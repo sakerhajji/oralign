@@ -61,7 +61,9 @@ services:
       MAIL_PASSWORD: ${MAIL_PASSWORD}
       MAIL_FROM: ${MAIL_FROM}
 
-    ports:
+    # !override REPLACES the base's "3000:3000" (which binds 0.0.0.0 and
+    # would conflict with our 127.0.0.1 binding when merged).
+    ports: !override
       - "127.0.0.1:3000:3000"
     volumes:
       - ${UPLOADS_HOST_DIR:?UPLOADS_HOST_DIR not set}:/app/uploads
@@ -74,7 +76,8 @@ services:
         NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
     environment:
       NODE_ENV: production
-    ports:
+    # Same reason as backend — replace, don't merge.
+    ports: !override
       - "127.0.0.1:3001:3001"
 
   # The dev-only `prisma-studio` service from the base compose is not

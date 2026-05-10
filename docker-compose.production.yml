@@ -8,37 +8,59 @@
 #     up -d
 #
 # Differences vs base compose:
-#   • Postgres + Redis + backend + frontend bound to 127.0.0.1 only
-#     (Nginx on the host proxies to them; nothing reaches the public
-#     internet directly).
+#   • Postgres + Redis host port mappings are REPLACED with empty
+#     (using `!override`) so neither is reachable from the host;
+#     backend reaches them via Docker's internal network.
+#   • Backend `env_file` is REPLACED with empty so the dev-only
+#     .env.docker is not required in production. All env comes from
+#     --env-file .env.production via ${...} substitution below.
+#   • Backend command runs `prisma migrate deploy` (idempotent,
+#     non-destructive) instead of the dev `db push --accept-data-loss`
+#     baked into the Dockerfile.
+#   • Backend / frontend host port mappings bind 127.0.0.1 only.
 #   • Persistent state uses host bind mounts under /var/lib/oralign-app
-#     so backup is a plain `tar` and uploads survive image rebuilds.
-#   • Backend command runs `prisma migrate deploy` instead of the dev
-#     `db push --accept-data-loss` baked into the Dockerfile.
+#     so backups are plain `tar` and uploads survive image rebuilds.
 #   • prisma-studio is removed (dev tool).
+#
+# `!override` requires Compose 2.24+ (Docker Engine 25+). The VPS has
+# Docker 29 / Compose v5, both safely past that.
 # ─────────────────────────────────────────────────────────────────
 
 services:
   postgres:
-    ports:
-      - "127.0.0.1:5432:5432"
+    # Replace the base's "5432:5432" mapping with no host binding.
+    # The DB is only reachable via the oralign-network internal DNS.
+    ports: !override []
     volumes:
       - ${POSTGRES_HOST_DIR:?POSTGRES_HOST_DIR not set}:/var/lib/postgresql/data
 
   redis:
-    ports:
-      - "127.0.0.1:6379:6379"
+    ports: !override []
 
   backend:
+    # Replace the base's `env_file: - .env.docker` (file is dev-only).
+    # All env is supplied via `--env-file .env.production` + the
+    # `environment:` block below (which is merged with the base block).
+    env_file: !override []
+
     # Production-safe migration: applies pending migrations from
     # prisma/migrations/, never drops data. Idempotent.
     command: >
       sh -c "node node_modules/.bin/prisma migrate deploy &&
              node dist/src/main"
+
+    # Vars NOT already declared in the base compose's environment
+    # block (MAIL_*) need to be re-injected here since we removed
+    # env_file. ${...} substitutions read from .env.production.
     environment:
       NODE_ENV: production
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      FRONTEND_URL: ${FRONTEND_URL}
+      MAIL_HOST: ${MAIL_HOST}
+      MAIL_PORT: ${MAIL_PORT}
+      MAIL_USER: ${MAIL_USER}
+      MAIL_PASSWORD: ${MAIL_PASSWORD}
+      MAIL_FROM: ${MAIL_FROM}
+
     ports:
       - "127.0.0.1:3000:3000"
     volumes:
@@ -56,7 +78,6 @@ services:
       - "127.0.0.1:3001:3001"
 
   # The dev-only `prisma-studio` service from the base compose is not
-  # included in production. Run it on demand from a dev workstation if
-  # you need to inspect data:
-  #   ssh -L 5555:127.0.0.1:5432 vps   # tunnel
-  #   prisma studio --url=...          # locally
+  # included in production. Run it on demand from a dev workstation
+  # via `docker exec` against the running postgres container, or via
+  # an SSH tunnel after temporarily exposing 5432 in a side overlay.

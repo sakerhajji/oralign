@@ -1,0 +1,172 @@
+/* ─────────────────────────────────────────────────────────────────
+   Marketing showcase — scoped styles.
+   Tokens live on :root so they're available even to portaled UI
+   (Radix Sheet, Dialog, Toast, etc.) which mount under <body>.
+   This CSS file is imported only by the (showcase) layout, so the
+   tokens are not loaded on dashboard pages.
+   Behavioral styles (background, font, cursor, etc.) stay scoped
+   to [data-theme="showcase"] so the dashboard's shadcn theme is
+   never touched.
+   ───────────────────────────────────────────────────────────────── */
+
+:root {
+  --sc-black: #0a0a0a;
+  --sc-white: #f8f6f2;
+  --sc-sun: #f5c842;
+  --sc-sun-2: #f9d96a;
+  --sc-sun-3: rgba(245, 200, 66, 0.12);
+  --sc-grey: #e8e4de;
+  --sc-mid-grey: #c4bfb6;
+  --sc-text-dark: #1a1a1a;
+  --sc-text-mid: rgba(10, 10, 10, 0.55);
+  --sc-text-mid-on-dark: rgba(248, 246, 242, 0.55);
+}
+
+[data-theme="showcase"] {
+  background: var(--sc-white);
+  color: var(--sc-black);
+  font-family: var(--font-sc-sans, "DM Sans", system-ui, sans-serif);
+  font-weight: 300;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Smooth scroll + sticky-header offset for anchor jumps */
+html { scroll-behavior: smooth; }
+[data-theme="showcase"] section[id],
+[data-theme="showcase"] [id="footer"] {
+  scroll-margin-top: 88px;
+}
+
+[data-theme="showcase"] h1,
+[data-theme="showcase"] h2,
+[data-theme="showcase"] h3,
+[data-theme="showcase"] .sc-serif {
+  font-family: var(--font-sc-serif, "Playfair Display", Georgia, serif);
+  font-weight: 300;
+}
+
+/* ─── INITIAL HIDDEN STATES (GSAP animates them in) ─────────────────
+   Wrapped in @media (not reduced-motion) so users with motion-reduce
+   preferences see content immediately on first paint — no flash, no
+   delay. Motion-allowed users see the elements hidden until GSAP
+   takes over after hydration. */
+@media not (prefers-reduced-motion: reduce) {
+  [data-theme="showcase"] .sc-rv,
+  [data-theme="showcase"] .sc-rv-2 {
+    opacity: 0;
+    transform: translate3d(0, 28px, 0);
+  }
+  [data-theme="showcase"] .sc-hero-eyebrow,
+  [data-theme="showcase"] .sc-hero-h1,
+  [data-theme="showcase"] .sc-hero-sub,
+  [data-theme="showcase"] .sc-hero-ctas,
+  [data-theme="showcase"] .sc-hero-scroll {
+    opacity: 0;
+  }
+  [data-theme="showcase"] .sc-hero-core {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+}
+
+/* ─── CURSOR ─── */
+.sc-cursor-dot,
+.sc-cursor-ring {
+  position: fixed;
+  pointer-events: none;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 9999;
+  display: none;
+}
+.sc-cursor-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--sc-black);
+  transition: background 0.2s, width 0.2s, height 0.2s;
+}
+.sc-cursor-ring {
+  width: 32px;
+  height: 32px;
+  border: 1.5px solid rgba(10, 10, 10, 0.3);
+  z-index: 9998;
+  transition: border-color 0.35s, width 0.35s, height 0.35s;
+}
+.sc-cursor-dot.sc-inv { background: var(--sc-white); }
+.sc-cursor-ring.sc-inv { border-color: rgba(248, 246, 242, 0.4); }
+
+@media (min-width: 1024px) and (pointer: fine) {
+  [data-theme="showcase"] { cursor: none; }
+  [data-theme="showcase"] a,
+  [data-theme="showcase"] button { cursor: none; }
+  .sc-cursor-dot,
+  .sc-cursor-ring { display: block; }
+}
+
+/* ─── MARQUEE ─── */
+@keyframes sc-marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+.sc-marquee-track {
+  display: flex;
+  gap: 48px;
+  width: max-content;
+  animation: sc-marquee 22s linear infinite;
+}
+
+/* ─── SUN ROTATION ─── */
+@keyframes sc-rotslow {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.sc-rotslow {
+  animation: sc-rotslow 40s linear infinite;
+}
+
+/* ─── HERO SCROLL INDICATOR BAR ─── */
+@keyframes sc-sbar {
+  0%   { left: -100%; }
+  50%  { left: 0; }
+  100% { left: 100%; }
+}
+
+/* ─── HOVER TINT FOR LIGHT CARDS ─── */
+.sc-card-tint:hover { background: #fdf9ec; }
+
+/* ─── MOBILE SHEET — darker overlay so hero doesn't bleed through ─── */
+[data-slot="sheet-overlay"] {
+  background-color: rgba(10, 10, 10, 0.5) !important;
+  backdrop-filter: blur(4px);
+}
+
+/* ─── REDUCED MOTION ─── */
+@media (prefers-reduced-motion: reduce) {
+  .sc-cursor-dot,
+  .sc-cursor-ring { display: none !important; }
+  .sc-marquee-track,
+  .sc-rotslow { animation: none !important; }
+}
+
+/* ─── RTL ─── */
+[data-theme="showcase"][dir="rtl"] .sc-eyebrow-line { display: none; }
+
+/* ─── ARABIC TYPOGRAPHIC PARITY ─────────────────────────────────────
+   Arabic glyphs read visually smaller at the same point size as Latin
+   characters. Bump the root size by ~7% only when the document is in
+   RTL so headings, body, and small caps regain parity with FR/EN.
+   This stylesheet is imported only by the (showcase) layout, so the
+   rule does not affect the dashboard. */
+html[dir="rtl"] {
+  font-size: 17.2px;
+}
+
+/* ─── FOCUS RING ─── */
+[data-theme="showcase"] *:focus-visible {
+  outline: 2px solid var(--sc-sun);
+  outline-offset: 2px;
+}
+
+/* ─── SCROLLBAR ─── */
+[data-theme="showcase"] ::-webkit-scrollbar { width: 2px; }
+[data-theme="showcase"] ::-webkit-scrollbar-thumb { background: var(--sc-black); }

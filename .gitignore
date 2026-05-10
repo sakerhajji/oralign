@@ -1,0 +1,54 @@
+# ─── Environment ────────────────────────────────────────────────
+# Never commit real secrets. Only the *.example files ship.
+.env
+.env.*
+!.env.example
+!.env.production.example
+!.env.docker.example
+
+# ─── Dependencies ───────────────────────────────────────────────
+node_modules/
+**/node_modules/
+.pnp
+.pnp.js
+
+# ─── Build output ───────────────────────────────────────────────
+.next/
+**/.next/
+dist/
+**/dist/
+build/
+**/build/
+out/
+**/out/
+*.tsbuildinfo
+
+# ─── Runtime data ───────────────────────────────────────────────
+uploads/
+**/uploads/
+*.log
+logs/
+.deploy.previous
+
+# ─── Coverage / tests ───────────────────────────────────────────
+coverage/
+*.lcov
+
+# ─── IDE / OS ───────────────────────────────────────────────────
+.vscode/*
+!.vscode/settings.json.example
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── Claude / agent metadata ────────────────────────────────────
+.claude/
+
+# ─── Misc ───────────────────────────────────────────────────────
+.turbo/
+.cache/
+*.tgz
+*.tar.gz

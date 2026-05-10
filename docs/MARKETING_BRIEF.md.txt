@@ -1,0 +1,343 @@
+# ROLE
+
+You are a **senior frontend engineer + UI/UX designer + SEO specialist** building a production-grade marketing/showcase website inside an existing Next.js codebase.
+
+You will recreate — pixel-faithfully in spirit, not literally — the editorial aesthetic of the Oralign brand reference HTML provided to you (filename: `oralign-reference.html`). That file is the **single source of design truth**. Read it first, study it, then build.
+
+---
+
+# STEP 0 — MANDATORY DISCOVERY (NO CODE YET)
+
+Before writing anything, do this and report back:
+
+1. Print the project tree (depth 3). Identify App Router structure.
+2. Open and summarize:
+   - `package.json` — Next.js version, React version, all deps
+   - `tailwind.config.{ts,js}` — current theme tokens, fonts, plugins
+   - `tsconfig.json` — path aliases (`@/components`, etc.)
+   - `app/layout.tsx` and any existing route groups `(group)/`
+   - `components/ui/` — list every shadcn/ui primitive already installed
+   - `app/globals.css` — existing CSS variables, base layer, theme
+   - Any existing fonts loaded via `next/font`
+3. **Confirm:** Is there already an authenticated dashboard? Where? It must remain untouched.
+4. Open `oralign-reference.html` and extract:
+   - Exact color tokens (`--black: #0a0a0a`, `--sun: #f5c842`, `--sun2: #f9d96a`, `--white: #f8f6f2`, `--grey: #e8e4de`, `--text-mid: rgba(10,10,10,.55)`, etc.)
+   - Font pairing (Playfair Display 300/400/500 + italic, DM Sans 200/300/400/500)
+   - Section padding rhythm (`120px 72px` desktop, `80px 24px` mobile)
+   - Animation timings, reveal pattern, cursor behavior
+
+Only then propose an implementation plan and proceed.
+
+---
+
+# PROJECT CONTEXT
+
+**Product:** A dental aligner **case management SaaS platform** (the existing dashboard app in this repo) — for dentists, orthodontists, clinics, designers, and admins.
+
+**Positioning:** *The professional case management platform for digital aligner workflows.*
+
+**Audience:**
+1. Dentists / orthodontists / clinics (primary)
+2. Patients (informational only — patients do NOT submit cases; their dentist does)
+
+**Tone:** professional, medical, trustworthy, modern, premium SaaS, editorial. **Not** playful, **not** overly technical.
+
+**Forbidden language:** "perfect smile guaranteed", "instant treatment", "replace orthodontists", "miracle AI".
+
+**Preferred language:** digital workflow, clinical collaboration, secure case management, treatment plan review, planning clarity, professional aligner workflow.
+
+---
+
+# AESTHETIC DIRECTION — MATCH `oralign-reference.html` EXACTLY
+
+This is the most important section. The reference HTML is editorial, premium, and category-disrupting. **Reject every generic SaaS landing page convention.** No purple gradients, no `Inter`, no pure-white backgrounds, no rounded-3xl glassmorphism cliché.
+
+### Color System (use these tokens — port them into Tailwind theme + `globals.css`)
+```
+--black: #0a0a0a        /* dominant on dark sections */
+--white: #f8f6f2        /* warm off-white, NEVER pure #fff */
+--sun: #f5c842          /* golden primary accent */
+--sun-2: #f9d96a        /* lighter golden */
+--sun-3: rgba(245,200,66,.12) /* sun glow */
+--grey: #e8e4de         /* warm divider grey */
+--mid-grey: #c4bfb6
+--text-dark: #1a1a1a
+--text-mid: rgba(10,10,10,.55)
+```
+Dark sections are **near-black with golden accents**. Light sections are **warm off-white**. Alternate them. One section is **pure golden background** (manifesto) for visual punctuation.
+
+### Typography
+- **Display / Headings:** `Playfair Display` (weights 300, 400, 500, italic 300/400) — load via `next/font/google`. Use **italic for emphasis words** (e.g. "*revealed*", "*precision*", "*shine*").
+- **Body / UI:** `DM Sans` (weights 200, 300, 400, 500) — load via `next/font/google`.
+- Headings: weight 300, line-height 1.08, font-size `clamp(2rem, 3.5vw, 3.6rem)`.
+- Body: weight 300, line-height ~1.95, color `var(--text-mid)`.
+- Eyebrow tags: 0.55rem, letter-spacing 0.42em, uppercase, with a 18px line before.
+- **NEVER use Inter, Roboto, system-ui, or any generic sans.**
+
+### Signature Visual Elements (port these from reference, adapt to platform)
+
+1. **Custom cursor** — small black dot + larger ring (32×32, 1.5px border). Inverts to white on dark sections. Scales up on hover. Hidden on touch devices via `@media (pointer: coarse)`. Build as `<CustomCursor />` client component, mounted only on `lg+` viewports.
+2. **Sun burst SVG** — radial sun with rays + concentric circles, used as background in hero and CTA. Component: `<SunBurst variant="hero" | "core" | "subtle" />`.
+3. **Sun core disc** — golden radial-gradient circle with shadow glow, used as hero right-panel centerpiece. **Replace the "ORALIGN" wordmark inside the disc with the platform logo + brand name from this app.** Slow rotation (40s linear infinite) on the rays.
+4. **Reveal animation** — `.rv` class: opacity 0 → 1, translateY 24px → 0, transition 0.8s ease, triggered by IntersectionObserver at threshold 0.08. Stagger pairs with `.rv2` (0.15s delay).
+5. **Marquee ribbon** — black strip between hero and brand section, infinite horizontal scroll, gold dots between items, items uppercase 0.55rem letter-spacing 0.38em.
+6. **Hover state on cards** — bottom border scales from 0 → 100% in golden, background tints to `#fdf9ec`.
+7. **Section eyebrow tag** — `.stag` with 18px gold line before the label.
+8. **Italic emphasis in headings** — every section headline has at least one italic word in a different shade or `var(--sun)`.
+9. **Noise grain on dark sections** — SVG fractalNoise filter at ~0.06 opacity, 0.25 layer opacity.
+10. **Multilingual switch** — top-right FR / EN / AR pills. AR triggers `dir="rtl"`. Implement as `next-intl` or `next/navigation`-based locale routing if it fits the existing app; otherwise client-side switch using a translation dictionary in `lib/i18n/dict.ts`.
+
+---
+
+# TECH STACK
+
+- Next.js (App Router) + TypeScript + Tailwind CSS + shadcn/ui
+- Server Components by default; `"use client"` only where genuinely required (cursor, lang switch, mobile sheet, accordion, tabs, IntersectionObserver reveals)
+- `next/font/google` for Playfair Display + DM Sans
+- `next/image` for all bitmap imagery (the reference uses SVG mockups — keep that approach, no stock photos)
+- `next/link` for nav
+- Strictly typed; no `any`; props interfaces exported from each component
+- Zero backend logic except a stub server action for the contact form (`app/(marketing)/actions.ts`) that validates with Zod and returns `{ ok: true }`
+- Marketing site lives in `app/(marketing)/` route group with its **own layout** so it does not inherit dashboard chrome
+- **Do not modify, break, or share state with any existing dashboard route, middleware, or auth.**
+
+---
+
+# ROUTES
+
+- `/` — Homepage (full implementation, all sections below)
+- Optional pages, only if existing structure supports them trivially: `/for-dentists`, `/for-patients`, `/pricing`, `/contact`, `/book-demo`. Otherwise navbar uses anchor links to homepage section IDs.
+
+---
+
+# HOMEPAGE — SECTIONS (mirroring reference structure, adapted for SaaS)
+
+Each is a `<section>` with `id` and `aria-labelledby`. Each in its own file under `components/marketing/`.
+
+### 1. `<Header />` — sticky, translucent backdrop-blur after 60px scroll
+- Logo (use existing app logo + small "by [Brand]" tagline below in 0.5rem 0.4em letter-spacing)
+- Nav links: For Dentists · How It Works · Platform · Pricing · For Patients · About
+- Lang switcher (FR / EN / AR) top-right
+- Primary CTA button (gold): **Book a Demo** | Secondary text link: **Login**
+- Mobile: shadcn `Sheet` slide-in menu
+
+### 2. `<Hero />` — dark, two-column grid, sun burst SVG behind right column
+- Eyebrow: small gold line + `Aligner Case Management Platform`
+- **H1** (Playfair, weight 300, mixed roman + italic gold):
+  > Digital aligner *case management,*
+  > built for **modern dentists.**
+- Sub: *Submit cases, upload scans, review treatment plans, approve designs, and receive production-ready files — all from one secure platform.*
+- CTAs: `[Book a Demo]` (gold) + `Start Your First Case →` (ghost arrow)
+- Right column: **`<SunCore />` disc** with platform name inside + rotating ray SVG behind
+- Bottom-left scroll indicator with animated bar
+- Below hero: dark **marquee ribbon** with: `Case Submission · Treatment Plan Review · STL Upload · Versioning · Secure · Audit-Ready · Role-Based Access`
+
+### 3. `<ProblemSection />` — light, two-column
+- Eyebrow: `The Problem`
+- H2: *Your aligner workflow shouldn't be scattered across* **WhatsApp, email, and file links.**
+- Right side: 2×2 grid of stat-style cards (matching `.bstat` from reference) with the six pain points: Lost STL files · Unclear feedback · No version history · Slow approvals · Messy patient records · No clear case status
+
+### 4. `<SolutionSection />` — dark, with sun burst behind
+- Eyebrow gold: `The Solution`
+- H2: *One platform.* **Every aligner case.** *From upload to approval.*
+- Visual left + four feature cards right: Case Submission · Treatment Plan Review · Secure File Management · Planner Collaboration. Numbered `01`–`04` in giant ghosted Playfair (`#fff` at 6% opacity), gold icon, gold left-border-grow on hover.
+
+### 5. `<HowItWorks />` — light, centered, 5-step horizontal timeline
+- H2 centered: *A simple workflow for* **complex aligner cases.**
+- 5 numbered circles connected by gradient line: Create Patient Case → Upload Records → Submit for Planning → Review Treatment Plan → Receive Final Container
+- Mirror the `.psteps` structure from reference exactly — gold circle, hover ring expansion.
+
+### 6. `<PlatformFeatures />` — dark
+- 8 cards in bento grid: Patient Management · Smart Order Wizard · Odontogram Instructions · Treatment Plan Versioning · Case Timeline · Secure File Storage · Admin Dashboard · Doctor Dashboard.
+
+### 7. `<OldVsNew />` — light, two-column comparison
+- Left "Old Way": muted, subtle strikethrough — WhatsApp messages · Email attachments · Drive links · No version tracking · Manual follow-ups
+- Right "New Way": gold accents, gold checkmark — Structured case flow · Treatment plan history · Secure file folders · Approval timeline · Professional collaboration
+
+### 8. `<DentistsSection />` — dark, like Audiences/Praticiens card from reference
+- Eyebrow: `For Practitioners`
+- H2: *Built around the* **dentist's real workflow.**
+- Five benefit lines with gold em-dash markers (matching `.alist li::before { content: '—'; color: gold }`)
+
+### 9. `<PatientsSection />` — light, second audience card
+- Eyebrow: `For Patients`
+- H2: *A smoother digital journey for your* **smile.**
+- **Mandatory callout** (gold-bordered box): *Patients do not submit cases directly. Your dentist manages your treatment through the platform.*
+
+### 10. `<SecuritySection />` — dark
+- H2: *Designed with* **clinical data privacy** *in mind.*
+- 7-item grid: Role-based access · Secure login · Dentist-scoped patient access · Admin operations · File access protection · Audit-ready history · Soft-delete protection
+- Bottom: small CE-style trust badges row in golden line-art style
+
+### 11. `<DashboardPreview />` — light, shadcn `Tabs`
+- Three tabs: Dentist · Admin · Designer
+- Each tab renders a **mockup composed entirely of shadcn `Card` + `Badge` + SVG** — no screenshots, no stock images. Cards show: patient list, case status badges, mini timeline, file tree icons.
+- Frame with reference's `.pc-tl` and `.pc-br` gold corner brackets.
+
+### 12. `<CaseLifecycle />` — dark, horizontal scrollable timeline
+- 10 nodes as gold-circled badges connected by gradient: Draft → Submitted → Under Review → Design In Progress → Treatment Plan Ready → Revision Requested → Approved → Billed → Container Sent → Finished
+- Mobile: horizontal overflow with scroll snap.
+
+### 13. `<Manifesto />` — **golden background section**, the punctuation moment
+- Sun-burst SVG faint behind in black at 8% opacity
+- Centered Playfair quote, weight 300, clamp(1.8rem, 4vw, 3.8rem):
+  > *« Workflow clarity isn't seen.* **It is felt.** *»*
+- Signature line beneath: `— [Platform Name] · Case Management`
+
+### 14. `<Testimonials />` — light, three cards
+- Quotes in italic Playfair. Roles: Orthodontist · Dental Clinic Manager · Digital Planning Lead. Use placeholder names + neutral avatars (initials in a gold-circled disc — no photos).
+
+### 15. `<PricingSection />` — dark, three tiers
+- Cards: Starter · Clinic (highlighted with golden border + glow) · Enterprise / Lab
+- **No invented dollar amounts.** Show "Request Pricing" as the value. Each card CTA: `Request Pricing →`
+
+### 16. `<FAQ />` — light, shadcn `Accordion`
+- Is this for dentists or patients?
+- Can I upload STL files?
+- Can I request treatment plan changes?
+- Can I track plan versions?
+- Can admins see all cases?
+- Is this a manufacturing platform?
+
+### 17. `<FinalCTA />` — light, centered, large radial sun glow behind
+- H2: *Ready to bring your aligner workflow into* **one professional platform?**
+- Sub: *Start managing cases, treatment plans, files, and approvals with a workflow built for modern dentistry.*
+- Buttons: `[Book a Demo]` (black) + `Start Your First Case` (outline)
+
+### 18. `<Footer />` — dark, four columns
+- **Brand** — logo + warm grey paragraph
+- **Product** — For Dentists · Platform · How It Works · Pricing
+- **Company** — About · Contact · Support
+- **Legal** — Privacy Policy · Terms of Use · Data Security
+- Bottom strip: `© 2026 [Brand] — All rights reserved.` + `Designed for clinical workflows`
+
+---
+
+# SEO REQUIREMENTS (NON-NEGOTIABLE)
+
+In `app/(marketing)/layout.tsx` export `metadata`:
+- **title:** `Dental Aligner Case Management Platform for Dentists`
+- **description:** `A secure digital aligner workflow platform for dentists to submit cases, upload scans, review treatment plans, manage files, and approve designs.`
+- `metadataBase`, canonical via `alternates.canonical`
+- Per-locale alternates (`x-default`, `en`, `fr`, `ar`)
+- Open Graph: type `website`, full title/description, `og:image` 1200×630 generated via `app/(marketing)/opengraph-image.tsx` using `ImageResponse` — render the sun-disc + tagline on `#0a0a0a` background with golden type
+- Twitter card: `summary_large_image`
+- robots: `index, follow`
+
+Add **JSON-LD** in homepage as `<Script type="application/ld+json">` for both:
+- `Organization` (name, url, logo, sameAs)
+- `SoftwareApplication` (applicationCategory: `BusinessApplication`, operatingSystem: `Web`, offers with `priceCurrency` omitted, aggregateRating optional)
+
+Semantics:
+- Exactly **one `<h1>`** (in Hero only).
+- `<header>`, `<main>`, `<nav>`, `<section>`, `<footer>`.
+- Decorative SVGs: `aria-hidden="true"`. Meaningful icons: descriptive `aria-label`.
+- Skip-to-content link as first focusable element.
+
+Performance:
+- All images via `next/image` with explicit width/height (no CLS).
+- Below-the-fold heavy sections (Manifesto SVG, CaseLifecycle): dynamic import with `ssr: false` only if measurably needed.
+- Custom cursor: `lg+` viewports only, preference-respect `prefers-reduced-motion`.
+- **Lighthouse target on homepage: Performance ≥ 95, A11y ≥ 95, SEO = 100, Best Practices ≥ 95.**
+
+---
+
+# MULTILINGUAL (FR / EN / AR)
+
+- FR is the default (matches reference).
+- AR sets `<html dir="rtl">` and mirrors paddings, eyebrow lines, scroll indicator.
+- Translation dictionary in `lib/i18n/dict.ts` with typed keys. **No untranslated strings allowed** — every visible string must come from the dict.
+- Language switcher persists choice in `localStorage` and updates `document.documentElement.lang` and `dir`.
+
+---
+
+# UI/UX RULES
+
+- Mobile-first: 375px → 768px → 1024px → 1440px.
+- Container: `max-w-[1400px] mx-auto px-6 lg:px-[72px]` (matches reference 72px gutter on desktop).
+- Section rhythm: `py-20 lg:py-[120px]`.
+- Focus rings: `outline-2 outline-offset-2 outline-[var(--sun)]` — gold and visible.
+- WCAG AA contrast minimum on all text (verify against `--text-mid` on `--white`).
+- Mobile nav (Sheet) animates from right, gold underline on active link.
+- Cards: 1px hairline border `var(--grey)`, subtle shadow `0 1px 3px rgba(0,0,0,0.04)`, **no rounded corners larger than `rounded-md`** — reference uses sharp edges (editorial code).
+- Buttons: Primary = solid gold with -2px hover lift; Secondary = ghost with arrow extension on hover (40px); Tertiary = black solid on light sections.
+- Animations: hero load stagger (0.15s, 0.3s, 0.45s, 0.6s delays), `.rv` reveal on scroll, marquee infinite, sun-rays slow rotate. **No parallax, no scroll-jacking.**
+- `prefers-reduced-motion`: disable cursor, marquee, sun rotation, reveals (just opacity 1 directly).
+
+---
+
+# FOLDER STRUCTURE TO CREATE
+
+```
+app/(marketing)/
+  layout.tsx                  # marketing layout, fonts, metadata, lang provider
+  page.tsx                    # homepage composition
+  opengraph-image.tsx         # generated OG image
+  actions.ts                  # contact form server action (Zod-validated)
+components/marketing/
+  header.tsx
+  mobile-nav.tsx
+  lang-switcher.tsx
+  hero.tsx
+  ribbon-marquee.tsx
+  problem-section.tsx
+  solution-section.tsx
+  how-it-works.tsx
+  platform-features.tsx
+  old-vs-new.tsx
+  dentists-section.tsx
+  patients-section.tsx
+  security-section.tsx
+  dashboard-preview.tsx
+  case-lifecycle.tsx
+  manifesto.tsx
+  testimonials.tsx
+  pricing-section.tsx
+  faq-section.tsx
+  final-cta.tsx
+  footer.tsx
+  shared/
+    custom-cursor.tsx         # client component
+    sun-burst.tsx             # SVG, variants: hero/core/subtle/dark/light
+    sun-core.tsx              # rotating disc
+    section-heading.tsx       # eyebrow + h2 + divider
+    reveal.tsx                # IntersectionObserver wrapper
+    noise-grain.tsx           # SVG noise overlay
+lib/
+  i18n/
+    dict.ts                   # translations FR/EN/AR
+    use-lang.ts               # client hook
+  marketing/
+    nav.ts
+    features.ts
+    faq.ts
+    pricing.ts
+    testimonials.ts
+    lifecycle-stages.ts
+```
+
+---
+
+# ACCEPTANCE CRITERIA
+
+- [ ] Step 0 audit completed and reported before any code is written.
+- [ ] `oralign-reference.html` aesthetic is faithfully translated: Playfair + DM Sans, exact color tokens, dark/light alternation, sun visuals, custom cursor, marquee, italic emphasis in every H2, gold em-dash list markers, `.rv` reveals, sharp corners, 72px desktop gutter.
+- [ ] All 18 sections render and are fully responsive (375 → 1440px).
+- [ ] FR / EN / AR all functional; AR is RTL-correct.
+- [ ] Metadata, OG image, JSON-LD, single H1, semantic HTML — all present and verified.
+- [ ] Mobile nav, sticky header, anchor scroll, language switch — all working.
+- [ ] Existing dashboard routes untouched; `npm run build` and `npm run lint` pass with **zero** errors.
+- [ ] `prefers-reduced-motion` honored.
+- [ ] Lighthouse run on `/`; scores reported in deliverable.
+
+---
+
+# DELIVERABLE
+
+After implementation, return:
+1. Full list of files created/modified, grouped by folder.
+2. Any new dependencies installed, with one-line justification each.
+3. Commands: `npm run dev`, `npm run build`, `npm run lint`.
+4. Any deliberate deviations from this spec, with reasoning.
+5. Lighthouse summary (Performance / A11y / Best Practices / SEO).
+6. Three follow-up improvements you'd recommend (post-launch).

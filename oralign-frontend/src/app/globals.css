@@ -1,0 +1,397 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "react-phone-input-2/lib/style.css";
+@import "leaflet/dist/leaflet.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --font-heading: var(--font-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --radius: 0.625rem;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+/* ─── react-phone-input-2 overrides ─────────────────────────────────────────
+   Intentionally outside @layer so these rules beat the library's unlayered CSS.
+   Declaration order wins at equal specificity, and we declare after the import.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* Container */
+.react-tel-input.phone-input {
+  position: relative;
+  width: 100%;
+}
+
+/* Input field */
+.react-tel-input.phone-input .form-control {
+  width: 100% !important;
+  height: 2.5rem !important;           /* h-10 */
+  padding-top: 0.5rem !important;
+  padding-bottom: 0.5rem !important;
+  padding-right: 0.75rem !important;
+  padding-left: 52px !important;        /* leave room for the 48px flag button */
+  font-size: 0.875rem !important;       /* text-sm */
+  line-height: 1.25rem !important;
+  color: var(--foreground) !important;
+  background-color: var(--background) !important;
+  border: 1px solid var(--input) !important;
+  border-radius: var(--radius) !important;
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  outline: none !important;
+  transition: box-shadow 0.2s, border-color 0.2s;
+}
+
+.react-tel-input.phone-input .form-control::placeholder {
+  color: var(--muted-foreground) !important;
+}
+
+.react-tel-input.phone-input .form-control:hover {
+  box-shadow: 0 2px 6px 0 rgb(0 0 0 / 0.08);
+}
+
+.react-tel-input.phone-input .form-control:focus {
+  border-color: var(--ring) !important;
+  box-shadow: 0 0 0 2px var(--ring), 0 0 0 4px var(--background) !important;
+}
+
+/* Flag button */
+.react-tel-input.phone-input .flag-dropdown {
+  position: absolute !important;
+  top: 0 !important;
+  bottom: 0 !important;
+  left: 0 !important;
+  width: 48px !important;
+  background-color: var(--background) !important;
+  border: 1px solid var(--input) !important;
+  border-right: 1px solid var(--border) !important;
+  border-radius: var(--radius) 0 0 var(--radius) !important;
+  transition: background-color 0.15s;
+  cursor: pointer;
+}
+
+.react-tel-input.phone-input .flag-dropdown:hover {
+  background-color: var(--accent) !important;
+}
+
+.react-tel-input.phone-input .flag-dropdown.open {
+  background-color: var(--accent) !important;
+  border-color: var(--ring) !important;
+  border-radius: var(--radius) 0 0 var(--radius) !important;
+  z-index: 2;
+}
+
+/* Selected flag inner */
+.react-tel-input.phone-input .selected-flag {
+  width: 48px !important;
+  height: 100% !important;
+  padding: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 4px !important;
+  border-radius: var(--radius) 0 0 var(--radius) !important;
+  background: transparent !important;
+}
+
+.react-tel-input.phone-input .selected-flag:hover,
+.react-tel-input.phone-input .selected-flag:focus {
+  background: transparent !important;
+}
+
+.react-tel-input.phone-input .selected-flag .flag {
+  position: static !important;
+  margin-top: 0 !important;
+  transform: scale(1.1);
+}
+
+.react-tel-input.phone-input .selected-flag .arrow {
+  position: static !important;
+  margin: 0 !important;
+  left: auto !important;
+  top: auto !important;
+  border-top-color: var(--muted-foreground) !important;
+}
+
+/* Dropdown list */
+.react-tel-input.phone-input .country-list {
+  width: 300px !important;
+  max-height: 18rem !important;
+  margin: 4px 0 0 0 !important;
+  padding: 4px 0 !important;
+  background-color: var(--popover) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 0.75rem !important;
+  box-shadow: 0 10px 40px rgb(0 0 0 / 0.12), 0 2px 8px rgb(0 0 0 / 0.06) !important;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--muted-foreground) var(--muted);
+  animation: phoneDropdownIn 0.15s ease-out;
+}
+
+.react-tel-input.phone-input .country-list::-webkit-scrollbar {
+  width: 5px;
+}
+.react-tel-input.phone-input .country-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.react-tel-input.phone-input .country-list::-webkit-scrollbar-thumb {
+  background: var(--muted-foreground);
+  border-radius: 3px;
+}
+
+/* Search box inside dropdown */
+.react-tel-input.phone-input .country-list .search {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 1 !important;
+  padding: 8px !important;
+  background-color: var(--popover) !important;
+  border-bottom: 1px solid var(--border) !important;
+}
+
+.react-tel-input.phone-input .country-list .search-box {
+  width: 100% !important;
+  height: 2rem !important;
+  padding: 0.25rem 0.625rem !important;
+  font-size: 0.8125rem !important;
+  color: var(--foreground) !important;
+  background-color: var(--background) !important;
+  border: 1px solid var(--input) !important;
+  border-radius: calc(var(--radius) * 0.75) !important;
+  outline: none !important;
+}
+
+.react-tel-input.phone-input .country-list .search-box:focus {
+  border-color: var(--ring) !important;
+  box-shadow: 0 0 0 2px var(--ring) !important;
+}
+
+/* Country rows */
+.react-tel-input.phone-input .country-list .country {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 8px 12px !important;
+  font-size: 0.875rem !important;
+  color: var(--foreground) !important;
+  background-color: transparent !important;
+  cursor: pointer;
+  transition: background-color 0.1s;
+}
+
+.react-tel-input.phone-input .country-list .country:hover,
+.react-tel-input.phone-input .country-list .country.highlight {
+  background-color: var(--accent) !important;
+  color: var(--accent-foreground) !important;
+}
+
+.react-tel-input.phone-input .country-list .country .dial-code {
+  font-size: 0.75rem !important;
+  color: var(--muted-foreground) !important;
+}
+
+.react-tel-input.phone-input .country-list .country .flag {
+  flex-shrink: 0;
+}
+
+/* Divider between preferred countries and the rest */
+.react-tel-input.phone-input .country-list .divider {
+  border-bottom: 1px solid var(--border) !important;
+  margin-bottom: 4px !important;
+  padding-bottom: 4px !important;
+}
+
+/* Invalid state */
+.react-tel-input.phone-input.phone-input--invalid .form-control {
+  border-color: var(--destructive) !important;
+}
+
+.react-tel-input.phone-input.phone-input--invalid .flag-dropdown {
+  border-color: var(--destructive) !important;
+}
+
+.react-tel-input.phone-input.phone-input--invalid .form-control:focus {
+  box-shadow: 0 0 0 2px var(--destructive), 0 0 0 4px var(--background) !important;
+}
+
+/* Dark mode */
+.dark .react-tel-input.phone-input .form-control {
+  color: var(--foreground) !important;
+  background-color: var(--background) !important;
+  border-color: var(--input) !important;
+}
+
+.dark .react-tel-input.phone-input .flag-dropdown {
+  background-color: var(--background) !important;
+  border-color: var(--input) !important;
+}
+
+.dark .react-tel-input.phone-input .country-list {
+  background-color: var(--popover) !important;
+  border-color: var(--border) !important;
+}
+
+.dark .react-tel-input.phone-input .country-list .search {
+  background-color: var(--popover) !important;
+  border-color: var(--border) !important;
+}
+
+.dark .react-tel-input.phone-input .country-list .search-box {
+  background-color: var(--background) !important;
+  color: var(--foreground) !important;
+  border-color: var(--input) !important;
+}
+
+.dark .react-tel-input.phone-input .country-list .country {
+  color: var(--foreground) !important;
+}
+
+@keyframes phoneDropdownIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ─── Leaflet map overrides ──────────────────────────────────────────────────
+   Keep Leaflet controls visible inside our Dialog (z-50 overlay).
+   The dialog itself is z-50; map controls default to z-1000 which causes
+   them to bleed above radix popovers. Clamp them to a safe range.
+   ─────────────────────────────────────────────────────────────────────────── */
+.leaflet-pane,
+.leaflet-tile,
+.leaflet-marker-icon,
+.leaflet-marker-shadow,
+.leaflet-tile-pane,
+.leaflet-overlay-pane,
+.leaflet-shadow-pane,
+.leaflet-marker-pane,
+.leaflet-popup-pane { z-index: auto; }
+
+.leaflet-control { z-index: 55; }
+.leaflet-top,
+.leaflet-bottom { z-index: 55; }
+
+.leaflet-container {
+  font-family: inherit;
+  border-radius: 0.5rem;
+}

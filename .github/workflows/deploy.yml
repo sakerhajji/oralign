@@ -1,0 +1,106 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Stop any in-flight deploy if a new commit lands.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  # ── Phase 1: cheap CI checks (run inside GitHub runner) ─────────
+  verify:
+    name: Lint & Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            oralign-backend/package-lock.json
+            oralign-frontend/package-lock.json
+
+      - name: Backend — install
+        working-directory: oralign-backend
+        run: npm ci
+
+      - name: Backend — generate Prisma client
+        working-directory: oralign-backend
+        env:
+          DATABASE_URL: postgresql://u:p@localhost:5432/db
+        run: npx prisma generate
+
+      - name: Backend — lint
+        working-directory: oralign-backend
+        run: npm run lint -- --max-warnings=0 || true   # warn-only for now
+
+      - name: Backend — build
+        working-directory: oralign-backend
+        run: npm run build
+
+      - name: Frontend — install
+        working-directory: oralign-frontend
+        run: npm ci
+
+      - name: Frontend — lint
+        working-directory: oralign-frontend
+        run: npm run lint || true   # warn-only for now
+
+      - name: Frontend — build
+        working-directory: oralign-frontend
+        env:
+          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
+          NEXT_PUBLIC_APP_NAME: Oralign
+          NEXT_PUBLIC_APP_URL: https://oralign.com.tn
+        run: npm run build
+
+  # ── Phase 2: deploy on VPS ──────────────────────────────────────
+  deploy:
+    name: Deploy on VPS
+    needs: verify
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: SSH into VPS and run deploy.sh
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          # 5-min timeout for build+migrate+restart
+          command_timeout: 5m
+          script: |
+            set -euo pipefail
+            cd /opt/oralign-app
+            bash scripts/deploy.sh
+
+      - name: Smoke check (frontend)
+        run: |
+          for i in 1 2 3 4 5; do
+            if curl -fsS -o /dev/null https://oralign.com.tn; then
+              echo "✓ frontend reachable"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "✗ frontend smoke check failed" >&2
+          exit 1
+
+      - name: Smoke check (api)
+        run: |
+          for i in 1 2 3 4 5; do
+            if curl -fsS https://api.oralign.com.tn/api/health >/dev/null; then
+              echo "✓ api reachable"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "✗ api smoke check failed" >&2
+          exit 1

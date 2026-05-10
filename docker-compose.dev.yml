@@ -1,0 +1,39 @@
+# Docker Compose Override for Development
+# Use with: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+version: '3.9'
+
+services:
+  backend:
+    # In development, we want debug mode and watch
+    environment:
+      NODE_ENV: development
+      LOG_LEVEL: debug
+    ports:
+      - "9229:9229"  # Node.js debugger port
+    volumes:
+      - ./oralign-backend/src:/app/src
+      - ./oralign-backend/prisma:/app/prisma
+      - ./oralign-backend/uploads:/app/uploads
+    # Override command to run with debug
+    command: npm run start:debug
+
+  frontend:
+    environment:
+      NODE_ENV: development
+    # Dev server with hot reload
+    command: npm run dev
+    ports:
+      - "9230:9230"  # Next.js debugger port
+
+  postgres:
+    environment:
+      POSTGRES_INITDB_ARGS: "-c log_statement=all -c log_duration=on"
+    # Log all queries in development
+    ports:
+      - "5432:5432"
+
+  redis:
+    # No changes needed, already configured
+    ports:
+      - "6379:6379"

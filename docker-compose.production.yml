@@ -1,0 +1,62 @@
+# ─────────────────────────────────────────────────────────────────
+# Production overlay — apply on top of docker-compose.yml:
+#
+#   docker compose \
+#     --env-file .env.production \
+#     -f docker-compose.yml \
+#     -f docker-compose.production.yml \
+#     up -d
+#
+# Differences vs base compose:
+#   • Postgres + Redis + backend + frontend bound to 127.0.0.1 only
+#     (Nginx on the host proxies to them; nothing reaches the public
+#     internet directly).
+#   • Persistent state uses host bind mounts under /var/lib/oralign-app
+#     so backup is a plain `tar` and uploads survive image rebuilds.
+#   • Backend command runs `prisma migrate deploy` instead of the dev
+#     `db push --accept-data-loss` baked into the Dockerfile.
+#   • prisma-studio is removed (dev tool).
+# ─────────────────────────────────────────────────────────────────
+
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - ${POSTGRES_HOST_DIR:?POSTGRES_HOST_DIR not set}:/var/lib/postgresql/data
+
+  redis:
+    ports:
+      - "127.0.0.1:6379:6379"
+
+  backend:
+    # Production-safe migration: applies pending migrations from
+    # prisma/migrations/, never drops data. Idempotent.
+    command: >
+      sh -c "node node_modules/.bin/prisma migrate deploy &&
+             node dist/src/main"
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      FRONTEND_URL: ${FRONTEND_URL}
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ${UPLOADS_HOST_DIR:?UPLOADS_HOST_DIR not set}:/app/uploads
+
+  frontend:
+    build:
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+        NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+    environment:
+      NODE_ENV: production
+    ports:
+      - "127.0.0.1:3001:3001"
+
+  # The dev-only `prisma-studio` service from the base compose is not
+  # included in production. Run it on demand from a dev workstation if
+  # you need to inspect data:
+  #   ssh -L 5555:127.0.0.1:5432 vps   # tunnel
+  #   prisma studio --url=...          # locally

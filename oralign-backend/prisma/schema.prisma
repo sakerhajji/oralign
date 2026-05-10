@@ -1,0 +1,309 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────
+
+enum UserRole {
+  dentist
+  admin
+  designer
+  super_admin
+}
+
+enum VerificationStatus {
+  pending
+  approved
+  rejected
+}
+
+enum DayOfWeek {
+  monday
+  tuesday
+  wednesday
+  thursday
+  friday
+  saturday
+  sunday
+}
+
+enum Gender {
+  male
+  female
+  other
+}
+
+enum OrderStatus {
+  draft
+  submitted
+  in_review
+  approved
+  rejected
+  cancelled
+}
+
+enum PatientStage {
+  initial
+  refinement
+  retainer
+}
+
+enum ArchTreatment {
+  upper
+  lower
+  both
+}
+
+enum ToothInstructionType {
+  no_attachments
+  do_not_move
+  no_ipr
+}
+
+enum OrderFileCategory {
+  right_photo
+  front_photo
+  left_photo
+  upper_photo
+  lower_photo
+  orthopantomography
+  stl
+  ply
+  obj
+  zip
+  pdf
+  image
+  video
+  other
+}
+
+// ─────────────────────────────────────────
+// USER
+// ─────────────────────────────────────────
+
+model User {
+  id                  String             @id @default(uuid())
+  fullName            String
+  email               String             @unique
+  phone               String?
+  passwordHash        String
+
+  role                UserRole           @default(dentist)
+  isActive            Boolean            @default(true)
+
+  // Email verification
+  isEmailVerified          Boolean            @default(false)
+  emailVerificationCode    String?
+  emailVerificationExpiry  DateTime?
+
+  // Account verification — single source of truth (drop isVerified boolean)
+  verificationStatus  VerificationStatus @default(pending)
+
+  // Brute-force protection
+  failedLoginAttempts Int                @default(0)
+  lockedUntil         DateTime?          // null = not locked
+
+  // Profile
+  avatarUrl           String?            // validated path only, no raw URLs
+  country             String?            // personal country, separate from clinic
+
+  // Timestamps
+  lastLoginAt         DateTime?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  deletedAt           DateTime?          // soft delete
+
+  dentistProfile      DentistProfile?
+  patients            Patient[]
+  doctorOrders        DentalOrder[]      @relation("OrderDoctor")
+  designerOrders      DentalOrder[]      @relation("OrderDesigner")
+
+  @@index([email])
+  @@index([role])
+  @@index([verificationStatus])
+  @@index([isActive])
+  @@index([deletedAt])               // fast soft-delete filtering
+  @@index([lockedUntil])             // lockout queries
+}
+
+// ─────────────────────────────────────────
+// PATIENT
+// ─────────────────────────────────────────
+
+model Patient {
+  id            String    @id @default(uuid())
+  doctorId      String
+  fullName      String
+  email         String?
+  phone         String?
+  gender        Gender?
+  dateOfBirth   DateTime?
+  address       String?
+  notes         String?
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+
+  doctor        User      @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  orders        DentalOrder[]
+
+  @@index([doctorId])
+  @@index([deletedAt])
+  @@index([fullName])
+  @@index([email])
+  @@index([phone])
+}
+
+// ─────────────────────────────────────────
+// ORDERS
+// ─────────────────────────────────────────
+
+model DentalOrder {
+  id                            String                    @id @default(uuid())
+  orderCode                     String                    @unique
+  doctorId                      String
+  patientId                     String
+  assignedDesignerId            String?
+  status                        OrderStatus               @default(draft)
+
+  patientStage                  PatientStage?
+  chiefComplaint                String?
+  archTreatment                 ArchTreatment?
+  treatBothArch                 Boolean                   @default(false)
+  treatmentPlan                 String?
+  dontMoveOption                String?
+  apRelationship                String?
+  anteroposteriorRelationship   String?
+  elastics                      String?
+  openBite                      String?
+  midline                       String?
+  ipr                           String?
+  biteRamps                     String?
+  crossbite                     String?
+  spaces                        String?
+  extractions                   String?
+  specialInstructions           String?
+  additionalInstructions        String?
+  useCbctWithScans              Boolean                   @default(false)
+  wantsManufacturing            Boolean                   @default(false)
+  materials                     String[]                  @default([])
+
+  createdAt                     DateTime                  @default(now())
+  updatedAt                     DateTime                  @updatedAt
+  submittedAt                   DateTime?
+  deletedAt                     DateTime?
+
+  doctor                        User                      @relation("OrderDoctor", fields: [doctorId], references: [id], onDelete: Cascade)
+  patient                       Patient                   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  assignedDesigner              User?                     @relation("OrderDesigner", fields: [assignedDesignerId], references: [id], onDelete: SetNull)
+  toothInstructions             OrderToothInstruction[]
+  files                         OrderFile[]
+
+  @@index([doctorId])
+  @@index([patientId])
+  @@index([assignedDesignerId])
+  @@index([status])
+  @@index([orderCode])
+  @@index([deletedAt])
+  @@index([createdAt])
+}
+
+model OrderToothInstruction {
+  id             String               @id @default(uuid())
+  orderId        String
+  toothNumber    Int
+  type           ToothInstructionType
+  createdAt      DateTime             @default(now())
+
+  order          DentalOrder          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([orderId, toothNumber, type])
+  @@index([orderId])
+  @@index([toothNumber])
+}
+
+model OrderFile {
+  id             String               @id @default(uuid())
+  orderId        String
+  category       OrderFileCategory
+  originalName   String
+  fileName       String
+  relativePath   String
+  mimeType       String
+  size           Int
+  createdAt      DateTime             @default(now())
+  deletedAt      DateTime?
+
+  order          DentalOrder          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([category])
+  @@index([deletedAt])
+}
+
+// ─────────────────────────────────────────
+// DENTIST PROFILE
+// ─────────────────────────────────────────
+
+model DentistProfile {
+  id             String         @id @default(uuid())
+  userId         String         @unique
+
+  clinicName     String
+  clinicAddress  String?
+  city           String?
+  country        String?        // clinic country, separate from user personal country
+
+  // Geo — reconstruct Maps URL at render time from these
+  latitude       Float?
+  longitude      Float?
+
+  clinicPhone    String?
+  clinicEmail    String?        @unique   // one email per clinic
+
+  description    String?
+  logoUrl        String?        // validated path only, no raw URLs
+
+  // Timestamps + soft delete (mirrors User)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  deletedAt      DateTime?
+
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workingHours   WorkingHours[]
+
+  @@index([city])
+  @@index([country])
+  @@index([latitude, longitude])   // geo proximity search
+  @@index([deletedAt])
+}
+
+// ─────────────────────────────────────────
+// WORKING HOURS  
+// ─────────────────────────────────────────
+
+model WorkingHours {
+  id               String         @id @default(uuid())
+  dentistProfileId String
+
+  dayOfWeek        DayOfWeek
+  openTime         String         // "09:00" — store as HH:mm
+  closeTime        String         // "17:00"
+  isClosed         Boolean        @default(false)
+
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  dentistProfile   DentistProfile @relation(fields: [dentistProfileId], references: [id], onDelete: Cascade)
+
+  // One row per day per clinic
+  @@unique([dentistProfileId, dayOfWeek])
+  @@index([dentistProfileId])
+}

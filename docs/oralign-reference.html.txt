@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="fr" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ORALIGN — Aura Aligners</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,300;0,400;0,500;0,700;1,300;1,400;1,500&family=DM+Sans:wght@200;300;400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --black:#0a0a0a;
+  --white:#f8f6f2;
+  --sun:#f5c842;
+  --sun2:#f9d96a;
+  --sun3:rgba(245,200,66,.12);
+  --grey:#e8e4de;
+  --mid-grey:#c4bfb6;
+  --text-dark:#1a1a1a;
+  --text-mid:rgba(10,10,10,.55);
+  --serif:'Playfair Display',Georgia,serif;
+  --sans:'DM Sans',sans-serif;
+}
+html{scroll-behavior:smooth}
+body{background:var(--white);color:var(--black);font-family:var(--sans);font-weight:300;overflow-x:hidden;cursor:none}
+a,button{cursor:none}
+::-webkit-scrollbar{width:2px}::-webkit-scrollbar-thumb{background:var(--black)}
+
+/* ─── CURSOR ─── */
+#cs{width:8px;height:8px;border-radius:50%;background:var(--black);position:fixed;pointer-events:none;z-index:9999;transform:translate(-50%,-50%);transition:width .2s,height .2s,background .2s}
+#cr{width:32px;height:32px;border-radius:50%;border:1.5px solid rgba(10,10,10,.3);position:fixed;pointer-events:none;z-index:9998;transform:translate(-50%,-50%);transition:width .35s,height .35s}
+#cs.inv{background:var(--white)}
+#cr.inv{border-color:rgba(248,246,242,.4)}
+
+/* ─── LANG ─── */
+#lang-bar{position:fixed;top:0;right:72px;z-index:500;display:flex;gap:0;padding-top:14px}
+.lb{font-size:.58rem;letter-spacing:.25em;padding:8px 14px;background:none;border:none;color:var(--text-mid);font-family:var(--sans);font-weight:400;transition:color .3s}
+.lb.active,.lb:hover{color:var(--black)}
+
+/* ─── NAV ─── */
+nav{position:fixed;inset:0 0 auto;z-index:300;padding:32px 72px;display:flex;align-items:center;justify-content:space-between;transition:all .5s}
+nav.sc{padding:16px 72px;background:rgba(248,246,242,.92);backdrop-filter:blur(24px);border-bottom:1px solid var(--grey)}
+.nlogo{text-decoration:none;display:flex;flex-direction:column;gap:2px}
+.nlogo-m{font-family:var(--serif);font-size:1.55rem;font-weight:500;letter-spacing:.2em;color:var(--black);line-height:1}
+.nlogo-s{font-size:.5rem;letter-spacing:.4em;text-transform:uppercase;color:var(--text-mid)}
+.nlinks{display:flex;gap:42px;list-style:none}
+.nlinks a{font-size:.6rem;letter-spacing:.25em;text-transform:uppercase;color:var(--text-mid);text-decoration:none;transition:color .3s;position:relative}
+.nlinks a::after{content:'';position:absolute;bottom:-4px;left:0;width:0;height:1px;background:var(--black);transition:width .35s}
+.nlinks a:hover{color:var(--black)}
+.nlinks a:hover::after{width:100%}
+.ncta{font-size:.58rem;letter-spacing:.28em;text-transform:uppercase;color:var(--white);background:var(--black);padding:12px 28px;text-decoration:none;font-weight:400;transition:background .3s}
+.ncta:hover{background:var(--text-dark)}
+
+/* ─── HERO ─── */
+#hero{min-height:100vh;background:var(--black);color:var(--white);display:grid;grid-template-columns:1fr 1fr;position:relative;overflow:hidden}
+
+/* Sun radial burst */
+.sun-burst{position:absolute;right:-5%;top:50%;transform:translateY(-50%);width:min(80vw,860px);height:min(80vw,860px);pointer-events:none;z-index:1}
+.sun-burst svg{width:100%;height:100%}
+
+/* hero grain on dark */
+.hnoise{position:absolute;inset:0;opacity:.25;pointer-events:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='f'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23f)' opacity='.06'/%3E%3C/svg%3E")}
+.hl{display:flex;flex-direction:column;justify-content:center;padding:0 72px 60px;position:relative;z-index:5}
+.hey{display:flex;align-items:center;gap:13px;font-size:.55rem;letter-spacing:.45em;text-transform:uppercase;color:var(--sun);margin-bottom:38px;opacity:0;animation:fup .9s .15s ease forwards}
+.hline{width:26px;height:1px;background:var(--sun)}
+.hh1{font-family:var(--serif);font-weight:300;font-size:clamp(3rem,5vw,5.8rem);line-height:1.02;margin-bottom:30px;opacity:0;animation:fup .9s .3s ease forwards;color:var(--white)}
+.hh1 em{font-style:italic;color:var(--sun)}
+.hp{font-size:.86rem;line-height:1.95;color:rgba(248,246,242,.55);max-width:400px;margin-bottom:52px;opacity:0;animation:fup .9s .45s ease forwards}
+.hbtns{display:flex;align-items:center;gap:30px;opacity:0;animation:fup .9s .6s ease forwards}
+.btn-sun{font-size:.62rem;letter-spacing:.3em;text-transform:uppercase;background:var(--sun);color:var(--black);padding:15px 36px;text-decoration:none;font-weight:500;transition:background .3s,transform .2s;display:inline-block}
+.btn-sun:hover{background:var(--sun2);transform:translateY(-2px)}
+.btn-ghost{font-size:.62rem;letter-spacing:.22em;text-transform:uppercase;color:rgba(248,246,242,.5);text-decoration:none;display:flex;align-items:center;gap:11px;transition:color .3s}
+.btn-ghost:hover{color:var(--sun)}
+.btn-ghost .arr{display:block;width:26px;height:1px;background:currentColor;position:relative;transition:width .35s}
+.btn-ghost .arr::after{content:'';position:absolute;right:-1px;top:-3px;border:4px solid transparent;border-left:6px solid currentColor}
+.btn-ghost:hover .arr{width:40px}
+
+.hr-panel{position:relative;z-index:4;display:flex;align-items:center;justify-content:center;overflow:hidden}
+
+/* Sun core visual */
+.sun-core{position:relative;width:320px;height:320px}
+.sc-rays{position:absolute;inset:-80px;animation:rotslow 40s linear infinite}
+.sc-rays svg{width:100%;height:100%}
+.sc-disc{position:absolute;inset:80px;border-radius:50%;background:radial-gradient(circle at 40% 35%,var(--sun2) 0%,var(--sun) 60%,#e8a820 100%);box-shadow:0 0 60px rgba(245,200,66,.35),0 0 120px rgba(245,200,66,.12);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px}
+.sc-logo{font-family:var(--serif);font-size:2.4rem;font-weight:500;letter-spacing:.2em;color:var(--black);line-height:1}
+.sc-sub{font-size:.48rem;letter-spacing:.5em;text-transform:uppercase;color:rgba(10,10,10,.55)}
+
+.hscr{position:absolute;bottom:36px;left:72px;z-index:6;display:flex;align-items:center;gap:13px;font-size:.55rem;letter-spacing:.38em;text-transform:uppercase;color:rgba(248,246,242,.3);opacity:0;animation:fin 1s 1.3s ease forwards}
+.sbar{width:36px;height:1px;background:rgba(248,246,242,.2);position:relative;overflow:hidden}
+.sbar::after{content:'';position:absolute;left:-100%;top:0;width:100%;height:100%;background:var(--sun);animation:sb 2.8s ease-in-out infinite}
+
+/* ─── RIBBON ─── */
+.ribbon{background:var(--black);border-top:1px solid #1e1e1e;border-bottom:1px solid #1e1e1e;padding:14px 0;overflow:hidden}
+.rtrack{display:flex;gap:48px;width:max-content;animation:tk 20s linear infinite}
+.ritem{display:flex;align-items:center;gap:14px;font-size:.55rem;letter-spacing:.38em;text-transform:uppercase;color:rgba(248,246,242,.28);white-space:nowrap}
+.rdot{width:4px;height:4px;border-radius:50%;background:var(--sun)}
+
+/* ─── SECTION BASE (WHITE) ─── */
+.s{padding:120px 72px}
+.s-dark{background:var(--black);color:var(--white)}
+.s-grey{background:var(--grey)}
+.stag{display:flex;align-items:center;gap:12px;font-size:.55rem;letter-spacing:.42em;text-transform:uppercase;color:var(--black);margin-bottom:14px}
+.stag::before{content:'';width:18px;height:1px;background:var(--black)}
+.stag.light{color:var(--sun)}
+.stag.light::before{background:var(--sun)}
+.stag.c{justify-content:center}.stag.c::before{display:none}.stag.c::after{content:'';width:18px;height:1px;background:currentColor}
+.sh{font-family:var(--serif);font-weight:300;font-size:clamp(2rem,3.5vw,3.6rem);line-height:1.08}
+.sh em{font-style:italic;color:var(--black)}
+.sh.light em{color:var(--sun)}
+.sdiv{width:30px;height:1px;background:var(--black);margin:22px 0;opacity:.3}
+.sdiv.light{background:var(--sun);opacity:.6}
+
+/* ─── BRAND ─── */
+#brand .bg{display:grid;grid-template-columns:1fr 1fr;gap:100px;align-items:center}
+.bl p{font-size:.87rem;line-height:1.98;color:var(--text-mid);margin-bottom:18px}
+.bl p strong{color:var(--black);font-weight:500}
+.br-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--grey)}
+.bstat{background:var(--white);padding:32px 26px;transition:background .3s;position:relative;overflow:hidden}
+.bstat::after{content:'';position:absolute;bottom:0;left:0;width:100%;height:2px;background:var(--sun);transform:scaleX(0);transform-origin:left;transition:transform .45s}
+.bstat:hover{background:#fdf9ec}
+.bstat:hover::after{transform:scaleX(1)}
+.bnum{font-family:var(--serif);font-size:2.4rem;font-weight:300;color:var(--black);line-height:1;display:block;margin-bottom:6px}
+.blbl{font-size:.55rem;letter-spacing:.22em;text-transform:uppercase;color:var(--text-mid);display:block;margin-bottom:7px}
+.bdesc{font-size:.75rem;color:var(--text-mid);line-height:1.65}
+
+/* ─── PRODUCT ─── */
+#product{background:var(--black);color:var(--white)}
+#product .pg{display:grid;grid-template-columns:1fr 1fr;gap:80px;align-items:center}
+.pvis{aspect-ratio:3/4;background:var(--text-dark);border:1px solid #1e1e1e;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+.pvis-sun{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;opacity:.06}
+.pvis-sun svg{width:140%;height:140%}
+.pvis-inner{text-align:center;z-index:1;position:relative}
+.pvi-sun{width:120px;height:120px;border-radius:50%;background:radial-gradient(circle at 40% 35%,var(--sun2),var(--sun));display:flex;align-items:center;justify-content:center;margin:0 auto 20px;box-shadow:0 0 40px rgba(245,200,66,.2)}
+.pvi-icon{font-size:2.8rem}
+.pvi-name{font-family:var(--serif);font-size:1.5rem;font-weight:300;letter-spacing:.2em;color:var(--white)}
+.pvi-sub{font-size:.5rem;letter-spacing:.4em;text-transform:uppercase;color:rgba(248,246,242,.35);margin-top:6px}
+.pc-br{position:absolute;bottom:-1px;right:-1px;width:56px;height:56px;border-right:2px solid var(--sun);border-bottom:2px solid var(--sun)}
+.pc-tl{position:absolute;top:-1px;left:-1px;width:56px;height:56px;border-left:2px solid var(--sun);border-top:2px solid var(--sun)}
+.pr p{font-size:.87rem;line-height:1.98;color:rgba(248,246,242,.55);margin-bottom:16px}
+.pr p strong{color:var(--sun);font-weight:400}
+.feats{margin-top:32px}
+.feat{display:flex;align-items:center;gap:16px;padding:14px 0;border-bottom:1px solid #1e1e1e;font-size:.79rem;color:rgba(248,246,242,.55)}
+.feat-ic{color:var(--sun);font-size:.85rem;flex-shrink:0;width:18px}
+
+/* ─── TECHNOLOGY ─── */
+#technology{background:var(--white)}
+.th{display:grid;grid-template-columns:1fr 1fr;gap:52px;align-items:end;margin-bottom:70px}
+.th p{font-size:.87rem;line-height:1.95;color:var(--text-mid)}
+.tcards{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--grey)}
+.tc{background:var(--white);padding:44px 32px;transition:background .3s;position:relative;overflow:hidden}
+.tc::before{content:'';position:absolute;top:0;left:0;width:2px;height:0;background:var(--sun);transition:height .5s}
+.tc:hover{background:#fdf9ec}
+.tc:hover::before{height:100%}
+.tcn{font-family:var(--serif);font-size:3.6rem;font-weight:300;color:rgba(10,10,10,.06);line-height:1;margin-bottom:18px}
+.tci{font-size:1.5rem;display:block;margin-bottom:14px}
+.tct{font-family:var(--serif);font-size:1.25rem;font-weight:400;margin-bottom:11px}
+.tcb{font-size:.79rem;line-height:1.85;color:var(--text-mid)}
+
+/* ─── PROCESS ─── */
+#process{background:var(--black);color:var(--white)}
+.ph{text-align:center;margin-bottom:70px}
+.ph p{font-size:.86rem;color:rgba(248,246,242,.45);margin-top:14px}
+.psteps{display:grid;grid-template-columns:repeat(5,1fr);position:relative}
+.psteps::before{content:'';position:absolute;top:31px;left:12%;right:12%;height:1px;background:linear-gradient(to right,transparent,rgba(245,200,66,.3),transparent)}
+.pst{text-align:center;padding:0 14px}
+.psb{width:62px;height:62px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 20px;font-family:var(--serif);font-size:1.3rem;font-weight:300;color:var(--black);background:var(--sun);transition:all .35s;position:relative;z-index:1;box-shadow:0 0 0 0 rgba(245,200,66,.4)}
+.pst:hover .psb{box-shadow:0 0 0 8px rgba(245,200,66,.15)}
+.pstitle{font-family:var(--serif);font-size:1rem;margin-bottom:8px;color:var(--white)}
+.psdesc{font-size:.73rem;line-height:1.72;color:rgba(248,246,242,.45)}
+
+/* ─── AUDIENCES ─── */
+#audiences{background:var(--white)}
+.ag{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--grey);margin-top:56px}
+.acard{background:var(--white);padding:54px 46px;position:relative;overflow:hidden;transition:background .35s}
+.acard:hover{background:#fdf9ec}
+.sun-corner{position:absolute;width:160px;height:160px;border-radius:50%;background:radial-gradient(circle,rgba(245,200,66,.12),transparent 70%);top:-40px;right:-40px;transition:transform .5s}
+.acard:hover .sun-corner{transform:scale(1.3)}
+.atag{font-size:.54rem;letter-spacing:.38em;text-transform:uppercase;color:var(--black);border:1px solid rgba(10,10,10,.2);padding:5px 14px;display:inline-block;margin-bottom:24px}
+.atitle{font-family:var(--serif);font-size:1.85rem;font-weight:300;margin-bottom:14px;line-height:1.1}
+.atitle em{font-style:italic}
+.abody{font-size:.82rem;line-height:1.9;color:var(--text-mid);margin-bottom:26px}
+.alist{list-style:none;display:flex;flex-direction:column;gap:9px}
+.alist li{font-size:.77rem;color:var(--text-mid);display:flex;align-items:flex-start;gap:10px}
+.alist li::before{content:'—';color:var(--sun);flex-shrink:0;font-weight:700}
+
+/* ─── GEOGRAPHY ─── */
+#geography{background:var(--black);color:var(--white)}
+.gg{display:grid;grid-template-columns:1fr 1fr;gap:90px;align-items:start}
+.gr p{font-size:.87rem;line-height:1.95;color:rgba(248,246,242,.5);margin-bottom:18px}
+.gr p strong{color:var(--white);font-weight:400}
+.gmap{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:#1a1a1a}
+.gcity{background:var(--black);padding:26px;transition:background .3s;position:relative;overflow:hidden}
+.gcity:hover{background:#111}
+.gcity::before{content:'';position:absolute;bottom:0;left:0;width:0;height:1px;background:var(--sun);transition:width .4s}
+.gcity:hover::before{width:100%}
+.gcname{font-family:var(--serif);font-size:1.2rem;font-weight:300;color:var(--white);margin-bottom:4px}
+.gcstat{font-size:.56rem;letter-spacing:.22em;text-transform:uppercase;color:rgba(248,246,242,.3)}
+.gcstat.on{color:var(--sun)}
+
+/* ─── MANIFESTO ─── */
+#manifesto{background:var(--sun);color:var(--black);text-align:center;padding:100px 72px;position:relative;overflow:hidden}
+.mfbg{position:absolute;inset:0;pointer-events:none;opacity:.08}
+.mfbg svg{width:100%;height:100%}
+.mf-quote{font-family:var(--serif);font-size:clamp(1.8rem,4vw,3.8rem);font-weight:300;line-height:1.15;max-width:900px;margin:0 auto 32px;position:relative;z-index:1}
+.mf-quote em{font-style:italic;font-weight:400}
+.mf-sig{font-size:.65rem;letter-spacing:.38em;text-transform:uppercase;color:rgba(10,10,10,.5);position:relative;z-index:1}
+
+/* ─── CTA ─── */
+#cta{background:var(--white);text-align:center;position:relative;overflow:hidden}
+.cta-sun{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:600px;height:600px;border-radius:50%;background:radial-gradient(circle,rgba(245,200,66,.08) 0%,transparent 70%);pointer-events:none}
+.ctah{font-family:var(--serif);font-weight:300;font-size:clamp(2.2rem,4vw,4.4rem);line-height:1.08;margin-bottom:18px;position:relative;z-index:1}
+.ctah em{font-style:italic}
+.ctap{font-size:.87rem;color:var(--text-mid);max-width:440px;margin:0 auto 44px;line-height:1.9;position:relative;z-index:1}
+.cta-btns{display:flex;align-items:center;justify-content:center;gap:16px;flex-wrap:wrap;position:relative;z-index:1}
+.btn-black{font-size:.64rem;letter-spacing:.3em;text-transform:uppercase;background:var(--black);color:var(--white);padding:16px 44px;text-decoration:none;font-weight:400;transition:background .3s,transform .2s;display:inline-block}
+.btn-black:hover{background:var(--text-dark);transform:translateY(-2px)}
+.btn-ol-dark{font-size:.64rem;letter-spacing:.25em;text-transform:uppercase;color:var(--text-mid);padding:15px 34px;text-decoration:none;border:1px solid rgba(10,10,10,.2);transition:border-color .3s,color .3s}
+.btn-ol-dark:hover{border-color:var(--black);color:var(--black)}
+
+/* ─── FOOTER ─── */
+footer{background:var(--black);color:var(--white);padding:60px 72px 36px;border-top:1px solid #1a1a1a}
+.fg{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:52px;margin-bottom:44px}
+.fbrand p{font-size:.76rem;line-height:1.85;color:rgba(248,246,242,.4);margin-top:14px;max-width:240px}
+.fcol h4{font-size:.52rem;letter-spacing:.35em;text-transform:uppercase;color:rgba(248,246,242,.3);margin-bottom:18px}
+.fcol ul{list-style:none;display:flex;flex-direction:column;gap:9px}
+.fcol ul a{font-size:.76rem;color:rgba(248,246,242,.45);text-decoration:none;transition:color .3s}
+.fcol ul a:hover{color:var(--sun)}
+.fbot{border-top:1px solid #1a1a1a;padding-top:22px;display:flex;justify-content:space-between;align-items:center}
+.fbot p{font-size:.6rem;color:rgba(248,246,242,.22)}
+.fs{color:var(--sun)}
+
+/* ─── REVEAL ─── */
+.rv{opacity:0;transform:translateY(24px);transition:opacity .8s ease,transform .8s ease}
+.rv2{opacity:0;transform:translateY(24px);transition:opacity .8s .15s ease,transform .8s .15s ease}
+.rv.v,.rv2.v{opacity:1;transform:translateY(0)}
+
+/* ─── KEYFRAMES ─── */
+@keyframes fup{from{opacity:0;transform:translateY(22px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fin{from{opacity:0}to{opacity:1}}
+@keyframes rotslow{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+@keyframes tk{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+@keyframes sb{0%{left:-100%}50%{left:0}100%{left:100%}}
+
+/* ─── RTL ─── */
+html[dir="rtl"] .stag::before{display:none}
+html[dir="rtl"] .stag::after{content:'';width:18px;height:1px;background:currentColor}
+html[dir="rtl"] .hline{display:none}
+
+/* ─── RESPONSIVE ─── */
+@media(max-width:960px){
+  nav,nav.sc{padding:18px 24px}
+  .nlinks{display:none}
+  #lang-bar{right:24px}
+  #hero{grid-template-columns:1fr}
+  .hl{padding:130px 24px 70px}
+  .hr-panel{display:none}
+  .hscr{left:24px}
+  .s{padding:80px 24px}
+  #brand .bg,.pg,.th,.gg{grid-template-columns:1fr;gap:44px}
+  .tcards,.psteps{grid-template-columns:1fr}
+  .psteps::before{display:none}
+  .ag{grid-template-columns:1fr}
+  .fg{grid-template-columns:1fr 1fr;gap:32px}
+  footer{padding:48px 24px 30px}
+  #cta,#manifesto{padding:80px 24px}
+}
+</style>
+</head>
+<body>
+
+<div id="cs"></div>
+<div id="cr"></div>
+
+<!-- LANG -->
+<div id="lang-bar">
+  <button class="lb active" onclick="setLang('fr')">FR</button>
+  <button class="lb" onclick="setLang('en')">EN</button>
+  <button class="lb" onclick="setLang('ar')">AR</button>
+</div>
+
+<!-- NAV -->
+<nav id="nav">
+  <a href="#" class="nlogo">
+    <span class="nlogo-m">ORALIGN</span>
+    <span class="nlogo-s" data-fr="by Aura Aligners" data-en="by Aura Aligners" data-ar="من Aura Aligners">by Aura Aligners</span>
+  </a>
+  <ul class="nlinks">
+    <li><a href="#brand" data-fr="La Marque" data-en="The Brand" data-ar="العلامة">La Marque</a></li>
+    <li><a href="#product" data-fr="Le Produit" data-en="Product" data-ar="المنتج">Le Produit</a></li>
+    <li><a href="#technology" data-fr="Technologie" data-en="Technology" data-ar="التكنولوجيا">Technologie</a></li>
+    <li><a href="#audiences" data-fr="Pour vous" data-en="For You" data-ar="لكم">Pour vous</a></li>
+    <li><a href="#geography" data-fr="Réseau" data-en="Network" data-ar="الشبكة">Réseau</a></li>
+  </ul>
+  <a href="#cta" class="ncta" data-fr="Nous contacter" data-en="Contact Us" data-ar="تواصل معنا">Nous contacter</a>
+</nav>
+
+<!-- HERO -->
+<section id="hero">
+  <div class="hnoise"></div>
+
+  <!-- Sun burst background -->
+  <div class="sun-burst" aria-hidden="true">
+    <svg viewBox="0 0 800 800" xmlns="http://www.w3.org/2000/svg">
+      <g transform="translate(400,400)" opacity="1">
+        <!-- Rays -->
+        <line x1="0" y1="-380" x2="0" y2="380" stroke="rgba(245,200,66,0.06)" stroke-width="1"/>
+        <line x1="-380" y1="0" x2="380" y2="0" stroke="rgba(245,200,66,0.06)" stroke-width="1"/>
+        <line x1="-269" y1="-269" x2="269" y2="269" stroke="rgba(245,200,66,0.06)" stroke-width="1"/>
+        <line x1="269" y1="-269" x2="-269" y2="269" stroke="rgba(245,200,66,0.06)" stroke-width="1"/>
+        <line x1="-144" y1="-355" x2="144" y2="355" stroke="rgba(245,200,66,0.04)" stroke-width="1"/>
+        <line x1="355" y1="-144" x2="-355" y2="144" stroke="rgba(245,200,66,0.04)" stroke-width="1"/>
+        <line x1="144" y1="-355" x2="-144" y2="355" stroke="rgba(245,200,66,0.04)" stroke-width="1"/>
+        <line x1="-355" y1="-144" x2="355" y2="144" stroke="rgba(245,200,66,0.04)" stroke-width="1"/>
+        <line x1="-75" y1="-372" x2="75" y2="372" stroke="rgba(245,200,66,0.03)" stroke-width="1"/>
+        <line x1="372" y1="-75" x2="-372" y2="75" stroke="rgba(245,200,66,0.03)" stroke-width="1"/>
+        <line x1="75" y1="-372" x2="-75" y2="372" stroke="rgba(245,200,66,0.03)" stroke-width="1"/>
+        <line x1="-372" y1="-75" x2="372" y2="75" stroke="rgba(245,200,66,0.03)" stroke-width="1"/>
+        <line x1="-210" y1="-320" x2="210" y2="320" stroke="rgba(245,200,66,0.025)" stroke-width="1"/>
+        <line x1="320" y1="-210" x2="-320" y2="210" stroke="rgba(245,200,66,0.025)" stroke-width="1"/>
+        <line x1="210" y1="-320" x2="-210" y2="320" stroke="rgba(245,200,66,0.025)" stroke-width="1"/>
+        <line x1="-320" y1="-210" x2="320" y2="210" stroke="rgba(245,200,66,0.025)" stroke-width="1"/>
+        <!-- Concentric circles -->
+        <circle r="120" fill="none" stroke="rgba(245,200,66,0.07)" stroke-width="1"/>
+        <circle r="200" fill="none" stroke="rgba(245,200,66,0.05)" stroke-width="1"/>
+        <circle r="290" fill="none" stroke="rgba(245,200,66,0.035)" stroke-width="1"/>
+        <circle r="370" fill="none" stroke="rgba(245,200,66,0.02)" stroke-width="1"/>
+        <!-- Glow core -->
+        <circle r="80" fill="radial-gradient(circle,rgba(245,200,66,0.15),transparent)"/>
+        <circle r="80" fill="rgba(245,200,66,0.04)"/>
+      </g>
+    </svg>
+  </div>
+
+  <div class="hl">
+    <div class="hey"><span class="hline"></span><span data-fr="Aura Aligners" data-en="Aura Aligners" data-ar="أورا أليينرز">Aura Aligners</span></div>
+    <h1 class="hh1">
+      <span data-fr="L'aligneur" data-en="The aligner" data-ar="المثبّت">L'aligneur</span><br>
+      <em data-fr="invisible." data-en="invisible." data-ar="غير المرئي.">invisible.</em><br>
+      <span style="font-size:.6em;letter-spacing:.05em;font-weight:300;font-style:normal" data-fr="Brillamment précis." data-en="Brilliantly precise." data-ar="دقة لامعة.">Brillamment précis.</span>
+    </h1>
+    <p class="hp" data-fr="ORALIGN redéfinit le standard des aligneurs orthodontiques — conçu en Allemagne, fabriqué en Tunisie. Une rigueur absolue, au service du sourire." data-en="ORALIGN redefines the orthodontic aligner standard — designed in Germany, manufactured in Tunisia. Absolute rigor, in service of the smile." data-ar="أورالاين يُعيد تعريف معيار أجهزة التقويم — مصمَّم في ألمانيا، مصنوع في تونس. صرامة مطلقة في خدمة الابتسامة.">ORALIGN redéfinit le standard des aligneurs orthodontiques — conçu en Allemagne, fabriqué en Tunisie. Une rigueur absolue, au service du sourire.</p>
+    <div class="hbtns">
+      <a href="#product" class="btn-sun" data-fr="Découvrir ORALIGN" data-en="Discover ORALIGN" data-ar="اكتشف أورالاين">Découvrir ORALIGN</a>
+      <a href="#cta" class="btn-ghost">
+        <span data-fr="Devenir partenaire" data-en="Become a partner" data-ar="كن شريكاً">Devenir partenaire</span>
+        <span class="arr"></span>
+      </a>
+    </div>
+  </div>
+
+  <div class="hr-panel">
+    <div class="sun-core">
+      <div class="sc-rays">
+        <svg viewBox="0 0 480 480" xmlns="http://www.w3.org/2000/svg">
+          <g transform="translate(240,240)">
+            <line x1="0" y1="-230" x2="0" y2="230" stroke="rgba(245,200,66,0.18)" stroke-width="1"/>
+            <line x1="-230" y1="0" x2="230" y2="0" stroke="rgba(245,200,66,0.18)" stroke-width="1"/>
+            <line x1="-163" y1="-163" x2="163" y2="163" stroke="rgba(245,200,66,0.14)" stroke-width="1"/>
+            <line x1="163" y1="-163" x2="-163" y2="163" stroke="rgba(245,200,66,0.14)" stroke-width="1"/>
+            <line x1="-88" y1="-215" x2="88" y2="215" stroke="rgba(245,200,66,0.1)" stroke-width="1"/>
+            <line x1="215" y1="-88" x2="-215" y2="88" stroke="rgba(245,200,66,0.1)" stroke-width="1"/>
+            <line x1="88" y1="-215" x2="-88" y2="215" stroke="rgba(245,200,66,0.1)" stroke-width="1"/>
+            <line x1="-215" y1="-88" x2="215" y2="88" stroke="rgba(245,200,66,0.1)" stroke-width="1"/>
+            <line x1="-128" y1="-195" x2="128" y2="195" stroke="rgba(245,200,66,0.07)" stroke-width="1"/>
+            <line x1="195" y1="-128" x2="-195" y2="128" stroke="rgba(245,200,66,0.07)" stroke-width="1"/>
+            <line x1="128" y1="-195" x2="-128" y2="195" stroke="rgba(245,200,66,0.07)" stroke-width="1"/>
+            <line x1="-195" y1="-128" x2="195" y2="128" stroke="rgba(245,200,66,0.07)" stroke-width="1"/>
+            <circle r="230" fill="none" stroke="rgba(245,200,66,0.06)" stroke-width="1" stroke-dasharray="4 6"/>
+            <circle r="170" fill="none" stroke="rgba(245,200,66,0.08)" stroke-width="1"/>
+            <circle r="110" fill="none" stroke="rgba(245,200,66,0.1)" stroke-width="1"/>
+          </g>
+        </svg>
+      </div>
+      <div class="sc-disc">
+        <span class="sc-logo">ORALIGN</span>
+        <span class="sc-sub">AURA ALIGNERS</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="hscr"><div class="sbar"></div><span data-fr="Défiler" data-en="Scroll" data-ar="تمرير">Défiler</span></div>
+</section>
+
+<!-- RIBBON -->
+<div class="ribbon">
+  <div class="rtrack">
+    <div class="ritem"><span class="rdot"></span>Aura Aligners</div>
+    <div class="ritem"><span class="rdot"></span>ORALIGN™</div>
+    <div class="ritem"><span class="rdot"></span><span data-fr="Conçu en Allemagne" data-en="Designed in Germany" data-ar="مصمَّم في ألمانيا">Conçu en Allemagne</span></div>
+    <div class="ritem"><span class="rdot"></span><span data-fr="Fabriqué en Tunisie" data-en="Made in Tunisia" data-ar="صُنع في تونس">Fabriqué en Tunisie</span></div>
+    <div class="ritem"><span class="rdot"></span><span data-fr="100% Invisible" data-en="100% Invisible" data-ar="100% غير مرئي">100% Invisible</span></div>
+    <div class="ritem"><span class="rdot"></span><span data-fr="Résine certifiée CE" data-en="CE Certified" data-ar="معتمد CE">Résine certifiée CE</span></div>
+    <div class="ritem"><span class="rdot"></span><span data-fr="Scan 3D & Simulation" data-en="3D Scan & Simulation" data-ar="مسح ثلاثي الأبعاد">Scan 3D & Simulation</span></div>
+    <div class="ritem"><span class="rdot"></span>Aura Aligners</div>
+    <div class="ritem"><span class="rdot"></span>ORALIGN™</div>
+    <div class="ritem"><span class="rdot"></span><span data-fr="Conçu en Allemagne" data-en="Designed in Germany" data-ar="مصمَّم في ألمانيا">Conçu en Allemagne</span></div>
+    <div class="ritem"><span class="rdot"></span><span data-fr="Fabriqué en Tunisie" data-en="Made in Tunisia" data-ar="صُنع في تونس">Fabriqué en Tunisie</span></div>
+    <div class="ritem"><span class="rdot"></span><span data-fr="100% Invisible" data-en="100% Invisible" data-ar="100% غير مرئي">100% Invisible</span></div>
+    <div class="ritem"><span class="rdot"></span><span data-fr="Résine certifiée CE" data-en="CE Certified" data-ar="معتمد CE">Résine certifiée CE</span></div>
+    <div class="ritem"><span class="rdot"></span><span data-fr="Scan 3D & Simulation" data-en="3D Scan & Simulation" data-ar="مسح ثلاثي الأبعاد">Scan 3D & Simulation</span></div>
+  </div>
+</div>
+
+<!-- BRAND -->
+<section id="brand" class="s">
+  <div class="bg">
+    <div class="bl rv">
+      <div class="stag" data-fr="La Marque" data-en="The Brand" data-ar="العلامة">La Marque</div>
+      <h2 class="sh" data-fr="Aura Aligners —<br><em>une exigence,</em> une mission." data-en="Aura Aligners —<br><em>one standard,</em> one mission." data-ar="أورا أليينرز —<br><em>معيار واحد،</em> مهمة واحدة.">Aura Aligners —<br><em>une exigence,</em> une mission.</h2>
+      <div class="sdiv"></div>
+      <p data-fr="<strong>Aura Aligners</strong> est une société spécialisée dans la conception et la fabrication d'aligneurs orthodontiques de précision. Née d'une volonté de transformer l'accès à l'orthodontie invisible, elle allie l'exigence industrielle européenne à l'agilité locale." data-en="<strong>Aura Aligners</strong> is a company specializing in the design and manufacture of precision orthodontic aligners, combining European industrial standards with local agility." data-ar="<strong>أورا أليينرز</strong> شركة متخصصة في تصميم وتصنيع أجهزة التقويم الدقيقة، تجمع بين المعايير الأوروبية والمرونة المحلية."><strong>Aura Aligners</strong> est une société spécialisée dans la conception et la fabrication d'aligneurs orthodontiques de précision. Née d'une volonté de transformer l'accès à l'orthodontie invisible, elle allie l'exigence industrielle européenne à l'agilité locale.</p>
+      <p data-fr="Son produit phare, <strong>ORALIGN</strong>, est conçu en Allemagne, fabriqué en Tunisie — distribué à un réseau sélectionné de praticiens certifiés à travers la région." data-en="Its flagship product, <strong>ORALIGN</strong>, is designed in Germany, made in Tunisia — distributed to a select network of certified practitioners across the region." data-ar="منتجها الرائد <strong>أورالاين</strong> مصمَّم في ألمانيا، مصنوع في تونس — موزَّع على شبكة مختارة من الأطباء المعتمدين.">Son produit phare, <strong>ORALIGN</strong>, est conçu en Allemagne, fabriqué en Tunisie — distribué à un réseau sélectionné de praticiens certifiés.</p>
+      <div style="margin-top:36px"><a href="#cta" class="btn-black" data-fr="Devenir partenaire" data-en="Become a partner" data-ar="كن شريكاً">Devenir partenaire</a></div>
+    </div>
+    <div class="br-grid rv2">
+      <div class="bstat">
+        <span class="bnum">01</span>
+        <span class="blbl" data-fr="Pionnière" data-en="Pioneer" data-ar="رائدة">Pionnière</span>
+        <p class="bdesc" data-fr="Première société tunisienne de conception & fabrication d'aligneurs orthodontiques." data-en="First Tunisian company designing & manufacturing orthodontic aligners." data-ar="أول شركة تونسية لتصميم وتصنيع أجهزة التقويم.">Première société tunisienne de conception & fabrication d'aligneurs orthodontiques.</p>
+      </div>
+      <div class="bstat">
+        <span class="bnum">🇩🇪</span>
+        <span class="blbl" data-fr="Standards CE" data-en="CE Standards" data-ar="معايير CE">Standards CE</span>
+        <p class="bdesc" data-fr="Protocoles et matériaux conformes aux normes européennes." data-en="Protocols and materials compliant with European standards." data-ar="بروتوكولات ومواد مطابقة للمعايير الأوروبية.">Protocoles et matériaux conformes aux normes européennes.</p>
+      </div>
+      <div class="bstat">
+        <span class="bnum">✦</span>
+        <span class="blbl" data-fr="Réseau certifié" data-en="Certified network" data-ar="شبكة معتمدة">Réseau certifié</span>
+        <p class="bdesc" data-fr="Praticiens rigoureusement sélectionnés et accompagnés." data-en="Rigorously selected and supported practitioners." data-ar="أطباء مختارون بعناية ومدعومون.">Praticiens rigoureusement sélectionnés et accompagnés.</p>
+      </div>
+      <div class="bstat">
+        <span class="bnum">◈</span>
+        <span class="blbl" data-fr="Qualité totale" data-en="Total quality" data-ar="جودة شاملة">Qualité totale</span>
+        <p class="bdesc" data-fr="Contrôle qualité systématique à chaque étape de fabrication." data-en="Systematic quality control at every production stage." data-ar="مراقبة جودة منهجية في كل مرحلة إنتاج.">Contrôle qualité systématique à chaque étape.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PRODUCT -->
+<section id="product" class="s s-dark">
+  <div class="pg">
+    <div class="pvis rv">
+      <div class="pvis-sun" aria-hidden="true">
+        <svg viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
+          <g transform="translate(200,200)">
+            <line x1="0" y1="-190" x2="0" y2="190" stroke="rgba(245,200,66,1)" stroke-width="1"/>
+            <line x1="-190" y1="0" x2="190" y2="0" stroke="rgba(245,200,66,1)" stroke-width="1"/>
+            <line x1="-134" y1="-134" x2="134" y2="134" stroke="rgba(245,200,66,1)" stroke-width="1"/>
+            <line x1="134" y1="-134" x2="-134" y2="134" stroke="rgba(245,200,66,1)" stroke-width="1"/>
+            <line x1="-72" y1="-178" x2="72" y2="178" stroke="rgba(245,200,66,1)" stroke-width="1"/>
+            <line x1="178" y1="-72" x2="-178" y2="72" stroke="rgba(245,200,66,1)" stroke-width="1"/>
+            <line x1="72" y1="-178" x2="-72" y2="178" stroke="rgba(245,200,66,1)" stroke-width="1"/>
+            <line x1="-178" y1="-72" x2="178" y2="72" stroke="rgba(245,200,66,1)" stroke-width="1"/>
+            <circle r="60" fill="rgba(245,200,66,0.8)"/>
+            <circle r="100" fill="none" stroke="rgba(245,200,66,0.5)" stroke-width="1"/>
+            <circle r="150" fill="none" stroke="rgba(245,200,66,0.25)" stroke-width="1"/>
+            <circle r="190" fill="none" stroke="rgba(245,200,66,0.12)" stroke-width="1"/>
+          </g>
+        </svg>
+      </div>
+      <div class="pc-tl"></div>
+      <div class="pc-br"></div>
+      <div class="pvis-inner">
+        <div class="pvi-sun"><span class="pvi-icon">◎</span></div>
+        <div class="pvi-name">ORALIGN</div>
+        <div class="pvi-sub" data-fr="Aligneur invisible de précision" data-en="Precision invisible aligner" data-ar="مثبّت شفاف دقيق">Aligneur invisible de précision</div>
+      </div>
+    </div>
+    <div class="pr rv2">
+      <div class="stag light" data-fr="Le Produit" data-en="The Product" data-ar="المنتج">Le Produit</div>
+      <h2 class="sh light" data-fr="ORALIGN — la <em>référence</em><br>de la région." data-en="ORALIGN — the regional <em>reference.</em>" data-ar="أورالاين — <em>المرجع</em> الإقليمي.">ORALIGN — la <em>référence</em> de la région.</h2>
+      <div class="sdiv light"></div>
+      <p data-fr="Chaque gouttière ORALIGN est le fruit d'un processus industriel rigoureux : matériaux thermoformés de grade médical, planification numérique avancée et contrôle qualité systématique." data-en="Each ORALIGN aligner results from a rigorous industrial process: medical-grade thermoformed materials, advanced digital planning, and systematic quality control." data-ar="كل مثبّت أورالاين هو نتيجة عملية صناعية صارمة: مواد حرارية طبية، تخطيط رقمي متقدم، ومراقبة جودة منهجية.">Chaque gouttière ORALIGN est le fruit d'un processus industriel rigoureux : matériaux thermoformés de grade médical, planification numérique avancée et contrôle qualité systématique.</p>
+      <div class="feats">
+        <div class="feat"><span class="feat-ic">☀</span><span data-fr="Résine thermoformée grade médical — certifiée CE" data-en="Medical-grade thermoformed resin — CE certified" data-ar="راتنج حراري طبي — معتمد CE">Résine thermoformée grade médical — certifiée CE</span></div>
+        <div class="feat"><span class="feat-ic">◎</span><span data-fr="Transparence optimale — quasi indétectable" data-en="Optimal transparency — virtually undetectable" data-ar="شفافية مثلى — غير مرئي تقريباً">Transparence optimale — quasi indétectable</span></div>
+        <div class="feat"><span class="feat-ic">◈</span><span data-fr="Scan 3D & simulation du résultat final" data-en="3D scan & final result simulation" data-ar="مسح ثلاثي الأبعاد ومحاكاة النتيجة">Scan 3D & simulation du résultat final</span></div>
+        <div class="feat"><span class="feat-ic">✦</span><span data-fr="Adapté enfants & adultes — 6 à 18 mois" data-en="For children & adults — 6 to 18 months" data-ar="للأطفال والبالغين — 6 إلى 18 شهراً">Adapté enfants & adultes — 6 à 18 mois</span></div>
+        <div class="feat"><span class="feat-ic">→</span><span data-fr="Livraison rapide au cabinet partenaire" data-en="Fast delivery to partner practices" data-ar="تسليم سريع للعيادات الشريكة">Livraison rapide au cabinet partenaire</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- TECHNOLOGY -->
+<section id="technology" class="s">
+  <div class="th">
+    <div class="rv">
+      <div class="stag" data-fr="Technologie" data-en="Technology" data-ar="التكنولوجيا">Technologie</div>
+      <h2 class="sh" data-fr="La science au<br>service du <em>sourire.</em>" data-en="Science in<br>service of the <em>smile.</em>" data-ar="العلم في خدمة<br><em>الابتسامة.</em>">La science au service du <em>sourire.</em></h2>
+    </div>
+    <div class="rv2"><p data-fr="De la prise d'empreinte numérique à la livraison, chaque étape d'Aura Aligners est optimisée pour garantir une précision clinique maximale et une expérience patient d'exception." data-en="From digital impression to delivery, every Aura Aligners step is optimized for maximum clinical precision and an exceptional patient experience." data-ar="من الطبعة الرقمية إلى التسليم، كل خطوة مُحسَّنة لضمان أقصى دقة سريرية وتجربة استثنائية.">De la prise d'empreinte numérique à la livraison, chaque étape d'Aura Aligners est optimisée pour garantir une précision clinique maximale et une expérience patient d'exception.</p></div>
+  </div>
+  <div class="tcards">
+    <div class="tc rv">
+      <div class="tcn">01</div><span class="tci">⬡</span>
+      <div class="tct" data-fr="Résine médicale certifiée" data-en="Certified medical resin" data-ar="راتنج طبي معتمد">Résine médicale certifiée</div>
+      <p class="tcb" data-fr="Matériaux thermoformés de grade médical, conformes aux normes CE. Transparence, résistance et confort garantis sur toute la durée du traitement." data-en="Medical-grade thermoformed materials, CE compliant. Transparency, strength and comfort throughout treatment." data-ar="مواد حرارية طبية مطابقة لمعايير CE. شفافية ومتانة وراحة طوال فترة العلاج.">Matériaux thermoformés de grade médical, conformes aux normes CE. Transparence, résistance et confort garantis sur toute la durée du traitement.</p>
+    </div>
+    <div class="tc rv">
+      <div class="tcn">02</div><span class="tci">◎</span>
+      <div class="tct" data-fr="Planification 3D avancée" data-en="Advanced 3D planning" data-ar="تخطيط ثلاثي متقدم">Planification 3D avancée</div>
+      <p class="tcb" data-fr="Empreinte numérique haute définition et logiciel de planification occlusale. Simulation complète du résultat final soumise à validation avant toute fabrication." data-en="High-definition digital impressions and occlusal planning software. Complete final result simulation submitted for approval before production." data-ar="طبعة رقمية عالية الدقة وبرنامج تخطيط. محاكاة كاملة للنتيجة قبل أي تصنيع.">Empreinte numérique haute définition et logiciel de planification occlusale. Simulation du résultat final avant toute fabrication.</p>
+    </div>
+    <div class="tc rv">
+      <div class="tcn">03</div><span class="tci">◈</span>
+      <div class="tct" data-fr="Fabrication contrôlée" data-en="Controlled manufacturing" data-ar="تصنيع مُتحكَّم فيه">Fabrication contrôlée</div>
+      <p class="tcb" data-fr="Thermoformage numérique sur modèles 3D, découpe de précision et contrôle qualité systématique à chaque étape — zéro compromis." data-en="Digital thermoforming on 3D models, precision cutting and systematic quality control at every step — zero compromise." data-ar="قولبة حرارية رقمية على نماذج ثلاثية، قطع دقيق ومراقبة جودة منهجية — لا تنازلات.">Thermoformage numérique, découpe de précision et contrôle qualité systématique — zéro compromis.</p>
+    </div>
+  </div>
+</section>
+
+<!-- PROCESS -->
+<section id="process" class="s s-dark">
+  <div class="ph rv">
+    <div class="stag light c" data-fr="Du scan à la livraison" data-en="From scan to delivery" data-ar="من المسح إلى التسليم">Du scan à la livraison</div>
+    <h2 class="sh light" style="text-align:center" data-fr="Un processus <em>simple</em> et rigoureux." data-en="A <em>simple</em> and rigorous process." data-ar="عملية <em>بسيطة</em> وصارمة.">Un processus <em>simple</em> et rigoureux.</h2>
+    <p data-fr="5 étapes. Zéro complexité. Un suivi dédié." data-en="5 steps. Zero complexity. Dedicated follow-up." data-ar="5 خطوات. لا تعقيد. متابعة مخصصة.">5 étapes. Zéro complexité. Un suivi dédié.</p>
+  </div>
+  <div class="psteps">
+    <div class="pst rv"><div class="psb">1</div><div class="pstitle" data-fr="Scan" data-en="Scan" data-ar="المسح">Scan</div><p class="psdesc" data-fr="Empreinte numérique 3D ou envoi des empreintes physiques au laboratoire." data-en="3D digital impression or physical molds sent to the lab." data-ar="طبعة رقمية ثلاثية أو إرسال الطبعات المادية.">Empreinte numérique 3D ou envoi des empreintes physiques.</p></div>
+    <div class="pst rv"><div class="psb">2</div><div class="pstitle" data-fr="Planification" data-en="Planning" data-ar="التخطيط">Planification</div><p class="psdesc" data-fr="Plan de traitement complet avec simulation du résultat, soumis à validation." data-en="Full treatment plan with result simulation, submitted for validation." data-ar="خطة علاج كاملة مع محاكاة، للمصادقة.">Plan de traitement avec simulation du résultat soumis à validation.</p></div>
+    <div class="pst rv"><div class="psb">3</div><div class="pstitle" data-fr="Validation" data-en="Validation" data-ar="المصادقة">Validation</div><p class="psdesc" data-fr="Le praticien approuve ou ajuste. Aucune fabrication sans accord explicite." data-en="Practitioner approves or adjusts. No production without explicit agreement." data-ar="الطبيب يوافق أو يعدّل. لا تصنيع دون موافقة.">Le praticien approuve ou ajuste. Aucune fabrication sans accord.</p></div>
+    <div class="pst rv"><div class="psb">4</div><div class="pstitle" data-fr="Fabrication" data-en="Production" data-ar="التصنيع">Fabrication</div><p class="psdesc" data-fr="Production selon les standards Aura Aligners, contrôle qualité systématique." data-en="Production per Aura Aligners standards, systematic quality control." data-ar="إنتاج وفق معايير أورا أليينرز، مراقبة جودة منهجية.">Production selon les standards Aura Aligners, contrôle qualité systématique.</p></div>
+    <div class="pst rv"><div class="psb">5</div><div class="pstitle" data-fr="Livraison" data-en="Delivery" data-ar="التسليم">Livraison</div><p class="psdesc" data-fr="Livraison rapide au cabinet, suivi clinique dédié à chaque étape." data-en="Fast delivery to the practice, dedicated clinical support at each step." data-ar="تسليم سريع مع متابعة سريرية مخصصة.">Livraison rapide au cabinet, suivi clinique dédié.</p></div>
+  </div>
+</section>
+
+<!-- AUDIENCES -->
+<section id="audiences" class="s">
+  <div class="rv">
+    <div class="stag" data-fr="Pour vous" data-en="For You" data-ar="لكم">Pour vous</div>
+    <h2 class="sh" data-fr="Pour les <em>praticiens</em> et leurs <em>patients.</em>" data-en="For <em>practitioners</em> and their <em>patients.</em>" data-ar="للأطباء<br>ومرضاهم.">Pour les <em>praticiens</em> et leurs <em>patients.</em></h2>
+  </div>
+  <div class="ag">
+    <div class="acard rv">
+      <div class="sun-corner"></div>
+      <span class="atag" data-fr="Praticiens & Cliniques" data-en="Practitioners & Clinics" data-ar="الأطباء والعيادات">Praticiens & Cliniques</span>
+      <div class="atitle" data-fr="Un partenaire <em>de confiance.</em>" data-en="A <em>trusted</em> partner." data-ar="شريك <em>موثوق.</em>">Un partenaire <em>de confiance.</em></div>
+      <p class="abody" data-fr="Aura Aligners accompagne orthodontistes, chirurgiens-dentistes et groupes de cliniques avec une solution complète : produit premium, formation clinique et suivi dédié." data-en="Aura Aligners supports orthodontists, dental surgeons and clinic groups with a complete solution: premium product, clinical training and dedicated support." data-ar="أورا أليينرز تدعم الأطباء ومجموعات العيادات بحل متكامل: منتج متميز، تدريب سريري ومتابعة مخصصة.">Aura Aligners accompagne orthodontistes, chirurgiens-dentistes et groupes de cliniques avec une solution complète : produit premium, formation clinique et suivi dédié.</p>
+      <ul class="alist">
+        <li data-fr="Accès au réseau certifié Oralign" data-en="Access to the Oralign certified network" data-ar="الوصول إلى شبكة أورالاين المعتمدة">Accès au réseau certifié Oralign</li>
+        <li data-fr="Formation clinique & protocoles dédiés" data-en="Clinical training & dedicated protocols" data-ar="تدريب سريري وبروتوكولات مخصصة">Formation clinique & protocoles dédiés</li>
+        <li data-fr="Tarification compétitive & offre volume" data-en="Competitive pricing & volume offers" data-ar="تسعير تنافسي وعروض بالجملة">Tarification compétitive & offre volume</li>
+        <li data-fr="Support technique sur chaque cas" data-en="Technical support on each case" data-ar="دعم تقني على كل حالة">Support technique sur chaque cas</li>
+      </ul>
+    </div>
+    <div class="acard rv2">
+      <div class="sun-corner"></div>
+      <span class="atag" data-fr="Patients" data-en="Patients" data-ar="المرضى">Patients</span>
+      <div class="atitle" data-fr="Un sourire <em>transformé,</em><br>discrètement." data-en="A smile <em>transformed,</em><br>discreetly." data-ar="ابتسامة <em>متحوّلة</em><br>بتحفّظ.">Un sourire <em>transformé,</em> discrètement.</div>
+      <p class="abody" data-fr="ORALIGN offre une alternative esthétique, confortable et efficace aux appareils traditionnels. Un traitement invisible, précis, adapté à chaque morphologie." data-en="ORALIGN offers an aesthetic, comfortable and effective alternative to traditional braces. Invisible, precise treatment, adapted to every morphology." data-ar="أورالاين يقدم بديلاً جمالياً ومريحاً للأجهزة التقليدية. علاج غير مرئي ودقيق.">ORALIGN offre une alternative esthétique, confortable et efficace aux appareils traditionnels. Un traitement invisible adapté à chaque morphologie.</p>
+      <ul class="alist">
+        <li data-fr="Quasi invisibles au quotidien" data-en="Nearly invisible in daily life" data-ar="شبه غير مرئية يومياً">Quasi invisibles au quotidien</li>
+        <li data-fr="Confort supérieur — sans métal" data-en="Superior comfort — metal-free" data-ar="راحة فائقة — بلا معدن">Confort supérieur — sans métal</li>
+        <li data-fr="Résultats visibles en 6 à 18 mois" data-en="Visible results in 6 to 18 months" data-ar="نتائج في 6 إلى 18 شهراً">Résultats visibles en 6 à 18 mois</li>
+        <li data-fr="Pour enfants & adultes" data-en="For children & adults" data-ar="للأطفال والبالغين">Pour enfants & adultes</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- MANIFESTO (SUN YELLOW SECTION) -->
+<section id="manifesto">
+  <div class="mfbg" aria-hidden="true">
+    <svg viewBox="0 0 1200 400" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+      <g transform="translate(600,200)">
+        <line x1="-600" y1="0" x2="600" y2="0" stroke="#0a0a0a" stroke-width="1"/>
+        <line x1="0" y1="-200" x2="0" y2="200" stroke="#0a0a0a" stroke-width="1"/>
+        <line x1="-424" y1="-200" x2="424" y2="200" stroke="#0a0a0a" stroke-width="1"/>
+        <line x1="424" y1="-200" x2="-424" y2="200" stroke="#0a0a0a" stroke-width="1"/>
+        <line x1="-156" y1="-190" x2="156" y2="190" stroke="#0a0a0a" stroke-width="1"/>
+        <line x1="190" y1="-156" x2="-190" y2="156" stroke="#0a0a0a" stroke-width="1"/>
+        <line x1="156" y1="-190" x2="-156" y2="190" stroke="#0a0a0a" stroke-width="1"/>
+        <line x1="-190" y1="-156" x2="190" y2="156" stroke="#0a0a0a" stroke-width="1"/>
+        <circle r="100" fill="none" stroke="#0a0a0a" stroke-width="1"/>
+        <circle r="180" fill="none" stroke="#0a0a0a" stroke-width="1"/>
+      </g>
+    </svg>
+  </div>
+  <p class="mf-quote rv" data-fr="« La précision ne se voit pas. <em>Elle se ressent.</em> »" data-en="« Precision isn't seen. <em>It is felt.</em> »" data-ar="« الدقة لا تُرى. <em>تُحسّ.</em> »">« La précision ne se voit pas. <em>Elle se ressent.</em> »</p>
+  <p class="mf-sig" data-fr="— Aura Aligners · ORALIGN™" data-en="— Aura Aligners · ORALIGN™" data-ar="— أورا أليينرز · ORALIGN™">— Aura Aligners · ORALIGN™</p>
+</section>
+
+<!-- GEOGRAPHY -->
+<section id="geography" class="s s-dark">
+  <div class="gg">
+    <div class="rv">
+      <div class="stag light" data-fr="Réseau" data-en="Network" data-ar="الشبكة">Réseau</div>
+      <h2 class="sh light" data-fr="Un réseau en<br>pleine <em>expansion.</em>" data-en="A network in<br>full <em>expansion.</em>" data-ar="شبكة في<br><em>توسّع</em> مستمر.">Un réseau en pleine <em>expansion.</em></h2>
+      <div class="sdiv light"></div>
+      <p data-fr="Oralign est présent dans les principales villes de Tunisie et développe son réseau à travers le Maghreb et la Méditerranée. Chaque praticien partenaire est certifié et accompagné." data-en="Oralign is present in Tunisia's major cities and expanding across the Maghreb and Mediterranean. Each partner practitioner is certified and supported." data-ar="أورالاين موجود في كبرى مدن تونس ويتوسع عبر المغرب العربي والمتوسط. كل طبيب شريك معتمد ومدعوم.">Oralign est présent dans les principales villes de Tunisie et développe son réseau à travers le Maghreb et la Méditerranée.</p>
+      <div style="margin-top:36px"><a href="#cta" class="btn-sun" data-fr="Rejoindre le réseau" data-en="Join the network" data-ar="انضم إلى الشبكة">Rejoindre le réseau</a></div>
+    </div>
+    <div class="gmap rv2">
+      <div class="gcity"><div class="gcname">Tunis</div><div class="gcstat on" data-fr="Réseau actif" data-en="Active" data-ar="نشط">Réseau actif</div></div>
+      <div class="gcity"><div class="gcname">Sfax</div><div class="gcstat on" data-fr="Réseau actif" data-en="Active" data-ar="نشط">Réseau actif</div></div>
+      <div class="gcity"><div class="gcname">Sousse</div><div class="gcstat on" data-fr="Réseau actif" data-en="Active" data-ar="نشط">Réseau actif</div></div>
+      <div class="gcity"><div class="gcname">Nabeul</div><div class="gcstat" data-fr="En développement" data-en="Expanding" data-ar="قيد التطوير">En développement</div></div>
+      <div class="gcity"><div class="gcname">Maghreb</div><div class="gcstat" data-fr="En expansion" data-en="Coming" data-ar="في التوسع">En expansion</div></div>
+      <div class="gcity"><div class="gcname">Méditerranée</div><div class="gcstat" data-fr="Bientôt" data-en="Soon" data-ar="قريباً">Bientôt</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section id="cta" class="s">
+  <div class="cta-sun"></div>
+  <div class="rv" style="text-align:center">
+    <div class="stag c" data-fr="Contact" data-en="Contact" data-ar="تواصل">Contact</div>
+    <h2 class="ctah" data-fr="Intégrez ORALIGN<br>dans votre <em>pratique.</em>" data-en="Integrate ORALIGN<br>into your <em>practice.</em>" data-ar="ادمج أورالاين<br>في <em>ممارستك.</em>">Intégrez ORALIGN<br>dans votre <em>pratique.</em></h2>
+    <p class="ctap" data-fr="Rejoignez le réseau de praticiens certifiés Aura Aligners. Premier contact sans engagement." data-en="Join the Aura Aligners certified practitioner network. First contact, no commitment." data-ar="انضم إلى شبكة أطباء أورا أليينرز المعتمدين. تواصل أول بلا التزام.">Rejoignez le réseau de praticiens certifiés Aura Aligners. Premier contact sans engagement.</p>
+    <div class="cta-btns">
+      <a href="mailto:contact@auraaligners.com" class="btn-black" data-fr="Écrire à Aura Aligners" data-en="Write to Aura Aligners" data-ar="اكتب إلى أورا أليينرز">Écrire à Aura Aligners</a>
+      <a href="https://www.aminebenayed.com#appointment" class="btn-ol-dark" target="_blank" data-fr="Prendre un RDV" data-en="Book an appointment" data-ar="احجز موعداً">Prendre un RDV</a>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="fg">
+    <div class="fbrand">
+      <div style="font-family:var(--serif);font-size:1.4rem;letter-spacing:.2em;color:var(--white)">ORALIGN</div>
+      <div style="font-size:.48rem;letter-spacing:.4em;text-transform:uppercase;color:rgba(248,246,242,.3);margin-top:3px" data-fr="by Aura Aligners" data-en="by Aura Aligners" data-ar="من Aura Aligners">by Aura Aligners</div>
+      <p data-fr="Aligneurs orthodontiques de précision. Conçus en Allemagne. Fabriqués en Tunisie." data-en="Precision orthodontic aligners. Designed in Germany. Made in Tunisia." data-ar="أجهزة تقويم دقيقة. مصمَّمة في ألمانيا. مصنوعة في تونس.">Aligneurs orthodontiques de précision. Conçus en Allemagne. Fabriqués en Tunisie.</p>
+    </div>
+    <div class="fcol">
+      <h4 data-fr="Marque" data-en="Brand" data-ar="العلامة">Marque</h4>
+      <ul>
+        <li><a href="#brand" data-fr="Aura Aligners" data-en="Aura Aligners" data-ar="أورا أليينرز">Aura Aligners</a></li>
+        <li><a href="#product" data-fr="ORALIGN" data-en="ORALIGN" data-ar="أورالاين">ORALIGN</a></li>
+        <li><a href="#technology" data-fr="Technologie" data-en="Technology" data-ar="التكنولوجيا">Technologie</a></li>
+      </ul>
+    </div>
+    <div class="fcol">
+      <h4 data-fr="Partenaires" data-en="Partners" data-ar="الشركاء">Partenaires</h4>
+      <ul>
+        <li><a href="#audiences" data-fr="Praticiens" data-en="Practitioners" data-ar="الأطباء">Praticiens</a></li>
+        <li><a href="#audiences" data-fr="Patients" data-en="Patients" data-ar="المرضى">Patients</a></li>
+        <li><a href="#geography" data-fr="Réseau" data-en="Network" data-ar="الشبكة">Réseau</a></li>
+      </ul>
+    </div>
+    <div class="fcol">
+      <h4 data-fr="Contact" data-en="Contact" data-ar="تواصل">Contact</h4>
+      <ul>
+        <li><a href="mailto:contact@auraaligners.com">contact@auraaligners.com</a></li>
+        <li><a href="tel:+21698760728">+216 98 760 728</a></li>
+        <li><a href="#" data-fr="Tunis, Tunisie" data-en="Tunis, Tunisia" data-ar="تونس، تونس">Tunis, Tunisie</a></li>
+      </ul>
+    </div>
+  </div>
+  <div class="fbot">
+    <p>© 2025 <span class="fs">Aura Aligners</span> — ORALIGN™. <span data-fr="Tous droits réservés." data-en="All rights reserved." data-ar="جميع الحقوق محفوظة.">Tous droits réservés.</span></p>
+    <p data-fr="Conçu en Allemagne · Fabriqué en Tunisie" data-en="Designed in Germany · Made in Tunisia" data-ar="مصمَّم في ألمانيا · مصنوع في تونس">Conçu en Allemagne · Fabriqué en Tunisie</p>
+  </div>
+</footer>
+
+<script>
+/* Cursor */
+const cs=document.getElementById('cs'),cr=document.getElementById('cr');
+let mx=0,my=0,rx=0,ry=0;
+document.addEventListener('mousemove',e=>{mx=e.clientX;my=e.clientY});
+(function a(){rx+=(mx-rx)*.1;ry+=(my-ry)*.1;
+  cs.style.left=mx+'px';cs.style.top=my+'px';
+  cr.style.left=rx+'px';cr.style.top=ry+'px';
+  requestAnimationFrame(a)})();
+document.querySelectorAll('a,button').forEach(el=>{
+  el.addEventListener('mouseenter',()=>{cs.style.width='16px';cs.style.height='16px';cr.style.width='44px';cr.style.height='44px'});
+  el.addEventListener('mouseleave',()=>{cs.style.width='8px';cs.style.height='8px';cr.style.width='32px';cr.style.height='32px'})});
+
+/* Dark sections → invert cursor */
+const darkSecs=['hero','product','process','geography','manifesto'];
+const io2=new IntersectionObserver(es=>es.forEach(e=>{
+  if(e.isIntersecting){cs.classList.add('inv');cr.classList.add('inv')}
+  else{
+    const anyDark=darkSecs.some(id=>{
+      const r=document.getElementById(id)?.getBoundingClientRect();
+      return r&&r.top<window.innerHeight/2&&r.bottom>window.innerHeight/2;
+    });
+    if(!anyDark){cs.classList.remove('inv');cr.classList.remove('inv')}
+  }
+}),{threshold:.5});
+darkSecs.forEach(id=>{const el=document.getElementById(id);if(el)io2.observe(el)});
+
+/* Nav scroll */
+const nav=document.getElementById('nav');
+window.addEventListener('scroll',()=>nav.classList.toggle('sc',scrollY>60));
+
+/* Reveal */
+const obs=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting)e.target.classList.add('v')}),{threshold:.08});
+document.querySelectorAll('.rv,.rv2').forEach(el=>obs.observe(el));
+
+/* Lang */
+function setLang(l){
+  document.documentElement.lang=l;
+  document.documentElement.dir=l==='ar'?'rtl':'ltr';
+  document.querySelectorAll('.lb').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.lb').forEach(b=>{if(b.textContent.toLowerCase()===l)b.classList.add('active')});
+  document.querySelectorAll('[data-'+l+']').forEach(el=>el.innerHTML=el.getAttribute('data-'+l));
+}
+</script>
+</body>
+</html>

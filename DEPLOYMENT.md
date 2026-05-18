@@ -309,6 +309,52 @@ curl -I https://viewer.oralign.com.tn       # 200 OK expected
 sudo nginx -T 2>/dev/null | grep -A2 "server_name viewer"   # config unchanged
 ```
 
+### 5.8 Editing `.env.production` after first deploy
+
+`.env.production` lives at `/opt/oralign-app/.env.production` on the VPS, mode `600`, owned by the deploy user. It is **not** in git — every edit happens directly on the box.
+
+```bash
+ssh deploy@<VPS>
+cd /opt/oralign-app
+
+# 1. Back up the current file
+sudo cp .env.production .env.production.bak.$(date +%Y%m%dT%H%M%S)
+
+# 2. Edit
+nano .env.production           # or: sudo -e .env.production
+
+# 3. Re-check permissions (editors sometimes reset them)
+sudo chmod 600 .env.production
+sudo chown "$USER":"$USER" .env.production
+```
+
+**Apply the change** — which command depends on what you edited:
+
+| What you changed | What to run |
+|---|---|
+| Backend runtime vars (`JWT_*`, `MAIL_*`, `DATABASE_URL`, `REDIS_PASSWORD`, `LOG_LEVEL`, …) | `docker compose -p oralign-app -f docker-compose.yml -f docker-compose.production.yml --env-file .env.production up -d backend` |
+| `NEXT_PUBLIC_*` (frontend) | **Rebuild required** — they are baked at build time: `bash scripts/deploy.sh` |
+| `DB_USER` / `DB_PASSWORD` / `DB_NAME` | Postgres credentials are **set on volume init**. Changing them in `.env.production` only affects fresh volumes; you must also `ALTER USER` inside Postgres, or restore from backup with the new credentials. |
+| `POSTGRES_HOST_DIR` / `UPLOADS_HOST_DIR` / `BACKUPS_HOST_DIR` | Stop the stack, move the data, then `up -d`. Bind-mount paths are not hot-swappable. |
+| `BACKUP_KEEP_LAST` | No restart needed — read by `scripts/backup.sh` on next run. |
+
+**Verify** after restart:
+
+```bash
+docker compose -p oralign-app ps                    # all services healthy
+docker compose -p oralign-app logs --tail=50 backend
+curl -fsS https://api.oralign.com.tn/api/health     # should return 200
+```
+
+**Rollback** if something breaks:
+
+```bash
+sudo cp .env.production.bak.<timestamp> .env.production
+docker compose -p oralign-app -f docker-compose.yml -f docker-compose.production.yml --env-file .env.production up -d
+```
+
+> **Security:** Never paste secrets into chat, screenshots, or commit messages. Rotating `JWT_*` invalidates every issued token — which is the desired behavior on rotation.
+
 ---
 
 ## 6. Common errors & fixes

@@ -6,7 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
-import { MailIcon, RefreshCwIcon } from 'lucide-react';
+import { AlertCircle, MailIcon, RefreshCwIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -19,6 +19,7 @@ import { Form } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { verifyEmailSchema, type VerifyEmailFormData } from '@/lib/schemas';
 import { useVerifyEmail, useResendVerification } from '@/lib/hooks';
+import { getApiErrorMessage } from '@/lib/hooks/use-auth';
 import { useAuth } from '@/lib/providers';
 import { userKeys } from '@/lib/hooks/use-users';
 
@@ -31,6 +32,7 @@ export function VerifyEmailCard() {
   const { mutateAsync: verifyEmail, isPending: isVerifying } = useVerifyEmail();
   const { mutate: resendCode, isPending: isResending } = useResendVerification();
   const [cooldown, setCooldown] = useState(0);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const form = useForm<VerifyEmailFormData>({
     resolver: zodResolver(verifyEmailSchema),
@@ -62,6 +64,8 @@ export function VerifyEmailCard() {
       toast.error('Please enter your email address first.');
       return;
     }
+    setSubmitError(null);
+    form.setValue('verificationCode', '');
     resendCode(
       { email },
       {
@@ -71,13 +75,20 @@ export function VerifyEmailCard() {
   };
 
   const onSubmit = form.handleSubmit(async (values) => {
+    setSubmitError(null);
     try {
       await verifyEmail(values);
       // Auth context + tokens are updated inside useVerifyEmail onSuccess.
       await queryClient.invalidateQueries({ queryKey: userKeys.currentUser() });
-      router.replace('/account/profile?onboarding=1');
-    } catch {
-      // onError toast already shown by useVerifyEmail
+      // After OTP succeeds, send the user into the dedicated onboarding flow
+      // (separate layout, step indicator). The OnboardingGuard would catch
+      // them anyway, but redirecting directly avoids a flash of the dashboard.
+      router.replace('/onboarding/profile');
+    } catch (error) {
+      // Surface the actual backend reason in the form, not just a toast.
+      // Common causes: "Invalid verification code", "Verification code has
+      // expired", "No verification code found".
+      setSubmitError(getApiErrorMessage(error, 'Failed to verify email'));
     }
   });
 
@@ -134,7 +145,10 @@ export function VerifyEmailCard() {
                 placeholder="123456"
                 maxLength={6}
                 className="text-center text-2xl font-bold tracking-[0.5em]"
-                {...form.register('verificationCode')}
+                aria-invalid={!!submitError}
+                {...form.register('verificationCode', {
+                  onChange: () => submitError && setSubmitError(null),
+                })}
               />
               {form.formState.errors.verificationCode && (
                 <p className="text-sm text-destructive">
@@ -142,6 +156,19 @@ export function VerifyEmailCard() {
                 </p>
               )}
             </div>
+
+            {submitError && (
+              <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <div className="min-w-0">
+                  <p className="font-medium">{submitError}</p>
+                  <p className="mt-0.5 text-xs text-destructive/80">
+                    If your code expired or you can't find the email, click
+                    "Resend code" below to get a fresh one.
+                  </p>
+                </div>
+              </div>
+            )}
 
             <Button
               type="submit"

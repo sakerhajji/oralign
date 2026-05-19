@@ -100,6 +100,22 @@ export const usersService = {
   },
 
   /**
+   * Admin approval — flip the user's verificationStatus.
+   * Backend fires the approval email automatically when transitioning to
+   * "approved" for the first time.
+   */
+  updateApproval: async (
+    id: string,
+    verificationStatus: 'pending' | 'approved' | 'rejected',
+  ): Promise<User> => {
+    const response = await apiClient.patch<User>(
+      `/users/${id}/approval`,
+      { verificationStatus },
+    );
+    return response.data;
+  },
+
+  /**
    * Permanently delete a user (Hard delete - Admin only)
    */
   permanentlyDeleteUser: async (id: string): Promise<MessageResponse> => {

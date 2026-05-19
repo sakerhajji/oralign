@@ -10,7 +10,7 @@ import {
   Matches,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
-import { UserRole } from '@prisma/client';
+import { UserRole, VerificationStatus } from '@prisma/client';
 
 const E164_PHONE_REGEX = /^\+[1-9]\d{1,14}$/;
 const ISO_COUNTRY_REGEX = /^[A-Z]{2}$/;
@@ -280,4 +280,15 @@ export class UpdateEmailVerificationDto {
   })
   @IsBoolean()
   isEmailVerified!: boolean;
+}
+
+export class UpdateApprovalDto {
+  @ApiProperty({
+    enum: VerificationStatus,
+    description:
+      'Admin decision on the account: approved unlocks the dashboard, ' +
+      'rejected blocks it, pending keeps it in the holding area.',
+  })
+  @IsEnum(VerificationStatus)
+  verificationStatus!: VerificationStatus;
 }

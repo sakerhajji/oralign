@@ -130,15 +130,21 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           <SidebarMenuItem>
             <SidebarMenuButton
               asChild
-              className="data-[slot=sidebar-menu-button]:h-auto data-[slot=sidebar-menu-button]:min-h-[112px] data-[slot=sidebar-menu-button]:p-3"
+              className="data-[slot=sidebar-menu-button]:h-auto data-[slot=sidebar-menu-button]:py-3"
             >
-              <a href="#" className="flex w-full flex-col items-center justify-center gap-2 text-center">
+              {/* Logo aligned to the start (left in LTR, right in RTL) so it
+                  matches the rest of the sidebar's leading-icon rhythm. */}
+              <a
+                href="/dashboard"
+                className="flex w-full items-center justify-start gap-2"
+                aria-label="Oralign — Dashboard home"
+              >
                 <Image
                   src="/ORALIGN BLACK.png"
                   alt="Oralign"
-                  width={100}
-                  height={100}
-                  className="object-contain"
+                  width={120}
+                  height={32}
+                  className="h-7 w-auto object-contain"
                   priority
                 />
               </a>

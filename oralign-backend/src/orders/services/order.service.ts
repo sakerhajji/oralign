@@ -60,6 +60,7 @@ type ClinicalOrderData = Partial<
     | 'midline'
     | 'ipr'
     | 'biteRamps'
+    | 'expansion'
     | 'crossbite'
     | 'spaces'
     | 'extractions'
@@ -285,6 +286,11 @@ export class OrderService {
             orderId: id,
             toothNumber: instruction.toothNumber,
             type: instruction.type,
+            // value/note are optional; ipr_value entries use value as the
+            // measured IPR amount in mm. The DTO already validated shape.
+            value: instruction.value ?? null,
+            note: instruction.note ?? null,
+            createdById: caller.userId,
           })),
         });
       }
@@ -530,6 +536,7 @@ export class OrderService {
       midline: dto.midline,
       ipr: dto.ipr,
       biteRamps: dto.biteRamps,
+      expansion: dto.expansion,
       crossbite: dto.crossbite,
       spaces: dto.spaces,
       extractions: dto.extractions,
@@ -659,6 +666,7 @@ export class OrderService {
       midline: order.midline ?? undefined,
       ipr: order.ipr ?? undefined,
       biteRamps: order.biteRamps ?? undefined,
+      expansion: order.expansion ?? undefined,
       crossbite: order.crossbite ?? undefined,
       spaces: order.spaces ?? undefined,
       extractions: order.extractions ?? undefined,

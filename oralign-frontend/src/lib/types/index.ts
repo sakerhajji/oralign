@@ -56,6 +56,118 @@ export enum ToothInstructionType {
   NO_ATTACHMENTS = 'no_attachments',
   DO_NOT_MOVE = 'do_not_move',
   NO_IPR = 'no_ipr',
+  IPR_VALUE = 'ipr_value',
+  EXTRACT = 'extract',
+}
+
+// ─── Treatment plan ─────────────────────────────────────────────────────────
+
+export enum TreatmentPlanStatus {
+  PENDING = 'pending',
+  READY = 'ready',
+  APPROVED = 'approved',
+  REJECTED = 'rejected',
+}
+
+export enum TreatmentMessageType {
+  MESSAGE = 'message',
+  SYSTEM = 'system',
+  APPROVAL = 'approval',
+  REJECTION = 'rejection',
+  FILE = 'file',
+  TREATMENT_RESULT = 'treatment_result',
+}
+
+export enum TreatmentAttachmentCategory {
+  IMAGE = 'image',
+  XRAY = 'xray',
+  STL = 'stl',
+  PLY = 'ply',
+  OBJ = 'obj',
+  ZIP = 'zip',
+  PDF = 'pdf',
+  VIDEO = 'video',
+  TREATMENT_FILE = 'treatment_file',
+  TREATMENT_RESULT = 'treatment_result',
+  CONTAINER = 'container',
+  OTHER = 'other',
+}
+
+export interface TreatmentPlan {
+  id: string;
+  orderId: string;
+  version: number;
+  name: string;
+  status: TreatmentPlanStatus;
+  resultViewUrl?: string | null;
+  filePath?: string | null;
+  movementTableImagePath?: string | null;
+  movementTableImageName?: string | null;
+  movementTableImageMimeType?: string | null;
+  movementTableImageSizeBytes?: number | null;
+  totalUpperAligners?: number | null;
+  totalLowerAligners?: number | null;
+  issuedUpperAligners?: number | null;
+  issuedLowerAligners?: number | null;
+  createdById: string;
+  approvedAt?: string | null;
+  rejectedAt?: string | null;
+  publicToken?: string | null;
+  publicExpiresAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TreatmentMessageAttachment {
+  id: string;
+  messageId: string;
+  uploadedById: string;
+  fileName: string;
+  filePath: string;
+  mimeType?: string | null;
+  sizeBytes?: number | null;
+  category: TreatmentAttachmentCategory;
+  createdAt: string;
+}
+
+export interface TreatmentMessage {
+  id: string;
+  treatmentPlanId: string;
+  senderId: string;
+  message?: string | null;
+  type: TreatmentMessageType;
+  attachments: TreatmentMessageAttachment[];
+  sender?: {
+    id: string;
+    fullName: string;
+    role: string;
+    avatarUrl?: string | null;
+  };
+  createdAt: string;
+}
+
+export interface OdontogramEntry {
+  type: string;
+  value?: string | null;
+  note?: string | null;
+  createdById?: string | null;
+  createdAt: string;
+}
+
+export interface TreatmentPlanReview extends TreatmentPlan {
+  odontogram: Array<{ toothNumber: number; entries: OdontogramEntry[] }>;
+  messages: TreatmentMessage[];
+}
+
+export interface PublicTreatmentViewerPayload {
+  treatmentPlan: {
+    id: string;
+    name: string;
+    version: number;
+    resultViewUrl?: string | null;
+  };
+  doctor?: { fullName?: string | null; clinicName?: string | null };
+  patient?: { firstName?: string | null };
 }
 
 export enum OrderFileCategory {
@@ -179,6 +291,7 @@ export interface DentalOrder {
   midline?: string;
   ipr?: string;
   biteRamps?: string;
+  expansion?: string;
   crossbite?: string;
   spaces?: string;
   extractions?: string;
@@ -243,6 +356,8 @@ export interface AuthResponseDto {
   fullName: string;
   role: UserRole;
   isEmailVerified: boolean;
+  verificationStatus: VerificationStatus;
+  avatarUrl?: string;
   authToken: AuthTokenDto;
 }
 
@@ -254,6 +369,7 @@ export interface VerifyEmailResponseDto {
     fullName: string;
     role: UserRole;
     isEmailVerified: boolean;
+    verificationStatus: VerificationStatus;
   };
   authToken?: AuthTokenDto;
 }
@@ -310,6 +426,19 @@ export interface UpdateDentistProfileDto {
   clinicEmail?: string;
   description?: string;
   logoUrl?: string;
+}
+
+/** Single-shot weekly schedule entry — used by SetupClinicDto. */
+export interface WeeklyHoursEntryDto {
+  dayOfWeek: DayOfWeek;
+  openTime: string; // HH:mm
+  closeTime: string; // HH:mm
+  isClosed: boolean;
+}
+
+/** Combined clinic + working-hours payload for the onboarding wizard. */
+export interface SetupClinicDto extends CreateDentistProfileDto {
+  workingHours: WeeklyHoursEntryDto[];
 }
 
 export interface SearchByCityDto {
@@ -387,6 +516,7 @@ export interface CreateOrderDto {
   midline?: string;
   ipr?: string;
   biteRamps?: string;
+  expansion?: string;
   crossbite?: string;
   spaces?: string;
   extractions?: string;

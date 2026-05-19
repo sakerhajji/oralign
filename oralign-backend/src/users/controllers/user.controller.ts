@@ -37,6 +37,7 @@ import {
   BulkUpdateStatusDto,
   UpdateRoleDto,
   UpdateEmailVerificationDto,
+  UpdateApprovalDto,
 } from '../dto/user.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -328,6 +329,27 @@ export class UserController {
     @Body() updateRoleDto: UpdateRoleDto,
   ): Promise<UserResponseDto> {
     return this.userService.updateUserRole(id, updateRoleDto.role);
+  }
+
+  @Patch(':id/approval')
+  @Roles(UserRole.admin, UserRole.super_admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Set the account approval status (admin only). The frontend gates ' +
+      'dashboard access on this field reaching "approved".',
+  })
+  @ApiParam({ name: 'id', type: String, description: 'User ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Approval status updated successfully',
+    type: UserResponseDto,
+  })
+  async updateApproval(
+    @Param('id') id: string,
+    @Body() dto: UpdateApprovalDto,
+  ): Promise<UserResponseDto> {
+    return this.userService.updateApproval(id, dto.verificationStatus);
   }
 
   @Patch(':id/email-verification')

@@ -224,12 +224,29 @@
   transform: scale(1.1);
 }
 
-.react-tel-input.phone-input .selected-flag .arrow {
-  position: static !important;
-  margin: 0 !important;
-  left: auto !important;
-  top: auto !important;
-  border-top-color: var(--muted-foreground) !important;
+/* react-phone-input-2 renders its arrow as two CSS triangles that don't
+   honour color-scheme variables and look broken on hover/open. Hide the
+   library arrow entirely and draw a clean chevron with a pseudo-element
+   on the trigger button instead. */
+.react-tel-input.phone-input .selected-flag .arrow,
+.react-tel-input.phone-input .selected-flag .arrow.up {
+  display: none !important;
+}
+
+.react-tel-input.phone-input .selected-flag::after {
+  content: '';
+  width: 8px;
+  height: 8px;
+  margin-left: 2px;
+  border-right: 1.5px solid var(--muted-foreground);
+  border-bottom: 1.5px solid var(--muted-foreground);
+  transform: rotate(45deg) translate(-2px, -2px);
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.react-tel-input.phone-input .flag-dropdown.open .selected-flag::after {
+  transform: rotate(-135deg) translate(0, 0);
+  border-color: var(--foreground);
 }
 
 /* Dropdown list */

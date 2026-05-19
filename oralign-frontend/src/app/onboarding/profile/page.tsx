@@ -1,0 +1,45 @@
+'use client';
+
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { Loader2 } from 'lucide-react';
+import { OnboardingShell } from '@/components/onboarding/onboarding-shell';
+import { ProfileForm } from '@/components/account/profile-form';
+import { useAccountData, useOnboardingStatus } from '@/lib/hooks';
+
+export default function OnboardingProfilePage() {
+  const router = useRouter();
+  const { user, dentistProfile, workingHours, isLoading } = useAccountData();
+  const status = useOnboardingStatus(user, dentistProfile, workingHours);
+
+  useEffect(() => {
+    if (isLoading || !user) return;
+    if (!status.emailVerified) {
+      router.replace('/auth/verify-email');
+    }
+  }, [isLoading, user, status.emailVerified, router]);
+
+  const handleSaved = () => {
+    if (status.isDentist) {
+      router.push('/onboarding/clinic');
+    } else {
+      router.push('/onboarding/pending');
+    }
+  };
+
+  return (
+    <OnboardingShell
+      current="profile"
+      title="Complete your profile"
+      description="Add your phone number and country so we can finish setting up your account."
+    >
+      {isLoading || !user ? (
+        <div className="flex h-40 items-center justify-center">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+      ) : (
+        <ProfileForm user={user} onboarding onSaved={handleSaved} />
+      )}
+    </OnboardingShell>
+  );
+}

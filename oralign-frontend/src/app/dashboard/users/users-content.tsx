@@ -2,8 +2,8 @@
 
 import { useState, useMemo, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { useUsers, useDeletedUsers, useBulkDeleteUsers, useBulkRestoreUsers, useBulkUpdateStatus, useBulkPermanentlyDeleteUsers } from '@/lib/hooks';
-import { UserRole } from '@/lib/types';
+import { useUsers, useDeletedUsers, useBulkDeleteUsers, useBulkRestoreUsers, useBulkUpdateStatus, useBulkPermanentlyDeleteUsers, useUpdateApproval } from '@/lib/hooks';
+import { UserRole, VerificationStatus } from '@/lib/types';
 import type { User } from '@/lib/types';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -43,6 +43,9 @@ import {
   RefreshCw,
   Building2,
   Clock,
+  ShieldCheck,
+  ShieldAlert,
+  ShieldX,
 } from "lucide-react";
 import { UserAvatar } from "@/components/users/user-avatar";
 import { CreateUserDialog } from "@/components/users/user-dialogs";
@@ -97,6 +100,35 @@ export function UsersPageContent() {
   const bulkRestore = useBulkRestoreUsers();
   const bulkPermanentDelete = useBulkPermanentlyDeleteUsers();
   const bulkUpdateStatus = useBulkUpdateStatus();
+  const updateApproval = useUpdateApproval();
+
+  // Display order: pending users float to the top so admins notice them
+  // first; rejected accounts come next so they don't get forgotten; approved
+  // users fall to the bottom of the page.
+  const displayUsers = useMemo(() => {
+    const rank: Record<string, number> = {
+      [VerificationStatus.PENDING]: 0,
+      [VerificationStatus.REJECTED]: 1,
+      [VerificationStatus.APPROVED]: 2,
+    };
+    return [...(data?.data ?? [])].sort((a, b) => {
+      const aRank = rank[a.verificationStatus] ?? 99;
+      const bRank = rank[b.verificationStatus] ?? 99;
+      if (aRank !== bRank) return aRank - bRank;
+      // Within a tier, newest first so fresh signups bubble up.
+      return (
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+    });
+  }, [data?.data]);
+
+  const pendingCount = useMemo(
+    () =>
+      displayUsers.filter(
+        (u) => u.verificationStatus === VerificationStatus.PENDING,
+      ).length,
+    [displayUsers],
+  );
 
   // Selection handlers
   const toggleSelectAll = () => {
@@ -242,6 +274,22 @@ export function UsersPageContent() {
           Add User
         </Button>
       </div>
+
+      {/* Pending-approval banner — surfaces the count up top so admins
+          can scan even before they look at the table. */}
+      {viewMode === 'active' && pendingCount > 0 && (
+        <div className="flex items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-50 px-4 py-3 dark:bg-amber-950/30">
+          <ShieldAlert className="h-5 w-5 shrink-0 text-amber-600" />
+          <div className="flex-1 text-sm">
+            <span className="font-semibold text-amber-900 dark:text-amber-200">
+              {pendingCount} user{pendingCount === 1 ? '' : 's'} awaiting approval
+            </span>
+            <span className="ml-1 text-amber-700/80 dark:text-amber-300/80">
+              — they're listed at the top of the table.
+            </span>
+          </div>
+        </div>
+      )}
 
       <Tabs
         value={viewMode}
@@ -424,6 +472,7 @@ export function UsersPageContent() {
                       />
                     </th>
                     <th className="p-4 text-left font-medium">User</th>
+                    <th className="p-4 text-left font-medium">Approval</th>
                     <th className="p-4 text-left font-medium">Phone</th>
                     <th className="p-4 text-left font-medium">Role</th>
                     <th className="p-4 text-left font-medium">Status</th>
@@ -433,9 +482,26 @@ export function UsersPageContent() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data?.data && data.data.length > 0 ? (
-                    data.data.map((user) => (
-                    <tr key={user.id} className="border-b hover:bg-muted/50 transition-colors">
+                  {displayUsers.length > 0 ? (
+                    displayUsers.map((user) => {
+                      const isPending =
+                        user.verificationStatus === VerificationStatus.PENDING;
+                      const isRejected =
+                        user.verificationStatus === VerificationStatus.REJECTED;
+                      const needsAttention = isPending || isRejected;
+                      return (
+                    <tr
+                      key={user.id}
+                      className={
+                        needsAttention
+                          ? `border-b transition-colors ${
+                              isPending
+                                ? 'bg-amber-50/40 hover:bg-amber-50/70 dark:bg-amber-950/20'
+                                : 'bg-red-50/40 hover:bg-red-50/70 dark:bg-red-950/20'
+                            }`
+                          : 'border-b hover:bg-muted/50 transition-colors'
+                      }
+                    >
                       <td className="p-4">
                         <Checkbox
                           checked={selectedUsers.has(user.id)}
@@ -444,12 +510,46 @@ export function UsersPageContent() {
                       </td>
                       <td className="p-4">
                         <div className="flex items-center gap-3">
+                          {needsAttention && (
+                            <span
+                              className={
+                                isPending
+                                  ? 'h-10 w-1 shrink-0 rounded-full bg-amber-500'
+                                  : 'h-10 w-1 shrink-0 rounded-full bg-red-500'
+                              }
+                              aria-hidden
+                            />
+                          )}
                           <UserAvatar user={user} className="h-10 w-10" />
                           <div>
                             <p className="font-medium">{user.fullName}</p>
                             <p className="text-sm text-muted-foreground">{user.email}</p>
                           </div>
                         </div>
+                      </td>
+                      <td className="p-4">
+                        {user.verificationStatus === VerificationStatus.APPROVED ? (
+                          <Badge
+                            variant="default"
+                            className="gap-1 bg-emerald-600 hover:bg-emerald-600"
+                          >
+                            <ShieldCheck className="h-3 w-3" />
+                            Approved
+                          </Badge>
+                        ) : user.verificationStatus === VerificationStatus.REJECTED ? (
+                          <Badge variant="destructive" className="gap-1">
+                            <ShieldX className="h-3 w-3" />
+                            Rejected
+                          </Badge>
+                        ) : (
+                          <Badge
+                            variant="outline"
+                            className="gap-1 border-amber-500/40 bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
+                          >
+                            <ShieldAlert className="h-3 w-3" />
+                            Not approved
+                          </Badge>
+                        )}
                       </td>
                       <td className="p-4">
                         <div className="flex items-center text-sm">
@@ -537,6 +637,52 @@ export function UsersPageContent() {
                                 </DropdownMenuItem>
                               )}
                               <DropdownMenuSeparator />
+                              {viewMode !== 'deleted' && (
+                                <>
+                                  {user.verificationStatus !== VerificationStatus.APPROVED && (
+                                    <DropdownMenuItem
+                                      onClick={() =>
+                                        updateApproval.mutate({
+                                          id: user.id,
+                                          verificationStatus: 'approved',
+                                        })
+                                      }
+                                      className="text-emerald-600"
+                                    >
+                                      <ShieldCheck className="mr-2 h-4 w-4" />
+                                      Approve
+                                    </DropdownMenuItem>
+                                  )}
+                                  {user.verificationStatus !== VerificationStatus.REJECTED && (
+                                    <DropdownMenuItem
+                                      onClick={() =>
+                                        updateApproval.mutate({
+                                          id: user.id,
+                                          verificationStatus: 'rejected',
+                                        })
+                                      }
+                                      className="text-red-600"
+                                    >
+                                      <ShieldX className="mr-2 h-4 w-4" />
+                                      Reject
+                                    </DropdownMenuItem>
+                                  )}
+                                  {user.verificationStatus !== VerificationStatus.PENDING && (
+                                    <DropdownMenuItem
+                                      onClick={() =>
+                                        updateApproval.mutate({
+                                          id: user.id,
+                                          verificationStatus: 'pending',
+                                        })
+                                      }
+                                    >
+                                      <ShieldAlert className="mr-2 h-4 w-4" />
+                                      Mark as pending
+                                    </DropdownMenuItem>
+                                  )}
+                                  <DropdownMenuSeparator />
+                                </>
+                              )}
                               {viewMode === 'deleted' ? (
                                 <>
                                   <DropdownMenuItem
@@ -603,10 +749,11 @@ export function UsersPageContent() {
                         </div>
                       </td>
                     </tr>
-                  ))
+                      );
+                    })
                   ) : (
                     <tr>
-                      <td colSpan={8} className="p-8 text-center">
+                      <td colSpan={9} className="p-8 text-center">
                         <div className="flex flex-col items-center justify-center text-muted-foreground">
                           <UsersIcon className="h-12 w-12 mb-4 opacity-50" />
                           <p className="text-lg font-medium">

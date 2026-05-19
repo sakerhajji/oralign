@@ -1,106 +1,132 @@
 import 'dotenv/config';
-import { ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import helmet from 'helmet';
 import { join } from 'path';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/exceptions/exception.filter';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    // Quieter built-in logger — we still emit our own startup banner below.
+    bufferLogs: true,
+  });
+  const logger = new Logger('Bootstrap');
+  const isProd = process.env.NODE_ENV === 'production';
+
+  // ─── HTTP hardening ───────────────────────────────────────────────────────
+
+  // Behind nginx in production — trust the first reverse proxy so rate-limit,
+  // logs, and req.ip resolve to the real client address.
+  app.set('trust proxy', 1);
+
+  // Security headers (CSP/HSTS/XFO/Referrer/etc). Conservative defaults: we
+  // disable CSP for now because Swagger UI ships inline scripts/styles and a
+  // CSP needs careful tuning per-route. Everything else stays on.
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginEmbedderPolicy: false,
+      // HSTS only meaningful when served over HTTPS — nginx terminates TLS.
+      hsts: isProd
+        ? { maxAge: 60 * 60 * 24 * 365, includeSubDomains: true, preload: true }
+        : false,
+    }),
+  );
+
+  // Body size cap — JSON requests should stay small; large uploads go through
+  // Multer which has its own limits. 1 MB is plenty for JSON DTOs.
+  app.use(
+    (await import('express')).json({ limit: '1mb' }),
+    (await import('express')).urlencoded({ extended: true, limit: '1mb' }),
+  );
 
   // Serve uploaded files (avatars, etc.) at /uploads/*
   app.useStaticAssets(join(process.cwd(), 'uploads'), { prefix: '/uploads' });
 
   app.setGlobalPrefix('api');
 
+  // ─── CORS allowlist ───────────────────────────────────────────────────────
+  // Production must whitelist explicit origins from env. Dev includes loopback
+  // ports as a convenience. We deliberately do NOT fall through to '*' or
+  // accept any origin when env vars are missing.
+  const envOrigins = (process.env.CORS_ORIGINS ?? process.env.FRONTEND_URL ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const devOrigins = isProd
+    ? []
+    : ['http://localhost:3001', 'http://localhost:3000', 'http://localhost:5173'];
+  const allowedOrigins = Array.from(new Set([...envOrigins, ...devOrigins]));
+
+  if (allowedOrigins.length === 0 && isProd) {
+    throw new Error(
+      '[security] CORS_ORIGINS or FRONTEND_URL must be set in production',
+    );
+  }
+
   app.enableCors({
-    origin: [
-      process.env.FRONTEND_URL || 'http://localhost:3001',
-      'http://localhost:3001',
-      'http://localhost:3000',
-      'http://localhost:5173',
-    ],
+    origin: (origin, callback) => {
+      // Server-to-server / curl / health-check requests have no Origin —
+      // allow them. Browser-origins must match the allowlist exactly.
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      callback(new Error(`CORS: origin ${origin} is not allowed`));
+    },
     credentials: true,
+    maxAge: 600,
   });
 
   // Global exception filter
   app.useGlobalFilters(new AllExceptionsFilter());
 
-  // Global validation pipe
+  // Global validation pipe — strict by default to defend against
+  // mass-assignment and unexpected payload shapes.
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,
-      transformOptions: {
-        enableImplicitConversion: true,
-      },
+      transformOptions: { enableImplicitConversion: true },
     }),
   );
 
-  // Swagger configuration
-  const config = new DocumentBuilder()
-    .setTitle('Oralign API')
-    .setDescription(
-      '## Complete NestJS API for Dentist Clinic Management\n\n' +
-        'This API provides a comprehensive backend solution for managing dentist profiles, appointments, and clinic operations. ' +
-        'It is built with NestJS, Prisma, and follows Clean Architecture principles for a scalable and maintainable codebase.\n\n' +
-        '### Key Features:\n' +
-        '- **Authentication**: Secure JWT-based authentication (access and refresh tokens).\n' +
-        '- **User Management**: Role-based access control for users.\n' +
-        '- **Dentist Profiles**: Full CRUD operations for dentist profiles, including search by location.\n' +
-        '- **Working Hours**: Manage clinic operating hours.\n' +
-        '- **Error Handling**: Centralized exception handling for consistent error responses.\n\n' +
-        '### Authentication Flow:\n' +
-        '1. **Sign Up**: Register a new account using `POST /auth/signup`.\n' +
-        '2. **Sign In**: Log in with your credentials using `POST /auth/signin` to receive an `access-token` and `refresh-token`.\n' +
-        '3. **Authorized Requests**: Include the `access-token` in the `Authorization` header for all protected endpoints (e.g., `Authorization: Bearer <token>`).\n' +
-        '4. **Token Refresh**: When the `access-token` expires, use the `refresh-token` with `POST /auth/refresh` to get a new set of tokens.\n',
-    )
-    .setVersion('1.0.0')
-    .setContact(
-      'API Support',
-      'https://oralign.com/support',
-      'support@oralign.com',
-    )
-    .setLicense('MIT License', 'https://opensource.org/licenses/MIT')
-    .addBearerAuth(
-      {
-        type: 'http',
-        scheme: 'bearer',
-        bearerFormat: 'JWT',
-        name: 'Authorization',
-        description: 'Enter JWT access token',
-        in: 'header',
-      },
-      'access-token', // This name here is important for matching up with @ApiBearerAuth() in your controllers
-    )
-    .addTag(
-      'Authentication',
-      'Endpoints for user sign-up, sign-in, and token management',
-    )
-    .addTag('Users', 'Endpoints for managing user accounts and profiles')
-    .addTag(
-      'Dentist Profile',
-      'Endpoints for creating, updating, and searching for dentist profiles',
-    )
-    .addTag('Patients', 'Endpoints for managing dentist patients')
-    .addTag('Orders', 'Endpoints for managing dental aligner orders')
-    .addTag('Working Hours', 'Endpoints for managing clinic working hours')
-    .build();
-
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('docs', app, document);
+  // ─── Swagger ───────────────────────────────────────────────────────────────
+  // Public docs are useful in dev/staging but a needless attack surface in
+  // production. Disable unless ENABLE_SWAGGER=true is explicitly set.
+  const enableSwagger = !isProd || process.env.ENABLE_SWAGGER === 'true';
+  if (enableSwagger) {
+    const config = new DocumentBuilder()
+      .setTitle('Oralign API')
+      .setDescription('Oralign clinic-management REST API')
+      .setVersion('1.0.0')
+      .addBearerAuth(
+        {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+          name: 'Authorization',
+          description: 'Enter JWT access token',
+          in: 'header',
+        },
+        'access-token',
+      )
+      .build();
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('docs', app, document);
+  }
 
   const httpPort = parseInt(process.env.HTTP_PORT || '3000', 10);
-  await app.listen(httpPort, () => {
-    console.log(`\n🚀 Server running on http://localhost:${httpPort}`);
-    console.log(`📖 API Docs: http://localhost:${httpPort}/docs\n`);
-  });
+  await app.listen(httpPort);
+  logger.log(`Listening on :${httpPort} (NODE_ENV=${process.env.NODE_ENV ?? 'unset'})`);
+  if (enableSwagger) {
+    logger.log(`Swagger docs: /docs`);
+  }
 }
 void bootstrap().catch((error) => {
+  // eslint-disable-next-line no-console
   console.error('Failed to start server:', error);
   process.exit(1);
 });

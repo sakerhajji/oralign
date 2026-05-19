@@ -42,10 +42,57 @@ enum Gender {
 enum OrderStatus {
   draft
   submitted
+  under_review
+  treatment_planning
+  treatment_plan_ready
+  revision_requested
+  treatment_approved
+  quotation_sent
+  payment_plan_selected
+  payment_pending
+  payment_review
+  paid
+  fabrication
+  ready_to_ship
+  shipped
+  finished
+  canceled
+  // ─── Legacy values (existing rows reference these; keep until migrated) ─
   in_review
   approved
   rejected
   cancelled
+}
+
+enum TreatmentPlanStatus {
+  pending
+  ready
+  approved
+  rejected
+}
+
+enum TreatmentMessageType {
+  message
+  system
+  approval
+  rejection
+  file
+  treatment_result
+}
+
+enum TreatmentAttachmentCategory {
+  image
+  xray
+  stl
+  ply
+  obj
+  zip
+  pdf
+  video
+  treatment_file
+  treatment_result
+  container
+  other
 }
 
 enum PatientStage {
@@ -64,6 +111,8 @@ enum ToothInstructionType {
   no_attachments
   do_not_move
   no_ipr
+  ipr_value
+  extract
 }
 
 enum OrderFileCategory {
@@ -123,6 +172,10 @@ model User {
   patients            Patient[]
   doctorOrders        DentalOrder[]      @relation("OrderDoctor")
   designerOrders      DentalOrder[]      @relation("OrderDesigner")
+  createdTreatmentPlans TreatmentPlan[]  @relation("TreatmentPlanCreator")
+  createdToothInstructions OrderToothInstruction[] @relation("ToothInstructionCreator")
+  sentTreatmentMessages TreatmentMessage[]
+  uploadedTreatmentAttachments TreatmentMessageAttachment[]
 
   @@index([email])
   @@index([role])
@@ -186,6 +239,10 @@ model DentalOrder {
   midline                       String?
   ipr                           String?
   biteRamps                     String?
+  // Expansion plan — encoded as a short structured string from the wizard
+  // (e.g. "Both — anterior priority"). Free-text so the lab can also add
+  // notes if the dentist needs to describe something atypical.
+  expansion                     String?
   crossbite                     String?
   spaces                        String?
   extractions                   String?
@@ -200,11 +257,15 @@ model DentalOrder {
   submittedAt                   DateTime?
   deletedAt                     DateTime?
 
+  // Approved treatment plan reference — used by the order's lifecycle.
+  approvedTreatmentPlanId       String?
+
   doctor                        User                      @relation("OrderDoctor", fields: [doctorId], references: [id], onDelete: Cascade)
   patient                       Patient                   @relation(fields: [patientId], references: [id], onDelete: Cascade)
   assignedDesigner              User?                     @relation("OrderDesigner", fields: [assignedDesignerId], references: [id], onDelete: SetNull)
   toothInstructions             OrderToothInstruction[]
   files                         OrderFile[]
+  treatmentPlans                TreatmentPlan[]
 
   @@index([doctorId])
   @@index([patientId])
@@ -220,9 +281,16 @@ model OrderToothInstruction {
   orderId        String
   toothNumber    Int
   type           ToothInstructionType
+  // Optional numeric value (e.g. IPR amount in mm for type = ipr_value)
+  // and a free-text note. Both nullable so existing rows keep working.
+  value          String?
+  note           String?
+  createdById    String?
   createdAt      DateTime             @default(now())
+  updatedAt      DateTime?            @updatedAt
 
   order          DentalOrder          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  createdBy      User?                @relation("ToothInstructionCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
   @@unique([orderId, toothNumber, type])
   @@index([orderId])
@@ -244,6 +312,100 @@ model OrderFile {
   order          DentalOrder          @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([orderId])
+  @@index([category])
+  @@index([deletedAt])
+}
+
+// ─────────────────────────────────────────
+// TREATMENT PLAN
+// ─────────────────────────────────────────
+
+model TreatmentPlan {
+  id                          String              @id @default(uuid())
+  orderId                     String
+  // Auto-incremented per order (Treatment Plan 1, 2, 3 …).
+  version                     Int
+  name                        String
+  status                      TreatmentPlanStatus @default(pending)
+
+  // Treatment web viewer URL (3D viewer / aligner setup link).
+  resultViewUrl               String?
+
+  // Optional bundled deliverable (e.g. a zip the designer attaches).
+  filePath                    String?
+
+  // Orthodontic tooth movement table — uploaded image metadata.
+  movementTableImagePath      String?
+  movementTableImageName      String?
+  movementTableImageMimeType  String?
+  movementTableImageSizeBytes Int?
+
+  totalUpperAligners          Int?
+  totalLowerAligners          Int?
+  issuedUpperAligners         Int?
+  issuedLowerAligners         Int?
+
+  createdById                 String
+  approvedAt                  DateTime?
+  rejectedAt                  DateTime?
+
+  // Public viewer access — token grants read-only access to a slim subset.
+  publicToken                 String?             @unique
+  publicExpiresAt             DateTime?
+
+  createdAt                   DateTime            @default(now())
+  updatedAt                   DateTime            @updatedAt
+  deletedAt                   DateTime?
+
+  order                       DentalOrder         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  createdBy                   User                @relation("TreatmentPlanCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  messages                    TreatmentMessage[]
+
+  @@unique([orderId, version])
+  @@index([orderId])
+  @@index([status])
+  @@index([publicToken])
+  @@index([deletedAt])
+}
+
+model TreatmentMessage {
+  id              String                       @id @default(uuid())
+  treatmentPlanId String
+  senderId        String
+  message         String?
+  type            TreatmentMessageType         @default(message)
+
+  createdAt       DateTime                     @default(now())
+  updatedAt       DateTime?                    @updatedAt
+  deletedAt       DateTime?
+
+  treatmentPlan   TreatmentPlan                @relation(fields: [treatmentPlanId], references: [id], onDelete: Cascade)
+  sender          User                         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  attachments     TreatmentMessageAttachment[]
+
+  @@index([treatmentPlanId])
+  @@index([senderId])
+  @@index([deletedAt])
+  @@index([createdAt])
+}
+
+model TreatmentMessageAttachment {
+  id            String                       @id @default(uuid())
+  messageId     String
+  uploadedById  String
+  fileName      String
+  filePath      String                       // relative path under uploads/
+  mimeType      String?
+  sizeBytes     Int?
+  category      TreatmentAttachmentCategory  @default(other)
+
+  createdAt     DateTime                     @default(now())
+  deletedAt     DateTime?
+
+  message       TreatmentMessage             @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  uploadedBy    User                         @relation(fields: [uploadedById], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
   @@index([category])
   @@index([deletedAt])
 }

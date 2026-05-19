@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { UserRole, Prisma } from '@prisma/client';
+import { UserRole, Prisma, VerificationStatus } from '@prisma/client';
 import { UserFilterDto } from '../dto/user.dto';
 
 type UserWithProfile = Prisma.UserGetPayload<{
@@ -92,6 +92,7 @@ export class UserRepository {
       role?: UserRole;
       isEmailVerified?: boolean;
       isActive?: boolean;
+      verificationStatus?: VerificationStatus;
     },
   ): Promise<UserWithProfile> {
     return this.prisma.user.update({

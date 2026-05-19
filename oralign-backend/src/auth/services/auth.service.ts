@@ -3,6 +3,10 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MailService } from '../../mail/mail.service';
+import { requiredSecret } from '../../common/config/required-secret';
+
+/** OWASP-recommended bcrypt cost as of 2024+. */
+const BCRYPT_COST = 12;
 import {
   UnauthorizedException,
   ConflictException,
@@ -53,7 +57,7 @@ export class AuthService {
       throw new ConflictException('Email already registered', 'EMAIL_EXISTS');
     }
 
-    const hashedPassword = await bcrypt.hash(signUpDto.password, 10);
+    const hashedPassword = await bcrypt.hash(signUpDto.password, BCRYPT_COST);
     const code = this.generateOtp();
     const codeExpiry = new Date(Date.now() + VERIFICATION_CODE_TTL_MS);
 
@@ -85,6 +89,7 @@ export class AuthService {
       fullName: user.fullName,
       role: user.role,
       isEmailVerified: user.isEmailVerified,
+      verificationStatus: user.verificationStatus,
       avatarUrl: user.avatarUrl ?? undefined,
       authToken,
     };
@@ -168,6 +173,7 @@ export class AuthService {
       fullName: user.fullName,
       role: user.role,
       isEmailVerified: user.isEmailVerified,
+      verificationStatus: user.verificationStatus,
       avatarUrl: user.avatarUrl ?? undefined,
       authToken,
     };
@@ -199,6 +205,7 @@ export class AuthService {
           fullName: user.fullName,
           role: user.role,
           isEmailVerified: true,
+          verificationStatus: user.verificationStatus,
         },
         authToken,
       };
@@ -248,6 +255,7 @@ export class AuthService {
         fullName: updated.fullName,
         role: updated.role,
         isEmailVerified: updated.isEmailVerified,
+        verificationStatus: updated.verificationStatus,
       },
       authToken,
     };
@@ -315,7 +323,7 @@ export class AuthService {
     const resetToken = this.jwtService.sign(
       { sub: user.id, purpose: 'password-reset' },
       {
-        secret: process.env.JWT_RESET_SECRET || 'reset-secret-key',
+        secret: requiredSecret('JWT_RESET_SECRET'),
         expiresIn: RESET_TOKEN_TTL_S,
       },
     );
@@ -343,7 +351,7 @@ export class AuthService {
 
     try {
       decoded = this.jwtService.verify(resetPasswordDto.token, {
-        secret: process.env.JWT_RESET_SECRET || 'reset-secret-key',
+        secret: requiredSecret('JWT_RESET_SECRET'),
       });
     } catch {
       throw new BadRequestException(
@@ -367,7 +375,10 @@ export class AuthService {
       throw new NotFoundException('User not found');
     }
 
-    const hashedPassword = await bcrypt.hash(resetPasswordDto.newPassword, 10);
+    const hashedPassword = await bcrypt.hash(
+      resetPasswordDto.newPassword,
+      BCRYPT_COST,
+    );
 
     await this.prisma.user.update({
       where: { id: user.id },
@@ -385,7 +396,7 @@ export class AuthService {
     try {
       const decoded = this.jwtService.verify<{ sub: string }>(
         refreshTokenDto.refreshToken,
-        { secret: process.env.JWT_REFRESH_SECRET || 'refresh-secret-key' },
+        { secret: requiredSecret('JWT_REFRESH_SECRET') },
       );
 
       const user = await this.prisma.user.findUnique({
@@ -434,7 +445,7 @@ export class AuthService {
       );
     }
 
-    const hashedPassword = await bcrypt.hash(dto.newPassword, 10);
+    const hashedPassword = await bcrypt.hash(dto.newPassword, BCRYPT_COST);
     await this.prisma.user.update({
       where: { id: user.id },
       data: { passwordHash: hashedPassword },
@@ -459,7 +470,7 @@ export class AuthService {
     const accessToken = this.jwtService.sign(
       { sub: userId, email, role },
       {
-        secret: process.env.JWT_SECRET || 'your-secret-key',
+        secret: requiredSecret('JWT_SECRET'),
         expiresIn: '15m',
       },
     );
@@ -467,7 +478,7 @@ export class AuthService {
     const refreshToken = this.jwtService.sign(
       { sub: userId },
       {
-        secret: process.env.JWT_REFRESH_SECRET || 'refresh-secret-key',
+        secret: requiredSecret('JWT_REFRESH_SECRET'),
         expiresIn: '7d',
       },
     );

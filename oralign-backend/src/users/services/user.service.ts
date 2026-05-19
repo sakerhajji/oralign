@@ -10,9 +10,11 @@ import {
   UserResponseDto,
   UserFilterDto,
 } from '../dto/user.dto';
-import { Prisma, UserRole } from '@prisma/client';
+import { Prisma, UserRole, VerificationStatus } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PaginatedResponse } from '../../common/dto/response.dto';
+import { MailService } from '../../mail/mail.service';
+import { Logger } from '@nestjs/common';
 
 type UserWithProfile = Prisma.UserGetPayload<{
   include: { dentistProfile: true };
@@ -20,7 +22,12 @@ type UserWithProfile = Prisma.UserGetPayload<{
 
 @Injectable()
 export class UserService {
-  constructor(private userRepository: UserRepository) {}
+  private readonly logger = new Logger(UserService.name);
+
+  constructor(
+    private userRepository: UserRepository,
+    private readonly mailService: MailService,
+  ) {}
 
   async createUser(createUserDto: CreateUserDto): Promise<UserResponseDto> {
     const existingUser = await this.userRepository.findByEmail(
@@ -31,7 +38,7 @@ export class UserService {
       throw new ConflictException('Email already exists');
     }
 
-    const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
+    const hashedPassword = await bcrypt.hash(createUserDto.password, 12);
 
     const user = await this.userRepository.create({
       email: createUserDto.email,
@@ -122,7 +129,7 @@ export class UserService {
 
     // Password update: Only if provided and not empty
     if (updateUserDto.password && updateUserDto.password.trim() !== '') {
-      updateData.passwordHash = await bcrypt.hash(updateUserDto.password, 10);
+      updateData.passwordHash = await bcrypt.hash(updateUserDto.password, 12);
     }
 
     // Admin-only fields
@@ -189,6 +196,49 @@ export class UserService {
     const updatedUser = await this.userRepository.update(id, {
       isEmailVerified,
     });
+    return this.mapToDto(updatedUser);
+  }
+
+  /**
+   * Admin sets the account's approval state. The frontend uses this to gate
+   * access to the dashboard until a human has reviewed the registration.
+   * When the status transitions to `approved` we fire a welcome email; the
+   * send is non-blocking so a misconfigured SMTP doesn't break the API call.
+   */
+  async updateApproval(
+    id: string,
+    verificationStatus: VerificationStatus,
+  ): Promise<UserResponseDto> {
+    const user = await this.userRepository.findById(id);
+    if (!user || user.deletedAt) {
+      throw new NotFoundException('User not found');
+    }
+
+    const wasNotApproved =
+      user.verificationStatus !== VerificationStatus.approved;
+    const updatedUser = await this.userRepository.update(id, {
+      verificationStatus,
+    });
+
+    if (
+      wasNotApproved &&
+      verificationStatus === VerificationStatus.approved
+    ) {
+      const frontendUrl =
+        process.env.FRONTEND_URL ?? 'http://localhost:3001';
+      void this.mailService
+        .sendApprovalGrantedEmail(
+          updatedUser.email,
+          updatedUser.fullName,
+          `${frontendUrl}/dashboard`,
+        )
+        .catch((err: unknown) => {
+          this.logger.warn(
+            `Failed to send approval email to ${updatedUser.email}: ${(err as Error).message}`,
+          );
+        });
+    }
+
     return this.mapToDto(updatedUser);
   }
 

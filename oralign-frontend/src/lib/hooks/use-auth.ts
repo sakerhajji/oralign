@@ -96,12 +96,14 @@ export function useSignUp() {
         role: data.role,
         isEmailVerified: data.isEmailVerified,
         isActive: true,
-        verificationStatus: VerificationStatus.PENDING,
+        verificationStatus:
+          (data as { verificationStatus?: VerificationStatus })
+            .verificationStatus ?? VerificationStatus.PENDING,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       });
       toast.success('Account created! Please verify your email.');
-      router.push('/auth/verify-email?onboarding=1');
+      router.push('/auth/verify-email');
     },
     onError: (error: unknown) => {
       toast.error(getApiErrorMessage(error, 'Failed to create account'));
@@ -112,11 +114,13 @@ export function useSignUp() {
 /**
  * Hook for sign-in.
  *
- * After a successful login the redirect logic is:
- *   1. Email not verified  → /auth/verify-email?onboarding=1
- *   2. Dentist             → /account/profile?onboarding=1
- *      (the profile page redirects to /dashboard once onboarding is complete)
- *   3. Other roles         → /dashboard
+ * Post-login routing — every gate is double-checked by OnboardingGuard so
+ * the dashboard layout itself stays defensive, but routing the user to the
+ * right place from here avoids an extra redirect flash:
+ *   1. Email not verified                  → /auth/verify-email
+ *   2. Dentist profile/clinic missing      → /onboarding/profile (or /clinic)
+ *   3. Dentist waiting for admin approval  → /onboarding/pending
+ *   4. Everything good                     → /dashboard
  */
 export function useSignIn() {
   const router = useRouter();
@@ -125,6 +129,9 @@ export function useSignIn() {
   return useMutation<AuthResponseDto, unknown, SignInDto>({
     mutationFn: authService.signIn,
     onSuccess: (data) => {
+      const verificationStatus =
+        (data as { verificationStatus?: VerificationStatus })
+          .verificationStatus ?? VerificationStatus.PENDING;
       login({
         id: data.id,
         email: data.email,
@@ -132,26 +139,26 @@ export function useSignIn() {
         role: data.role,
         isEmailVerified: data.isEmailVerified,
         isActive: true,
-        verificationStatus: VerificationStatus.PENDING,
+        verificationStatus,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       });
       toast.success('Logged in successfully!');
 
       if (!data.isEmailVerified) {
-        // Fire-and-forget: send a fresh OTP so the user has a valid code waiting.
-        void authService.resendVerification({ email: data.email }).catch(() => {/* already logged */});
-        router.push('/auth/verify-email?onboarding=1');
+        // Just route them to the verify page — DON'T fire an automatic
+        // resend. The original signup email is almost certainly still valid
+        // (15 min TTL), and a silent resend overwrites that code with a new
+        // one, breaking the user's first attempt. The page has a visible
+        // "Resend code" button if they need it.
+        router.push('/auth/verify-email');
         return;
       }
 
-      if (data.role === UserRole.DENTIST) {
-        // The profile page handles further onboarding redirects
-        // and eventually lands on /dashboard when complete.
-        router.push('/account/profile?onboarding=1');
-        return;
-      }
-
+      // For dentists, OnboardingGuard inside /dashboard will inspect the
+      // freshly-fetched profile + working-hours + approval state and push
+      // them deeper into the flow as needed. Sending them to /dashboard
+      // first keeps the routing logic in one place.
       router.push('/dashboard');
     },
     onError: (error: unknown) => {
@@ -188,8 +195,13 @@ export function useVerifyEmail(): UseMutationResult<VerifyEmailResponseDto, Erro
       }
       toast.success('Email verified successfully!');
     },
-    onError: (error: Error) => {
-      toast.error(error.message || 'Failed to verify email');
+    onError: (error: unknown) => {
+      // The backend's BadRequestException carries a useful message
+      // ("Invalid verification code", "Verification code has expired", …).
+      // `error.message` on an Axios error is "Request failed with status
+      // code 400", which hides that information from the user. Always go
+      // through getApiErrorMessage to unwrap the response body.
+      toast.error(getApiErrorMessage(error, 'Failed to verify email'));
     },
   });
 }
@@ -223,7 +235,7 @@ export function useForgotPassword(): UseMutationResult<MessageResponse, Error, F
       toast.success('If that email exists, a reset link has been sent. Check your inbox.');
     },
     onError: (error: Error) => {
-      toast.error(error.message || 'Failed to send reset email');
+      toast.error(getApiErrorMessage(error, 'Failed to send reset email'));
     },
   });
 }

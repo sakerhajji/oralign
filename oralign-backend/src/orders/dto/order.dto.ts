@@ -38,6 +38,24 @@ export class ToothInstructionDto {
   @ApiProperty({ enum: ToothInstructionType })
   @IsEnum(ToothInstructionType)
   type!: ToothInstructionType;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Optional numeric/text value. Required by `ipr_value` (admin-added IPR in mm).',
+    example: '0.2',
+  })
+  @IsOptional()
+  @IsString()
+  value?: string;
+
+  @ApiProperty({
+    required: false,
+    description: 'Free-text note attached to this per-tooth instruction.',
+  })
+  @IsOptional()
+  @IsString()
+  note?: string;
 }
 
 export class UpdateToothInstructionsDto {
@@ -140,6 +158,17 @@ export class CreateOrderDto {
   @IsOptional()
   @IsString()
   biteRamps?: string;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Expansion plan. Encoded as a short structured string by the wizard ' +
+      '(e.g. "Both — anterior priority") or "No expansion" when none is needed.',
+  })
+  @Transform(({ value }: { value: unknown }) => normalizeOptionalString(value))
+  @IsOptional()
+  @IsString()
+  expansion?: string;
 
   @ApiProperty({ required: false })
   @Transform(({ value }: { value: unknown }) => normalizeOptionalString(value))
@@ -290,6 +319,8 @@ export class OrderResponseDto {
   ipr?: string;
   @ApiProperty({ required: false })
   biteRamps?: string;
+  @ApiProperty({ required: false })
+  expansion?: string;
   @ApiProperty({ required: false })
   crossbite?: string;
   @ApiProperty({ required: false })

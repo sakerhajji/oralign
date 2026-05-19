@@ -54,6 +54,97 @@ function Cmd-Up {
     docker-compose ps
 }
 
+# Frees the host port from any leftover process (typically a stray
+# `next dev` that survived its parent shell). Called by Cmd-Rebuild before
+# the stack is brought up, so the docker bind doesn't fight a node process.
+function Free-Port {
+    param([int]$Port)
+    $listeners = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty OwningProcess -Unique |
+        Where-Object { $_ -ne 0 }
+    if (-not $listeners) { return }
+
+    foreach ($processId in $listeners) {
+        try {
+            $proc = Get-Process -Id $processId -ErrorAction SilentlyContinue
+            if (-not $proc) { continue }
+            # Don't kill Docker Desktop's own processes — they own ports too.
+            if ($proc.ProcessName -match '^(com\.docker|Docker|vpnkit)') {
+                Print-Warning "Port ${Port} held by $($proc.ProcessName) (pid $processId) — leaving it alone."
+                continue
+            }
+            Stop-Process -Id $processId -Force -ErrorAction Stop
+            Print-Info "Freed port ${Port}: killed $($proc.ProcessName) (pid $processId)"
+        } catch {
+            Print-Warning "Could not free port ${Port} (pid $processId): $($_.Exception.Message)"
+        }
+    }
+}
+
+function Cmd-KillPorts {
+    Print-Header "Freeing Project Ports"
+    foreach ($p in 3000, 3001, 5432, 6379, 9229, 9230) { Free-Port -Port $p }
+    Print-Success "Project ports checked"
+}
+
+# One-shot full-stack rebuild: clears stale port holders, brings the stack
+# down, builds with --pull, brings it back up, then verifies health.
+function Cmd-Rebuild {
+    Print-Header "Full-stack Rebuild"
+
+    Print-Info "Step 1/5  Freeing project ports (3000, 3001, 5432, 6379)"
+    foreach ($p in 3000, 3001, 5432, 6379, 9229, 9230) { Free-Port -Port $p }
+
+    Print-Info "Step 2/5  Stopping any running containers"
+    docker compose down --remove-orphans
+    if ($LASTEXITCODE -ne 0) {
+        Print-Error "docker compose down failed"
+        exit 1
+    }
+
+    Print-Info "Step 3/5  Building images (--pull base images)"
+    docker compose build --pull
+    if ($LASTEXITCODE -ne 0) {
+        Print-Error "docker compose build failed"
+        exit 1
+    }
+
+    Print-Info "Step 4/5  Starting services"
+    docker compose up -d
+    if ($LASTEXITCODE -ne 0) {
+        Print-Error "docker compose up failed"
+        exit 1
+    }
+
+    Print-Info "Step 5/5  Waiting for services to become healthy (max 90s)"
+    $deadline = (Get-Date).AddSeconds(90)
+    $services = @('oralign-postgres', 'oralign-redis', 'oralign-backend', 'oralign-frontend')
+    while ((Get-Date) -lt $deadline) {
+        $statuses = $services | ForEach-Object {
+            $s = docker inspect --format '{{.State.Health.Status}}' $_ 2>$null
+            if (-not $s) { 'missing' } else { $s }
+        }
+        if ($statuses -notcontains 'starting' -and $statuses -notcontains 'missing') { break }
+        Start-Sleep -Seconds 3
+    }
+    docker compose ps
+
+    $unhealthy = $services | Where-Object {
+        $s = docker inspect --format '{{.State.Health.Status}}' $_ 2>$null
+        $s -ne 'healthy'
+    }
+    if ($unhealthy) {
+        Print-Warning "Some services are not healthy yet: $($unhealthy -join ', ')"
+        Print-Info "Tail logs with: .\docker.ps1 logs <service>"
+    } else {
+        Print-Success "All services healthy"
+        Write-Host ""
+        Write-Host "Frontend:  http://localhost:3001" -ForegroundColor Green
+        Write-Host "Backend:   http://localhost:3000/api/health" -ForegroundColor Green
+        Write-Host "API Docs:  http://localhost:3000/api/docs" -ForegroundColor Green
+    }
+}
+
 function Cmd-Down {
     Print-Header "Stopping Services"
     docker-compose down
@@ -171,6 +262,8 @@ Oralign Docker CLI
 Usage: .\docker.ps1 [command] [options]
 
 Commands:
+  rebuild            Full-stack rebuild: free ports, down, build, up, wait healthy
+  kill-ports         Free 3000/3001/5432/6379/9229/9230 from stray processes
   build              Build Docker images
   up                 Start all services
   down               Stop all services
@@ -186,6 +279,8 @@ Commands:
   help               Show this help message
 
 Examples:
+  .\docker.ps1 rebuild            # One-shot full-stack rebuild + start
+  .\docker.ps1 kill-ports         # Free project ports from leftover node procs
   .\docker.ps1 build              # Build images
   .\docker.ps1 up                 # Start services
   .\docker.ps1 logs backend       # View backend logs
@@ -205,6 +300,9 @@ Service URLs:
 
 # Main
 switch ($Command.ToLower()) {
+    "rebuild" { Cmd-Rebuild }
+    "kill-ports" { Cmd-KillPorts }
+    "killports" { Cmd-KillPorts }
     "build" { Cmd-Build }
     "up" { Cmd-Up }
     "down" { Cmd-Down }

@@ -234,26 +234,70 @@ export function LocationPicker({ value, onChange, className }: LocationPickerPro
   );
 
   const handleUseMyLocation = useCallback(() => {
+    // The Geolocation API is gated behind a secure context. The hostname
+    // exception (localhost) lets dev work, but production over plain HTTP
+    // or through a misconfigured proxy will throw before the prompt shows.
+    const isSecure =
+      typeof window !== 'undefined' &&
+      (window.isSecureContext ||
+        window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1');
+
+    if (!isSecure) {
+      setErrorMessage(
+        'Browser geolocation needs HTTPS. Use the map or search to pick a place.',
+      );
+      return;
+    }
+
     if (!navigator.geolocation) {
-      setErrorMessage('Geolocation is not supported by this browser.');
+      setErrorMessage(
+        "This browser doesn't support geolocation. Use the search box or click the map.",
+      );
       return;
     }
 
     setIsLocating(true);
     setErrorMessage(null);
+    setStatusMessage('Requesting your location…');
 
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        const lat = pos.coords.latitude;
-        const lng = pos.coords.longitude;
         setIsLocating(false);
-        commitPosition(lat, lng);
+        commitPosition(pos.coords.latitude, pos.coords.longitude);
       },
-      () => {
+      (err) => {
         setIsLocating(false);
-        setErrorMessage('Location access was denied. Choose a place on the map.');
+        // GeolocationPositionError codes:
+        //   1 PERMISSION_DENIED     — user (or page policy) blocked us
+        //   2 POSITION_UNAVAILABLE  — sensor problem
+        //   3 TIMEOUT               — we hit the timeout option below
+        let msg: string;
+        switch (err.code) {
+          case err.PERMISSION_DENIED:
+            msg =
+              'Location permission is blocked. Enable it in the browser ' +
+              'site settings, or pick a place on the map instead.';
+            break;
+          case err.POSITION_UNAVAILABLE:
+            msg =
+              "Couldn't determine your position right now. " +
+              'Try again or pick a place on the map.';
+            break;
+          case err.TIMEOUT:
+            msg =
+              'Locating took too long. Check your connection and try ' +
+              'again, or pick a place on the map.';
+            break;
+          default:
+            msg = `Geolocation failed (${err.message || 'unknown error'}).`;
+        }
+        setStatusMessage(null);
+        setErrorMessage(msg);
       },
-      { enableHighAccuracy: true, timeout: 8000 },
+      // High accuracy is worth the battery hit for a one-shot picker; 12 s
+      // is generous enough that GPS-first phones don't false-timeout.
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 60_000 },
     );
   }, [commitPosition]);
 

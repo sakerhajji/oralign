@@ -113,6 +113,63 @@ export const clinicSettingsSchema = z.object({
   description: z.string().optional(),
 });
 
+// Stricter version used in the onboarding wizard: every field needed to flip
+// `clinicComplete` to true must be present, otherwise the user could submit
+// a partial profile and end up stuck on the pending screen with the
+// Continue gate disabled.
+const HHMM = /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/;
+
+export const onboardingClinicSchema = z
+  .object({
+    clinicName: z.string().min(2, 'Clinic name is required'),
+    clinicAddress: z.string().min(2, 'Clinic address is required'),
+    clinicPhone: z
+      .string()
+      .regex(/^\+[1-9]\d{6,14}$/, 'Phone number must be in international format'),
+    city: z.string().min(1, 'City is required'),
+    country: z.string().min(1, 'Country is required'),
+    latitude: z
+      .number({ message: 'Pick the clinic location on the map' })
+      .gt(-90, 'Pick the clinic location on the map')
+      .lt(90, 'Pick the clinic location on the map')
+      .refine((v) => v !== 0, 'Pick the clinic location on the map'),
+    longitude: z
+      .number({ message: 'Pick the clinic location on the map' })
+      .gt(-180, 'Pick the clinic location on the map')
+      .lt(180, 'Pick the clinic location on the map')
+      .refine((v) => v !== 0, 'Pick the clinic location on the map'),
+    description: z.string().optional(),
+    workingHours: z
+      .array(
+        z.object({
+          dayOfWeek: z.nativeEnum(DayOfWeek),
+          openTime: z.string().regex(HHMM, 'Time must be HH:mm'),
+          closeTime: z.string().regex(HHMM, 'Time must be HH:mm'),
+          isClosed: z.boolean(),
+        }),
+      )
+      .min(1, 'Set at least one day'),
+  })
+  .refine(
+    (data) => data.workingHours.some((d) => !d.isClosed),
+    {
+      message: 'At least one day of the week must be open',
+      path: ['workingHours'],
+    },
+  )
+  .refine(
+    (data) =>
+      data.workingHours.every(
+        (d) => d.isClosed || d.openTime < d.closeTime,
+      ),
+    {
+      message: 'Opening time must be before closing time on every open day',
+      path: ['workingHours'],
+    },
+  );
+
+export type OnboardingClinicFormData = z.infer<typeof onboardingClinicSchema>;
+
 export const securitySettingsSchema = z
   .object({
     currentPassword: z.string().min(8, 'Password must be at least 8 characters'),

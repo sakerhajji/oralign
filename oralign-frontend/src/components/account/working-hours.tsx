@@ -73,6 +73,14 @@ export function WorkingHoursList({
   );
 }
 
+/**
+ * Editable weekly schedule. Each row has:
+ *   - Day label (with weekend tint)
+ *   - Explicit OPEN/CLOSED toggle pill with status text
+ *   - Open / close time inputs that are visually hidden when the day is OFF
+ *
+ * Layout adapts: single column on phones, day + toggle row → times row.
+ */
 export function WorkingHoursEditor({
   schedule,
   onChange,
@@ -86,9 +94,7 @@ export function WorkingHoursEditor({
     (dayOfWeek: DayOfWeek, update: Partial<DaySchedule>) => {
       onChange(
         schedule.map((day) =>
-          day.dayOfWeek === dayOfWeek
-            ? { ...day, ...update }
-            : day,
+          day.dayOfWeek === dayOfWeek ? { ...day, ...update } : day,
         ),
       );
     },
@@ -100,67 +106,115 @@ export function WorkingHoursEditor({
       {schedule.map((day) => {
         const meta = DAY_META.find((item) => item.key === day.dayOfWeek);
         const isOpen = !day.isClosed;
+        const toggleId = `day-toggle-${day.dayOfWeek}`;
 
         return (
           <div
             key={day.dayOfWeek}
             className={cn(
-              'grid grid-cols-[140px_1fr_1fr_56px] items-center gap-3 rounded-xl border px-4 py-3',
-              isOpen ? 'bg-background' : 'bg-muted/20',
+              'rounded-xl border p-3 transition-colors sm:p-4',
+              isOpen
+                ? 'border-primary/40 bg-background shadow-sm'
+                : 'border-border bg-muted/30',
             )}
           >
-            <div className="flex items-center gap-2">
-              <span
-                className={cn(
-                  'inline-flex h-7 w-7 items-center justify-center rounded-lg text-[11px] font-semibold',
-                  meta?.isWeekend
-                    ? isOpen
-                      ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
-                      : 'bg-muted text-muted-foreground/60'
-                    : isOpen
-                    ? 'bg-primary/10 text-primary'
-                    : 'bg-muted text-muted-foreground/60',
-                )}
-              >
-                {meta?.short ?? '??'}
-              </span>
-              <span
-                className={cn(
-                  'text-sm font-medium',
-                  isOpen ? 'text-foreground' : 'text-muted-foreground/70',
-                )}
-              >
-                {meta?.label ?? day.dayOfWeek}
-              </span>
-            </div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              {/* Day label + status pill */}
+              <div className="flex items-center justify-between gap-3 sm:justify-start">
+                <div className="flex items-center gap-3">
+                  <span
+                    className={cn(
+                      'inline-flex h-9 w-9 items-center justify-center rounded-lg text-[11px] font-bold uppercase tracking-wide',
+                      meta?.isWeekend
+                        ? isOpen
+                          ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                          : 'bg-muted text-muted-foreground/60'
+                        : isOpen
+                        ? 'bg-primary/10 text-primary'
+                        : 'bg-muted text-muted-foreground/60',
+                    )}
+                    aria-hidden
+                  >
+                    {meta?.short ?? '??'}
+                  </span>
+                  <label
+                    htmlFor={toggleId}
+                    className={cn(
+                      'cursor-pointer text-sm font-semibold sm:text-base',
+                      isOpen ? 'text-foreground' : 'text-muted-foreground',
+                    )}
+                  >
+                    {meta?.label ?? day.dayOfWeek}
+                  </label>
+                </div>
 
-            {isOpen ? (
-              <>
-                <input
-                  type="time"
-                  value={day.openTime}
-                  onChange={(event) => updateDay(day.dayOfWeek, { openTime: event.target.value })}
-                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm font-mono"
-                  disabled={disabled}
-                />
-                <input
-                  type="time"
-                  value={day.closeTime}
-                  onChange={(event) => updateDay(day.dayOfWeek, { closeTime: event.target.value })}
-                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm font-mono"
-                  disabled={disabled}
-                />
-              </>
-            ) : (
-              <div className="col-span-2 text-sm text-muted-foreground italic">Closed</div>
-            )}
+                {/* Status pill + switch */}
+                <div className="flex items-center gap-2">
+                  <span
+                    className={cn(
+                      'rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider',
+                      isOpen
+                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+                        : 'bg-muted text-muted-foreground',
+                    )}
+                  >
+                    {isOpen ? 'Open' : 'Closed'}
+                  </span>
+                  <Switch
+                    id={toggleId}
+                    checked={isOpen}
+                    onCheckedChange={(value) =>
+                      updateDay(day.dayOfWeek, { isClosed: !value })
+                    }
+                    disabled={disabled}
+                    aria-label={`${meta?.label ?? day.dayOfWeek} is ${isOpen ? 'open' : 'closed'}`}
+                  />
+                </div>
+              </div>
 
-            <div className="flex items-center justify-center">
-              <Switch
-                checked={isOpen}
-                onCheckedChange={(value) => updateDay(day.dayOfWeek, { isClosed: !value })}
-                disabled={disabled}
-              />
+              {/* Time inputs — only rendered when the day is ON.
+                  Hiding (not just disabling) removes them from the tab
+                  order, which matches what the user expects. */}
+              {isOpen && (
+                <div className="grid grid-cols-2 gap-2 sm:max-w-xs sm:flex-1">
+                  <div className="space-y-1">
+                    <label
+                      htmlFor={`${toggleId}-open`}
+                      className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
+                    >
+                      Opens
+                    </label>
+                    <input
+                      id={`${toggleId}-open`}
+                      type="time"
+                      value={day.openTime}
+                      onChange={(event) =>
+                        updateDay(day.dayOfWeek, { openTime: event.target.value })
+                      }
+                      className="w-full rounded-lg border border-input bg-background px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      disabled={disabled}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label
+                      htmlFor={`${toggleId}-close`}
+                      className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
+                    >
+                      Closes
+                    </label>
+                    <input
+                      id={`${toggleId}-close`}
+                      type="time"
+                      value={day.closeTime}
+                      onChange={(event) =>
+                        updateDay(day.dayOfWeek, { closeTime: event.target.value })
+                      }
+                      className="w-full rounded-lg border border-input bg-background px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      disabled={disabled}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         );

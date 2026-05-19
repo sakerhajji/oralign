@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -22,6 +22,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -33,7 +34,24 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { OdontogramSelector } from '@/components/orders/odontogram-selector';
+
+// The odontogram pulls a 4 MB anatomical SVG sprite (cached after the
+// first request) — defer the component chunk until step 5 is shown so
+// earlier steps stay light.
+const OdontogramSelector = dynamic(
+  () =>
+    import('@/components/orders/odontogram-selector').then((m) => ({
+      default: m.OdontogramSelector,
+    })),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
+        Loading odontogram…
+      </div>
+    ),
+  },
+);
 import {
   ClinicalOrderFiles,
   OrderFileUpload,
@@ -94,25 +112,14 @@ const steps = [
     icon: Target,
   },
   {
+    // Combined "Odontogram + Movement" step. Tooth-level instructions are
+    // shown FIRST (primary clinical task), with the AP/elastics/bite/IPR
+    // controls underneath. Manufacturing has been dropped from the wizard.
     title: 'Movement',
-    heading: 'Movement, bite, and space instructions',
+    heading: 'Tooth-level instructions & movement plan',
     description:
-      'Document AP relationship, elastics, open bite, midline, IPR, bite ramps, crossbite, spaces, and extractions.',
-    icon: ShieldCheck,
-  },
-  {
-    title: 'Odontogram',
-    heading: 'Odontogram: Select tooth-level instructions',
-    description:
-      'Mark teeth that need no attachments, no IPR, or should not be moved.',
+      'Mark teeth that need no attachments, no IPR, or should not be moved — then document AP relationship, elastics, open bite, midline, IPR, bite ramps, crossbite, spaces, and extractions.',
     icon: ListChecks,
-  },
-  {
-    title: 'Manufacture',
-    heading: 'Manufacture and material preferences',
-    description:
-      'Set CBCT usage, manufacturing request, materials, delivery date, and final notes.',
-    icon: Factory,
   },
   {
     title: 'Review',
@@ -201,6 +208,7 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
     midline: initialOrder?.midline ?? '',
     ipr: initialOrder?.ipr ?? '',
     biteRamps: initialOrder?.biteRamps ?? '',
+    expansion: initialOrder?.expansion ?? '',
     crossbite: initialOrder?.crossbite ?? '',
     spaces: initialOrder?.spaces ?? '',
     extractions: initialOrder?.extractions ?? '',
@@ -486,30 +494,26 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
         )}
 
         {step === 4 && (
-          <AdvancedMovementStep
-            form={form}
-            disabled={!canModify}
-            updateField={updateField}
-          />
+          <div className="space-y-10">
+            {/* Tooth-level instructions FIRST — primary clinical task on
+                this step. Movement / bite / IPR controls follow under a
+                visual divider so the user scrolls into them naturally. */}
+            <OdontogramSelector
+              value={toothInstructions}
+              onChange={setToothInstructions}
+              disabled={!canModify}
+            />
+            <div className="border-t pt-8">
+              <AdvancedMovementStep
+                form={form}
+                disabled={!canModify}
+                updateField={updateField}
+              />
+            </div>
+          </div>
         )}
 
         {step === 5 && (
-          <OdontogramSelector
-            value={toothInstructions}
-            onChange={setToothInstructions}
-            disabled={!canModify}
-          />
-        )}
-
-        {step === 6 && (
-          <ManufacturingStep
-            form={form}
-            disabled={!canModify}
-            updateField={updateField}
-          />
-        )}
-
-        {step === 7 && (
           <div className="space-y-6">
             <ReviewStep
               savedOrder={savedOrder}
@@ -597,37 +601,87 @@ function OrderStepper({
   currentStep: number;
   onStepChange: (step: number) => void;
 }) {
+  const current = steps[currentStep];
+  // Total = step count + N-1 progress bars. The progress bars take `flex-1`
+  // so they expand to fill whatever width the container provides — the
+  // stepper always exactly fits its parent without a horizontal scroll.
+
   return (
-    <nav className="overflow-x-auto pb-1">
-      <ol className="flex min-w-max items-center gap-3 px-1">
+    <nav aria-label="Order wizard steps" className="space-y-3">
+      {/* Mobile-only context line — shows the title clearly because the
+          circles below are too small for inline labels at phone widths. */}
+      <div className="flex items-center justify-between gap-3 sm:hidden">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Step {currentStep + 1} of {steps.length}
+        </span>
+        <span className="truncate text-sm font-semibold text-foreground">
+          {current.title}
+        </span>
+      </div>
+
+      {/* Step rail — circles stretched evenly across the available width. */}
+      <ol
+        role="list"
+        className="relative flex w-full items-center pb-6 sm:pb-8"
+      >
         {steps.map((step, index) => {
           const active = index === currentStep;
           const complete = index < currentStep;
           return (
-            <li key={step.title} className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => onStepChange(index)}
-                className="flex items-center gap-2 whitespace-nowrap text-sm font-semibold"
-              >
-                <span
+            <Fragment key={step.title}>
+              <li className="relative flex shrink-0 flex-col items-center">
+                <button
+                  type="button"
+                  // Free navigation — every step circle is clickable so the
+                  // user can jump back and forth without finishing earlier
+                  // steps. The Next button still validates before moving
+                  // forward; this is just a quick-jump shortcut.
+                  onClick={() => onStepChange(index)}
+                  aria-current={active ? 'step' : undefined}
+                  aria-label={`Step ${index + 1}: ${step.title}`}
                   className={cn(
-                    'flex h-7 w-7 items-center justify-center rounded-full border text-xs transition',
-                    active && `${BRAND_ACTIVE_BG} border-primary text-primary-foreground shadow-sm`,
-                    complete && 'border-primary bg-primary/5 text-primary',
-                    !active && !complete && 'border-border bg-background text-muted-foreground',
+                    'group relative grid h-8 w-8 cursor-pointer place-items-center rounded-full border-2 text-xs font-bold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 sm:h-9 sm:w-9 sm:text-sm',
+                    active &&
+                      'scale-110 border-primary bg-primary text-primary-foreground shadow-md shadow-primary/25',
+                    complete &&
+                      'border-primary bg-primary/10 text-primary hover:bg-primary/20',
+                    !active && !complete &&
+                      'border-border bg-background text-muted-foreground hover:border-primary/60 hover:text-foreground',
                   )}
                 >
-                  {complete ? <Check className="h-3.5 w-3.5" /> : index + 1}
+                  {complete ? (
+                    <Check className="h-4 w-4" />
+                  ) : (
+                    <span>{index + 1}</span>
+                  )}
+                </button>
+
+                {/* Label — absolutely positioned below the circle so its
+                    presence (or absence below sm) doesn't push the
+                    connector lines out of alignment. */}
+                <span
+                  className={cn(
+                    'pointer-events-none absolute top-full mt-1.5 hidden whitespace-nowrap text-[11px] font-medium transition-colors sm:block',
+                    active ? 'text-foreground' : 'text-muted-foreground',
+                  )}
+                >
+                  {step.title}
                 </span>
-                <span className={active ? BRAND_ACTIVE_TEXT : 'text-muted-foreground'}>
-                  Step {index + 1}
-                </span>
-              </button>
+              </li>
+
+              {/* Connector — `flex-1` makes it absorb every spare pixel,
+                  so seven circles + six connectors always span the row
+                  without scroll. Coloured to track completion. */}
               {index < steps.length - 1 && (
-                <span className="h-px w-16 bg-border" aria-hidden />
+                <span
+                  aria-hidden
+                  className={cn(
+                    'mx-1 h-0.5 flex-1 rounded-full transition-colors sm:mx-2',
+                    complete ? 'bg-primary' : 'bg-border',
+                  )}
+                />
               )}
-            </li>
+            </Fragment>
           );
         })}
       </ol>
@@ -860,26 +914,17 @@ function TreatmentStep({
 
       <div className="grid gap-5">
         <TextInput
-          label="Chief Complain"
+          label="Chief complaint"
           value={form.chiefComplaint ?? ''}
           placeholder="Describe the patient's main concern..."
           error={errors.chiefComplaint}
           disabled={disabled}
           onChange={(value) => updateField('chiefComplaint', value)}
         />
-        <TextInput
-          label="Treat both arch"
-          value={form.treatBothArch ? 'Yes' : ''}
-          placeholder="Add treat both arch notes..."
-          icon={<Info className="h-4 w-4" />}
-          disabled={disabled}
-          onChange={(value) => {
-            updateField('treatBothArch', value.trim().length > 0);
-            if (value.trim().length > 0) {
-              updateField('archTreatment', ArchTreatment.BOTH);
-            }
-          }}
-        />
+        {/* "Treat both arch" text input removed — it was a duplicate of the
+            "Both arches" pill above. Choosing the pill already sets the
+            boolean. The duplicate text input could leave the radio and the
+            boolean out of sync (a real bug). */}
         <RadioGroupField
           label="Treatment plan"
           value={form.treatmentPlan ?? ''}
@@ -888,16 +933,10 @@ function TreatmentStep({
           error={errors.treatmentPlan}
           onChange={(value) => updateField('treatmentPlan', value)}
         />
-        <TextInput
-          label="Don't move"
-          value={form.dontMoveOption ?? ''}
-          placeholder="Teeth or segments that should not move..."
-          icon={<Info className="h-4 w-4" />}
-          disabled={disabled}
-          onChange={(value) => updateField('dontMoveOption', value)}
-        />
+        {/* "Don't move" text removed — the Odontogram's "Do Not Move" colour
+            captures this per-tooth in step 5 (the canonical place). */}
         <RadioGroupField
-          label="AP Relationship"
+          label="A-P relationship"
           value={form.apRelationship ?? ''}
           options={apRelationshipOptions}
           disabled={disabled}
@@ -906,6 +945,49 @@ function TreatmentStep({
       </div>
     </div>
   );
+}
+
+// ─── Structured option tables for the mechanics fields ──────────────────────
+// Each control writes a short structured string into the existing free-text
+// backend column (e.g. ipr: "Both — anterior priority"). The wizard parses
+// the same string back so the radio reflects what was previously chosen.
+
+const segmentOptions = ['No', 'Anterior', 'Posterior', 'Both'] as const;
+type Segment = (typeof segmentOptions)[number];
+
+const segmentPriorityOptions = [
+  'No priority',
+  'Anterior priority',
+  'Posterior priority',
+] as const;
+
+const biteRampOptions = ['No bite ramps', 'Anterior', 'Canine / cuspid', 'Molar'] as const;
+const expansionOptions = ['No expansion', 'Anterior', 'Posterior', 'Both'] as const;
+
+/** Pack a "segment + priority" pair into the saved string. */
+function packSegment(segment: Segment, priority: string): string {
+  if (segment === 'No') return 'No';
+  if (segment === 'Both' && priority && priority !== 'No priority') {
+    return `Both — ${priority.toLowerCase()}`;
+  }
+  return segment;
+}
+
+/** Recover the segment + priority from a saved string. */
+function unpackSegment(value: string | undefined): {
+  segment: Segment;
+  priority: string;
+} {
+  const raw = (value ?? '').trim();
+  if (!raw || raw === 'No' || /^no\b/i.test(raw)) return { segment: 'No', priority: 'No priority' };
+  if (/^anterior/i.test(raw)) return { segment: 'Anterior', priority: 'No priority' };
+  if (/^posterior/i.test(raw)) return { segment: 'Posterior', priority: 'No priority' };
+  if (/^both/i.test(raw)) {
+    if (/anterior/i.test(raw)) return { segment: 'Both', priority: 'Anterior priority' };
+    if (/posterior/i.test(raw)) return { segment: 'Both', priority: 'Posterior priority' };
+    return { segment: 'Both', priority: 'No priority' };
+  }
+  return { segment: 'No', priority: 'No priority' };
 }
 
 function AdvancedMovementStep({
@@ -917,31 +999,43 @@ function AdvancedMovementStep({
   disabled?: boolean;
   updateField: <K extends keyof CreateOrderDto>(key: K, value: CreateOrderDto[K]) => void;
 }) {
+  // Decode the current saved strings into structured UI state.
+  const ipr = unpackSegment(form.ipr);
+  const expansion = unpackSegment(form.expansion);
+  const spaces = form.spaces?.trim() ?? '';
+
+  const setIpr = (segment: Segment, priority?: string) => {
+    const next = packSegment(segment, priority ?? ipr.priority);
+    updateField('ipr', next);
+  };
+
+  const setExpansion = (segment: Segment, priority?: string) => {
+    const next = packSegment(segment, priority ?? expansion.priority);
+    updateField('expansion', next === 'No' ? 'No expansion' : next);
+  };
+
   return (
     <div className="space-y-6">
-      <TextInput
-        label="Anteroposterior relationship"
-        value={form.anteroposteriorRelationship ?? ''}
-        placeholder="Add anteroposterior notes..."
-        icon={<Info className="h-4 w-4" />}
-        disabled={disabled}
-        onChange={(value) => updateField('anteroposteriorRelationship', value)}
-      />
+      {/* Anteroposterior text input REMOVED — duplicate of the
+          "A-P relationship" radio in step 4 (Treatment). */}
+
       <TextInput
         label="Elastics"
         value={form.elastics ?? ''}
-        placeholder="Describe elastics protocol..."
+        placeholder="e.g. Class II elastics from upper canine to lower first molar, full-time"
         icon={<Info className="h-4 w-4" />}
         disabled={disabled}
         onChange={(value) => updateField('elastics', value)}
       />
+
       <RadioGroupField
-        label="Open Bite"
+        label="Open bite"
         value={form.openBite ?? ''}
         options={openBiteOptions}
         disabled={disabled}
         onChange={(value) => updateField('openBite', value)}
       />
+
       <RadioGroupField
         label="Midline"
         value={form.midline ?? ''}
@@ -949,22 +1043,86 @@ function AdvancedMovementStep({
         disabled={disabled}
         onChange={(value) => updateField('midline', value)}
       />
-      <TextInput
-        label="IPR"
-        value={form.ipr ?? ''}
-        placeholder="Add IPR instructions..."
-        icon={<Info className="h-4 w-4" />}
-        disabled={disabled}
-        onChange={(value) => updateField('ipr', value)}
-      />
-      <TextInput
-        label="Bite Ramps"
+
+      {/* ─── IPR ────────────────────────────────────────────────────────── */}
+      <fieldset className="space-y-3 rounded-lg border bg-card p-4">
+        <legend className="px-1 text-sm font-semibold">IPR</legend>
+        <p className="text-xs text-muted-foreground">
+          Pick where interproximal reduction is allowed. "Both" reveals an
+          optional priority — leave it on "No priority" if either segment
+          may be done first.
+        </p>
+        <div className="grid gap-2 sm:grid-cols-4">
+          {segmentOptions.map((opt) => (
+            <OptionPill
+              key={opt}
+              active={ipr.segment === opt}
+              disabled={disabled}
+              label={opt === 'No' ? 'No IPR' : opt}
+              onClick={() => setIpr(opt)}
+            />
+          ))}
+        </div>
+        {ipr.segment === 'Both' && (
+          <div className="grid gap-2 sm:grid-cols-3">
+            {segmentPriorityOptions.map((p) => (
+              <OptionPill
+                key={p}
+                active={ipr.priority === p}
+                disabled={disabled}
+                label={p}
+                onClick={() => setIpr('Both', p)}
+              />
+            ))}
+          </div>
+        )}
+      </fieldset>
+
+      {/* ─── Bite ramps ─────────────────────────────────────────────────── */}
+      <RadioGroupField
+        label="Bite ramps"
         value={form.biteRamps ?? ''}
-        placeholder="Add bite ramp instructions..."
-        icon={<Info className="h-4 w-4" />}
+        options={biteRampOptions}
         disabled={disabled}
         onChange={(value) => updateField('biteRamps', value)}
       />
+
+      {/* ─── Expansion ──────────────────────────────────────────────────── */}
+      <fieldset className="space-y-3 rounded-lg border bg-card p-4">
+        <legend className="px-1 text-sm font-semibold">Expansion</legend>
+        <p className="text-xs text-muted-foreground">
+          Select the segment that needs expansion, or "No expansion" if the
+          arches are well-developed. "Both" reveals an optional priority.
+        </p>
+        <div className="grid gap-2 sm:grid-cols-4">
+          {expansionOptions.map((opt) => {
+            const norm: Segment = opt === 'No expansion' ? 'No' : opt;
+            return (
+              <OptionPill
+                key={opt}
+                active={expansion.segment === norm}
+                disabled={disabled}
+                label={opt}
+                onClick={() => setExpansion(norm)}
+              />
+            );
+          })}
+        </div>
+        {expansion.segment === 'Both' && (
+          <div className="grid gap-2 sm:grid-cols-3">
+            {segmentPriorityOptions.map((p) => (
+              <OptionPill
+                key={p}
+                active={expansion.priority === p}
+                disabled={disabled}
+                label={p}
+                onClick={() => setExpansion('Both', p)}
+              />
+            ))}
+          </div>
+        )}
+      </fieldset>
+
       <RadioGroupField
         label="Crossbite"
         value={form.crossbite ?? ''}
@@ -972,25 +1130,49 @@ function AdvancedMovementStep({
         disabled={disabled}
         onChange={(value) => updateField('crossbite', value)}
       />
-      <RadioGroupField
-        label="Spaces"
-        value={form.spaces?.startsWith('Close all spaces') || form.spaces?.startsWith('Maintain spaces') ? form.spaces : ''}
-        options={spacesOptions}
-        disabled={disabled}
-        onChange={(value) => updateField('spaces', value)}
-      />
-      <TextInput
-        label="Spaces"
-        value={form.spaces ?? ''}
-        placeholder="Add detailed space instructions..."
-        icon={<Info className="h-4 w-4" />}
-        disabled={disabled}
-        onChange={(value) => updateField('spaces', value)}
-      />
+
+      {/* ─── Spaces — single source of truth ────────────────────────────── */}
+      <fieldset className="space-y-3 rounded-lg border bg-card p-4">
+        <legend className="px-1 text-sm font-semibold">Spaces</legend>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {spacesOptions.map((opt) => (
+            <OptionPill
+              key={opt}
+              active={spaces.startsWith(opt)}
+              disabled={disabled}
+              label={opt}
+              onClick={() => updateField('spaces', opt)}
+            />
+          ))}
+        </div>
+        <TextAreaField
+          label="Notes (optional)"
+          compact
+          value={
+            spaces && !spacesOptions.some((o) => spaces === o)
+              ? spaces.replace(
+                  new RegExp(`^(${spacesOptions.join('|')})\\s*[—-]?\\s*`),
+                  '',
+                )
+              : ''
+          }
+          placeholder="e.g. Close upper midline diastema; maintain space at #15 for future implant"
+          disabled={disabled}
+          onChange={(detail) => {
+            const base = spacesOptions.find((o) => spaces.startsWith(o)) ?? '';
+            const trimmed = detail.trim();
+            updateField(
+              'spaces',
+              trimmed ? `${base ? `${base} — ` : ''}${trimmed}` : base,
+            );
+          }}
+        />
+      </fieldset>
+
       <TextInput
         label="Extractions"
         value={form.extractions ?? ''}
-        placeholder="Add extraction instructions..."
+        placeholder="e.g. UR4 and UL4 (FDI 14, 24); confirmed with patient"
         icon={<Info className="h-4 w-4" />}
         disabled={disabled}
         onChange={(value) => updateField('extractions', value)}

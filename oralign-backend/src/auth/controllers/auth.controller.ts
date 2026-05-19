@@ -1,4 +1,5 @@
 import { Controller, Post, Body, HttpCode, HttpStatus } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import {
   ApiTags,
   ApiOperation,
@@ -32,6 +33,7 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Public()
+  @Throttle({ long: { limit: 5, ttl: 60 * 60_000 } }) // 5 signups / hour / IP
   @Post('sign-up')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Register a new dentist account' })
@@ -46,6 +48,9 @@ export class AuthController {
   }
 
   @Public()
+  // 10 attempts per 15 min — pairs with the per-account 5-strike lockout in
+  // AuthService to defend against IP-rotated credential-stuffing too.
+  @Throttle({ long: { limit: 10, ttl: 15 * 60_000 } })
   @Post('sign-in')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Sign in' })
@@ -76,6 +81,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ long: { limit: 5, ttl: 60 * 60_000 } })
   @Post('resend-verification')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Resend email verification code' })
@@ -87,6 +93,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ long: { limit: 3, ttl: 60 * 60_000 } }) // 3 reset requests / hour
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Request a password-reset link via email' })
@@ -98,6 +105,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ long: { limit: 10, ttl: 60 * 60_000 } })
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Reset password using token from email' })

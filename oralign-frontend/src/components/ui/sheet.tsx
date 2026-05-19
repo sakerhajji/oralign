@@ -37,7 +37,11 @@ function SheetOverlay({
     <SheetPrimitive.Overlay
       data-slot="sheet-overlay"
       className={cn(
-        "fixed inset-0 z-50 bg-black/10 duration-100 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
+        // The scrim needs to read as "tap me to close" — a 10 % wash was so
+        // faint that users on phones didn't realise the area outside the
+        // sheet was interactive. 40 % black + a light blur is the modern
+        // standard and matches iOS / Material Design action sheets.
+        "fixed inset-0 z-50 bg-black/40 duration-150 supports-backdrop-filter:backdrop-blur-sm data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
         className
       )}
       {...props}

@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { usePathname } from "next/navigation"
 import { cva, type VariantProps } from "class-variance-authority"
 import { Slot } from "radix-ui"
 
@@ -27,7 +28,10 @@ import { PanelLeftIcon } from "lucide-react"
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
 const SIDEBAR_WIDTH = "16rem"
-const SIDEBAR_WIDTH_MOBILE = "18rem"
+// Phones: keep the drawer compact (~70 % of a 360 px screen). The remaining
+// strip is the tap-to-close zone, and dropping below ~14 rem starts crowding
+// the labels.
+const SIDEBAR_WIDTH_MOBILE = "14rem"
 const SIDEBAR_WIDTH_ICON = "3rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
 
@@ -108,6 +112,18 @@ function SidebarProvider({
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [toggleSidebar])
 
+  // Auto-close the mobile drawer when the route changes — tapping a nav
+  // item now also dismisses the sidebar, matching standard mobile patterns.
+  // Desktop is unaffected (the sheet only mounts on mobile).
+  const pathname = usePathname()
+  const pathnameRef = React.useRef(pathname)
+  React.useEffect(() => {
+    if (pathnameRef.current !== pathname) {
+      pathnameRef.current = pathname
+      if (isMobile && openMobile) setOpenMobile(false)
+    }
+  }, [pathname, isMobile, openMobile])
+
   // We add a state so that we can do data-state="expanded" or "collapsed".
   // This makes it easier to style the sidebar with Tailwind classes.
   const state = open ? "expanded" : "collapsed"
@@ -186,7 +202,11 @@ function Sidebar({
           data-sidebar="sidebar"
           data-slot="sidebar"
           data-mobile="true"
-          className="w-(--sidebar-width) bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden"
+          // The default Sheet close button (X, top-right) is kept visible
+          // on mobile so users have an unmistakable way out — tapping the
+          // overlay and pressing Escape also work, but the visible X is
+          // what most thumbs go for first.
+          className="w-(--sidebar-width) bg-sidebar p-0 text-sidebar-foreground"
           style={
             {
               "--sidebar-width": SIDEBAR_WIDTH_MOBILE,

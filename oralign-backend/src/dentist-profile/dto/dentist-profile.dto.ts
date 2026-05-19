@@ -1,5 +1,19 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsOptional, IsNumber, Min, Max } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  IsString,
+  IsOptional,
+  IsNumber,
+  Min,
+  Max,
+  IsArray,
+  ValidateNested,
+  IsEnum,
+  IsBoolean,
+  Matches,
+  ArrayMaxSize,
+} from 'class-validator';
+import { DayOfWeek } from '@prisma/client';
 
 export class CreateDentistProfileDto {
   @ApiProperty({
@@ -95,6 +109,48 @@ export class CreateDentistProfileDto {
 }
 
 export class UpdateDentistProfileDto extends CreateDentistProfileDto {}
+
+const HHMM = /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/;
+
+export class WeeklyHoursEntryDto {
+  @ApiProperty({ enum: DayOfWeek, example: 'monday' })
+  @IsEnum(DayOfWeek)
+  dayOfWeek!: DayOfWeek;
+
+  @ApiProperty({ example: '09:00', description: 'HH:mm 24-hour format' })
+  @IsString()
+  @Matches(HHMM, { message: 'openTime must be HH:mm (24h)' })
+  openTime!: string;
+
+  @ApiProperty({ example: '17:00', description: 'HH:mm 24-hour format' })
+  @IsString()
+  @Matches(HHMM, { message: 'closeTime must be HH:mm (24h)' })
+  closeTime!: string;
+
+  @ApiProperty({ example: false })
+  @IsBoolean()
+  isClosed!: boolean;
+}
+
+/**
+ * Combined create-or-update payload for the onboarding flow. Saves the
+ * clinic profile AND the seven-day weekly schedule in a single atomic
+ * request — eliminates the two-step UI dance where the frontend has to
+ * wait for the profile to exist before it can save working hours.
+ */
+export class SetupClinicDto extends CreateDentistProfileDto {
+  @ApiProperty({
+    type: [WeeklyHoursEntryDto],
+    description:
+      'Full weekly schedule (replaces any existing rows). Each entry must ' +
+      'cover one weekday — typically 7 entries, max 7.',
+  })
+  @IsArray()
+  @ArrayMaxSize(7)
+  @ValidateNested({ each: true })
+  @Type(() => WeeklyHoursEntryDto)
+  workingHours!: WeeklyHoursEntryDto[];
+}
 
 export class DentistProfileResponseDto {
   @ApiProperty()

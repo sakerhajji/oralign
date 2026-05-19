@@ -211,6 +211,42 @@ export function usePermanentlyDeleteUser(): UseMutationResult<MessageResponse, E
 }
 
 /**
+ * Hook to approve / reject / re-pending a user (Admin only).
+ * On approval the backend sends the welcome email automatically.
+ */
+export function useUpdateApproval(): UseMutationResult<
+  User,
+  Error,
+  { id: string; verificationStatus: 'pending' | 'approved' | 'rejected' }
+> {
+  const queryClient = useQueryClient();
+  return useMutation<
+    User,
+    Error,
+    { id: string; verificationStatus: 'pending' | 'approved' | 'rejected' }
+  >({
+    mutationFn: ({ id, verificationStatus }) =>
+      usersService.updateApproval(id, verificationStatus),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: userKeys.lists() });
+      queryClient.invalidateQueries({
+        queryKey: userKeys.detail(variables.id),
+      });
+      const verb =
+        variables.verificationStatus === 'approved'
+          ? 'approved'
+          : variables.verificationStatus === 'rejected'
+            ? 'rejected'
+            : 'set to pending';
+      toast.success(`User ${verb}.`);
+    },
+    onError: (error: Error) => {
+      toast.error(extractApiErrorMessage(error));
+    },
+  });
+}
+
+/**
  * Hook to bulk permanently delete users (Hard delete - Admin only)
  */
 export function useBulkPermanentlyDeleteUsers(): UseMutationResult<MessageResponse & { count: number }, Error, BulkActionDto> {

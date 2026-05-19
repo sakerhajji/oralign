@@ -10,7 +10,9 @@ import {
   FileText,
   FileUp,
   ImageIcon,
+  Loader2,
   Maximize2,
+  Pencil,
   RotateCcw,
   ScanLine,
   Trash2,
@@ -18,6 +20,7 @@ import {
   Video,
   X,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import {
@@ -42,6 +45,8 @@ import {
 import { getAccessToken } from '@/lib/api';
 import { OrderFile, OrderFileCategory } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { ImageEditDialog } from './image-edit-dialog';
+import { ZipUploadDialog } from './zip-upload-dialog';
 
 const categories = [
   [OrderFileCategory.RIGHT_PHOTO, 'Right photo'],
@@ -60,13 +65,20 @@ const categories = [
   [OrderFileCategory.OTHER, 'Other'],
 ] as const;
 
+// Slot order is meaningful — on a 3-column grid the rows read as:
+//   Row 1 (extraoral):  profile      | face-at-rest | smile
+//   Row 2 (intraoral):  left lateral | frontal occl | right lateral
+//   Row 3 (occlusal):   upper occl   | lower occl
+// On 2-column screens they pair into natural left/right couples instead.
 const patientImageSlots = [
+  // ── Row 1: extraoral facial views ──────────────────────────────────────
   {
-    key: 'smile',
-    title: 'Smile photo',
-    category: OrderFileCategory.FRONT_PHOTO,
+    key: 'profile',
+    title: 'Profile photo',
+    category: OrderFileCategory.LEFT_PHOTO,
     icon: ImageIcon,
     accept: 'image/*',
+    referenceImage: '/defaultImage/Profile%20photo.png',
   },
   {
     key: 'face-rest',
@@ -74,34 +86,27 @@ const patientImageSlots = [
     category: OrderFileCategory.IMAGE,
     icon: ImageIcon,
     accept: 'image/*',
+    // Default reference swapped on purpose — the "smile" reference makes
+    // it clearer to the dentist what view this slot expects, even though
+    // the slot is technically "face at rest". See sibling slot below.
+    referenceImage: '/defaultImage/Smilephoto.png',
   },
   {
-    key: 'profile',
-    title: 'Profile photo',
-    category: OrderFileCategory.LEFT_PHOTO,
+    key: 'smile',
+    title: 'Smile photo',
+    category: OrderFileCategory.FRONT_PHOTO,
     icon: ImageIcon,
     accept: 'image/*',
+    referenceImage: '/defaultImage/Faceatrestphoto.png',
   },
-  {
-    key: 'upper-occlusal',
-    title: 'Upper occlusal view',
-    category: OrderFileCategory.UPPER_PHOTO,
-    icon: ScanLine,
-    accept: 'image/*',
-  },
-  {
-    key: 'lower-occlusal',
-    title: 'Lower occlusal view',
-    category: OrderFileCategory.LOWER_PHOTO,
-    icon: ScanLine,
-    accept: 'image/*',
-  },
+  // ── Row 2: intraoral left / frontal / right ────────────────────────────
   {
     key: 'left-lateral',
     title: 'Left lateral view',
     category: OrderFileCategory.LEFT_PHOTO,
     icon: ImageIcon,
     accept: 'image/*',
+    referenceImage: '/defaultImage/Leftlateralview.png',
   },
   {
     key: 'frontal-occlusion',
@@ -109,6 +114,7 @@ const patientImageSlots = [
     category: OrderFileCategory.FRONT_PHOTO,
     icon: ImageIcon,
     accept: 'image/*',
+    referenceImage: '/defaultImage/Frontalocclusionview.png',
   },
   {
     key: 'right-lateral',
@@ -116,6 +122,24 @@ const patientImageSlots = [
     category: OrderFileCategory.RIGHT_PHOTO,
     icon: ImageIcon,
     accept: 'image/*',
+    referenceImage: '/defaultImage/Rightlateralview.png',
+  },
+  // ── Row 3: intraoral occlusal views ────────────────────────────────────
+  {
+    key: 'upper-occlusal',
+    title: 'Upper occlusal view',
+    category: OrderFileCategory.UPPER_PHOTO,
+    icon: ScanLine,
+    accept: 'image/*',
+    referenceImage: '/defaultImage/Upperocclusalview.png',
+  },
+  {
+    key: 'lower-occlusal',
+    title: 'Lower occlusal view',
+    category: OrderFileCategory.LOWER_PHOTO,
+    icon: ScanLine,
+    accept: 'image/*',
+    referenceImage: '/defaultImage/Lowerocclusalview.png',
   },
 ] as const;
 
@@ -126,6 +150,7 @@ const radiographySlots = [
     category: OrderFileCategory.ORTHOPANTOMOGRAPHY,
     icon: ScanLine,
     accept: 'image/*,.pdf',
+    referenceImage: '/defaultImage/Panoramicradiography.png',
   },
   {
     key: 'profile-tele',
@@ -133,6 +158,7 @@ const radiographySlots = [
     category: OrderFileCategory.IMAGE,
     icon: ScanLine,
     accept: 'image/*,.pdf',
+    referenceImage: '/defaultImage/Profileteleradiography.png',
   },
 ] as const;
 
@@ -166,6 +192,8 @@ type UploadSlotDefinition = {
   category: OrderFileCategory;
   icon?: typeof ImageIcon;
   accept?: string;
+  /** Public path to the reference photo shown as a placeholder. */
+  referenceImage?: string;
 };
 
 export function OrderFileUpload({
@@ -250,9 +278,22 @@ export function ClinicalOrderFiles({
       .map((slot) => fileForSlot(files, slot, patientImageSlots)?.id)
       .filter(Boolean),
   );
-  const extraPatientFiles = files.filter(
-    (file) => photoCategories.has(file.category) && !assignedPatientFileIds.has(file.id),
+  // Files that explicitly belong to a patient image slot — keyed by the
+  // `key__` prefix the upload helper writes. Helps us route legacy items
+  // that share a generic category (e.g. IMAGE) into the right bucket.
+  const patientSlotKeys = new Set<string>(
+    patientImageSlots.map((slot) => slot.key),
   );
+  const radiographySlotKeys = new Set<string>(
+    radiographySlots.map((slot) => slot.key),
+  );
+  const extraPatientFiles = files.filter((file) => {
+    if (assignedPatientFileIds.has(file.id)) return false;
+    const prefix = slotPrefixOf(file);
+    if (prefix && patientSlotKeys.has(prefix)) return true;
+    if (prefix && radiographySlotKeys.has(prefix)) return false;
+    return photoCategories.has(file.category);
+  });
 
   const uploadSlot = (slot: UploadSlotDefinition, file: File) => {
     uploadFiles.mutate({
@@ -263,26 +304,61 @@ export function ClinicalOrderFiles({
   };
 
   if (section === 'patient-images') {
+    // The slot list is laid out in two grids so the trailing occlusal row
+    // can be centred instead of orphaned in the left columns of a 3-col
+    // grid. The first six slots fill rows 1+2; the last two (upper / lower
+    // occlusal) go into a separate flex row that centres them as a pair.
+    const extraoralAndLateral = patientImageSlots.slice(0, 6);
+    const occlusals = patientImageSlots.slice(6);
+
     return (
       <div className="space-y-6">
         <SectionIntro
           title="Patient images"
-          description="Upload the facial and intraoral views that help the clinical team read the case quickly."
+          description="Upload each facial and intraoral view. The faint reference shows the expected angle — rotate or flip your photo to match before it uploads."
         />
-        <div className="grid gap-x-6 gap-y-8 md:grid-cols-2 xl:grid-cols-3">
-          {patientImageSlots.map((slot) => (
+
+        {/* ZIP bulk-upload moved to the Radiography / STL section — that
+            context is where dentists typically deal with bundles (CBCT
+            DICOM archives, multi-file STL exports). The patient-photo
+            section only has eight slots and bulk-upload was confusing. */}
+
+        <div className="grid justify-items-center gap-x-6 gap-y-6 sm:gap-y-8 md:grid-cols-2 md:justify-items-stretch xl:grid-cols-3">
+          {extraoralAndLateral.map((slot) => (
             <ClinicalMediaSlot
               key={slot.key}
               orderId={orderId}
               title={slot.title}
               icon={slot.icon}
               accept={slot.accept}
+              referenceImage={slot.referenceImage}
               disabled={readOnly || uploadFiles.isPending}
               file={fileForSlot(files, slot, patientImageSlots)}
               onSelect={(file) => uploadSlot(slot, file)}
             />
           ))}
         </div>
+        {occlusals.length > 0 && (
+          <div className="flex flex-wrap items-stretch justify-center gap-x-6 gap-y-6 sm:gap-y-8">
+            {occlusals.map((slot) => (
+              <div
+                key={slot.key}
+                className="w-full max-w-[320px] sm:max-w-[300px] md:w-[44%] xl:w-[30%]"
+              >
+                <ClinicalMediaSlot
+                  orderId={orderId}
+                  title={slot.title}
+                  icon={slot.icon}
+                  accept={slot.accept}
+                  referenceImage={slot.referenceImage}
+                  disabled={readOnly || uploadFiles.isPending}
+                  file={fileForSlot(files, slot, patientImageSlots)}
+                  onSelect={(file) => uploadSlot(slot, file)}
+                />
+              </div>
+            ))}
+          </div>
+        )}
         {extraPatientFiles.length > 0 && (
           <LegacyFileList
             title="Other patient images"
@@ -302,13 +378,19 @@ export function ClinicalOrderFiles({
       .map((slot) => fileForSlot(files, slot, radiographySlots)?.id)
       .filter(Boolean),
   );
-  const extraRadiographyFiles = files.filter(
-    (file) =>
-      (file.category === OrderFileCategory.ORTHOPANTOMOGRAPHY ||
-        file.category === OrderFileCategory.IMAGE ||
-        file.category === OrderFileCategory.PDF) &&
-      !assignedRadiographyFileIds.has(file.id),
-  );
+  // Same slot-key/category routing logic for radiography. Specifically,
+  // avoid pulling in patient-image files that happen to share the IMAGE
+  // category (face-rest slot) — they belong above, not here.
+  const extraRadiographyFiles = files.filter((file) => {
+    if (assignedRadiographyFileIds.has(file.id)) return false;
+    const prefix = slotPrefixOf(file);
+    if (prefix && radiographySlotKeys.has(prefix)) return true;
+    if (prefix && patientSlotKeys.has(prefix)) return false;
+    return (
+      file.category === OrderFileCategory.ORTHOPANTOMOGRAPHY ||
+      file.category === OrderFileCategory.PDF
+    );
+  });
   const assignedStlFileIds = new Set(
     stlSlots.map((slot) => fileForSlot(files, slot, stlSlots)?.id).filter(Boolean),
   );
@@ -323,7 +405,7 @@ export function ClinicalOrderFiles({
           title="Radiography images"
           description="Include panoramic and profile radiography files to support the diagnosis."
         />
-        <div className="grid gap-6 md:grid-cols-2">
+        <div className="grid justify-items-center gap-6 md:grid-cols-2 md:justify-items-stretch">
           {radiographySlots.map((slot) => (
             <ClinicalMediaSlot
               key={slot.key}
@@ -331,6 +413,7 @@ export function ClinicalOrderFiles({
               title={slot.title}
               icon={slot.icon}
               accept={slot.accept}
+              referenceImage={slot.referenceImage}
               disabled={readOnly || uploadFiles.isPending}
               file={fileForSlot(files, slot, radiographySlots)}
               onSelect={(file) => uploadSlot(slot, file)}
@@ -368,6 +451,21 @@ export function ClinicalOrderFiles({
             />
           ))}
         </div>
+
+        {/* ZIP / CBCT bundle upload — placed here because dentists who
+            upload a single archive almost always do so for radiology
+            (CBCT DICOM volumes) or to ship a multi-file STL export. The
+            ZipUploadDialog audits archive contents client-side before
+            anything leaves the browser; CBCT .dcm files are also
+            accepted as individual uploads. */}
+        {!readOnly && (
+          <ZipUploadAction
+            orderId={orderId}
+            title="Upload bundle (.zip) or CBCT (.dcm)"
+            description="Ship a single ZIP archive (e.g. a CBCT DICOM volume, or a multi-file STL export). We audit it client-side for executables and unsafe filenames before saving. Single .dcm DICOM files are also accepted."
+            category={OrderFileCategory.ZIP}
+          />
+        )}
         {extraStlFiles.length > 0 && (
           <LegacyFileList
             title="Other scan files"
@@ -735,6 +833,13 @@ function FullscreenFileViewer({
 }) {
   const [open, setOpen] = useState(false);
 
+  // Stop click-to-close from firing when the user clicks ON the image —
+  // only background clicks should dismiss. Defined here so both image and
+  // non-image branches share it.
+  const onBackdropClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (event.target === event.currentTarget) setOpen(false);
+  };
+
   return (
     <Dialog
       open={open}
@@ -749,87 +854,94 @@ function FullscreenFileViewer({
       <DialogContent
         showCloseButton={false}
         className="fixed inset-0 left-0 top-0 h-screen w-screen max-w-none translate-x-0 translate-y-0 overflow-hidden rounded-none border-0 bg-black/95 p-0 text-white ring-0 sm:max-w-none"
-        onClick={(event) => {
-          if (event.target === event.currentTarget) {
-            setOpen(false);
-          }
-        }}
+        onClick={onBackdropClick}
       >
         <DialogTitle className="sr-only">{displayFileName(file)}</DialogTitle>
-        <button
-          type="button"
-          aria-label="Close preview"
-          onClick={() => setOpen(false)}
-          className="absolute right-4 top-4 z-20 grid h-11 w-11 place-items-center rounded-full bg-white/10 text-white shadow-lg transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
-        >
-          <X className="h-5 w-5" />
-        </button>
-        <div className="pointer-events-none absolute left-4 top-4 z-10 max-w-[calc(100vw-6rem)]">
-          <p className="truncate text-sm font-semibold text-white">
-            {displayFileName(file)}
-          </p>
-          <p className="mt-0.5 text-xs text-white/60">
-            Click outside or press Esc to close
-          </p>
-        </div>
-        <div
-          className="flex h-full w-full items-center justify-center p-4 pt-20 sm:p-8 sm:pt-20"
-          onClick={(event) => {
-            if (event.target === event.currentTarget) {
-              setOpen(false);
-            }
-          }}
-        >
-          <div
-            className={cn(
-              'max-h-full max-w-full overflow-hidden',
-              type === 'image'
-                ? 'grid h-[calc(100vh-7rem)] w-[calc(100vw-2rem)] place-items-center'
-                : 'h-[min(82vh,820px)] w-[min(94vw,1280px)] rounded-md bg-background text-foreground shadow-2xl',
-            )}
-            onClick={(event) => {
-              if (type !== 'image') {
-                event.stopPropagation();
-                return;
-              }
 
-              const target = event.target as HTMLElement;
-              if (target.tagName.toLowerCase() === 'img') {
-                event.stopPropagation();
-                return;
-              }
-
-              setOpen(false);
-            }}
+        {/* Top bar — combines caption and close button into one flex row so
+            they never overlap on narrow phones (previous absolute-positioned
+            pair could collide below ~360 px). */}
+        <div className="absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-3 px-3 pt-3 sm:px-4 sm:pt-4">
+          <div className="pointer-events-none min-w-0 flex-1">
+            <p className="truncate text-sm font-semibold text-white">
+              {displayFileName(file)}
+            </p>
+            <p className="mt-0.5 hidden text-xs text-white/60 sm:block">
+              Click outside or press Esc to close
+            </p>
+          </div>
+          <button
+            type="button"
+            aria-label="Close preview"
+            onClick={() => setOpen(false)}
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white/10 text-white shadow-lg transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white sm:h-11 sm:w-11"
           >
-            <PreviewSurface
-              orderId={orderId}
-              objectUrl={objectUrl}
-              file={file}
-              type={type}
-              large
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Body — for images we go straight to the <img> with viewport-relative
+            constraints. Avoiding the previous percentage chain (parent h-* →
+            child max-h-full → image) because some flexbox/grid combinations
+            stop propagating the height cap, leaving the image at intrinsic
+            size and clipping past the viewport. */}
+        {type === 'image' && objectUrl ? (
+          <div
+            className="flex h-full w-full items-center justify-center px-2 pt-14 pb-4 sm:px-6 sm:pt-16 sm:pb-6"
+            onClick={onBackdropClick}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={objectUrl}
+              alt={displayFileName(file)}
+              draggable={false}
+              onClick={(event) => event.stopPropagation()}
+              className="block select-none rounded-md shadow-2xl"
+              style={{
+                maxWidth: '100%',
+                maxHeight: '100%',
+                width: 'auto',
+                height: 'auto',
+                objectFit: 'contain',
+              }}
             />
           </div>
-        </div>
+        ) : (
+          <div
+            className="flex h-full w-full items-center justify-center p-3 pt-14 sm:p-8 sm:pt-20"
+            onClick={onBackdropClick}
+          >
+            <div
+              className="h-[min(82vh,820px)] w-[min(96vw,1280px)] overflow-hidden rounded-md bg-background text-foreground shadow-2xl"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <PreviewSurface
+                orderId={orderId}
+                objectUrl={objectUrl}
+                file={file}
+                type={type}
+                large
+              />
+            </div>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );
 }
 
-function CircleFilePreview({
+function SlotFilePreview({
   orderId,
   file,
+  secureFile,
 }: {
   orderId: string;
   file: OrderFile;
+  /** Pre-hoisted from the parent so we don't double-fetch the blob. */
+  secureFile: SecureFileResult;
 }) {
   const previewType = getPreviewType(file);
-  const needsBlobPreview = ['image', 'pdf', 'video'].includes(previewType);
-  const { objectUrl, loading, error } = useSecureFileUrl(
-    orderId,
-    file.id,
-    needsBlobPreview,
-  );
+  const { objectUrl, loading, error } = secureFile;
 
   return (
     <FullscreenFileViewer
@@ -842,10 +954,10 @@ function CircleFilePreview({
         <button
           type="button"
           disabled={loading || (!!error && previewType !== 'model')}
-          className="group relative h-32 w-32 overflow-hidden rounded-full border bg-muted/30 shadow-sm transition hover:border-primary hover:ring-4 hover:ring-primary/10"
+          className="group relative aspect-[4/3] w-full max-w-[320px] overflow-hidden rounded-xl border bg-muted/30 shadow-sm transition hover:border-primary hover:ring-4 hover:ring-primary/10 sm:max-w-[260px]"
         >
           {loading ? (
-            <Skeleton className="h-full w-full rounded-full" />
+            <Skeleton className="h-full w-full rounded-xl" />
           ) : previewType === 'image' && objectUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -864,7 +976,9 @@ function CircleFilePreview({
               )}
             </span>
           )}
-          <span className="absolute inset-x-0 bottom-0 bg-background/88 py-2 text-xs font-medium opacity-0 transition group-hover:opacity-100">
+          {/* Hover affordance — solid pill in the bottom-right corner so it
+              never sits ON the patient photo full-width. */}
+          <span className="pointer-events-none absolute bottom-2 right-2 rounded-full bg-foreground/85 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-background opacity-0 shadow transition group-hover:opacity-100">
             View
           </span>
         </button>
@@ -878,6 +992,7 @@ function ClinicalMediaSlot({
   title,
   icon: Icon,
   accept,
+  referenceImage,
   disabled,
   file,
   onSelect,
@@ -886,6 +1001,8 @@ function ClinicalMediaSlot({
   title: string;
   icon: typeof ImageIcon;
   accept?: string;
+  /** Optional placeholder image showing the expected view orientation. */
+  referenceImage?: string;
   disabled?: boolean;
   file?: OrderFile;
   onSelect: (file: File) => void;
@@ -895,24 +1012,127 @@ function ClinicalMediaSlot({
     [title],
   );
 
+  // Hoist the secure-blob fetch up here (instead of leaving it inside
+  // SlotFilePreview) so both the preview AND the Edit button reuse the same
+  // cached blob — no duplicate authenticated request, no token-refresh race.
+  const isImage = !!file && file.mimeType.startsWith('image/');
+  const previewType = file ? getPreviewType(file) : 'file';
+  const needsBlobPreview =
+    !!file && ['image', 'pdf', 'video'].includes(previewType);
+  const secureFile = useSecureFileUrl(orderId, file?.id ?? '', needsBlobPreview);
+
+  // Intercept the OS picker — instead of uploading immediately, open the
+  // editor so the user can rotate/flip the image first. Non-image files
+  // (e.g. PDFs picked for radiography) skip the editor entirely.
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [reEditing, setReEditing] = useState(false);
+
+  const handlePicked = (picked: File) => {
+    if (picked.type.startsWith('image/')) {
+      setPendingFile(picked);
+    } else {
+      onSelect(picked);
+    }
+  };
+
+  // Re-open the editor with the ALREADY-UPLOADED image. We don't refetch
+  // the bytes — `useSecureFileUrl` already loaded them into a blob: URL for
+  // the preview. We just convert that local blob back into a File so the
+  // editor's existing pipeline can consume it, exactly like an OS-picked
+  // file. blob: URLs are same-origin and unauthenticated, so this never
+  // races against token expiry or CORS.
+  const handleEditExisting = async () => {
+    if (!file) return;
+    if (!isImage) {
+      toast.error('Only images can be rotated or flipped.');
+      return;
+    }
+    if (secureFile.error) {
+      toast.error(`Couldn't open the image: ${secureFile.error}`);
+      return;
+    }
+    if (!secureFile.objectUrl) {
+      toast.error('The image is still loading — try again in a moment.');
+      return;
+    }
+    setReEditing(true);
+    try {
+      const response = await fetch(secureFile.objectUrl); // blob: URL, local
+      if (!response.ok) throw new Error('Local image cache miss.');
+      const blob = await response.blob();
+      const reconstructed = new File([blob], displayFileName(file), {
+        type: blob.type || file.mimeType || 'image/jpeg',
+      });
+      setPendingFile(reconstructed);
+    } catch (err) {
+      // Log the underlying error for diagnostics; surface a clean toast.
+      // eslint-disable-next-line no-console
+      console.error('[ClinicalMediaSlot] edit-existing failed:', err);
+      toast.error('Could not open the editor for this image.');
+    } finally {
+      setReEditing(false);
+    }
+  };
+
   return (
-    <div className="grid justify-items-center gap-3 rounded-md border bg-background p-4 text-center">
+    <div className="grid w-full max-w-[340px] justify-items-center gap-3 rounded-xl border bg-background p-3 text-center shadow-sm sm:max-w-none sm:p-4">
       <p className="text-sm font-semibold text-foreground">{title}</p>
+
       {file ? (
-        <CircleFilePreview orderId={orderId} file={file} />
+        <SlotFilePreview
+          orderId={orderId}
+          file={file}
+          secureFile={secureFile}
+        />
       ) : (
         <label
           htmlFor={inputId}
           className={cn(
-            'group grid h-32 w-32 cursor-pointer place-items-center rounded-full border bg-muted/40 transition hover:border-primary hover:bg-primary/5',
+            'group relative grid aspect-[4/3] w-full max-w-[320px] cursor-pointer place-items-center overflow-hidden rounded-xl border bg-muted/30 transition hover:border-primary hover:bg-primary/5 sm:max-w-[260px]',
             disabled && 'pointer-events-none opacity-60',
           )}
         >
-          <span className="grid h-24 w-24 place-items-center rounded-full bg-background shadow-sm">
-            <Icon className="h-10 w-10 text-muted-foreground transition group-hover:text-primary" />
-          </span>
+          {referenceImage ? (
+            <>
+              {/* `object-contain` shows the whole reference (the X-ray
+                  doesn't get zoomed/cropped). A neutral inner backdrop
+                  keeps the image readable when its own padding is light,
+                  and prevents it from melting into the card. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={referenceImage}
+                alt={`${title} reference`}
+                aria-hidden
+                className="h-full w-full object-contain p-2 transition group-hover:scale-[1.02]"
+              />
+
+              {/* Subtle inset border separates the image area from the
+                  card edge. */}
+              <span
+                className="pointer-events-none absolute inset-0 rounded-xl ring-1 ring-inset ring-border/40 transition group-hover:ring-primary/40"
+                aria-hidden
+              />
+
+              {/* Soft "Click to upload your photo" overlay — only visible
+                  on hover/focus so it doesn't compete with the reference
+                  image at rest. Makes the affordance discoverable without
+                  a permanent badge over the picture. */}
+              <span
+                className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-center gap-1.5 bg-gradient-to-t from-foreground/70 via-foreground/35 to-transparent px-3 pt-6 pb-2 text-[11px] font-semibold uppercase tracking-wide text-background opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100"
+                aria-hidden
+              >
+                <UploadCloud className="h-3.5 w-3.5" />
+                Click to upload your photo
+              </span>
+            </>
+          ) : (
+            <span className="grid h-20 w-20 place-items-center rounded-2xl bg-background shadow-sm">
+              <Icon className="h-9 w-9 text-muted-foreground transition group-hover:text-primary" />
+            </span>
+          )}
         </label>
       )}
+
       <input
         id={inputId}
         type="file"
@@ -921,21 +1141,58 @@ function ClinicalMediaSlot({
         disabled={disabled}
         onChange={(event) => {
           const selected = event.target.files?.[0];
-          if (!selected) return;
-          onSelect(selected);
+          if (!selected) {
+            event.currentTarget.value = '';
+            return;
+          }
+          handlePicked(selected);
           event.currentTarget.value = '';
         }}
       />
-      <Button type="button" variant="secondary" size="sm" asChild disabled={disabled}>
-        <label htmlFor={inputId} className="cursor-pointer">
-          <UploadCloud className="mr-2 h-4 w-4" />
-          {file ? 'Replace File' : 'Choose File'}
-        </label>
-      </Button>
+
+      <div className="flex items-center gap-2">
+        <Button type="button" variant="secondary" size="sm" asChild disabled={disabled}>
+          <label htmlFor={inputId} className="cursor-pointer">
+            <UploadCloud className="mr-2 h-4 w-4" />
+            {file ? 'Replace' : 'Upload'}
+          </label>
+        </Button>
+        {file && file.mimeType.startsWith('image/') && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleEditExisting}
+            disabled={disabled || reEditing}
+            title="Rotate or flip the uploaded photo"
+          >
+            {reEditing ? (
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Pencil className="mr-1.5 h-3.5 w-3.5" />
+            )}
+            Edit
+          </Button>
+        )}
+      </div>
+
       {file && (
         <p className="max-w-48 truncate text-xs text-muted-foreground">
           {displayFileName(file)}
         </p>
+      )}
+
+      {pendingFile && (
+        <ImageEditDialog
+          file={pendingFile}
+          title={title}
+          referenceImage={referenceImage}
+          onCancel={() => setPendingFile(null)}
+          onConfirm={(edited) => {
+            setPendingFile(null);
+            onSelect(edited);
+          }}
+        />
       )}
     </div>
   );
@@ -1131,6 +1388,9 @@ function StlModelViewer({
         if (disposed) return;
 
         const scene = new THREE.Scene();
+        // No scene.background — `alpha: true` keeps the renderer
+        // transparent so the soft light gradient on the container shows
+        // through. That's the "default" look the wrapping card defines.
         const camera = new THREE.PerspectiveCamera(38, 1, 0.01, 100);
         renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -1148,10 +1408,12 @@ function StlModelViewer({
         const radius = geometry.boundingSphere?.radius || 1;
         const scale = radius > 0 ? 1.35 / radius : 1;
 
+        // Dark grey model material — Tailwind slate-600 (#475569). Reads
+        // as clearly dental but contrasts strongly against the white card.
         material = new THREE.MeshStandardMaterial({
-          color: 0xf1f5f9,
-          metalness: 0.04,
-          roughness: 0.46,
+          color: 0x475569,
+          metalness: 0.08,
+          roughness: 0.48,
           side: THREE.DoubleSide,
         });
         const mesh = new THREE.Mesh(geometry, material);
@@ -1159,19 +1421,23 @@ function StlModelViewer({
         mesh.rotation.x = -Math.PI / 2;
         scene.add(mesh);
 
+        // Edge overlay — slate-900 at low opacity so it crisps up the
+        // silhouette against white without dominating the surface shading.
         edgeMaterial = new THREE.LineBasicMaterial({
-          color: readPrimaryThreeColor(THREE),
+          color: 0x0f172a,
           transparent: true,
-          opacity: 0.35,
+          opacity: 0.25,
         });
         edgeGeometry = new THREE.EdgesGeometry(geometry, 28);
         const edges = new THREE.LineSegments(edgeGeometry, edgeMaterial);
         mesh.add(edges);
 
-        const ambient = new THREE.HemisphereLight(0xffffff, 0x94a3b8, 2.4);
+        // Lighting tuned for a dark model on a white scene — bright
+        // hemisphere keeps shadows soft, key light gives the cusps depth.
+        const ambient = new THREE.HemisphereLight(0xffffff, 0x94a3b8, 2.2);
         scene.add(ambient);
 
-        const keyLight = new THREE.DirectionalLight(0xffffff, 2.2);
+        const keyLight = new THREE.DirectionalLight(0xffffff, 2.0);
         keyLight.position.set(3, -4, 5);
         scene.add(keyLight);
 
@@ -1179,9 +1445,8 @@ function StlModelViewer({
         fillLight.position.set(-4, 3, 3);
         scene.add(fillLight);
 
-        const grid = new THREE.GridHelper(3.6, 18, 0xcbd5e1, 0xe2e8f0);
-        grid.position.y = -1.1;
-        scene.add(grid);
+        // Reference grid ("échelle") stays removed — clean white-box
+        // presentation, no floor lines.
 
         camera.position.set(0, -4.2, 2.2);
         controls = new controlsModule.OrbitControls(camera, renderer.domElement);
@@ -1238,6 +1503,8 @@ function StlModelViewer({
   return (
     <div
       className={cn(
+        // Default theme — soft light gradient. Matches the rest of the
+        // dashboard's card surfaces; transparent canvas sits on top.
         'relative w-full overflow-hidden rounded-md bg-[radial-gradient(circle_at_top,_hsl(var(--primary)/0.10),_transparent_46%),linear-gradient(180deg,_hsl(var(--background)),_hsl(var(--muted)/0.55))]',
         large ? 'h-full min-h-[420px]' : 'h-64 md:h-72',
       )}
@@ -1248,7 +1515,7 @@ function StlModelViewer({
       />
       {status === 'loading' && (
         <div className="absolute inset-0 grid place-items-center bg-background/70 text-sm text-muted-foreground">
-          Loading 3D STL...
+          Loading 3D STL…
         </div>
       )}
       {status === 'error' && (
@@ -1290,6 +1557,95 @@ function ModelPlaceholder({ file, large }: { file: OrderFile; large?: boolean })
         {extensionFor(file.originalName).toUpperCase()} model
       </span>
     </div>
+  );
+}
+
+function ZipUploadAction({
+  orderId,
+  title,
+  description,
+  category,
+}: {
+  orderId: string;
+  title: string;
+  description: string;
+  category: OrderFileCategory;
+}) {
+  const [open, setOpen] = useState(false);
+  const uploadFiles = useUploadOrderFiles();
+  const dicomInputId = useMemo(
+    () => `dicom-upload-${orderId}-${category}`,
+    [orderId, category],
+  );
+
+  return (
+    <>
+      <div className="flex flex-col items-start gap-3 rounded-xl border border-dashed bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3">
+          <FileArchive className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+          <div className="min-w-0">
+            <p className="text-sm font-semibold">{title}</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+          </div>
+        </div>
+        <div className="flex flex-col gap-2 self-stretch sm:flex-row sm:self-auto">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setOpen(true)}
+            disabled={uploadFiles.isPending}
+            className="gap-2"
+          >
+            <UploadCloud className="h-4 w-4" />
+            Choose ZIP…
+          </Button>
+          {/* CBCT volumes sometimes ship as a single uncompressed .dcm
+              file rather than an archive. Offering a direct uploader
+              avoids forcing the dentist to zip a single file. */}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            asChild
+            disabled={uploadFiles.isPending}
+          >
+            <label htmlFor={dicomInputId} className="cursor-pointer gap-2">
+              <UploadCloud className="h-4 w-4" />
+              Single .dcm
+            </label>
+          </Button>
+          <input
+            id={dicomInputId}
+            type="file"
+            accept=".dcm,application/dicom"
+            className="sr-only"
+            disabled={uploadFiles.isPending}
+            onChange={(event) => {
+              const picked = event.target.files?.[0];
+              event.currentTarget.value = '';
+              if (!picked) return;
+              uploadFiles.mutate({
+                id: orderId,
+                files: [picked],
+                category: OrderFileCategory.IMAGE,
+              });
+            }}
+          />
+        </div>
+      </div>
+      <ZipUploadDialog
+        open={open}
+        title={title}
+        onClose={() => setOpen(false)}
+        onConfirm={(file) => {
+          uploadFiles.mutate(
+            { id: orderId, files: [file], category },
+            { onSettled: () => setOpen(false) },
+          );
+        }}
+      />
+    </>
   );
 }
 
@@ -1350,7 +1706,18 @@ function FileCategorySelect({
 
 type PreviewType = 'image' | 'pdf' | 'video' | 'model' | 'file';
 
-function useSecureFileUrl(orderId: string, fileId: string, enabled: boolean) {
+export interface SecureFileResult {
+  objectUrl?: string;
+  loading: boolean;
+  error?: string;
+  refresh: () => void;
+}
+
+function useSecureFileUrl(
+  orderId: string,
+  fileId: string,
+  enabled: boolean,
+): SecureFileResult {
   const [version, setVersion] = useState(0);
   const [state, setState] = useState<{
     objectUrl?: string;
@@ -1423,20 +1790,6 @@ function buildDownloadUrl(orderId: string, fileId: string) {
   return `${apiBase}/orders/${orderId}/files/${fileId}/download`;
 }
 
-function readPrimaryThreeColor(THREE: typeof import('three')) {
-  const primary = getComputedStyle(document.documentElement)
-    .getPropertyValue('--primary')
-    .trim();
-
-  if (!primary) return new THREE.Color(0x334155);
-
-  try {
-    return new THREE.Color(`hsl(${primary})`);
-  } catch {
-    return new THREE.Color(0x334155);
-  }
-}
-
 function withSlotName(slotKey: string, file: File) {
   return new File([file], `${slotKey}__${file.name}`, {
     type: file.type,
@@ -1477,6 +1830,13 @@ function latestByCreatedAt(files: OrderFile[]) {
 
 function displayFileName(file: OrderFile) {
   return file.originalName.replace(/^[a-z0-9-]+__/i, '');
+}
+
+/** Returns the slot key encoded into a file's name (the `key__` prefix the
+ *  uploader writes), or null for legacy / category-only files. */
+function slotPrefixOf(file: OrderFile): string | null {
+  const match = file.originalName.match(/^([a-z0-9-]+)__/i);
+  return match ? match[1] : null;
 }
 
 function downloadOrderFile(orderId: string, file: OrderFile) {

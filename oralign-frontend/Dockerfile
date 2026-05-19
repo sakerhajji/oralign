@@ -15,6 +15,14 @@ ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
 COPY package*.json ./
 RUN npm ci
 
+# CACHE_BUST is an opaque token used to invalidate the source-copy layer
+# (and everything after it) on demand, while preserving the npm ci cache.
+# Pass a new value to force a fresh `next build` even when BuildKit
+# thinks the source hash is unchanged:
+#   docker compose build --build-arg CACHE_BUST=$(date +%s) frontend
+ARG CACHE_BUST=1
+RUN echo "CACHE_BUST=$CACHE_BUST" > /tmp/cache-bust.txt
+
 COPY . .
 RUN npm run build
 

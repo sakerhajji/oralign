@@ -1,4 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import type { Cache } from 'cache-manager';
 import {
   NotFoundException,
   BadRequestException,
@@ -12,6 +14,7 @@ import {
 } from '../dto/working-hours.dto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UserRole, WorkingHours } from '@prisma/client';
+import { TTL, whKey } from '../../common/cache/cache-keys';
 
 type Caller = { userId: string; role: string };
 
@@ -19,9 +22,12 @@ const ADMIN_ROLES: string[] = [UserRole.admin, UserRole.super_admin];
 
 @Injectable()
 export class WorkingHoursService {
+  private readonly logger = new Logger(WorkingHoursService.name);
+
   constructor(
     private readonly workingHoursRepository: WorkingHoursRepository,
     private readonly prisma: PrismaService,
+    @Inject(CACHE_MANAGER) private readonly cache: Cache,
   ) {}
 
   async createWorkingHours(
@@ -45,26 +51,40 @@ export class WorkingHoursService {
       isClosed: createWorkingHoursDto.isClosed || false,
     });
 
+    await this.invalidate(dentistProfileId, workingHours.id);
+
     return this.mapToDto(workingHours);
   }
 
   async getWorkingHoursById(id: string): Promise<WorkingHoursResponseDto> {
-    const workingHours = await this.workingHoursRepository.findById(id);
+    const key = whKey.byId(id);
+    const cached = await this.safeGet<WorkingHoursResponseDto>(key);
+    if (cached) return cached;
 
+    const workingHours = await this.workingHoursRepository.findById(id);
     if (!workingHours) {
       throw new NotFoundException('Working hours not found');
     }
 
-    return this.mapToDto(workingHours);
+    const dto = this.mapToDto(workingHours);
+    await this.safeSet(key, dto, TTL.cold);
+    return dto;
   }
 
   async getWorkingHoursByDentistProfile(
     dentistProfileId: string,
   ): Promise<WorkingHoursResponseDto[]> {
+    const key = whKey.byProfile(dentistProfileId);
+    const cached = await this.safeGet<WorkingHoursResponseDto[]>(key);
+    if (cached) return cached;
+
     const workingHours =
       await this.workingHoursRepository.findByDentistProfile(dentistProfileId);
 
-    return workingHours.map((hours) => this.mapToDto(hours));
+    const dtos = workingHours.map((hours) => this.mapToDto(hours));
+    // Cold cache — working hours change a handful of times per year at most.
+    await this.safeSet(key, dtos, TTL.cold);
+    return dtos;
   }
 
   async updateWorkingHours(
@@ -104,6 +124,8 @@ export class WorkingHoursService {
       isClosed: updateWorkingHoursDto.isClosed,
     });
 
+    await this.invalidate(workingHours.dentistProfileId, id);
+
     return this.mapToDto(updatedWorkingHours);
   }
 
@@ -120,6 +142,7 @@ export class WorkingHoursService {
     await this.assertOwnership(workingHours.dentistProfileId, caller);
 
     await this.workingHoursRepository.delete(id);
+    await this.invalidate(workingHours.dentistProfileId, id);
 
     return { message: 'Working hours deleted successfully' };
   }
@@ -146,6 +169,44 @@ export class WorkingHoursService {
     const timeRegex = /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/;
     if (!timeRegex.test(time)) {
       throw new BadRequestException('Time must be in HH:mm format (24-hour)');
+    }
+  }
+
+  private async invalidate(
+    dentistProfileId: string,
+    id: string,
+  ): Promise<void> {
+    await Promise.all([
+      this.safeDel(whKey.byProfile(dentistProfileId)),
+      this.safeDel(whKey.byId(id)),
+    ]);
+  }
+
+  // ─── Cache helpers ────────────────────────────────────────────────────────
+
+  private async safeGet<T>(key: string): Promise<T | undefined> {
+    try {
+      const value = await this.cache.get<T>(key);
+      return value ?? undefined;
+    } catch (err) {
+      this.logger.warn(`cache.get(${key}) failed: ${(err as Error).message}`);
+      return undefined;
+    }
+  }
+
+  private async safeSet<T>(key: string, value: T, ttl: number): Promise<void> {
+    try {
+      await this.cache.set(key, value, ttl);
+    } catch (err) {
+      this.logger.warn(`cache.set(${key}) failed: ${(err as Error).message}`);
+    }
+  }
+
+  private async safeDel(key: string): Promise<void> {
+    try {
+      await this.cache.del(key);
+    } catch (err) {
+      this.logger.warn(`cache.del(${key}) failed: ${(err as Error).message}`);
     }
   }
 

@@ -24,6 +24,7 @@ import {
   CreateDentistProfileDto,
   UpdateDentistProfileDto,
   DentistProfileResponseDto,
+  SetupClinicDto,
 } from '../dto/dentist-profile.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -56,6 +57,29 @@ export class DentistProfileController {
     @CurrentUser() user: JwtPayload,
   ): Promise<DentistProfileResponseDto> {
     return this.profileService.createProfile(user.sub, createProfileDto);
+  }
+
+  @Post('setup')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.dentist, UserRole.admin, 'super_admin' as UserRole)
+  @ApiBearerAuth('access-token')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Onboarding: create/update the dentist profile AND replace working ' +
+      'hours atomically. Use this from the onboarding wizard instead of the ' +
+      'separate /dentist-profile and /working-hours endpoints.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Profile + weekly schedule saved successfully',
+    type: DentistProfileResponseDto,
+  })
+  async setupClinic(
+    @Body() dto: SetupClinicDto,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<DentistProfileResponseDto> {
+    return this.profileService.setupClinic(user.sub, dto);
   }
 
   @Post('admin/user/:userId')

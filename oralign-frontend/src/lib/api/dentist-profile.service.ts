@@ -8,9 +8,21 @@ import {
   SearchByCityDto,
   SearchNearbyDto,
   MessageResponse,
+  SetupClinicDto,
 } from '@/lib/types';
 
 export const dentistProfileService = {
+  /**
+   * Atomic onboarding endpoint — saves the dentist profile AND the entire
+   * weekly schedule in a single transaction. Use this from the onboarding
+   * wizard so the UI never has to await two separate mutations to keep
+   * `clinicComplete` and `scheduleComplete` in sync.
+   */
+  setupClinic: async (data: SetupClinicDto): Promise<DentistProfile> => {
+    const response = await apiClient.post<DentistProfile>('/dentist-profile/setup', data);
+    return response.data;
+  },
+
   /**
    * Create dentist profile (for current user)
    */

@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { UserRole } from '@prisma/client';
+import { UserRole, VerificationStatus } from '@prisma/client';
 
 export class AuthTokenDto {
   @ApiProperty({
@@ -51,6 +51,15 @@ export class AuthResponseDto {
   isEmailVerified!: boolean;
 
   @ApiProperty({
+    enum: VerificationStatus,
+    example: VerificationStatus.pending,
+    description:
+      'Admin approval state for the account. The app must gate access ' +
+      'until this reaches "approved".',
+  })
+  verificationStatus!: VerificationStatus;
+
+  @ApiProperty({
     example: '/uploads/avatars/abc123.jpg',
     description: 'URL of the user avatar image',
     required: false,
@@ -74,6 +83,8 @@ export class VerifyEmailUserDto {
   role!: UserRole;
   @ApiProperty()
   isEmailVerified!: boolean;
+  @ApiProperty({ enum: VerificationStatus })
+  verificationStatus!: VerificationStatus;
 }
 
 export class VerifyEmailResponseDto {

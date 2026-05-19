@@ -13,6 +13,11 @@ COPY prisma ./prisma/
 # DATABASE_URL dummy: prisma generate only needs schema, not a live DB
 RUN DATABASE_URL="postgresql://u:p@localhost:5432/db" npx prisma generate
 
+# CACHE_BUST invalidates COPY+build when source hash is unchanged but stale.
+# Pass: docker compose build --build-arg CACHE_BUST=$(date +%s) backend
+ARG CACHE_BUST=1
+RUN echo "CACHE_BUST=$CACHE_BUST" > /tmp/cache-bust.txt
+
 COPY . .
 RUN npm run build
 

@@ -5,13 +5,15 @@ import { AuthService } from './services/auth.service';
 import { AuthController } from './controllers/auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { PrismaModule } from '../prisma/prisma.module';
+import { requiredSecret } from '../common/config/required-secret';
 
 @Module({
   imports: [
     PrismaModule,
     PassportModule,
     JwtModule.register({
-      secret: process.env.JWT_SECRET || 'your-secret-key',
+      // Required in production — see requiredSecret for the rules.
+      secret: requiredSecret('JWT_SECRET'),
       signOptions: { expiresIn: '15m' },
     }),
   ],

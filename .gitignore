@@ -47,6 +47,12 @@ desktop.ini
 # ─── Claude / agent metadata ────────────────────────────────────
 .claude/
 
+# ─── Local asset source (not used at runtime) ───────────────────
+# Raw tooth SVGs lived in `teeths/` before they were extracted into
+# the runtime sprite at `oralign-frontend/public/teeth-sprite.svg`.
+# The sprite IS tracked; the raw source folder isn't.
+teeths/
+
 # ─── Misc ───────────────────────────────────────────────────────
 .turbo/
 .cache/

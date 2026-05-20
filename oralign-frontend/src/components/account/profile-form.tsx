@@ -67,6 +67,9 @@ export function ProfileForm({ user, onboarding = false, onSaved }: ProfileFormPr
 
   const handleAvatarSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
+    // Always clear the input's value so picking the SAME file twice still
+    // fires onChange (browsers suppress onChange when value is unchanged).
+    event.target.value = '';
     if (!file) return;
     if (!file.type.startsWith('image/')) {
       toast.error('Please select an image file.');
@@ -81,6 +84,9 @@ export function ProfileForm({ user, onboarding = false, onSaved }: ProfileFormPr
     reader.onload = (e) => {
       setAvatarPreview(e.target?.result as string);
     };
+    reader.onerror = () => {
+      toast.error('Could not read the selected image.');
+    };
     reader.readAsDataURL(file);
   };
 
@@ -93,10 +99,24 @@ export function ProfileForm({ user, onboarding = false, onSaved }: ProfileFormPr
     try {
       let updatedUser = user;
 
+      // Upload the avatar first if one is staged. We do this BEFORE the
+      // profile-data update so a failed upload aborts before the form
+      // shows a misleading "Profile updated" toast for the text fields.
+      // Errors are re-thrown so the outer try/finally still resets the
+      // submitting flag.
       if (avatarFile) {
-        updatedUser = await usersService.uploadAvatar(user.id, avatarFile);
-        login(updatedUser);
-        queryClient.invalidateQueries({ queryKey: userKeys.currentUser() });
+        try {
+          updatedUser = await usersService.uploadAvatar(user.id, avatarFile);
+          login(updatedUser);
+          queryClient.invalidateQueries({ queryKey: userKeys.currentUser() });
+        } catch (err) {
+          const message =
+            err instanceof Error && err.message
+              ? err.message
+              : 'Failed to upload avatar.';
+          toast.error(message);
+          throw err;
+        }
       }
 
       const trimmedPhone = normalizeOptional(values.phone);
@@ -124,7 +144,7 @@ export function ProfileForm({ user, onboarding = false, onSaved }: ProfileFormPr
       if (hasProfileDataChanges) {
         updatedUser = await updateProfile({ id: user.id, data: updateData });
       } else if (avatarFile) {
-        toast.success('Profile updated successfully.');
+        toast.success('Avatar updated.');
       }
 
       form.reset({
@@ -138,6 +158,10 @@ export function ProfileForm({ user, onboarding = false, onSaved }: ProfileFormPr
 
       // Let the parent page navigate to the next onboarding step
       onSaved?.();
+    } catch {
+      // Toast already surfaced inside the inner catch / by the mutation
+      // hook's onError. We swallow here so the user can fix whichever
+      // step failed and retry without a second uncaught-error toast.
     } finally {
       setIsUploadingAvatar(false);
     }

@@ -50,8 +50,15 @@ import {
   usePatient,
   usePermanentDeleteOrder,
 } from '@/lib/hooks';
+import { useQuotationForOrder } from '@/lib/hooks/use-quotations';
 import { useAuth } from '@/lib/providers/auth-provider';
-import { Gender, UserRole } from '@/lib/types';
+import {
+  Gender,
+  OrderStatus,
+  QuotationStatus,
+  TreatmentPlanStatus,
+  UserRole,
+} from '@/lib/types';
 import { useState } from 'react';
 
 // Defer the odontogram (its sprite payload is heavy) until the page mounts.
@@ -83,6 +90,11 @@ export default function OrderDetailPage() {
   // page needs the full demographic profile (sex, DOB, age) clinicians
   // expect to see for a treatment plan review.
   const patientQuery = usePatient(orderQuery.data?.patientId ?? '');
+
+  // Order-scoped quote — drives both whether the Quote tab is shown and
+  // which decision badge it carries. Doctors can read their own order's
+  // quote (RBAC allows owning dentist); admins always see it.
+  const quotationQuery = useQuotationForOrder(orderQuery.data?.id ?? '');
 
   if (orderQuery.isLoading) {
     return (
@@ -211,41 +223,71 @@ export default function OrderDetailPage() {
         </div>
       </header>
 
-      {/* ─── Order detail / Treatment plans — split into tabs so the
-            doctor can switch quickly between the clinical record and the
-            ongoing treatment-planning conversation without scrolling.
+      {/* ─── Tab visibility + default selection ─────────────────────────────
+            Doctors only see what's been created — no empty Quote tab on a
+            brand-new order. Admins/designers ALWAYS see both tabs because
+            they need an entry-point to create the first plan / first quote.
 
-            Default tab: when the order already has at least one treatment
-            plan, land on the Treatment Plans tab — that's where the
-            actionable state lives (approve, message, view IPR). If no
-            plans exist yet, the Order details tab is more useful.
+            Default tab priority (mirrors what's "live" in the order):
+              1. Quote exists                       → 'quote'
+              2. At least one treatment plan exists → 'treatment-plans'
+              3. Otherwise                          → 'order'
+            Computed from order.status as a synchronous fallback so the tab
+            picks correctly even before the /quotations/order/:id query
+            settles — the status itself encodes the lifecycle.
+
+            "Needs attention" dot on a tab:
+              • Doctor side: status awaits THEIR action
+                  - plan.status === 'ready'         → review treatment plan
+                  - quote.status === 'sent'         → approve / reject quote
+              • Admin / designer side: doctor reacted recently
+                  - plan.status approved / rejected
+                  - quote.status approved / rejected
 
             forceMount on both TabsContent keeps their React subtrees alive
-            across tab switches. Without it, Radix unmounts the inactive
-            panel — meaning every flip back to "Order details" remounted
-            the Section cards, refired their queries, and rebuilt the
-            (heavy) Odontogram + file thumbnails. data-[state=inactive]:hidden
-            still hides the inactive pane visually. */}
+            across tab switches — preserves chat socket, cached file
+            thumbnails, scroll position. data-[state=inactive]:hidden hides
+            the inactive pane visually without unmounting. */}
       <Tabs
-        defaultValue={
-          (order.treatmentPlansCount ?? 0) > 0 ? 'treatment-plans' : 'order'
-        }
+        defaultValue={computeDefaultTab({
+          status: order.status,
+          hasTreatmentPlans: (order.treatmentPlansCount ?? 0) > 0,
+          hasQuotation: !!quotationQuery.data,
+        })}
       >
         <TabsList className="w-full justify-start sm:w-auto">
           <TabsTrigger value="order">Order details</TabsTrigger>
-          <TabsTrigger value="treatment-plans" className="gap-1.5">
-            <Sparkles className="h-3.5 w-3.5" />
-            Treatment plans
-            {(order.treatmentPlansCount ?? 0) > 0 && (
-              <span className="ml-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
-                {order.treatmentPlansCount}
-              </span>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="quote" className="gap-1.5">
-            <FileText className="h-3.5 w-3.5" />
-            Quote
-          </TabsTrigger>
+          {showTreatmentTab({
+            isPlanner: isAdmin || user?.role === UserRole.DESIGNER,
+            hasTreatmentPlans: (order.treatmentPlansCount ?? 0) > 0,
+          }) && (
+            <TabsTrigger value="treatment-plans" className="gap-1.5">
+              <Sparkles className="h-3.5 w-3.5" />
+              Treatment plans
+              {(order.treatmentPlansCount ?? 0) > 0 && (
+                <span className="ml-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                  {order.treatmentPlansCount}
+                </span>
+              )}
+              {needsTreatmentAttention({
+                role: user?.role,
+                latestPlanStatus: order.latestPlanStatus,
+              }) && <AttentionDot />}
+            </TabsTrigger>
+          )}
+          {showQuoteTab({
+            isPlanner: isAdmin || user?.role === UserRole.DESIGNER,
+            hasQuotation: !!quotationQuery.data,
+          }) && (
+            <TabsTrigger value="quote" className="gap-1.5">
+              <FileText className="h-3.5 w-3.5" />
+              Quote
+              {needsQuoteAttention({
+                role: user?.role,
+                status: quotationQuery.data?.status,
+              }) && <AttentionDot />}
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent
@@ -417,6 +459,125 @@ export default function OrderDetailPage() {
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+// ─── Tab visibility / default / attention helpers ─────────────────────────
+
+/**
+ * Order statuses that imply a quotation has already been issued. Used as
+ * a synchronous fallback for the default-tab calculation so the page
+ * doesn't have to wait for the /quotations/order/:id query to settle
+ * before deciding which tab opens first.
+ */
+const POST_QUOTE_STATUSES = new Set<OrderStatus>([
+  OrderStatus.QUOTATION_SENT,
+  OrderStatus.PAYMENT_PLAN_SELECTED,
+  OrderStatus.PAYMENT_PENDING,
+  OrderStatus.PAYMENT_REVIEW,
+  OrderStatus.PAID,
+  OrderStatus.FABRICATION,
+  OrderStatus.READY_TO_SHIP,
+  OrderStatus.SHIPPED,
+  OrderStatus.FINISHED,
+]);
+
+/**
+ * Pick the initial tab on first mount.
+ * Priority: existing quote → existing treatment plan → order details.
+ * `hasQuotation` lags by one render-tick on first paint (async query);
+ * we compensate by also treating any post-quote OrderStatus as proof
+ * that a quote exists.
+ */
+function computeDefaultTab(args: {
+  status: OrderStatus;
+  hasTreatmentPlans: boolean;
+  hasQuotation: boolean;
+}): 'order' | 'treatment-plans' | 'quote' {
+  if (args.hasQuotation || POST_QUOTE_STATUSES.has(args.status)) {
+    return 'quote';
+  }
+  if (args.hasTreatmentPlans) {
+    return 'treatment-plans';
+  }
+  return 'order';
+}
+
+/** Treatment-plans tab is shown for planners always, doctors only when content exists. */
+function showTreatmentTab(args: {
+  isPlanner: boolean;
+  hasTreatmentPlans: boolean;
+}): boolean {
+  return args.isPlanner || args.hasTreatmentPlans;
+}
+
+/** Quote tab is shown for planners always, doctors only when a quote exists. */
+function showQuoteTab(args: {
+  isPlanner: boolean;
+  hasQuotation: boolean;
+}): boolean {
+  return args.isPlanner || args.hasQuotation;
+}
+
+/**
+ * Does the treatment tab need the doctor / planner's attention?
+ * – Doctor: a plan is "ready" → they should approve or reject.
+ * – Planner: the doctor just reacted (approved / rejected).
+ */
+function needsTreatmentAttention(args: {
+  role: UserRole | undefined;
+  latestPlanStatus?: TreatmentPlanStatus;
+}): boolean {
+  if (!args.latestPlanStatus) return false;
+  if (args.role === UserRole.DENTIST) {
+    return args.latestPlanStatus === TreatmentPlanStatus.READY;
+  }
+  if (
+    args.role === UserRole.ADMIN ||
+    args.role === UserRole.SUPER_ADMIN ||
+    args.role === UserRole.DESIGNER
+  ) {
+    return (
+      args.latestPlanStatus === TreatmentPlanStatus.APPROVED ||
+      args.latestPlanStatus === TreatmentPlanStatus.REJECTED
+    );
+  }
+  return false;
+}
+
+/** Same logic but for the quotation lifecycle. */
+function needsQuoteAttention(args: {
+  role: UserRole | undefined;
+  status?: QuotationStatus;
+}): boolean {
+  if (!args.status) return false;
+  if (args.role === UserRole.DENTIST) {
+    return args.status === QuotationStatus.SENT;
+  }
+  if (
+    args.role === UserRole.ADMIN ||
+    args.role === UserRole.SUPER_ADMIN ||
+    args.role === UserRole.DESIGNER
+  ) {
+    return (
+      args.status === QuotationStatus.APPROVED ||
+      args.status === QuotationStatus.REJECTED
+    );
+  }
+  return false;
+}
+
+/**
+ * Small pulsing dot rendered inside a TabsTrigger to signal "you have
+ * something to look at here". Pulses primary so it pops without being
+ * shouty like a destructive red would.
+ */
+function AttentionDot() {
+  return (
+    <span className="relative ml-1 flex h-2 w-2" aria-label="New activity">
+      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
+      <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
+    </span>
   );
 }
 

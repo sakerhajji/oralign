@@ -5,6 +5,7 @@ import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import { Loader2 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -14,7 +15,7 @@ import { PhoneInput } from '@/components/ui/phone-input';
 import { accountProfileSchema, type AccountProfileFormData } from '@/lib/schemas';
 import { type UpdateUserDto, type User } from '@/lib/types';
 import { useUpdateProfile } from '@/lib/hooks';
-import { usersService } from '@/lib/api';
+import { usersService, extractApiErrorMessage } from '@/lib/api';
 import { getAvatarUrl } from '@/lib/utils';
 import { useAuth } from '@/lib/providers';
 import { userKeys } from '@/lib/hooks/use-users';
@@ -40,8 +41,15 @@ export function ProfileForm({ user, onboarding = false, onSaved }: ProfileFormPr
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Avatar state — uploaded eagerly the moment the user picks a file.
+  // We deliberately do NOT couple it to the rest of the form's submit
+  // anymore: the previous "pick then save" UX gave users no feedback if
+  // they forgot to click Save, leading to the persistent "I uploaded but
+  // nothing changed" reports. With upload-on-pick the avatar is committed
+  // to the backend the instant a file is chosen, the preview shows the
+  // real backend URL (not a transient data: URL), and the Save button
+  // only handles the text fields. `avatarFile` is no longer needed.
   const [avatarPreview, setAvatarPreview] = useState<string>('');
-  const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
 
   const form = useForm<AccountProfileFormData>({
@@ -62,10 +70,20 @@ export function ProfileForm({ user, onboarding = false, onSaved }: ProfileFormPr
       country: user.country ?? '',
     });
     setAvatarPreview(getAvatarUrl(user.avatarUrl));
-    setAvatarFile(null);
   }, [user, form]);
 
-  const handleAvatarSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+  /**
+   * File-picker handler — uploads the avatar IMMEDIATELY and updates the
+   * preview to the new backend URL on success. No staging, no waiting
+   * for the Save button. This is the simplest UX that's hard to get
+   * wrong: pick → spinner → toast → preview updates → sidebar updates.
+   *
+   * Errors are surfaced via toast and leave the previous preview
+   * untouched, so the user can retry without losing context.
+   */
+  const handleAvatarSelect = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
     const file = event.target.files?.[0];
     // Always clear the input's value so picking the SAME file twice still
     // fires onChange (browsers suppress onChange when value is unchanged).
@@ -79,46 +97,43 @@ export function ProfileForm({ user, onboarding = false, onSaved }: ProfileFormPr
       toast.error('Avatar must be 5MB or smaller.');
       return;
     }
-    setAvatarFile(file);
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      setAvatarPreview(e.target?.result as string);
-    };
-    reader.onerror = () => {
-      toast.error('Could not read the selected image.');
-    };
-    reader.readAsDataURL(file);
+
+    setIsUploadingAvatar(true);
+    // Optimistic preview while the upload is in flight — a data: URL
+    // off the picked file. Replaced by the real backend URL on success,
+    // reverted to the previous user.avatarUrl on failure.
+    const previousPreview = avatarPreview;
+    try {
+      const reader = new FileReader();
+      const optimistic: string = await new Promise((resolve, reject) => {
+        reader.onload = (e) => resolve((e.target?.result as string) ?? '');
+        reader.onerror = () =>
+          reject(new Error('Could not read the selected image.'));
+        reader.readAsDataURL(file);
+      });
+      setAvatarPreview(optimistic);
+
+      const updated = await usersService.uploadAvatar(user.id, file);
+      // Replace the data: URL with the real backend URL (cache-busts on
+      // the new uuid filename, so no need for a ?t= query string).
+      setAvatarPreview(getAvatarUrl(updated.avatarUrl));
+      login(updated);
+      queryClient.invalidateQueries({ queryKey: userKeys.currentUser() });
+      toast.success('Avatar updated.');
+    } catch (err) {
+      setAvatarPreview(previousPreview);
+      toast.error(extractApiErrorMessage(err));
+    } finally {
+      setIsUploadingAvatar(false);
+    }
   };
 
   const countryValue = form.watch('country');
-  const isSubmitting = isPending || isUploadingAvatar;
-  const hasChanges = form.formState.isDirty || !!avatarFile;
+  const isSubmitting = isPending;
+  const hasChanges = form.formState.isDirty;
 
   const onSubmit = form.handleSubmit(async (values) => {
-    setIsUploadingAvatar(true);
     try {
-      let updatedUser = user;
-
-      // Upload the avatar first if one is staged. We do this BEFORE the
-      // profile-data update so a failed upload aborts before the form
-      // shows a misleading "Profile updated" toast for the text fields.
-      // Errors are re-thrown so the outer try/finally still resets the
-      // submitting flag.
-      if (avatarFile) {
-        try {
-          updatedUser = await usersService.uploadAvatar(user.id, avatarFile);
-          login(updatedUser);
-          queryClient.invalidateQueries({ queryKey: userKeys.currentUser() });
-        } catch (err) {
-          const message =
-            err instanceof Error && err.message
-              ? err.message
-              : 'Failed to upload avatar.';
-          toast.error(message);
-          throw err;
-        }
-      }
-
       const trimmedPhone = normalizeOptional(values.phone);
       const trimmedCountry = normalizeOptional(values.country);
       const updateData: UpdateUserDto = {
@@ -141,10 +156,9 @@ export function ProfileForm({ user, onboarding = false, onSaved }: ProfileFormPr
         trimmedPhone !== (user.phone ?? undefined) ||
         trimmedCountry !== (user.country ?? undefined);
 
+      let updatedUser = user;
       if (hasProfileDataChanges) {
         updatedUser = await updateProfile({ id: user.id, data: updateData });
-      } else if (avatarFile) {
-        toast.success('Avatar updated.');
       }
 
       form.reset({
@@ -153,17 +167,11 @@ export function ProfileForm({ user, onboarding = false, onSaved }: ProfileFormPr
         phone: updatedUser.phone ?? '',
         country: updatedUser.country ?? '',
       });
-      setAvatarFile(null);
-      setAvatarPreview(getAvatarUrl(updatedUser.avatarUrl));
 
       // Let the parent page navigate to the next onboarding step
       onSaved?.();
     } catch {
-      // Toast already surfaced inside the inner catch / by the mutation
-      // hook's onError. We swallow here so the user can fix whichever
-      // step failed and retry without a second uncaught-error toast.
-    } finally {
-      setIsUploadingAvatar(false);
+      // toast already raised by useUpdateProfile.onError
     }
   });
 
@@ -177,22 +185,35 @@ export function ProfileForm({ user, onboarding = false, onSaved }: ProfileFormPr
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-          <Avatar className="h-16 w-16">
-            <AvatarImage src={avatarPreview} alt={user.fullName} />
-            <AvatarFallback>
-              {user.fullName
-                .split(' ')
-                .map((part) => part[0])
-                .join('')
-                .slice(0, 2)
-                .toUpperCase()}
-            </AvatarFallback>
-          </Avatar>
+          <div className="relative">
+            <Avatar className="h-16 w-16">
+              <AvatarImage src={avatarPreview} alt={user.fullName} />
+              <AvatarFallback>
+                {user.fullName
+                  .split(' ')
+                  .map((part) => part[0])
+                  .join('')
+                  .slice(0, 2)
+                  .toUpperCase()}
+              </AvatarFallback>
+            </Avatar>
+            {/* Spinner overlay while uploading — gives the user a clear
+                signal that the upload is in flight. */}
+            {isUploadingAvatar && (
+              <div
+                className="absolute inset-0 flex items-center justify-center rounded-full bg-background/70 backdrop-blur-[1px]"
+                aria-hidden
+              >
+                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              </div>
+            )}
+          </div>
           <div className="flex flex-1 flex-col gap-2">
             <div>
               <p className="text-sm font-medium">Profile photo</p>
               <p className="text-xs text-muted-foreground">
-                Upload a square image for best results.
+                Pick a square image (max 5 MB). It uploads as soon as you
+                choose the file — no separate save step.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -200,23 +221,10 @@ export function ProfileForm({ user, onboarding = false, onSaved }: ProfileFormPr
                 type="button"
                 variant="outline"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={isSubmitting}
+                disabled={isUploadingAvatar || isSubmitting}
               >
-                Upload avatar
+                {isUploadingAvatar ? 'Uploading…' : 'Upload avatar'}
               </Button>
-              {avatarFile && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => {
-                    setAvatarFile(null);
-                    setAvatarPreview(getAvatarUrl(user.avatarUrl));
-                  }}
-                  disabled={isSubmitting}
-                >
-                  Reset
-                </Button>
-              )}
             </div>
             <input
               type="file"

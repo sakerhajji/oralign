@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
+import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { NAV_ITEMS } from "../_lib/nav";
 import { dict } from "../_lib/i18n/dict";
@@ -10,8 +11,22 @@ import { MobileNav } from "./mobile-nav";
 
 export function Header() {
   const { lang } = useShowcaseLang();
+  const pathname = usePathname();
   const [active, setActive] = useState<string | null>(null);
   const [scrolled, setScrolled] = useState(false);
+
+  /**
+   * Nav items target homepage anchors (#problem, #how-it-works, …).
+   * On the homepage itself we use the bare hash so Next.js / the browser
+   * just smooth-scrolls. On every OTHER page (e.g. /created_for_you/<token>,
+   * /login, /signup) we prepend "/" so clicking actually navigates back to
+   * the homepage and then scrolls to the section. Without this prefix the
+   * browser would just dump the hash onto the current URL and nothing
+   * would happen.
+   */
+  const onHome = pathname === "/";
+  const resolveAnchor = (hashHref: string): string =>
+    hashHref.startsWith("#") && !onHome ? `/${hashHref}` : hashHref;
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
@@ -79,7 +94,7 @@ export function Header() {
               return (
                 <li key={item.id}>
                   <Link
-                    href={item.href}
+                    href={resolveAnchor(item.href)}
                     aria-current={isActive ? "true" : undefined}
                     className={[
                       "relative inline-block py-2 text-[0.62rem] uppercase tracking-[0.25em] no-underline transition-colors",
@@ -113,7 +128,7 @@ export function Header() {
             {dict.nav.login[lang]}
           </Link>
           <Link
-            href="#cta"
+            href={resolveAnchor("#cta")}
             className="hidden lg:inline-flex items-center bg-[var(--sc-sun)] px-5 py-3 text-[0.6rem] font-medium uppercase tracking-[0.28em] text-[var(--sc-black)] no-underline transition-colors hover:bg-[var(--sc-sun-2,#f9d96a)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sc-black)]"
           >
             {dict.nav.bookDemo[lang]}

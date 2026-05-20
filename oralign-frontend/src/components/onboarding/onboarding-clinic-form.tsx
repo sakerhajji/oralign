@@ -130,12 +130,64 @@ export function OnboardingClinicForm({ profile, workingHours, onSaved }: Props) 
 
   return (
     <Form onSubmit={onSubmit} className="space-y-8">
-      {/* ─── Clinic details ─────────────────────────────────────────────── */}
+      {/* ─── Location FIRST ──────────────────────────────────────────────
+          We render the map BEFORE the address fields on purpose: the
+          most natural way to set a clinic location is to drop a pin (or
+          tap "Use My Location") and let reverse-geocoding fill in the
+          address, city, and country. The text fields below then act as
+          a verification + edit surface, not an entry surface. */}
+      <section className="space-y-3">
+        <header>
+          <h2 className="text-base font-semibold">Map location</h2>
+          <p className="text-sm text-muted-foreground">
+            Drop a pin on the map (or tap "Use My Location") — we&apos;ll
+            auto-fill the address, city, and country below.
+          </p>
+        </header>
+        <LocationPicker
+          value={locationValue}
+          onChange={({ lat, lng, address, city: c, country: co }) => {
+            form.setValue('latitude', lat, {
+              shouldValidate: true,
+              shouldDirty: true,
+            });
+            form.setValue('longitude', lng, {
+              shouldValidate: true,
+              shouldDirty: true,
+            });
+            if (address) {
+              form.setValue('clinicAddress', address, {
+                shouldValidate: true,
+                shouldDirty: true,
+              });
+            }
+            if (c)
+              form.setValue('city', c, {
+                shouldValidate: true,
+                shouldDirty: true,
+              });
+            if (co)
+              form.setValue('country', co, {
+                shouldValidate: true,
+                shouldDirty: true,
+              });
+          }}
+        />
+        {(errors.latitude || errors.longitude) && (
+          <p className="text-sm text-destructive">
+            {errors.latitude?.message ?? errors.longitude?.message}
+          </p>
+        )}
+      </section>
+
+      {/* ─── Clinic details (auto-filled from map, editable) ────────────── */}
       <section className="space-y-4">
         <header>
           <h2 className="text-base font-semibold">Clinic details</h2>
           <p className="text-sm text-muted-foreground">
             Information patients will see when they look up your clinic.
+            Address, city, and country are pre-filled from the map above —
+            edit them if anything needs to be more precise.
           </p>
         </header>
 
@@ -239,42 +291,6 @@ export function OnboardingClinicForm({ profile, workingHours, onSaved }: Props) 
             />
           </div>
         </div>
-      </section>
-
-      {/* ─── Location ────────────────────────────────────────────────────── */}
-      <section className="space-y-3">
-        <header>
-          <h2 className="text-base font-semibold">Map location</h2>
-          <p className="text-sm text-muted-foreground">
-            Search an address, click the map, or use "Use My Location". The
-            map is the only required pin — geolocation is optional.
-          </p>
-        </header>
-        <LocationPicker
-          value={locationValue}
-          onChange={({ lat, lng, address, city: c, country: co }) => {
-            form.setValue('latitude', lat, {
-              shouldValidate: true,
-              shouldDirty: true,
-            });
-            form.setValue('longitude', lng, {
-              shouldValidate: true,
-              shouldDirty: true,
-            });
-            if (address) {
-              form.setValue('clinicAddress', address, {
-                shouldDirty: true,
-              });
-            }
-            if (c) form.setValue('city', c, { shouldDirty: true });
-            if (co) form.setValue('country', co, { shouldDirty: true });
-          }}
-        />
-        {(errors.latitude || errors.longitude) && (
-          <p className="text-sm text-destructive">
-            {errors.latitude?.message ?? errors.longitude?.message}
-          </p>
-        )}
       </section>
 
       {/* ─── Working hours ──────────────────────────────────────────────── */}

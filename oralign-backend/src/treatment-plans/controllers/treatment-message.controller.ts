@@ -23,6 +23,7 @@ import {
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import { Response } from 'express';
 import { TreatmentAttachmentCategory, UserRole } from '@prisma/client';
 import { TreatmentMessageService } from '../services/treatment-message.service';
@@ -50,8 +51,94 @@ const AUTHED: UserRole[] = [
 export class TreatmentMessageController {
   constructor(private readonly service: TreatmentMessageService) {}
 
+  // ─── Order-scoped chat (one conversation per order, across all plans) ─────
+
+  @Get('orders/:orderId/messages')
+  @ApiOperation({
+    summary:
+      "List all chat messages for an order's conversation (spans every treatment plan version).",
+  })
+  @ApiParam({ name: 'orderId', type: String })
+  listByOrder(
+    @Param('orderId') orderId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.listByOrder(orderId, {
+      userId: user.sub,
+      role: user.role as UserRole,
+    });
+  }
+
+  @Post('orders/:orderId/messages')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary:
+      "Send a text-only message to the order's conversation (attached to the latest plan).",
+  })
+  @ApiParam({ name: 'orderId', type: String })
+  createForOrder(
+    @Param('orderId') orderId: string,
+    @Body() dto: CreateTreatmentMessageDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.createForOrder(
+      orderId,
+      { message: dto.message, files: [] },
+      { userId: user.sub, role: user.role as UserRole },
+    );
+  }
+
+  @Post('orders/:orderId/messages/with-attachments')
+  @HttpCode(HttpStatus.CREATED)
+  @UseInterceptors(FilesInterceptor('files', 20))
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', nullable: true },
+        files: {
+          type: 'array',
+          items: { type: 'string', format: 'binary' },
+        },
+      },
+    },
+  })
+  @ApiQuery({
+    name: 'category',
+    enum: TreatmentAttachmentCategory,
+    required: false,
+  })
+  @ApiOperation({
+    summary:
+      "Send a message + attachments to the order's conversation (attached to the latest plan).",
+  })
+  @ApiParam({ name: 'orderId', type: String })
+  createForOrderWithAttachments(
+    @Param('orderId') orderId: string,
+    @Body() body: CreateTreatmentMessageDto,
+    @UploadedFiles() files: Express.Multer.File[],
+    @CurrentUser() user: JwtPayload,
+    @Query('category') category?: TreatmentAttachmentCategory,
+  ) {
+    return this.service.createForOrder(
+      orderId,
+      { message: body.message, files: files ?? [] },
+      { userId: user.sub, role: user.role as UserRole },
+      category,
+    );
+  }
+
+  // ─── Legacy per-plan endpoints (kept for back-compat) ─────────────────────
+  // `list` returns ORDER-wide messages — same as the new endpoint — so
+  // older clients still see the full conversation. New code should use
+  // the /orders/:orderId/messages endpoints above.
+
   @Get('treatment-plans/:id/messages')
-  @ApiOperation({ summary: 'List messages in the treatment-plan conversation' })
+  @ApiOperation({
+    summary:
+      "List the order's conversation (messages span every plan version) — addressed by plan id.",
+  })
   @ApiParam({ name: 'id', type: String })
   list(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.service.list(id, {
@@ -124,6 +211,7 @@ export class TreatmentMessageController {
   // ─── Attachment access ────────────────────────────────────────────────────
 
   @Get('treatment-message-attachments/:attachmentId/download')
+  @SkipThrottle()
   @ApiOperation({ summary: 'Stream a treatment-message attachment' })
   @ApiParam({ name: 'attachmentId', type: String })
   async download(
@@ -131,10 +219,11 @@ export class TreatmentMessageController {
     @CurrentUser() user: JwtPayload,
     @Res() res: Response,
   ) {
-    const { stream, mimeType, fileName } = await this.service.getAttachmentStream(
-      attachmentId,
-      { userId: user.sub, role: user.role as UserRole },
-    );
+    const { stream, mimeType, fileName } =
+      await this.service.getAttachmentStream(attachmentId, {
+        userId: user.sub,
+        role: user.role as UserRole,
+      });
     res.setHeader('Content-Type', mimeType);
     res.setHeader(
       'Content-Disposition',

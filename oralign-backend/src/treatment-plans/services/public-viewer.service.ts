@@ -21,8 +21,15 @@ export interface PublicViewerPayload {
     fullName?: string | null;
     clinicName?: string | null;
   };
+  /**
+   * Patient first name + gender — both are needed for the welcome
+   * salutation ("Dear Mr. <FirstName>" vs "Dear Ms. <FirstName>"). We
+   * still don't expose the full name, date of birth, or any other
+   * identifying detail.
+   */
   patient?: {
     firstName?: string | null;
+    gender?: 'male' | 'female' | 'other' | null;
   };
 }
 
@@ -61,14 +68,18 @@ export class PublicTreatmentViewerService {
                 dentistProfile: { select: { clinicName: true } },
               },
             },
-            patient: { select: { fullName: true } },
+            patient: {
+              select: { fullName: true, gender: true },
+            },
           },
         },
       },
     });
 
     if (!plan || plan.deletedAt) {
-      throw new NotFoundException('This treatment link is no longer available.');
+      throw new NotFoundException(
+        'This treatment link is no longer available.',
+      );
     }
     if (plan.publicExpiresAt && plan.publicExpiresAt.getTime() < Date.now()) {
       throw new NotFoundException('This treatment link has expired.');
@@ -88,7 +99,17 @@ export class PublicTreatmentViewerService {
           }
         : undefined,
       patient: plan.order.patient
-        ? { firstName: firstNameOf(plan.order.patient.fullName) }
+        ? {
+            firstName: firstNameOf(plan.order.patient.fullName),
+            // Prisma exposes the enum as lowercase strings already
+            // (e.g. 'male'); pass it through but narrow to the
+            // payload's union to keep the contract explicit.
+            gender: (plan.order.patient.gender ?? null) as
+              | 'male'
+              | 'female'
+              | 'other'
+              | null,
+          }
         : undefined,
     };
 

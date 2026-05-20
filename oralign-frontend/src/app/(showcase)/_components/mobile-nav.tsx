@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
+import { usePathname } from "next/navigation";
 import { useState } from "react";
 import {
   Sheet,
@@ -17,7 +18,15 @@ import { useShowcaseLang } from "../_lib/i18n/lang-context";
 
 export function MobileNav() {
   const { lang } = useShowcaseLang();
+  const pathname = usePathname();
   const [open, setOpen] = useState(false);
+
+  // Same trick as the desktop Header: when we're not on the homepage,
+  // anchor links need a "/" prefix so clicking actually navigates home
+  // instead of just appending the hash to the current URL.
+  const onHome = pathname === "/";
+  const resolveAnchor = (hashHref: string): string =>
+    hashHref.startsWith("#") && !onHome ? `/${hashHref}` : hashHref;
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
@@ -85,7 +94,7 @@ export function MobileNav() {
               <li key={item.id}>
                 <SheetClose asChild>
                   <Link
-                    href={item.href}
+                    href={resolveAnchor(item.href)}
                     className="group flex items-center justify-between border-b border-[#e8e4de] py-4 no-underline text-[#0a0a0a]/70 transition-colors hover:text-[#0a0a0a]"
                   >
                     <span className="text-[0.72rem] uppercase tracking-[0.28em]">
@@ -106,7 +115,7 @@ export function MobileNav() {
           <div className="mt-7 flex flex-col gap-3">
             <SheetClose asChild>
               <Link
-                href="#cta"
+                href={resolveAnchor("#cta")}
                 className="block bg-[#f5c842] px-6 py-3.5 text-center text-[0.62rem] font-medium uppercase tracking-[0.3em] text-[#0a0a0a] no-underline transition-colors hover:bg-[#f9d96a]"
               >
                 {dict.nav.bookDemo[lang]}

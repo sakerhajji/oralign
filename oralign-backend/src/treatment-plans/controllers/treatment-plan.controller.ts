@@ -22,6 +22,7 @@ import {
   ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import { Response } from 'express';
 import { UserRole } from '@prisma/client';
 import { TreatmentPlanService } from '../services/treatment-plan.service';
@@ -95,10 +96,7 @@ export class TreatmentPlanController {
   @Get('treatment-plans/:id')
   @ApiOperation({ summary: 'Get a Treatment Plan by id' })
   @ApiParam({ name: 'id', type: String })
-  async getOne(
-    @Param('id') id: string,
-    @CurrentUser() user: JwtPayload,
-  ) {
+  async getOne(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.service.getOne(id, {
       userId: user.sub,
       role: user.role as UserRole,
@@ -112,10 +110,7 @@ export class TreatmentPlanController {
       'odontogram + conversation messages.',
   })
   @ApiParam({ name: 'id', type: String })
-  async getReview(
-    @Param('id') id: string,
-    @CurrentUser() user: JwtPayload,
-  ) {
+  async getReview(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.service.getReview(id, {
       userId: user.sub,
       role: user.role as UserRole,
@@ -154,15 +149,29 @@ export class TreatmentPlanController {
 
   // ─── Approve / reject — doctor or admin ───────────────────────────────────
 
+  @Post('treatment-plans/:id/mark-ready')
+  @HttpCode(HttpStatus.OK)
+  @Roles(...PLANNER)
+  @ApiOperation({
+    summary:
+      'Planner marks the plan as ready for doctor review. The plan status ' +
+      'becomes "ready" and the order status becomes "treatment_plan_ready". ' +
+      'No longer happens implicitly when uploading a treatment_result file.',
+  })
+  async markReady(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.service.markReady(id, {
+      userId: user.sub,
+      role: user.role as UserRole,
+    });
+  }
+
   @Post('treatment-plans/:id/approve')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Doctor (or admin) approves a treatment plan; transitions the order to treatment_approved.',
+    summary:
+      'Doctor (or admin) approves a treatment plan; transitions the order to treatment_approved.',
   })
-  async approve(
-    @Param('id') id: string,
-    @CurrentUser() user: JwtPayload,
-  ) {
+  async approve(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.service.approve(id, {
       userId: user.sub,
       role: user.role as UserRole,
@@ -172,10 +181,7 @@ export class TreatmentPlanController {
   @Post('treatment-plans/:id/reject')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Doctor (or admin) rejects a treatment plan' })
-  async reject(
-    @Param('id') id: string,
-    @CurrentUser() user: JwtPayload,
-  ) {
+  async reject(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.service.reject(id, {
       userId: user.sub,
       role: user.role as UserRole,
@@ -195,7 +201,9 @@ export class TreatmentPlanController {
       properties: { file: { type: 'string', format: 'binary' } },
     },
   })
-  @ApiOperation({ summary: 'Upload (or replace) the orthodontic movement-table image' })
+  @ApiOperation({
+    summary: 'Upload (or replace) the orthodontic movement-table image',
+  })
   async uploadMovementTableImage(
     @Param('id') id: string,
     @UploadedFile() file: Express.Multer.File,
@@ -222,6 +230,7 @@ export class TreatmentPlanController {
   }
 
   @Get('treatment-plans/:id/movement-table-image')
+  @SkipThrottle()
   @ApiOperation({ summary: 'Stream the movement-table image' })
   async getMovementTableImage(
     @Param('id') id: string,

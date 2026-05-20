@@ -51,6 +51,14 @@ export const treatmentPlansService = {
     return res.data;
   },
 
+  markReady: async (id: string): Promise<TreatmentPlan> => {
+    const res = await apiClient.post<TreatmentPlan>(
+      `/treatment-plans/${id}/mark-ready`,
+      {},
+    );
+    return res.data;
+  },
+
   approve: async (id: string): Promise<TreatmentPlan> => {
     const res = await apiClient.post<TreatmentPlan>(
       `/treatment-plans/${id}/approve`,
@@ -86,10 +94,12 @@ export const treatmentPlansService = {
   ): Promise<TreatmentPlan> => {
     const form = new FormData();
     form.append('file', file);
+    // Let axios derive the multipart boundary — see users.service.ts
+    // for the long explanation; tl;dr: hand-setting Content-Type strips
+    // the boundary and the server can't parse the body.
     const res = await apiClient.post<TreatmentPlan>(
       `/treatment-plans/${id}/movement-table-image`,
       form,
-      { headers: { 'Content-Type': 'multipart/form-data' } },
     );
     return res.data;
   },
@@ -142,7 +152,8 @@ export const treatmentPlansService = {
       `/treatment-plans/${id}/messages/with-attachments`,
       form,
       {
-        headers: { 'Content-Type': 'multipart/form-data' },
+        // Axios auto-fills Content-Type with the right boundary when the
+        // body is FormData. Don't override it.
         params: args.category ? { category: args.category } : undefined,
       },
     );
@@ -165,13 +176,28 @@ export const treatmentPlansService = {
   },
 
   // ─── Public viewer (no auth) ──────────────────────────────────────────────
+  // Uses a RAW fetch instead of the authenticated apiClient — the patient
+  // visiting the share link is anonymous, and the apiClient's response
+  // interceptor would redirect them to /login if a stale access token is
+  // sitting in localStorage. The endpoint is `@Public()` server-side,
+  // rate-limited, and only returns display-safe fields.
 
   publicByToken: async (
     token: string,
   ): Promise<PublicTreatmentViewerPayload> => {
-    const res = await apiClient.get<PublicTreatmentViewerPayload>(
-      `/public/treatment-viewer/${token}`,
+    const base =
+      process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
+    const res = await fetch(
+      `${base}/public/treatment-viewer/${encodeURIComponent(token)}`,
+      {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        credentials: 'omit',
+      },
     );
-    return res.data;
+    if (!res.ok) {
+      throw new Error(`Public viewer fetch failed: HTTP ${res.status}`);
+    }
+    return (await res.json()) as PublicTreatmentViewerPayload;
   },
 };

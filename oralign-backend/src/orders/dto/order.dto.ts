@@ -5,6 +5,7 @@ import {
   OrderStatus,
   PatientStage,
   ToothInstructionType,
+  TreatmentPlanStatus,
 } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
 import {
@@ -261,6 +262,30 @@ export class UploadOrderFilesQueryDto {
   category?: OrderFileCategory;
 }
 
+/**
+ * Admin override of the order status. Used to roll an order forward
+ * past a stuck step (e.g. fabrication never auto-promoted) or backward
+ * to fix an operator mistake (e.g. canceled by accident).
+ *
+ * `reason` is logged for auditability; we don't have an order-history
+ * table yet, so it's kept as a free-text field that's surfaced in the
+ * backend logs.
+ */
+export class UpdateOrderStatusDto {
+  @ApiProperty({ enum: OrderStatus, description: 'Target lifecycle status' })
+  @IsEnum(OrderStatus)
+  status!: OrderStatus;
+
+  @ApiProperty({
+    required: false,
+    description: 'Reason for the change (audit log only).',
+  })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  reason?: string;
+}
+
 export class OrderFileResponseDto {
   @ApiProperty()
   id!: string;
@@ -351,4 +376,22 @@ export class OrderResponseDto {
   updatedAt!: Date;
   @ApiProperty({ required: false })
   submittedAt?: Date;
+
+  // ── Notification badges shown in the orders list ───────────────────────────
+  // Computed server-side so the table doesn't have to issue per-row calls to
+  // fetch each order's latest plan. `latestPlanStatus` drives the doctor's
+  // "Action required" / "Approved" chip; `treatmentPlansCount` shows when
+  // designers have started planning even if no plan is yet "ready".
+  @ApiProperty({
+    enum: TreatmentPlanStatus,
+    required: false,
+    description: 'Status of the most recent treatment plan, if any.',
+  })
+  latestPlanStatus?: TreatmentPlanStatus;
+
+  @ApiProperty({
+    required: false,
+    description: 'Number of treatment-plan revisions started for this order.',
+  })
+  treatmentPlansCount?: number;
 }

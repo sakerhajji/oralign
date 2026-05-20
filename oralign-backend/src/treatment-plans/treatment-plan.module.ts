@@ -6,6 +6,7 @@ import { PublicTreatmentViewerController } from './controllers/public-viewer.con
 import { TreatmentPlanService } from './services/treatment-plan.service';
 import { TreatmentMessageService } from './services/treatment-message.service';
 import { PublicTreatmentViewerService } from './services/public-viewer.service';
+import { TreatmentChatGateway } from './gateways/treatment-chat.gateway';
 
 @Module({
   imports: [PrismaModule],
@@ -18,6 +19,7 @@ import { PublicTreatmentViewerService } from './services/public-viewer.service';
     TreatmentPlanService,
     TreatmentMessageService,
     PublicTreatmentViewerService,
+    TreatmentChatGateway,
   ],
   exports: [TreatmentPlanService, TreatmentMessageService],
 })

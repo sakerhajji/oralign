@@ -24,9 +24,14 @@ function logoUrl(): string {
   // Public URL the frontend serves. Set MAIL_LOGO_URL in env to override
   // (useful when the frontend lives on a different host than the API).
   // Falls back to the dashboard's PNG.
-  const base = (process.env.MAIL_LOGO_URL ?? process.env.FRONTEND_URL ?? '')
-    .replace(/\/$/, '');
-  return base ? `${base}/ORALIGN%20BLACK.png` : 'https://oralign.com.tn/ORALIGN%20BLACK.png';
+  const base = (
+    process.env.MAIL_LOGO_URL ??
+    process.env.FRONTEND_URL ??
+    ''
+  ).replace(/\/$/, '');
+  return base
+    ? `${base}/ORALIGN%20BLACK.png`
+    : 'https://oralign.com.tn/ORALIGN%20BLACK.png';
 }
 
 function shell({
@@ -169,7 +174,9 @@ function escape(input: string): string {
   return String(input).replace(
     /[&<>"']/g,
     (c) =>
-      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[
+        c
+      ]!,
   );
 }
 
@@ -247,4 +254,296 @@ export function renderApprovalGrantedEmail(args: {
       `,
     }),
   };
+}
+
+// ─── Order-lifecycle helpers ────────────────────────────────────────────────
+
+/**
+ * Small two-column metadata table used in the order-lifecycle emails to
+ * display the order code, patient, doctor, status, etc. Inline styles so
+ * Gmail / Outlook render it consistently.
+ */
+function metaTable(rows: Array<{ label: string; value: string }>): string {
+  const body = rows
+    .map(
+      (r) => `
+      <tr>
+        <td style="padding:8px 12px;border-bottom:1px solid ${BORDER_COLOR};
+                   font-size:12px;font-weight:600;letter-spacing:0.4px;
+                   text-transform:uppercase;color:${MUTED_COLOR};width:40%;">
+          ${escape(r.label)}
+        </td>
+        <td style="padding:8px 12px;border-bottom:1px solid ${BORDER_COLOR};
+                   font-size:14px;color:${TEXT_COLOR};">
+          ${escape(r.value)}
+        </td>
+      </tr>`,
+    )
+    .join('');
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+           style="margin:0 0 24px;background:${SUBTLE_BG};border:1px solid ${BORDER_COLOR};border-radius:12px;overflow:hidden;">
+    ${body}
+  </table>`;
+}
+
+function decisionBadge(decision: 'approved' | 'rejected'): string {
+  const isApproved = decision === 'approved';
+  const bg = isApproved ? '#dcfce7' : '#fee2e2';
+  const fg = isApproved ? '#166534' : '#991b1b';
+  const label = isApproved ? 'Approved' : 'Rejected';
+  return `<span style="display:inline-block;padding:4px 12px;font-size:12px;
+                       font-weight:700;text-transform:uppercase;letter-spacing:0.6px;
+                       border-radius:999px;background:${bg};color:${fg};">
+    ${label}
+  </span>`;
+}
+
+// ─── Order-lifecycle renderers ──────────────────────────────────────────────
+
+/**
+ * Sent to the doctor when they submit a new order. Confirms the order
+ * was received and points them at the dashboard so they can track it.
+ */
+export function renderNewOrderForDoctorEmail(args: {
+  doctorName: string;
+  orderCode: string;
+  patientName: string;
+  dashboardUrl: string;
+}): { html: string; subject: string } {
+  return {
+    subject: `Order ${args.orderCode} submitted — ${APP_NAME}`,
+    html: shell({
+      title: `Order ${args.orderCode} received`,
+      preheader: `We've received your order for ${args.patientName}. Our team is on it.`,
+      body: `
+        ${greeting(escape(args.doctorName))}
+        ${lead(
+          `Thanks — your order has been submitted to our team. ` +
+            `You'll get an email as soon as the treatment plan is ready ` +
+            `for your review.`,
+        )}
+        ${metaTable([
+          { label: 'Order', value: args.orderCode },
+          { label: 'Patient', value: args.patientName },
+          { label: 'Status', value: 'Submitted — under review' },
+        ])}
+        ${button(args.dashboardUrl, 'Open order')}
+      `,
+    }),
+  };
+}
+
+/**
+ * Sent to each admin / super_admin when a doctor submits a new order so
+ * they know there's something fresh to plan.
+ */
+export function renderNewOrderForAdminEmail(args: {
+  adminName: string;
+  orderCode: string;
+  doctorName: string;
+  patientName: string;
+  dashboardUrl: string;
+}): { html: string; subject: string } {
+  return {
+    subject: `New order ${args.orderCode} from ${args.doctorName}`,
+    html: shell({
+      title: `New order ${args.orderCode}`,
+      preheader: `${args.doctorName} submitted a new order for ${args.patientName}.`,
+      body: `
+        ${greeting(escape(args.adminName))}
+        ${lead(
+          `A new order has just been submitted and is waiting for ` +
+            `treatment planning.`,
+        )}
+        ${metaTable([
+          { label: 'Order', value: args.orderCode },
+          { label: 'Doctor', value: args.doctorName },
+          { label: 'Patient', value: args.patientName },
+          { label: 'Status', value: 'Submitted — needs planner assignment' },
+        ])}
+        ${button(args.dashboardUrl, 'Review order')}
+      `,
+    }),
+  };
+}
+
+/**
+ * Sent to the doctor when admin / designer marks the treatment plan as
+ * READY for the doctor's review.
+ */
+export function renderTreatmentReadyForDoctorEmail(args: {
+  doctorName: string;
+  orderCode: string;
+  planName: string;
+  dashboardUrl: string;
+}): { html: string; subject: string } {
+  return {
+    subject: `${args.planName} is ready for review — ${args.orderCode}`,
+    html: shell({
+      title: `Treatment plan ready`,
+      preheader: `${args.planName} is ready for your review.`,
+      body: `
+        ${greeting(escape(args.doctorName))}
+        ${lead(
+          `The treatment plan for order <strong>${escape(
+            args.orderCode,
+          )}</strong> has been prepared and is ready for your review. ` +
+            `You can approve it to move on to quotation, or request a ` +
+            `revision if anything needs to change.`,
+        )}
+        ${metaTable([
+          { label: 'Order', value: args.orderCode },
+          { label: 'Plan', value: args.planName },
+          { label: 'Status', value: 'Ready for your review' },
+        ])}
+        ${button(args.dashboardUrl, 'Review treatment plan')}
+      `,
+    }),
+  };
+}
+
+/**
+ * Sent to each admin when the doctor approves or rejects a treatment
+ * plan. One template covers both outcomes via the `decision` flag.
+ */
+export function renderTreatmentDecisionForAdminEmail(args: {
+  adminName: string;
+  orderCode: string;
+  doctorName: string;
+  planName: string;
+  decision: 'approved' | 'rejected';
+  reason?: string;
+  dashboardUrl: string;
+}): { html: string; subject: string } {
+  const isApproved = args.decision === 'approved';
+  const subject = isApproved
+    ? `${args.doctorName} approved ${args.planName} (${args.orderCode})`
+    : `${args.doctorName} requested a revision on ${args.planName} (${args.orderCode})`;
+  const leadText = isApproved
+    ? `<strong>${escape(args.doctorName)}</strong> approved the treatment plan. The order has moved to fabrication.`
+    : `<strong>${escape(args.doctorName)}</strong> requested a revision on the treatment plan. The order is back in planning.`;
+  const rows: Array<{ label: string; value: string }> = [
+    { label: 'Order', value: args.orderCode },
+    { label: 'Plan', value: args.planName },
+    { label: 'Doctor', value: args.doctorName },
+  ];
+  if (args.reason && args.reason.trim()) {
+    rows.push({ label: 'Reason', value: args.reason.trim() });
+  }
+  return {
+    subject,
+    html: shell({
+      title: subject,
+      preheader: isApproved
+        ? `${args.doctorName} approved ${args.planName}.`
+        : `${args.doctorName} rejected ${args.planName}.`,
+      body: `
+        ${greeting(escape(args.adminName))}
+        <p style="margin:0 0 16px;">${decisionBadge(args.decision)}</p>
+        ${lead(leadText)}
+        ${metaTable(rows)}
+        ${button(args.dashboardUrl, 'Open order')}
+      `,
+    }),
+  };
+}
+
+/**
+ * Sent to the doctor when admin sends a quotation. Includes the total
+ * for at-a-glance approval/refusal.
+ */
+export function renderQuoteSentForDoctorEmail(args: {
+  doctorName: string;
+  orderCode: string;
+  quotationNumber: string;
+  totalTtc: number;
+  currency: string;
+  dashboardUrl: string;
+}): { html: string; subject: string } {
+  const formattedTotal = formatMoney(args.totalTtc, args.currency);
+  return {
+    subject: `Quotation ${args.quotationNumber} is ready — ${args.orderCode}`,
+    html: shell({
+      title: `Quotation ready`,
+      preheader: `Your quotation for order ${args.orderCode} is ready: ${formattedTotal}.`,
+      body: `
+        ${greeting(escape(args.doctorName))}
+        ${lead(
+          `A quotation for your order <strong>${escape(
+            args.orderCode,
+          )}</strong> is ready for your review. Approve it to start ` +
+            `fabrication or reject it to stop the order.`,
+        )}
+        ${metaTable([
+          { label: 'Order', value: args.orderCode },
+          { label: 'Quotation', value: args.quotationNumber },
+          { label: 'Total (TTC)', value: formattedTotal },
+        ])}
+        ${button(args.dashboardUrl, 'Review quotation')}
+      `,
+    }),
+  };
+}
+
+/**
+ * Sent to each admin when the doctor approves or rejects a quotation.
+ * One template covers both outcomes.
+ */
+export function renderQuoteDecisionForAdminEmail(args: {
+  adminName: string;
+  orderCode: string;
+  doctorName: string;
+  quotationNumber: string;
+  decision: 'approved' | 'rejected';
+  reason?: string;
+  dashboardUrl: string;
+}): { html: string; subject: string } {
+  const isApproved = args.decision === 'approved';
+  const subject = isApproved
+    ? `${args.doctorName} approved quotation ${args.quotationNumber} (${args.orderCode})`
+    : `${args.doctorName} rejected quotation ${args.quotationNumber} (${args.orderCode})`;
+  const leadText = isApproved
+    ? `<strong>${escape(args.doctorName)}</strong> approved the quotation. The order has moved to fabrication.`
+    : `<strong>${escape(args.doctorName)}</strong> rejected the quotation. The order has been canceled.`;
+  const rows: Array<{ label: string; value: string }> = [
+    { label: 'Order', value: args.orderCode },
+    { label: 'Quotation', value: args.quotationNumber },
+    { label: 'Doctor', value: args.doctorName },
+  ];
+  if (args.reason && args.reason.trim()) {
+    rows.push({ label: 'Reason', value: args.reason.trim() });
+  }
+  return {
+    subject,
+    html: shell({
+      title: subject,
+      preheader: isApproved
+        ? `${args.doctorName} approved quotation ${args.quotationNumber}.`
+        : `${args.doctorName} rejected quotation ${args.quotationNumber}.`,
+      body: `
+        ${greeting(escape(args.adminName))}
+        <p style="margin:0 0 16px;">${decisionBadge(args.decision)}</p>
+        ${lead(leadText)}
+        ${metaTable(rows)}
+        ${button(args.dashboardUrl, 'Open order')}
+      `,
+    }),
+  };
+}
+
+// ─── Formatting helpers ─────────────────────────────────────────────────────
+
+function formatMoney(amount: number, currency: string): string {
+  // Intl works server-side in Node — we let it pick the locale, then
+  // append the ISO code (e.g. "120,00 TND") for clarity in mail clients
+  // that don't render the currency symbol consistently.
+  try {
+    const formatted = new Intl.NumberFormat('fr-FR', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 3,
+    }).format(Number.isFinite(amount) ? amount : 0);
+    return `${formatted} ${currency}`;
+  } catch {
+    return `${amount.toFixed(2)} ${currency}`;
+  }
 }

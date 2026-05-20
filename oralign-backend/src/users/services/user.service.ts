@@ -220,12 +220,8 @@ export class UserService {
       verificationStatus,
     });
 
-    if (
-      wasNotApproved &&
-      verificationStatus === VerificationStatus.approved
-    ) {
-      const frontendUrl =
-        process.env.FRONTEND_URL ?? 'http://localhost:3001';
+    if (wasNotApproved && verificationStatus === VerificationStatus.approved) {
+      const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3001';
       void this.mailService
         .sendApprovalGrantedEmail(
           updatedUser.email,

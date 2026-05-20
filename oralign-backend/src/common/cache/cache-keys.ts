@@ -18,7 +18,13 @@ export const dpKey = {
   byUserId: (userId: string) => `dp:user:${userId}`,
   searchByCity: (city: string, page: number, limit: number) =>
     `dp:city:${city.toLowerCase()}:${page}:${limit}`,
-  nearby: (lat: number, lon: number, radiusKm: number, page: number, limit: number) =>
+  nearby: (
+    lat: number,
+    lon: number,
+    radiusKm: number,
+    page: number,
+    limit: number,
+  ) =>
     // Round coordinates so near-identical queries hit the same cache entry.
     `dp:near:${lat.toFixed(3)}:${lon.toFixed(3)}:${radiusKm}:${page}:${limit}`,
 };

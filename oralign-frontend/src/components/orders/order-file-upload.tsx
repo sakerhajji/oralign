@@ -359,16 +359,10 @@ export function ClinicalOrderFiles({
             ))}
           </div>
         )}
-        {extraPatientFiles.length > 0 && (
-          <LegacyFileList
-            title="Other patient images"
-            description="These files were uploaded before slot tracking was added."
-            orderId={orderId}
-            files={extraPatientFiles}
-            readOnly={readOnly}
-            onDelete={(fileId) => deleteFile.mutate({ id: orderId, fileId })}
-          />
-        )}
+        {/* "Other patient images" legacy list deliberately removed —
+            uploads now flow through the slot grid above; any orphan files
+            stay in the database and remain accessible via the admin /
+            order-files endpoints, but we don't surface them on this page. */}
       </div>
     );
   }
@@ -420,16 +414,8 @@ export function ClinicalOrderFiles({
             />
           ))}
         </div>
-        {extraRadiographyFiles.length > 0 && (
-          <LegacyFileList
-            title="Other radiography files"
-            description="These files are still attached to this order."
-            orderId={orderId}
-            files={extraRadiographyFiles}
-            readOnly={readOnly}
-            onDelete={(fileId) => deleteFile.mutate({ id: orderId, fileId })}
-          />
-        )}
+        {/* Legacy "Other radiography files" list removed — anything
+            outside a tracked slot is intentionally hidden here. */}
       </section>
 
       <section className="space-y-5">
@@ -466,16 +452,8 @@ export function ClinicalOrderFiles({
             category={OrderFileCategory.ZIP}
           />
         )}
-        {extraStlFiles.length > 0 && (
-          <LegacyFileList
-            title="Other scan files"
-            description="These scans were uploaded before individual STL slots were tracked."
-            orderId={orderId}
-            files={extraStlFiles}
-            readOnly={readOnly}
-            onDelete={(fileId) => deleteFile.mutate({ id: orderId, fileId })}
-          />
-        )}
+        {/* Legacy "Other scan files" list removed for the same reason —
+            keep the page focused on the structured slots. */}
       </section>
     </div>
   );
@@ -1340,6 +1318,7 @@ function StlModelViewer({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [errorMessage, setErrorMessage] = useState<string>();
+  const [reloadKey, setReloadKey] = useState(0); // bump to force retry
 
   useEffect(() => {
     const container = containerRef.current;
@@ -1356,11 +1335,62 @@ function StlModelViewer({
     let material: import('three').Material | undefined;
     let edgeMaterial: import('three').Material | undefined;
     let resizeObserver: ResizeObserver | undefined;
+    let abortController: AbortController | undefined;
 
     const clearCanvas = () => {
       while (container.firstChild) {
         container.removeChild(container.firstChild);
       }
+    };
+
+    /**
+     * Self-diagnosing fetch — surfaces the actual HTTP status and a
+     * trimmed response snippet instead of a generic "Unable to load"
+     * message. Common real-world causes we want visible:
+     *   - 401 → auth token expired between page load and STL render
+     *   - 404 → file row exists in DB but the bytes on disk are gone
+     *   - 413 → nginx body-size limit hit (large STL)
+     *   - network error → CORS / DNS / dropped connection
+     */
+    const fetchStlBuffer = async (signal: AbortSignal) => {
+      const token = getAccessToken();
+      const url = buildDownloadUrl(orderId, file.id);
+
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          signal,
+        });
+      } catch (err) {
+        // Network-level failures (DNS, CORS, offline, mixed-content)
+        // arrive as TypeError("Failed to fetch") with no status code.
+        throw new Error(
+          `Network error contacting ${url}: ${(err as Error).message}`,
+        );
+      }
+
+      if (!response.ok) {
+        // Try to surface the backend's reason without trusting it to
+        // be JSON — exception filters sometimes return text/plain.
+        let detail = '';
+        try {
+          const text = await response.text();
+          detail = text.slice(0, 200);
+        } catch {
+          /* ignore */
+        }
+        throw new Error(
+          `STL download failed (HTTP ${response.status} ${response.statusText})` +
+            (detail ? `: ${detail}` : ''),
+        );
+      }
+
+      const arrayBuffer = await response.arrayBuffer();
+      if (arrayBuffer.byteLength === 0) {
+        throw new Error('STL download returned 0 bytes.');
+      }
+      return arrayBuffer;
     };
 
     const init = async () => {
@@ -1375,16 +1405,8 @@ function StlModelViewer({
           import('three/examples/jsm/controls/OrbitControls.js'),
         ]);
 
-        const token = getAccessToken();
-        const response = await fetch(buildDownloadUrl(orderId, file.id), {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        });
-
-        if (!response.ok) {
-          throw new Error('Unable to load STL file');
-        }
-
-        const arrayBuffer = await response.arrayBuffer();
+        abortController = new AbortController();
+        const arrayBuffer = await fetchStlBuffer(abortController.signal);
         if (disposed) return;
 
         const scene = new THREE.Scene();
@@ -1479,7 +1501,13 @@ function StlModelViewer({
         setStatus('ready');
       } catch (error) {
         if (disposed) return;
-        setErrorMessage(error instanceof Error ? error.message : 'Unable to load STL');
+        // Log full error to console — the UI message gets truncated and
+        // we want stack + cause available in DevTools for diagnostics.
+        // eslint-disable-next-line no-console
+        console.error('[StlModelViewer] load failed:', error);
+        setErrorMessage(
+          error instanceof Error ? error.message : 'Unable to load STL',
+        );
         setStatus('error');
       }
     };
@@ -1488,6 +1516,7 @@ function StlModelViewer({
 
     return () => {
       disposed = true;
+      abortController?.abort();
       if (frameId) window.cancelAnimationFrame(frameId);
       resizeObserver?.disconnect();
       controls?.dispose();
@@ -1498,7 +1527,9 @@ function StlModelViewer({
       renderer?.dispose();
       clearCanvas();
     };
-  }, [file.id, orderId, large]);
+    // `reloadKey` is part of the deps so clicking Retry replays the effect
+    // without unmounting the component.
+  }, [file.id, orderId, large, reloadKey]);
 
   return (
     <div
@@ -1519,8 +1550,32 @@ function StlModelViewer({
         </div>
       )}
       {status === 'error' && (
-        <div className="absolute inset-0 grid place-items-center bg-background/80 p-4 text-center text-sm text-red-600">
-          {errorMessage ?? 'Unable to load STL'}
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background/85 p-4 text-center">
+          <p className="max-w-md text-sm font-medium text-red-600">
+            {errorMessage ?? 'Unable to load STL'}
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setReloadKey((k) => k + 1)}
+              className="gap-2"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              Retry
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => downloadOrderFile(orderId, file)}
+              className="gap-2"
+            >
+              <Download className="h-3.5 w-3.5" />
+              Download instead
+            </Button>
+          </div>
         </div>
       )}
       {status === 'ready' && (

@@ -1,0 +1,214 @@
+import { Injectable } from '@nestjs/common';
+import { CompanyBillingSettings, Prisma } from '@prisma/client';
+import { PrismaService } from '../../prisma/prisma.service';
+import {
+  BadRequestException,
+  NotFoundException,
+} from '../../common/exceptions/app.exception';
+import {
+  CompanyBillingSettingsResponseDto,
+  UpsertCompanyBillingSettingsDto,
+} from '../dto/company-billing-settings.dto';
+
+/**
+ * CompanyBillingSettings is treated as a singleton: there is at most
+ * one active row at a time. The service exposes the "active" row via
+ * `getActive()` and lazily creates one on first PUT.
+ *
+ * Why a row and not env vars: the admin needs to upload a logo, edit
+ * translations, change the TVA rate from the UI without a redeploy,
+ * and old quotes have to keep referencing the values that existed at
+ * generation time. JSONB + a single editable row hits all those.
+ */
+@Injectable()
+export class CompanyBillingSettingsService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  /** Returns the current active settings or null if the admin hasn't saved any yet. */
+  async getActive(): Promise<CompanyBillingSettings | null> {
+    return this.prisma.companyBillingSettings.findFirst({
+      where: { isActive: true },
+      orderBy: { updatedAt: 'desc' },
+    });
+  }
+
+  /**
+   * Same as getActive() but throws when no active row exists. Used by
+   * the Quote pipeline — refusing to generate a Quote without company
+   * settings keeps every PDF self-consistent.
+   */
+  async requireActive(): Promise<CompanyBillingSettings> {
+    const settings = await this.getActive();
+    if (!settings) {
+      throw new NotFoundException(
+        'Company billing settings have not been configured yet. Ask an admin to set them up first.',
+      );
+    }
+    return settings;
+  }
+
+  /**
+   * Upsert the active row. The first save also satisfies the
+   * companyName-required guard. Subsequent saves are pure updates.
+   */
+  async upsert(
+    dto: UpsertCompanyBillingSettingsDto,
+  ): Promise<CompanyBillingSettings> {
+    const current = await this.getActive();
+
+    if (!current) {
+      if (!dto.companyName || !dto.companyName.trim()) {
+        throw new BadRequestException(
+          'Company name is required when creating billing settings for the first time.',
+        );
+      }
+      return this.prisma.companyBillingSettings.create({
+        data: {
+          companyName: dto.companyName.trim(),
+          companyAddress: dto.companyAddress ?? null,
+          companyCity: dto.companyCity ?? null,
+          companyCountry: dto.companyCountry ?? null,
+          companyPhone: dto.companyPhone ?? null,
+          companyEmail: dto.companyEmail ?? null,
+          taxRegistrationNumber: dto.taxRegistrationNumber ?? null,
+          defaultTvaRate: dto.defaultTvaRate ?? 19,
+          defaultCurrency: dto.defaultCurrency ?? 'TND',
+          devisPrefix: dto.devisPrefix ?? 'DEV',
+          devisNextNumber: dto.devisNextNumber ?? 1,
+          legalTextTranslations:
+            (dto.legalTextTranslations as Prisma.InputJsonValue) ??
+            Prisma.JsonNull,
+          footerTextTranslations:
+            (dto.footerTextTranslations as Prisma.InputJsonValue) ??
+            Prisma.JsonNull,
+          bankDetails:
+            (dto.bankDetails as Prisma.InputJsonValue) ?? Prisma.JsonNull,
+          isActive: dto.isActive ?? true,
+        },
+      });
+    }
+
+    // Update path — preserve fields the form didn't touch.
+    return this.prisma.companyBillingSettings.update({
+      where: { id: current.id },
+      data: {
+        companyName: dto.companyName ?? current.companyName,
+        companyAddress: dto.companyAddress ?? current.companyAddress,
+        companyCity: dto.companyCity ?? current.companyCity,
+        companyCountry: dto.companyCountry ?? current.companyCountry,
+        companyPhone: dto.companyPhone ?? current.companyPhone,
+        companyEmail: dto.companyEmail ?? current.companyEmail,
+        taxRegistrationNumber:
+          dto.taxRegistrationNumber ?? current.taxRegistrationNumber,
+        defaultTvaRate: dto.defaultTvaRate ?? current.defaultTvaRate,
+        defaultCurrency: dto.defaultCurrency ?? current.defaultCurrency,
+        devisPrefix: dto.devisPrefix ?? current.devisPrefix,
+        devisNextNumber: dto.devisNextNumber ?? current.devisNextNumber,
+        legalTextTranslations:
+          dto.legalTextTranslations !== undefined
+            ? (dto.legalTextTranslations as Prisma.InputJsonValue)
+            : (current.legalTextTranslations as Prisma.InputJsonValue),
+        footerTextTranslations:
+          dto.footerTextTranslations !== undefined
+            ? (dto.footerTextTranslations as Prisma.InputJsonValue)
+            : (current.footerTextTranslations as Prisma.InputJsonValue),
+        bankDetails:
+          dto.bankDetails !== undefined
+            ? (dto.bankDetails as Prisma.InputJsonValue)
+            : (current.bankDetails as Prisma.InputJsonValue),
+        isActive: dto.isActive ?? current.isActive,
+      },
+    });
+  }
+
+  /**
+   * Attach a freshly uploaded logo. The caller is expected to have
+   * already validated the upload (size/mime) via the storage service.
+   */
+  async setLogoPath(relativePath: string): Promise<CompanyBillingSettings> {
+    let settings = await this.getActive();
+    if (!settings) {
+      // Create a minimal row so the logo isn't orphaned. companyName
+      // can be filled in later by the admin via PUT.
+      settings = await this.prisma.companyBillingSettings.create({
+        data: { companyName: 'Oralign', companyLogoPath: relativePath },
+      });
+      return settings;
+    }
+    return this.prisma.companyBillingSettings.update({
+      where: { id: settings.id },
+      data: { companyLogoPath: relativePath },
+    });
+  }
+
+  async clearLogo(): Promise<CompanyBillingSettings | null> {
+    const settings = await this.getActive();
+    if (!settings) return null;
+    return this.prisma.companyBillingSettings.update({
+      where: { id: settings.id },
+      data: { companyLogoPath: null },
+    });
+  }
+
+  /**
+   * Atomically pull the next quotationNumber and increment the counter.
+   * Used by QuotationService when assigning the human-readable number.
+   *
+   * Wrapped in a serializable Prisma transaction so two simultaneous
+   * `POST /quotations/.../send` calls cannot allocate the same number.
+   */
+  async allocateNextQuotationNumber(): Promise<string> {
+    return this.prisma.$transaction(async (tx) => {
+      const settings = await tx.companyBillingSettings.findFirst({
+        where: { isActive: true },
+        orderBy: { updatedAt: 'desc' },
+      });
+      if (!settings) {
+        throw new NotFoundException(
+          'Cannot allocate quotation number — company billing settings missing.',
+        );
+      }
+      const prefix = settings.devisPrefix || 'DEV';
+      const next = settings.devisNextNumber;
+      const numberString = `${prefix}-${String(next).padStart(6, '0')}`;
+      await tx.companyBillingSettings.update({
+        where: { id: settings.id },
+        data: { devisNextNumber: next + 1 },
+      });
+      return numberString;
+    });
+  }
+
+  // ─── Mapping ─────────────────────────────────────────────────────────────
+
+  static toDto(
+    settings: CompanyBillingSettings,
+  ): CompanyBillingSettingsResponseDto {
+    return {
+      id: settings.id,
+      companyName: settings.companyName,
+      companyLogoPath: settings.companyLogoPath ?? null,
+      companyAddress: settings.companyAddress ?? null,
+      companyCity: settings.companyCity ?? null,
+      companyCountry: settings.companyCountry ?? null,
+      companyPhone: settings.companyPhone ?? null,
+      companyEmail: settings.companyEmail ?? null,
+      taxRegistrationNumber: settings.taxRegistrationNumber ?? null,
+      defaultTvaRate: settings.defaultTvaRate,
+      defaultCurrency: settings.defaultCurrency,
+      devisPrefix: settings.devisPrefix,
+      devisNextNumber: settings.devisNextNumber,
+      legalTextTranslations:
+        (settings.legalTextTranslations as Record<string, string> | null) ??
+        null,
+      footerTextTranslations:
+        (settings.footerTextTranslations as Record<string, string> | null) ??
+        null,
+      bankDetails:
+        (settings.bankDetails as Record<string, string> | null) ?? null,
+      isActive: settings.isActive,
+      createdAt: settings.createdAt,
+      updatedAt: settings.updatedAt,
+    };
+  }
+}

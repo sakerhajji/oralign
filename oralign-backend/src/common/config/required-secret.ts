@@ -8,7 +8,8 @@
  * - In dev/test we warn instead of throw — convenient when running with
  *   the compose defaults, but the warning is hard to miss in logs.
  */
-const PLACEHOLDER_PATTERN = /^(change[-_]?me|your[-_]?secret|secret|default|password|test|dev|placeholder)/i;
+const PLACEHOLDER_PATTERN =
+  /^(change[-_]?me|your[-_]?secret|secret|default|password|test|dev|placeholder)/i;
 const MIN_LENGTH = 32;
 
 export function requiredSecret(name: string): string {
@@ -21,7 +22,7 @@ export function requiredSecret(name: string): string {
       // Loud, unambiguous failure — the container will refuse to start.
       throw new Error(msg);
     }
-    // eslint-disable-next-line no-console
+
     console.warn(`${msg} (allowed in non-production)`);
     return raw ?? 'dev-only-insecure-fallback-please-set-env-vars';
   };

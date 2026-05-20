@@ -52,26 +52,34 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { OrderStatusBadge } from '@/components/orders/order-status-badge';
+import {
+  OrderStatusBadge,
+  orderStatusLabel,
+} from '@/components/orders/order-status-badge';
+import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/lib/providers/auth-provider';
 import {
   useDeleteOrder,
   useOrders,
   usePermanentDeleteOrder,
 } from '@/lib/hooks';
-import { DentalOrder, OrderStatus } from '@/lib/types';
+import { DentalOrder, OrderStatus, TreatmentPlanStatus } from '@/lib/types';
+import { AlertTriangle, CheckCircle2, Hourglass, RefreshCcw } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 const PAGE_SIZE = 10;
 const ALL_STATUSES = 'all';
 
-const statusLabels: Record<OrderStatus, string> = {
-  [OrderStatus.DRAFT]: 'Draft',
-  [OrderStatus.SUBMITTED]: 'Submitted',
-  [OrderStatus.IN_REVIEW]: 'In review',
-  [OrderStatus.APPROVED]: 'Approved',
-  [OrderStatus.REJECTED]: 'Rejected',
-  [OrderStatus.CANCELLED]: 'Cancelled',
-};
+// Re-use the centralised label table from the badge so we don't have
+// two copies that can drift apart. Filter out the legacy values so the
+// status <Select> only offers the modern lifecycle phases.
+const LEGACY_STATUSES = new Set<OrderStatus>([
+  OrderStatus.IN_REVIEW,
+  OrderStatus.APPROVED,
+  OrderStatus.REJECTED,
+  OrderStatus.CANCELLED,
+]);
+const statusLabels: Record<OrderStatus, string> = orderStatusLabel;
 
 export default function OrdersPage() {
   const { isAdmin, isDentist, user } = useAuth();
@@ -181,7 +189,9 @@ export default function OrdersPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={ALL_STATUSES}>All statuses</SelectItem>
-              {Object.values(OrderStatus).map((item) => (
+              {Object.values(OrderStatus)
+                .filter((item) => !LEGACY_STATUSES.has(item))
+                .map((item) => (
                 <SelectItem key={item} value={item}>
                   {statusLabels[item]}
                 </SelectItem>
@@ -285,7 +295,14 @@ export default function OrdersPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <OrderStatusBadge status={order.status} />
+                      <div className="flex flex-col gap-1">
+                        <OrderStatusBadge status={order.status} />
+                        <PlanBadge
+                          order={order}
+                          isDoctor={isDentist}
+                          isAdmin={isAdmin}
+                        />
+                      </div>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {format(new Date(order.createdAt), 'MMM d, yyyy')}
@@ -525,7 +542,10 @@ function OrderMobileCard({
               {order.patient?.fullName ?? 'No patient selected'}
             </p>
           </div>
-          <OrderStatusBadge status={order.status} />
+          <div className="flex flex-col items-end gap-1">
+            <OrderStatusBadge status={order.status} />
+            <PlanBadge order={order} isDoctor={!isAdmin} isAdmin={isAdmin} />
+          </div>
         </div>
         <div className="grid grid-cols-2 gap-2 text-sm">
           <MobileMeta label="Stage" value={order.patientStage ?? 'Not set'} />
@@ -590,6 +610,78 @@ function MobileMeta({ label, value }: { label: string; value: string }) {
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="truncate font-medium">{value}</p>
     </div>
+  );
+}
+
+/**
+ * Treatment-plan notification badge shown alongside the order status.
+ *
+ * The wording is role-aware so the chip is actionable, not just descriptive:
+ *  • Doctor sees "Awaiting your review" when a plan is READY — meaning the
+ *    designer handed it off and the ball is now in the doctor's court.
+ *  • Designers/admins see "Plan pending" so they know they still have work.
+ *  • Everyone sees "Approved" / "Replanning requested" in their respective
+ *    terminal states.
+ *
+ * Returns null when there's no treatment plan yet — the order status badge
+ * already conveys "Draft / Submitted / In review" by itself.
+ */
+function PlanBadge({
+  order,
+  isDoctor,
+  isAdmin,
+}: {
+  order: DentalOrder;
+  isDoctor: boolean;
+  isAdmin: boolean;
+}) {
+  const status = order.latestPlanStatus;
+  if (!status) return null;
+
+  // Doctor + admin both care about "Awaiting your review" — admins often
+  // approve on behalf of dentists.
+  const audienceIsApprover = isDoctor || isAdmin;
+
+  const map: Record<
+    TreatmentPlanStatus,
+    { label: string; tone: string; icon: React.ReactNode } | null
+  > = {
+    [TreatmentPlanStatus.PENDING]: {
+      label: 'Plan being prepared',
+      tone: 'border-slate-200 bg-slate-50 text-slate-700',
+      icon: <Hourglass className="h-3 w-3" />,
+    },
+    [TreatmentPlanStatus.READY]: {
+      label: audienceIsApprover ? 'Awaiting your review' : 'Awaiting doctor',
+      tone: 'border-amber-300 bg-amber-50 text-amber-900',
+      icon: <AlertTriangle className="h-3 w-3" />,
+    },
+    [TreatmentPlanStatus.APPROVED]: {
+      label: 'Plan approved',
+      tone: 'border-emerald-300 bg-emerald-50 text-emerald-900',
+      icon: <CheckCircle2 className="h-3 w-3" />,
+    },
+    [TreatmentPlanStatus.REJECTED]: {
+      label: 'Replanning requested',
+      tone: 'border-red-300 bg-red-50 text-red-900',
+      icon: <RefreshCcw className="h-3 w-3" />,
+    },
+  };
+
+  const entry = map[status];
+  if (!entry) return null;
+
+  return (
+    <Badge
+      variant="outline"
+      className={cn(
+        'gap-1 whitespace-nowrap border px-1.5 py-0 text-[10px] font-medium',
+        entry.tone,
+      )}
+    >
+      {entry.icon}
+      {entry.label}
+    </Badge>
   );
 }
 

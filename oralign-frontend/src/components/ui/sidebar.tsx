@@ -28,10 +28,11 @@ import { PanelLeftIcon } from "lucide-react"
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
 const SIDEBAR_WIDTH = "16rem"
-// Phones: keep the drawer compact (~70 % of a 360 px screen). The remaining
-// strip is the tap-to-close zone, and dropping below ~14 rem starts crowding
-// the labels.
-const SIDEBAR_WIDTH_MOBILE = "14rem"
+// Phones: even tighter drawer (10 rem ≈ 160 px). Single-word labels like
+// "Orders", "Patients", "Settings" still read comfortably alongside their
+// icon at this width, and a 360 px phone keeps ~200 px of tap-to-close
+// space on the right.
+const SIDEBAR_WIDTH_MOBILE = "10rem"
 const SIDEBAR_WIDTH_ICON = "3rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
 
@@ -206,7 +207,14 @@ function Sidebar({
           // on mobile so users have an unmistakable way out — tapping the
           // overlay and pressing Escape also work, but the visible X is
           // what most thumbs go for first.
-          className="w-(--sidebar-width) bg-sidebar p-0 text-sidebar-foreground"
+          //
+          // The `!w-…` / `!max-w-…` / `sm:!max-w-…` overrides are NEEDED
+          // because SheetContent's base class ships with
+          //   data-[side=left]:w-[95%] data-[side=left]:sm:max-w-2xl
+          // (and the right-side equivalents). Without `!important`, the
+          // sheet would render at 95% of the viewport on phones and
+          // ignore our SIDEBAR_WIDTH_MOBILE entirely.
+          className="!w-(--sidebar-width) !max-w-(--sidebar-width) sm:!max-w-(--sidebar-width) bg-sidebar p-0 text-sidebar-foreground"
           style={
             {
               "--sidebar-width": SIDEBAR_WIDTH_MOBILE,

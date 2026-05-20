@@ -26,6 +26,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import { OrderFileCategory, OrderStatus, UserRole } from '@prisma/client';
 import { Response } from 'express';
 import {
@@ -40,6 +41,7 @@ import {
   OrderFilterDto,
   OrderResponseDto,
   UpdateOrderDto,
+  UpdateOrderStatusDto,
   UpdateToothInstructionsDto,
 } from '../dto/order.dto';
 import { OrderService } from '../services/order.service';
@@ -47,7 +49,12 @@ import { OrderService } from '../services/order.service';
 @ApiTags('orders')
 @ApiBearerAuth('access-token')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.dentist, UserRole.admin, UserRole.super_admin, UserRole.designer)
+@Roles(
+  UserRole.dentist,
+  UserRole.admin,
+  UserRole.super_admin,
+  UserRole.designer,
+)
 @Controller('orders')
 export class OrderController {
   constructor(private readonly orderService: OrderService) {}
@@ -181,6 +188,28 @@ export class OrderController {
     });
   }
 
+  @Put(':id/status')
+  @Roles(UserRole.admin, UserRole.super_admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      "Manually override an order's lifecycle status (admin-only). " +
+      'Used to roll forward past a stuck step OR roll back a transition fired by mistake. ' +
+      'Related side-tables (treatment plan, quotation) are NOT modified.',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiResponse({ status: 200, type: OrderResponseDto })
+  async overrideStatus(
+    @Param('id') id: string,
+    @Body() dto: UpdateOrderStatusDto,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<OrderResponseDto> {
+    return this.orderService.overrideStatus(id, dto.status, dto.reason, {
+      userId: user.sub,
+      role: user.role,
+    });
+  }
+
   @Put(':id/tooth-instructions')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Replace tooth-level odontogram instructions' })
@@ -233,10 +262,7 @@ export class OrderController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Get order files' })
   @ApiParam({ name: 'id', type: String })
-  async getFiles(
-    @Param('id') id: string,
-    @CurrentUser() user: JwtPayload,
-  ) {
+  async getFiles(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.orderService.getFiles(id, {
       userId: user.sub,
       role: user.role,
@@ -260,6 +286,12 @@ export class OrderController {
   }
 
   @Get(':id/files/:fileId/download')
+  // File downloads are RBAC-gated (assertOrderReadable) — they don't need
+  // the global anti-abuse throttle on top. Loading an order detail page
+  // can fire ~15 of these in parallel (8 patient photos + 3 radiographs
+  // + STL files + treatment-plan attachments), which used to trip the
+  // 10-req/10s "short" bucket and produce HTTP 429.
+  @SkipThrottle()
   @HttpCode(HttpStatus.OK)
   @Header('Content-Type', 'application/octet-stream')
   @ApiOperation({ summary: 'Download an order file' })

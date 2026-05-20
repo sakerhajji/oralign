@@ -4,22 +4,48 @@ import { useMemo } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAccountData } from '@/lib/hooks';
+import { useAuth } from '@/lib/providers/auth-provider';
 
-const TAB_MAP = [
+interface AccountTab {
+  value: string;
+  label: string;
+  href: string;
+  // Optional role gate — when undefined the tab is shown to everyone
+  // who can reach the account area.
+  show?: (ctx: { isDentist: boolean; isAdmin: boolean }) => boolean;
+}
+
+const TAB_MAP: AccountTab[] = [
   { value: 'profile', label: 'Profile', href: '/account/profile' },
-  { value: 'clinic', label: 'Clinic', href: '/account/clinic' },
+  {
+    value: 'clinic',
+    label: 'Clinic',
+    href: '/account/clinic',
+    show: ({ isDentist }) => isDentist,
+  },
+  {
+    value: 'billing-settings',
+    label: 'Billing',
+    href: '/account/billing-settings',
+    show: ({ isAdmin }) => isAdmin,
+  },
 ];
 
 export function AccountNavTabs() {
   const router = useRouter();
   const pathname = usePathname();
   const { isDentist } = useAccountData();
+  const { isAdmin } = useAuth();
 
-  const currentTab = pathname.includes('/account/clinic') ? 'clinic' : 'profile';
+  const currentTab = pathname.includes('/account/clinic')
+    ? 'clinic'
+    : pathname.includes('/account/billing-settings')
+      ? 'billing-settings'
+      : 'profile';
 
   const tabs = useMemo(
-    () => (isDentist ? TAB_MAP : TAB_MAP.filter((tab) => tab.value !== 'clinic')),
-    [isDentist],
+    () => TAB_MAP.filter((tab) => !tab.show || tab.show({ isDentist, isAdmin })),
+    [isDentist, isAdmin],
   );
 
   return (

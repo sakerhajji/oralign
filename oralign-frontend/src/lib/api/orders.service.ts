@@ -6,6 +6,7 @@ import {
   OrderFile,
   OrderFileCategory,
   OrderFilterParams,
+  OrderStatus,
   PaginatedResponse,
   ToothInstruction,
   UpdateOrderDto,
@@ -57,6 +58,23 @@ export const ordersService = {
     return response.data;
   },
 
+  /**
+   * Admin-only manual status override. Accepts any valid OrderStatus,
+   * including rollback to earlier phases. `reason` is logged on the
+   * backend for auditability.
+   */
+  overrideStatus: async (
+    id: string,
+    status: OrderStatus,
+    reason?: string,
+  ): Promise<DentalOrder> => {
+    const response = await apiClient.put<DentalOrder>(
+      `/orders/${id}/status`,
+      { status, reason: reason?.trim() || undefined },
+    );
+    return response.data;
+  },
+
   updateToothInstructions: async (
     id: string,
     instructions: ToothInstruction[],
@@ -75,12 +93,15 @@ export const ordersService = {
   ): Promise<OrderFile[]> => {
     const formData = new FormData();
     files.forEach((file) => formData.append('files', file));
+    // Do NOT set Content-Type manually — axios reads the FormData and
+    // emits `multipart/form-data; boundary=...` automatically. Forcing
+    // the header strips the boundary parameter and the server can no
+    // longer parse the body. (Same fix as users.service.ts uploadAvatar.)
     const response = await apiClient.post<OrderFile[]>(
       `/orders/${id}/files`,
       formData,
       {
         params: { category },
-        headers: { 'Content-Type': 'multipart/form-data' },
       },
     );
     return response.data;

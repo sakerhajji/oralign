@@ -16,6 +16,7 @@ import {
   OrderFile,
   OrderFileCategory,
   OrderFilterParams,
+  OrderStatus,
   PaginatedResponse,
   ToothInstruction,
   UpdateOrderDto,
@@ -94,6 +95,34 @@ export function useSubmitOrder(): UseMutationResult<DentalOrder, Error, string> 
   });
 }
 
+/**
+ * Admin-only manual status override (roll forward or roll back the
+ * order to any lifecycle value). The backend enforces the role check;
+ * the UI hides the affordance for non-admins.
+ */
+export function useOverrideOrderStatus(): UseMutationResult<
+  DentalOrder,
+  Error,
+  { id: string; status: OrderStatus; reason?: string }
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, status, reason }) =>
+      ordersService.overrideStatus(id, status, reason),
+    onSuccess: (_data, { id }) => {
+      queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
+      // Treatment plan + quote views read order status indirectly via
+      // their order include — refresh those too so the status badges
+      // shown next to those tabs stay accurate.
+      queryClient.invalidateQueries({ queryKey: ['treatment-plans'] });
+      queryClient.invalidateQueries({ queryKey: ['quotations'] });
+      toast.success('Order status updated.');
+    },
+    onError: (error) => toast.error(extractApiErrorMessage(error)),
+  });
+}
+
 export function useDeleteOrder(): UseMutationResult<
   MessageResponse,
   Error,
@@ -139,6 +168,11 @@ export function useUpdateToothInstructions(): UseMutationResult<
       ordersService.updateToothInstructions(id, instructions),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(variables.id) });
+      // The treatment plan review payload also includes the tooth
+      // instructions (grouped odontogram + IPR map). Without this
+      // invalidation, the IPR purple bars in the plan editor stay
+      // stale until the user manually refreshes.
+      queryClient.invalidateQueries({ queryKey: ['treatment-plans'] });
       toast.success('Odontogram saved');
     },
     onError: (error) => toast.error(extractApiErrorMessage(error)),

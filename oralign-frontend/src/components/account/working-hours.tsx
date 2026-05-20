@@ -118,13 +118,19 @@ export function WorkingHoursEditor({
                 : 'border-border bg-muted/30',
             )}
           >
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              {/* Day label + status pill */}
+            {/* Three-column grid on tablets+ pinned to FIXED widths so
+                the time inputs land at the same x-position on every row
+                regardless of whether the day name is "Monday" or
+                "Wednesday". Closed rows still occupy the Opens/Closes
+                slots (rendered empty) so vertical rhythm is preserved.
+                Phones fall back to a single-column stack. */}
+            <div className="flex flex-col gap-3 sm:grid sm:grid-cols-[minmax(0,1fr)_140px_140px] sm:items-center sm:gap-4">
+              {/* ─── Column 1: day badge + label + status pill + switch ── */}
               <div className="flex items-center justify-between gap-3 sm:justify-start">
-                <div className="flex items-center gap-3">
+                <div className="flex min-w-0 items-center gap-3">
                   <span
                     className={cn(
-                      'inline-flex h-9 w-9 items-center justify-center rounded-lg text-[11px] font-bold uppercase tracking-wide',
+                      'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[11px] font-bold uppercase tracking-wide',
                       meta?.isWeekend
                         ? isOpen
                           ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
@@ -140,7 +146,7 @@ export function WorkingHoursEditor({
                   <label
                     htmlFor={toggleId}
                     className={cn(
-                      'cursor-pointer text-sm font-semibold sm:text-base',
+                      'cursor-pointer truncate text-sm font-semibold sm:text-base',
                       isOpen ? 'text-foreground' : 'text-muted-foreground',
                     )}
                   >
@@ -148,8 +154,7 @@ export function WorkingHoursEditor({
                   </label>
                 </div>
 
-                {/* Status pill + switch */}
-                <div className="flex items-center gap-2">
+                <div className="flex shrink-0 items-center gap-2 sm:ml-auto">
                   <span
                     className={cn(
                       'rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider',
@@ -172,48 +177,54 @@ export function WorkingHoursEditor({
                 </div>
               </div>
 
-              {/* Time inputs — only rendered when the day is ON.
-                  Hiding (not just disabling) removes them from the tab
-                  order, which matches what the user expects. */}
-              {isOpen && (
-                <div className="grid grid-cols-2 gap-2 sm:max-w-xs sm:flex-1">
-                  <div className="space-y-1">
-                    <label
-                      htmlFor={`${toggleId}-open`}
-                      className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
-                    >
-                      Opens
-                    </label>
-                    <input
-                      id={`${toggleId}-open`}
-                      type="time"
-                      value={day.openTime}
-                      onChange={(event) =>
-                        updateDay(day.dayOfWeek, { openTime: event.target.value })
-                      }
-                      className="w-full rounded-lg border border-input bg-background px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                      disabled={disabled}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label
-                      htmlFor={`${toggleId}-close`}
-                      className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
-                    >
-                      Closes
-                    </label>
-                    <input
-                      id={`${toggleId}-close`}
-                      type="time"
-                      value={day.closeTime}
-                      onChange={(event) =>
-                        updateDay(day.dayOfWeek, { closeTime: event.target.value })
-                      }
-                      className="w-full rounded-lg border border-input bg-background px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                      disabled={disabled}
-                    />
-                  </div>
+              {/* ─── Column 2: Opens — fixed 140px on tablets+ ── */}
+              {isOpen ? (
+                <div className="space-y-1">
+                  <label
+                    htmlFor={`${toggleId}-open`}
+                    className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
+                  >
+                    Opens
+                  </label>
+                  <input
+                    id={`${toggleId}-open`}
+                    type="time"
+                    value={day.openTime}
+                    onChange={(event) =>
+                      updateDay(day.dayOfWeek, { openTime: event.target.value })
+                    }
+                    className="w-full rounded-lg border border-input bg-background px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    disabled={disabled}
+                  />
                 </div>
+              ) : (
+                // Empty slot — keeps grid alignment on closed rows so the
+                // Opens column on every other row still lines up.
+                <div className="hidden sm:block" aria-hidden="true" />
+              )}
+
+              {/* ─── Column 3: Closes — fixed 140px on tablets+ ── */}
+              {isOpen ? (
+                <div className="space-y-1">
+                  <label
+                    htmlFor={`${toggleId}-close`}
+                    className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
+                  >
+                    Closes
+                  </label>
+                  <input
+                    id={`${toggleId}-close`}
+                    type="time"
+                    value={day.closeTime}
+                    onChange={(event) =>
+                      updateDay(day.dayOfWeek, { closeTime: event.target.value })
+                    }
+                    className="w-full rounded-lg border border-input bg-background px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    disabled={disabled}
+                  />
+                </div>
+              ) : (
+                <div className="hidden sm:block" aria-hidden="true" />
               )}
             </div>
           </div>

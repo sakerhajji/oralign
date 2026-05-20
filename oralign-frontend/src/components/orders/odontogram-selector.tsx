@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  Fragment,
   memo,
   useCallback,
   useEffect,
@@ -11,11 +12,12 @@ import {
 } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import type { CSSProperties, MouseEvent as ReactMouseEvent } from 'react';
-import { Check, Info, Palette, RotateCcw } from 'lucide-react';
+import { Check, Info, Palette, RotateCcw, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ToothInstruction, ToothInstructionType } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { TOOTH_VIEWBOXES } from './tooth-viewboxes';
 
 // ── Layout (FDI numbering) ──────────────────────────────────────────────────
@@ -83,10 +85,24 @@ export function OdontogramSelector({
   value,
   onChange,
   disabled,
+  iprValues,
+  onIprChange,
 }: {
   value: ToothInstruction[];
   onChange: (value: ToothInstruction[]) => void;
   disabled?: boolean;
+  /**
+   * Optional per-tooth IPR values (mm as a string). When provided together
+   * with `onIprChange`, the odontogram renders clickable purple bars
+   * BETWEEN adjacent teeth in each arch half. The key is the "right tooth
+   * in render order" — i.e. the slot to the LEFT of tooth N belongs to N.
+   * Tooth 18, 21 (upper) and 48, 31 (lower) cannot have IPR (they're at
+   * the start of their respective halves). When omitted, the IPR layer
+   * is hidden — preserves the existing wizard / read-only behaviour.
+   */
+  iprValues?: Map<number, string>;
+  /** Setter for an IPR slot. `null` clears the slot. */
+  onIprChange?: (toothNumber: number, value: string | null) => void;
 }) {
   const [showLegend, setShowLegend] = useState(true);
   const [popup, setPopup] = useState<{
@@ -95,6 +111,17 @@ export function OdontogramSelector({
     y: number;
     width: number;
   } | null>(null);
+  const [iprPopup, setIprPopup] = useState<{
+    tooth: number;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  // Show the IPR layer whenever values are provided — even if no setter is
+  // attached. Read-only viewers (doctor / order-detail read screen) still
+  // benefit from seeing where IPR is planned. Clicking is gated separately.
+  const iprVisible = !!iprValues;
+  const iprEditable = !!onIprChange && !disabled;
 
   // One instruction per tooth.
   const assignments = useMemo(() => {
@@ -110,9 +137,11 @@ export function OdontogramSelector({
   const valueRef = useRef(value);
   const onChangeRef = useRef(onChange);
   const disabledRef = useRef(disabled);
+  const onIprChangeRef = useRef(onIprChange);
   valueRef.current = value;
   onChangeRef.current = onChange;
   disabledRef.current = disabled;
+  onIprChangeRef.current = onIprChange;
 
   const setTooth = useCallback(
     (toothNumber: number, type: ToothInstructionType | null) => {
@@ -122,6 +151,29 @@ export function OdontogramSelector({
       onChangeRef.current(
         type ? [...without, { toothNumber, type }] : without,
       );
+    },
+    [],
+  );
+
+  const openIprPopup = useCallback(
+    (toothNumber: number, event: ReactMouseEvent<HTMLButtonElement>) => {
+      if (disabledRef.current) return;
+      const rect = event.currentTarget.getBoundingClientRect();
+      setIprPopup({
+        tooth: toothNumber,
+        x: rect.left + rect.width / 2,
+        y: rect.bottom + 8,
+      });
+    },
+    [],
+  );
+
+  const closeIprPopup = useCallback(() => setIprPopup(null), []);
+
+  const commitIpr = useCallback(
+    (toothNumber: number, value: string | null) => {
+      onIprChangeRef.current?.(toothNumber, value);
+      setIprPopup(null);
     },
     [],
   );
@@ -195,8 +247,11 @@ export function OdontogramSelector({
               right={UPPER_LEFT}
               assignments={assignments}
               activeTooth={popup?.tooth ?? null}
+              activeIpr={iprPopup?.tooth ?? null}
               disabled={disabled}
+              iprValues={iprVisible ? iprValues : undefined}
               onToothClick={openPopup}
+              onIprClick={iprEditable ? openIprPopup : undefined}
             />
             <div className="relative my-2 h-px bg-foreground/15">
               <span className="absolute left-1/2 top-1/2 h-8 w-px -translate-x-1/2 -translate-y-1/2 bg-foreground/30" />
@@ -207,8 +262,11 @@ export function OdontogramSelector({
               right={LOWER_LEFT}
               assignments={assignments}
               activeTooth={popup?.tooth ?? null}
+              activeIpr={iprPopup?.tooth ?? null}
               disabled={disabled}
+              iprValues={iprVisible ? iprValues : undefined}
               onToothClick={openPopup}
+              onIprClick={iprEditable ? openIprPopup : undefined}
             />
           </div>
         </div>
@@ -267,6 +325,17 @@ export function OdontogramSelector({
           onClose={closePopup}
         />
       )}
+
+      {iprPopup && iprEditable && (
+        <IprPopover
+          tooth={iprPopup.tooth}
+          anchorX={iprPopup.x}
+          anchorY={iprPopup.y}
+          currentValue={iprValues?.get(iprPopup.tooth)}
+          onCommit={(v) => commitIpr(iprPopup.tooth, v)}
+          onClose={closeIprPopup}
+        />
+      )}
     </div>
   );
 }
@@ -315,20 +384,39 @@ function Arch({
   right,
   assignments,
   activeTooth,
+  activeIpr,
   disabled,
+  iprValues,
   onToothClick,
+  onIprClick,
 }: {
   row: 'upper' | 'lower';
   left: readonly number[];
   right: readonly number[];
   assignments: Map<number, ToothInstructionType>;
   activeTooth: number | null;
+  activeIpr: number | null;
   disabled?: boolean;
+  iprValues?: Map<number, string>;
   onToothClick: (
     tooth: number,
     event: ReactMouseEvent<HTMLButtonElement>,
   ) => void;
+  /** Optional — when omitted the slots become read-only (no popup). */
+  onIprClick?: (
+    tooth: number,
+    event: ReactMouseEvent<HTMLButtonElement>,
+  ) => void;
 }) {
+  // Render rules for the IPR layer:
+  //   • If `iprValues` is provided (even when read-only), show the
+  //     populated slots — this is what the doctor sees: the planner-set
+  //     IPR amounts as purple bars between teeth.
+  //   • Empty / dotted placeholder slots ONLY render when an editor
+  //     handler is attached (admin/designer in per-tooth mode). Doctors
+  //     don't need the "click here to add" hints cluttering the arch.
+  const showFilledSlots = !!iprValues;
+  const showEmptyPlaceholders = !!onIprClick;
   return (
     <div className="grid grid-cols-2 gap-x-3 sm:gap-x-6">
       {[left, right].map((teeth, i) => (
@@ -339,18 +427,40 @@ function Arch({
             row === 'upper' ? 'items-end' : 'items-start',
           )}
         >
-          {teeth.map((n) => (
-            <ToothButton
-              key={n}
-              toothNumber={n}
-              row={row}
-              mirrored={MIRRORED.has(n)}
-              type={assignments.get(n)}
-              active={activeTooth === n}
-              disabled={disabled}
-              onClick={onToothClick}
-            />
-          ))}
+          {teeth.map((n, idx) => {
+            const next = teeth[idx + 1];
+            const slotValue =
+              idx < teeth.length - 1 ? iprValues?.get(next) : undefined;
+            const slotShouldRender =
+              idx < teeth.length - 1 &&
+              (showEmptyPlaceholders ||
+                (showFilledSlots && !!slotValue));
+            return (
+              <Fragment key={n}>
+                <ToothButton
+                  toothNumber={n}
+                  row={row}
+                  mirrored={MIRRORED.has(n)}
+                  type={assignments.get(n)}
+                  active={activeTooth === n}
+                  disabled={disabled}
+                  onClick={onToothClick}
+                />
+                {/* IPR slot between this tooth and the next one. The next
+                    tooth (teeth[idx + 1]) anchors the slot's storage key. */}
+                {slotShouldRender && (
+                  <IprSlot
+                    toothNumber={next}
+                    row={row}
+                    value={slotValue}
+                    active={activeIpr === next}
+                    disabled={disabled || !onIprClick}
+                    onClick={onIprClick}
+                  />
+                )}
+              </Fragment>
+            );
+          })}
         </div>
       ))}
     </div>
@@ -458,6 +568,74 @@ const ToothButton = memo(
   },
 );
 
+// ── IPR slot (purple bar between two adjacent teeth) ───────────────────────
+
+type IprSlotProps = {
+  toothNumber: number;
+  row: 'upper' | 'lower';
+  value?: string;
+  active?: boolean;
+  disabled?: boolean;
+  /** Omitted in read-only mode (doctor's view). The slot renders the
+   *  filled bar + mm label but doesn't open the editor popup on click. */
+  onClick?: (
+    tooth: number,
+    event: ReactMouseEvent<HTMLButtonElement>,
+  ) => void;
+};
+
+const IprSlot = memo(function IprSlot({
+  toothNumber,
+  row,
+  value,
+  active,
+  disabled,
+  onClick,
+}: IprSlotProps) {
+  const handleClick = useCallback(
+    (e: ReactMouseEvent<HTMLButtonElement>) => onClick?.(toothNumber, e),
+    [onClick, toothNumber],
+  );
+  const hasValue = !!value && value.trim().length > 0;
+  // Read-only slots (no onClick) should not be focusable as actionable
+  // controls and should not appear pressable — they're a data display.
+  const readOnly = !onClick;
+
+  return (
+    <button
+      type="button"
+      disabled={disabled || readOnly}
+      onClick={readOnly ? undefined : handleClick}
+      aria-label={
+        readOnly
+          ? `IPR ${value} mm between teeth (anchored on ${toothNumber})`
+          : hasValue
+            ? `Edit IPR ${value} mm — slot anchored on tooth ${toothNumber}`
+            : `Add IPR for slot anchored on tooth ${toothNumber}`
+      }
+      aria-pressed={readOnly ? undefined : active}
+      data-active={active ? 'true' : undefined}
+      data-readonly={readOnly ? 'true' : undefined}
+      className={cn(
+        'odo-ipr',
+        row === 'upper' ? 'odo-ipr-upper' : 'odo-ipr-lower',
+        hasValue && 'odo-ipr-on',
+        readOnly && 'odo-ipr-readonly',
+      )}
+      title={
+        readOnly
+          ? `IPR ${value} mm`
+          : hasValue
+            ? `IPR ${value} mm`
+            : 'Click to add IPR (interproximal reduction in mm)'
+      }
+    >
+      <span className="odo-ipr-bar" aria-hidden />
+      {hasValue && <span className="odo-ipr-label">{value}</span>}
+    </button>
+  );
+});
+
 // ── Popover ────────────────────────────────────────────────────────────────
 
 function ColorPopover({
@@ -559,6 +737,124 @@ function ColorPopover({
         <RotateCcw className="h-3 w-3" />
         Clear
       </button>
+    </div>,
+    document.body,
+  );
+}
+
+// ── IPR Popover ────────────────────────────────────────────────────────────
+
+function IprPopover({
+  tooth,
+  anchorX,
+  anchorY,
+  currentValue,
+  onCommit,
+  onClose,
+}: {
+  tooth: number;
+  anchorX: number;
+  anchorY: number;
+  currentValue?: string;
+  onCommit: (value: string | null) => void;
+  onClose: () => void;
+}) {
+  const popupRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ left: anchorX, top: anchorY });
+  const [draft, setDraft] = useState(currentValue ?? '0.2');
+
+  useEffect(() => {
+    let armed = false;
+    const id = window.setTimeout(() => {
+      armed = true;
+    }, 0);
+    const onDocClick = (e: MouseEvent) => {
+      if (!armed) return;
+      if (popupRef.current && !popupRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => {
+      window.clearTimeout(id);
+      document.removeEventListener('mousedown', onDocClick);
+    };
+  }, [onClose]);
+
+  useLayoutEffect(() => {
+    if (!popupRef.current) return;
+    const rect = popupRef.current.getBoundingClientRect();
+    const margin = 8;
+    const maxLeft = window.innerWidth - rect.width - margin;
+    const maxTop = window.innerHeight - rect.height - margin;
+    const left = Math.min(Math.max(margin, anchorX - rect.width / 2), maxLeft);
+    const top = Math.min(Math.max(margin, anchorY), maxTop);
+    setPos({ left, top });
+  }, [anchorX, anchorY]);
+
+  if (typeof window === 'undefined') return null;
+
+  const handleConfirm = () => {
+    const trimmed = draft.trim();
+    if (!trimmed) {
+      onCommit(null);
+      return;
+    }
+    // Clamp to a sane range — 0.1 to 1.0 mm is the typical clinical IPR range.
+    const num = Number(trimmed);
+    if (Number.isFinite(num) && num >= 0 && num <= 2) {
+      onCommit(num.toString());
+    } else {
+      onCommit(trimmed);
+    }
+  };
+
+  return createPortal(
+    <div
+      ref={popupRef}
+      role="dialog"
+      aria-label={`Set IPR amount for tooth ${tooth} slot`}
+      className="odo-popover fixed z-[1000] w-[220px] rounded-xl border bg-popover p-3 shadow-xl outline-none"
+      style={{ left: pos.left, top: pos.top }}
+    >
+      <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+        IPR slot · tooth {tooth}
+      </div>
+      <div className="flex items-center gap-2">
+        <Input
+          type="number"
+          step="0.1"
+          min="0"
+          max="2"
+          inputMode="decimal"
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') handleConfirm();
+            if (e.key === 'Escape') onClose();
+          }}
+          className="h-9"
+        />
+        <span className="text-xs text-muted-foreground">mm</span>
+      </div>
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => onCommit(null)}
+          disabled={!currentValue}
+          className="gap-1"
+        >
+          <Trash2 className="h-3 w-3" />
+          Clear
+        </Button>
+        <Button type="button" size="sm" onClick={handleConfirm} className="gap-1">
+          <Check className="h-3 w-3" />
+          Save
+        </Button>
+      </div>
     </div>,
     document.body,
   );
@@ -742,6 +1038,113 @@ const ODONTOGRAM_CSS = /* css */ `
   .odo-glyph { height: 110px; }
 }
 
+/* ── IPR slot (purple bar between adjacent teeth) ─────────────────────────
+   Visually evokes the clinical reality: a thin strip of enamel reduction
+   between two teeth. Purple was picked specifically because it has zero
+   conflict with the 4 color-instruction hues (blue/red/green/sky) and
+   reads instantly as a separate semantic layer.
+
+   Empty slots show a subtle dotted hint on hover only — they don't compete
+   for attention with the tooth icons when nothing is set. Filled slots
+   show a saturated purple bar with the mm value floating beside it.
+*/
+.odo-ipr {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  width: 14px;
+  min-height: 96px;
+  padding: 0 2px;
+  margin: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  user-select: none;
+  contain: layout style paint;
+  outline: none;
+  transition: transform 160ms ease;
+}
+.odo-ipr-upper { justify-content: flex-end; padding-bottom: 8px; }
+.odo-ipr-lower { justify-content: flex-start; padding-top: 8px; }
+.odo-ipr:hover { transform: scale(1.06); }
+.odo-ipr:disabled { cursor: default; opacity: 0.55; }
+.odo-ipr:focus-visible .odo-ipr-bar {
+  box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.35);
+}
+/* Read-only slots (doctor's view) — show the data, don't suggest it's
+   actionable. No hover transform, no disabled-fade, default cursor. */
+.odo-ipr-readonly { cursor: default; opacity: 1; }
+.odo-ipr-readonly:hover { transform: none; }
+.odo-ipr-readonly:disabled { opacity: 1; }
+.odo-ipr-readonly .odo-ipr-bar { border-style: solid; }
+
+.odo-ipr-bar {
+  display: block;
+  width: 4px;
+  height: 32px;
+  border-radius: 999px;
+  background: rgba(168, 85, 247, 0.12);
+  border: 1px dashed rgba(168, 85, 247, 0.45);
+  transition: background 180ms ease, border-color 180ms ease, height 180ms ease;
+}
+.odo-ipr:hover .odo-ipr-bar {
+  background: rgba(168, 85, 247, 0.28);
+  border-color: rgba(168, 85, 247, 0.75);
+}
+.odo-ipr-on .odo-ipr-bar {
+  /* Purple = #a855f7. Saturated bar makes set values immediately legible. */
+  width: 6px;
+  height: 56px;
+  background: #a855f7;
+  border: 1px solid #7c3aed;
+  border-style: solid;
+  box-shadow: 0 1px 6px rgba(139, 92, 246, 0.45);
+}
+.odo-ipr-on:hover .odo-ipr-bar {
+  background: #9333ea;
+}
+
+.odo-ipr-label {
+  position: absolute;
+  /* On the upper arch, the label sits above the bar; on the lower arch,
+     below. Centered horizontally on the bar's anchor button. */
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  padding: 1px 5px;
+  background: #7c3aed;
+  color: #fff;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  box-shadow: 0 1px 4px rgba(124, 58, 237, 0.45);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.odo-ipr-upper .odo-ipr-label {
+  bottom: calc(100% - 16px);
+}
+.odo-ipr-lower .odo-ipr-label {
+  top: calc(100% - 16px);
+}
+
+@media (max-width: 640px) {
+  .odo-ipr { width: 10px; min-height: 72px; }
+  .odo-ipr-on .odo-ipr-bar { height: 44px; width: 5px; }
+  .odo-ipr-label { font-size: 8px; min-width: 22px; padding: 0 4px; }
+}
+@media (max-width: 480px) {
+  .odo-ipr { width: 8px; min-height: 60px; }
+}
+
 /* Respect reduced motion. */
 @media (prefers-reduced-motion: reduce) {
   .odo-tooth,
@@ -751,6 +1154,8 @@ const ODONTOGRAM_CSS = /* css */ `
   .odo-chip-on,
   .odo-swatch,
   .odo-swatch:hover,
+  .odo-ipr,
+  .odo-ipr:hover,
   .odo-popover {
     transition: none !important;
     animation: none !important;

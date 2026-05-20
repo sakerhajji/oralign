@@ -2,7 +2,13 @@ import { Injectable, Logger } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
 import {
   renderApprovalGrantedEmail,
+  renderNewOrderForAdminEmail,
+  renderNewOrderForDoctorEmail,
   renderPasswordResetEmail,
+  renderQuoteDecisionForAdminEmail,
+  renderQuoteSentForDoctorEmail,
+  renderTreatmentDecisionForAdminEmail,
+  renderTreatmentReadyForDoctorEmail,
   renderVerificationEmail,
 } from './templates';
 
@@ -81,6 +87,83 @@ export class MailService {
     await this.send({ to, subject, html });
   }
 
+  // ─── Order-lifecycle emails ─────────────────────────────────────────────
+
+  async sendNewOrderForDoctorEmail(args: {
+    to: string;
+    doctorName: string;
+    orderCode: string;
+    patientName: string;
+    dashboardUrl: string;
+  }): Promise<void> {
+    const { html, subject } = renderNewOrderForDoctorEmail(args);
+    await this.send({ to: args.to, subject, html });
+  }
+
+  async sendNewOrderForAdminEmail(args: {
+    to: string;
+    adminName: string;
+    orderCode: string;
+    doctorName: string;
+    patientName: string;
+    dashboardUrl: string;
+  }): Promise<void> {
+    const { html, subject } = renderNewOrderForAdminEmail(args);
+    await this.send({ to: args.to, subject, html });
+  }
+
+  async sendTreatmentReadyForDoctorEmail(args: {
+    to: string;
+    doctorName: string;
+    orderCode: string;
+    planName: string;
+    dashboardUrl: string;
+  }): Promise<void> {
+    const { html, subject } = renderTreatmentReadyForDoctorEmail(args);
+    await this.send({ to: args.to, subject, html });
+  }
+
+  async sendTreatmentDecisionForAdminEmail(args: {
+    to: string;
+    adminName: string;
+    orderCode: string;
+    doctorName: string;
+    planName: string;
+    decision: 'approved' | 'rejected';
+    reason?: string;
+    dashboardUrl: string;
+  }): Promise<void> {
+    const { html, subject } = renderTreatmentDecisionForAdminEmail(args);
+    await this.send({ to: args.to, subject, html });
+  }
+
+  async sendQuoteSentForDoctorEmail(args: {
+    to: string;
+    doctorName: string;
+    orderCode: string;
+    quotationNumber: string;
+    totalTtc: number;
+    currency: string;
+    dashboardUrl: string;
+  }): Promise<void> {
+    const { html, subject } = renderQuoteSentForDoctorEmail(args);
+    await this.send({ to: args.to, subject, html });
+  }
+
+  async sendQuoteDecisionForAdminEmail(args: {
+    to: string;
+    adminName: string;
+    orderCode: string;
+    doctorName: string;
+    quotationNumber: string;
+    decision: 'approved' | 'rejected';
+    reason?: string;
+    dashboardUrl: string;
+  }): Promise<void> {
+    const { html, subject } = renderQuoteDecisionForAdminEmail(args);
+    await this.send({ to: args.to, subject, html });
+  }
+
   private async send(options: {
     to: string;
     subject: string;
@@ -93,8 +176,7 @@ export class MailService {
       // leak OTPs or reset URLs into stdout (operators may ship logs to a
       // less-trusted system).
       const isProd = process.env.NODE_ENV === 'production';
-      const hint =
-        !isProd && options.devHint ? ` | ${options.devHint}` : '';
+      const hint = !isProd && options.devHint ? ` | ${options.devHint}` : '';
       this.logger.warn(
         `[MAIL DISABLED] To: ${options.to} | Subject: ${options.subject}${hint}`,
       );

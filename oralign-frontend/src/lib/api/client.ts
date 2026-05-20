@@ -41,12 +41,38 @@ export const clearTokens = (): void => {
   clearAccessTokenCookie();
 };
 
+/**
+ * True when the user is currently on a page that requires an
+ * authenticated session — i.e. somewhere inside /dashboard. Used by
+ * the response interceptor to decide whether a 401 should bounce them
+ * to /login or just be reported as an error.
+ *
+ * Public pages (the marketing site, /created_for_you/<token>, /test,
+ * /login, /signup, /verify-email, /reset-password, etc.) should keep
+ * rendering even when a stale token sits in localStorage.
+ */
+const isOnAuthedPath = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  return window.location.pathname.startsWith('/dashboard');
+};
+
 // Create axios instance
+//
+// IMPORTANT: do NOT set a default `Content-Type: application/json` here.
+// Axios v1.x has a "helpful" transformRequest that detects when the
+// header says application/json AND the body is FormData, and silently
+// converts the FormData to a JSON string before sending. Multer on the
+// backend then sees no multipart body and `@UploadedFile()` arrives
+// undefined ("No file uploaded" was the symptom). Letting axios pick
+// the Content-Type per request is the only safe option:
+//
+//   • Plain-object body  → axios auto-sets `application/json` (correct).
+//   • FormData body      → axios auto-sets `multipart/form-data;
+//                          boundary=...` (correct).
+//   • String / stream    → no Content-Type is auto-set; callers that
+//                          need one set it explicitly.
 const apiClient: AxiosInstance = axios.create({
   baseURL: API_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
   timeout: 30000,
 });
 
@@ -117,9 +143,13 @@ apiClient.interceptors.response.use(
       const refreshToken = getRefreshToken();
 
       if (!refreshToken) {
-        // No refresh token, redirect to login
+        // No refresh token. Only redirect to /login when the user is
+        // actually inside the authenticated dashboard area — otherwise
+        // visiting a public page (e.g. /created_for_you/<token> as a
+        // patient with stale localStorage tokens) would bounce them
+        // out of a page they were entitled to see.
         clearTokens();
-        if (typeof window !== 'undefined') {
+        if (typeof window !== 'undefined' && isOnAuthedPath()) {
           window.location.href = '/login';
         }
         return Promise.reject(error);
@@ -147,10 +177,12 @@ apiClient.interceptors.response.use(
         // Retry the original request
         return apiClient(originalRequest);
       } catch (refreshError) {
-        // Refresh failed, clear tokens and redirect to login
+        // Refresh failed. As above, only bounce to /login if we're
+        // actually on an authed path — public pages should stay where
+        // they are even if a stale localStorage token failed to refresh.
         processQueue(refreshError as Error, null);
         clearTokens();
-        if (typeof window !== 'undefined') {
+        if (typeof window !== 'undefined' && isOnAuthedPath()) {
           window.location.href = '/login';
         }
         return Promise.reject(refreshError);

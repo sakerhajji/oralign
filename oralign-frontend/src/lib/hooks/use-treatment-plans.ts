@@ -35,16 +35,34 @@ export function useTreatmentPlansByOrder(
     queryKey: treatmentPlanKeys.byOrder(orderId),
     queryFn: () => treatmentPlansService.listByOrder(orderId),
     enabled: !!orderId,
+    // List is cheap (no relations, ~1KB) but flipping tabs shouldn't refire.
+    staleTime: 1000 * 60 * 5,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
   });
 }
 
 export function useTreatmentPlanReview(
   id: string,
 ): UseQueryResult<TreatmentPlanReview, Error> {
+  // The review payload is HEAVY — it pulls the full plan + grouped odontogram
+  // + every chat message with its attachments + senders. Before this fix the
+  // Order detail tab flip refetched it on every mount, plus on every window
+  // focus, holding two copies in memory while the new one came in. That's
+  // most of the ~824 MB the user reported.
+  //
+  // The WebSocket gateway (`useTreatmentChatSocket`) is the source of truth
+  // for new messages anyway — it updates this cache in-place — so we can
+  // safely disable auto-refetch entirely and let the socket drive updates.
   return useQuery({
     queryKey: treatmentPlanKeys.review(id),
     queryFn: () => treatmentPlansService.getReview(id),
     enabled: !!id,
+    staleTime: 1000 * 60 * 10,
+    gcTime: 1000 * 60 * 5,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 }
 
@@ -85,6 +103,31 @@ export function useUpdateResultViewUrl(): UseMutationResult<
     onSuccess: (plan) => {
       invalidatePlan(queryClient, plan);
       toast.success('Treatment viewer URL saved.');
+    },
+    onError: (err) => toast.error(extractApiErrorMessage(err)),
+  });
+}
+
+export function useMarkTreatmentPlanReady(): UseMutationResult<
+  TreatmentPlan,
+  Error,
+  string
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => treatmentPlansService.markReady(id),
+    onSuccess: (plan, sourceId) => {
+      invalidatePlan(queryClient, plan);
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      // Resend-after-rejection creates a NEW versioned plan — surface that
+      // in the toast so the planner knows the rejected version is preserved
+      // and they're now looking at a fresh one.
+      const isNewVersion = plan.id !== sourceId;
+      toast.success(
+        isNewVersion
+          ? `${plan.name} created and marked ready (replaces the rejected plan).`
+          : 'Plan marked ready for doctor review.',
+      );
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });

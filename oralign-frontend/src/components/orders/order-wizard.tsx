@@ -164,11 +164,21 @@ const materialOptions = ['TAGLUS', 'ZENDURA', 'NO MANUFACTURING'] as const;
 type PatientMode = 'existing' | 'new';
 type FieldErrors = Partial<Record<string, string>>;
 
+/**
+ * Mirrors the field set used by the dedicated /dashboard/patients form
+ * so the planner sees the same affordances regardless of where they
+ * create a patient from. `reason` is the inline-only addition because
+ * the order wizard needs a chief complaint to seed the next step;
+ * everything else maps 1:1 to `CreatePatientDto`.
+ */
 interface NewPatientDraft {
-  firstName: string;
-  lastName: string;
+  fullName: string;
+  email: string;
+  phone: string;
   dateOfBirth: string;
   gender?: Gender;
+  address: string;
+  notes: string;
   reason: string;
 }
 
@@ -185,10 +195,13 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
     initialOrder?.toothInstructions ?? [],
   );
   const [newPatient, setNewPatient] = useState<NewPatientDraft>({
-    firstName: '',
-    lastName: '',
+    fullName: '',
+    email: '',
+    phone: '',
     dateOfBirth: '',
     gender: undefined,
+    address: '',
+    notes: '',
     reason: '',
   });
   const [form, setForm] = useState<CreateOrderDto>({
@@ -287,11 +300,8 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
         errors.patientId = 'Patient selection is required.';
       }
     } else {
-      if (!newPatient.firstName.trim()) {
-        errors['newPatient.firstName'] = 'First name is required.';
-      }
-      if (!newPatient.lastName.trim()) {
-        errors['newPatient.lastName'] = 'Last name is required.';
+      if (!newPatient.fullName.trim()) {
+        errors['newPatient.fullName'] = 'Patient name is required.';
       }
       if (!newPatient.dateOfBirth) {
         errors['newPatient.dateOfBirth'] = 'Date of birth is required.';
@@ -302,6 +312,8 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
       if (!newPatient.reason.trim()) {
         errors['newPatient.reason'] = 'Consultation reason is required.';
       }
+      // email + phone + address + notes are OPTIONAL (same as the
+      // dedicated patient form).
     }
 
     if (Object.keys(errors).length > 0) {
@@ -310,11 +322,27 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
     }
 
     if (patientMode === 'new' && !form.patientId) {
+      // Combine the consultation reason with any free-form notes the
+      // planner entered. The dedicated patients form treats `notes` as
+      // free-form too, so this stays consistent — and the chief
+      // complaint on the order is seeded separately below.
+      const combinedNotes = [
+        newPatient.notes.trim(),
+        newPatient.reason.trim()
+          ? `Consultation reason: ${newPatient.reason.trim()}`
+          : '',
+      ]
+        .filter(Boolean)
+        .join('\n\n');
+
       const createdPatient = await createPatient.mutateAsync({
-        fullName: `${newPatient.firstName.trim()} ${newPatient.lastName.trim()}`,
-        dateOfBirth: newPatient.dateOfBirth,
+        fullName: newPatient.fullName.trim(),
+        email: newPatient.email.trim() || undefined,
+        phone: newPatient.phone.trim() || undefined,
         gender: newPatient.gender,
-        notes: newPatient.reason.trim(),
+        dateOfBirth: newPatient.dateOfBirth || undefined,
+        address: newPatient.address.trim() || undefined,
+        notes: combinedNotes || undefined,
         doctorId: isAdmin ? form.doctorId : undefined,
       });
       setForm((current) => ({
@@ -783,25 +811,41 @@ function PatientStep({
           <FieldError message={errors.patientId} />
         </div>
       ) : (
+        // ──────────────────────────────────────────────────────────────
+        // Inline "Create a new patient" form. Field set mirrors the
+        // dedicated /dashboard/patients page so users see a consistent
+        // form regardless of entry point. Required: name + DOB + gender +
+        // reason. Optional: email, phone, address, notes.
+        // ──────────────────────────────────────────────────────────────
         <div className="grid gap-5">
           <div className="grid gap-5 md:grid-cols-2">
+            <div className="md:col-span-2">
+              <TextInput
+                label="Patient name"
+                value={newPatient.fullName}
+                placeholder="Full name"
+                icon={<UserRound className="h-4 w-4" />}
+                error={errors['newPatient.fullName']}
+                disabled={!canModify}
+                onChange={(value) => updateNewPatient('fullName', value)}
+              />
+            </div>
             <TextInput
-              label="First name"
-              value={newPatient.firstName}
-              placeholder="Enter a first name..."
-              icon={<UserRound className="h-4 w-4" />}
-              error={errors['newPatient.firstName']}
+              label="Email"
+              value={newPatient.email}
+              type="email"
+              placeholder="patient@example.com"
+              error={errors['newPatient.email']}
               disabled={!canModify}
-              onChange={(value) => updateNewPatient('firstName', value)}
+              onChange={(value) => updateNewPatient('email', value)}
             />
             <TextInput
-              label="Last name"
-              value={newPatient.lastName}
-              placeholder="Enter the last name..."
-              icon={<UserRound className="h-4 w-4" />}
-              error={errors['newPatient.lastName']}
+              label="Phone"
+              value={newPatient.phone}
+              placeholder="+216 12 345 678"
+              error={errors['newPatient.phone']}
               disabled={!canModify}
-              onChange={(value) => updateNewPatient('lastName', value)}
+              onChange={(value) => updateNewPatient('phone', value)}
             />
             <TextInput
               label="Date of birth"
@@ -832,11 +876,29 @@ function PatientStep({
               </Select>
               <FieldError message={errors['newPatient.gender']} />
             </div>
+            <div className="md:col-span-2">
+              <TextInput
+                label="Address"
+                value={newPatient.address}
+                placeholder="Street, city, postal code"
+                error={errors['newPatient.address']}
+                disabled={!canModify}
+                onChange={(value) => updateNewPatient('address', value)}
+              />
+            </div>
           </div>
+          <TextAreaField
+            label="Notes"
+            value={newPatient.notes}
+            placeholder="Allergies, medical history, anything the planner should know…"
+            error={errors['newPatient.notes']}
+            disabled={!canModify}
+            onChange={(value) => updateNewPatient('notes', value)}
+          />
           <TextAreaField
             label="Reason for consultation"
             value={newPatient.reason}
-            placeholder="Briefly describe the reason for consultation..."
+            placeholder="Briefly describe why the patient is coming in…"
             error={errors['newPatient.reason']}
             disabled={!canModify}
             onChange={(value) => updateNewPatient('reason', value)}

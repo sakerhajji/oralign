@@ -19,6 +19,7 @@ import { MailModule } from './mail/mail.module';
 import { PatientModule } from './patients/patient.module';
 import { OrderModule } from './orders/order.module';
 import { TreatmentPlanModule } from './treatment-plans/treatment-plan.module';
+import { QuotationModule } from './quotations/quotation.module';
 
 // ─── Redis URL builder ──────────────────────────────────────────────────────
 // Compose injects REDIS_HOST / REDIS_PORT / REDIS_PASSWORD individually; this
@@ -40,14 +41,16 @@ function buildRedisUrl(): string {
 
     // ─── Rate limiting ──────────────────────────────────────────────────────
     // Three buckets so we can apply different envelopes per endpoint:
-    //   short  — anti-burst (10 req / 10s)
-    //   medium — normal usage cap (60 req / min)
-    //   long   — slow brute-force protection (300 req / hour)
-    // Auth endpoints opt-in to stricter @Throttle() overrides.
+    //   short  — anti-burst (30 req / 10 s)  — generous because the
+    //            dashboard fires many parallel requests on first paint
+    //   medium — normal usage cap (120 req / min)
+    //   long   — slow brute-force protection (1000 req / hour)
+    // Auth endpoints layer on stricter @Throttle() overrides; file
+    // downloads use @SkipThrottle() (already RBAC-gated).
     ThrottlerModule.forRoot([
-      { name: 'short', ttl: 10_000, limit: 10 },
-      { name: 'medium', ttl: 60_000, limit: 60 },
-      { name: 'long', ttl: 60 * 60_000, limit: 300 },
+      { name: 'short', ttl: 10_000, limit: 30 },
+      { name: 'medium', ttl: 60_000, limit: 120 },
+      { name: 'long', ttl: 60 * 60_000, limit: 1000 },
     ]),
 
     // ─── Distributed cache (Redis) ──────────────────────────────────────────
@@ -76,6 +79,7 @@ function buildRedisUrl(): string {
     PatientModule,
     OrderModule,
     TreatmentPlanModule,
+    QuotationModule,
     StorageModule,
   ],
   controllers: [AppController],

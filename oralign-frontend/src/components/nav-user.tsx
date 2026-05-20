@@ -69,7 +69,13 @@ export function NavUser({
             </SidebarMenuButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent
-            className="w-(--radix-dropdown-menu-trigger-width) min-w-56 rounded-lg"
+            // Use a FIXED width so the labels never get clipped — the
+            // base DropdownMenuContent class binds to the trigger's
+            // measured width, which is tiny (~3rem) when the sidebar
+            // is in icon-collapsed mode. Force 14rem regardless of
+            // sidebar state so "Account / Billing / Notifications"
+            // always render in full.
+            className="!w-56 min-w-56 rounded-lg"
             side={isMobile ? "bottom" : "right"}
             align="end"
             sideOffset={4}

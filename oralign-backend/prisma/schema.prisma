@@ -132,6 +132,26 @@ enum OrderFileCategory {
   other
 }
 
+// Devis / Quotation language. Drives PDF labels, header copy, footer
+// legal text, and the snapshot persisted alongside each Quotation.
+enum DevisLanguage {
+  fr
+  en
+  ar
+}
+
+// Quotation lifecycle. Mirrors the existing TreatmentPlanStatus shape so
+// the doctor's review UX is consistent. `canceled` is a separate terminal
+// state from `rejected` — admin may CANCEL a draft/sent quote, the doctor
+// REJECTS a sent quote.
+enum QuotationStatus {
+  draft
+  sent
+  approved
+  rejected
+  canceled
+}
+
 // ─────────────────────────────────────────
 // USER
 // ─────────────────────────────────────────
@@ -176,6 +196,9 @@ model User {
   createdToothInstructions OrderToothInstruction[] @relation("ToothInstructionCreator")
   sentTreatmentMessages TreatmentMessage[]
   uploadedTreatmentAttachments TreatmentMessageAttachment[]
+  createdQuotations    Quotation[]       @relation("QuotationCreatedBy")
+  approvedQuotations   Quotation[]       @relation("QuotationApprovedBy")
+  rejectedQuotations   Quotation[]       @relation("QuotationRejectedBy")
 
   @@index([email])
   @@index([role])
@@ -266,6 +289,10 @@ model DentalOrder {
   toothInstructions             OrderToothInstruction[]
   files                         OrderFile[]
   treatmentPlans                TreatmentPlan[]
+  // One active quotation per order. Cancelled quotes stay in history but
+  // a fresh one can be created after cancel. The 1:1 is enforced by the
+  // unique constraint on `Quotation.orderId`.
+  quotation                     Quotation?
 
   @@index([doctorId])
   @@index([patientId])
@@ -468,4 +495,142 @@ model WorkingHours {
   // One row per day per clinic
   @@unique([dentistProfileId, dayOfWeek])
   @@index([dentistProfileId])
+}
+
+// ─────────────────────────────────────────
+// COMPANY BILLING SETTINGS
+// ─────────────────────────────────────────
+//
+// Singleton-style configuration row that drives the Quote PDF header,
+// footer, bank info, and the auto-incremented quotation number. There
+// can be many rows in theory, but only ONE is active at a time
+// (filtered by `isActive = true`). Admin upserts the active row from the
+// settings UI.
+//
+// JSONB columns store per-language text + bank account info so the admin
+// can edit them from a single form without schema changes. Examples:
+//
+//   legalTextTranslations:
+//     { "fr": "Texte légal…", "en": "Legal text…", "ar": "النص…" }
+//   footerTextTranslations:
+//     { "fr": "Merci…",       "en": "Thank you…", "ar": "شكراً…" }
+//   bankDetails:
+//     { "bankName": "BIAT", "accountName": "Oralign SARL",
+//       "rib": "…", "iban": "TN59…", "swift": "BIATTNTT" }
+//
+// Each generated Quotation snapshots these values into `companySnapshot`
+// so old quotes stay correct after admin edits the settings later.
+model CompanyBillingSettings {
+  id                      String        @id @default(uuid())
+
+  companyName             String
+  companyLogoPath         String?       // relative path under uploads/
+  companyAddress          String?
+  companyCity             String?
+  companyCountry          String?
+  companyPhone            String?
+  companyEmail            String?
+  taxRegistrationNumber   String?
+
+  defaultTvaRate          Float         @default(19)
+  defaultCurrency         String        @default("TND")
+
+  // Devis numbering. Incremented inside a transaction when each quote
+  // is first assigned a number, so two concurrent quote-creations can't
+  // collide on the same DEV-XXXXXX value.
+  devisPrefix             String        @default("DEV")
+  devisNextNumber         Int           @default(1)
+
+  legalTextTranslations   Json?
+  footerTextTranslations  Json?
+  bankDetails             Json?
+
+  isActive                Boolean       @default(true)
+
+  createdAt               DateTime      @default(now())
+  updatedAt               DateTime      @updatedAt
+
+  @@index([isActive])
+}
+
+// ─────────────────────────────────────────
+// QUOTATION (DEVIS)
+// ─────────────────────────────────────────
+//
+// One quotation per order (unique on orderId). The full lifecycle:
+//
+//   draft → admin edits fees, language, notes
+//   sent → admin transitioned status; order.status becomes quotation_sent
+//   approved → doctor approved; order.status becomes fabrication
+//   rejected → doctor rejected; order.status becomes canceled
+//   canceled → admin canceled (e.g. before sending, or to re-issue)
+//
+// `companySnapshot` (JSONB) and `clinicSnapshot` (JSONB) lock in the
+// data used to render the PDF at the time it was generated/sent — old
+// quotes remain historically correct even if the admin edits
+// CompanyBillingSettings or the doctor edits their DentistProfile later.
+//
+// Money fields use Float to match the rest of the project. Calculation
+// is centralized in QuotationService.computeTotals() and rounded to
+// three decimal places at the boundary (TND uses 3-decimal pricing).
+model Quotation {
+  id                  String           @id @default(uuid())
+  orderId             String           @unique
+  // DEV-000001 style, unique across the system. Assigned in a tx when
+  // the quote first transitions out of draft (or when its PDF is
+  // generated, whichever comes first).
+  quotationNumber     String?          @unique
+
+  language            DevisLanguage    @default(fr)
+  status              QuotationStatus  @default(draft)
+
+  // Fees (admin-entered, doctor sees but cannot edit)
+  treatmentFees       Float            @default(0)
+  fabricationFees     Float            @default(0)
+  deliveryFees        Float            @default(0)
+  discountAmount      Float            @default(0)
+
+  // Calculated and persisted so PDFs / summaries don't recompute every read.
+  // Always derived from the fees above by computeTotals().
+  subTotalHt          Float            @default(0)
+  tvaRate             Float            @default(19)
+  tvaAmount           Float            @default(0)
+  totalTtc            Float            @default(0)
+  currency            String           @default("TND")
+
+  notes               String?
+  // Optional admin-only message rendered above the totals block. Useful
+  // for explaining a discount or attached terms.
+  adminMessage        String?
+
+  // Snapshots — see header comment.
+  companySnapshot     Json?
+  clinicSnapshot      Json?
+
+  // Relative path under uploads/, never an absolute URL.
+  pdfFilePath         String?
+
+  sentAt              DateTime?
+  approvedAt          DateTime?
+  rejectedAt          DateTime?
+  rejectionReason     String?
+
+  createdById         String
+  approvedById        String?
+  rejectedById        String?
+
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  deletedAt           DateTime?
+
+  order               DentalOrder      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  createdBy           User             @relation("QuotationCreatedBy",  fields: [createdById],  references: [id], onDelete: Cascade)
+  approvedBy          User?            @relation("QuotationApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  rejectedBy          User?            @relation("QuotationRejectedBy", fields: [rejectedById], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+  @@index([status])
+  @@index([language])
+  @@index([deletedAt])
+  @@index([createdAt])
 }

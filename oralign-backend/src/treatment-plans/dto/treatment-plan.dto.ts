@@ -25,21 +25,40 @@ export class CreateTreatmentPlanDto {
   @IsUrl({ require_protocol: true, require_tld: false })
   resultViewUrl?: string;
 
-  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) @Max(200) totalUpperAligners?: number;
-  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) @Max(200) totalLowerAligners?: number;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(200)
+  totalUpperAligners?: number;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(200)
+  totalLowerAligners?: number;
 }
 
-export class UpdateTreatmentPlanDto extends PartialType(CreateTreatmentPlanDto) {
+export class UpdateTreatmentPlanDto extends PartialType(
+  CreateTreatmentPlanDto,
+) {
   @ApiPropertyOptional({ example: 0 })
-  @IsOptional() @IsInt() @Min(0) @Max(200)
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(200)
   issuedUpperAligners?: number;
 
   @ApiPropertyOptional({ example: 0 })
-  @IsOptional() @IsInt() @Min(0) @Max(200)
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(200)
   issuedLowerAligners?: number;
 
   @ApiPropertyOptional({ enum: TreatmentPlanStatus })
-  @IsOptional() @IsEnum(TreatmentPlanStatus)
+  @IsOptional()
+  @IsEnum(TreatmentPlanStatus)
   status?: TreatmentPlanStatus;
 }
 
@@ -62,9 +81,13 @@ export class CreateTreatmentMessageDto {
 export class CreatePublicLinkDto {
   @ApiPropertyOptional({
     example: 7,
-    description: 'How many days the public link stays valid (default 30, max 365).',
+    description:
+      'How many days the public link stays valid (default 30, max 365).',
   })
-  @IsOptional() @IsInt() @Min(1) @Max(365)
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(365)
   validDays?: number;
 }
 
@@ -99,7 +122,8 @@ export class TreatmentMessageAttachmentResponseDto {
   @ApiProperty() filePath!: string;
   @ApiPropertyOptional() mimeType?: string;
   @ApiPropertyOptional() sizeBytes?: number;
-  @ApiProperty({ enum: TreatmentAttachmentCategory }) category!: TreatmentAttachmentCategory;
+  @ApiProperty({ enum: TreatmentAttachmentCategory })
+  category!: TreatmentAttachmentCategory;
   @ApiProperty() uploadedById!: string;
   @ApiProperty() createdAt!: Date;
 }

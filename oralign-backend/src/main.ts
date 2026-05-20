@@ -52,13 +52,21 @@ async function bootstrap(): Promise<void> {
   // Production must whitelist explicit origins from env. Dev includes loopback
   // ports as a convenience. We deliberately do NOT fall through to '*' or
   // accept any origin when env vars are missing.
-  const envOrigins = (process.env.CORS_ORIGINS ?? process.env.FRONTEND_URL ?? '')
+  const envOrigins = (
+    process.env.CORS_ORIGINS ??
+    process.env.FRONTEND_URL ??
+    ''
+  )
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
   const devOrigins = isProd
     ? []
-    : ['http://localhost:3001', 'http://localhost:3000', 'http://localhost:5173'];
+    : [
+        'http://localhost:3001',
+        'http://localhost:3000',
+        'http://localhost:5173',
+      ];
   const allowedOrigins = Array.from(new Set([...envOrigins, ...devOrigins]));
 
   if (allowedOrigins.length === 0 && isProd) {
@@ -120,13 +128,14 @@ async function bootstrap(): Promise<void> {
 
   const httpPort = parseInt(process.env.HTTP_PORT || '3000', 10);
   await app.listen(httpPort);
-  logger.log(`Listening on :${httpPort} (NODE_ENV=${process.env.NODE_ENV ?? 'unset'})`);
+  logger.log(
+    `Listening on :${httpPort} (NODE_ENV=${process.env.NODE_ENV ?? 'unset'})`,
+  );
   if (enableSwagger) {
     logger.log(`Swagger docs: /docs`);
   }
 }
 void bootstrap().catch((error) => {
-  // eslint-disable-next-line no-console
   console.error('Failed to start server:', error);
   process.exit(1);
 });

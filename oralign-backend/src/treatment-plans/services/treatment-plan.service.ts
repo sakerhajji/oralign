@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
 import { randomBytes } from 'crypto';
@@ -13,6 +13,7 @@ import {
   TreatmentPlanStatus,
   UserRole,
 } from '@prisma/client';
+import { OrderNotificationService } from '../../mail/order-notification.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   BadRequestException,
@@ -23,6 +24,7 @@ import {
   CreateTreatmentPlanDto,
   UpdateTreatmentPlanDto,
 } from '../dto/treatment-plan.dto';
+import { TreatmentChatGateway } from '../gateways/treatment-chat.gateway';
 
 type Caller = { userId: string; role: UserRole };
 
@@ -50,7 +52,29 @@ export class TreatmentPlanService {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
+    // forwardRef because the gateway also depends on the message service,
+    // and the message service depends on this one — circular DI shaped
+    // like a triangle. Lazy resolution is safe here; the gateway is only
+    // used after the request is already in-flight.
+    @Inject(forwardRef(() => TreatmentChatGateway))
+    private readonly chatGateway: TreatmentChatGateway,
+    private readonly notifications: OrderNotificationService,
   ) {}
+
+  /** Fire-and-forget broadcast helper. Sockets are advisory. */
+  private safeBroadcastPlanChanged(
+    orderId: string,
+    type: 'created' | 'updated' | 'ready' | 'approved' | 'rejected',
+    planId: string,
+  ) {
+    try {
+      this.chatGateway.broadcastPlanChanged(orderId, { type, planId });
+    } catch (err) {
+      this.logger.warn(
+        `plan:changed broadcast failed: ${(err as Error).message}`,
+      );
+    }
+  }
 
   // ─── Authorisation helpers ────────────────────────────────────────────────
 
@@ -114,11 +138,7 @@ export class TreatmentPlanService {
 
   // ─── Lifecycle ────────────────────────────────────────────────────────────
 
-  async create(
-    orderId: string,
-    dto: CreateTreatmentPlanDto,
-    caller: Caller,
-  ) {
+  async create(orderId: string, dto: CreateTreatmentPlanDto, caller: Caller) {
     const order = await this.assertOrderReadable(orderId, caller);
     if (!PLANNER_ROLES.includes(caller.role)) {
       throw new ForbiddenException('Only planners can create treatment plans.');
@@ -179,6 +199,11 @@ export class TreatmentPlanService {
       });
     }
 
+    // Real-time: tell any open doctor / admin / designer page that a new
+    // plan was created for this order. Frontends invalidate their plan
+    // list cache so the new tab appears without a hard refresh.
+    this.safeBroadcastPlanChanged(orderId, 'created', plan.id);
+
     return plan;
   }
 
@@ -193,7 +218,9 @@ export class TreatmentPlanService {
   async getOne(id: string, caller: Caller) {
     const plan = await this.prisma.treatmentPlan.findUnique({
       where: { id },
-      include: { createdBy: { select: { id: true, fullName: true, role: true } } },
+      include: {
+        createdBy: { select: { id: true, fullName: true, role: true } },
+      },
     });
     if (!plan || plan.deletedAt) {
       throw new NotFoundException('Treatment plan not found');
@@ -202,13 +229,9 @@ export class TreatmentPlanService {
     return plan;
   }
 
-  async update(
-    id: string,
-    dto: UpdateTreatmentPlanDto,
-    caller: Caller,
-  ) {
+  async update(id: string, dto: UpdateTreatmentPlanDto, caller: Caller) {
     await this.assertCanPlan(id, caller);
-    return this.prisma.treatmentPlan.update({
+    const updated = await this.prisma.treatmentPlan.update({
       where: { id },
       data: {
         name: dto.name,
@@ -220,6 +243,139 @@ export class TreatmentPlanService {
         status: dto.status,
       },
     });
+    this.safeBroadcastPlanChanged(updated.orderId, 'updated', updated.id);
+    return updated;
+  }
+
+  /**
+   * Planner explicitly marks the plan as "ready for doctor review".
+   *
+   * Two flows:
+   *   • PENDING plan → transitions in place to READY (the very first send).
+   *   • REJECTED plan → "resend" creates a NEW versioned plan that inherits
+   *     plan-level data from the rejected one and starts in READY status.
+   *     The rejected plan stays around as historical evidence of what the
+   *     doctor pushed back on. This is the behaviour requested by clinical
+   *     ops: once a plan is rejected, the next attempt is logged as v+1,
+   *     never as a re-edit of the same row.
+   *
+   * ALREADY-READY / APPROVED plans cannot be marked ready again.
+   */
+  async markReady(id: string, caller: Caller) {
+    await this.assertCanPlan(id, caller);
+    const plan = await this.prisma.treatmentPlan.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        status: true,
+        orderId: true,
+        name: true,
+        resultViewUrl: true,
+        totalUpperAligners: true,
+        totalLowerAligners: true,
+        movementTableImagePath: true,
+        movementTableImageName: true,
+        movementTableImageMimeType: true,
+        movementTableImageSizeBytes: true,
+      },
+    });
+    if (!plan) throw new NotFoundException('Treatment plan not found.');
+
+    if (plan.status === TreatmentPlanStatus.pending) {
+      // ── First send → in-place transition ───────────────────────────────
+      const updated = await this.prisma.$transaction(async (tx) => {
+        const u = await tx.treatmentPlan.update({
+          where: { id },
+          data: { status: TreatmentPlanStatus.ready },
+        });
+        await tx.dentalOrder.update({
+          where: { id: plan.orderId },
+          data: { status: OrderStatus.treatment_plan_ready },
+        });
+        await tx.treatmentMessage.create({
+          data: {
+            treatmentPlanId: id,
+            senderId: caller.userId,
+            message: 'PLAN READY for review',
+            type: TreatmentMessageType.system,
+          },
+        });
+        return u;
+      });
+      this.safeBroadcastPlanChanged(plan.orderId, 'ready', id);
+      // Email the doctor: their plan is ready for review.
+      void this.notifications.notifyTreatmentReady(id);
+      return updated;
+    }
+
+    if (plan.status === TreatmentPlanStatus.rejected) {
+      // ── Resend after rejection → spawn a NEW version ──────────────────
+      // Plan-level data (URL, aligner counts, movement-table image path) is
+      // copied so the new version is a true continuation. Order-level data
+      // (tooth instructions, files) is shared via orderId so it picks up
+      // any corrections the planner made automatically.
+      const latest = await this.prisma.treatmentPlan.findFirst({
+        where: { orderId: plan.orderId, deletedAt: null },
+        orderBy: { version: 'desc' },
+        select: { version: true },
+      });
+      const nextVersion = (latest?.version ?? 0) + 1;
+      const nextName = `Treatment Plan ${nextVersion}`;
+
+      const created = await this.prisma.$transaction(async (tx) => {
+        const c = await tx.treatmentPlan.create({
+          data: {
+            orderId: plan.orderId,
+            version: nextVersion,
+            name: nextName,
+            status: TreatmentPlanStatus.ready,
+            resultViewUrl: plan.resultViewUrl,
+            totalUpperAligners: plan.totalUpperAligners,
+            totalLowerAligners: plan.totalLowerAligners,
+            movementTableImagePath: plan.movementTableImagePath,
+            movementTableImageName: plan.movementTableImageName,
+            movementTableImageMimeType: plan.movementTableImageMimeType,
+            movementTableImageSizeBytes: plan.movementTableImageSizeBytes,
+            createdById: caller.userId,
+          },
+        });
+        await tx.dentalOrder.update({
+          where: { id: plan.orderId },
+          data: { status: OrderStatus.treatment_plan_ready },
+        });
+        // Audit trail on BOTH the old (closed) plan and the new one so
+        // doctors can trace the lineage in the conversation tab.
+        await tx.treatmentMessage.create({
+          data: {
+            treatmentPlanId: id,
+            senderId: caller.userId,
+            message: `Replacement plan created → ${nextName}`,
+            type: TreatmentMessageType.system,
+          },
+        });
+        await tx.treatmentMessage.create({
+          data: {
+            treatmentPlanId: c.id,
+            senderId: caller.userId,
+            message: `${nextName} READY for review (replaces previous rejected plan)`,
+            type: TreatmentMessageType.system,
+          },
+        });
+        return c;
+      });
+      // Two broadcasts: one for the new plan creation, one for ready.
+      // Frontends use the type to choose between "new tab" and "switch
+      // active plan" UX.
+      this.safeBroadcastPlanChanged(plan.orderId, 'created', created.id);
+      this.safeBroadcastPlanChanged(plan.orderId, 'ready', created.id);
+      // Email the doctor: replacement plan is ready for review.
+      void this.notifications.notifyTreatmentReady(created.id);
+      return created;
+    }
+
+    throw new BadRequestException(
+      `Cannot mark a ${plan.status} plan as ready.`,
+    );
   }
 
   async updateResultViewUrl(id: string, url: string, caller: Caller) {
@@ -256,15 +412,28 @@ export class TreatmentPlanService {
     const isOwner =
       caller.role === UserRole.dentist && plan.order.doctorId === caller.userId;
     if (!isAdmin && !isOwner) {
-      throw new ForbiddenException('Only the order doctor or admin can approve.');
+      throw new ForbiddenException(
+        'Only the order doctor or admin can approve.',
+      );
     }
-    if (plan.status !== TreatmentPlanStatus.ready) {
+    // Doctors must wait for "ready"; admins can bypass the handshake and
+    // approve directly (used when admin both planned + signed off, or
+    // when fast-tracking a doctor's verbal approval).
+    if (!isAdmin && plan.status !== TreatmentPlanStatus.ready) {
       throw new BadRequestException(
         'Only a plan in "ready" status can be approved.',
       );
     }
+    if (
+      plan.status === TreatmentPlanStatus.approved ||
+      plan.status === TreatmentPlanStatus.rejected
+    ) {
+      throw new BadRequestException(
+        `Cannot approve a plan in "${plan.status}" state.`,
+      );
+    }
 
-    return this.prisma.$transaction(async (tx) => {
+    const approved = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.treatmentPlan.update({
         where: { id },
         data: {
@@ -289,6 +458,10 @@ export class TreatmentPlanService {
       });
       return updated;
     });
+    this.safeBroadcastPlanChanged(plan.orderId, 'approved', id);
+    // Email all admins: doctor approved the plan.
+    void this.notifications.notifyTreatmentDecision(id, 'approved');
+    return approved;
   }
 
   async reject(id: string, caller: Caller) {
@@ -309,13 +482,27 @@ export class TreatmentPlanService {
     const isOwner =
       caller.role === UserRole.dentist && plan.order.doctorId === caller.userId;
     if (!isAdmin && !isOwner) {
-      throw new ForbiddenException('Only the order doctor or admin can reject.');
+      throw new ForbiddenException(
+        'Only the order doctor or admin can reject.',
+      );
     }
-    if (plan.status === TreatmentPlanStatus.approved) {
-      throw new BadRequestException('Cannot reject an already-approved plan.');
+    // Doctors can only reject a READY plan; admins can reject any non-terminal
+    // state (e.g. abandon a PENDING plan that's gone stale).
+    if (!isAdmin && plan.status !== TreatmentPlanStatus.ready) {
+      throw new BadRequestException(
+        'Only a plan in "ready" status can be rejected.',
+      );
+    }
+    if (
+      plan.status === TreatmentPlanStatus.approved ||
+      plan.status === TreatmentPlanStatus.rejected
+    ) {
+      throw new BadRequestException(
+        `Cannot reject a plan in "${plan.status}" state.`,
+      );
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const rejected = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.treatmentPlan.update({
         where: { id },
         data: {
@@ -337,6 +524,10 @@ export class TreatmentPlanService {
       });
       return updated;
     });
+    this.safeBroadcastPlanChanged(plan.orderId, 'rejected', id);
+    // Email all admins: doctor requested a revision.
+    void this.notifications.notifyTreatmentDecision(id, 'rejected');
+    return rejected;
   }
 
   // ─── Movement table image ─────────────────────────────────────────────────
@@ -369,7 +560,9 @@ export class TreatmentPlanService {
     const absDir = path.join(UPLOAD_ROOT, relDir);
     await fs.promises.mkdir(absDir, { recursive: true });
 
-    const ext = (path.extname(file.originalname) || '').toLowerCase().slice(0, 8);
+    const ext = (path.extname(file.originalname) || '')
+      .toLowerCase()
+      .slice(0, 8);
     const safeName = `${uuidv4()}${ext}`;
     const absPath = path.join(absDir, safeName);
     const relPath = path.posix.join(relDir, safeName);
@@ -433,18 +626,56 @@ export class TreatmentPlanService {
 
   // ─── Public link ──────────────────────────────────────────────────────────
 
-  async generatePublicLink(id: string, validDays: number | undefined, caller: Caller) {
-    await this.assertCanPlan(id, caller);
+  /**
+   * Generate (or rotate) a public viewer token.
+   *
+   * Auth: planners (admin/designer) can always generate. Doctors who OWN
+   * the order can also generate — they're the ones sharing it with the
+   * patient, so it would be perverse to force them to ask an admin every
+   * time. The link itself is bearer-style: anyone with the token can read,
+   * so the privilege of CREATING it is the access-control boundary.
+   */
+  async generatePublicLink(
+    id: string,
+    validDays: number | undefined,
+    caller: Caller,
+  ) {
+    const plan = await this.prisma.treatmentPlan.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        deletedAt: true,
+        orderId: true,
+        order: {
+          select: { doctorId: true, assignedDesignerId: true },
+        },
+      },
+    });
+    if (!plan || plan.deletedAt) {
+      throw new NotFoundException('Treatment plan not found');
+    }
+    const isAdmin = ADMIN_ROLES.includes(caller.role);
+    const isOwnerDoctor =
+      caller.role === UserRole.dentist && plan.order.doctorId === caller.userId;
+    const isAssignedDesigner =
+      caller.role === UserRole.designer &&
+      plan.order.assignedDesignerId === caller.userId;
+    if (!isAdmin && !isOwnerDoctor && !isAssignedDesigner) {
+      throw new ForbiddenException(
+        'Only the order doctor, the assigned designer, or an admin can generate a public link.',
+      );
+    }
+
     const token = randomBytes(24).toString('base64url');
     const days = Math.min(Math.max(validDays ?? 30, 1), 365);
     const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
 
-    const plan = await this.prisma.treatmentPlan.update({
+    const updated = await this.prisma.treatmentPlan.update({
       where: { id },
       data: { publicToken: token, publicExpiresAt: expiresAt },
     });
     await this.cache.del(`treatment-viewer:${token}`);
-    return plan;
+    return updated;
   }
 
   // ─── Doctor/admin review payload ──────────────────────────────────────────
@@ -457,8 +688,14 @@ export class TreatmentPlanService {
         where: { orderId: plan.orderId },
         orderBy: [{ toothNumber: 'asc' }, { createdAt: 'asc' }],
       }),
+      // Order-scoped chat: pull messages from EVERY non-deleted plan
+      // under this order so the doctor sees the full back-and-forth even
+      // after a rejected plan was replaced by a new versioned one.
       this.prisma.treatmentMessage.findMany({
-        where: { treatmentPlanId: id, deletedAt: null },
+        where: {
+          treatmentPlan: { orderId: plan.orderId, deletedAt: null },
+          deletedAt: null,
+        },
         orderBy: { createdAt: 'asc' },
         include: {
           attachments: { where: { deletedAt: null } },

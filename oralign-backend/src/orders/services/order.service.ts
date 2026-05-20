@@ -1,4 +1,4 @@
-import { Injectable, StreamableFile } from '@nestjs/common';
+import { Injectable, Logger, StreamableFile } from '@nestjs/common';
 import {
   OrderFile,
   OrderFileCategory,
@@ -15,6 +15,7 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '../../common/exceptions/app.exception';
+import { OrderNotificationService } from '../../mail/order-notification.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   CreateOrderDto,
@@ -37,6 +38,20 @@ const orderInclude = Prisma.validator<Prisma.DentalOrderInclude>()({
   files: {
     where: { deletedAt: null },
     orderBy: { createdAt: 'desc' },
+  },
+  // Used to compute notification badges in the orders list. `take: 1` keeps
+  // the join tiny — Postgres only fetches one row per order, so this scales
+  // with page size, not with plan-history size.
+  treatmentPlans: {
+    where: { deletedAt: null },
+    select: { id: true, status: true },
+    orderBy: { version: 'desc' },
+    take: 1,
+  },
+  _count: {
+    select: {
+      treatmentPlans: { where: { deletedAt: null } },
+    },
   },
 });
 
@@ -94,7 +109,12 @@ const ALLOWED_EXTENSIONS = new Set([
 
 @Injectable()
 export class OrderService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(OrderService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifications: OrderNotificationService,
+  ) {}
 
   readonly includeOrder = orderInclude;
 
@@ -119,8 +139,7 @@ export class OrderService {
     const order = await this.prisma.dentalOrder.create({
       data: {
         ...this.buildClinicalData(createOrderDto),
-        orderCode:
-          createOrderDto.orderCode ?? (await this.generateOrderCode()),
+        orderCode: createOrderDto.orderCode ?? (await this.generateOrderCode()),
         doctorId,
         patientId: createOrderDto.patientId,
         toothInstructions: createOrderDto.toothInstructions?.length
@@ -190,7 +209,10 @@ export class OrderService {
     if (doctorId) {
       await this.ensureDentistExists(doctorId);
     }
-    await this.ensurePatientBelongsToDoctor(patientId, doctorId ?? current.doctorId);
+    await this.ensurePatientBelongsToDoctor(
+      patientId,
+      doctorId ?? current.doctorId,
+    );
 
     const order = await this.prisma.dentalOrder.update({
       where: { id },
@@ -265,6 +287,69 @@ export class OrderService {
       include: this.includeOrder,
     });
 
+    // Fire-and-forget — fan-out emails to doctor + all admins. Failures
+    // are logged inside the notification service so a flaky SMTP relay
+    // can't break the submit-order transaction the user is waiting on.
+    void this.notifications.notifyOrderSubmitted(order.id);
+
+    return this.mapToDto(order);
+  }
+
+  /**
+   * Admin-only manual status override.
+   *
+   * Sets `order.status` to any valid OrderStatus value, no state-machine
+   * validation — the admin is intentionally allowed to roll forward
+   * (skip ahead) OR roll backward (undo a transition that fired by
+   * mistake). Related side-tables (treatment plan, quotation) are NOT
+   * touched: changing the status doesn't destroy artefacts.
+   *
+   * The reason field is logged at INFO level for traceability; an
+   * audit-log table is a follow-up feature.
+   */
+  async overrideStatus(
+    id: string,
+    status: OrderStatus,
+    reason: string | undefined,
+    caller: Caller,
+  ): Promise<OrderResponseDto> {
+    if (!ADMIN_ROLES.includes(caller.role)) {
+      throw new ForbiddenException(
+        'Only admins can manually override an order status.',
+      );
+    }
+    const current = await this.findAccessibleOrder(id, caller);
+
+    if (current.status === status) {
+      // Idempotent — no-op when the requested status matches reality.
+      return this.mapToDto(current);
+    }
+
+    this.logger.log(
+      `Admin status override on order ${current.orderCode} (${id}): ` +
+        `${current.status} → ${status}` +
+        ` by user ${caller.userId}` +
+        (reason ? ` — reason: ${reason}` : ''),
+    );
+
+    // When admin rolls all the way back to `draft`, clear the
+    // submittedAt timestamp so the order looks pristine again. When
+    // admin moves a still-unsubmitted draft forward, backfill
+    // submittedAt now so downstream UIs that key off it (e.g. "Created
+    // / Submitted" header strap) stay consistent.
+    const data: Prisma.DentalOrderUncheckedUpdateInput = { status };
+    if (status === OrderStatus.draft) {
+      data.submittedAt = null;
+    } else if (!current.submittedAt) {
+      data.submittedAt = new Date();
+    }
+
+    const order = await this.prisma.dentalOrder.update({
+      where: { id },
+      data,
+      include: this.includeOrder,
+    });
+
     return this.mapToDto(order);
   }
 
@@ -273,7 +358,10 @@ export class OrderService {
     instructions: ToothInstructionDto[],
     caller: Caller,
   ): Promise<OrderResponseDto> {
-    this.ensureCanCreateOrModify(caller);
+    // Designers normally can't modify orders directly, but the odontogram
+    // (and especially per-tooth IPR values) IS their job in the treatment
+    // plan editor. assertCanEditOdontogram allows them when assigned.
+    this.ensureCanEditOdontogram(caller);
     await this.findAccessibleOrder(id, caller);
 
     this.ensureUniqueToothInstructions(instructions);
@@ -339,10 +427,7 @@ export class OrderService {
     return orderFiles.map((file) => this.mapFileToDto(file));
   }
 
-  async getFiles(
-    id: string,
-    caller: Caller,
-  ): Promise<OrderFileResponseDto[]> {
+  async getFiles(id: string, caller: Caller): Promise<OrderFileResponseDto[]> {
     await this.findAccessibleOrder(id, caller);
 
     const files = await this.prisma.orderFile.findMany({
@@ -376,7 +461,11 @@ export class OrderService {
     id: string,
     fileId: string,
     caller: Caller,
-  ): Promise<{ stream: StreamableFile; file: OrderFile; absolutePath: string }> {
+  ): Promise<{
+    stream: StreamableFile;
+    file: OrderFile;
+    absolutePath: string;
+  }> {
     await this.findAccessibleOrder(id, caller);
     const file = await this.findOrderFile(id, fileId);
     const absolutePath = this.resolveUploadPath(file.relativePath);
@@ -470,6 +559,23 @@ export class OrderService {
       !ADMIN_ROLES.includes(caller.role)
     ) {
       throw new ForbiddenException('You cannot manage orders');
+    }
+  }
+
+  /**
+   * Looser permission gate used by the per-tooth instruction endpoint —
+   * lets designers update the odontogram (color flags + IPR mm values)
+   * because that's their primary job during treatment planning. Read
+   * access (assertOrderReadable) is enforced separately and ensures the
+   * caller is actually assigned to this order.
+   */
+  private ensureCanEditOdontogram(caller: Caller): void {
+    if (
+      caller.role !== UserRole.dentist &&
+      caller.role !== UserRole.designer &&
+      !ADMIN_ROLES.includes(caller.role)
+    ) {
+      throw new ForbiddenException('You cannot edit this odontogram');
     }
   }
 
@@ -687,6 +793,10 @@ export class OrderService {
       createdAt: order.createdAt,
       updatedAt: order.updatedAt,
       submittedAt: order.submittedAt ?? undefined,
+      // Notification fields used by the orders list to render badges
+      // ("Awaiting your review", "Approved", "Replanning requested", …).
+      latestPlanStatus: order.treatmentPlans?.[0]?.status ?? undefined,
+      treatmentPlansCount: order._count?.treatmentPlans ?? 0,
     };
   }
 

@@ -59,6 +59,16 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     return this.prisma.treatmentMessageAttachment;
   }
 
+  // ─── Quotation / Devis models ────────────────────────────────────────────
+
+  get quotation() {
+    return this.prisma.quotation;
+  }
+
+  get companyBillingSettings() {
+    return this.prisma.companyBillingSettings;
+  }
+
   // ─── Prisma utilities ─────────────────────────────────────────────────────
 
   /**

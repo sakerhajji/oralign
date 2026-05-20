@@ -84,7 +84,8 @@ export class CreatePatientDto {
   @ApiProperty({
     example: '8a45c87d-c66a-4f30-8504-c90f7d14e68e',
     required: false,
-    description: 'Admin-only dentist filter/assignment. Dentists cannot set this.',
+    description:
+      'Admin-only dentist filter/assignment. Dentists cannot set this.',
   })
   @IsOptional()
   @IsString()
@@ -178,7 +179,10 @@ export class PatientResponseDto {
 }
 
 export class PatientFilterDto {
-  @ApiProperty({ required: false, description: 'Search by name, email, or phone' })
+  @ApiProperty({
+    required: false,
+    description: 'Search by name, email, or phone',
+  })
   @IsOptional()
   @IsString()
   search?: string;

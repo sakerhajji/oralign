@@ -12,6 +12,7 @@ import {
   Edit,
   ListChecks,
   ScanLine,
+  ShieldCheck,
   ShieldX,
   Target,
   Trash2,
@@ -33,12 +34,16 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ClinicalOrderFiles } from '@/components/orders/order-file-upload';
 import { OrderStatusBadge } from '@/components/orders/order-status-badge';
+import { OrderStatusChangeDialog } from '@/components/orders/order-status-change-dialog';
 import { TreatmentPlanReview } from '@/components/orders/treatment-plan-review';
+import { QuoteReview } from '@/components/orders/quote-review';
 import {
   useCreateTreatmentPlan,
   useTreatmentPlansByOrder,
 } from '@/lib/hooks/use-treatment-plans';
-import { Plus, Sparkles } from 'lucide-react';
+import { useTreatmentChatSocket } from '@/lib/hooks/use-treatment-chat-socket';
+import { FileText, Plus, Sparkles } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   useDeleteOrder,
   useOrder,
@@ -135,6 +140,28 @@ export default function OrderDetailPage() {
               {order.orderCode}
             </h1>
             <OrderStatusBadge status={order.status} />
+            {/* Admin manual override — small, low-visual-weight chip
+                tucked next to the status badge so it doesn't compete
+                with the doctor-facing actions. Backend re-enforces
+                the role check; hiding the trigger is affordance only. */}
+            {isAdmin && (
+              <OrderStatusChangeDialog
+                orderId={order.id}
+                orderCode={order.orderCode}
+                currentStatus={order.status}
+                trigger={
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 gap-1.5 text-xs"
+                  >
+                    <ShieldCheck className="h-3 w-3" />
+                    Change status
+                  </Button>
+                }
+              />
+            )}
           </div>
           <p className="mt-0.5 text-sm text-muted-foreground">
             Created {format(new Date(order.createdAt), 'MMM d, yyyy')}
@@ -184,6 +211,48 @@ export default function OrderDetailPage() {
         </div>
       </header>
 
+      {/* ─── Order detail / Treatment plans — split into tabs so the
+            doctor can switch quickly between the clinical record and the
+            ongoing treatment-planning conversation without scrolling.
+
+            Default tab: when the order already has at least one treatment
+            plan, land on the Treatment Plans tab — that's where the
+            actionable state lives (approve, message, view IPR). If no
+            plans exist yet, the Order details tab is more useful.
+
+            forceMount on both TabsContent keeps their React subtrees alive
+            across tab switches. Without it, Radix unmounts the inactive
+            panel — meaning every flip back to "Order details" remounted
+            the Section cards, refired their queries, and rebuilt the
+            (heavy) Odontogram + file thumbnails. data-[state=inactive]:hidden
+            still hides the inactive pane visually. */}
+      <Tabs
+        defaultValue={
+          (order.treatmentPlansCount ?? 0) > 0 ? 'treatment-plans' : 'order'
+        }
+      >
+        <TabsList className="w-full justify-start sm:w-auto">
+          <TabsTrigger value="order">Order details</TabsTrigger>
+          <TabsTrigger value="treatment-plans" className="gap-1.5">
+            <Sparkles className="h-3.5 w-3.5" />
+            Treatment plans
+            {(order.treatmentPlansCount ?? 0) > 0 && (
+              <span className="ml-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                {order.treatmentPlansCount}
+              </span>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="quote" className="gap-1.5">
+            <FileText className="h-3.5 w-3.5" />
+            Quote
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent
+          value="order"
+          forceMount
+          className="space-y-6 data-[state=inactive]:hidden"
+        >
       {/* ─── 1 · Patient information ──────────────────────────────────── */}
       <Section icon={UserRound} title="Patient information">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -238,11 +307,27 @@ export default function OrderDetailPage() {
         title="Tooth-level instructions & movement plan"
       >
         <div className="space-y-8">
-          {/* Odontogram FIRST — same as in the wizard's step 5 */}
+          {/* Odontogram FIRST — same as in the wizard's step 5. We pass
+              the planner-added IPR map so the read-only view also shows
+              purple bars between teeth where IPR is planned. The setter is
+              omitted intentionally — the order page is view-only here;
+              IPR editing lives in the treatment-plan review screen. */}
           <OdontogramSelector
             value={order.toothInstructions ?? []}
             onChange={() => undefined}
             disabled
+            iprValues={
+              new Map(
+                (order.toothInstructions ?? [])
+                  .filter(
+                    (i) =>
+                      i.type === 'ipr_value' &&
+                      !!i.value &&
+                      i.value.trim().length > 0,
+                  )
+                  .map((i) => [i.toothNumber, i.value as string]),
+              )
+            }
           />
 
           {/* Mechanics summary below the chart */}
@@ -279,11 +364,6 @@ export default function OrderDetailPage() {
         </div>
       </Section>
 
-      {/* ─── Treatment plans (review) ─────────────────────────────────── */}
-      <Section icon={Sparkles} title="Treatment plans">
-        <TreatmentPlansSection orderId={order.id} role={user?.role as UserRole} />
-      </Section>
-
       {/* Bottom meta block — small, low-priority info that used to be
           in a "Summary" sidebar but is more honest at the end. */}
       <Section icon={ClipboardCheck} title="Order metadata">
@@ -306,6 +386,36 @@ export default function OrderDetailPage() {
           />
         </div>
       </Section>
+        </TabsContent>
+
+        {/* Treatment-plans tab — separate so the chat/timeline doesn't
+            fight the patient record for visual real-estate. forceMount
+            here too so the WebSocket connection in TreatmentConversation
+            isn't torn down when the doctor flips back to Order details.
+
+            The "Action required — review this plan" message + approve /
+            reject buttons live at the BOTTOM of this tab (rendered by
+            TreatmentPlanReview's ApprovalActions card). No separate
+            page-level footer — the action card is the message. */}
+        <TabsContent
+          value="treatment-plans"
+          forceMount
+          className="data-[state=inactive]:hidden"
+        >
+          <TreatmentPlansSection orderId={order.id} role={user?.role as UserRole} />
+        </TabsContent>
+
+        {/* Quote tab — admin issues, doctor approves / rejects. Kept on
+            forceMount so the API query cache stays warm when the user
+            switches back and forth between the three tabs. */}
+        <TabsContent
+          value="quote"
+          forceMount
+          className="data-[state=inactive]:hidden"
+        >
+          <QuoteReview orderId={order.id} role={user?.role as UserRole} />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
@@ -414,6 +524,12 @@ function TreatmentPlansSection({
   const create = useCreateTreatmentPlan();
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
+  // Order-scoped socket: keeps the plan list in sync (admin creating a
+  // new plan → doctor sees it appear without a refresh) AND drives the
+  // conversation's live indicator. Mounted once per order, so it
+  // survives plan-tab switches and is alive even when zero plans exist.
+  const { connected: socketConnected } = useTreatmentChatSocket(orderId);
+
   const plans = plansQuery.data ?? [];
   const activeId = selectedId ?? plans[0]?.id ?? null;
   const isPlanner =
@@ -482,7 +598,11 @@ function TreatmentPlansSection({
           )}
         </div>
       ) : activeId ? (
-        <TreatmentPlanReview treatmentPlanId={activeId} role={role} />
+        <TreatmentPlanReview
+          treatmentPlanId={activeId}
+          role={role}
+          socketConnected={socketConnected}
+        />
       ) : null}
     </div>
   );

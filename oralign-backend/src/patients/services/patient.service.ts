@@ -201,7 +201,9 @@ export class PatientService {
       where: {
         id,
         deletedAt: null,
-        ...(ADMIN_ROLES.includes(caller.role) ? {} : { doctorId: caller.userId }),
+        ...(ADMIN_ROLES.includes(caller.role)
+          ? {}
+          : { doctorId: caller.userId }),
       },
       include: this.includeDoctor,
     });

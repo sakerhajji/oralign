@@ -31,13 +31,39 @@ export enum Gender {
   OTHER = 'other',
 }
 
+/**
+ * Order lifecycle — kept in sync with the backend Prisma `OrderStatus`
+ * enum. Group naming here drives the grouped <Select> on the admin
+ * status-override dialog.
+ */
 export enum OrderStatus {
-  DRAFT = 'draft',
-  SUBMITTED = 'submitted',
-  IN_REVIEW = 'in_review',
-  APPROVED = 'approved',
-  REJECTED = 'rejected',
-  CANCELLED = 'cancelled',
+  // ── Submission phase ─────────────────────────────────────────────
+  DRAFT                  = 'draft',
+  SUBMITTED              = 'submitted',
+  UNDER_REVIEW           = 'under_review',
+  // ── Treatment planning ──────────────────────────────────────────
+  TREATMENT_PLANNING     = 'treatment_planning',
+  TREATMENT_PLAN_READY   = 'treatment_plan_ready',
+  REVISION_REQUESTED     = 'revision_requested',
+  TREATMENT_APPROVED     = 'treatment_approved',
+  // ── Quote + payment ─────────────────────────────────────────────
+  QUOTATION_SENT         = 'quotation_sent',
+  PAYMENT_PLAN_SELECTED  = 'payment_plan_selected',
+  PAYMENT_PENDING        = 'payment_pending',
+  PAYMENT_REVIEW         = 'payment_review',
+  PAID                   = 'paid',
+  // ── Production / fulfilment ─────────────────────────────────────
+  FABRICATION            = 'fabrication',
+  READY_TO_SHIP          = 'ready_to_ship',
+  SHIPPED                = 'shipped',
+  FINISHED               = 'finished',
+  // ── Terminal ────────────────────────────────────────────────────
+  CANCELED               = 'canceled',
+  // ── Legacy (kept so old rows still resolve a label / badge) ─────
+  IN_REVIEW              = 'in_review',
+  APPROVED               = 'approved',
+  REJECTED               = 'rejected',
+  CANCELLED              = 'cancelled',
 }
 
 export enum PatientStage {
@@ -167,7 +193,164 @@ export interface PublicTreatmentViewerPayload {
     resultViewUrl?: string | null;
   };
   doctor?: { fullName?: string | null; clinicName?: string | null };
-  patient?: { firstName?: string | null };
+  patient?: {
+    firstName?: string | null;
+    /** Used to render a gendered salutation (Mr. / Ms.) on the patient
+     *  public viewer page. */
+    gender?: 'male' | 'female' | 'other' | null;
+  };
+}
+
+// ─── Quotation / Devis ──────────────────────────────────────────────────────
+
+export enum DevisLanguage {
+  FR = 'fr',
+  EN = 'en',
+  AR = 'ar',
+}
+
+export enum QuotationStatus {
+  DRAFT     = 'draft',
+  SENT      = 'sent',
+  APPROVED  = 'approved',
+  REJECTED  = 'rejected',
+  CANCELED  = 'canceled',
+}
+
+/** Translated text bundles editable from the admin billing-settings UI. */
+export interface TranslatedTexts {
+  fr?: string;
+  en?: string;
+  ar?: string;
+}
+
+export interface BankDetails {
+  bankName?: string;
+  accountName?: string;
+  rib?: string;
+  iban?: string;
+  swift?: string;
+}
+
+export interface CompanyBillingSettings {
+  id: string;
+  companyName: string;
+  companyLogoPath?: string | null;
+  companyAddress?: string | null;
+  companyCity?: string | null;
+  companyCountry?: string | null;
+  companyPhone?: string | null;
+  companyEmail?: string | null;
+  taxRegistrationNumber?: string | null;
+
+  defaultTvaRate: number;
+  defaultCurrency: string;
+  devisPrefix: string;
+  devisNextNumber: number;
+
+  legalTextTranslations?: TranslatedTexts | null;
+  footerTextTranslations?: TranslatedTexts | null;
+  bankDetails?: BankDetails | null;
+
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpsertCompanyBillingSettingsDto {
+  companyName?: string;
+  companyAddress?: string;
+  companyCity?: string;
+  companyCountry?: string;
+  companyPhone?: string;
+  companyEmail?: string;
+  taxRegistrationNumber?: string;
+  defaultTvaRate?: number;
+  defaultCurrency?: string;
+  devisPrefix?: string;
+  devisNextNumber?: number;
+  legalTextTranslations?: TranslatedTexts;
+  footerTextTranslations?: TranslatedTexts;
+  bankDetails?: BankDetails;
+  isActive?: boolean;
+}
+
+/** Snapshot of the company-billing-settings row at quotation-issue time. */
+export interface QuotationCompanySnapshot {
+  companyName: string;
+  companyLogoPath?: string | null;
+  companyAddress?: string | null;
+  companyCity?: string | null;
+  companyCountry?: string | null;
+  companyPhone?: string | null;
+  companyEmail?: string | null;
+  taxRegistrationNumber?: string | null;
+  tvaRate: number;
+  currency: string;
+  selectedLanguage: DevisLanguage;
+  legalText: string;
+  footerText: string;
+  bankDetails?: BankDetails | null;
+  generatedAt: string;
+}
+
+/** Snapshot of the doctor's DentistProfile at quotation-issue time. */
+export interface QuotationClinicSnapshot {
+  doctorId: string;
+  doctorFullName: string;
+  doctorEmail: string;
+  clinicName?: string | null;
+  clinicAddress?: string | null;
+  city?: string | null;
+  country?: string | null;
+  clinicPhone?: string | null;
+  clinicEmail?: string | null;
+  logoUrl?: string | null;
+  generatedAt: string;
+}
+
+export interface Quotation {
+  id: string;
+  orderId: string;
+  quotationNumber?: string | null;
+  language: DevisLanguage;
+  status: QuotationStatus;
+  treatmentFees: number;
+  fabricationFees: number;
+  deliveryFees: number;
+  discountAmount: number;
+  subTotalHt: number;
+  tvaRate: number;
+  tvaAmount: number;
+  totalTtc: number;
+  currency: string;
+  notes?: string | null;
+  adminMessage?: string | null;
+  companySnapshot?: QuotationCompanySnapshot | null;
+  clinicSnapshot?: QuotationClinicSnapshot | null;
+  pdfFilePath?: string | null;
+  sentAt?: string | null;
+  approvedAt?: string | null;
+  rejectedAt?: string | null;
+  rejectionReason?: string | null;
+  createdById: string;
+  approvedById?: string | null;
+  rejectedById?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Create / update payload shared by admin form. */
+export interface UpsertQuotationDto {
+  language?: DevisLanguage;
+  treatmentFees?: number;
+  fabricationFees?: number;
+  deliveryFees?: number;
+  discountAmount?: number;
+  tvaRate?: number;
+  currency?: string;
+  notes?: string;
+  adminMessage?: string;
 }
 
 export enum OrderFileCategory {
@@ -258,6 +441,11 @@ export interface Patient {
 export interface ToothInstruction {
   toothNumber: number;
   type: ToothInstructionType;
+  // Optional value — required by `ipr_value` entries (mm as a string so
+  // forms can keep their raw input including trailing zeros) and free-form
+  // notes attached to any per-tooth instruction.
+  value?: string | null;
+  note?: string | null;
 }
 
 export interface OrderFile {
@@ -307,6 +495,10 @@ export interface DentalOrder {
   createdAt: string;
   updatedAt: string;
   submittedAt?: string;
+  // ── Notification badges (computed by the backend list endpoint) ───────────
+  // `latestPlanStatus` is undefined when no treatment plan has been started.
+  latestPlanStatus?: TreatmentPlanStatus;
+  treatmentPlansCount?: number;
 }
 
 // ==========================================

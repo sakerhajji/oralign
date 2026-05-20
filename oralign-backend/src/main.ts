@@ -43,8 +43,30 @@ async function bootstrap(): Promise<void> {
     (await import('express')).urlencoded({ extended: true, limit: '1mb' }),
   );
 
-  // Serve uploaded files (avatars, etc.) at /uploads/*
-  app.useStaticAssets(join(process.cwd(), 'uploads'), { prefix: '/uploads' });
+  // Serve uploaded files (avatars, etc.) at /uploads/*.
+  //
+  // Two things to note:
+  //   1. process.cwd() resolves to the container's WORKDIR (/app), so
+  //      uploads land at /app/uploads — exactly where docker-compose
+  //      mounts the persistent host volume. (We previously also had a
+  //      ServeStaticModule.forRoot in app.module.ts with
+  //      `rootPath: join(__dirname, '..', 'uploads')` which resolves to
+  //      /app/dist/uploads at runtime — a nonexistent path. That second
+  //      handler shadowed this one and returned 404 for every avatar.
+  //      It has been removed; this is the single source of truth.)
+  //   2. Helmet defaults Cross-Origin-Resource-Policy to `same-origin`,
+  //      which blocks the frontend at oralign.com.tn from loading
+  //      images served by api.oralign.com.tn (different origin). We
+  //      explicitly set CORP=cross-origin on /uploads responses so
+  //      avatar / clinic-logo / order-file image previews work in the
+  //      browser without disabling the protection on the API endpoints
+  //      themselves.
+  app.useStaticAssets(join(process.cwd(), 'uploads'), {
+    prefix: '/uploads',
+    setHeaders: (res) => {
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    },
+  });
 
   app.setGlobalPrefix('api');
 

@@ -15,10 +15,11 @@ import { QuotationService } from './quotation.service';
 
 /**
  * Where PDFs land on disk. Always written under `uploads/` so the
- * existing `ServeStaticModule` at `/uploads` can serve them — BUT note
- * we never expose Quote PDFs via the static route; download is gated
- * through a controller endpoint with RBAC. The relative path stored
- * on the row is the unprefixed segment after `uploads/`.
+ * existing static-files middleware at `/uploads` could serve them in
+ * theory — BUT note we never expose Quote PDFs via the static route;
+ * download is gated through a controller endpoint with RBAC. The
+ * relative path stored on the row is the unprefixed segment after
+ * `uploads/`.
  */
 const UPLOAD_ROOT = path.join(process.cwd(), 'uploads');
 

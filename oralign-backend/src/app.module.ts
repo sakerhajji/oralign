@@ -1,11 +1,9 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { ServeStaticModule } from '@nestjs/serve-static';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { CacheModule } from '@nestjs/cache-manager';
 import { APP_GUARD } from '@nestjs/core';
 import { createKeyv } from '@keyv/redis';
-import { join } from 'path';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
@@ -65,10 +63,18 @@ function buildRedisUrl(): string {
       }),
     }),
 
-    ServeStaticModule.forRoot({
-      rootPath: join(__dirname, '..', 'uploads'),
-      serveRoot: '/uploads',
-    }),
+    // ─── Static files ─────────────────────────────────────────────────────
+    // /uploads/* is served via `app.useStaticAssets(...)` in main.ts —
+    // see comments there. We deliberately do NOT mount a second
+    // ServeStaticModule here: the previous attempt used
+    //   rootPath: join(__dirname, '..', 'uploads')
+    // which at runtime resolves to /app/dist/uploads (because the
+    // compiled entry-point lives at /app/dist/src/main.js) — a path
+    // that does NOT exist. The Docker volume mounts the host uploads
+    // dir at /app/uploads, which is what useStaticAssets + process.cwd()
+    // resolves to. Two handlers for the same prefix is also a footgun:
+    // depending on registration order the wrong one shadows the correct
+    // one and every avatar URL returns 404.
     PrismaModule,
     CommonModule,
     MailModule,

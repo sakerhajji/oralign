@@ -13,7 +13,7 @@ import {
   WifiOff,
   X,
 } from 'lucide-react';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -24,7 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { cn } from '@/lib/utils';
+import { cn, getAvatarUrl } from '@/lib/utils';
 import { treatmentPlansService } from '@/lib/api/treatment-plans.service';
 import { useSendTreatmentMessage } from '@/lib/hooks/use-treatment-plans';
 import {
@@ -408,6 +408,17 @@ function Bubble({
         <div className="shrink-0">
           {isLastOfCluster ? (
             <Avatar className="h-7 w-7">
+              {/*
+                  AvatarImage is allowed to fail silently — Radix's <Avatar>
+                  falls back to <AvatarFallback> when the image can't load
+                  or src is empty. We always feed it through getAvatarUrl so
+                  the backend-relative path (/uploads/avatars/...) becomes
+                  an absolute URL the browser can fetch from the API host.
+              */}
+              <AvatarImage
+                src={getAvatarUrl(message.sender?.avatarUrl)}
+                alt={message.sender?.fullName ?? ''}
+              />
               <AvatarFallback className="bg-primary/15 text-[10px] font-semibold text-primary">
                 {initials}
               </AvatarFallback>

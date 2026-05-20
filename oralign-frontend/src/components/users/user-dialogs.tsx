@@ -17,6 +17,7 @@ import { CountryPhoneDisplay } from "@/components/ui/phone-display";
 import { useCreateUser, useDeleteUser } from '@/lib/hooks';
 import { createUserSchema, CreateUserFormData } from '@/lib/schemas';
 import { User, UserRole } from '@/lib/types';
+import { getAvatarUrl } from '@/lib/utils';
 import { EditUserDialog } from './edit-user-dialog';
 import { format } from 'date-fns';
 import { Mail, Phone, Shield, CheckCircle, XCircle, Calendar, User as UserIcon } from 'lucide-react';
@@ -152,7 +153,7 @@ export function ViewUserDialog({ user, open, onOpenChange }: { user: User; open:
                 <div className="flex items-center space-x-6">
                   <div className="relative">
                     <Avatar className="w-24 h-24 border-2 border-muted">
-                      <AvatarImage src={user.avatarUrl} alt={user.fullName} />
+                      <AvatarImage src={getAvatarUrl(user.avatarUrl)} alt={user.fullName} />
                       <AvatarFallback className="text-xl font-semibold bg-gradient-to-br from-blue-500 to-purple-600 text-white">
                         {user.fullName
                           .split(' ')

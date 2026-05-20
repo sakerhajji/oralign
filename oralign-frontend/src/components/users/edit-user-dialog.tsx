@@ -18,6 +18,7 @@ import { User, UserRole } from '@/lib/types';
 import { useUpdateUser } from '@/lib/hooks/use-users';
 import { useAuth } from '@/lib/providers/auth-provider';
 import { updateUserSchema, UpdateUserFormData } from '@/lib/schemas';
+import { getAvatarUrl } from '@/lib/utils';
 import { Upload, User as UserIcon, Shield, Mail, Phone, Key } from 'lucide-react';
 
 interface EditUserDialogProps {
@@ -65,12 +66,21 @@ const sectionVariants = {
 };
 
 export function EditUserDialog({ user, open, onOpenChange }: EditUserDialogProps) {
-  const [avatarPreview, setAvatarPreview] = useState<string>(user.avatarUrl || '');
+  // `avatarPreview` may hold three kinds of value:
+  //   • a backend-relative path like `/uploads/avatars/<uuid>.jpg`
+  //     (we always wrap it through getAvatarUrl() before rendering)
+  //   • a `data:` URL while the user is previewing a freshly-picked file
+  //   • '' (empty) → AvatarFallback shows the user's initials
+  // We always store the RESOLVED absolute URL so a single <AvatarImage src>
+  // read just works regardless of source.
+  const [avatarPreview, setAvatarPreview] = useState<string>(
+    getAvatarUrl(user.avatarUrl),
+  );
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { mutate: updateUser, isPending } = useUpdateUser();
-  const { user: currentUser, isAdmin } = useAuth();
+  const { user: currentUser, isAdmin, login } = useAuth();
   
   const canEditPassword = isAdmin || currentUser?.id === user.id;
   const canEditRole = isAdmin;
@@ -104,7 +114,7 @@ export function EditUserDialog({ user, open, onOpenChange }: EditUserDialogProps
         role: user.role,
         isEmailVerified: user.isEmailVerified,
       });
-      setAvatarPreview(user.avatarUrl || '');
+      setAvatarPreview(getAvatarUrl(user.avatarUrl));
       setAvatarFile(null);
     }
   }, [open, user, reset]);
@@ -136,10 +146,16 @@ export function EditUserDialog({ user, open, onOpenChange }: EditUserDialogProps
   const onSubmit = async (data: UpdateUserFormData) => {
     setIsUploading(true);
     try {
-      // If there's a new avatar file, upload it first
+      // If there's a new avatar file, upload it first. Capture the
+      // response so we can refresh the auth context immediately when
+      // an admin is editing themselves — otherwise the sidebar avatar
+      // would stay stale until the next React Query refetch lands.
       if (avatarFile) {
         const { usersService } = await import('@/lib/api');
-        await usersService.uploadAvatar(user.id, avatarFile);
+        const updatedUser = await usersService.uploadAvatar(user.id, avatarFile);
+        if (currentUser?.id === user.id) {
+          login(updatedUser);
+        }
       }
 
       // Remove empty password field if not editing
@@ -170,7 +186,7 @@ export function EditUserDialog({ user, open, onOpenChange }: EditUserDialogProps
 
   const handleClose = () => {
     reset();
-    setAvatarPreview(user.avatarUrl || '');
+    setAvatarPreview(getAvatarUrl(user.avatarUrl));
     setAvatarFile(null);
     onOpenChange(false);
   };
@@ -239,13 +255,13 @@ export function EditUserDialog({ user, open, onOpenChange }: EditUserDialogProps
                                 <Upload className="w-4 h-4 mr-2" />
                                 Upload Image
                               </Button>
-                              {avatarPreview && avatarPreview !== user.avatarUrl && (
+                              {avatarPreview && avatarPreview !== getAvatarUrl(user.avatarUrl) && (
                                 <Button
                                   type="button"
                                   variant="ghost"
                                   size="sm"
                                   onClick={() => {
-                                    setAvatarPreview(user.avatarUrl || '');
+                                    setAvatarPreview(getAvatarUrl(user.avatarUrl));
                                     setAvatarFile(null);
                                   }}
                                 >

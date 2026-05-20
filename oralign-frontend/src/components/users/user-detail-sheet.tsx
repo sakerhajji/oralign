@@ -42,6 +42,7 @@ import {
   useUpdateWorkingHours,
 } from '@/lib/hooks/use-working-hours';
 import { usersService, extractApiErrorMessage } from '@/lib/api';
+import { useAuth } from '@/lib/providers/auth-provider';
 import { getAvatarUrl, cn } from '@/lib/utils';
 import { optionalCountrySchema, optionalE164PhoneSchema } from '@/lib/schemas';
 import { toast } from 'sonner';
@@ -131,6 +132,11 @@ export function UserDetailSheet({
   initialTab = 'profile',
 }: UserDetailSheetProps) {
   const queryClient = useQueryClient();
+  // Surface the auth context so we can refresh the sidebar / header
+  // avatar instantly when an admin opens their own row and uploads a
+  // new picture — otherwise the new avatar only appears after the
+  // next /users/me refetch.
+  const { user: currentUser, login } = useAuth();
   const { data: user, isLoading: isLoadingUser } = useUser(userId);
 
   const [activeTab, setActiveTab] = useState(initialTab);
@@ -263,6 +269,12 @@ export function UserDetailSheet({
         setAvatarFile(null);
         queryClient.invalidateQueries({ queryKey: userKeys.detail(userId) });
         queryClient.invalidateQueries({ queryKey: userKeys.lists() });
+        // Admin editing themselves → refresh auth context so the
+        // sidebar avatar updates without waiting for /users/me to
+        // refetch on next tick.
+        if (currentUser?.id === userId) {
+          login(updatedUser);
+        }
       }
       const trimmedPhone = data.phone?.trim();
       const payload: Record<string, unknown> = { fullName: data.fullName };

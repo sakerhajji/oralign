@@ -617,15 +617,21 @@ function MovementTableSection({
   );
 
   // ── Decompose the review odontogram into:
-  //     • Color instructions: the four enum values OdontogramSelector knows about
-  //     • IPR values: ipr_value entries with `value` in mm
-  const { colorInstructions, iprMap } = useMemo(() => {
+  //     • Color instructions: attachment markers (treatment-plan editor
+  //       collapses to a single attachment colour via mode='attachments').
+  //     • IPR values: ipr_value entries with `value` in mm.
+  //     • IPR notes: the optional "stripping" secondary value stored on
+  //       the same ipr_value row as `note`. Rendered in muted grey next
+  //       to the mm label.
+  const { colorInstructions, iprMap, iprNotes } = useMemo(() => {
     const colors: ToothInstruction[] = [];
     const ipr = new Map<number, string>();
+    const notes = new Map<number, string>();
     for (const { toothNumber, entries } of review.odontogram ?? []) {
       for (const e of entries) {
         if (e.type === 'ipr_value') {
           if (e.value) ipr.set(toothNumber, e.value);
+          if (e.note) notes.set(toothNumber, e.note);
         } else if (
           e.type === ToothInstructionType.NO_ATTACHMENTS ||
           e.type === ToothInstructionType.DO_NOT_MOVE ||
@@ -636,7 +642,7 @@ function MovementTableSection({
         }
       }
     }
-    return { colorInstructions: colors, iprMap: ipr };
+    return { colorInstructions: colors, iprMap: ipr, iprNotes: notes };
   }, [review.odontogram]);
 
   // Default the toggle based on what data the plan already has — if an image
@@ -649,33 +655,51 @@ function MovementTableSection({
     (
       colors: ToothInstruction[],
       ipr: Map<number, string>,
+      notes: Map<number, string>,
     ) => {
-      const next: ToothInstruction[] = [
-        ...colors,
-        ...Array.from(ipr.entries())
-          .filter(([, v]) => v && v.trim().length > 0)
-          .map(([toothNumber, value]) => ({
-            toothNumber,
-            type: ToothInstructionType.IPR_VALUE,
-            value: value.trim(),
-          })),
-      ];
-      updateInstructions.mutate({ id: review.orderId, instructions: next });
+      // Build the final ipr_value rows by merging the two maps on tooth
+      // number. A slot is persisted whenever it has EITHER an mm value
+      // OR a stripping note — clearing the IPR amount but keeping the
+      // note (or vice versa) is a legal state.
+      const iprKeys = new Set<number>([...ipr.keys(), ...notes.keys()]);
+      const iprRows: ToothInstruction[] = [];
+      for (const toothNumber of iprKeys) {
+        const value = ipr.get(toothNumber)?.trim();
+        const note = notes.get(toothNumber)?.trim();
+        if (!value && !note) continue;
+        iprRows.push({
+          toothNumber,
+          type: ToothInstructionType.IPR_VALUE,
+          value: value && value.length > 0 ? value : null,
+          note: note && note.length > 0 ? note : null,
+        });
+      }
+      updateInstructions.mutate({
+        id: review.orderId,
+        instructions: [...colors, ...iprRows],
+      });
     },
     [review.orderId, updateInstructions],
   );
 
   const handleColorChange = (next: ToothInstruction[]) => {
     // Color instructions changed via OdontogramSelector — persist immediately,
-    // preserving the current IPR set.
-    persistInstructions(next, iprMap);
+    // preserving the current IPR set + stripping notes.
+    persistInstructions(next, iprMap, iprNotes);
   };
 
   const handleIprChange = (toothNumber: number, value: string | null) => {
     const next = new Map(iprMap);
     if (value === null || value.trim().length === 0) next.delete(toothNumber);
     else next.set(toothNumber, value.trim());
-    persistInstructions(colorInstructions, next);
+    persistInstructions(colorInstructions, next, iprNotes);
+  };
+
+  const handleIprNoteChange = (toothNumber: number, note: string | null) => {
+    const next = new Map(iprNotes);
+    if (note === null || note.trim().length === 0) next.delete(toothNumber);
+    else next.set(toothNumber, note.trim());
+    persistInstructions(colorInstructions, iprMap, next);
   };
 
   return (
@@ -683,31 +707,40 @@ function MovementTableSection({
       <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <CardTitle className="flex items-center gap-2">
           <Stethoscope className="h-4 w-4 text-primary" />
-          Orthodontic Tooth Movement &amp; IPR
+          {/* Renamed from "Orthodontic Tooth Movement & IPR". In the
+              treatment-plan editor the planner only places attachments
+              and IPR — the doctor's movement instructions live on the
+              order itself, not on the plan. */}
+          Attachments &amp; IPR
         </CardTitle>
         {canEdit && (
           <IprModeToggle value={iprMode} onChange={setIprMode} />
         )}
       </CardHeader>
       <CardContent className="space-y-6">
-        {/* ── 2a · Interactive odontogram. The IPR layer is ALWAYS active for
-                  display — the doctor needs to see the purple bars between
-                  teeth regardless of which editor the planner used. The
-                  per-tooth-vs-image toggle only governs which editor the
-                  PLANNER has open; it never hides data from the doctor.
-
-                  Edit handlers are still gated by canEdit + per-tooth mode:
-                    iprValues  — always read-only-visible
-                    onIprChange — only when the admin/designer is editing
-                                  per-tooth (image-mode admins see bars as
-                                  read-only reference). */}
+        {/* ── 2a · Interactive odontogram in 'attachments' mode.
+                  • Tooth picker collapses to a single attachment colour —
+                    the planner just marks which teeth carry an attachment.
+                  • IPR layer is ALWAYS displayed (so the doctor sees the
+                    purple bars between teeth regardless of editor mode);
+                    edits are gated by canEdit + per-tooth IPR mode.
+                  • Stripping notes are wired through iprNotes /
+                    onIprNoteChange — the IPR popover surfaces a second
+                    input only when the setter is present. */}
         <OdontogramSelector
+          mode="attachments"
           value={colorInstructions}
           onChange={handleColorChange}
           disabled={!canEdit || updateInstructions.isPending}
           iprValues={iprMap}
+          iprNotes={iprNotes}
           onIprChange={
             iprMode === 'per-tooth' && canEdit ? handleIprChange : undefined
+          }
+          onIprNoteChange={
+            iprMode === 'per-tooth' && canEdit
+              ? handleIprNoteChange
+              : undefined
           }
         />
 

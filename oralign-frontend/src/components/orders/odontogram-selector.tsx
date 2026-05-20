@@ -86,7 +86,12 @@ export function OdontogramSelector({
   onChange,
   disabled,
   iprValues,
+  iprNotes,
   onIprChange,
+  onIprNoteChange,
+  mode = 'movement',
+  title,
+  subtitle,
 }: {
   value: ToothInstruction[];
   onChange: (value: ToothInstruction[]) => void;
@@ -94,15 +99,37 @@ export function OdontogramSelector({
   /**
    * Optional per-tooth IPR values (mm as a string). When provided together
    * with `onIprChange`, the odontogram renders clickable purple bars
-   * BETWEEN adjacent teeth in each arch half. The key is the "right tooth
+   * between adjacent teeth in each arch half AND across the midline
+   * (slots anchored on tooth 21 and 31). The key is the "right tooth
    * in render order" — i.e. the slot to the LEFT of tooth N belongs to N.
-   * Tooth 18, 21 (upper) and 48, 31 (lower) cannot have IPR (they're at
-   * the start of their respective halves). When omitted, the IPR layer
-   * is hidden — preserves the existing wizard / read-only behaviour.
+   * Tooth 18 and 48 cannot have IPR (they're at the start of their
+   * respective halves). When omitted, the IPR layer is hidden —
+   * preserves the existing wizard / read-only behaviour.
    */
   iprValues?: Map<number, string>;
-  /** Setter for an IPR slot. `null` clears the slot. */
+  /**
+   * Optional per-tooth stripping notes — a SECOND value persisted alongside
+   * the IPR amount. Used for things like "aligner step #" or "side"
+   * depending on the clinic's protocol. Rendered in muted gray next to the
+   * primary IPR mm label. Same key as `iprValues`.
+   */
+  iprNotes?: Map<number, string>;
+  /** Setter for an IPR slot's mm value. `null` clears the slot. */
   onIprChange?: (toothNumber: number, value: string | null) => void;
+  /** Setter for the stripping note. `null` clears it. */
+  onIprNoteChange?: (toothNumber: number, note: string | null) => void;
+  /**
+   * 'movement'   — order-wizard context: shows all 4 instruction colors
+   *                (No Attachments / Do Not Move / No IPR / Extract).
+   * 'attachments' — treatment-plan editor context: a single attachment
+   *                colour, the rest of the picker is hidden. The planner
+   *                only needs to mark which teeth carry an attachment.
+   */
+  mode?: 'movement' | 'attachments';
+  /** Override the default section heading. */
+  title?: string;
+  /** Override the default section subheading. */
+  subtitle?: string;
 }) {
   const [showLegend, setShowLegend] = useState(true);
   const [popup, setPopup] = useState<{
@@ -122,6 +149,18 @@ export function OdontogramSelector({
   // benefit from seeing where IPR is planned. Clicking is gated separately.
   const iprVisible = !!iprValues;
   const iprEditable = !!onIprChange && !disabled;
+
+  // In 'attachments' mode the picker collapses to a single colour — the
+  // planner only needs to mark "has attachment" vs "no attachment".
+  // Movement / Do-Not-Move / No-IPR / Extract are doctor-level signals
+  // recorded on the order, not the plan.
+  const visibleColors = useMemo<readonly ColorEntry[]>(
+    () =>
+      mode === 'attachments'
+        ? COLORS.filter((c) => c.type === ToothInstructionType.NO_ATTACHMENTS)
+        : COLORS,
+    [mode],
+  );
 
   // One instruction per tooth.
   const assignments = useMemo(() => {
@@ -218,25 +257,36 @@ export function OdontogramSelector({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-lg font-semibold text-foreground">
-            Select tooth-level instructions
+            {title ??
+              (mode === 'attachments'
+                ? 'Attachments & IPR'
+                : 'Select tooth-level instructions')}
           </h2>
           <p className="text-sm text-muted-foreground">
-            Tap any tooth to assign a color. Each tooth carries one
-            instruction at a time.
+            {subtitle ??
+              (mode === 'attachments'
+                ? 'Tap a tooth to mark an attachment. Tap between teeth to set IPR (mm) and the optional stripping value.'
+                : 'Tap any tooth to assign a color. Each tooth carries one instruction at a time.')}
           </p>
         </div>
-        <Button
-          type="button"
-          variant="ghost"
-          className="justify-start text-primary"
-          onClick={() => setShowLegend((s) => !s)}
-        >
-          <Palette className="mr-2 h-4 w-4" />
-          {showLegend ? 'Hide' : 'View'} color legend
-        </Button>
+        {/* In attachments mode there's only one colour, so the legend
+            collapses into the helper text — no toggle needed. */}
+        {mode === 'movement' && (
+          <Button
+            type="button"
+            variant="ghost"
+            className="justify-start text-primary"
+            onClick={() => setShowLegend((s) => !s)}
+          >
+            <Palette className="mr-2 h-4 w-4" />
+            {showLegend ? 'Hide' : 'View'} color legend
+          </Button>
+        )}
       </div>
 
-      {showLegend && <ColorLegend assignments={assignments} />}
+      {mode === 'movement' && showLegend && (
+        <ColorLegend assignments={assignments} />
+      )}
 
       <div className="rounded-2xl border bg-card shadow-sm">
         <div className="odo-scroll overflow-x-auto px-2 pt-8 pb-6 sm:px-5">
@@ -250,6 +300,7 @@ export function OdontogramSelector({
               activeIpr={iprPopup?.tooth ?? null}
               disabled={disabled}
               iprValues={iprVisible ? iprValues : undefined}
+              iprNotes={iprVisible ? iprNotes : undefined}
               onToothClick={openPopup}
               onIprClick={iprEditable ? openIprPopup : undefined}
             />
@@ -265,6 +316,7 @@ export function OdontogramSelector({
               activeIpr={iprPopup?.tooth ?? null}
               disabled={disabled}
               iprValues={iprVisible ? iprValues : undefined}
+              iprNotes={iprVisible ? iprNotes : undefined}
               onToothClick={openPopup}
               onIprClick={iprEditable ? openIprPopup : undefined}
             />
@@ -316,6 +368,7 @@ export function OdontogramSelector({
           anchorX={popup.x}
           anchorY={popup.y}
           currentType={assignments.get(popup.tooth)}
+          colors={visibleColors}
           onPick={(type) => {
             // flushSync commits the color in the same frame as the click —
             // no popup-close animation can mask the change.
@@ -332,7 +385,13 @@ export function OdontogramSelector({
           anchorX={iprPopup.x}
           anchorY={iprPopup.y}
           currentValue={iprValues?.get(iprPopup.tooth)}
+          currentNote={iprNotes?.get(iprPopup.tooth)}
           onCommit={(v) => commitIpr(iprPopup.tooth, v)}
+          onCommitNote={
+            onIprNoteChange
+              ? (n) => onIprNoteChange(iprPopup.tooth, n)
+              : undefined
+          }
           onClose={closeIprPopup}
         />
       )}
@@ -378,6 +437,40 @@ function ColorLegend({
 
 // ── Arch + Tooth ───────────────────────────────────────────────────────────
 
+/**
+ * Tooth that the midline IPR slot anchors on, per row. In FDI numbering
+ * the upper-left half starts at 21 and the lower-left at 31, so those
+ * are the natural "right side" anchors when we render the slot between
+ * the two halves of an arch.
+ */
+const MIDLINE_ANCHOR: Record<'upper' | 'lower', number> = {
+  upper: 21,
+  lower: 31,
+};
+
+/**
+ * Pretty-print an IPR slot as "between X and Y". The slot is keyed by
+ * the right-hand anchor in render order; the left-hand neighbour is
+ * the previous element in the array, OR the last tooth of the
+ * opposite-half array when crossing the midline.
+ */
+function neighbourTooth(
+  anchor: number,
+  upperRight: readonly number[],
+  upperLeft: readonly number[],
+  lowerRight: readonly number[],
+  lowerLeft: readonly number[],
+): number | undefined {
+  for (const arr of [upperRight, upperLeft, lowerRight, lowerLeft]) {
+    const i = arr.indexOf(anchor);
+    if (i > 0) return arr[i - 1];
+  }
+  // Midline crossing: anchor is first element of its half.
+  if (anchor === MIDLINE_ANCHOR.upper) return upperRight[upperRight.length - 1];
+  if (anchor === MIDLINE_ANCHOR.lower) return lowerRight[lowerRight.length - 1];
+  return undefined;
+}
+
 function Arch({
   row,
   left,
@@ -387,6 +480,7 @@ function Arch({
   activeIpr,
   disabled,
   iprValues,
+  iprNotes,
   onToothClick,
   onIprClick,
 }: {
@@ -398,6 +492,7 @@ function Arch({
   activeIpr: number | null;
   disabled?: boolean;
   iprValues?: Map<number, string>;
+  iprNotes?: Map<number, string>;
   onToothClick: (
     tooth: number,
     event: ReactMouseEvent<HTMLButtonElement>,
@@ -417,52 +512,94 @@ function Arch({
   //     don't need the "click here to add" hints cluttering the arch.
   const showFilledSlots = !!iprValues;
   const showEmptyPlaceholders = !!onIprClick;
+  const midline = MIDLINE_ANCHOR[row];
+  const midlineValue = iprValues?.get(midline);
+  const midlineNote = iprNotes?.get(midline);
+  const midlineShouldRender =
+    showEmptyPlaceholders || (showFilledSlots && !!midlineValue);
+  // Tooth that sits on the left side of the midline slot — last entry
+  // of the "left half" array (e.g. 11 for upper, 41 for lower).
+  const midlineLeftNeighbour = left[left.length - 1];
+
+  const renderHalf = (teeth: readonly number[]) => (
+    <div
+      className={cn(
+        'flex justify-between gap-0.5',
+        row === 'upper' ? 'items-end' : 'items-start',
+      )}
+    >
+      {teeth.map((n, idx) => {
+        const next = teeth[idx + 1];
+        const slotValue =
+          idx < teeth.length - 1 ? iprValues?.get(next) : undefined;
+        const slotNote =
+          idx < teeth.length - 1 ? iprNotes?.get(next) : undefined;
+        const slotShouldRender =
+          idx < teeth.length - 1 &&
+          (showEmptyPlaceholders || (showFilledSlots && !!slotValue));
+        return (
+          <Fragment key={n}>
+            <ToothButton
+              toothNumber={n}
+              row={row}
+              mirrored={MIRRORED.has(n)}
+              type={assignments.get(n)}
+              active={activeTooth === n}
+              disabled={disabled}
+              onClick={onToothClick}
+            />
+            {/* IPR slot between this tooth and the next one. The next
+                tooth (teeth[idx + 1]) anchors the slot's storage key. */}
+            {slotShouldRender && (
+              <IprSlot
+                toothNumber={next}
+                neighbour={n}
+                row={row}
+                value={slotValue}
+                note={slotNote}
+                active={activeIpr === next}
+                disabled={disabled || !onIprClick}
+                onClick={onIprClick}
+              />
+            )}
+          </Fragment>
+        );
+      })}
+    </div>
+  );
+
+  // Render the two halves side-by-side with the midline IPR slot
+  // sandwiched between them when applicable. This is what enables IPR
+  // between teeth 11–21 (upper) and 41–31 (lower) — previously the
+  // CSS grid hard-split the arch into two columns with no element
+  // between, so the midline contact was the only one without a slot.
   return (
-    <div className="grid grid-cols-2 gap-x-3 sm:gap-x-6">
-      {[left, right].map((teeth, i) => (
-        <div
-          key={i}
-          className={cn(
-            'flex justify-between gap-0.5',
-            row === 'upper' ? 'items-end' : 'items-start',
-          )}
-        >
-          {teeth.map((n, idx) => {
-            const next = teeth[idx + 1];
-            const slotValue =
-              idx < teeth.length - 1 ? iprValues?.get(next) : undefined;
-            const slotShouldRender =
-              idx < teeth.length - 1 &&
-              (showEmptyPlaceholders ||
-                (showFilledSlots && !!slotValue));
-            return (
-              <Fragment key={n}>
-                <ToothButton
-                  toothNumber={n}
-                  row={row}
-                  mirrored={MIRRORED.has(n)}
-                  type={assignments.get(n)}
-                  active={activeTooth === n}
-                  disabled={disabled}
-                  onClick={onToothClick}
-                />
-                {/* IPR slot between this tooth and the next one. The next
-                    tooth (teeth[idx + 1]) anchors the slot's storage key. */}
-                {slotShouldRender && (
-                  <IprSlot
-                    toothNumber={next}
-                    row={row}
-                    value={slotValue}
-                    active={activeIpr === next}
-                    disabled={disabled || !onIprClick}
-                    onClick={onIprClick}
-                  />
-                )}
-              </Fragment>
-            );
-          })}
-        </div>
-      ))}
+    <div className="flex items-stretch gap-x-1 sm:gap-x-2">
+      <div className="flex-1">{renderHalf(left)}</div>
+      <div
+        className={cn(
+          'flex shrink-0 items-center',
+          row === 'upper' ? 'items-end pb-1' : 'items-start pt-1',
+        )}
+      >
+        {midlineShouldRender ? (
+          <IprSlot
+            toothNumber={midline}
+            neighbour={midlineLeftNeighbour}
+            row={row}
+            value={midlineValue}
+            note={midlineNote}
+            active={activeIpr === midline}
+            disabled={disabled || !onIprClick}
+            onClick={onIprClick}
+          />
+        ) : (
+          // Keep a fixed spacer width so the two halves stay aligned
+          // even when the midline slot isn't rendered.
+          <span className="block w-2" aria-hidden />
+        )}
+      </div>
+      <div className="flex-1">{renderHalf(right)}</div>
     </div>
   );
 }
@@ -571,9 +708,14 @@ const ToothButton = memo(
 // ── IPR slot (purple bar between two adjacent teeth) ───────────────────────
 
 type IprSlotProps = {
+  /** Anchor tooth on the right side of the contact. */
   toothNumber: number;
+  /** Anchor tooth on the left side of the contact — used for labelling. */
+  neighbour?: number;
   row: 'upper' | 'lower';
   value?: string;
+  /** Optional stripping value rendered in muted gray next to the mm value. */
+  note?: string;
   active?: boolean;
   disabled?: boolean;
   /** Omitted in read-only mode (doctor's view). The slot renders the
@@ -586,8 +728,10 @@ type IprSlotProps = {
 
 const IprSlot = memo(function IprSlot({
   toothNumber,
+  neighbour,
   row,
   value,
+  note,
   active,
   disabled,
   onClick,
@@ -597,9 +741,17 @@ const IprSlot = memo(function IprSlot({
     [onClick, toothNumber],
   );
   const hasValue = !!value && value.trim().length > 0;
+  const hasNote = !!note && note.trim().length > 0;
   // Read-only slots (no onClick) should not be focusable as actionable
   // controls and should not appear pressable — they're a data display.
   const readOnly = !onClick;
+
+  // Human-readable "between X and Y" label — falls back to "tooth N" if
+  // we don't know the neighbour for some reason (defensive — shouldn't
+  // happen in practice given Arch always supplies it).
+  const contactLabel = neighbour
+    ? `between ${neighbour} and ${toothNumber}`
+    : `tooth ${toothNumber}`;
 
   return (
     <button
@@ -608,10 +760,10 @@ const IprSlot = memo(function IprSlot({
       onClick={readOnly ? undefined : handleClick}
       aria-label={
         readOnly
-          ? `IPR ${value} mm between teeth (anchored on ${toothNumber})`
+          ? `IPR ${value} mm ${contactLabel}`
           : hasValue
-            ? `Edit IPR ${value} mm — slot anchored on tooth ${toothNumber}`
-            : `Add IPR for slot anchored on tooth ${toothNumber}`
+            ? `Edit IPR ${value} mm — ${contactLabel}`
+            : `Add IPR ${contactLabel}`
       }
       aria-pressed={readOnly ? undefined : active}
       data-active={active ? 'true' : undefined}
@@ -624,14 +776,19 @@ const IprSlot = memo(function IprSlot({
       )}
       title={
         readOnly
-          ? `IPR ${value} mm`
+          ? `IPR ${value} mm · ${contactLabel}${hasNote ? ` · stripping ${note}` : ''}`
           : hasValue
-            ? `IPR ${value} mm`
-            : 'Click to add IPR (interproximal reduction in mm)'
+            ? `IPR ${value} mm · ${contactLabel}${hasNote ? ` · stripping ${note}` : ''}`
+            : `Click to add IPR ${contactLabel}`
       }
     >
       <span className="odo-ipr-bar" aria-hidden />
-      {hasValue && <span className="odo-ipr-label">{value}</span>}
+      {hasValue && (
+        <span className="odo-ipr-label">
+          {hasNote && <span className="odo-ipr-note">{note}</span>}
+          <span className="odo-ipr-value">{value}</span>
+        </span>
+      )}
     </button>
   );
 });
@@ -643,6 +800,7 @@ function ColorPopover({
   anchorX,
   anchorY,
   currentType,
+  colors,
   onPick,
   onClose,
 }: {
@@ -650,6 +808,8 @@ function ColorPopover({
   anchorX: number;
   anchorY: number;
   currentType?: ToothInstructionType;
+  /** Subset of COLORS to show — controls movement vs. attachments-only. */
+  colors: readonly ColorEntry[];
   onPick: (type: ToothInstructionType | null) => void;
   onClose: () => void;
 }) {
@@ -707,8 +867,16 @@ function ColorPopover({
           </span>
         )}
       </div>
-      <div className="grid grid-cols-4 gap-2">
-        {COLORS.map((c) => {
+      <div
+        className={cn(
+          'grid gap-2',
+          // Single-colour attachments mode: collapse the swatch grid to
+          // a single wide button so the picker looks intentional instead
+          // of weirdly sparse.
+          colors.length === 1 ? 'grid-cols-1' : 'grid-cols-4',
+        )}
+      >
+        {colors.map((c) => {
           const active = c.type === currentType;
           return (
             <button
@@ -749,19 +917,27 @@ function IprPopover({
   anchorX,
   anchorY,
   currentValue,
+  currentNote,
   onCommit,
+  onCommitNote,
   onClose,
 }: {
   tooth: number;
   anchorX: number;
   anchorY: number;
   currentValue?: string;
+  /** Existing stripping value (note column). */
+  currentNote?: string;
   onCommit: (value: string | null) => void;
+  /** Optional setter for the stripping/note value. When omitted, the
+   *  popover hides the second input entirely. */
+  onCommitNote?: (note: string | null) => void;
   onClose: () => void;
 }) {
   const popupRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: anchorX, top: anchorY });
   const [draft, setDraft] = useState(currentValue ?? '0.2');
+  const [noteDraft, setNoteDraft] = useState(currentNote ?? '');
 
   useEffect(() => {
     let armed = false;
@@ -797,7 +973,10 @@ function IprPopover({
   const handleConfirm = () => {
     const trimmed = draft.trim();
     if (!trimmed) {
+      // Clearing the IPR also clears its stripping note — they belong
+      // together as one logical "contact-point plan" row.
       onCommit(null);
+      if (onCommitNote) onCommitNote(null);
       return;
     }
     // Clamp to a sane range — 0.1 to 1.0 mm is the typical clinical IPR range.
@@ -807,19 +986,50 @@ function IprPopover({
     } else {
       onCommit(trimmed);
     }
+    // Persist the stripping value (if its setter is wired up).
+    if (onCommitNote) {
+      const trimmedNote = noteDraft.trim();
+      onCommitNote(trimmedNote.length > 0 ? trimmedNote : null);
+    }
   };
+
+  // Tooth labelling: figure out the left-side neighbour for a friendlier
+  // "between X and Y" header. We can re-derive it from FDI math because
+  // we always anchor on the right tooth of the contact.
+  //   • 21 → 11 (midline upper)
+  //   • 31 → 41 (midline lower)
+  //   • 17 → 18, 16 → 17, … (within the upper-right half)
+  //   • 22 → 23 visually but the anchor is on the LEFT side of the
+  //     contact in this case; we still want "21 and 22" — i.e. neighbour
+  //     is the FDI predecessor in the same half. Encoded via the table
+  //     below to keep the math obvious.
+  const neighbour = (() => {
+    if (tooth === 21) return 11;
+    if (tooth === 31) return 41;
+    if (tooth >= 12 && tooth <= 18) return tooth + 1; // within UR (11..18 chain runs 11,12,…,18)
+    if (tooth >= 22 && tooth <= 28) return tooth - 1; // within UL (21,22,…,28)
+    if (tooth >= 42 && tooth <= 48) return tooth + 1; // within LR
+    if (tooth >= 32 && tooth <= 38) return tooth - 1; // within LL
+    return undefined;
+  })();
+  const contactLabel = neighbour
+    ? `Between ${neighbour} and ${tooth}`
+    : `Tooth ${tooth}`;
 
   return createPortal(
     <div
       ref={popupRef}
       role="dialog"
-      aria-label={`Set IPR amount for tooth ${tooth} slot`}
-      className="odo-popover fixed z-[1000] w-[220px] rounded-xl border bg-popover p-3 shadow-xl outline-none"
+      aria-label={`Set IPR amount ${contactLabel}`}
+      className="odo-popover fixed z-[1000] w-[240px] rounded-xl border bg-popover p-3 shadow-xl outline-none"
       style={{ left: pos.left, top: pos.top }}
     >
       <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-        IPR slot · tooth {tooth}
+        IPR · {contactLabel}
       </div>
+      <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+        Reduction
+      </label>
       <div className="flex items-center gap-2">
         <Input
           type="number"
@@ -838,13 +1048,38 @@ function IprPopover({
         />
         <span className="text-xs text-muted-foreground">mm</span>
       </div>
-      <div className="mt-2 grid grid-cols-2 gap-2">
+      {/* Stripping column — only shown when the parent wired a setter.
+          Rendered in a muted style to communicate "secondary / optional"
+          and to mirror the gray styling used on the slot display. */}
+      {onCommitNote && (
+        <>
+          <label className="mb-1 mt-2 block text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            Stripping
+          </label>
+          <Input
+            type="text"
+            inputMode="decimal"
+            value={noteDraft}
+            onChange={(e) => setNoteDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleConfirm();
+              if (e.key === 'Escape') onClose();
+            }}
+            placeholder="e.g. 11"
+            className="h-9 bg-muted/40 text-muted-foreground"
+          />
+        </>
+      )}
+      <div className="mt-3 grid grid-cols-2 gap-2">
         <Button
           type="button"
           variant="outline"
           size="sm"
-          onClick={() => onCommit(null)}
-          disabled={!currentValue}
+          onClick={() => {
+            onCommit(null);
+            if (onCommitNote) onCommitNote(null);
+          }}
+          disabled={!currentValue && !currentNote}
           className="gap-1"
         >
           <Trash2 className="h-3 w-3" />
@@ -1134,6 +1369,33 @@ const ODONTOGRAM_CSS = /* css */ `
 }
 .odo-ipr-lower .odo-ipr-label {
   top: calc(100% - 16px);
+}
+
+/* Inside the label pill, the primary IPR mm value sits next to the
+   optional "stripping" note. The note is rendered in muted gray to
+   communicate that it's secondary information — the dentist's eye
+   should land on the mm value first. */
+.odo-ipr-value {
+  display: inline-block;
+  font-weight: 700;
+  color: inherit;
+}
+.odo-ipr-note {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.18); /* slate-400 / 18% */
+  color: rgba(71, 85, 105, 0.95);         /* slate-600 */
+  font-weight: 600;
+  font-size: 9px;
+  letter-spacing: 0.2px;
+}
+.odo-ipr-on .odo-ipr-note {
+  /* Slightly more contrast when the slot is filled — the purple label
+     surface tends to swallow muted greys otherwise. */
+  background: rgba(241, 245, 249, 0.85); /* slate-100 / 85% */
+  color: rgba(71, 85, 105, 0.95);
 }
 
 @media (max-width: 640px) {

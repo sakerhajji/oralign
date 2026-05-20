@@ -34,9 +34,15 @@ export function useOnboardingStatus(
   return useMemo(() => {
     const isDentist = user?.role === UserRole.DENTIST;
     const emailVerified = Boolean(user?.isEmailVerified);
-    const profileComplete = Boolean(
-      user?.fullName && user?.phone && user?.country,
-    );
+
+    // Profile completeness is role-aware. Dentists need phone + country
+    // because we contact them for case follow-ups; admin / super_admin /
+    // designer are internal accounts created via the create-super-admin
+    // script or admin UI and shouldn't be funnelled into the dentist
+    // onboarding wizard just because their seed row has null phone.
+    const profileComplete = isDentist
+      ? Boolean(user?.fullName && user?.phone && user?.country)
+      : Boolean(user?.fullName);
 
     const hasLocation =
       dentistProfile?.latitude != null &&

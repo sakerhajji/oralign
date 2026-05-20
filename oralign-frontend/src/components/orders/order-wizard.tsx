@@ -940,8 +940,12 @@ function TreatmentStep({
           <FieldError message={errors.patientStage} />
         </div>
         <div className="grid gap-2">
-          <Label>Arch treatment</Label>
-          <div className="grid gap-2 sm:grid-cols-3">
+          <Label className="text-sm font-semibold">Arch treatment</Label>
+          <div
+            role="radiogroup"
+            aria-label="Arch treatment"
+            className="grid gap-2 sm:grid-cols-3"
+          >
             <OptionPill
               active={form.archTreatment === ArchTreatment.UPPER}
               disabled={disabled}
@@ -1114,7 +1118,7 @@ function AdvancedMovementStep({
           optional priority — leave it on "No priority" if either segment
           may be done first.
         </p>
-        <div className="grid gap-2 sm:grid-cols-4">
+        <div role="radiogroup" aria-label="IPR segment" className="grid gap-2 sm:grid-cols-4">
           {segmentOptions.map((opt) => (
             <OptionPill
               key={opt}
@@ -1126,7 +1130,7 @@ function AdvancedMovementStep({
           ))}
         </div>
         {ipr.segment === 'Both' && (
-          <div className="grid gap-2 sm:grid-cols-3">
+          <div role="radiogroup" aria-label="IPR priority" className="grid gap-2 sm:grid-cols-3">
             {segmentPriorityOptions.map((p) => (
               <OptionPill
                 key={p}
@@ -1156,7 +1160,7 @@ function AdvancedMovementStep({
           Select the segment that needs expansion, or "No expansion" if the
           arches are well-developed. "Both" reveals an optional priority.
         </p>
-        <div className="grid gap-2 sm:grid-cols-4">
+        <div role="radiogroup" aria-label="Expansion segment" className="grid gap-2 sm:grid-cols-4">
           {expansionOptions.map((opt) => {
             const norm: Segment = opt === 'No expansion' ? 'No' : opt;
             return (
@@ -1171,7 +1175,7 @@ function AdvancedMovementStep({
           })}
         </div>
         {expansion.segment === 'Both' && (
-          <div className="grid gap-2 sm:grid-cols-3">
+          <div role="radiogroup" aria-label="Expansion priority" className="grid gap-2 sm:grid-cols-3">
             {segmentPriorityOptions.map((p) => (
               <OptionPill
                 key={p}
@@ -1196,7 +1200,7 @@ function AdvancedMovementStep({
       {/* ─── Spaces — single source of truth ────────────────────────────── */}
       <fieldset className="space-y-3 rounded-lg border bg-card p-4">
         <legend className="px-1 text-sm font-semibold">Spaces</legend>
-        <div className="grid gap-2 sm:grid-cols-2">
+        <div role="radiogroup" aria-label="Spaces" className="grid gap-2 sm:grid-cols-2">
           {spacesOptions.map((opt) => (
             <OptionPill
               key={opt}
@@ -1483,6 +1487,18 @@ function ToggleTile({
   );
 }
 
+/**
+ * Universal pill-style choice button used by every "pick one" control
+ * in the order wizard — Expansion segments, IPR options, treatment-plan
+ * stage, A-P relationship, open bite, midline, bite ramps, crossbite,
+ * materials, etc. Single source of truth so the form has one look
+ * instead of two competing radio aesthetics.
+ *
+ * When nested inside a parent with role="radiogroup" the pill exposes
+ * itself as role="radio" with aria-checked, which gives screen readers
+ * the standard radio-button experience (arrow keys to move, space to
+ * select). Otherwise it's a plain button.
+ */
 function OptionPill({
   label,
   active,
@@ -1497,11 +1513,16 @@ function OptionPill({
   return (
     <button
       type="button"
+      role="radio"
+      aria-checked={active}
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        'inline-flex min-h-11 items-center justify-center rounded-md border bg-background px-3 text-sm font-semibold transition hover:border-primary/70 disabled:cursor-not-allowed disabled:opacity-60',
-        active && 'border-primary bg-primary/5 text-primary',
+        'inline-flex min-h-11 items-center justify-center rounded-md border bg-background px-3 text-sm font-semibold transition',
+        'hover:border-primary/70',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1',
+        'disabled:cursor-not-allowed disabled:opacity-60',
+        active && 'border-primary bg-primary/5 text-primary shadow-sm',
       )}
     >
       {label}
@@ -1509,6 +1530,17 @@ function OptionPill({
   );
 }
 
+/**
+ * Single-choice "radio" rendered as a row of outlined pills — same look
+ * as <OptionPill> used in the Expansion / IPR / chief-complaint blocks
+ * so every choice in the wizard reads as the same control type. The
+ * circle-dot variant we used previously was the only place in the form
+ * that diverged from the pill aesthetic and it felt inconsistent.
+ *
+ * Click semantics are the same as a native radio: pick one, replaces
+ * the current value. Disabled / error / label props are unchanged so
+ * call sites don't need updating.
+ */
 function RadioGroupField({
   label,
   value,
@@ -1526,34 +1558,21 @@ function RadioGroupField({
 }) {
   return (
     <div className="grid gap-2">
-      <Label>{label}</Label>
-      <div className="flex flex-wrap gap-x-4 gap-y-3">
-        {options.map((option) => {
-          const active = value === option;
-          return (
-            <button
-              key={option}
-              type="button"
-              disabled={disabled}
-              onClick={() => onChange(option)}
-              className="inline-flex min-h-8 items-center gap-2 text-left text-sm text-muted-foreground transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <span
-                className={cn(
-                  'grid h-5 w-5 place-items-center rounded-full border',
-                  active
-                    ? 'border-primary bg-primary text-primary-foreground shadow-sm'
-                    : 'border-input bg-background',
-                )}
-              >
-                {active && <span className="h-2 w-2 rounded-full bg-current" />}
-              </span>
-              <span className={active ? 'font-medium text-foreground' : ''}>
-                {option}
-              </span>
-            </button>
-          );
-        })}
+      <Label className="text-sm font-semibold">{label}</Label>
+      <div
+        role="radiogroup"
+        aria-label={label}
+        className="flex flex-wrap gap-2"
+      >
+        {options.map((option) => (
+          <OptionPill
+            key={option}
+            label={option}
+            active={value === option}
+            disabled={disabled}
+            onClick={() => onChange(option)}
+          />
+        ))}
       </div>
       <FieldError message={error} />
     </div>

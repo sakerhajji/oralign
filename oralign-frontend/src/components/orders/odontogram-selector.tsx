@@ -859,38 +859,46 @@ const IprSlot = memo(function IprSlot({
         readOnly && 'odo-ipr-readonly',
       )}
       title={(() => {
+        // Tooltip uses the relabelled field semantics:
+        //   value → "Step" (the aligner-step encoding)
+        //   note  → "IPR mm" (the actual reduction amount)
+        // It iterates whichever fields are populated so a partial
+        // contact (mm-only OR step-only) reads cleanly.
         if (readOnly && (hasValue || hasNote)) {
           const parts: string[] = [];
-          if (hasValue) parts.push(`IPR ${value} mm`);
-          if (hasNote) parts.push(`stripping ${note}`);
+          if (hasNote) parts.push(`IPR ${note} mm`);
+          if (hasValue) parts.push(`step ${value}`);
           return `${parts.join(' · ')} · ${contactLabel}`;
         }
         if (hasValue || hasNote) {
           const parts: string[] = [];
-          if (hasValue) parts.push(`IPR ${value} mm`);
-          if (hasNote) parts.push(`stripping ${note}`);
+          if (hasNote) parts.push(`IPR ${note} mm`);
+          if (hasValue) parts.push(`step ${value}`);
           return `Edit ${parts.join(' · ')} — ${contactLabel}`;
         }
         return `Click to add IPR ${contactLabel}`;
       })()}
     >
       <span className="odo-ipr-bar" aria-hidden />
-      {/* Render the label whenever EITHER the IPR mm or the stripping
-          note is set. The previous gate (only `hasValue`) hid the
-          stripping pill when the planner entered just a stripping
-          number with no mm reduction. */}
+      {/* Label rendered whenever the contact carries EITHER a Step OR
+          an IPR mm value. Visual hierarchy:
+            • IPR (mm) — clinical primary, bold (uses .odo-ipr-value
+              style for legibility against the purple bar).
+            • Step — secondary metadata, gray pill (.odo-ipr-note).
+          The `note` column holds the mm value (no DB rename — the
+          column name predates the relabel), `value` holds the step. */}
       {(hasValue || hasNote) && (
         <span className="odo-ipr-label">
-          {hasValue && (
+          {hasNote && (
             <span className="odo-ipr-value">
-              {value}
+              {note}
               <span className="odo-ipr-unit">mm</span>
             </span>
           )}
-          {hasNote && (
+          {hasValue && (
             <span className="odo-ipr-note">
-              <span className="odo-ipr-note-label">Strip</span>
-              {note}
+              <span className="odo-ipr-note-label">Step</span>
+              {value}
             </span>
           )}
         </span>
@@ -1047,7 +1055,16 @@ function IprPopover({
 }) {
   const popupRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: anchorX, top: anchorY });
-  const [draft, setDraft] = useState(currentValue ?? '0.2');
+  // `draft` holds the FIRST input — relabelled "Step" in the UI per the
+  // clinical team's terminology (the aligner step number when the IPR
+  // is performed). It's the row's required field on the backend, but
+  // not numerically clamped — clinics use various step encodings
+  // (numeric step #, letter, "mid", etc.).
+  const [draft, setDraft] = useState(currentValue ?? '');
+  // `noteDraft` holds the SECOND input — relabelled "IPR (mm)" per the
+  // clinical team. THIS is the actual interproximal-reduction amount in
+  // millimetres. We still write it into the `note` column so we don't
+  // need a DB migration; the column name is purely internal.
   const [noteDraft, setNoteDraft] = useState(currentNote ?? '');
 
   useEffect(() => {
@@ -1082,29 +1099,31 @@ function IprPopover({
   if (typeof window === 'undefined') return null;
 
   const handleConfirm = () => {
-    const trimmed = draft.trim();
-    const trimmedNote = noteDraft.trim();
-    // Build one payload that carries BOTH fields so the parent
-    // persists in a single mutation. Either field can independently
-    // be null — clearing the IPR while keeping the stripping note,
-    // or vice versa, is a legal state.
-    if (!trimmed) {
-      onCommit({
-        value: null,
-        // If stripping isn't shown, never send a note value at all
-        // (`showStripping=false` means the parent doesn't store notes).
-        note: showStripping ? (trimmedNote.length > 0 ? trimmedNote : null) : null,
-      });
-      return;
-    }
-    // Clamp the IPR mm to a sane range — 0.1 to 1.0 mm is typical;
-    // we accept up to 2 mm to give the planner some headroom.
-    const num = Number(trimmed);
-    const valueOut =
-      Number.isFinite(num) && num >= 0 && num <= 2 ? num.toString() : trimmed;
+    const trimmedStep = draft.trim();
+    const trimmedMm = noteDraft.trim();
+    // Build one payload that carries BOTH fields so the parent persists
+    // in a single mutation. Either field can independently be null —
+    // entering only a Step or only an IPR mm is a legal state.
+    //
+    // The Step value lives in `value` (the row's required column on
+    // the backend); the IPR mm lives in `note` (the optional column).
+    // We do NOT clamp Step — clinics encode it differently (numeric
+    // step, "mid", letter codes, etc.). We DO clamp IPR mm to a sane
+    // 0..2 mm range so a typo can't store "20" thinking it was "0.20".
+    const clampMm = (raw: string): string => {
+      const num = Number(raw);
+      return Number.isFinite(num) && num >= 0 && num <= 2 ? num.toString() : raw;
+    };
+
     onCommit({
-      value: valueOut,
-      note: showStripping ? (trimmedNote.length > 0 ? trimmedNote : null) : null,
+      value: trimmedStep.length > 0 ? trimmedStep : null,
+      // showStripping=false means the parent never wants the second
+      // field at all (defensive — current call sites always opt in).
+      note: showStripping
+        ? trimmedMm.length > 0
+          ? clampMm(trimmedMm)
+          : null
+        : null,
     });
   };
 
@@ -1142,48 +1161,56 @@ function IprPopover({
       <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
         IPR · {contactLabel}
       </div>
+
+      {/* ─── Step (free-form text) ─────────────────────────────────────
+          The aligner-step / sequence label when this IPR is performed.
+          Free text so clinics can use whatever encoding their protocol
+          requires (`4`, `S5`, `mid`, etc.) — no numeric clamp. */}
       <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-        Reduction
+        Step
       </label>
-      <div className="flex items-center gap-2">
-        <Input
-          type="number"
-          step="0.1"
-          min="0"
-          max="2"
-          inputMode="decimal"
-          autoFocus
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') handleConfirm();
-            if (e.key === 'Escape') onClose();
-          }}
-          className="h-9"
-        />
-        <span className="text-xs text-muted-foreground">mm</span>
-      </div>
-      {/* Stripping column — only shown when the parent opted in via
-          `showStripping`. Rendered in a muted style to communicate
-          "secondary / optional" and to mirror the gray styling used
-          on the slot display. */}
+      <Input
+        type="text"
+        inputMode="text"
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') handleConfirm();
+          if (e.key === 'Escape') onClose();
+        }}
+        placeholder="e.g. 4"
+        className="h-9"
+      />
+
+      {/* ─── IPR (mm) — the actual reduction amount ──────────────────
+          Only shown when the parent opted in via `showStripping`. Held
+          in the row's `note` column (we never renamed the column to
+          avoid a Prisma migration). 0..2 mm clamp catches typos like
+          "20" that were meant to be "0.20". */}
       {showStripping && (
         <>
           <label className="mb-1 mt-2 block text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-            Stripping
+            IPR (mm)
           </label>
-          <Input
-            type="text"
-            inputMode="decimal"
-            value={noteDraft}
-            onChange={(e) => setNoteDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleConfirm();
-              if (e.key === 'Escape') onClose();
-            }}
-            placeholder="e.g. 11"
-            className="h-9 bg-muted/40 text-muted-foreground"
-          />
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              step="0.1"
+              min="0"
+              max="2"
+              inputMode="decimal"
+              value={noteDraft}
+              onChange={(e) => setNoteDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleConfirm();
+                if (e.key === 'Escape') onClose();
+              }}
+              placeholder="0.2"
+              className="h-9"
+            />
+            <span className="text-xs text-muted-foreground">mm</span>
+          </div>
         </>
       )}
       <div className="mt-3 grid grid-cols-2 gap-2">

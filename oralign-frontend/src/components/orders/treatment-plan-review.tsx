@@ -864,7 +864,13 @@ function MovementTableSection({
       </CardHeader>
       <CardContent className="space-y-6">
         <OdontogramSelector
-          mode="treatment"
+          // mode="attachments" → the picker shows ONLY the pink
+          // ATTACHMENT swatch. The four doctor-level instruction
+          // colours (No Attachments / Do Not Move / No IPR / Extract)
+          // belong on the order odontogram and are hidden here per the
+          // clinical workflow: planners only add attachments + IPR on
+          // this surface.
+          mode="attachments"
           value={colorInstructions}
           onChange={handleColorChange}
           disabled={

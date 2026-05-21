@@ -4,6 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
+import { X } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -13,11 +14,11 @@ import {
   SheetClose,
 } from "@/components/ui/sheet";
 import { NAV_ITEMS } from "../_lib/nav";
-import { dict } from "../_lib/i18n/dict";
+import { dict, LANGS, type Lang } from "../_lib/i18n/dict";
 import { useShowcaseLang } from "../_lib/i18n/lang-context";
 
 export function MobileNav() {
-  const { lang } = useShowcaseLang();
+  const { lang, setLang } = useShowcaseLang();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
 
@@ -66,43 +67,44 @@ export function MobileNav() {
         side="right"
         showCloseButton={false}
         data-theme="showcase"
-        className="w-[88vw] max-w-[360px] border-l border-[#e8e4de] bg-[#f8f6f2] p-0 text-[#0a0a0a]"
+        className="inset-0 z-[60] h-[100dvh] w-[100dvw] max-w-[100dvw] gap-0 overflow-x-hidden overflow-y-auto border-l-0 bg-[var(--sc-white)] p-0 text-[var(--sc-black)] sm:max-w-none"
       >
-        <SheetHeader className="flex-row items-center justify-between gap-3 border-b border-[#e8e4de] px-5 py-4">
-          <SheetTitle asChild>
+        <SheetHeader className="grid grid-cols-[44px_1fr_44px] items-center gap-3 border-b border-[var(--sc-grey)] px-5 py-4">
+          <span aria-hidden="true" />
+          <SheetTitle className="sr-only">ORALIGN menu</SheetTitle>
+          <Link href="/" aria-label="Oralign home" className="col-start-2 mx-auto flex items-center justify-center no-underline">
             <Image
               src="/ORALIGN BLACK.png"
               alt="Oralign"
               width={1240}
               height={880}
-              className="h-9 w-auto"
+              priority
+              className="h-11 w-auto"
             />
-          </SheetTitle>
+          </Link>
           <SheetClose
             aria-label="Close menu"
-            className="inline-flex h-9 w-9 items-center justify-center text-[#0a0a0a] transition-colors hover:text-[#f5c842]"
+            className="col-start-3 inline-flex h-11 w-11 items-center justify-center justify-self-end text-[var(--sc-black)] transition-colors hover:text-[var(--sc-sun-deep)]"
           >
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-              <path d="M3 3 L15 15 M15 3 L3 15" stroke="currentColor" strokeWidth="1.4" strokeLinecap="square" />
-            </svg>
+            <X size={26} strokeWidth={1.45} aria-hidden="true" />
           </SheetClose>
         </SheetHeader>
 
-        <nav aria-label="Mobile" className="flex flex-col px-5 pt-4 pb-8">
-          <ul className="flex list-none flex-col">
+        <nav aria-label="Mobile" className="flex min-h-[calc(100dvh-76px)] flex-col px-5 pb-8 pt-6">
+          <ul className="flex list-none flex-col border-t border-[var(--sc-grey)]">
             {NAV_ITEMS.map((item) => (
               <li key={item.id}>
                 <SheetClose asChild>
                   <Link
                     href={resolveAnchor(item.href)}
-                    className="group flex items-center justify-between border-b border-[#e8e4de] py-4 no-underline text-[#0a0a0a]/70 transition-colors hover:text-[#0a0a0a]"
+                    className="group flex min-h-16 items-center justify-between gap-4 border-b border-[var(--sc-grey)] py-4 no-underline text-[var(--sc-text-dark)]/70 transition-colors hover:text-[var(--sc-black)]"
                   >
-                    <span className="text-[0.72rem] uppercase tracking-[0.28em]">
+                    <span className="text-[0.86rem] uppercase tracking-[0.22em]">
                       {dict.nav[item.labelKey][lang]}
                     </span>
                     <span
                       aria-hidden="true"
-                      className="text-[#f5c842] -translate-x-1 opacity-0 transition-all group-hover:translate-x-0 group-hover:opacity-100"
+                      className="text-[var(--sc-sun-deep)] opacity-70 transition-all group-hover:translate-x-1 group-hover:opacity-100"
                     >
                       →
                     </span>
@@ -112,11 +114,33 @@ export function MobileNav() {
             ))}
           </ul>
 
-          <div className="mt-7 flex flex-col gap-3">
+          <div className="mt-7 grid grid-cols-3 border border-[var(--sc-grey)]">
+            {LANGS.map((l: Lang) => {
+              const active = l === lang;
+              return (
+                <button
+                  key={l}
+                  type="button"
+                  onClick={() => setLang(l)}
+                  aria-pressed={active}
+                  className={[
+                    "h-12 border-r border-[var(--sc-grey)] text-[0.74rem] uppercase tracking-[0.22em] transition-colors last:border-r-0",
+                    active
+                      ? "bg-[var(--sc-black)] text-[var(--sc-sun)]"
+                      : "bg-transparent text-[var(--sc-text-mid)] hover:text-[var(--sc-black)]",
+                  ].join(" ")}
+                >
+                  {l}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="mt-auto flex flex-col gap-3 pt-8">
             <SheetClose asChild>
               <Link
                 href={resolveAnchor("#cta")}
-                className="block bg-[#f5c842] px-6 py-3.5 text-center text-[0.62rem] font-medium uppercase tracking-[0.3em] text-[#0a0a0a] no-underline transition-colors hover:bg-[#f9d96a]"
+                className="block w-full bg-[var(--sc-sun)] px-5 py-4 text-center text-[0.72rem] font-bold uppercase tracking-[0.18em] text-[var(--sc-black)] no-underline transition-colors hover:bg-[var(--sc-sun-2)]"
               >
                 {dict.nav.bookDemo[lang]}
               </Link>
@@ -124,7 +148,7 @@ export function MobileNav() {
             <SheetClose asChild>
               <Link
                 href="/login"
-                className="block border border-[#0a0a0a] px-6 py-3 text-center text-[0.62rem] uppercase tracking-[0.3em] text-[#0a0a0a] no-underline transition-colors hover:bg-[#0a0a0a] hover:text-[#f8f6f2]"
+                className="block w-full border border-[var(--sc-black)] px-5 py-4 text-center text-[0.72rem] uppercase tracking-[0.18em] text-[var(--sc-black)] no-underline transition-colors hover:bg-[var(--sc-black)] hover:text-[var(--sc-white)]"
               >
                 {dict.nav.login[lang]}
               </Link>

@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { QueryProvider, AuthProvider } from "@/lib/providers";
 import { Toaster } from "@/components/ui/sonner";
@@ -7,6 +7,12 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 export const metadata: Metadata = {
   title: "Oralign - Dental Practice Management",
   description: "Manage your dental practice with Oralign",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

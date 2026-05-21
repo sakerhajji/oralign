@@ -6,7 +6,7 @@ import { dict } from "../_lib/i18n/dict";
 import { useShowcaseLang } from "../_lib/i18n/lang-context";
 import { Reveal } from "./shared/reveal";
 import { ImagePlaceholder } from "./shared/image-placeholder";
-import Image from "next/image";
+
 export function PrimeSection() {
   const { lang } = useShowcaseLang();
   const pathname = usePathname();

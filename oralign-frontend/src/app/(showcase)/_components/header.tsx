@@ -58,13 +58,13 @@ export function Header() {
     <header
       role="banner"
       className={[
-        "sticky top-0 z-[300] bg-[var(--sc-white)] transition-shadow duration-300",
+        "sticky top-0 z-[300] w-full max-w-full overflow-hidden bg-[var(--sc-white)] transition-shadow duration-300",
         scrolled
           ? "shadow-[0_1px_0_var(--sc-grey),0_8px_24px_-12px_rgba(10,10,10,0.10)]"
           : "border-b border-[var(--sc-grey)]",
       ].join(" ")}
     >
-      <div className="relative mx-auto flex h-16 sm:h-[72px] lg:h-20 max-w-[1400px] items-center px-4 sm:px-6 lg:px-12">
+      <div className="relative mx-auto flex h-16 max-w-[1400px] items-center px-4 sm:h-[72px] sm:px-6 lg:h-20 lg:px-12">
         {/* Logo — absolute-centered on <lg, inline on lg+ */}
         <Link
           href="/"

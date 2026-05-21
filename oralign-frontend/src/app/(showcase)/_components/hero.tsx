@@ -50,7 +50,7 @@ export function Hero() {
       id="hero"
       data-section-tone="dark"
       aria-labelledby="hero-h1"
-      className="relative overflow-hidden bg-[var(--sc-black)] text-[var(--sc-white)] min-h-[82svh]"
+      className="relative min-h-[82svh] max-w-full overflow-hidden bg-[var(--sc-black)] text-[var(--sc-white)]"
     >
       {/* Hero photography placeholder — real lifestyle image to be added later.
           Keeps an atmospheric amber wash + vortex pattern in the meantime. */}
@@ -74,7 +74,7 @@ export function Hero() {
 
       <div
         aria-hidden="true"
-        className="absolute pointer-events-none z-[2] opacity-70"
+        className="absolute pointer-events-none z-[2] opacity-40 sm:opacity-70"
         style={{
           right: "-12%",
           top: "8%",
@@ -85,9 +85,9 @@ export function Hero() {
         <SunBurst variant="hero" className="w-full h-full" />
       </div>
 
-      <div className="relative z-[5] mx-auto flex min-h-[82svh] max-w-[1400px] flex-col justify-center px-6 py-20 sm:px-8 lg:px-12 lg:py-24">
+      <div className="relative z-[5] mx-auto flex min-h-[82svh] max-w-[1400px] flex-col justify-center px-5 py-16 sm:px-8 sm:py-20 lg:px-12 lg:py-24">
         <div
-          className="sc-hero-eyebrow flex items-center gap-3 mb-9"
+          className="sc-hero-eyebrow mb-7 flex max-w-full items-center gap-3 sm:mb-9"
           style={{
             color: "var(--sc-sun)",
             fontSize: "0.55rem",
@@ -101,8 +101,8 @@ export function Hero() {
 
         <h1
           id="hero-h1"
-          className="sc-hero-h1 sc-serif text-[var(--sc-white)] mb-7"
-          style={{ fontSize: "clamp(2.6rem, 5vw, 5.4rem)", fontWeight: 200, lineHeight: 1.04 }}
+          className="sc-hero-h1 sc-serif mb-7 max-w-full break-words text-[var(--sc-white)]"
+          style={{ fontSize: "clamp(2.35rem, 12vw, 5.4rem)", fontWeight: 400, lineHeight: 1.04 }}
         >
           {dict.hero.headlinePart1[lang]}
           <br />
@@ -117,22 +117,22 @@ export function Hero() {
           )}
         </h1>
 
-        <p className="sc-hero-sub mb-10 max-w-[540px]" style={{ fontSize: "0.96rem", lineHeight: 1.9, color: "rgba(242,245,239,0.72)" }}>
+        <p className="sc-hero-sub mb-9 max-w-[540px] text-pretty" style={{ fontSize: "0.96rem", lineHeight: 1.85, color: "rgba(242,245,239,0.72)" }}>
           {dict.hero.sub[lang]}
         </p>
 
         {/* ONE primary CTA + ONE subtle ghost link per brand brief */}
-        <div className="sc-hero-ctas flex items-center gap-8 flex-wrap">
+        <div className="sc-hero-ctas flex max-w-full flex-col items-stretch gap-5 sm:flex-row sm:items-center sm:gap-8">
           <Link
             href="#cta"
-            className="sc-serif no-underline inline-block transition-colors hover:bg-[var(--sc-sun-2)]"
+            className="sc-serif inline-block w-full max-w-[360px] no-underline transition-colors hover:bg-[var(--sc-sun-2)] sm:w-auto"
             style={{
               fontSize: "0.7rem",
-              letterSpacing: "0.22em",
+              letterSpacing: "0.16em",
               textTransform: "uppercase",
               background: "var(--sc-sun)",
               color: "var(--sc-black)",
-              padding: "17px 36px",
+              padding: "17px 28px",
               fontWeight: 700,
             }}
           >
@@ -140,8 +140,8 @@ export function Hero() {
           </Link>
           <Link
             href="#dashboard-preview"
-            className="no-underline flex items-center gap-3 transition-colors hover:text-[var(--sc-sun)]"
-            style={{ fontSize: "0.62rem", letterSpacing: "0.22em", textTransform: "uppercase", color: "rgba(242,245,239,0.66)" }}
+            className="flex max-w-full items-center gap-3 no-underline transition-colors hover:text-[var(--sc-sun)]"
+            style={{ fontSize: "0.62rem", letterSpacing: "0.18em", textTransform: "uppercase", color: "rgba(242,245,239,0.66)" }}
           >
             <span>{dict.hero.ctaGhost[lang]}</span>
             <span className="block w-[26px] h-px bg-current" aria-hidden="true" />

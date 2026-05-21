@@ -33,6 +33,29 @@
   font-family: var(--font-sc-sans, "DM Sans", system-ui, sans-serif);
   font-weight: 300;
   -webkit-font-smoothing: antialiased;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: clip;
+  position: relative;
+}
+
+body:has([data-theme="showcase"]),
+html:has([data-theme="showcase"]) {
+  overflow-x: clip;
+  max-width: 100%;
+}
+
+[data-theme="showcase"] main {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+[data-theme="showcase"] img,
+[data-theme="showcase"] svg,
+[data-theme="showcase"] canvas,
+[data-theme="showcase"] video {
+  max-width: 100%;
 }
 
 /* Smooth scroll + sticky-header offset for anchor jumps */
@@ -158,6 +181,13 @@ html { scroll-behavior: smooth; }
 [data-slot="sheet-overlay"] {
   background-color: rgba(10, 10, 10, 0.5) !important;
   backdrop-filter: blur(4px);
+}
+
+[data-theme="showcase"][data-slot="sheet-content"] {
+  position: fixed;
+  max-width: 100dvw;
+  width: 100dvw;
+  overflow-x: hidden;
 }
 
 /* ─── REDUCED MOTION ─── */

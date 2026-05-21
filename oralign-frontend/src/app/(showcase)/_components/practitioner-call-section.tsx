@@ -371,14 +371,14 @@ export function PractitionerCallSection() {
           <div className="mt-12 flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
             <Link
               href="/login"
-              className="sc-serif inline-flex items-center justify-center gap-3 bg-[var(--sc-sun)] px-6 py-4 text-[0.66rem] font-bold uppercase tracking-[0.22em] text-[var(--sc-black)] no-underline transition-colors hover:bg-[var(--sc-sun-2)]"
+              className="sc-serif inline-flex w-full items-center justify-center gap-3 bg-[var(--sc-sun)] px-6 py-4 text-center text-[0.66rem] font-bold uppercase tracking-[0.16em] text-[var(--sc-black)] no-underline transition-colors hover:bg-[var(--sc-sun-2)] sm:w-auto sm:tracking-[0.22em]"
             >
               <span>{copy.primary[lang]}</span>
               <ArrowRight size={15} />
             </Link>
             <Link
               href="#cta"
-              className="inline-flex items-center justify-center gap-3 border border-[rgba(242,245,239,0.25)] px-6 py-4 text-[0.62rem] font-medium uppercase tracking-[0.22em] text-[var(--sc-white)] no-underline transition-colors hover:border-[var(--sc-sun)] hover:text-[var(--sc-sun)]"
+              className="inline-flex w-full items-center justify-center gap-3 border border-[rgba(242,245,239,0.25)] px-6 py-4 text-center text-[0.62rem] font-medium uppercase tracking-[0.16em] text-[var(--sc-white)] no-underline transition-colors hover:border-[var(--sc-sun)] hover:text-[var(--sc-sun)] sm:w-auto sm:tracking-[0.22em]"
             >
               <span>{copy.secondary[lang]}</span>
             </Link>

@@ -9,7 +9,7 @@ export function FloatingLang() {
     <div
       role="group"
       aria-label="Language"
-      className="fixed top-1/2 -translate-y-1/2 end-3 sm:end-4 lg:end-6 z-30 flex flex-col items-stretch bg-[rgba(248,246,242,0.92)] backdrop-blur border border-[var(--sc-grey)] shadow-[0_2px_18px_rgba(10,10,10,0.06)]"
+      className="fixed top-1/2 -translate-y-1/2 end-3 sm:end-4 lg:end-6 z-30 hidden flex-col items-stretch bg-[rgba(248,246,242,0.92)] backdrop-blur border border-[var(--sc-grey)] shadow-[0_2px_18px_rgba(10,10,10,0.06)] lg:flex"
     >
       <span
         aria-hidden="true"

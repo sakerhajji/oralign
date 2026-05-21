@@ -8,7 +8,6 @@ import { AdultBrochureSection, ParentBrochureSection } from "./_components/broch
 import { PrimeSection } from "./_components/prime-section";
 import { DashboardPreview } from "./_components/dashboard-preview";
 import { Testimonials } from "./_components/testimonials";
-import { PricingSection } from "./_components/pricing-section";
 import { FaqSection } from "./_components/faq-section";
 import { FinalCta } from "./_components/final-cta";
 import { PractitionerCallSection } from "./_components/practitioner-call-section";
@@ -25,10 +24,9 @@ import { PractitionerCallSection } from "./_components/practitioner-call-section
  *   8. Children/Parents (PrimeSection intro + ParentBrochureSection)
  *   9. Smile preview (DashboardPreview — before/after gallery)
  *  10. Testimonials (real patient stories)
- *  11. Pricing (patient treatment plans)
+ *  11. PractitionerCallSection (B2B Dentists)
  *  12. FAQ
  *  13. FinalCta (patient close)
- *  14. PractitionerCallSection (B2B Dentists — last content section)
  *
  * Sections temporarily not rendered (kept in repo, may revive later):
  *   - Manifesto (removed per brief)
@@ -50,8 +48,9 @@ export default function ShowcaseHomePage() {
       <ParentBrochureSection />
       <DashboardPreview />
       <Testimonials />
+      <PractitionerCallSection />
       <FaqSection />
-  
+      <FinalCta />
     </>
   );
 }

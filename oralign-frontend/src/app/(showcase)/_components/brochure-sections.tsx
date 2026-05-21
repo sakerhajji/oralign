@@ -16,7 +16,6 @@ import { dict } from "../_lib/i18n/dict";
 import { useShowcaseLang } from "../_lib/i18n/lang-context";
 import { Reveal } from "./shared/reveal";
 import { ImagePlaceholder } from "./shared/image-placeholder";
-import Image from "next/image";
 
 /**
  * Brochure-derived sections. Adult tone = emotional transformation.
@@ -55,7 +54,7 @@ const brochureCopy = {
         icon: Smile,
         title: { fr: "Liberté retrouvée", en: "Freedom restored", ar: "حرية مستعادة" },
         body: {
-          fr: "Se retire en quelques secondes pour manger, boire, embrasser. Aucune contrainte, aucune liste d'aliments interdits.",
+          fr: "Se retire en quelques secondes pour manger et boire. Votre routine reste simple, libre et naturelle.",
           en: "Comes off in seconds to eat, drink, or kiss. No restrictions, no banned-food list.",
           ar: "تُزال في ثوانٍ للأكل أو الشرب أو التعبير. بدون قيود غذائية.",
         },
@@ -155,6 +154,7 @@ export function AdultBrochureSection() {
       id="adults"
       lang={lang}
       copy={brochureCopy.adult}
+      imageSrc="/showcase/adulteAlinger.png"
       imageTone="light"
     />
   );
@@ -168,6 +168,7 @@ export function ParentBrochureSection() {
       id="parents"
       lang={lang}
       copy={brochureCopy.parent}
+      imageSrc="/showcase/boyalinger.png"
       imageTone="dark"
       dark
     />
@@ -178,12 +179,14 @@ function BrochureSection({
   id,
   lang,
   copy,
+  imageSrc,
   imageTone,
   dark,
 }: {
   id: string;
   lang: Lang;
   copy: typeof brochureCopy.adult | typeof brochureCopy.parent;
+  imageSrc: string;
   imageTone: "light" | "dark";
   dark?: boolean;
 }) {
@@ -238,7 +241,7 @@ function BrochureSection({
           <Reveal>
             <figure className={`overflow-hidden border ${dark ? "border-[#303030]" : "border-[var(--sc-grey)]"}`}>
               <ImagePlaceholder
-              src="/showcase/adulteAlinger.png"
+                src={imageSrc}
                 label={copy.imageLabel[lang]}
                 aspect="portrait"
                 tone={imageTone}
@@ -298,7 +301,7 @@ function BrochureSection({
           <div className="mt-9">
             <Link
               href="#cta"
-              className="sc-serif inline-flex items-center justify-center gap-3 bg-[var(--sc-sun)] px-6 py-4 text-center text-[0.66rem] font-bold uppercase tracking-[0.22em] text-[var(--sc-black)] no-underline transition-colors hover:bg-[var(--sc-sun-2)]"
+              className="sc-serif inline-flex w-full max-w-[360px] items-center justify-center gap-3 bg-[var(--sc-sun)] px-6 py-4 text-center text-[0.66rem] font-bold uppercase tracking-[0.16em] text-[var(--sc-black)] no-underline transition-colors hover:bg-[var(--sc-sun-2)] sm:w-auto sm:max-w-none sm:tracking-[0.22em]"
             >
               <span>{copy.cta[lang]}</span>
               <ArrowRight size={15} />

@@ -8,7 +8,7 @@
  * The page renders sections in this order (per page.tsx):
  *   Hero → Ribbon → Indications → Confidence → Solution → HowItWorks
  *     → AdultBrochure → Prime → ParentBrochure → DashboardPreview
- *     → Testimonials → FAQ
+ *     → Testimonials → PractitionerCall → FAQ → FinalCta
  *
  * Anchorable sections (those with an `id`) that the nav exposes:
  *   1. #indications        — Indications
@@ -16,11 +16,8 @@
  *   3. #dashboard-preview  — Results / before-after gallery
  *   4. #faq                — FAQ
  *
- * Removed (no longer rendered on the page — links here would scroll
- * to nothing):
- *   • #practitioner-call   (PractitionerCallSection imported but not
- *                           rendered in page.tsx)
- *   • #pricing             (PricingSection imported but not rendered)
+ * Keep the public nav intentionally compact on mobile; the practitioner
+ * and CTA sections remain reachable through page CTAs.
  */
 export const NAV_ITEMS = [
   { id: "indications", labelKey: "platform" as const, href: "#indications" },

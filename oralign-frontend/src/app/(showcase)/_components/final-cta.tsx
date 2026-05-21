@@ -13,7 +13,7 @@ export function FinalCta() {
       data-section-tone="light"
       aria-labelledby="cta-h2"
       className="relative bg-[var(--sc-white)] text-center overflow-hidden"
-      style={{ padding: "120px 24px" }}
+      style={{ padding: "clamp(80px, 12vw, 120px) 20px" }}
     >
       <div
         aria-hidden="true"
@@ -40,17 +40,17 @@ export function FinalCta() {
         <p className="mx-auto relative z-[1] mt-6" style={{ fontSize: "0.95rem", color: "var(--sc-text-mid)", lineHeight: 1.8, maxWidth: 520 }}>
           {dict.finalCta.sub[lang]}
         </p>
-        <div className="mt-10 relative z-[1] flex items-center justify-center gap-4 flex-wrap">
+        <div className="relative z-[1] mx-auto mt-10 flex max-w-[520px] flex-col items-stretch justify-center gap-3 sm:max-w-none sm:flex-row sm:flex-wrap sm:items-center">
           <Link
             href="mailto:contact@oralign.example"
-            className="no-underline inline-block transition-all"
+            className="inline-flex min-h-12 items-center justify-center text-center no-underline transition-all"
             style={{
               fontSize: "0.64rem",
-              letterSpacing: "0.3em",
+              letterSpacing: "0.18em",
               textTransform: "uppercase",
               background: "var(--sc-black)",
               color: "var(--sc-white)",
-              padding: "16px 44px",
+              padding: "16px 28px",
               fontWeight: 400,
             }}
           >
@@ -58,13 +58,13 @@ export function FinalCta() {
           </Link>
           <Link
             href="/login"
-            className="no-underline inline-block transition-colors"
+            className="inline-flex min-h-12 items-center justify-center text-center no-underline transition-colors"
             style={{
               fontSize: "0.64rem",
-              letterSpacing: "0.25em",
+              letterSpacing: "0.18em",
               textTransform: "uppercase",
               color: "var(--sc-text-mid)",
-              padding: "15px 34px",
+              padding: "15px 28px",
               border: "1px solid rgba(10,10,10,0.2)",
             }}
           >

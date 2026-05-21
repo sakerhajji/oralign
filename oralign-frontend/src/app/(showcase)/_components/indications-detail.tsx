@@ -35,21 +35,25 @@ export function IndicationsDetail() {
 
         <Reveal delay>
           {/*
-            Switched the layout from `flex flex-wrap` over a grey `<ul>`
-            background (which painted 1px separators through `gap-px` and
-            left the unfilled cells of the last row as visible dark grey
-            slabs) to a proper CSS grid. Empty trailing cells are now
-            truly empty — no background shows because the `<ul>` itself
-            no longer has one. Cards also bleed edge-to-edge by removing
-            the `p-2` padding on the image and switching to `object-cover`,
-            which is what the user asked for: every image fills its
-            frame at identical dimensions.
+            Layout: flex-wrap + justify-center so a partial trailing row
+            (e.g. 5 items in a 3-up layout → 3 then 2) centres its two
+            cards instead of leaving them flushed to the left edge.
+            CSS Grid wouldn't centre the last row — its cells are fixed
+            to a 3-column track regardless of how many items occupy it.
+
+            Card sizing: every card is given an EXPLICIT width per
+            breakpoint using `calc(% - gap-share)` so all cards are the
+            same pixel width whether they're in a full row or a partial
+            one. gap-5 = 1.25rem (20px). For 3-up the 2 gaps total 40px;
+            each card therefore gets `calc(33.333% - 0.834rem)` (~13.3px
+            of gap allowance per card). Same math for the 2-up sm
+            breakpoint with one 20px gap.
           */}
-          <ul className="mx-auto mt-12 grid max-w-[1200px] list-none grid-cols-1 gap-5 sm:mt-16 sm:grid-cols-2 lg:grid-cols-3">
+          <ul className="mx-auto mt-12 flex max-w-[1200px] list-none flex-wrap justify-center gap-5 sm:mt-16">
             {featuredCases.map((item, i) => (
               <li
                 key={item.id}
-                className="group relative overflow-hidden rounded-lg bg-[#111] ring-1 ring-white/5 transition-colors hover:ring-white/10"
+                className="group relative w-full max-w-[420px] overflow-hidden rounded-lg bg-[#111] ring-1 ring-white/5 transition-colors hover:ring-white/10 sm:w-[calc(50%-0.625rem)] sm:max-w-none lg:w-[calc(33.333%-0.834rem)]"
               >
                 {/* Image frame — fixed aspect ratio so every card is
                     exactly the same height regardless of source-image

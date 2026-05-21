@@ -1,13 +1,17 @@
 "use client";
 
+import Image from "next/image";
+import { showcaseCases } from "../_lib/case-gallery";
 import { dict } from "../_lib/i18n/dict";
 import { useShowcaseLang } from "../_lib/i18n/lang-context";
 import { Reveal } from "./shared/reveal";
 import { SectionHeading } from "./shared/section-heading";
-import { ImagePlaceholder } from "./shared/image-placeholder";
+
+const testimonialCases = [showcaseCases[0], showcaseCases[2], showcaseCases[5]];
 
 export function Testimonials() {
   const { lang } = useShowcaseLang();
+
   return (
     <section
       id="testimonials"
@@ -23,50 +27,73 @@ export function Testimonials() {
             <em style={{ fontStyle: "italic", color: "var(--sc-sun)" }}>{dict.testimonials.h2Em[lang]}</em>
           </SectionHeading>
         </Reveal>
+
         <Reveal delay>
-          <ul className="list-none mt-14 grid grid-cols-1 md:grid-cols-3 gap-px bg-[var(--sc-grey)]">
-            {dict.testimonials.items.map((t, i) => (
-              <li
-                key={i}
-                className="bg-[var(--sc-white)] sc-card-tint flex flex-col gap-6"
-                style={{ padding: "32px 28px" }}
-              >
-                <ImagePlaceholder
-                  label={dict.common.imagePlaceholder[lang]}
-                  aspect="landscape"
-                  tone="light"
-                  className="w-full"
-                />
-                <p
-                  className="sc-serif"
-                  style={{ fontStyle: "italic", fontSize: "1.05rem", lineHeight: 1.6, color: "var(--sc-black)", flex: 1 }}
+          <ul className="mt-14 grid list-none grid-cols-1 gap-px bg-[var(--sc-grey)] md:grid-cols-3">
+            {dict.testimonials.items.map((t, i) => {
+              const item = testimonialCases[i] ?? showcaseCases[i];
+              return (
+                <li
+                  key={i}
+                  className="sc-card-tint flex flex-col gap-6 bg-[var(--sc-white)]"
+                  style={{ padding: "32px 28px" }}
                 >
-                  &ldquo;{t.quote[lang]}&rdquo;
-                </p>
-                <div className="flex items-center gap-3 mt-auto">
-                  <ImagePlaceholder
-                    label=""
-                    aspect="square"
-                    tone="gold"
-                    bare
-                    className="w-10 h-10 rounded-full overflow-hidden"
-                  />
-                  <div>
-                    <div style={{ fontSize: "0.85rem", fontWeight: 500, color: "var(--sc-black)" }}>{t.name[lang]}</div>
+                  <figure>
+                    <div className="relative aspect-[4/3] overflow-hidden border border-[var(--sc-grey)] bg-[var(--sc-grey)]">
+                      <Image
+                        src={item.after}
+                        alt={`${item.shortTitle[lang]} - ${dict.preview.after[lang]}`}
+                        fill
+                        sizes="(min-width: 768px) 33vw, 100vw"
+                        className="object-contain"
+                      />
+                    </div>
+                    <figcaption
+                      className="mt-3"
+                      style={{ fontSize: "0.52rem", letterSpacing: "0.28em", textTransform: "uppercase", color: "var(--sc-text-mid)" }}
+                    >
+                      {item.shortTitle[lang]} · {dict.preview.after[lang]}
+                    </figcaption>
+                  </figure>
+
+                  <p
+                    className="sc-serif"
+                    style={{ fontStyle: "italic", fontSize: "1.05rem", lineHeight: 1.6, color: "var(--sc-black)", flex: 1 }}
+                  >
+                    &ldquo;{t.quote[lang]}&rdquo;
+                  </p>
+
+                  <div className="mt-auto flex items-center gap-3">
                     <div
+                      aria-hidden="true"
+                      className="flex h-10 w-10 items-center justify-center rounded-full"
                       style={{
-                        fontSize: "0.65rem",
-                        letterSpacing: "0.18em",
-                        textTransform: "uppercase",
-                        color: "var(--sc-text-mid)",
+                        background: "var(--sc-black)",
+                        color: "var(--sc-sun)",
+                        fontSize: "0.72rem",
+                        fontWeight: 600,
+                        letterSpacing: "0.08em",
                       }}
                     >
-                      {t.role[lang]}
+                      {t.name[lang].slice(0, 1)}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: "0.85rem", fontWeight: 500, color: "var(--sc-black)" }}>{t.name[lang]}</div>
+                      <div
+                        style={{
+                          fontSize: "0.65rem",
+                          letterSpacing: "0.18em",
+                          textTransform: "uppercase",
+                          color: "var(--sc-text-mid)",
+                        }}
+                      >
+                        {t.role[lang]}
+                      </div>
                     </div>
                   </div>
-                </div>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
         </Reveal>
       </div>

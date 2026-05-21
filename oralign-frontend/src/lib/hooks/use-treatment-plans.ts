@@ -26,6 +26,9 @@ export const treatmentPlanKeys = {
   messages: (id: string) => [...treatmentPlanKeys.all, 'messages', id] as const,
 };
 
+const PLAN_LIST_STALE_TIME = 15_000;
+const PLAN_REVIEW_STALE_TIME = 30_000;
+
 // ─── Queries ────────────────────────────────────────────────────────────────
 
 export function useTreatmentPlansByOrder(
@@ -35,34 +38,30 @@ export function useTreatmentPlansByOrder(
     queryKey: treatmentPlanKeys.byOrder(orderId),
     queryFn: () => treatmentPlansService.listByOrder(orderId),
     enabled: !!orderId,
-    // List is cheap (no relations, ~1KB) but flipping tabs shouldn't refire.
-    staleTime: 1000 * 60 * 5,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false,
+    staleTime: PLAN_LIST_STALE_TIME,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    retry: 2,
   });
 }
 
 export function useTreatmentPlanReview(
   id: string,
 ): UseQueryResult<TreatmentPlanReview, Error> {
-  // The review payload is HEAVY — it pulls the full plan + grouped odontogram
-  // + every chat message with its attachments + senders. Before this fix the
-  // Order detail tab flip refetched it on every mount, plus on every window
-  // focus, holding two copies in memory while the new one came in. That's
-  // most of the ~824 MB the user reported.
-  //
-  // The WebSocket gateway (`useTreatmentChatSocket`) is the source of truth
-  // for new messages anyway — it updates this cache in-place — so we can
-  // safely disable auto-refetch entirely and let the socket drive updates.
+  // This payload is heavy, so the order page lazy-mounts this tab. Once a
+  // user opens it, though, it must reconcile on real navigation/focus because
+  // production tabs can miss websocket events while sleeping in the background.
   return useQuery({
     queryKey: treatmentPlanKeys.review(id),
     queryFn: () => treatmentPlansService.getReview(id),
     enabled: !!id,
-    staleTime: 1000 * 60 * 10,
+    staleTime: PLAN_REVIEW_STALE_TIME,
     gcTime: 1000 * 60 * 5,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    retry: 2,
   });
 }
 

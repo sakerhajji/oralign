@@ -8,24 +8,6 @@ import { useShowcaseLang } from "../_lib/i18n/lang-context";
 import { Reveal } from "./shared/reveal";
 import { SectionHeading } from "./shared/section-heading";
 
-/**
- * FAQ section — refreshed visual treatment.
- *
- * The previous design used a hard rectangular tab strip with tiny
- * 10px uppercase tab labels and a flat black active state. That read
- * as "low-effort placeholder" against the rest of the showcase, which
- * leans premium / editorial. Reworked into:
- *
- *   • A rounded-full segmented control for Patient / Practitioner —
- *     bigger readable labels, soft pill highlight on the active tab,
- *     stays inside the brand palette (Midnight Ink + Porcelain Mist).
- *   • The accordion now lives inside a card with subtle border + soft
- *     shadow so the section reads as a unit instead of a stack of
- *     lines, and each question gets enough breathing room.
- *   • Custom rotating "+ → ×" icon swap on open, larger serif question
- *     text, and a subtle amber wash on the OPEN row so the eye lands
- *     on the question being answered instead of having to scan for it.
- */
 export function FaqSection() {
   const { lang } = useShowcaseLang();
 
@@ -42,52 +24,67 @@ export function FaqSection() {
           <div className="mx-auto max-w-3xl text-center">
             <SectionHeading eyebrow={dict.faq.eyebrow[lang]} tone="light" align="center" id="faq-h2">
               {dict.faq.h2Part1[lang]}{" "}
-              <em style={{ fontStyle: "italic", color: "var(--sc-sun)" }}>{dict.faq.h2Em[lang]}</em>
+              <em style={{ fontStyle: "italic", color: "var(--sc-sun)" }}>
+                {dict.faq.h2Em[lang]}
+              </em>
             </SectionHeading>
           </div>
         </Reveal>
 
         <Reveal delay>
           <Tabs defaultValue="patient" className="mt-12 gap-10">
-            {/* Pill-style segmented control — rounded-full outer track with
-                rounded-full triggers inside. Active state uses a Midnight
-                Ink pill that "snaps" into place.
-
-                IMPORTANT: do NOT use variant="line" here. The line variant
-                forces `data-active:bg-transparent` + a bottom underline,
-                which fights with our custom pill design — the active text
-                ends up white on a transparent surface (invisible against
-                the page background) and a stray underline shows through.
-                The default variant lets our pill classes win cleanly. We
-                also use `!` modifiers on the background + text so the
-                base Tabs default-active styles can't shadow ours through
-                Tailwind class-order ambiguity. */}
             <TabsList
-              className="mx-auto !grid h-auto w-full max-w-[440px] grid-cols-2 gap-1 !rounded-full border border-[var(--sc-grey)] !bg-[var(--sc-white)] p-1.5 shadow-[0_1px_0_rgba(25,25,25,0.04)]"
+              className="
+                mx-auto grid h-9 w-full max-w-[480px] grid-cols-2 gap-0
+                overflow-hidden !rounded-none
+                !border-0
+                bg-transparent p-0
+                shadow-none
+              "
             >
-              {/* `!rounded-full` overrides the base TabsTrigger's
-                  `rounded-md` so the active pill stays fully rounded
-                  end-to-end. `after:!hidden` removes the underline
-                  pseudo-element baked into the base Tabs CSS (it was
-                  drawing a black line under the active tab even with
-                  variant="line" removed). */}
               <TabsTrigger
                 value="patient"
-                className="relative h-11 !rounded-full border-0 px-5 text-sm font-medium tracking-wide text-[var(--sc-text-mid)] transition-all duration-300 after:!hidden data-active:!bg-[var(--sc-black)] data-active:!text-[var(--sc-white)] data-active:shadow-sm"
+                className="
+                  !flex h-9 w-full !items-center !justify-center
+                  !rounded-none border-0 px-6 !py-0
+                  text-center text-sm font-semibold leading-none tracking-wide
+                  text-[var(--sc-text-mid)]
+                  shadow-none transition-all duration-300
+                  after:!hidden
+                  data-[state=active]:!bg-[var(--sc-black)]
+                  data-[state=active]:!text-[var(--sc-white)]
+                  data-[state=active]:shadow-none
+                "
               >
-                {dict.faq.tabPatient[lang]}
+                <span className="block leading-none">
+                  {dict.faq.tabPatient[lang]}
+                </span>
               </TabsTrigger>
+
               <TabsTrigger
                 value="practitioner"
-                className="relative h-11 !rounded-full border-0 px-5 text-sm font-medium tracking-wide text-[var(--sc-text-mid)] transition-all duration-300 after:!hidden data-active:!bg-[var(--sc-black)] data-active:!text-[var(--sc-white)] data-active:shadow-sm"
+                className="
+                  !flex h-9 w-full !items-center !justify-center
+                  !rounded-none border-0 px-6 !py-0
+                  text-center text-sm font-semibold leading-none tracking-wide
+                  text-[var(--sc-text-mid)]
+                  shadow-none transition-all duration-300
+                  after:!hidden
+                  data-[state=active]:!bg-[var(--sc-black)]
+                  data-[state=active]:!text-[var(--sc-white)]
+                  data-[state=active]:shadow-none
+                "
               >
-                {dict.faq.tabPractitioner[lang]}
+                <span className="block leading-none">
+                  {dict.faq.tabPractitioner[lang]}
+                </span>
               </TabsTrigger>
             </TabsList>
 
             <TabsContent value="patient" className="mt-0">
               <FaqAccordion items={dict.faq.items} lang={lang} namespace="patient" />
             </TabsContent>
+
             <TabsContent value="practitioner" className="mt-0">
               <FaqAccordion items={dict.faq.practitionerItems} lang={lang} namespace="practitioner" />
             </TabsContent>
@@ -117,17 +114,11 @@ function FaqAccordion({
             className="group/faq-item border-0 transition-colors duration-200 hover:bg-[var(--sc-sun-3)] data-[state=open]:bg-[var(--sc-sun-3)]"
           >
             <AccordionTrigger
-              // The shared AccordionTrigger auto-renders a chevron via
-              // [data-slot=accordion-trigger-icon] — we hide it here
-              // because the custom "+ → ×" pill below replaces it
-              // with something more on-brand.
               className="sc-serif gap-6 px-6 py-6 text-left text-[1.05rem] leading-snug text-[var(--sc-black)] transition-colors hover:no-underline sm:px-8 sm:text-[1.15rem] [&>[data-slot=accordion-trigger-icon]]:hidden"
               style={{ fontWeight: 500 }}
             >
               <span className="flex-1 pr-2">{it.q[lang]}</span>
-              {/* Replace the default chevron with a "+ → ×" rotation —
-                  reads as "expand" more clearly and matches editorial
-                  FAQ patterns the design system already uses elsewhere. */}
+
               <span
                 className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-[var(--sc-grey)] bg-[var(--sc-white)] text-[var(--sc-black)] transition-transform duration-300 group-data-[state=open]/faq-item:rotate-45 group-data-[state=open]/faq-item:border-[var(--sc-black)] group-data-[state=open]/faq-item:bg-[var(--sc-black)] group-data-[state=open]/faq-item:text-[var(--sc-white)]"
                 aria-hidden
@@ -135,6 +126,7 @@ function FaqAccordion({
                 <Plus className="h-4 w-4" strokeWidth={2.25} />
               </span>
             </AccordionTrigger>
+
             <AccordionContent className="px-6 pb-7 pt-0 text-[0.95rem] leading-relaxed text-[var(--sc-text-mid)] sm:px-8 sm:text-base">
               {it.a[lang]}
             </AccordionContent>

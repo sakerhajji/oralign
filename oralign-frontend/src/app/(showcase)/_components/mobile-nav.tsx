@@ -71,7 +71,7 @@ export function MobileNav() {
         <SheetHeader className="flex-row items-center justify-between gap-3 border-b border-[#e8e4de] px-5 py-4">
           <SheetTitle asChild>
             <Image
-              src="/ORALIGN%20BLACK.png"
+              src="/ORALIGN BLACK.png"
               alt="Oralign"
               width={1240}
               height={880}

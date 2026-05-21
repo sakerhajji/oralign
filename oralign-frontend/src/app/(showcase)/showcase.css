@@ -10,16 +10,21 @@
    ───────────────────────────────────────────────────────────────── */
 
 :root {
-  --sc-black: #0a0a0a;
-  --sc-white: #f8f6f2;
-  --sc-sun: #f5c842;
-  --sc-sun-2: #f9d96a;
-  --sc-sun-3: rgba(245, 200, 66, 0.12);
-  --sc-grey: #e8e4de;
-  --sc-mid-grey: #c4bfb6;
-  --sc-text-dark: #1a1a1a;
-  --sc-text-mid: rgba(10, 10, 10, 0.55);
-  --sc-text-mid-on-dark: rgba(248, 246, 242, 0.55);
+  /* ORALIGN BRAND GUIDELINES — Palette Primaire */
+  --sc-black: #191919; /* Midnight Ink — primary text/dark BG */
+  --sc-white: #f2f5ef; /* Porcelain Mist — primary light BG, never #fff */
+  --sc-sun: #feca16; /* Royal Amber — accent (10% rule) */
+  /* Palette secondaire — gamme Amber */
+  --sc-sun-soft: #ffe58a; /* Soft Amber — large surfaces */
+  --sc-sun-2: #ffd24a; /* Golden Amber — hover / highlights */
+  --sc-sun-deep: #c99a0b; /* Deep Amber — text accents on light */
+  --sc-sun-3: rgba(254, 202, 22, 0.12); /* Sun glow */
+  /* Palette neutre */
+  --sc-grey: #e7e2d8; /* Light Neutral */
+  --sc-mid-grey: #a6a6a6; /* Amber Stone — fine print */
+  --sc-text-dark: #191919;
+  --sc-text-mid: rgba(25, 25, 25, 0.58);
+  --sc-text-mid-on-dark: rgba(242, 245, 239, 0.62);
 }
 
 [data-theme="showcase"] {
@@ -37,12 +42,27 @@ html { scroll-behavior: smooth; }
   scroll-margin-top: 88px;
 }
 
+/* ORALIGN brand guidelines: Century Gothic for display. Fall back to Jost
+   (closest free Google equivalent) when CG isn't installed locally.
+   Two weights only: 400 Regular and 700 Bold. */
 [data-theme="showcase"] h1,
 [data-theme="showcase"] h2,
 [data-theme="showcase"] h3,
 [data-theme="showcase"] .sc-serif {
-  font-family: var(--font-sc-serif, "Playfair Display", Georgia, serif);
-  font-weight: 300;
+  font-family: "Century Gothic", var(--font-sc-serif, "Jost"), system-ui, sans-serif;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+[data-theme="showcase"] .sc-serif-bold {
+  font-family: "Century Gothic", var(--font-sc-serif, "Jost"), system-ui, sans-serif;
+  font-weight: 700;
+}
+/* Subheads per type hierarchy: uppercase + generous tracking */
+[data-theme="showcase"] .sc-subhead {
+  font-family: "Century Gothic", var(--font-sc-serif, "Jost"), system-ui, sans-serif;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
 }
 
 /* ─── INITIAL HIDDEN STATES (GSAP animates them in) ─────────────────

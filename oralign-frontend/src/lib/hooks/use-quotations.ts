@@ -20,6 +20,8 @@ export const quotationKeys = {
   detail: (id: string) => [...quotationKeys.all, 'detail', id] as const,
 };
 
+const QUOTATION_STALE_TIME = 15_000;
+
 /** Order-scoped read. Returns null when no quote exists yet. */
 export function useQuotationForOrder(
   orderId: string,
@@ -29,9 +31,11 @@ export function useQuotationForOrder(
     queryKey: quotationKeys.byOrder(orderId),
     queryFn: () => quotationsService.getForOrder(orderId),
     enabled: enabled && !!orderId,
-    staleTime: 1000 * 60 * 2,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false,
+    staleTime: QUOTATION_STALE_TIME,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    retry: 2,
   });
 }
 

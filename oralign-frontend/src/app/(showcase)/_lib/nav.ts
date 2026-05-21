@@ -4,10 +4,10 @@
  * IntersectionObserver and the smooth-scroll links stay in sync.
  */
 export const NAV_ITEMS = [
-  { id: "why", labelKey: "forDentists" as const, href: "#problem" },
+  { id: "indications", labelKey: "platform" as const, href: "#indications" },
+  { id: "dashboard-preview", labelKey: "results" as const, href: "#dashboard-preview" },
   { id: "how-it-works", labelKey: "howItWorks" as const, href: "#how-it-works" },
-  { id: "what-we-treat", labelKey: "platform" as const, href: "#features" },
-  { id: "reviews", labelKey: "forPatients" as const, href: "#testimonials" },
+  { id: "practitioner-call", labelKey: "practitioners" as const, href: "#practitioner-call" },
   { id: "pricing", labelKey: "pricing" as const, href: "#pricing" },
   { id: "faq", labelKey: "about" as const, href: "#faq" },
 ] as const;

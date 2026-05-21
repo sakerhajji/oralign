@@ -29,6 +29,10 @@ async function bootstrap(): Promise<void> {
     helmet({
       contentSecurityPolicy: false,
       crossOriginEmbedderPolicy: false,
+      // Uploaded media is served from the API origin and rendered by the
+      // frontend origin. Disable Helmet's default same-origin CORP header here;
+      // /uploads responses set the explicit cross-origin policy below.
+      crossOriginResourcePolicy: false,
       // HSTS only meaningful when served over HTTPS — nginx terminates TLS.
       hsts: isProd
         ? { maxAge: 60 * 60 * 24 * 365, includeSubDomains: true, preload: true }

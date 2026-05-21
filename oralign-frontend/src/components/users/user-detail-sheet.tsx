@@ -267,12 +267,14 @@ export function UserDetailSheet({
         const updatedUser = await usersService.uploadAvatar(userId, avatarFile);
         setAvatarPreview(getAvatarUrl(updatedUser.avatarUrl) || avatarPreview);
         setAvatarFile(null);
+        queryClient.setQueryData(userKeys.detail(userId), updatedUser);
         queryClient.invalidateQueries({ queryKey: userKeys.detail(userId) });
         queryClient.invalidateQueries({ queryKey: userKeys.lists() });
         // Admin editing themselves → refresh auth context so the
         // sidebar avatar updates without waiting for /users/me to
         // refetch on next tick.
         if (currentUser?.id === userId) {
+          queryClient.setQueryData(userKeys.currentUser(), updatedUser);
           login(updatedUser);
         }
       }

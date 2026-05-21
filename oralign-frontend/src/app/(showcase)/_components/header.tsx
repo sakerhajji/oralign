@@ -16,7 +16,7 @@ export function Header() {
   const [scrolled, setScrolled] = useState(false);
 
   /**
-   * Nav items target homepage anchors (#problem, #how-it-works, …).
+   * Nav items target homepage anchors (#indications, #how-it-works, …).
    * On the homepage itself we use the bare hash so Next.js / the browser
    * just smooth-scrolls. On every OTHER page (e.g. /created_for_you/<token>,
    * /login, /signup) we prepend "/" so clicking actually navigates back to
@@ -72,7 +72,7 @@ export function Header() {
           className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 lg:static lg:translate-x-0 lg:translate-y-0 flex shrink-0 items-center outline-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--sc-sun)]"
         >
           <Image
-            src="/ORALIGN%20BLACK.png"
+            src="/ORALIGN BLACK.png"
             alt="Oralign"
             width={1240}
             height={880}

@@ -153,6 +153,8 @@ export function EditUserDialog({ user, open, onOpenChange }: EditUserDialogProps
       if (avatarFile) {
         const { usersService } = await import('@/lib/api');
         const updatedUser = await usersService.uploadAvatar(user.id, avatarFile);
+        setAvatarPreview(getAvatarUrl(updatedUser.avatarUrl));
+        setAvatarFile(null);
         if (currentUser?.id === user.id) {
           login(updatedUser);
         }

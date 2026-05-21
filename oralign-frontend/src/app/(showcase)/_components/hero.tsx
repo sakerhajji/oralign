@@ -1,13 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
 import { useEffect, useRef } from "react";
 import { dict } from "../_lib/i18n/dict";
 import { useShowcaseLang } from "../_lib/i18n/lang-context";
 import { gsap, prefersReducedMotion } from "../_lib/gsap";
 import { SunBurst } from "./shared/sun-burst";
-import { SunCore } from "./shared/sun-core";
 import { NoiseGrain } from "./shared/noise-grain";
 
 const ANIMATED = [
@@ -16,7 +14,6 @@ const ANIMATED = [
   ".sc-hero-sub",
   ".sc-hero-ctas",
   ".sc-hero-scroll",
-  ".sc-hero-core",
 ];
 
 export function Hero() {
@@ -35,12 +32,10 @@ export function Hero() {
     const ctx = gsap.context(() => {
       gsap.set(ANIMATED, { opacity: 0 });
       gsap.set([".sc-hero-eyebrow", ".sc-hero-h1", ".sc-hero-sub", ".sc-hero-ctas", ".sc-hero-scroll"], { y: 24 });
-      gsap.set(".sc-hero-core", { scale: 0.92 });
 
       const tl = gsap.timeline({ defaults: { ease: "power3.out" } });
       tl.to(".sc-hero-eyebrow", { opacity: 1, y: 0, duration: 0.8 }, 0.15)
         .to(".sc-hero-h1", { opacity: 1, y: 0, duration: 1 }, 0.3)
-        .to(".sc-hero-core", { opacity: 1, scale: 1, duration: 1.4, ease: "expo.out" }, 0.35)
         .to(".sc-hero-sub", { opacity: 1, y: 0, duration: 0.85 }, 0.55)
         .to(".sc-hero-ctas", { opacity: 1, y: 0, duration: 0.85 }, 0.7)
         .to(".sc-hero-scroll", { opacity: 1, y: 0, duration: 1, ease: "power2.out" }, 1.2);
@@ -55,25 +50,42 @@ export function Hero() {
       id="hero"
       data-section-tone="dark"
       aria-labelledby="hero-h1"
-      className="relative bg-[var(--sc-black)] text-[var(--sc-white)] grid grid-cols-1 lg:grid-cols-2 overflow-hidden min-h-[100svh]"
+      className="relative overflow-hidden bg-[var(--sc-black)] text-[var(--sc-white)] min-h-[82svh]"
     >
-      <NoiseGrain opacity={0.25} />
+      {/* Hero photography placeholder — real lifestyle image to be added later.
+          Keeps an atmospheric amber wash + vortex pattern in the meantime. */}
+      <div
+        aria-hidden="true"
+        className="absolute inset-0 z-[0]"
+        style={{
+          background:
+            "radial-gradient(ellipse at 78% 35%, rgba(254,202,22,0.18), transparent 55%), radial-gradient(circle at 20% 75%, rgba(254,202,22,0.06), transparent 60%), var(--sc-black)",
+        }}
+      />
+      <div
+        aria-hidden="true"
+        className="absolute inset-x-0 bottom-0 z-[2] h-32"
+        style={{
+          background:
+            "linear-gradient(to bottom, transparent, var(--sc-black))",
+        }}
+      />
+      <NoiseGrain opacity={0.18} />
 
       <div
         aria-hidden="true"
-        className="absolute pointer-events-none z-[1]"
+        className="absolute pointer-events-none z-[2] opacity-70"
         style={{
-          right: "-5%",
-          top: "50%",
-          transform: "translateY(-50%)",
-          width: "min(80vw, 860px)",
-          height: "min(80vw, 860px)",
+          right: "-12%",
+          top: "8%",
+          width: "min(74vw, 760px)",
+          height: "min(74vw, 760px)",
         }}
       >
         <SunBurst variant="hero" className="w-full h-full" />
       </div>
 
-      <div className="relative z-[5] flex flex-col justify-center px-6 lg:px-[72px] pt-28 pb-20 sm:pt-32 lg:pt-32 lg:pb-[80px]">
+      <div className="relative z-[5] mx-auto flex min-h-[82svh] max-w-[1400px] flex-col justify-center px-6 py-20 sm:px-8 lg:px-12 lg:py-24">
         <div
           className="sc-hero-eyebrow flex items-center gap-3 mb-9"
           style={{
@@ -90,43 +102,46 @@ export function Hero() {
         <h1
           id="hero-h1"
           className="sc-hero-h1 sc-serif text-[var(--sc-white)] mb-7"
-          style={{ fontSize: "clamp(2.6rem, 5vw, 5.4rem)", fontWeight: 300, lineHeight: 1.04 }}
+          style={{ fontSize: "clamp(2.6rem, 5vw, 5.4rem)", fontWeight: 200, lineHeight: 1.04 }}
         >
           {dict.hero.headlinePart1[lang]}
           <br />
           <em style={{ fontStyle: "italic", color: "var(--sc-sun)", fontWeight: 300 }}>
             {dict.hero.headlineEm[lang]}
-          </em>{" "}
-          <strong style={{ fontWeight: 500 }}>{dict.hero.headlinePart3[lang]}</strong>
+          </em>
+          {dict.hero.headlinePart3[lang] && (
+            <>
+              {" "}
+              <strong style={{ fontWeight: 400 }}>{dict.hero.headlinePart3[lang]}</strong>
+            </>
+          )}
         </h1>
 
-        <p
-          className="sc-hero-sub mb-12"
-          style={{ fontSize: "0.86rem", lineHeight: 1.95, color: "rgba(248,246,242,0.55)", maxWidth: 460 }}
-        >
+        <p className="sc-hero-sub mb-10 max-w-[540px]" style={{ fontSize: "0.96rem", lineHeight: 1.9, color: "rgba(242,245,239,0.72)" }}>
           {dict.hero.sub[lang]}
         </p>
 
-        <div className="sc-hero-ctas flex items-center gap-7 flex-wrap">
+        {/* ONE primary CTA + ONE subtle ghost link per brand brief */}
+        <div className="sc-hero-ctas flex items-center gap-8 flex-wrap">
           <Link
             href="#cta"
-            className="no-underline inline-block transition-all"
+            className="sc-serif no-underline inline-block transition-colors hover:bg-[var(--sc-sun-2)]"
             style={{
-              fontSize: "0.62rem",
-              letterSpacing: "0.3em",
+              fontSize: "0.7rem",
+              letterSpacing: "0.22em",
               textTransform: "uppercase",
               background: "var(--sc-sun)",
               color: "var(--sc-black)",
-              padding: "15px 36px",
-              fontWeight: 500,
+              padding: "17px 36px",
+              fontWeight: 700,
             }}
           >
             {dict.hero.ctaPrimary[lang]}
           </Link>
           <Link
-            href="#how-it-works"
+            href="#dashboard-preview"
             className="no-underline flex items-center gap-3 transition-colors hover:text-[var(--sc-sun)]"
-            style={{ fontSize: "0.62rem", letterSpacing: "0.22em", textTransform: "uppercase", color: "rgba(248,246,242,0.5)" }}
+            style={{ fontSize: "0.62rem", letterSpacing: "0.22em", textTransform: "uppercase", color: "rgba(242,245,239,0.66)" }}
           >
             <span>{dict.hero.ctaGhost[lang]}</span>
             <span className="block w-[26px] h-px bg-current" aria-hidden="true" />
@@ -134,30 +149,9 @@ export function Hero() {
         </div>
       </div>
 
-      <div className="hidden lg:flex relative z-[4] items-center justify-center overflow-hidden px-8">
-        <div className="sc-hero-core relative">
-          <div className="relative w-[340px] xl:w-[380px] aspect-[3/4] overflow-hidden border border-[#262626]">
-            <Image
-              src="/loginPicture.png"
-              alt="Dentist with patient"
-              fill
-              priority
-              sizes="(min-width: 1280px) 380px, (min-width: 1024px) 340px, 100vw"
-              className="object-cover"
-            />
-          </div>
-          <div
-            aria-hidden="true"
-            className="absolute -top-14 -right-16 xl:-right-20 scale-[0.6] xl:scale-[0.65] origin-top-right pointer-events-none"
-          >
-            <SunCore name="" sub="" />
-          </div>
-        </div>
-      </div>
-
       <div
-        className="sc-hero-scroll absolute bottom-9 left-6 lg:left-[72px] z-[6] flex items-center gap-3"
-        style={{ fontSize: "0.55rem", letterSpacing: "0.38em", textTransform: "uppercase", color: "rgba(248,246,242,0.3)" }}
+        className="sc-hero-scroll absolute bottom-7 left-6 z-[6] flex items-center gap-3 lg:left-[calc((100vw-min(1400px,100vw))/2+48px)]"
+        style={{ fontSize: "0.55rem", letterSpacing: "0.38em", textTransform: "uppercase", color: "rgba(242,245,239,0.42)" }}
       >
         <div className="relative w-9 h-px overflow-hidden bg-[rgba(248,246,242,0.2)]">
           <span

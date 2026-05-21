@@ -117,8 +117,10 @@ export function ProfileForm({ user, onboarding = false, onSaved }: ProfileFormPr
       // Replace the data: URL with the real backend URL (cache-busts on
       // the new uuid filename, so no need for a ?t= query string).
       setAvatarPreview(getAvatarUrl(updated.avatarUrl));
+      queryClient.setQueryData(userKeys.currentUser(), updated);
       login(updated);
       queryClient.invalidateQueries({ queryKey: userKeys.currentUser() });
+      queryClient.invalidateQueries({ queryKey: userKeys.lists() });
       toast.success('Avatar updated.');
     } catch (err) {
       setAvatarPreview(previousPreview);

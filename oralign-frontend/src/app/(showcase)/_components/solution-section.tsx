@@ -1,11 +1,11 @@
 "use client";
 
+import Image from "next/image";
 import { dict } from "../_lib/i18n/dict";
 import { useShowcaseLang } from "../_lib/i18n/lang-context";
 import { Reveal } from "./shared/reveal";
 import { SunBurst } from "./shared/sun-burst";
 import { Parallax } from "./shared/parallax";
-import { ImagePlaceholder } from "./shared/image-placeholder";
 
 export function SolutionSection() {
   const { lang } = useShowcaseLang();
@@ -48,12 +48,27 @@ export function SolutionSection() {
 
         <div className="grid gap-10 lg:grid-cols-[5fr_7fr] mt-14 items-stretch">
           <Reveal>
-            <ImagePlaceholder
-              label={dict.common.imagePlaceholder[lang]}
-              aspect="portrait"
-              tone="dark"
-              className="h-full w-full"
-            />
+            <figure className="relative min-h-[500px] overflow-hidden border border-[#303030] bg-[#202020]">
+              <Image
+                src="/showcase/palndetaritemt.png"
+                alt={lang === "fr" ? "Sourire aligné après traitement ORALIGN" : lang === "en" ? "Aligned smile after ORALIGN treatment" : "ابتسامة مصطفة بعد علاج ORALIGN"}
+                fill
+                sizes="(min-width: 1024px) 420px, 100vw"
+                className="object-cover"
+              />
+              <div
+                aria-hidden="true"
+                className="absolute inset-0"
+                style={{ background: "linear-gradient(to top, rgba(25,25,25,0.72), transparent 55%)" }}
+              />
+              <figcaption className="absolute bottom-5 left-5 right-5 text-sm leading-7 text-[rgba(242,245,239,0.78)]">
+                {lang === "fr"
+                  ? "Un plan numérique, des aligneurs fabriqués sur mesure, un suivi régulier."
+                  : lang === "en"
+                    ? "Digital planning, custom-made aligners and regular follow-up."
+                    : "تخطيط رقمي، أجهزة مخصصة ومتابعة منتظمة."}
+              </figcaption>
+            </figure>
           </Reveal>
 
           <Reveal delay>

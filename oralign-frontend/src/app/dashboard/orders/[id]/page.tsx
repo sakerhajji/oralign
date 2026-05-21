@@ -59,7 +59,7 @@ import {
   TreatmentPlanStatus,
   UserRole,
 } from '@/lib/types';
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 // Defer the odontogram (its sprite payload is heavy) until the page mounts.
 const OdontogramSelector = dynamic(
@@ -76,6 +76,8 @@ const OdontogramSelector = dynamic(
     ),
   },
 );
+
+type OrderDetailTab = 'order' | 'treatment-plans' | 'quote';
 
 export default function OrderDetailPage() {
   const params = useParams<{ id: string }>();
@@ -95,6 +97,41 @@ export default function OrderDetailPage() {
   // which decision badge it carries. Doctors can read their own order's
   // quote (RBAC allows owning dentist); admins always see it.
   const quotationQuery = useQuotationForOrder(orderQuery.data?.id ?? '');
+  const [activeTab, setActiveTab] = useState<OrderDetailTab>('order');
+  const [mountedTabs, setMountedTabs] = useState<Set<OrderDetailTab>>(
+    () => new Set(['order']),
+  );
+  const initializedOrderIdRef = useRef<string | null>(null);
+
+  const defaultTab = useMemo<OrderDetailTab>(() => {
+    if (!orderQuery.data) return 'order';
+    return computeDefaultTab({
+      status: orderQuery.data.status,
+      hasTreatmentPlans: (orderQuery.data.treatmentPlansCount ?? 0) > 0,
+      hasQuotation: !!quotationQuery.data,
+    });
+  }, [
+    orderQuery.data?.status,
+    orderQuery.data?.treatmentPlansCount,
+    quotationQuery.data,
+  ]);
+
+  useEffect(() => {
+    const orderId = orderQuery.data?.id;
+    if (!orderId || initializedOrderIdRef.current === orderId) return;
+    initializedOrderIdRef.current = orderId;
+    setActiveTab(defaultTab);
+    setMountedTabs(new Set([defaultTab]));
+  }, [defaultTab, orderQuery.data?.id]);
+
+  useEffect(() => {
+    setMountedTabs((current) => {
+      if (current.has(activeTab)) return current;
+      const next = new Set(current);
+      next.add(activeTab);
+      return next;
+    });
+  }, [activeTab]);
 
   if (orderQuery.isLoading) {
     return (
@@ -125,6 +162,8 @@ export default function OrderDetailPage() {
   const order = orderQuery.data;
   const patient = patientQuery.data;
   const canManage = isAdmin || isDentist;
+  const hasQuotationSignal =
+    !!quotationQuery.data || POST_QUOTE_STATUSES.has(order.status);
 
   // ── View-page section layout ────────────────────────────────────────────
   // Mirrors the order-creation wizard but flattened into a single scrollable
@@ -244,16 +283,13 @@ export default function OrderDetailPage() {
                   - plan.status approved / rejected
                   - quote.status approved / rejected
 
-            forceMount on both TabsContent keeps their React subtrees alive
-            across tab switches — preserves chat socket, cached file
-            thumbnails, scroll position. data-[state=inactive]:hidden hides
-            the inactive pane visually without unmounting. */}
+            Heavy tabs are lazy-mounted the first time they are opened, then
+            kept mounted while switching tabs. This avoids loading treatment
+            viewers / chat / quote forms while the user is only reading the
+            order summary. */}
       <Tabs
-        defaultValue={computeDefaultTab({
-          status: order.status,
-          hasTreatmentPlans: (order.treatmentPlansCount ?? 0) > 0,
-          hasQuotation: !!quotationQuery.data,
-        })}
+        value={activeTab}
+        onValueChange={(value) => setActiveTab(value as OrderDetailTab)}
       >
         <TabsList className="w-full justify-start sm:w-auto">
           <TabsTrigger value="order">Order details</TabsTrigger>
@@ -277,7 +313,7 @@ export default function OrderDetailPage() {
           )}
           {showQuoteTab({
             isPlanner: isAdmin || user?.role === UserRole.DESIGNER,
-            hasQuotation: !!quotationQuery.data,
+            hasQuotation: hasQuotationSignal,
           }) && (
             <TabsTrigger value="quote" className="gap-1.5">
               <FileText className="h-3.5 w-3.5" />
@@ -295,6 +331,8 @@ export default function OrderDetailPage() {
           forceMount
           className="space-y-6 data-[state=inactive]:hidden"
         >
+          {mountedTabs.has('order') && (
+            <>
       {/* ─── 1 · Patient information ──────────────────────────────────── */}
       <Section icon={UserRound} title="Patient information">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -428,11 +466,13 @@ export default function OrderDetailPage() {
           />
         </div>
       </Section>
+            </>
+          )}
         </TabsContent>
 
         {/* Treatment-plans tab — separate so the chat/timeline doesn't
-            fight the patient record for visual real-estate. forceMount
-            here too so the WebSocket connection in TreatmentConversation
+            fight the patient record for visual real-estate. It mounts only
+            after first open, then stays alive so the WebSocket connection
             isn't torn down when the doctor flips back to Order details.
 
             The "Action required — review this plan" message + approve /
@@ -444,18 +484,21 @@ export default function OrderDetailPage() {
           forceMount
           className="data-[state=inactive]:hidden"
         >
-          <TreatmentPlansSection orderId={order.id} role={user?.role as UserRole} />
+          {mountedTabs.has('treatment-plans') ? (
+            <TreatmentPlansSection orderId={order.id} role={user?.role as UserRole} />
+          ) : null}
         </TabsContent>
 
-        {/* Quote tab — admin issues, doctor approves / rejects. Kept on
-            forceMount so the API query cache stays warm when the user
-            switches back and forth between the three tabs. */}
+        {/* Quote tab — admin issues, doctor approves / rejects. Also
+            lazy-mounted, so quotation forms don't block the order summary. */}
         <TabsContent
           value="quote"
           forceMount
           className="data-[state=inactive]:hidden"
         >
-          <QuoteReview orderId={order.id} role={user?.role as UserRole} />
+          {mountedTabs.has('quote') ? (
+            <QuoteReview orderId={order.id} role={user?.role as UserRole} />
+          ) : null}
         </TabsContent>
       </Tabs>
     </div>

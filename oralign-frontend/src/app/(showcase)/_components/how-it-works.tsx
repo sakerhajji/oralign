@@ -1,10 +1,12 @@
 "use client";
 
+import { ClipboardCheck, Eye, ScanFace, Smile, Stethoscope } from "lucide-react";
 import { dict } from "../_lib/i18n/dict";
 import { useShowcaseLang } from "../_lib/i18n/lang-context";
 import { Reveal } from "./shared/reveal";
 import { SectionHeading } from "./shared/section-heading";
-import { ImagePlaceholder } from "./shared/image-placeholder";
+
+const stepIcons = [Stethoscope, ScanFace, Eye, ClipboardCheck, Smile];
 
 export function HowItWorks() {
   const { lang } = useShowcaseLang();
@@ -28,19 +30,17 @@ export function HowItWorks() {
 
         <Reveal delay>
           <ol className="relative grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-12 lg:gap-6 mt-16 list-none">
-            <span
-              aria-hidden="true"
-              className="hidden lg:block absolute top-[calc(33.333%+30px)] left-[10%] right-[10%] h-px"
-              style={{ background: "linear-gradient(to right, transparent, rgba(245,200,66,0.35), transparent)" }}
-            />
             {dict.how.steps.map((s, i) => (
               <li key={i} className="relative flex flex-col items-center text-center px-2">
-                <ImagePlaceholder
-                  label={dict.common.imagePlaceholder[lang]}
-                  aspect="square"
-                  tone="light"
-                  className="w-full max-w-[180px] mb-6"
-                />
+                <div
+                  className="mb-6 grid aspect-square w-full max-w-[180px] place-items-center border border-[var(--sc-grey)] bg-[rgba(254,202,22,0.08)]"
+                  aria-hidden="true"
+                >
+                  {(() => {
+                    const Icon = stepIcons[i] ?? Smile;
+                    return <Icon className="h-10 w-10 text-[var(--sc-black)]" strokeWidth={1.35} />;
+                  })()}
+                </div>
                 <div
                   className="rounded-full flex items-center justify-center relative z-[1] mb-4"
                   style={{

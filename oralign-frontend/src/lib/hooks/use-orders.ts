@@ -22,6 +22,52 @@ import {
   UpdateOrderDto,
 } from '@/lib/types';
 
+const ORDER_LIST_STALE_TIME = 15_000;
+const ORDER_DETAIL_STALE_TIME = 10_000;
+
+function patchOrderInLists(
+  queryClient: ReturnType<typeof useQueryClient>,
+  order: DentalOrder,
+) {
+  queryClient.setQueriesData<PaginatedResponse<DentalOrder>>(
+    { queryKey: orderKeys.lists() },
+    (cached) => {
+      if (!cached) return cached;
+      const nextData = cached.data.map((item) =>
+        item.id === order.id ? { ...item, ...order } : item,
+      );
+      return { ...cached, data: nextData };
+    },
+  );
+}
+
+function removeOrderFromLists(
+  queryClient: ReturnType<typeof useQueryClient>,
+  orderId: string,
+) {
+  queryClient.setQueriesData<PaginatedResponse<DentalOrder>>(
+    { queryKey: orderKeys.lists() },
+    (cached) => {
+      if (!cached) return cached;
+      const nextData = cached.data.filter((item) => item.id !== orderId);
+      const removed = cached.data.length - nextData.length;
+      return {
+        ...cached,
+        data: nextData,
+        total: Math.max(0, cached.total - removed),
+      };
+    },
+  );
+}
+
+function syncOrderCaches(
+  queryClient: ReturnType<typeof useQueryClient>,
+  order: DentalOrder,
+) {
+  queryClient.setQueryData(orderKeys.detail(order.id), order);
+  patchOrderInLists(queryClient, order);
+}
+
 export const orderKeys = {
   all: ['orders'] as const,
   lists: () => [...orderKeys.all, 'list'] as const,
@@ -37,7 +83,12 @@ export function useOrders(
   return useQuery({
     queryKey: orderKeys.list(params),
     queryFn: () => ordersService.getOrders(params),
-    staleTime: 1000 * 60 * 3,
+    staleTime: ORDER_LIST_STALE_TIME,
+    placeholderData: (previousData) => previousData,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    retry: 2,
   });
 }
 
@@ -46,6 +97,11 @@ export function useOrder(id?: string): UseQueryResult<DentalOrder, Error> {
     queryKey: orderKeys.detail(id ?? ''),
     queryFn: () => ordersService.getOrderById(id ?? ''),
     enabled: !!id,
+    staleTime: ORDER_DETAIL_STALE_TIME,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    retry: 2,
   });
 }
 
@@ -57,7 +113,8 @@ export function useCreateOrder(): UseMutationResult<
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ordersService.createOrder,
-    onSuccess: () => {
+    onSuccess: (order) => {
+      syncOrderCaches(queryClient, order);
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
       toast.success('Order draft saved');
     },
@@ -73,7 +130,8 @@ export function useUpdateOrder(): UseMutationResult<
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }) => ordersService.updateOrder(id, data),
-    onSuccess: (_data, variables) => {
+    onSuccess: (order, variables) => {
+      syncOrderCaches(queryClient, order);
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(variables.id) });
       toast.success('Order updated');
@@ -86,7 +144,8 @@ export function useSubmitOrder(): UseMutationResult<DentalOrder, Error, string> 
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ordersService.submitOrder,
-    onSuccess: (_data, id) => {
+    onSuccess: (order, id) => {
+      syncOrderCaches(queryClient, order);
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
       toast.success('Order submitted');
@@ -109,7 +168,8 @@ export function useOverrideOrderStatus(): UseMutationResult<
   return useMutation({
     mutationFn: ({ id, status, reason }) =>
       ordersService.overrideStatus(id, status, reason),
-    onSuccess: (_data, { id }) => {
+    onSuccess: (order, { id }) => {
+      syncOrderCaches(queryClient, order);
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
       // Treatment plan + quote views read order status indirectly via
@@ -132,8 +192,9 @@ export function useDeleteOrder(): UseMutationResult<
   return useMutation({
     mutationFn: ordersService.deleteOrder,
     onSuccess: (_data, id) => {
+      removeOrderFromLists(queryClient, id);
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
-      queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
+      queryClient.removeQueries({ queryKey: orderKeys.detail(id) });
       toast.success('Order deleted');
     },
     onError: (error) => toast.error(extractApiErrorMessage(error)),
@@ -149,6 +210,7 @@ export function usePermanentDeleteOrder(): UseMutationResult<
   return useMutation({
     mutationFn: ordersService.permanentDeleteOrder,
     onSuccess: (_data, id) => {
+      removeOrderFromLists(queryClient, id);
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
       queryClient.removeQueries({ queryKey: orderKeys.detail(id) });
       toast.success('Order permanently deleted');
@@ -166,7 +228,8 @@ export function useUpdateToothInstructions(): UseMutationResult<
   return useMutation({
     mutationFn: ({ id, instructions }) =>
       ordersService.updateToothInstructions(id, instructions),
-    onSuccess: (_data, variables) => {
+    onSuccess: (order, variables) => {
+      syncOrderCaches(queryClient, order);
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(variables.id) });
       // The treatment plan review payload also includes the tooth
       // instructions (grouped odontogram + IPR map). Without this
@@ -184,6 +247,10 @@ export function useOrderFiles(id?: string): UseQueryResult<OrderFile[], Error> {
     queryKey: orderKeys.files(id ?? ''),
     queryFn: () => ordersService.getFiles(id ?? ''),
     enabled: !!id,
+    staleTime: 30_000,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   });
 }
 

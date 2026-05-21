@@ -6,21 +6,31 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 /**
- * Converts a relative backend path (e.g. /uploads/avatars/x.jpg) to an
- * absolute URL by prepending the backend origin.
- * Data URIs and already-absolute URLs are returned unchanged.
+ * Converts a backend media path to an absolute URL.
+ *
+ * The API stores uploaded files as relative paths, but older rows or manual
+ * edits may have slightly different shapes (`uploads/...`, `/api/uploads/...`,
+ * `avatars/...`). Normalize those variants so avatars keep rendering after
+ * refreshes, Docker rebuilds, and profile updates.
  */
 export function getAvatarUrl(avatarUrl: string | null | undefined): string {
-  if (!avatarUrl) return '';
+  const rawUrl = avatarUrl?.trim();
+  if (!rawUrl) return '';
+
   if (
-    avatarUrl.startsWith('http') ||
-    avatarUrl.startsWith('blob:') ||
-    avatarUrl.startsWith('data:')
+    /^https?:\/\//i.test(rawUrl) ||
+    rawUrl.startsWith('blob:') ||
+    rawUrl.startsWith('data:')
   ) {
-    return avatarUrl;
+    return rawUrl;
   }
-  // Strip the trailing /api segment from NEXT_PUBLIC_API_URL to get the origin.
+
   const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000/api';
-  const backendOrigin = apiUrl.replace(/\/api\/?$/, '');
-  return `${backendOrigin}${avatarUrl}`;
+  const backendOrigin = apiUrl.replace(/\/api\/?$/, '').replace(/\/$/, '');
+  const normalizedPath = rawUrl
+    .replace(/^\/+/, '')
+    .replace(/^api\/uploads\//i, 'uploads/')
+    .replace(/^avatars\//i, 'uploads/avatars/');
+
+  return `${backendOrigin}/${normalizedPath}`;
 }

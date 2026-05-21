@@ -189,14 +189,28 @@ export function OdontogramSelector({
     [mode],
   );
 
-  // One instruction per tooth.
+  // One instruction per tooth — restricted to the modes-current
+  // palette so types that don't belong on this surface stay invisible.
+  //
+  // Example: when the order detail page renders the odontogram in
+  // 'movement' mode, the value array may STILL contain ATTACHMENT
+  // entries written by the planner via the treatment-plan editor.
+  // We must NOT paint those teeth pink on the order page — the user
+  // explicitly wants attachments to live only in the treatment view.
+  // The filter below skips any tooth-instruction whose type isn't
+  // part of the current mode's palette.
+  const visibleTypes = useMemo(
+    () => new Set(visibleColors.map((c) => c.type)),
+    [visibleColors],
+  );
   const assignments = useMemo(() => {
     const map = new Map<number, ToothInstructionType>();
     for (const item of value) {
+      if (!visibleTypes.has(item.type)) continue;
       if (!map.has(item.toothNumber)) map.set(item.toothNumber, item.type);
     }
     return map;
-  }, [value]);
+  }, [value, visibleTypes]);
 
   // Keep onChange / value / disabled reachable from stable callbacks so
   // ToothButton's memoization actually holds across renders.
@@ -315,7 +329,7 @@ export function OdontogramSelector({
       </div>
 
       {mode === 'movement' && showLegend && (
-        <ColorLegend assignments={assignments} />
+        <ColorLegend assignments={assignments} colors={visibleColors} />
       )}
 
       <div className="rounded-2xl border bg-card shadow-sm">
@@ -436,12 +450,20 @@ export function OdontogramSelector({
 
 function ColorLegend({
   assignments,
+  colors,
 }: {
   assignments: Map<number, ToothInstructionType>;
+  /**
+   * Restricted palette — only iterate over the colours that are valid
+   * for the current mode. Otherwise the order-page legend would list
+   * the pink Attachment row even though that colour belongs to the
+   * treatment-plan editor.
+   */
+  colors: readonly ColorEntry[];
 }) {
   return (
     <div className="grid gap-3 rounded-xl border bg-card p-4 sm:grid-cols-2 lg:grid-cols-4">
-      {COLORS.map((c) => {
+      {colors.map((c) => {
         const teeth: number[] = [];
         assignments.forEach((type, tooth) => {
           if (type === c.type) teeth.push(tooth);

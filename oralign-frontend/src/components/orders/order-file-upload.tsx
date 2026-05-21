@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   Box,
+  ClipboardPaste,
+  Copy,
   Download,
   Eye,
   FileArchive,
@@ -255,6 +257,24 @@ export function OrderFileUpload({
   );
 }
 
+/**
+ * In-app "image clipboard" — when the user clicks Copy on an uploaded
+ * slot image we stash a File reference here, then ALL other slots
+ * (filled or empty) surface a Paste button that uses this file as
+ * their source. No system-clipboard / no server roundtrip; the file
+ * stays in memory until the user pastes, copies a different image,
+ * or navigates away from the page.
+ *
+ * Stored as a strong File reference rather than a blob URL so the
+ * bytes survive even after the source slot's blob URL is revoked
+ * (e.g. when the source slot is unmounted by tab switching).
+ */
+export interface ImageClipboardEntry {
+  file: File;
+  /** Title of the slot the image was copied FROM — used in toasts. */
+  sourceTitle: string;
+}
+
 export function ClinicalOrderFiles({
   orderId,
   readOnly,
@@ -267,6 +287,10 @@ export function ClinicalOrderFiles({
   const filesQuery = useOrderFiles(orderId);
   const uploadFiles = useUploadOrderFiles();
   const deleteFile = useDeleteOrderFile();
+
+  // Lifted clipboard state — shared by every ClinicalMediaSlot below.
+  // null when nothing has been copied yet.
+  const [clipboard, setClipboard] = useState<ImageClipboardEntry | null>(null);
 
   if (!orderId) {
     return <SaveDraftNotice />;
@@ -335,6 +359,8 @@ export function ClinicalOrderFiles({
               disabled={readOnly || uploadFiles.isPending}
               file={fileForSlot(files, slot, patientImageSlots)}
               onSelect={(file) => uploadSlot(slot, file)}
+              clipboard={clipboard}
+              onClipboard={setClipboard}
             />
           ))}
         </div>
@@ -354,6 +380,8 @@ export function ClinicalOrderFiles({
                   disabled={readOnly || uploadFiles.isPending}
                   file={fileForSlot(files, slot, patientImageSlots)}
                   onSelect={(file) => uploadSlot(slot, file)}
+                  clipboard={clipboard}
+                  onClipboard={setClipboard}
                 />
               </div>
             ))}
@@ -411,6 +439,8 @@ export function ClinicalOrderFiles({
               disabled={readOnly || uploadFiles.isPending}
               file={fileForSlot(files, slot, radiographySlots)}
               onSelect={(file) => uploadSlot(slot, file)}
+              clipboard={clipboard}
+              onClipboard={setClipboard}
             />
           ))}
         </div>
@@ -974,6 +1004,8 @@ function ClinicalMediaSlot({
   disabled,
   file,
   onSelect,
+  clipboard,
+  onClipboard,
 }: {
   orderId: string;
   title: string;
@@ -984,6 +1016,14 @@ function ClinicalMediaSlot({
   disabled?: boolean;
   file?: OrderFile;
   onSelect: (file: File) => void;
+  /**
+   * Shared cross-slot image clipboard. When a sibling slot has copied
+   * its image, the entry lives here and every other slot offers a
+   * "Paste" affordance backed by it. Null when nothing is copied.
+   */
+  clipboard?: ImageClipboardEntry | null;
+  /** Update the shared clipboard. Called from the Copy button. */
+  onClipboard?: (entry: ImageClipboardEntry | null) => void;
 }) {
   const inputId = useMemo(
     () => `upload-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
@@ -1050,6 +1090,56 @@ function ClinicalMediaSlot({
     } finally {
       setReEditing(false);
     }
+  };
+
+  // ── Copy / Paste handlers ──────────────────────────────────────────────
+  // The slot's image bytes live as a blob: URL once `useSecureFileUrl`
+  // resolves them. To "copy" the image to the shared clipboard, we fetch
+  // those bytes (local, instant) and wrap them in a fresh File whose name
+  // is the slot's title — so when the user pastes into another slot and
+  // we end up uploading the file, the OrderFile.originalName is something
+  // human-readable like "front-face.jpg" instead of the original camera
+  // filename which may have nothing to do with the new slot.
+  const [copying, setCopying] = useState(false);
+
+  const handleCopy = async () => {
+    if (!file || !isImage || !onClipboard) return;
+    if (!secureFile.objectUrl) {
+      toast.error('The image is still loading — try again in a moment.');
+      return;
+    }
+    setCopying(true);
+    try {
+      const response = await fetch(secureFile.objectUrl);
+      if (!response.ok) throw new Error('Local image cache miss.');
+      const blob = await response.blob();
+      const ext = file.mimeType.split('/')[1] || 'jpg';
+      const safeTitle = title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      const reconstructed = new File([blob], `${safeTitle}.${ext}`, {
+        type: blob.type || file.mimeType || 'image/jpeg',
+      });
+      onClipboard({ file: reconstructed, sourceTitle: title });
+      toast.success(`Copied "${title}" — pick a slot and paste it.`);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[ClinicalMediaSlot] copy failed:', err);
+      toast.error('Could not copy this image.');
+    } finally {
+      setCopying(false);
+    }
+  };
+
+  const handlePaste = () => {
+    if (!clipboard) return;
+    // Re-wrap as a new File so re-pasting into multiple slots doesn't
+    // share the same reference (a few backend code paths read .name and
+    // would otherwise see all uploads collide on identical names).
+    const pastedFile = new File([clipboard.file], clipboard.file.name, {
+      type: clipboard.file.type,
+      lastModified: Date.now(),
+    });
+    onSelect(pastedFile);
+    toast.success(`Pasted from "${clipboard.sourceTitle}" → "${title}".`);
   };
 
   return (
@@ -1128,7 +1218,7 @@ function ClinicalMediaSlot({
         }}
       />
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-center gap-2">
         <Button type="button" variant="secondary" size="sm" asChild disabled={disabled}>
           <label htmlFor={inputId} className="cursor-pointer">
             <UploadCloud className="mr-2 h-4 w-4" />
@@ -1150,6 +1240,45 @@ function ClinicalMediaSlot({
               <Pencil className="mr-1.5 h-3.5 w-3.5" />
             )}
             Edit
+          </Button>
+        )}
+        {/* Copy — only when the slot has an image AND the parent wired
+            the shared clipboard. Reads the bytes from the local blob URL
+            and stashes a File reference for sibling slots to paste. */}
+        {file && isImage && onClipboard && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleCopy}
+            disabled={disabled || copying || !secureFile.objectUrl}
+            title={`Copy ${title} so you can paste it into another slot`}
+          >
+            {copying ? (
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Copy className="mr-1.5 h-3.5 w-3.5" />
+            )}
+            Copy
+          </Button>
+        )}
+        {/* Paste — visible on EVERY slot whenever the shared clipboard
+            holds something, including the one it was copied FROM (handy
+            if the user copies, picks a different image somewhere else,
+            then wants to restore the original). Pasting onto a filled
+            slot replaces the image, same as the Replace button. */}
+        {clipboard && onClipboard && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handlePaste}
+            disabled={disabled}
+            title={`Paste the image copied from "${clipboard.sourceTitle}"`}
+            className="border-primary/40 text-primary"
+          >
+            <ClipboardPaste className="mr-1.5 h-3.5 w-3.5" />
+            {file ? 'Paste over' : 'Paste image'}
           </Button>
         )}
       </div>

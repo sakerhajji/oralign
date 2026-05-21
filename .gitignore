@@ -58,3 +58,12 @@ teeths/
 .cache/
 *.tgz
 *.tar.gz
+
+# ─── Archives (one-off downloads, e.g. WeTransfer asset drops) ──
+# These are sources for assets/photos that get processed into the
+# runtime tree separately. The archive itself never needs to be in
+# git — keeping it out also avoids bloating the repo with 10+ MB
+# binaries.
+*.zip
+*.rar
+*.7z

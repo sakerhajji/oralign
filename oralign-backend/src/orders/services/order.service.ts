@@ -366,16 +366,36 @@ export class OrderService {
 
     this.ensureUniqueToothInstructions(instructions);
 
+    // Defence-in-depth dedupe: even after the per-payload uniqueness
+    // check above passes, two CONCURRENT updateToothInstructions calls
+    // for the same order can race each other (both pass the check
+    // independently, then their createMany overlap and one fails the
+    // unique constraint with P2002). The SELECT FOR UPDATE below
+    // serialises that race; dedupe via Map here is also a belt to
+    // catch any frontend bug that sends the same (tooth, type) twice
+    // in one payload before it reaches the DB.
+    const deduped = new Map<string, ToothInstructionDto>();
+    for (const ins of instructions) {
+      deduped.set(`${ins.toothNumber}:${ins.type}`, ins);
+    }
+    const uniqueInstructions = Array.from(deduped.values());
+
     const order = await this.prisma.$transaction(async (tx) => {
+      // Row-level lock on the parent order. Two concurrent calls for
+      // the same orderId serialise here, eliminating the delete +
+      // createMany race that otherwise throws P2002.
+      await tx.$queryRaw`SELECT id FROM "DentalOrder" WHERE id = ${id}::uuid FOR UPDATE`;
+
       await tx.orderToothInstruction.deleteMany({ where: { orderId: id } });
-      if (instructions.length > 0) {
+      if (uniqueInstructions.length > 0) {
         await tx.orderToothInstruction.createMany({
-          data: instructions.map((instruction) => ({
+          data: uniqueInstructions.map((instruction) => ({
             orderId: id,
             toothNumber: instruction.toothNumber,
             type: instruction.type,
             // value/note are optional; ipr_value entries use value as the
-            // measured IPR amount in mm. The DTO already validated shape.
+            // measured IPR amount in mm and note as the optional
+            // stripping auxiliary value. The DTO validated shape.
             value: instruction.value ?? null,
             note: instruction.note ?? null,
             createdById: caller.userId,

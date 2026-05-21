@@ -108,11 +108,21 @@ enum ArchTreatment {
 }
 
 enum ToothInstructionType {
+  // ── Order-level (set by the doctor when creating the order) ─────
   no_attachments
   do_not_move
   no_ipr
-  ipr_value
   extract
+  // ── Treatment-plan level (set by the planner) ───────────────────
+  // attachment = planner placed an attachment on this tooth.
+  //              Distinct from `no_attachments` which is the doctor
+  //              saying "please don't use attachments here". Pink
+  //              swatch in the UI.
+  // ipr_value  = planner-set inter-proximal-reduction amount; the
+  //              `value` column carries the mm, the `note` column
+  //              carries the optional "stripping" auxiliary value.
+  attachment
+  ipr_value
 }
 
 enum OrderFileCategory {

@@ -43,33 +43,48 @@ type ColorEntry = {
 };
 
 const COLORS: readonly ColorEntry[] = [
+  // ── Order-level (doctor's instructions) ──────────────────────────
   {
     type: ToothInstructionType.NO_ATTACHMENTS,
     label: 'No Attachments',
     short: 'NA',
-    hex: '#2563eb',
+    hex: '#2563eb', // blue-600
     outline: '#3b82f6',
   },
   {
     type: ToothInstructionType.DO_NOT_MOVE,
     label: 'Do Not Move',
     short: 'DNM',
-    hex: '#ef4444',
+    hex: '#ef4444', // red-500
     outline: '#f87171',
   },
   {
     type: ToothInstructionType.NO_IPR,
     label: 'No IPR',
     short: 'NoIPR',
-    hex: '#22c55e',
+    hex: '#22c55e', // green-500
     outline: '#4ade80',
   },
   {
+    // Extract — bumped from the previous sky-blue to a distinct orange
+    // so it doesn't get visually confused with No-Attachments (also
+    // blue) on the doctor's order odontogram.
     type: ToothInstructionType.EXTRACT,
     label: 'Extract',
     short: 'EXT',
-    hex: '#7dd3fc',
-    outline: '#bae6fd',
+    hex: '#f97316', // orange-500
+    outline: '#fb923c',
+  },
+  // ── Treatment-plan level (planner's marks) ───────────────────────
+  {
+    // Pink swatch — the planner placed an attachment on this tooth.
+    // Used in the treatment-plan editor's attachments-mode picker
+    // (visibleColors filter, controlled by mode='attachments').
+    type: ToothInstructionType.ATTACHMENT,
+    label: 'Attachment',
+    short: 'ATT',
+    hex: '#ec4899', // pink-500
+    outline: '#f472b6',
   },
 ] as const;
 
@@ -88,7 +103,6 @@ export function OdontogramSelector({
   iprValues,
   iprNotes,
   onIprChange,
-  onIprNoteChange,
   mode = 'movement',
   title,
   subtitle,
@@ -114,10 +128,18 @@ export function OdontogramSelector({
    * primary IPR mm label. Same key as `iprValues`.
    */
   iprNotes?: Map<number, string>;
-  /** Setter for an IPR slot's mm value. `null` clears the slot. */
-  onIprChange?: (toothNumber: number, value: string | null) => void;
-  /** Setter for the stripping note. `null` clears it. */
-  onIprNoteChange?: (toothNumber: number, note: string | null) => void;
+  /**
+   * Combined setter for the IPR slot — passes both the mm value AND
+   * the optional stripping note in ONE call so the parent does ONE
+   * persist rather than two. Two-call shape was racing the backend's
+   * delete + createMany transaction and triggering the P2002 unique
+   * constraint failure on (orderId, toothNumber, type). Pass `null`
+   * for either field to clear it.
+   */
+  onIprChange?: (
+    toothNumber: number,
+    payload: { value: string | null; note: string | null },
+  ) => void;
   /**
    * 'movement'   — order-wizard context: shows all 4 instruction colors
    *                (No Attachments / Do Not Move / No IPR / Extract).
@@ -151,14 +173,19 @@ export function OdontogramSelector({
   const iprEditable = !!onIprChange && !disabled;
 
   // In 'attachments' mode the picker collapses to a single colour — the
-  // planner only needs to mark "has attachment" vs "no attachment".
-  // Movement / Do-Not-Move / No-IPR / Extract are doctor-level signals
-  // recorded on the order, not the plan.
+  // planner only needs to mark "the planner placed an attachment here".
+  // The 4 doctor-level signals (No Attachments / Do Not Move / No IPR /
+  // Extract) are NOT exposed in the attachments-mode picker — they're
+  // the doctor's prescriptions on the order, not the plan, and the
+  // planner shouldn't be changing them from this surface.
   const visibleColors = useMemo<readonly ColorEntry[]>(
     () =>
       mode === 'attachments'
-        ? COLORS.filter((c) => c.type === ToothInstructionType.NO_ATTACHMENTS)
-        : COLORS,
+        ? COLORS.filter((c) => c.type === ToothInstructionType.ATTACHMENT)
+        : // Movement mode: show every type EXCEPT the planner-only
+          // ATTACHMENT colour (which only makes sense on the plan
+          // odontogram). Order is preserved for legend stability.
+          COLORS.filter((c) => c.type !== ToothInstructionType.ATTACHMENT),
     [mode],
   );
 
@@ -210,8 +237,11 @@ export function OdontogramSelector({
   const closeIprPopup = useCallback(() => setIprPopup(null), []);
 
   const commitIpr = useCallback(
-    (toothNumber: number, value: string | null) => {
-      onIprChangeRef.current?.(toothNumber, value);
+    (
+      toothNumber: number,
+      payload: { value: string | null; note: string | null },
+    ) => {
+      onIprChangeRef.current?.(toothNumber, payload);
       setIprPopup(null);
     },
     [],
@@ -386,12 +416,15 @@ export function OdontogramSelector({
           anchorY={iprPopup.y}
           currentValue={iprValues?.get(iprPopup.tooth)}
           currentNote={iprNotes?.get(iprPopup.tooth)}
-          onCommit={(v) => commitIpr(iprPopup.tooth, v)}
-          onCommitNote={
-            onIprNoteChange
-              ? (n) => onIprNoteChange(iprPopup.tooth, n)
-              : undefined
-          }
+          // Single combined commit — popover gathers both fields and
+          // calls back ONCE so the parent fires ONE persist mutation.
+          // Two-call shape was racing the backend's delete+createMany
+          // transaction and triggering P2002.
+          onCommit={(payload) => commitIpr(iprPopup.tooth, payload)}
+          // Whether the popover should even show the stripping input
+          // is governed by whether `iprNotes` was wired by the parent
+          // — same effective semantics as the old onCommitNote prop.
+          showStripping={!!iprNotes}
           onClose={closeIprPopup}
         />
       )}
@@ -919,7 +952,7 @@ function IprPopover({
   currentValue,
   currentNote,
   onCommit,
-  onCommitNote,
+  showStripping,
   onClose,
 }: {
   tooth: number;
@@ -928,10 +961,15 @@ function IprPopover({
   currentValue?: string;
   /** Existing stripping value (note column). */
   currentNote?: string;
-  onCommit: (value: string | null) => void;
-  /** Optional setter for the stripping/note value. When omitted, the
-   *  popover hides the second input entirely. */
-  onCommitNote?: (note: string | null) => void;
+  /**
+   * Single combined commit — emits BOTH the IPR mm value and the
+   * optional stripping note in one callback so the parent fires one
+   * persist mutation instead of two. Two separate callbacks raced
+   * the backend's delete+createMany transaction and caused P2002.
+   */
+  onCommit: (payload: { value: string | null; note: string | null }) => void;
+  /** Whether to show the second "Stripping" input field. */
+  showStripping?: boolean;
   onClose: () => void;
 }) {
   const popupRef = useRef<HTMLDivElement>(null);
@@ -972,25 +1010,29 @@ function IprPopover({
 
   const handleConfirm = () => {
     const trimmed = draft.trim();
+    const trimmedNote = noteDraft.trim();
+    // Build one payload that carries BOTH fields so the parent
+    // persists in a single mutation. Either field can independently
+    // be null — clearing the IPR while keeping the stripping note,
+    // or vice versa, is a legal state.
     if (!trimmed) {
-      // Clearing the IPR also clears its stripping note — they belong
-      // together as one logical "contact-point plan" row.
-      onCommit(null);
-      if (onCommitNote) onCommitNote(null);
+      onCommit({
+        value: null,
+        // If stripping isn't shown, never send a note value at all
+        // (`showStripping=false` means the parent doesn't store notes).
+        note: showStripping ? (trimmedNote.length > 0 ? trimmedNote : null) : null,
+      });
       return;
     }
-    // Clamp to a sane range — 0.1 to 1.0 mm is the typical clinical IPR range.
+    // Clamp the IPR mm to a sane range — 0.1 to 1.0 mm is typical;
+    // we accept up to 2 mm to give the planner some headroom.
     const num = Number(trimmed);
-    if (Number.isFinite(num) && num >= 0 && num <= 2) {
-      onCommit(num.toString());
-    } else {
-      onCommit(trimmed);
-    }
-    // Persist the stripping value (if its setter is wired up).
-    if (onCommitNote) {
-      const trimmedNote = noteDraft.trim();
-      onCommitNote(trimmedNote.length > 0 ? trimmedNote : null);
-    }
+    const valueOut =
+      Number.isFinite(num) && num >= 0 && num <= 2 ? num.toString() : trimmed;
+    onCommit({
+      value: valueOut,
+      note: showStripping ? (trimmedNote.length > 0 ? trimmedNote : null) : null,
+    });
   };
 
   // Tooth labelling: figure out the left-side neighbour for a friendlier
@@ -1048,10 +1090,11 @@ function IprPopover({
         />
         <span className="text-xs text-muted-foreground">mm</span>
       </div>
-      {/* Stripping column — only shown when the parent wired a setter.
-          Rendered in a muted style to communicate "secondary / optional"
-          and to mirror the gray styling used on the slot display. */}
-      {onCommitNote && (
+      {/* Stripping column — only shown when the parent opted in via
+          `showStripping`. Rendered in a muted style to communicate
+          "secondary / optional" and to mirror the gray styling used
+          on the slot display. */}
+      {showStripping && (
         <>
           <label className="mb-1 mt-2 block text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
             Stripping
@@ -1075,10 +1118,9 @@ function IprPopover({
           type="button"
           variant="outline"
           size="sm"
-          onClick={() => {
-            onCommit(null);
-            if (onCommitNote) onCommitNote(null);
-          }}
+          // Clear wipes BOTH fields together in a single emit so the
+          // parent does one persist mutation, matching the Save path.
+          onClick={() => onCommit({ value: null, note: null })}
           disabled={!currentValue && !currentNote}
           className="gap-1"
         >

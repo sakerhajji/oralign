@@ -79,11 +79,17 @@ export enum ArchTreatment {
 }
 
 export enum ToothInstructionType {
+  // Order-level — set by the doctor on the order itself.
   NO_ATTACHMENTS = 'no_attachments',
   DO_NOT_MOVE = 'do_not_move',
   NO_IPR = 'no_ipr',
-  IPR_VALUE = 'ipr_value',
   EXTRACT = 'extract',
+  // Treatment-plan level — set by the planner on the plan editor.
+  // ATTACHMENT is distinct from NO_ATTACHMENTS: it records that the
+  // planner placed an attachment on this tooth (pink swatch). IPR_VALUE
+  // is the per-tooth IPR amount (mm) plus an optional stripping note.
+  ATTACHMENT = 'attachment',
+  IPR_VALUE = 'ipr_value',
 }
 
 // ─── Treatment plan ─────────────────────────────────────────────────────────

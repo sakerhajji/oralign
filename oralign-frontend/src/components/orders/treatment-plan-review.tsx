@@ -616,14 +616,27 @@ function MovementTableSection({
     [review.movementTableImagePath, review.updatedAt, treatmentPlanId],
   );
 
-  // ── Decompose the review odontogram into:
-  //     • Color instructions: attachment markers (treatment-plan editor
-  //       collapses to a single attachment colour via mode='attachments').
-  //     • IPR values: ipr_value entries with `value` in mm.
-  //     • IPR notes: the optional "stripping" secondary value stored on
-  //       the same ipr_value row as `note`. Rendered in muted grey next
-  //       to the mm label.
-  const { colorInstructions, iprMap, iprNotes } = useMemo(() => {
+  // ── Decompose the review odontogram into three buckets:
+  //     • orderColors        — the doctor's prescriptions
+  //                            (no_attachments / do_not_move / no_ipr /
+  //                            extract). Read-only in the treatment-plan
+  //                            editor — they're set on the order itself
+  //                            and we deliberately don't echo them back
+  //                            in our writes (otherwise we'd reset the
+  //                            doctor's instructions every time the
+  //                            planner saves an attachment or an IPR).
+  //     • colorInstructions  — the planner's attachments only. This is
+  //                            the editable set this surface owns.
+  //     • iprMap / iprNotes  — per-tooth IPR mm value + optional
+  //                            stripping note, both stored on the same
+  //                            ipr_value row.
+  //
+  // Splitting `orderColors` out of `colorInstructions` is what makes
+  // the Treatment Odontogram stop "duplicating" the Order Odontogram:
+  // the planner edits attachments + IPR; the doctor's colours stay
+  // intact on the order regardless.
+  const { orderColors, colorInstructions, iprMap, iprNotes } = useMemo(() => {
+    const order: ToothInstruction[] = [];
     const colors: ToothInstruction[] = [];
     const ipr = new Map<number, string>();
     const notes = new Map<number, string>();
@@ -632,17 +645,24 @@ function MovementTableSection({
         if (e.type === 'ipr_value') {
           if (e.value) ipr.set(toothNumber, e.value);
           if (e.note) notes.set(toothNumber, e.note);
+        } else if (e.type === ToothInstructionType.ATTACHMENT) {
+          colors.push({ toothNumber, type: ToothInstructionType.ATTACHMENT });
         } else if (
           e.type === ToothInstructionType.NO_ATTACHMENTS ||
           e.type === ToothInstructionType.DO_NOT_MOVE ||
           e.type === ToothInstructionType.NO_IPR ||
           e.type === ToothInstructionType.EXTRACT
         ) {
-          colors.push({ toothNumber, type: e.type as ToothInstructionType });
+          order.push({ toothNumber, type: e.type as ToothInstructionType });
         }
       }
     }
-    return { colorInstructions: colors, iprMap: ipr, iprNotes: notes };
+    return {
+      orderColors: order,
+      colorInstructions: colors,
+      iprMap: ipr,
+      iprNotes: notes,
+    };
   }, [review.odontogram]);
 
   // Default the toggle based on what data the plan already has — if an image
@@ -674,12 +694,34 @@ function MovementTableSection({
           note: note && note.length > 0 ? note : null,
         });
       }
+      // CRUCIAL: include orderColors (the doctor's prescriptions) in
+      // every write. `updateToothInstructions` is replace-all — the
+      // backend wipes ALL rows for the order and re-inserts whatever
+      // we send. If we omit orderColors we'd silently delete the
+      // doctor's instructions every time the planner saves an
+      // attachment or an IPR. They round-trip read-only.
+      //
+      // Defence-in-depth dedupe at the frontend too. If the local
+      // arrays ever drifted into containing two rows with the same
+      // (toothNumber, type) — e.g. from stale state or a previous
+      // botched write — we'd otherwise ship that duplicate and the
+      // unique constraint would reject the whole transaction with
+      // P2002. Keep the LAST entry for each key.
+      const merged: ToothInstruction[] = [...orderColors, ...colors, ...iprRows];
+      const deduped = new Map<string, ToothInstruction>();
+      for (const row of merged) {
+        deduped.set(`${row.toothNumber}:${row.type}`, row);
+      }
       updateInstructions.mutate({
         id: review.orderId,
-        instructions: [...colors, ...iprRows],
+        instructions: Array.from(deduped.values()),
       });
     },
-    [review.orderId, updateInstructions],
+    // `orderColors` is captured from the surrounding render so it must
+    // be in the deps array — otherwise stale closures would echo back
+    // an out-of-date snapshot of the doctor's instructions on every
+    // save, undoing any concurrent edit on the order side.
+    [review.orderId, updateInstructions, orderColors],
   );
 
   const handleColorChange = (next: ToothInstruction[]) => {
@@ -688,18 +730,31 @@ function MovementTableSection({
     persistInstructions(next, iprMap, iprNotes);
   };
 
-  const handleIprChange = (toothNumber: number, value: string | null) => {
-    const next = new Map(iprMap);
-    if (value === null || value.trim().length === 0) next.delete(toothNumber);
-    else next.set(toothNumber, value.trim());
-    persistInstructions(colorInstructions, next, iprNotes);
-  };
-
-  const handleIprNoteChange = (toothNumber: number, note: string | null) => {
-    const next = new Map(iprNotes);
-    if (note === null || note.trim().length === 0) next.delete(toothNumber);
-    else next.set(toothNumber, note.trim());
-    persistInstructions(colorInstructions, iprMap, next);
+  /**
+   * Combined IPR commit — used by the IPR popover's Save button. Replaces
+   * the old two-callback shape (separate value + separate note) which
+   * fired TWO `updateInstructions.mutate(...)` calls in rapid succession.
+   * Those two calls raced the backend's delete+createMany transaction and
+   * triggered P2002 "Unique constraint failed on (orderId, toothNumber,
+   * type)". One callback → one mutation → no race.
+   */
+  const handleIprChange = (
+    toothNumber: number,
+    payload: { value: string | null; note: string | null },
+  ) => {
+    const nextValues = new Map(iprMap);
+    const nextNotes = new Map(iprNotes);
+    if (payload.value === null || payload.value.trim().length === 0) {
+      nextValues.delete(toothNumber);
+    } else {
+      nextValues.set(toothNumber, payload.value.trim());
+    }
+    if (payload.note === null || payload.note.trim().length === 0) {
+      nextNotes.delete(toothNumber);
+    } else {
+      nextNotes.set(toothNumber, payload.note.trim());
+    }
+    persistInstructions(colorInstructions, nextValues, nextNotes);
   };
 
   return (
@@ -734,13 +789,9 @@ function MovementTableSection({
           disabled={!canEdit || updateInstructions.isPending}
           iprValues={iprMap}
           iprNotes={iprNotes}
+          // Combined IPR commit — receives `{ value, note }` in one call.
           onIprChange={
             iprMode === 'per-tooth' && canEdit ? handleIprChange : undefined
-          }
-          onIprNoteChange={
-            iprMode === 'per-tooth' && canEdit
-              ? handleIprNoteChange
-              : undefined
           }
         />
 

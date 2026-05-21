@@ -141,14 +141,23 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               asChild
               className="data-[slot=sidebar-menu-button]:h-auto data-[slot=sidebar-menu-button]:py-4 hover:bg-transparent active:bg-transparent group-data-[collapsible=icon]:!p-2"
             >
-              {/* Centered, larger logo. In icon-collapsed mode we swap to a
-                  compact square mark so the strip stays clean. */}
+              {/* Sidebar header logo — two variants swapped via the
+                  shadcn sidebar's `data-[collapsible=icon]` group attr:
+                    • Expanded  → full ORALIGN word-mark PNG, centred.
+                    • Collapsed → standalone `iconLogo.svg` brand mark,
+                                  the same icon used as the browser
+                                  favicon. Sized at 32 px (h-8 / w-8)
+                                  with object-contain so the SVG's
+                                  213.2 × 192.5 aspect ratio is
+                                  preserved without stretching.
+                  Both variants are wrapped in the same Link, so a tap
+                  at any sidebar width takes you to /dashboard. */}
               <Link
                 href="/dashboard"
                 className="flex w-full items-center justify-center gap-2"
                 aria-label="Oralign — Dashboard home"
               >
-                {/* Expanded — full word mark, centered, larger than before */}
+                {/* Expanded — full word mark, centered */}
                 <Image
                   src="/ORALIGN BLACK.png"
                   alt="Oralign"
@@ -157,13 +166,17 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   className="h-12 w-auto object-contain group-data-[collapsible=icon]:hidden"
                   priority
                 />
-                {/* Collapsed — small square version centered in the icon rail */}
+                {/* Collapsed — standalone brand mark. SVG so it stays
+                    crisp at any DPR; w-8 h-8 + object-contain keeps
+                    the natural aspect ratio centred inside the icon
+                    rail. mx-auto guarantees horizontal centring even
+                    if the sidebar header padding becomes asymmetric. */}
                 <Image
-                  src="/ORALIGN BLACK.png"
+                  src="/iconLogo.svg"
                   alt="Oralign"
-                  width={64}
-                  height={64}
-                  className="hidden h-7 w-7 object-contain object-left group-data-[collapsible=icon]:block"
+                  width={36}
+                  height={32}
+                  className="mx-auto hidden h-8 w-8 object-contain group-data-[collapsible=icon]:block"
                   priority
                 />
               </Link>

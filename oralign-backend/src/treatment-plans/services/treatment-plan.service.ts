@@ -6,9 +6,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import {
+  OrderFileCategory,
   OrderStatus,
-  Prisma,
-  TreatmentAttachmentCategory,
   TreatmentMessageType,
   TreatmentPlanStatus,
   UserRole,
@@ -33,6 +32,13 @@ const PLANNER_ROLES: UserRole[] = [
   UserRole.admin,
   UserRole.super_admin,
   UserRole.designer,
+];
+const CLINICAL_IMAGE_CATEGORIES: OrderFileCategory[] = [
+  OrderFileCategory.left_photo,
+  OrderFileCategory.front_photo,
+  OrderFileCategory.right_photo,
+  OrderFileCategory.upper_photo,
+  OrderFileCategory.lower_photo,
 ];
 
 /** Uploads directory — mirrors the existing LocalStorageService convention. */
@@ -683,7 +689,8 @@ export class TreatmentPlanService {
   async getReview(id: string, caller: Caller) {
     const plan = await this.getOne(id, caller);
 
-    const [toothInstructions, messages] = await Promise.all([
+    const [toothInstructions, messages, clinicalImages, iprEntries] =
+      await Promise.all([
       this.prisma.orderToothInstruction.findMany({
         where: { orderId: plan.orderId },
         orderBy: [{ toothNumber: 'asc' }, { createdAt: 'asc' }],
@@ -708,6 +715,31 @@ export class TreatmentPlanService {
             },
           },
         },
+      }),
+      this.prisma.orderFile.findMany({
+        where: {
+          orderId: plan.orderId,
+          deletedAt: null,
+          category: { in: CLINICAL_IMAGE_CATEGORIES },
+        },
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          category: true,
+          originalName: true,
+          fileName: true,
+          relativePath: true,
+          mimeType: true,
+          size: true,
+          createdAt: true,
+        },
+      }),
+      // IPR / stripping is owned by THIS plan (not the order). The
+      // table is intentionally scoped to treatmentPlanId so each plan
+      // version carries its own IPR map and a re-plan starts blank.
+      this.prisma.treatmentPlanIpr.findMany({
+        where: { treatmentPlanId: id },
+        orderBy: [{ fromTooth: 'asc' }, { toTooth: 'asc' }],
       }),
     ]);
 
@@ -737,7 +769,7 @@ export class TreatmentPlanService {
       .sort(([a], [b]) => a - b)
       .map(([toothNumber, entries]) => ({ toothNumber, entries }));
 
-    return { ...plan, odontogram, messages };
+    return { ...plan, odontogram, messages, clinicalImages, iprEntries };
   }
 
   // ─── File-path helpers ────────────────────────────────────────────────────

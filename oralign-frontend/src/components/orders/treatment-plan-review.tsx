@@ -27,6 +27,8 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import { getAccessToken } from '@/lib/api';
+import { ordersService } from '@/lib/api/orders.service';
 import { treatmentPlansService } from '@/lib/api/treatment-plans.service';
 import {
   useApproveTreatmentPlan,
@@ -34,14 +36,18 @@ import {
   useGeneratePublicLink,
   useMarkTreatmentPlanReady,
   useRejectTreatmentPlan,
+  useRemoveTreatmentPlanIpr,
   useTreatmentPlanReview,
   useUpdateResultViewUrl,
   useUploadMovementTableImage,
+  useUpsertTreatmentPlanIpr,
 } from '@/lib/hooks/use-treatment-plans';
 import { useUpdateToothInstructions } from '@/lib/hooks/use-orders';
 import { useAuth } from '@/lib/providers/auth-provider';
 import { TreatmentConversation } from './treatment-conversation';
 import {
+  OrderFile,
+  OrderFileCategory,
   ToothInstruction,
   ToothInstructionType,
   TreatmentPlanStatus,
@@ -250,7 +256,6 @@ function ReadyAction({
 function PlanHeader({
   review,
   role,
-  isDoctor: _isDoctor,
 }: {
   review: NonNullable<ReturnType<typeof useTreatmentPlanReview>['data']>;
   role: UserRole;
@@ -378,6 +383,7 @@ function TreatmentViewerCard({
   // Resync drafts when the upstream plan changes (e.g. someone else saved
   // a URL via WebSocket invalidation).
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setUrlDraft(savedCleanUrl);
     setModeDraft(savedMode);
   }, [savedCleanUrl, savedMode]);
@@ -593,6 +599,83 @@ function ViewerModeOption({
 
 type IprMode = 'per-tooth' | 'image';
 
+const TREATMENT_COLOR_TYPES = new Set<string>([
+  ToothInstructionType.NO_ATTACHMENTS,
+  ToothInstructionType.DO_NOT_MOVE,
+  ToothInstructionType.NO_IPR,
+  ToothInstructionType.EXTRACT,
+  ToothInstructionType.ATTACHMENT,
+]);
+
+const TREATMENT_CLINICAL_IMAGE_SLOTS = [
+  { category: OrderFileCategory.LEFT_PHOTO, label: 'Left lateral view' },
+  { category: OrderFileCategory.FRONT_PHOTO, label: 'Frontal occlusion view' },
+  { category: OrderFileCategory.RIGHT_PHOTO, label: 'Right lateral view' },
+  { category: OrderFileCategory.UPPER_PHOTO, label: 'Upper occlusal view' },
+  { category: OrderFileCategory.LOWER_PHOTO, label: 'Lower occlusal view' },
+] as const;
+
+function isTreatmentColorType(type: string): type is ToothInstructionType {
+  return TREATMENT_COLOR_TYPES.has(type);
+}
+
+function useAuthenticatedObjectUrl(url?: string | null) {
+  const [state, setState] = useState<{
+    objectUrl: string | null;
+    loading: boolean;
+    error: string | null;
+  }>({ objectUrl: null, loading: !!url, error: null });
+  const objectUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!url) {
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current);
+        objectUrlRef.current = null;
+      }
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setState({ objectUrl: null, loading: false, error: null });
+      return undefined;
+    }
+
+    let active = true;
+    const token = getAccessToken();
+    setState({ objectUrl: null, loading: true, error: null });
+
+    fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('Unable to load image preview');
+        return response.blob();
+      })
+      .then((blob) => {
+        if (!active) return;
+        if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+        const objectUrl = URL.createObjectURL(blob);
+        objectUrlRef.current = objectUrl;
+        setState({ objectUrl, loading: false, error: null });
+      })
+      .catch((error: Error) => {
+        if (!active) return;
+        setState({ objectUrl: null, loading: false, error: error.message });
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [url]);
+
+  useEffect(
+    () => () => {
+      if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+    },
+    [],
+  );
+
+  return state;
+}
+
 function MovementTableSection({
   review,
   canEdit,
@@ -605,8 +688,18 @@ function MovementTableSection({
   const upload = useUploadMovementTableImage();
   const remove = useDeleteMovementTableImage();
   const updateInstructions = useUpdateToothInstructions();
+  // IPR / stripping lives in its own table now. Each contact upsert
+  // is one round-trip — no race with the tooth-instructions endpoint,
+  // no P2002 collisions.
+  const upsertIpr = useUpsertTreatmentPlanIpr(treatmentPlanId);
+  const removeIpr = useRemoveTreatmentPlanIpr(treatmentPlanId);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [fullView, setFullView] = useState(false);
+  const [clinicalPreview, setClinicalPreview] = useState<{
+    src: string;
+    label: string;
+    name?: string;
+  } | null>(null);
 
   const imageUrl = useMemo(
     () =>
@@ -615,55 +708,70 @@ function MovementTableSection({
         : null,
     [review.movementTableImagePath, review.updatedAt, treatmentPlanId],
   );
+  const iprImage = useAuthenticatedObjectUrl(imageUrl);
 
-  // ── Decompose the review odontogram into three buckets:
-  //     • orderColors        — the doctor's prescriptions
-  //                            (no_attachments / do_not_move / no_ipr /
-  //                            extract). Read-only in the treatment-plan
-  //                            editor — they're set on the order itself
-  //                            and we deliberately don't echo them back
-  //                            in our writes (otherwise we'd reset the
-  //                            doctor's instructions every time the
-  //                            planner saves an attachment or an IPR).
-  //     • colorInstructions  — the planner's attachments only. This is
-  //                            the editable set this surface owns.
-  //     • iprMap / iprNotes  — per-tooth IPR mm value + optional
-  //                            stripping note, both stored on the same
-  //                            ipr_value row.
-  //
-  // Splitting `orderColors` out of `colorInstructions` is what makes
-  // the Treatment Odontogram stop "duplicating" the Order Odontogram:
-  // the planner edits attachments + IPR; the doctor's colours stay
-  // intact on the order regardless.
-  const { orderColors, colorInstructions, iprMap, iprNotes } = useMemo(() => {
-    const order: ToothInstruction[] = [];
-    const colors: ToothInstruction[] = [];
-    const ipr = new Map<number, string>();
-    const notes = new Map<number, string>();
-    for (const { toothNumber, entries } of review.odontogram ?? []) {
-      for (const e of entries) {
-        if (e.type === 'ipr_value') {
-          if (e.value) ipr.set(toothNumber, e.value);
-          if (e.note) notes.set(toothNumber, e.note);
-        } else if (e.type === ToothInstructionType.ATTACHMENT) {
-          colors.push({ toothNumber, type: ToothInstructionType.ATTACHMENT });
-        } else if (
-          e.type === ToothInstructionType.NO_ATTACHMENTS ||
-          e.type === ToothInstructionType.DO_NOT_MOVE ||
-          e.type === ToothInstructionType.NO_IPR ||
-          e.type === ToothInstructionType.EXTRACT
-        ) {
-          order.push({ toothNumber, type: e.type as ToothInstructionType });
-        }
+  const getOrderImageUrl = useCallback(
+    (file: OrderFile) => {
+      const base =
+        process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
+      return `${base}${ordersService.getDownloadUrl(review.orderId, file.id)}?t=${file.createdAt}`;
+    },
+    [review.orderId],
+  );
+
+  const clinicalImageSlots = useMemo(() => {
+    const latestByCategory = new Map<OrderFileCategory, OrderFile>();
+    for (const file of review.clinicalImages ?? []) {
+      if (!latestByCategory.has(file.category)) {
+        latestByCategory.set(file.category, file);
       }
     }
+    return TREATMENT_CLINICAL_IMAGE_SLOTS.map((slot) => ({
+      ...slot,
+      file: latestByCategory.get(slot.category),
+    }));
+  }, [review.clinicalImages]);
+
+  // ── Decompose the review payload into two cleanly-separated layers:
+  //     • colorInstructions — treatment tooth flags only:
+  //       No Attachments / Do Not Move / No IPR / Extract / Attachment.
+  //       These still live in OrderToothInstruction and are written
+  //       via the existing `updateToothInstructions` endpoint.
+  //     • iprMap / iprNotes — per-CONTACT IPR mm value + optional
+  //       stripping note, keyed by the right-anchor tooth number to
+  //       match the OdontogramSelector's render contract. Sourced
+  //       from the dedicated TreatmentPlanIpr table via the new
+  //       `review.iprEntries` field, written via upsertIpr / removeIpr.
+  //       The old `ipr_value` rows on tooth instructions have been
+  //       migrated out and the endpoint now rejects them — the team
+  //       gets a clear error if any client still tries to write that
+  //       legacy shape.
+  const { colorInstructions, iprMap, iprNotes } = useMemo(() => {
+    const colors: ToothInstruction[] = [];
+    for (const { toothNumber, entries } of review.odontogram ?? []) {
+      for (const e of entries) {
+        if (isTreatmentColorType(e.type)) {
+          colors.push({ toothNumber, type: e.type });
+        }
+        // Ignore any stray `ipr_value` rows — they're legacy data
+        // from before the migration. The backend will eventually
+        // catch up on the migration's DELETE if any slipped through.
+      }
+    }
+    const ipr = new Map<number, string>();
+    const notes = new Map<number, string>();
+    for (const row of review.iprEntries ?? []) {
+      // Key by toTooth (right anchor) — matches what
+      // OdontogramSelector expects in `iprValues` / `iprNotes`.
+      if (row.value) ipr.set(row.toTooth, row.value);
+      if (row.note) notes.set(row.toTooth, row.note);
+    }
     return {
-      orderColors: order,
       colorInstructions: colors,
       iprMap: ipr,
       iprNotes: notes,
     };
-  }, [review.odontogram]);
+  }, [review.odontogram, review.iprEntries]);
 
   // Default the toggle based on what data the plan already has — if an image
   // was uploaded, show the image tab; otherwise show per-tooth.
@@ -671,45 +779,21 @@ function MovementTableSection({
     review.movementTableImagePath ? 'image' : 'per-tooth',
   );
 
+  /**
+   * Persist the colour layer of the treatment odontogram (No Attachments
+   * / Do Not Move / No IPR / Extract / Attachment). This endpoint is
+   * REPLACE-ALL on the order's tooth instructions — sending an array
+   * with `colors` wipes everything else of those types and rewrites.
+   *
+   * Defence-in-depth dedupe by (toothNumber, type) so any stale state
+   * never ships a duplicate row that would trip the unique constraint.
+   * IPR no longer flows through this endpoint at all — it lives in
+   * TreatmentPlanIpr with its own dedicated mutations below.
+   */
   const persistInstructions = useCallback(
-    (
-      colors: ToothInstruction[],
-      ipr: Map<number, string>,
-      notes: Map<number, string>,
-    ) => {
-      // Build the final ipr_value rows by merging the two maps on tooth
-      // number. A slot is persisted whenever it has EITHER an mm value
-      // OR a stripping note — clearing the IPR amount but keeping the
-      // note (or vice versa) is a legal state.
-      const iprKeys = new Set<number>([...ipr.keys(), ...notes.keys()]);
-      const iprRows: ToothInstruction[] = [];
-      for (const toothNumber of iprKeys) {
-        const value = ipr.get(toothNumber)?.trim();
-        const note = notes.get(toothNumber)?.trim();
-        if (!value && !note) continue;
-        iprRows.push({
-          toothNumber,
-          type: ToothInstructionType.IPR_VALUE,
-          value: value && value.length > 0 ? value : null,
-          note: note && note.length > 0 ? note : null,
-        });
-      }
-      // CRUCIAL: include orderColors (the doctor's prescriptions) in
-      // every write. `updateToothInstructions` is replace-all — the
-      // backend wipes ALL rows for the order and re-inserts whatever
-      // we send. If we omit orderColors we'd silently delete the
-      // doctor's instructions every time the planner saves an
-      // attachment or an IPR. They round-trip read-only.
-      //
-      // Defence-in-depth dedupe at the frontend too. If the local
-      // arrays ever drifted into containing two rows with the same
-      // (toothNumber, type) — e.g. from stale state or a previous
-      // botched write — we'd otherwise ship that duplicate and the
-      // unique constraint would reject the whole transaction with
-      // P2002. Keep the LAST entry for each key.
-      const merged: ToothInstruction[] = [...orderColors, ...colors, ...iprRows];
+    (colors: ToothInstruction[]) => {
       const deduped = new Map<string, ToothInstruction>();
-      for (const row of merged) {
+      for (const row of colors) {
         deduped.set(`${row.toothNumber}:${row.type}`, row);
       }
       updateInstructions.mutate({
@@ -717,44 +801,54 @@ function MovementTableSection({
         instructions: Array.from(deduped.values()),
       });
     },
-    // `orderColors` is captured from the surrounding render so it must
-    // be in the deps array — otherwise stale closures would echo back
-    // an out-of-date snapshot of the doctor's instructions on every
-    // save, undoing any concurrent edit on the order side.
-    [review.orderId, updateInstructions, orderColors],
+    [review.orderId, updateInstructions],
   );
 
   const handleColorChange = (next: ToothInstruction[]) => {
-    // Color instructions changed via OdontogramSelector — persist immediately,
-    // preserving the current IPR set + stripping notes.
-    persistInstructions(next, iprMap, iprNotes);
+    persistInstructions(next);
   };
 
   /**
-   * Combined IPR commit — used by the IPR popover's Save button. Replaces
-   * the old two-callback shape (separate value + separate note) which
-   * fired TWO `updateInstructions.mutate(...)` calls in rapid succession.
-   * Those two calls raced the backend's delete+createMany transaction and
-   * triggered P2002 "Unique constraint failed on (orderId, toothNumber,
-   * type)". One callback → one mutation → no race.
+   * IPR / stripping commit — runs via the dedicated upsertIpr mutation
+   * (a single PUT under /treatment-plans/:id/iprs). The backend uses
+   * `prisma.treatmentPlanIpr.upsert` keyed on (planId, fromTooth,
+   * toTooth) so re-saving the same contact updates the row in place.
+   * No P2002 collisions are possible because there's no replace-all
+   * transaction to race; the conflict resolution is atomic inside
+   * Postgres.
+   *
+   * Clearing both `value` and `note` is interpreted as a DELETE so
+   * the contact disappears from the arch — no zombie zero-value rows.
    */
   const handleIprChange = (
-    toothNumber: number,
+    fromTooth: number,
+    toTooth: number,
     payload: { value: string | null; note: string | null },
   ) => {
-    const nextValues = new Map(iprMap);
-    const nextNotes = new Map(iprNotes);
-    if (payload.value === null || payload.value.trim().length === 0) {
-      nextValues.delete(toothNumber);
-    } else {
-      nextValues.set(toothNumber, payload.value.trim());
+    const trimmedValue = payload.value?.trim() ?? '';
+    const trimmedNote = payload.note?.trim() ?? '';
+    if (!trimmedValue && !trimmedNote) {
+      removeIpr.mutate({ fromTooth, toTooth });
+      return;
     }
-    if (payload.note === null || payload.note.trim().length === 0) {
-      nextNotes.delete(toothNumber);
-    } else {
-      nextNotes.set(toothNumber, payload.note.trim());
+    if (!trimmedValue) {
+      // Stripping note without an IPR mm — the backend requires a
+      // value, so use '0' as a sentinel meaning "no reduction, just
+      // a stripping marker". The UI renders the note pill regardless.
+      upsertIpr.mutate({
+        fromTooth,
+        toTooth,
+        value: '0',
+        note: trimmedNote.length > 0 ? trimmedNote : null,
+      });
+      return;
     }
-    persistInstructions(colorInstructions, nextValues, nextNotes);
+    upsertIpr.mutate({
+      fromTooth,
+      toTooth,
+      value: trimmedValue,
+      note: trimmedNote.length > 0 ? trimmedNote : null,
+    });
   };
 
   return (
@@ -762,65 +856,23 @@ function MovementTableSection({
       <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <CardTitle className="flex items-center gap-2">
           <Stethoscope className="h-4 w-4 text-primary" />
-          {/* Renamed from "Orthodontic Tooth Movement & IPR". In the
-              treatment-plan editor the planner only places attachments
-              and IPR — the doctor's movement instructions live on the
-              order itself, not on the plan. */}
-          Attachments &amp; IPR
+          Treatment odontogram &amp; IPR
         </CardTitle>
         {canEdit && (
           <IprModeToggle value={iprMode} onChange={setIprMode} />
         )}
       </CardHeader>
       <CardContent className="space-y-6">
-        {/* ── 2a · Reference: doctor's per-tooth instructions ───────
-            A separate, READ-ONLY odontogram that mirrors what the
-            doctor entered on the order itself. Lets the planner see
-            the doctor's prescriptions (no-attachments / do-not-move /
-            no-ipr / extract) WITHOUT them being editable from this
-            surface. Only renders when at least one such instruction
-            exists — saves vertical space on plain orders. */}
-        {orderColors.length > 0 && (
-          <div className="rounded-2xl border bg-muted/20 p-3 sm:p-4">
-            <div className="mb-2 flex items-center gap-2">
-              <span className="inline-block h-2 w-2 rounded-full bg-primary/70" />
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Doctor's per-tooth instructions
-              </p>
-              <span className="ml-2 text-[11px] text-muted-foreground">
-                (read-only — set on the order)
-              </span>
-            </div>
-            <OdontogramSelector
-              // movement mode shows the 4 doctor colours and hides
-              // the pink attachment swatch.
-              mode="movement"
-              // Pass the doctor's instructions as `value` so they
-              // render — but no onChange handler so React Hook Form
-              // pattern is purely display.
-              value={orderColors}
-              onChange={() => undefined}
-              // disabled removes the click affordance on every tooth
-              // button, so the picker popover never opens. The
-              // odontogram becomes a pure visualisation.
-              disabled
-              title=" "
-              subtitle="The four colours below reflect what the doctor specified when creating the order. Reference only."
-            />
-          </div>
-        )}
-
-        {/* ── 2b · Editable: attachments + IPR planning ────────────
-            The planner's own surface — pink attachment swatch only,
-            plus an editable IPR layer with stripping note support.
-            Doctor's order colours never appear here; we round-trip
-            them via persistInstructions but they're invisible to the
-            planner's eye and untouchable from the picker. */}
         <OdontogramSelector
-          mode="attachments"
+          mode="treatment"
           value={colorInstructions}
           onChange={handleColorChange}
-          disabled={!canEdit || updateInstructions.isPending}
+          disabled={
+            !canEdit ||
+            updateInstructions.isPending ||
+            upsertIpr.isPending ||
+            removeIpr.isPending
+          }
           iprValues={iprMap}
           iprNotes={iprNotes}
           // Combined IPR commit — receives `{ value, note }` in one
@@ -828,18 +880,25 @@ function MovementTableSection({
           onIprChange={
             iprMode === 'per-tooth' && canEdit ? handleIprChange : undefined
           }
+          title="Treatment odontogram"
+          subtitle="Choose tooth colors for No Attachments, Do Not Move, No IPR, Extract, and Attachment. Use the purple contacts for IPR and stripping values."
         />
 
         {/* Editor instructions — only relevant when the planner is in
             per-tooth mode and can actually click slots. */}
         {iprMode === 'per-tooth' && canEdit && (
-          <div className="rounded-md border bg-purple-50/40 p-3 text-xs text-purple-900">
-            <p className="font-semibold">Per-tooth IPR</p>
-            <p className="text-purple-900/80">
-              Click the dotted vertical line between any two teeth to add an
-              IPR amount (in millimetres). A purple bar with the value will
-              appear at the slot.
-            </p>
+          <div className="grid gap-3 rounded-xl border bg-purple-50/40 p-3 text-xs text-purple-900 sm:grid-cols-[auto_1fr]">
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-purple-100 text-purple-700">
+              <Stethoscope className="h-4 w-4" />
+            </div>
+            <div>
+              <p className="font-semibold">Per-tooth IPR and stripping</p>
+              <p className="text-purple-900/80">
+                Click the dotted contact between two teeth to add an IPR amount
+                in millimetres. Use the stripping field for the secondary strip
+                reference; both values save together.
+              </p>
+            </div>
           </div>
         )}
 
@@ -897,12 +956,25 @@ function MovementTableSection({
             {imageUrl ? (
               <>
                 <div className="w-full overflow-x-auto rounded-lg border bg-white">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={imageUrl}
-                    alt="IPR reference image"
-                    className="block max-h-[480px] w-full object-contain"
-                  />
+                  {iprImage.loading ? (
+                    <div className="flex h-48 items-center justify-center text-sm text-muted-foreground">
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Loading image…
+                    </div>
+                  ) : iprImage.objectUrl ? (
+                    <>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={iprImage.objectUrl}
+                        alt="IPR reference image"
+                        className="block max-h-[480px] w-full object-contain"
+                      />
+                    </>
+                  ) : (
+                    <div className="flex h-48 items-center justify-center text-sm text-red-600">
+                      {iprImage.error ?? 'Unable to load image preview.'}
+                    </div>
+                  )}
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
                   <Button
@@ -910,6 +982,7 @@ function MovementTableSection({
                     variant="outline"
                     size="sm"
                     onClick={() => setFullView(true)}
+                    disabled={!iprImage.objectUrl}
                     className="gap-2"
                   >
                     <Maximize2 className="h-4 w-4" />
@@ -926,6 +999,12 @@ function MovementTableSection({
           </div>
         )}
 
+        <ClinicalImageGallery
+          slots={clinicalImageSlots}
+          getImageUrl={getOrderImageUrl}
+          onPreview={setClinicalPreview}
+        />
+
         <input
           ref={fileInputRef}
           type="file"
@@ -938,36 +1017,195 @@ function MovementTableSection({
           }}
         />
 
-        {fullView && imageUrl && (
+        {fullView && iprImage.objectUrl && (
           <Dialog open onOpenChange={() => setFullView(false)}>
             <DialogContent
-              className="max-h-[95vh] w-[min(96vw,1400px)] max-w-none overflow-auto p-2 sm:p-4"
+              className="h-[100dvh] w-screen max-w-none border-0 bg-black/95 p-0 text-white"
               showCloseButton={false}
             >
               <DialogTitle className="sr-only">IPR Reference Image</DialogTitle>
-              <div className="flex justify-end">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setFullView(false)}
-                  className="gap-2"
-                >
-                  <X className="h-4 w-4" />
-                  Close
-                </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => setFullView(false)}
+                className="absolute right-4 top-4 z-10 h-10 w-10 rounded-full bg-white/10 text-white hover:bg-white/20 hover:text-white"
+                aria-label="Close image viewer"
+              >
+                <X className="h-5 w-5" />
+              </Button>
+              <div className="flex h-full items-center justify-center p-4 sm:p-8">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={iprImage.objectUrl}
+                  alt="IPR reference image — full size"
+                  className="max-h-[92dvh] max-w-[96vw] object-contain"
+                />
               </div>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={imageUrl}
-                alt="IPR reference image — full size"
-                className="block h-auto w-full object-contain"
-              />
+            </DialogContent>
+          </Dialog>
+        )}
+
+        {clinicalPreview && (
+          <Dialog open onOpenChange={() => setClinicalPreview(null)}>
+            <DialogContent
+              className="h-[100dvh] w-screen max-w-none border-0 bg-black/95 p-0 text-white"
+              showCloseButton={false}
+            >
+              <DialogTitle className="sr-only">
+                {clinicalPreview.label}
+              </DialogTitle>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => setClinicalPreview(null)}
+                className="absolute right-4 top-4 z-10 h-10 w-10 rounded-full bg-white/10 text-white hover:bg-white/20 hover:text-white"
+                aria-label="Close image viewer"
+              >
+                <X className="h-5 w-5" />
+              </Button>
+              <div className="flex h-full flex-col items-center justify-center gap-4 p-4 sm:p-8">
+                <div className="text-center">
+                  <p className="text-sm font-semibold">{clinicalPreview.label}</p>
+                  {clinicalPreview.name && (
+                    <p className="text-xs text-white/60">
+                      {clinicalPreview.name}
+                    </p>
+                  )}
+                </div>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={clinicalPreview.src}
+                  alt={clinicalPreview.label}
+                  className="max-h-[84dvh] max-w-[96vw] object-contain"
+                />
+              </div>
             </DialogContent>
           </Dialog>
         )}
       </CardContent>
     </Card>
+  );
+}
+
+type ClinicalImageSlot = {
+  category: OrderFileCategory;
+  label: string;
+  file?: OrderFile;
+};
+
+function ClinicalImageGallery({
+  slots,
+  getImageUrl,
+  onPreview,
+}: {
+  slots: ClinicalImageSlot[];
+  getImageUrl: (file: OrderFile) => string;
+  onPreview: (preview: { src: string; label: string; name?: string }) => void;
+}) {
+  const uploadedCount = slots.filter((slot) => slot.file).length;
+
+  return (
+    <div className="rounded-2xl border bg-card p-4 shadow-sm">
+      <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h3 className="text-base font-semibold">Clinical image views</h3>
+          <p className="text-xs text-muted-foreground">
+            Order photos sent with the case, shown here for treatment review.
+          </p>
+        </div>
+        <Badge variant="secondary" className="w-fit rounded-full">
+          {uploadedCount}/{slots.length} uploaded
+        </Badge>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        {slots.map((slot) => (
+          <ClinicalImageCard
+            key={slot.category}
+            slot={slot}
+            imageUrl={slot.file ? getImageUrl(slot.file) : null}
+            onPreview={onPreview}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ClinicalImageCard({
+  slot,
+  imageUrl,
+  onPreview,
+}: {
+  slot: ClinicalImageSlot;
+  imageUrl: string | null;
+  onPreview: (preview: { src: string; label: string; name?: string }) => void;
+}) {
+  const preview = useAuthenticatedObjectUrl(imageUrl);
+  const file = slot.file;
+
+  return (
+    <div className="rounded-xl border bg-background p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="text-sm font-medium leading-tight">{slot.label}</p>
+        {file && <ImageIcon className="h-4 w-4 text-primary" />}
+      </div>
+
+      {file ? (
+        <>
+          <button
+            type="button"
+            onClick={() =>
+              preview.objectUrl &&
+              onPreview({
+                src: preview.objectUrl,
+                label: slot.label,
+                name: file.originalName,
+              })
+            }
+            disabled={!preview.objectUrl}
+            className="group relative flex h-40 w-full items-center justify-center overflow-hidden rounded-lg border bg-muted/20 disabled:cursor-not-allowed sm:h-44"
+          >
+            {preview.loading ? (
+              <span className="flex items-center text-xs text-muted-foreground">
+                <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                Loading…
+              </span>
+            ) : preview.objectUrl ? (
+              <>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={preview.objectUrl}
+                  alt={slot.label}
+                  className="h-full w-full object-contain p-2"
+                />
+                <span className="absolute inset-x-3 bottom-3 flex items-center justify-center gap-1.5 rounded-full bg-black/70 px-3 py-1.5 text-xs font-medium text-white opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100">
+                  <Maximize2 className="h-3.5 w-3.5" />
+                  View
+                </span>
+              </>
+            ) : (
+              <span className="px-3 text-center text-xs text-red-600">
+                {preview.error ?? 'Unable to load preview.'}
+              </span>
+            )}
+          </button>
+          <p
+            className="mt-2 truncate text-[11px] text-muted-foreground"
+            title={file.originalName}
+          >
+            {file.originalName}
+          </p>
+        </>
+      ) : (
+        <div className="flex h-40 flex-col items-center justify-center rounded-lg border border-dashed bg-muted/20 text-center text-xs text-muted-foreground sm:h-44">
+          <ImageIcon className="mb-2 h-5 w-5 opacity-50" />
+          Not uploaded
+        </div>
+      )}
+    </div>
   );
 }
 

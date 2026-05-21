@@ -129,25 +129,29 @@ export function OdontogramSelector({
    */
   iprNotes?: Map<number, string>;
   /**
-   * Combined setter for the IPR slot — passes both the mm value AND
-   * the optional stripping note in ONE call so the parent does ONE
-   * persist rather than two. Two-call shape was racing the backend's
-   * delete + createMany transaction and triggering the P2002 unique
-   * constraint failure on (orderId, toothNumber, type). Pass `null`
-   * for either field to clear it.
+   * Combined setter for an IPR / stripping contact. Carries BOTH
+   * tooth numbers explicitly — IPR is between TWO teeth and the
+   * backend now stores it that way (TreatmentPlanIpr keyed on
+   * fromTooth + toTooth). The parent uses this signature to call
+   * `treatmentPlansService.upsertIpr` / `removeIpr` directly.
+   *
+   * Pass `null` for `value` (and optionally `note`) to clear the
+   * contact — the parent translates that into a DELETE.
    */
   onIprChange?: (
-    toothNumber: number,
+    fromTooth: number,
+    toTooth: number,
     payload: { value: string | null; note: string | null },
   ) => void;
   /**
    * 'movement'   — order-wizard context: shows all 4 instruction colors
    *                (No Attachments / Do Not Move / No IPR / Extract).
-   * 'attachments' — treatment-plan editor context: a single attachment
-   *                colour, the rest of the picker is hidden. The planner
-   *                only needs to mark which teeth carry an attachment.
+   * 'attachments' — focused treatment attachment context: a single attachment
+   *                colour, the rest of the picker is hidden.
+   * 'treatment'   — full treatment-planning context: movement flags,
+   *                extraction, attachments, and IPR live together.
    */
-  mode?: 'movement' | 'attachments';
+  mode?: 'movement' | 'attachments' | 'treatment';
   /** Override the default section heading. */
   title?: string;
   /** Override the default section subheading. */
@@ -161,7 +165,11 @@ export function OdontogramSelector({
     width: number;
   } | null>(null);
   const [iprPopup, setIprPopup] = useState<{
+    /** Anchor / right-side tooth of the contact. Used to look up the
+     *  existing value/note in the iprValues/iprNotes Maps. */
     tooth: number;
+    /** Left-side tooth — used for the API call (fromTooth on upsert). */
+    fromTooth: number;
     x: number;
     y: number;
   } | null>(null);
@@ -172,20 +180,18 @@ export function OdontogramSelector({
   const iprVisible = !!iprValues;
   const iprEditable = !!onIprChange && !disabled;
 
-  // In 'attachments' mode the picker collapses to a single colour — the
-  // planner only needs to mark "the planner placed an attachment here".
-  // The 4 doctor-level signals (No Attachments / Do Not Move / No IPR /
-  // Extract) are NOT exposed in the attachments-mode picker — they're
-  // the doctor's prescriptions on the order, not the plan, and the
-  // planner shouldn't be changing them from this surface.
+  // Palette by context:
+  // - movement: order-facing prescription colors only.
+  // - attachments: focused planner surface for pink attachment marks.
+  // - treatment: the full lab/planner odontogram, including attachment.
   const visibleColors = useMemo<readonly ColorEntry[]>(
-    () =>
-      mode === 'attachments'
-        ? COLORS.filter((c) => c.type === ToothInstructionType.ATTACHMENT)
-        : // Movement mode: show every type EXCEPT the planner-only
-          // ATTACHMENT colour (which only makes sense on the plan
-          // odontogram). Order is preserved for legend stability.
-          COLORS.filter((c) => c.type !== ToothInstructionType.ATTACHMENT),
+    () => {
+      if (mode === 'attachments') {
+        return COLORS.filter((c) => c.type === ToothInstructionType.ATTACHMENT);
+      }
+      if (mode === 'treatment') return COLORS;
+      return COLORS.filter((c) => c.type !== ToothInstructionType.ATTACHMENT);
+    },
     [mode],
   );
 
@@ -218,10 +224,13 @@ export function OdontogramSelector({
   const onChangeRef = useRef(onChange);
   const disabledRef = useRef(disabled);
   const onIprChangeRef = useRef(onIprChange);
-  valueRef.current = value;
-  onChangeRef.current = onChange;
-  disabledRef.current = disabled;
-  onIprChangeRef.current = onIprChange;
+
+  useLayoutEffect(() => {
+    valueRef.current = value;
+    onChangeRef.current = onChange;
+    disabledRef.current = disabled;
+    onIprChangeRef.current = onIprChange;
+  }, [value, onChange, disabled, onIprChange]);
 
   const setTooth = useCallback(
     (toothNumber: number, type: ToothInstructionType | null) => {
@@ -236,11 +245,18 @@ export function OdontogramSelector({
   );
 
   const openIprPopup = useCallback(
-    (toothNumber: number, event: ReactMouseEvent<HTMLButtonElement>) => {
+    (
+      fromTooth: number,
+      toTooth: number,
+      event: ReactMouseEvent<HTMLButtonElement>,
+    ) => {
       if (disabledRef.current) return;
       const rect = event.currentTarget.getBoundingClientRect();
       setIprPopup({
-        tooth: toothNumber,
+        // Keep `tooth` (anchor / right side) for backward compat with
+        // existing rendering. Carry the neighbour for the API call.
+        tooth: toTooth,
+        fromTooth,
         x: rect.left + rect.width / 2,
         y: rect.bottom + 8,
       });
@@ -252,10 +268,11 @@ export function OdontogramSelector({
 
   const commitIpr = useCallback(
     (
-      toothNumber: number,
+      fromTooth: number,
+      toTooth: number,
       payload: { value: string | null; note: string | null },
     ) => {
-      onIprChangeRef.current?.(toothNumber, payload);
+      onIprChangeRef.current?.(fromTooth, toTooth, payload);
       setIprPopup(null);
     },
     [],
@@ -304,18 +321,20 @@ export function OdontogramSelector({
             {title ??
               (mode === 'attachments'
                 ? 'Attachments & IPR'
-                : 'Select tooth-level instructions')}
+                : mode === 'treatment'
+                  ? 'Treatment odontogram'
+                  : 'Select tooth-level instructions')}
           </h2>
           <p className="text-sm text-muted-foreground">
             {subtitle ??
               (mode === 'attachments'
                 ? 'Tap a tooth to mark an attachment. Tap between teeth to set IPR (mm) and the optional stripping value.'
+                : mode === 'treatment'
+                  ? 'Tap a tooth to choose a clinical instruction color. Tap between teeth to set IPR in millimetres and stripping notes.'
                 : 'Tap any tooth to assign a color. Each tooth carries one instruction at a time.')}
           </p>
         </div>
-        {/* In attachments mode there's only one colour, so the legend
-            collapses into the helper text — no toggle needed. */}
-        {mode === 'movement' && (
+        {mode !== 'attachments' && (
           <Button
             type="button"
             variant="ghost"
@@ -328,7 +347,7 @@ export function OdontogramSelector({
         )}
       </div>
 
-      {mode === 'movement' && showLegend && (
+      {mode !== 'attachments' && showLegend && (
         <ColorLegend assignments={assignments} colors={visibleColors} />
       )}
 
@@ -431,10 +450,11 @@ export function OdontogramSelector({
           currentValue={iprValues?.get(iprPopup.tooth)}
           currentNote={iprNotes?.get(iprPopup.tooth)}
           // Single combined commit — popover gathers both fields and
-          // calls back ONCE so the parent fires ONE persist mutation.
-          // Two-call shape was racing the backend's delete+createMany
-          // transaction and triggering P2002.
-          onCommit={(payload) => commitIpr(iprPopup.tooth, payload)}
+          // calls back ONCE. The parent receives (fromTooth, toTooth,
+          // payload) which maps directly onto upsertIpr / removeIpr.
+          onCommit={(payload) =>
+            commitIpr(iprPopup.fromTooth, iprPopup.tooth, payload)
+          }
           // Whether the popover should even show the stripping input
           // is governed by whether `iprNotes` was wired by the parent
           // — same effective semantics as the old onCommitNote prop.
@@ -503,29 +523,6 @@ const MIDLINE_ANCHOR: Record<'upper' | 'lower', number> = {
   lower: 31,
 };
 
-/**
- * Pretty-print an IPR slot as "between X and Y". The slot is keyed by
- * the right-hand anchor in render order; the left-hand neighbour is
- * the previous element in the array, OR the last tooth of the
- * opposite-half array when crossing the midline.
- */
-function neighbourTooth(
-  anchor: number,
-  upperRight: readonly number[],
-  upperLeft: readonly number[],
-  lowerRight: readonly number[],
-  lowerLeft: readonly number[],
-): number | undefined {
-  for (const arr of [upperRight, upperLeft, lowerRight, lowerLeft]) {
-    const i = arr.indexOf(anchor);
-    if (i > 0) return arr[i - 1];
-  }
-  // Midline crossing: anchor is first element of its half.
-  if (anchor === MIDLINE_ANCHOR.upper) return upperRight[upperRight.length - 1];
-  if (anchor === MIDLINE_ANCHOR.lower) return lowerRight[lowerRight.length - 1];
-  return undefined;
-}
-
 function Arch({
   row,
   left,
@@ -552,9 +549,15 @@ function Arch({
     tooth: number,
     event: ReactMouseEvent<HTMLButtonElement>,
   ) => void;
-  /** Optional — when omitted the slots become read-only (no popup). */
+  /**
+   * Optional — when omitted the slots become read-only (no popup).
+   * Receives BOTH the left-side and right-side tooth numbers so the
+   * popup can immediately resolve the (fromTooth, toTooth) contact
+   * pair that the backend's TreatmentPlanIpr table is keyed on.
+   */
   onIprClick?: (
-    tooth: number,
+    fromTooth: number,
+    toTooth: number,
     event: ReactMouseEvent<HTMLButtonElement>,
   ) => void;
 }) {
@@ -773,7 +776,8 @@ const ToothButton = memo(
 type IprSlotProps = {
   /** Anchor tooth on the right side of the contact. */
   toothNumber: number;
-  /** Anchor tooth on the left side of the contact — used for labelling. */
+  /** Anchor tooth on the left side of the contact — used for labelling
+   *  AND as the `fromTooth` value emitted to the parent's onIprClick. */
   neighbour?: number;
   row: 'upper' | 'lower';
   value?: string;
@@ -781,10 +785,16 @@ type IprSlotProps = {
   note?: string;
   active?: boolean;
   disabled?: boolean;
-  /** Omitted in read-only mode (doctor's view). The slot renders the
-   *  filled bar + mm label but doesn't open the editor popup on click. */
+  /**
+   * Omitted in read-only mode (doctor's view). The slot renders the
+   * filled bar + mm label but doesn't open the editor popup on click.
+   * Receives BOTH ends of the contact (fromTooth, toTooth) so the
+   * parent can immediately call upsertIpr / removeIpr with the right
+   * payload.
+   */
   onClick?: (
-    tooth: number,
+    fromTooth: number,
+    toTooth: number,
     event: ReactMouseEvent<HTMLButtonElement>,
   ) => void;
 };
@@ -800,8 +810,16 @@ const IprSlot = memo(function IprSlot({
   onClick,
 }: IprSlotProps) {
   const handleClick = useCallback(
-    (e: ReactMouseEvent<HTMLButtonElement>) => onClick?.(toothNumber, e),
-    [onClick, toothNumber],
+    (e: ReactMouseEvent<HTMLButtonElement>) => {
+      // The slot is always rendered with an explicit `neighbour` from
+      // the parent Arch — but defend defensively in case a future
+      // caller forgets, by skipping the emit instead of sending a
+      // bogus `fromTooth=0` to the API.
+      if (typeof neighbour === 'number' && onClick) {
+        onClick(neighbour, toothNumber, e);
+      }
+    },
+    [onClick, toothNumber, neighbour],
   );
   const hasValue = !!value && value.trim().length > 0;
   const hasNote = !!note && note.trim().length > 0;
@@ -863,8 +881,18 @@ const IprSlot = memo(function IprSlot({
           number with no mm reduction. */}
       {(hasValue || hasNote) && (
         <span className="odo-ipr-label">
-          {hasNote && <span className="odo-ipr-note">{note}</span>}
-          {hasValue && <span className="odo-ipr-value">{value}</span>}
+          {hasValue && (
+            <span className="odo-ipr-value">
+              {value}
+              <span className="odo-ipr-unit">mm</span>
+            </span>
+          )}
+          {hasNote && (
+            <span className="odo-ipr-note">
+              <span className="odo-ipr-note-label">Strip</span>
+              {note}
+            </span>
+          )}
         </span>
       )}
     </button>
@@ -1435,54 +1463,64 @@ const ODONTOGRAM_CSS = /* css */ `
      below. Centered horizontally on the bar's anchor button. */
   left: 50%;
   transform: translateX(-50%);
-  display: inline-flex;
+  display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-width: 26px;
-  padding: 1px 5px;
-  background: #7c3aed;
-  color: #fff;
-  border-radius: 999px;
+  gap: 2px;
+  min-width: 34px;
   font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.02em;
-  line-height: 1.2;
-  box-shadow: 0 1px 4px rgba(124, 58, 237, 0.45);
+  line-height: 1.1;
   white-space: nowrap;
   pointer-events: none;
 }
 .odo-ipr-upper .odo-ipr-label {
-  bottom: calc(100% - 16px);
+  bottom: calc(100% - 12px);
 }
 .odo-ipr-lower .odo-ipr-label {
-  top: calc(100% - 16px);
+  top: calc(100% - 12px);
 }
 
-/* Inside the label pill, the primary IPR mm value sits next to the
-   optional "stripping" note. The note is rendered in muted gray to
-   communicate that it's secondary information — the dentist's eye
-   should land on the mm value first. */
+/* IPR and stripping are separate chips so the values do not collapse into a
+   cramped pill when both are present. The mm value stays primary; stripping is
+   a quieter secondary chip beneath it. */
 .odo-ipr-value {
-  display: inline-block;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  min-height: 16px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #7c3aed;
+  box-shadow: 0 1px 4px rgba(124, 58, 237, 0.45);
   font-weight: 700;
-  color: inherit;
+  color: #fff;
+}
+.odo-ipr-unit {
+  font-size: 7px;
+  font-weight: 800;
+  opacity: 0.8;
 }
 .odo-ipr-note {
-  display: inline-block;
-  margin-right: 4px;
-  padding: 0 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-height: 15px;
+  padding: 2px 5px;
   border-radius: 999px;
-  background: rgba(148, 163, 184, 0.18); /* slate-400 / 18% */
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(255, 255, 255, 0.95);
   color: rgba(71, 85, 105, 0.95);         /* slate-600 */
-  font-weight: 600;
-  font-size: 9px;
+  font-weight: 700;
+  font-size: 8px;
   letter-spacing: 0.2px;
 }
-.odo-ipr-on .odo-ipr-note {
-  /* Slightly more contrast when the slot is filled — the purple label
-     surface tends to swallow muted greys otherwise. */
-  background: rgba(241, 245, 249, 0.85); /* slate-100 / 85% */
-  color: rgba(71, 85, 105, 0.95);
+.odo-ipr-note-label {
+  color: rgba(100, 116, 139, 0.8);
+  font-size: 7px;
+  font-weight: 800;
+  text-transform: uppercase;
 }
 
 @media (max-width: 640px) {

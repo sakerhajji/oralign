@@ -26,13 +26,13 @@ import {
   UpdateOrderDto,
 } from '../dto/order.dto';
 
-type Caller = { userId: string; role: UserRole | string };
+type Caller = { userId: string; role: string };
 
 const orderInclude = Prisma.validator<Prisma.DentalOrderInclude>()({
   doctor: { select: { id: true, fullName: true, email: true } },
   patient: { select: { id: true, fullName: true, email: true, phone: true } },
   toothInstructions: {
-    select: { toothNumber: true, type: true },
+    select: { toothNumber: true, type: true, value: true, note: true },
     orderBy: [{ toothNumber: 'asc' }, { type: 'asc' }],
   },
   files: {
@@ -359,10 +359,25 @@ export class OrderService {
     caller: Caller,
   ): Promise<OrderResponseDto> {
     // Designers normally can't modify orders directly, but the odontogram
-    // (and especially per-tooth IPR values) IS their job in the treatment
-    // plan editor. assertCanEditOdontogram allows them when assigned.
+    // (per-tooth attachments + the doctor's no_attachments / do_not_move /
+    // no_ipr / extract instructions) IS their job in the treatment plan
+    // editor. assertCanEditOdontogram allows them when assigned.
     this.ensureCanEditOdontogram(caller);
     await this.findAccessibleOrder(id, caller);
+
+    // IPR / stripping moved to its own table (`TreatmentPlanIpr`).
+    // Any client still trying to stuff `ipr_value` rows through this
+    // endpoint is hitting deprecated behaviour — reject loudly so the
+    // bug surfaces early instead of silently re-introducing the legacy
+    // one-tooth model.
+    for (const ins of instructions) {
+      if (ins.type === 'ipr_value') {
+        throw new BadRequestException(
+          'IPR / stripping is no longer stored on tooth instructions. ' +
+            'Use PUT /treatment-plans/:planId/iprs instead.',
+        );
+      }
+    }
 
     this.ensureUniqueToothInstructions(instructions);
 
@@ -384,7 +399,7 @@ export class OrderService {
       // Row-level lock on the parent order. Two concurrent calls for
       // the same orderId serialise here, eliminating the delete +
       // createMany race that otherwise throws P2002.
-      await tx.$queryRaw`SELECT id FROM "DentalOrder" WHERE id = ${id}::uuid FOR UPDATE`;
+      await tx.$queryRaw`SELECT id FROM "DentalOrder" WHERE id = ${id} FOR UPDATE`;
 
       await tx.orderToothInstruction.deleteMany({ where: { orderId: id } });
       if (uniqueInstructions.length > 0) {

@@ -204,6 +204,7 @@ model User {
   designerOrders      DentalOrder[]      @relation("OrderDesigner")
   createdTreatmentPlans TreatmentPlan[]  @relation("TreatmentPlanCreator")
   createdToothInstructions OrderToothInstruction[] @relation("ToothInstructionCreator")
+  createdTreatmentPlanIprs TreatmentPlanIpr[] @relation("TreatmentPlanIprCreator")
   sentTreatmentMessages TreatmentMessage[]
   uploadedTreatmentAttachments TreatmentMessageAttachment[]
   createdQuotations    Quotation[]       @relation("QuotationCreatedBy")
@@ -397,12 +398,77 @@ model TreatmentPlan {
   order                       DentalOrder         @relation(fields: [orderId], references: [id], onDelete: Cascade)
   createdBy                   User                @relation("TreatmentPlanCreator", fields: [createdById], references: [id], onDelete: Cascade)
   messages                    TreatmentMessage[]
+  // Treatment-level IPR / stripping entries — between-tooth contacts.
+  // Lives in its own table so it can't collide with the doctor's
+  // order-level OrderToothInstruction rows (those are anchored on a
+  // single tooth, IPR is between two). See the TreatmentPlanIpr model
+  // below for the contract.
+  iprEntries                  TreatmentPlanIpr[]
 
   @@unique([orderId, version])
   @@index([orderId])
   @@index([status])
   @@index([publicToken])
   @@index([deletedAt])
+}
+
+/**
+ * Treatment-level IPR (Inter-Proximal Reduction) / stripping entry.
+ *
+ * Architectural reason this exists as a SEPARATE table instead of being
+ * folded into OrderToothInstruction:
+ *
+ *   • OrderToothInstruction stores per-TOOTH facts the doctor wrote on
+ *     the order (no_attachments, do_not_move, no_ipr, extract) plus the
+ *     planner's per-tooth attachment marker. Its unique constraint
+ *     (orderId, toothNumber, type) reflects that one-tooth identity.
+ *
+ *   • IPR is INHERENTLY a CONTACT property — it exists between two
+ *     adjacent teeth and carries a measurement (mm) plus an optional
+ *     stripping auxiliary value. Pretending it lives on one tooth
+ *     caused: (a) the legacy single-tooth model was confusing to the
+ *     dental team, (b) the unique constraint kept conflicting with the
+ *     four order-level types under concurrent writes (P2002).
+ *
+ * The new model is keyed by (treatmentPlanId, fromTooth, toTooth).
+ * Writes flow through `prisma.treatmentPlanIpr.upsert`, so re-saving
+ * the same contact is idempotent — no createMany, no race, no P2002.
+ *
+ * The data is scoped to the TREATMENT PLAN (not the order) so each
+ * plan version owns its own IPR map. A new plan starts with no IPR
+ * unless the planner duplicates from the previous version explicitly.
+ */
+model TreatmentPlanIpr {
+  id              String        @id @default(uuid())
+  treatmentPlanId String
+
+  // FDI tooth numbers identifying the contact. The render order in the
+  // odontogram uses the within-half "previous → current" convention
+  // (11→12, 21→22, 41→42, 31→32, …). For the two midline contacts the
+  // canonical pairs are (11, 21) upper and (41, 31) lower.
+  fromTooth       Int
+  toTooth         Int
+
+  // IPR amount in mm. Stored as a string so trailing zeros (`"0.20"`)
+  // round-trip exactly through forms — the dental team expects to see
+  // their input back unchanged.
+  value           String
+
+  // Optional auxiliary value the dental team calls "stripping" — its
+  // semantics vary by clinic (aligner step #, side, raw count). Free
+  // text so we don't lock the protocol prematurely.
+  note            String?
+
+  createdById     String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  treatmentPlan   TreatmentPlan @relation(fields: [treatmentPlanId], references: [id], onDelete: Cascade)
+  createdBy       User?         @relation("TreatmentPlanIprCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  // Per-plan uniqueness on the contact-point — duplicate writes upsert.
+  @@unique([treatmentPlanId, fromTooth, toTooth])
+  @@index([treatmentPlanId])
 }
 
 model TreatmentMessage {

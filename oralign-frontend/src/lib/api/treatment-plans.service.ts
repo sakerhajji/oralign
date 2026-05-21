@@ -3,8 +3,10 @@ import type {
   PublicTreatmentViewerPayload,
   TreatmentMessage,
   TreatmentPlan,
+  TreatmentPlanIpr,
   TreatmentPlanReview,
   TreatmentAttachmentCategory,
+  UpsertTreatmentPlanIprDto,
 } from '@/lib/types';
 
 export const treatmentPlansService = {
@@ -199,5 +201,40 @@ export const treatmentPlansService = {
       throw new Error(`Public viewer fetch failed: HTTP ${res.status}`);
     }
     return (await res.json()) as PublicTreatmentViewerPayload;
+  },
+
+  // ─── IPR / stripping (per treatment plan) ───────────────────────────
+  // Separate from the order's tooth instructions because IPR is a
+  // between-tooth CONTACT property — its own table, its own endpoints.
+  // Writes go through PUT (upsert) so re-saving the same contact never
+  // throws P2002.
+
+  listIpr: async (planId: string): Promise<TreatmentPlanIpr[]> => {
+    const res = await apiClient.get<TreatmentPlanIpr[]>(
+      `/treatment-plans/${planId}/iprs`,
+    );
+    return res.data;
+  },
+
+  upsertIpr: async (
+    planId: string,
+    dto: UpsertTreatmentPlanIprDto,
+  ): Promise<TreatmentPlanIpr> => {
+    const res = await apiClient.put<TreatmentPlanIpr>(
+      `/treatment-plans/${planId}/iprs`,
+      dto,
+    );
+    return res.data;
+  },
+
+  removeIpr: async (
+    planId: string,
+    fromTooth: number,
+    toTooth: number,
+  ): Promise<{ deleted: boolean }> => {
+    const res = await apiClient.delete<{ deleted: boolean }>(
+      `/treatment-plans/${planId}/iprs/${fromTooth}/${toTooth}`,
+    );
+    return res.data;
   },
 };

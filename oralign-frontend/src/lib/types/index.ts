@@ -186,9 +186,35 @@ export interface OdontogramEntry {
   createdAt: string;
 }
 
+export interface TreatmentPlanIpr {
+  id: string;
+  treatmentPlanId: string;
+  /** FDI tooth number of the "from" side of the contact. */
+  fromTooth: number;
+  /** FDI tooth number of the "to" side of the contact. */
+  toTooth: number;
+  /** IPR amount in mm, stored as a string to preserve trailing zeros. */
+  value: string;
+  /** Optional clinic-specific stripping auxiliary value. */
+  note?: string | null;
+  createdById?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpsertTreatmentPlanIprDto {
+  fromTooth: number;
+  toTooth: number;
+  value: string;
+  note?: string | null;
+}
+
 export interface TreatmentPlanReview extends TreatmentPlan {
   odontogram: Array<{ toothNumber: number; entries: OdontogramEntry[] }>;
   messages: TreatmentMessage[];
+  clinicalImages: OrderFile[];
+  /** IPR / stripping entries owned by THIS treatment plan version. */
+  iprEntries: TreatmentPlanIpr[];
 }
 
 export interface PublicTreatmentViewerPayload {

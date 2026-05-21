@@ -59,6 +59,16 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     return this.prisma.treatmentMessageAttachment;
   }
 
+  /**
+   * Per-treatment-plan IPR / stripping entries. Sits in its own table
+   * rather than in OrderToothInstruction so write-races between the
+   * doctor's order-level instructions and the planner's IPR are
+   * structurally impossible (each table has its own unique key).
+   */
+  get treatmentPlanIpr() {
+    return this.prisma.treatmentPlanIpr;
+  }
+
   // ─── Quotation / Devis models ────────────────────────────────────────────
 
   get quotation() {

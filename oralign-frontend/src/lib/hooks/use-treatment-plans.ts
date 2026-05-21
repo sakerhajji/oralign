@@ -14,7 +14,9 @@ import type {
   TreatmentAttachmentCategory,
   TreatmentMessage,
   TreatmentPlan,
+  TreatmentPlanIpr,
   TreatmentPlanReview,
+  UpsertTreatmentPlanIprDto,
 } from '@/lib/types';
 
 export const treatmentPlanKeys = {
@@ -244,6 +246,81 @@ export function useGeneratePublicLink(): UseMutationResult<
     onSuccess: (plan) => {
       invalidatePlan(queryClient, plan);
       toast.success('Public viewer link generated.');
+    },
+    onError: (err) => toast.error(extractApiErrorMessage(err)),
+  });
+}
+
+// ─── IPR / stripping (per treatment plan) ─────────────────────────────
+// Dedicated hooks for the new TreatmentPlanIpr table. Reads come back
+// via the parent useTreatmentPlanReview payload (review.iprEntries), so
+// these hooks focus on writes. Each mutation invalidates the review so
+// the odontogram re-renders with the fresh list.
+
+export const treatmentPlanIprKeys = {
+  all: ['treatment-plan-ipr'] as const,
+  list: (planId: string) =>
+    [...treatmentPlanIprKeys.all, 'list', planId] as const,
+};
+
+/**
+ * Optional standalone read — most callers should use the iprEntries
+ * field on `useTreatmentPlanReview()` to avoid double-fetching.
+ */
+export function useTreatmentPlanIprList(
+  planId: string,
+): UseQueryResult<TreatmentPlanIpr[], Error> {
+  return useQuery({
+    queryKey: treatmentPlanIprKeys.list(planId),
+    queryFn: () => treatmentPlansService.listIpr(planId),
+    enabled: !!planId,
+    staleTime: 30_000,
+  });
+}
+
+/**
+ * Upsert one IPR contact (fromTooth, toTooth, value, optional note).
+ * Idempotent on the backend — re-running with the same pair updates
+ * the existing row instead of inserting a duplicate. No P2002.
+ */
+export function useUpsertTreatmentPlanIpr(
+  planId: string,
+): UseMutationResult<TreatmentPlanIpr, Error, UpsertTreatmentPlanIprDto> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (dto) => treatmentPlansService.upsertIpr(planId, dto),
+    onSuccess: () => {
+      // Invalidate both the standalone list and the review payload
+      // (which embeds iprEntries) so every consumer sees the new row.
+      queryClient.invalidateQueries({
+        queryKey: treatmentPlanIprKeys.list(planId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: treatmentPlanKeys.review(planId),
+      });
+    },
+    onError: (err) => toast.error(extractApiErrorMessage(err)),
+  });
+}
+
+export function useRemoveTreatmentPlanIpr(
+  planId: string,
+): UseMutationResult<
+  { deleted: boolean },
+  Error,
+  { fromTooth: number; toTooth: number }
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ fromTooth, toTooth }) =>
+      treatmentPlansService.removeIpr(planId, fromTooth, toTooth),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: treatmentPlanIprKeys.list(planId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: treatmentPlanKeys.review(planId),
+      });
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });

@@ -48,7 +48,7 @@ export class ToothInstructionDto {
   })
   @IsOptional()
   @IsString()
-  value?: string;
+  value?: string | null;
 
   @ApiProperty({
     required: false,
@@ -56,7 +56,7 @@ export class ToothInstructionDto {
   })
   @IsOptional()
   @IsString()
-  note?: string;
+  note?: string | null;
 }
 
 export class UpdateToothInstructionsDto {

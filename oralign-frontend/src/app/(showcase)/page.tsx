@@ -39,7 +39,6 @@ export default function ShowcaseHomePage() {
     <>
       <Hero />
       <RibbonMarquee />
-      <IndicationsDetail />
       <ConfidenceSection />
       <SolutionSection />
       <HowItWorks />

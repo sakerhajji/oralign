@@ -9,6 +9,7 @@ import {
   Min,
 } from 'class-validator';
 import {
+  OrderFileCategory,
   TreatmentPlanStatus,
   TreatmentMessageType,
   TreatmentAttachmentCategory,
@@ -141,6 +142,17 @@ export class TreatmentMessageResponseDto {
   @ApiProperty() createdAt!: Date;
 }
 
+export class TreatmentReviewClinicalImageDto {
+  @ApiProperty() id!: string;
+  @ApiProperty({ enum: OrderFileCategory }) category!: OrderFileCategory;
+  @ApiProperty() originalName!: string;
+  @ApiProperty() fileName!: string;
+  @ApiProperty() relativePath!: string;
+  @ApiProperty() mimeType!: string;
+  @ApiProperty() size!: number;
+  @ApiProperty() createdAt!: Date;
+}
+
 export class TreatmentPlanReviewDto extends TreatmentPlanResponseDto {
   @ApiProperty({
     description:
@@ -160,4 +172,7 @@ export class TreatmentPlanReviewDto extends TreatmentPlanResponseDto {
 
   @ApiProperty({ type: [TreatmentMessageResponseDto] })
   messages!: TreatmentMessageResponseDto[];
+
+  @ApiProperty({ type: [TreatmentReviewClinicalImageDto] })
+  clinicalImages!: TreatmentReviewClinicalImageDto[];
 }

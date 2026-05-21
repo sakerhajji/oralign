@@ -18,6 +18,7 @@ import {
   ApiBearerAuth,
   ApiBody,
   ApiConsumes,
+  ApiOkResponse,
   ApiOperation,
   ApiParam,
   ApiTags,
@@ -29,6 +30,7 @@ import { TreatmentPlanService } from '../services/treatment-plan.service';
 import {
   CreatePublicLinkDto,
   CreateTreatmentPlanDto,
+  TreatmentPlanReviewDto,
   UpdateResultViewUrlDto,
   UpdateTreatmentPlanDto,
 } from '../dto/treatment-plan.dto';
@@ -107,9 +109,10 @@ export class TreatmentPlanController {
   @ApiOperation({
     summary:
       'Get the full review payload for a Treatment Plan — plan + grouped ' +
-      'odontogram + conversation messages.',
+      'odontogram + conversation messages + clinical images.',
   })
   @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ type: TreatmentPlanReviewDto })
   async getReview(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.service.getReview(id, {
       userId: user.sub,

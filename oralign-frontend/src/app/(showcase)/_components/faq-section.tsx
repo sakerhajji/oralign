@@ -51,20 +51,29 @@ export function FaqSection() {
           <Tabs defaultValue="patient" className="mt-12 gap-10">
             {/* Pill-style segmented control — rounded-full outer track with
                 rounded-full triggers inside. Active state uses a Midnight
-                Ink pill that "snaps" into place. */}
+                Ink pill that "snaps" into place.
+
+                IMPORTANT: do NOT use variant="line" here. The line variant
+                forces `data-active:bg-transparent` + a bottom underline,
+                which fights with our custom pill design — the active text
+                ends up white on a transparent surface (invisible against
+                the page background) and a stray underline shows through.
+                The default variant lets our pill classes win cleanly. We
+                also use `!` modifiers on the background + text so the
+                base Tabs default-active styles can't shadow ours through
+                Tailwind class-order ambiguity. */}
             <TabsList
-              className="mx-auto grid h-auto w-full max-w-[440px] grid-cols-2 gap-1 rounded-full border border-[var(--sc-grey)] bg-[var(--sc-white)] p-1.5 shadow-[0_1px_0_rgba(25,25,25,0.04)]"
-              variant="line"
+              className="mx-auto !grid h-auto w-full max-w-[440px] grid-cols-2 gap-1 rounded-full border border-[var(--sc-grey)] !bg-[var(--sc-white)] p-1.5 shadow-[0_1px_0_rgba(25,25,25,0.04)]"
             >
               <TabsTrigger
                 value="patient"
-                className="h-11 rounded-full border-0 px-5 text-sm font-medium tracking-wide text-[var(--sc-text-mid)] transition-all duration-300 data-active:bg-[var(--sc-black)] data-active:text-[var(--sc-white)] data-active:shadow-sm data-active:after:opacity-0"
+                className="h-11 rounded-full border-0 px-5 text-sm font-medium tracking-wide text-[var(--sc-text-mid)] transition-all duration-300 data-active:!bg-[var(--sc-black)] data-active:!text-[var(--sc-white)] data-active:shadow-sm"
               >
                 {dict.faq.tabPatient[lang]}
               </TabsTrigger>
               <TabsTrigger
                 value="practitioner"
-                className="h-11 rounded-full border-0 px-5 text-sm font-medium tracking-wide text-[var(--sc-text-mid)] transition-all duration-300 data-active:bg-[var(--sc-black)] data-active:text-[var(--sc-white)] data-active:shadow-sm data-active:after:opacity-0"
+                className="h-11 rounded-full border-0 px-5 text-sm font-medium tracking-wide text-[var(--sc-text-mid)] transition-all duration-300 data-active:!bg-[var(--sc-black)] data-active:!text-[var(--sc-white)] data-active:shadow-sm"
               >
                 {dict.faq.tabPractitioner[lang]}
               </TabsTrigger>

@@ -63,17 +63,23 @@ export function FaqSection() {
                 base Tabs default-active styles can't shadow ours through
                 Tailwind class-order ambiguity. */}
             <TabsList
-              className="mx-auto !grid h-auto w-full max-w-[440px] grid-cols-2 gap-1 rounded-full border border-[var(--sc-grey)] !bg-[var(--sc-white)] p-1.5 shadow-[0_1px_0_rgba(25,25,25,0.04)]"
+              className="mx-auto !grid h-auto w-full max-w-[440px] grid-cols-2 gap-1 !rounded-full border border-[var(--sc-grey)] !bg-[var(--sc-white)] p-1.5 shadow-[0_1px_0_rgba(25,25,25,0.04)]"
             >
+              {/* `!rounded-full` overrides the base TabsTrigger's
+                  `rounded-md` so the active pill stays fully rounded
+                  end-to-end. `after:!hidden` removes the underline
+                  pseudo-element baked into the base Tabs CSS (it was
+                  drawing a black line under the active tab even with
+                  variant="line" removed). */}
               <TabsTrigger
                 value="patient"
-                className="h-11 rounded-full border-0 px-5 text-sm font-medium tracking-wide text-[var(--sc-text-mid)] transition-all duration-300 data-active:!bg-[var(--sc-black)] data-active:!text-[var(--sc-white)] data-active:shadow-sm"
+                className="relative h-11 !rounded-full border-0 px-5 text-sm font-medium tracking-wide text-[var(--sc-text-mid)] transition-all duration-300 after:!hidden data-active:!bg-[var(--sc-black)] data-active:!text-[var(--sc-white)] data-active:shadow-sm"
               >
                 {dict.faq.tabPatient[lang]}
               </TabsTrigger>
               <TabsTrigger
                 value="practitioner"
-                className="h-11 rounded-full border-0 px-5 text-sm font-medium tracking-wide text-[var(--sc-text-mid)] transition-all duration-300 data-active:!bg-[var(--sc-black)] data-active:!text-[var(--sc-white)] data-active:shadow-sm"
+                className="relative h-11 !rounded-full border-0 px-5 text-sm font-medium tracking-wide text-[var(--sc-text-mid)] transition-all duration-300 after:!hidden data-active:!bg-[var(--sc-black)] data-active:!text-[var(--sc-white)] data-active:shadow-sm"
               >
                 {dict.faq.tabPractitioner[lang]}
               </TabsTrigger>

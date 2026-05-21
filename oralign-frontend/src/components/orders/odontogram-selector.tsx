@@ -548,8 +548,12 @@ function Arch({
   const midline = MIDLINE_ANCHOR[row];
   const midlineValue = iprValues?.get(midline);
   const midlineNote = iprNotes?.get(midline);
+  // Render the midline slot if it has EITHER an IPR mm value OR a
+  // stripping note — previously only checked the mm side, so a
+  // stripping-only entry was invisible across the midline.
   const midlineShouldRender =
-    showEmptyPlaceholders || (showFilledSlots && !!midlineValue);
+    showEmptyPlaceholders ||
+    (showFilledSlots && (!!midlineValue || !!midlineNote));
   // Tooth that sits on the left side of the midline slot — last entry
   // of the "left half" array (e.g. 11 for upper, 41 for lower).
   const midlineLeftNeighbour = left[left.length - 1];
@@ -567,9 +571,13 @@ function Arch({
           idx < teeth.length - 1 ? iprValues?.get(next) : undefined;
         const slotNote =
           idx < teeth.length - 1 ? iprNotes?.get(next) : undefined;
+        // Render a non-midline slot when either field is populated —
+        // mirrors the midlineShouldRender check above so a stripping-
+        // only entry on any contact stays visible.
         const slotShouldRender =
           idx < teeth.length - 1 &&
-          (showEmptyPlaceholders || (showFilledSlots && !!slotValue));
+          (showEmptyPlaceholders ||
+            (showFilledSlots && (!!slotValue || !!slotNote)));
         return (
           <Fragment key={n}>
             <ToothButton
@@ -804,22 +812,37 @@ const IprSlot = memo(function IprSlot({
       className={cn(
         'odo-ipr',
         row === 'upper' ? 'odo-ipr-upper' : 'odo-ipr-lower',
-        hasValue && 'odo-ipr-on',
+        // Slot has CONTENT (either an IPR mm value OR a stripping note,
+        // or both) → use the filled-purple-bar style so it's visually
+        // distinct from an empty placeholder slot.
+        (hasValue || hasNote) && 'odo-ipr-on',
         readOnly && 'odo-ipr-readonly',
       )}
-      title={
-        readOnly
-          ? `IPR ${value} mm · ${contactLabel}${hasNote ? ` · stripping ${note}` : ''}`
-          : hasValue
-            ? `IPR ${value} mm · ${contactLabel}${hasNote ? ` · stripping ${note}` : ''}`
-            : `Click to add IPR ${contactLabel}`
-      }
+      title={(() => {
+        if (readOnly && (hasValue || hasNote)) {
+          const parts: string[] = [];
+          if (hasValue) parts.push(`IPR ${value} mm`);
+          if (hasNote) parts.push(`stripping ${note}`);
+          return `${parts.join(' · ')} · ${contactLabel}`;
+        }
+        if (hasValue || hasNote) {
+          const parts: string[] = [];
+          if (hasValue) parts.push(`IPR ${value} mm`);
+          if (hasNote) parts.push(`stripping ${note}`);
+          return `Edit ${parts.join(' · ')} — ${contactLabel}`;
+        }
+        return `Click to add IPR ${contactLabel}`;
+      })()}
     >
       <span className="odo-ipr-bar" aria-hidden />
-      {hasValue && (
+      {/* Render the label whenever EITHER the IPR mm or the stripping
+          note is set. The previous gate (only `hasValue`) hid the
+          stripping pill when the planner entered just a stripping
+          number with no mm reduction. */}
+      {(hasValue || hasNote) && (
         <span className="odo-ipr-label">
           {hasNote && <span className="odo-ipr-note">{note}</span>}
-          <span className="odo-ipr-value">{value}</span>
+          {hasValue && <span className="odo-ipr-value">{value}</span>}
         </span>
       )}
     </button>

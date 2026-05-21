@@ -773,15 +773,49 @@ function MovementTableSection({
         )}
       </CardHeader>
       <CardContent className="space-y-6">
-        {/* ── 2a · Interactive odontogram in 'attachments' mode.
-                  • Tooth picker collapses to a single attachment colour —
-                    the planner just marks which teeth carry an attachment.
-                  • IPR layer is ALWAYS displayed (so the doctor sees the
-                    purple bars between teeth regardless of editor mode);
-                    edits are gated by canEdit + per-tooth IPR mode.
-                  • Stripping notes are wired through iprNotes /
-                    onIprNoteChange — the IPR popover surfaces a second
-                    input only when the setter is present. */}
+        {/* ── 2a · Reference: doctor's per-tooth instructions ───────
+            A separate, READ-ONLY odontogram that mirrors what the
+            doctor entered on the order itself. Lets the planner see
+            the doctor's prescriptions (no-attachments / do-not-move /
+            no-ipr / extract) WITHOUT them being editable from this
+            surface. Only renders when at least one such instruction
+            exists — saves vertical space on plain orders. */}
+        {orderColors.length > 0 && (
+          <div className="rounded-2xl border bg-muted/20 p-3 sm:p-4">
+            <div className="mb-2 flex items-center gap-2">
+              <span className="inline-block h-2 w-2 rounded-full bg-primary/70" />
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Doctor's per-tooth instructions
+              </p>
+              <span className="ml-2 text-[11px] text-muted-foreground">
+                (read-only — set on the order)
+              </span>
+            </div>
+            <OdontogramSelector
+              // movement mode shows the 4 doctor colours and hides
+              // the pink attachment swatch.
+              mode="movement"
+              // Pass the doctor's instructions as `value` so they
+              // render — but no onChange handler so React Hook Form
+              // pattern is purely display.
+              value={orderColors}
+              onChange={() => undefined}
+              // disabled removes the click affordance on every tooth
+              // button, so the picker popover never opens. The
+              // odontogram becomes a pure visualisation.
+              disabled
+              title=" "
+              subtitle="The four colours below reflect what the doctor specified when creating the order. Reference only."
+            />
+          </div>
+        )}
+
+        {/* ── 2b · Editable: attachments + IPR planning ────────────
+            The planner's own surface — pink attachment swatch only,
+            plus an editable IPR layer with stripping note support.
+            Doctor's order colours never appear here; we round-trip
+            them via persistInstructions but they're invisible to the
+            planner's eye and untouchable from the picker. */}
         <OdontogramSelector
           mode="attachments"
           value={colorInstructions}
@@ -789,7 +823,8 @@ function MovementTableSection({
           disabled={!canEdit || updateInstructions.isPending}
           iprValues={iprMap}
           iprNotes={iprNotes}
-          // Combined IPR commit — receives `{ value, note }` in one call.
+          // Combined IPR commit — receives `{ value, note }` in one
+          // call. Stripping input is shown because iprNotes is wired.
           onIprChange={
             iprMode === 'per-tooth' && canEdit ? handleIprChange : undefined
           }

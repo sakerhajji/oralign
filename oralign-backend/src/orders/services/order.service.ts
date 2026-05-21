@@ -816,7 +816,16 @@ export class OrderService {
       useCbctWithScans: order.useCbctWithScans,
       wantsManufacturing: order.wantsManufacturing,
       materials: order.materials,
-      toothInstructions: order.toothInstructions,
+      // Prisma returns nullable columns as `null`, but ToothInstructionDto
+      // declares `value?: string` / `note?: string` (i.e. undefined, not
+      // null). Coerce here so the DTO shape stays clean and the strict
+      // build doesn't reject the assignment.
+      toothInstructions: order.toothInstructions.map((i) => ({
+        toothNumber: i.toothNumber,
+        type: i.type,
+        value: i.value ?? undefined,
+        note: i.note ?? undefined,
+      })),
       files: order.files.map((file) => this.mapFileToDto(file)),
       doctor: order.doctor,
       patient: {

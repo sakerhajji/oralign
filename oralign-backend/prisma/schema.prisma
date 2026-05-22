@@ -393,6 +393,17 @@ model TreatmentPlan {
   movementTableImageMimeType  String?
   movementTableImageSizeBytes Int?
 
+  // ── Dental treatment table (a.k.a. "Traitement dentaire") ───────────
+  // Second image artefact the planner attaches alongside the movement
+  // table. Holds the per-tooth restorative / endo / extraction plan —
+  // a separate clinical document from the orthodontic movement table
+  // above. Same upload contract (PNG / JPEG / WebP, ≤10 MB); kept in
+  // its own four columns so neither image overwrites the other.
+  dentalTreatmentTableImagePath      String?
+  dentalTreatmentTableImageName      String?
+  dentalTreatmentTableImageMimeType  String?
+  dentalTreatmentTableImageSizeBytes Int?
+
   totalUpperAligners          Int?
   totalLowerAligners          Int?
   issuedUpperAligners         Int?

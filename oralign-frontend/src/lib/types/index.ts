@@ -137,6 +137,14 @@ export interface TreatmentPlan {
   movementTableImageName?: string | null;
   movementTableImageMimeType?: string | null;
   movementTableImageSizeBytes?: number | null;
+  // Dental treatment table ("traitement dentaire") — second image
+  // artefact, distinct from the movement table above. Stored in
+  // its own columns + on-disk folder so neither image can overwrite
+  // the other.
+  dentalTreatmentTableImagePath?: string | null;
+  dentalTreatmentTableImageName?: string | null;
+  dentalTreatmentTableImageMimeType?: string | null;
+  dentalTreatmentTableImageSizeBytes?: number | null;
   totalUpperAligners?: number | null;
   totalLowerAligners?: number | null;
   issuedUpperAligners?: number | null;

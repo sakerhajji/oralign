@@ -32,6 +32,7 @@ import { ordersService } from '@/lib/api/orders.service';
 import { treatmentPlansService } from '@/lib/api/treatment-plans.service';
 import {
   useApproveTreatmentPlan,
+  useDeleteDentalTreatmentTableImage,
   useDeleteMovementTableImage,
   useGeneratePublicLink,
   useMarkTreatmentPlanReady,
@@ -39,6 +40,7 @@ import {
   useRemoveTreatmentPlanIpr,
   useTreatmentPlanReview,
   useUpdateResultViewUrl,
+  useUploadDentalTreatmentTableImage,
   useUploadMovementTableImage,
   useUpsertTreatmentPlanIpr,
 } from '@/lib/hooks/use-treatment-plans';
@@ -87,6 +89,29 @@ import {
   stripViewerHash,
   withViewerHash,
 } from '@/lib/viewer/smart-shell';
+
+const parseDentalNumber = (raw?: string | null): number | null => {
+  if (!raw) return null;
+  const normalized = raw.trim().replace(',', '.');
+  if (!/^\d+(\.\d+)?$/.test(normalized)) return null;
+  const value = Number(normalized);
+  return Number.isFinite(value) ? value : null;
+};
+
+const isLikelyLegacySwappedIpr = (
+  value?: string | null,
+  note?: string | null,
+): boolean => {
+  const valueNumber = parseDentalNumber(value);
+  const noteNumber = parseDentalNumber(note);
+  return (
+    valueNumber !== null &&
+    noteNumber !== null &&
+    valueNumber > 2 &&
+    noteNumber >= 0 &&
+    noteNumber <= 2
+  );
+};
 
 interface Props {
   treatmentPlanId: string;
@@ -165,6 +190,15 @@ export function TreatmentPlanReview({
       <TreatmentViewerCard review={review} canEdit={isPlanner} isDoctor={isDoctor} />
 
       <MovementTableSection
+        review={review}
+        canEdit={isPlanner}
+        treatmentPlanId={treatmentPlanId}
+      />
+
+      {/* New clinical artefact, placed AFTER the Treatment odontogram
+          (which lives inside MovementTableSection) per the clinical
+          team's layout request. */}
+      <DentalTreatmentTableSection
         review={review}
         canEdit={isPlanner}
         treatmentPlanId={treatmentPlanId}
@@ -613,8 +647,8 @@ type IprMode = 'per-tooth' | 'image';
 //      shows in `mode="attachments"`.
 //
 // Keep these disjoint — a tooth that has BOTH a doctor flag AND a
-// planner attachment is rendered with the doctor colour as the fill
-// and a small pink corner dot overlay (see OdontogramSelector).
+// planner attachment is rendered pink on this treatment surface, with
+// the doctor colour retained as a small reference marker.
 const DOCTOR_ORDER_COLOR_TYPES = new Set<string>([
   ToothInstructionType.NO_ATTACHMENTS,
   ToothInstructionType.DO_NOT_MOVE,
@@ -713,7 +747,7 @@ function MovementTableSection({
   const upload = useUploadMovementTableImage();
   const remove = useDeleteMovementTableImage();
   const updateInstructions = useUpdateToothInstructions();
-  // IPR / stripping lives in its own table now. Each contact upsert
+  // IPR / STEP lives in its own table now. Each contact upsert
   // is one round-trip — no race with the tooth-instructions endpoint,
   // no P2002 collisions.
   const upsertIpr = useUpsertTreatmentPlanIpr(treatmentPlanId);
@@ -773,7 +807,7 @@ function MovementTableSection({
   //       other type from here.
   //
   //     • iprMap / iprNotes — per-CONTACT IPR mm value + optional
-  //       stripping note, keyed by the right-anchor tooth number to
+  //       STEP value, keyed by the right-anchor tooth number to
   //       match the OdontogramSelector's render contract. Sourced
   //       from the dedicated TreatmentPlanIpr table via the new
   //       `review.iprEntries` field, written via upsertIpr / removeIpr.
@@ -801,6 +835,11 @@ function MovementTableSection({
     for (const row of review.iprEntries ?? []) {
       // Key by toTooth (right anchor) — matches what
       // OdontogramSelector expects in `iprValues` / `iprNotes`.
+      if (isLikelyLegacySwappedIpr(row.value, row.note)) {
+        ipr.set(row.toTooth, row.note as string);
+        notes.set(row.toTooth, row.value);
+        continue;
+      }
       if (row.value) ipr.set(row.toTooth, row.value);
       if (row.note) notes.set(row.toTooth, row.note);
     }
@@ -859,7 +898,7 @@ function MovementTableSection({
   };
 
   /**
-   * IPR / stripping commit — runs via the dedicated upsertIpr mutation
+   * IPR / STEP commit — runs via the dedicated upsertIpr mutation
    * (a single PUT under /treatment-plans/:id/iprs). The backend uses
    * `prisma.treatmentPlanIpr.upsert` keyed on (planId, fromTooth,
    * toTooth) so re-saving the same contact updates the row in place.
@@ -882,9 +921,9 @@ function MovementTableSection({
       return;
     }
     if (!trimmedValue) {
-      // Stripping note without an IPR mm — the backend requires a
+      // STEP without an IPR mm — the backend requires a
       // value, so use '0' as a sentinel meaning "no reduction, just
-      // a stripping marker". The UI renders the note pill regardless.
+      // a staged contact marker". The UI renders the STEP pill regardless.
       upsertIpr.mutate({
         fromTooth,
         toTooth,
@@ -927,9 +966,9 @@ function MovementTableSection({
           //    (No Attachments / Do Not Move / No IPR / Extract)
           //    while placing attachments, without risking accidental
           //    edits. If both layers paint the same tooth, the
-          //    OdontogramSelector renders the doctor colour as the
-          //    fill and shows a small pink corner dot for the
-          //    planner's attachment.
+          //    OdontogramSelector renders the planner attachment as
+          //    the pink fill and keeps the doctor colour as a small
+          //    reference marker.
           readonlyValue={orderColors}
           disabled={
             !canEdit ||
@@ -940,7 +979,7 @@ function MovementTableSection({
           iprValues={iprMap}
           iprNotes={iprNotes}
           // Combined IPR commit — receives `{ value, note }` in one
-          // call. Stripping input is shown because iprNotes is wired.
+          // call. STEP input is shown because iprNotes is wired.
           onIprChange={
             iprMode === 'per-tooth' && canEdit ? handleIprChange : undefined
           }
@@ -956,10 +995,10 @@ function MovementTableSection({
               <Stethoscope className="h-4 w-4" />
             </div>
             <div>
-              <p className="font-semibold">Per-tooth IPR and stripping</p>
+              <p className="font-semibold">Per-tooth IPR and STEP</p>
               <p className="text-purple-900/80">
                 Click the dotted contact between two teeth to add an IPR amount
-                in millimetres. Use the stripping field for the secondary strip
+                in millimetres. Use the STEP field for the aligner step
                 reference; both values save together.
               </p>
             </div>
@@ -1325,6 +1364,224 @@ function IprModeToggle({
     </div>
   );
 }
+// ─── Dental treatment table ("traitement dentaire") ──────────────────────
+//
+// Second image artefact on every treatment plan, distinct from the
+// orthodontic movement table inside `MovementTableSection`. The clinical
+// team uploads a per-tooth restorative / endo / extraction plan as an
+// image — the doctor reads it inline.
+//
+// Surfaced as its own card so the planner + doctor both immediately
+// recognise it as a separate document, not a variant of the movement
+// table. Rendered AFTER the Treatment odontogram per the clinical
+// team's layout request.
+function DentalTreatmentTableSection({
+  review,
+  canEdit,
+  treatmentPlanId,
+}: {
+  review: NonNullable<ReturnType<typeof useTreatmentPlanReview>['data']>;
+  canEdit: boolean;
+  treatmentPlanId: string;
+}) {
+  const upload = useUploadDentalTreatmentTableImage();
+  const remove = useDeleteDentalTreatmentTableImage();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [fullView, setFullView] = useState(false);
+
+  // ?t=updatedAt cache-buster — the URL stays stable across uploads
+  // but the query string changes, so the browser re-fetches the new
+  // bytes instead of serving the previous image from cache.
+  const imageUrl = useMemo(
+    () =>
+      review.dentalTreatmentTableImagePath
+        ? `${treatmentPlansService.dentalTreatmentTableImageUrl(treatmentPlanId)}?t=${review.updatedAt}`
+        : null,
+    [review.dentalTreatmentTableImagePath, review.updatedAt, treatmentPlanId],
+  );
+  // Same authenticated-blob-URL pattern the movement-table section
+  // uses (see useAuthenticatedObjectUrl above) — required because
+  // the GET endpoint is behind the JWT guard.
+  const imageBlob = useAuthenticatedObjectUrl(imageUrl);
+
+  const handlePickFile = (file: File) => {
+    upload.mutate({ id: treatmentPlanId, file });
+  };
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <CardTitle className="flex items-center gap-2">
+          <ImageIcon className="h-4 w-4 text-primary" />
+          Dental treatment table
+          <span className="text-xs font-normal text-muted-foreground">
+            (Traitement dentaire)
+          </span>
+        </CardTitle>
+        {canEdit && imageUrl && (
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={upload.isPending || remove.isPending}
+              className="gap-2"
+            >
+              {upload.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Upload className="h-4 w-4" />
+              )}
+              Replace
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => remove.mutate(treatmentPlanId)}
+              disabled={upload.isPending || remove.isPending}
+              className="gap-2 text-destructive hover:text-destructive"
+            >
+              {remove.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4" />
+              )}
+              Remove
+            </Button>
+          </div>
+        )}
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-sm text-muted-foreground">
+          Per-tooth restorative / endodontic / extraction plan. Separate
+          from the orthodontic movement table above — upload it as an image
+          (PNG, JPG or WebP, max 10 MB) so the doctor sees the full plan
+          alongside the odontogram.
+        </p>
+
+        {imageUrl ? (
+          <div className="overflow-hidden rounded-2xl border bg-card shadow-sm">
+            {imageBlob.loading ? (
+              <div className="flex h-40 items-center justify-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading image…
+              </div>
+            ) : imageBlob.error ? (
+              <div className="flex h-40 items-center justify-center text-sm text-destructive">
+                {imageBlob.error}
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setFullView(true)}
+                className="group block w-full"
+                aria-label="View dental treatment table full size"
+              >
+                {imageBlob.objectUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={imageBlob.objectUrl}
+                    alt="Dental treatment table"
+                    className="max-h-[640px] w-full object-contain transition group-hover:scale-[1.005]"
+                  />
+                )}
+              </button>
+            )}
+            {review.dentalTreatmentTableImageName && (
+              <div className="flex items-center justify-between gap-2 border-t bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                <span className="truncate">
+                  {review.dentalTreatmentTableImageName}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setFullView(true)}
+                  className="flex items-center gap-1 hover:text-foreground"
+                >
+                  <Maximize2 className="h-3 w-3" />
+                  Open full view
+                </button>
+              </div>
+            )}
+          </div>
+        ) : canEdit ? (
+          <div className="rounded-2xl border-2 border-dashed bg-muted/20 p-6">
+            <div className="flex flex-col items-center justify-center gap-3 text-center">
+              <ImageIcon className="h-8 w-8 text-muted-foreground" />
+              <div>
+                <p className="text-sm font-medium">No image uploaded yet</p>
+                <p className="text-xs text-muted-foreground">
+                  Upload the dental treatment table as PNG, JPG or WebP.
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={upload.isPending}
+                className="gap-2"
+              >
+                {upload.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Upload className="h-4 w-4" />
+                )}
+                Upload image
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-2xl border bg-muted/10 p-6 text-center text-sm text-muted-foreground">
+            The dental treatment table will appear here once the planner
+            uploads it.
+          </div>
+        )}
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          className="sr-only"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) handlePickFile(file);
+            e.currentTarget.value = '';
+          }}
+        />
+      </CardContent>
+
+      {/* Full-screen viewer — escape closes, click outside closes. */}
+      <Dialog open={fullView} onOpenChange={setFullView}>
+        <DialogContent
+          showCloseButton={false}
+          className="h-[92dvh] w-[min(96vw,1280px)] max-w-none overflow-hidden bg-black/90 p-0 sm:max-w-none"
+        >
+          <DialogTitle className="sr-only">
+            Dental treatment table — full view
+          </DialogTitle>
+          <button
+            type="button"
+            onClick={() => setFullView(false)}
+            aria-label="Close full view"
+            className="absolute right-3 top-3 z-10 rounded-md bg-black/40 p-2 text-white hover:bg-black/60"
+          >
+            <X className="h-4 w-4" />
+          </button>
+          {imageBlob.objectUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={imageBlob.objectUrl}
+              alt="Dental treatment table — full view"
+              className="h-full w-full object-contain"
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+    </Card>
+  );
+}
+
 // ─── Approve / Reject ──────────────────────────────────────────────────────
 // Visually elevated to a "decision card" because the doctor lands on this
 // page specifically to make this call. Amber border + "Action required"

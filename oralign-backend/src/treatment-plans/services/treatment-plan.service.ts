@@ -283,6 +283,13 @@ export class TreatmentPlanService {
         movementTableImageName: true,
         movementTableImageMimeType: true,
         movementTableImageSizeBytes: true,
+        // Dental treatment table — carries forward on the resend path
+        // below so the new version inherits the planner's previous
+        // restorative document.
+        dentalTreatmentTableImagePath: true,
+        dentalTreatmentTableImageName: true,
+        dentalTreatmentTableImageMimeType: true,
+        dentalTreatmentTableImageSizeBytes: true,
       },
     });
     if (!plan) throw new NotFoundException('Treatment plan not found.');
@@ -342,6 +349,16 @@ export class TreatmentPlanService {
             movementTableImageName: plan.movementTableImageName,
             movementTableImageMimeType: plan.movementTableImageMimeType,
             movementTableImageSizeBytes: plan.movementTableImageSizeBytes,
+            // Carry the dental treatment table forward too — same
+            // reasoning as the movement table just above.
+            dentalTreatmentTableImagePath:
+              plan.dentalTreatmentTableImagePath,
+            dentalTreatmentTableImageName:
+              plan.dentalTreatmentTableImageName,
+            dentalTreatmentTableImageMimeType:
+              plan.dentalTreatmentTableImageMimeType,
+            dentalTreatmentTableImageSizeBytes:
+              plan.dentalTreatmentTableImageSizeBytes,
             createdById: caller.userId,
           },
         });
@@ -627,6 +644,124 @@ export class TreatmentPlanService {
       stream: fs.createReadStream(absPath),
       mimeType: plan.movementTableImageMimeType ?? 'application/octet-stream',
       fileName: plan.movementTableImageName ?? 'movement-table',
+    };
+  }
+
+  // ─── Dental treatment table image ("traitement dentaire") ────────────────
+  //
+  // Mirrors uploadMovementTableImage / deleteMovementTableImage /
+  // getMovementTableImageStream above. Kept as separate methods rather
+  // than a generic helper because:
+  //
+  //   1. The columns on TreatmentPlan are distinct strings (Prisma can't
+  //      address a column by computed name), so a "generic" version
+  //      would still need switch-case branches for path / name / mime /
+  //      size — no real DRY win.
+  //   2. The on-disk folder differs (`/dental-treatment` vs `/movement-
+  //      table`) so the two artefacts can never collide even if a
+  //      planner names them the same.
+  //
+  // The upload contract is identical: PNG / JPEG / WebP, ≤ 10 MB.
+
+  async uploadDentalTreatmentTableImage(
+    id: string,
+    file: Express.Multer.File,
+    caller: Caller,
+  ) {
+    if (!file) throw new BadRequestException('Image file is required.');
+    const allowed = ['image/png', 'image/jpeg', 'image/webp'];
+    if (!allowed.includes(file.mimetype)) {
+      throw new BadRequestException(
+        'Dental treatment table image must be PNG, JPG/JPEG or WebP.',
+      );
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      throw new BadRequestException(
+        'Dental treatment table image must be ≤ 10 MB.',
+      );
+    }
+    const plan = await this.assertCanPlan(id, caller);
+
+    // Storage path: orders/{orderId}/treatment-plans/{planId}/dental-treatment/
+    // Distinct sub-folder from /movement-table so the two image artefacts
+    // never collide even when a planner uploads files with the same name.
+    const relDir = path.posix.join(
+      'orders',
+      plan.orderId,
+      'treatment-plans',
+      id,
+      'dental-treatment',
+    );
+    const absDir = path.join(UPLOAD_ROOT, relDir);
+    await fs.promises.mkdir(absDir, { recursive: true });
+
+    const ext = (path.extname(file.originalname) || '')
+      .toLowerCase()
+      .slice(0, 8);
+    const safeName = `${uuidv4()}${ext}`;
+    const absPath = path.join(absDir, safeName);
+    const relPath = path.posix.join(relDir, safeName);
+
+    await fs.promises.writeFile(absPath, file.buffer);
+
+    // Best-effort cleanup of any previous dental-table image — same
+    // pattern as the movement-table method. Loose-await so a slow
+    // unlink doesn't block the upload's response.
+    const existing = await this.prisma.treatmentPlan.findUnique({
+      where: { id },
+      select: { dentalTreatmentTableImagePath: true },
+    });
+    if (existing?.dentalTreatmentTableImagePath) {
+      void this.safeUnlink(existing.dentalTreatmentTableImagePath).catch(
+        (err) =>
+          this.logger.warn(
+            `Failed to remove old dental treatment table: ${err}`,
+          ),
+      );
+    }
+
+    return this.prisma.treatmentPlan.update({
+      where: { id },
+      data: {
+        dentalTreatmentTableImagePath: relPath,
+        dentalTreatmentTableImageName: file.originalname,
+        dentalTreatmentTableImageMimeType: file.mimetype,
+        dentalTreatmentTableImageSizeBytes: file.size,
+      },
+    });
+  }
+
+  async deleteDentalTreatmentTableImage(id: string, caller: Caller) {
+    await this.assertCanPlan(id, caller);
+    const plan = await this.prisma.treatmentPlan.findUnique({
+      where: { id },
+      select: { dentalTreatmentTableImagePath: true },
+    });
+    if (plan?.dentalTreatmentTableImagePath) {
+      void this.safeUnlink(plan.dentalTreatmentTableImagePath).catch(() => {});
+    }
+    return this.prisma.treatmentPlan.update({
+      where: { id },
+      data: {
+        dentalTreatmentTableImagePath: null,
+        dentalTreatmentTableImageName: null,
+        dentalTreatmentTableImageMimeType: null,
+        dentalTreatmentTableImageSizeBytes: null,
+      },
+    });
+  }
+
+  async getDentalTreatmentTableImageStream(id: string, caller: Caller) {
+    const plan = await this.getOne(id, caller);
+    if (!plan.dentalTreatmentTableImagePath) {
+      throw new NotFoundException('No dental treatment table image uploaded.');
+    }
+    const absPath = this.resolveSafePath(plan.dentalTreatmentTableImagePath);
+    return {
+      stream: fs.createReadStream(absPath),
+      mimeType:
+        plan.dentalTreatmentTableImageMimeType ?? 'application/octet-stream',
+      fileName: plan.dentalTreatmentTableImageName ?? 'dental-treatment-table',
     };
   }
 

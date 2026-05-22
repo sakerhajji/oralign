@@ -253,11 +253,83 @@ export class TreatmentPlanController {
     stream.pipe(res);
   }
 
+  // ─── Dental treatment table image ("traitement dentaire") ──────────────
+  // Second image artefact, mirroring the movement-table-image trio above.
+  // Same auth surface (PLANNER), same multipart contract, separate columns
+  // + on-disk folder so the two images never collide.
+
+  @Post('treatment-plans/:id/dental-treatment-table-image')
+  @HttpCode(HttpStatus.CREATED)
+  @Roles(...PLANNER)
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { file: { type: 'string', format: 'binary' } },
+    },
+  })
+  @ApiOperation({
+    summary:
+      'Upload (or replace) the dental treatment table image (traitement dentaire)',
+  })
+  async uploadDentalTreatmentTableImage(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.uploadDentalTreatmentTableImage(id, file, {
+      userId: user.sub,
+      role: user.role as UserRole,
+    });
+  }
+
+  @Delete('treatment-plans/:id/dental-treatment-table-image')
+  @HttpCode(HttpStatus.OK)
+  @Roles(...PLANNER)
+  @ApiOperation({ summary: 'Delete the dental treatment table image' })
+  async deleteDentalTreatmentTableImage(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.deleteDentalTreatmentTableImage(id, {
+      userId: user.sub,
+      role: user.role as UserRole,
+    });
+  }
+
+  @Get('treatment-plans/:id/dental-treatment-table-image')
+  @SkipThrottle()
+  @ApiOperation({ summary: 'Stream the dental treatment table image' })
+  async getDentalTreatmentTableImage(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @Res() res: Response,
+  ) {
+    const { stream, mimeType, fileName } =
+      await this.service.getDentalTreatmentTableImageStream(id, {
+        userId: user.sub,
+        role: user.role as UserRole,
+      });
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="${encodeURIComponent(fileName)}"`,
+    );
+    stream.pipe(res);
+  }
+
   // ─── Public link ──────────────────────────────────────────────────────────
 
   @Post('treatment-plans/:id/generate-public-link')
   @HttpCode(HttpStatus.OK)
-  @Roles(...PLANNER)
+  // Dentists can also generate a public link for orders they own — the
+  // service-layer guard (treatment-plan.service.ts → generatePublicLink)
+  // verifies `plan.order.doctorId === caller.userId` before honouring
+  // the request. Adding `UserRole.dentist` to the controller @Roles
+  // guard just lets the call REACH the service; without it the route
+  // returns 403 before the ownership check even runs.
+  @Roles(...PLANNER, UserRole.dentist)
   @ApiOperation({
     summary:
       'Generate (or rotate) a public viewer token for this treatment plan.',

@@ -9,6 +9,31 @@ import type {
   UpsertTreatmentPlanIprDto,
 } from '@/lib/types';
 
+/**
+ * Extract a filename from a Content-Disposition header. Handles both
+ * `filename="x.png"` and RFC 5987 `filename*=UTF-8''x.png` forms; falls
+ * back to `null` if neither is present or readable. Kept local to this
+ * file because it's only consumed by `fetchAttachmentBlobUrl`.
+ */
+function parseContentDispositionFilename(
+  header: string | undefined,
+): string | null {
+  if (!header) return null;
+  // RFC 5987 form wins when both are present — that's the canonical
+  // UTF-8-aware version.
+  const star = /filename\*\s*=\s*[^']*''([^;]+)/i.exec(header);
+  if (star?.[1]) {
+    try {
+      return decodeURIComponent(star[1]).replace(/^"|"$/g, '');
+    } catch {
+      return star[1].replace(/^"|"$/g, '');
+    }
+  }
+  const plain = /filename\s*=\s*"?([^";]+)"?/i.exec(header);
+  if (plain?.[1]) return plain[1];
+  return null;
+}
+
 export const treatmentPlansService = {
   // ─── Plans ────────────────────────────────────────────────────────────────
 
@@ -119,6 +144,41 @@ export const treatmentPlansService = {
     return `${base}/treatment-plans/${id}/movement-table-image`;
   },
 
+  // ─── Dental treatment table image ("traitement dentaire") ────────────────
+  // Mirrors the movement-table trio above one-to-one. Kept separate
+  // rather than parameterised because (a) it pairs naturally with the
+  // distinct hook trio in use-treatment-plans.ts, and (b) the URL is a
+  // distinct route on the backend so a search across the codebase
+  // surfaces every call site.
+
+  uploadDentalTreatmentTableImage: async (
+    id: string,
+    file: File,
+  ): Promise<TreatmentPlan> => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await apiClient.post<TreatmentPlan>(
+      `/treatment-plans/${id}/dental-treatment-table-image`,
+      form,
+    );
+    return res.data;
+  },
+
+  deleteDentalTreatmentTableImage: async (
+    id: string,
+  ): Promise<TreatmentPlan> => {
+    const res = await apiClient.delete<TreatmentPlan>(
+      `/treatment-plans/${id}/dental-treatment-table-image`,
+    );
+    return res.data;
+  },
+
+  dentalTreatmentTableImageUrl: (id: string): string => {
+    const base =
+      process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
+    return `${base}/treatment-plans/${id}/dental-treatment-table-image`;
+  },
+
   // ─── Messages & attachments ──────────────────────────────────────────────
 
   listMessages: async (id: string): Promise<TreatmentMessage[]> => {
@@ -166,6 +226,41 @@ export const treatmentPlansService = {
     const base =
       process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
     return `${base}/treatment-message-attachments/${attachmentId}/download`;
+  },
+
+  /**
+   * Fetch a chat attachment as a Blob using the authenticated axios client
+   * (so the JWT travels in the Authorization header), and return an object
+   * URL the caller can open.
+   *
+   * Why this exists: a plain `<a href={attachmentDownloadUrl(id)}>` sends
+   * no Authorization header, so the backend's @CurrentUser guard returned
+   * 401 and the browser silently navigated to a JSON error page. Pulling
+   * the bytes here lets us authenticate the request and hand the UI a
+   * `blob:` URL that opens cleanly in a new tab.
+   *
+   * The blob URL is created via `URL.createObjectURL`. Callers should
+   * `URL.revokeObjectURL()` once they're done with it to free the blob
+   * (we don't auto-revoke because the user may keep the tab open).
+   */
+  fetchAttachmentBlobUrl: async (attachmentId: string): Promise<{
+    blobUrl: string;
+    mimeType: string;
+    fileName: string;
+  }> => {
+    const res = await apiClient.get<Blob>(
+      `/treatment-message-attachments/${attachmentId}/download`,
+      { responseType: 'blob' },
+    );
+    const mimeType = res.headers['content-type'] ?? 'application/octet-stream';
+    // Try to recover the filename from Content-Disposition so the
+    // downloaded blob keeps the user-facing name. Falls back to a
+    // generic name so the link is always clickable.
+    const disposition =
+      res.headers['content-disposition'] ?? res.headers['Content-Disposition'];
+    const fileName = parseContentDispositionFilename(disposition) ?? 'attachment';
+    const blobUrl = URL.createObjectURL(res.data);
+    return { blobUrl, mimeType, fileName };
   },
 
   deleteAttachment: async (

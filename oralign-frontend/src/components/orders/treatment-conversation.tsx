@@ -33,6 +33,11 @@ import {
   UserRole,
   type TreatmentMessage,
 } from '@/lib/types';
+import { toast } from 'sonner';
+
+// Type alias for the attachment shape used inside a chat message. Pulled
+// from the TreatmentMessage type so it stays in sync with the API.
+type ChatAttachment = TreatmentMessage['attachments'][number];
 
 interface Props {
   /** Order id — the conversation is order-scoped (one thread shared across
@@ -450,39 +455,11 @@ function Bubble({
           {message.attachments.length > 0 && (
             <div className={cn('grid gap-2', message.message && 'mt-2')}>
               {message.attachments.map((att) => (
-                <a
+                <ChatAttachmentLink
                   key={att.id}
-                  href={treatmentPlansService.attachmentDownloadUrl(att.id)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={cn(
-                    'flex items-center gap-3 rounded-lg border p-2 text-xs transition hover:scale-[1.02]',
-                    isOwn
-                      ? 'border-primary-foreground/30 bg-primary-foreground/10 hover:bg-primary-foreground/20'
-                      : 'border-border bg-muted/30 hover:bg-muted/50',
-                  )}
-                >
-                  {att.mimeType?.startsWith('image/') ? (
-                    <ImageIcon className="h-4 w-4 shrink-0" />
-                  ) : (
-                    <Paperclip className="h-4 w-4 shrink-0" />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium">{att.fileName}</p>
-                    <p
-                      className={cn(
-                        'text-[10px] uppercase tracking-wide',
-                        isOwn
-                          ? 'text-primary-foreground/70'
-                          : 'text-muted-foreground',
-                      )}
-                    >
-                      {att.category.replaceAll('_', ' ')} ·{' '}
-                      {formatBytes(att.sizeBytes ?? 0)}
-                    </p>
-                  </div>
-                  <Download className="h-3.5 w-3.5 shrink-0" />
-                </a>
+                  attachment={att}
+                  isOwn={isOwn}
+                />
               ))}
             </div>
           )}
@@ -503,5 +480,91 @@ function formatBytes(bytes: number) {
   if (!bytes) return '—';
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes < 1024 * 1024 * 1024)
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+/**
+ * Click-to-download attachment chip with authenticated fetch.
+ *
+ * Why this exists: the previous version was a plain `<a href={...}>` with
+ * `target="_blank"`. The download endpoint is behind the JWT guard, so
+ * clicking the anchor sent NO Authorization header — the backend
+ * returned 401, the browser silently opened a JSON error page, and the
+ * doctor couldn't open any document attached to the conversation. This
+ * component does the request through the axios client (which DOES carry
+ * the bearer token), turns the response into a `blob:` URL, and opens
+ * THAT in a new tab. The URL is revoked after a short delay so the blob
+ * doesn't pin memory once the browser has loaded it.
+ */
+function ChatAttachmentLink({
+  attachment,
+  isOwn,
+}: {
+  attachment: ChatAttachment;
+  isOwn: boolean;
+}) {
+  const [loading, setLoading] = useState(false);
+
+  const handleOpen = async () => {
+    if (loading) return;
+    setLoading(true);
+    try {
+      const { blobUrl } = await treatmentPlansService.fetchAttachmentBlobUrl(
+        attachment.id,
+      );
+      // open() can be popup-blocked when called from inside an async
+      // continuation. We trade-off accepting that the click handler is
+      // the actual user gesture (which most browsers honour) — and
+      // fall back to a same-tab navigation if that gets blocked.
+      const opened = window.open(blobUrl, '_blank', 'noopener');
+      if (!opened) window.location.href = blobUrl;
+      // Revoke after a short delay so the new tab definitely had time
+      // to fetch the blob. 60 s is plenty; the alternative is leaking
+      // the blob for the rest of the page's lifetime.
+      window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Failed to open attachment';
+      toast.error(message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleOpen}
+      disabled={loading}
+      className={cn(
+        'flex items-center gap-3 rounded-lg border p-2 text-left text-xs transition hover:scale-[1.02] disabled:opacity-60',
+        isOwn
+          ? 'border-primary-foreground/30 bg-primary-foreground/10 hover:bg-primary-foreground/20'
+          : 'border-border bg-muted/30 hover:bg-muted/50',
+      )}
+    >
+      {loading ? (
+        <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+      ) : attachment.mimeType?.startsWith('image/') ? (
+        <ImageIcon className="h-4 w-4 shrink-0" />
+      ) : (
+        <Paperclip className="h-4 w-4 shrink-0" />
+      )}
+      <div className="min-w-0 flex-1">
+        <p className="truncate font-medium">{attachment.fileName}</p>
+        <p
+          className={cn(
+            'text-[10px] uppercase tracking-wide',
+            isOwn ? 'text-primary-foreground/70' : 'text-muted-foreground',
+          )}
+        >
+          {attachment.category.replaceAll('_', ' ')} ·{' '}
+          {formatBytes(attachment.sizeBytes ?? 0)}
+        </p>
+      </div>
+      <Download className="h-3.5 w-3.5 shrink-0" />
+    </button>
+  );
 }

@@ -105,6 +105,13 @@ export class TreatmentPlanResponseDto {
   @ApiPropertyOptional() movementTableImageName?: string;
   @ApiPropertyOptional() movementTableImageMimeType?: string;
   @ApiPropertyOptional() movementTableImageSizeBytes?: number;
+  // Dental treatment table — second image artefact ("traitement
+  // dentaire"). Same shape as the movement-table fields above; lives
+  // in its own columns + on-disk folder so it never overwrites them.
+  @ApiPropertyOptional() dentalTreatmentTableImagePath?: string;
+  @ApiPropertyOptional() dentalTreatmentTableImageName?: string;
+  @ApiPropertyOptional() dentalTreatmentTableImageMimeType?: string;
+  @ApiPropertyOptional() dentalTreatmentTableImageSizeBytes?: number;
   @ApiPropertyOptional() totalUpperAligners?: number;
   @ApiPropertyOptional() totalLowerAligners?: number;
   @ApiPropertyOptional() issuedUpperAligners?: number;

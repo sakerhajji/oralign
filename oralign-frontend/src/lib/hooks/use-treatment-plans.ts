@@ -202,6 +202,46 @@ export function useDeleteMovementTableImage(): UseMutationResult<
   });
 }
 
+// ─── Dental treatment table image ("traitement dentaire") ─────────────────
+// Same mutation shape as the movement-table-image hooks above; they're
+// separated so the success toast and the cache-invalidation key are
+// each unambiguous to the planner. Both hooks share `invalidatePlan`
+// so the review payload re-fetches and the new image flows into the UI.
+
+export function useUploadDentalTreatmentTableImage(): UseMutationResult<
+  TreatmentPlan,
+  Error,
+  { id: string; file: File }
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, file }) =>
+      treatmentPlansService.uploadDentalTreatmentTableImage(id, file),
+    onSuccess: (plan) => {
+      invalidatePlan(queryClient, plan);
+      toast.success('Dental treatment table image uploaded.');
+    },
+    onError: (err) => toast.error(extractApiErrorMessage(err)),
+  });
+}
+
+export function useDeleteDentalTreatmentTableImage(): UseMutationResult<
+  TreatmentPlan,
+  Error,
+  string
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      treatmentPlansService.deleteDentalTreatmentTableImage(id),
+    onSuccess: (plan) => {
+      invalidatePlan(queryClient, plan);
+      toast.success('Dental treatment table image removed.');
+    },
+    onError: (err) => toast.error(extractApiErrorMessage(err)),
+  });
+}
+
 export function useSendTreatmentMessage(): UseMutationResult<
   TreatmentMessage,
   Error,

@@ -234,6 +234,21 @@ model Patient {
   address       String?
   notes         String?
 
+  // ── Clinical conditions ───────────────────────────────────────────
+  // `clinicalConditions` is a free String[] rather than a strict
+  // Postgres enum so the clinic can extend the list without a Prisma
+  // migration each time. The frontend constrains it to a known set of
+  // labels (Crowding / Spacing / Class II Div 1 / Class II Div 2 /
+  // Class III / Open bite / Anterior crossbite / Posterior crossbite /
+  // Deep bite / Narrow arch / Proclination / Increased overjet /
+  // Unesthetic smile / Dental shape anomaly / Other).
+  //
+  // `clinicalConditionsOther` carries the free-text detail the doctor
+  // types when they tick "Other". It is meaningful only when "Other"
+  // is in the array; the frontend hides it otherwise.
+  clinicalConditions      String[]  @default([])
+  clinicalConditionsOther String?
+
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   deletedAt     DateTime?

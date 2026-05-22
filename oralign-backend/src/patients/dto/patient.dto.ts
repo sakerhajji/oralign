@@ -2,12 +2,15 @@ import { ApiProperty } from '@nestjs/swagger';
 import { Gender } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsDate,
   IsEmail,
   IsEnum,
   IsOptional,
   IsString,
   Matches,
+  MaxLength,
   MinLength,
 } from 'class-validator';
 
@@ -81,6 +84,34 @@ export class CreatePatientDto {
   @IsString()
   notes?: string;
 
+  // ── Clinical conditions (multi-select + Other text) ──────────────
+  // Stored as a free String[] — see Patient model comment for why
+  // it isn't a Postgres enum. Capped at 30 entries to bound payload
+  // size; the canonical frontend list has 15 today.
+  @ApiProperty({
+    type: [String],
+    required: false,
+    example: ['Crowding', 'Deep bite'],
+    description:
+      'Multi-select clinical-condition labels. Frontend constrains to a known set + "Other".',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(30)
+  @IsString({ each: true })
+  clinicalConditions?: string[];
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Free-text detail typed when "Other" is selected in clinicalConditions.',
+  })
+  @Transform(({ value }: { value: unknown }) => normalizeOptionalString(value))
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  clinicalConditionsOther?: string;
+
   @ApiProperty({
     example: '8a45c87d-c66a-4f30-8504-c90f7d14e68e',
     required: false,
@@ -137,6 +168,25 @@ export class UpdatePatientDto {
   @IsString()
   notes?: string;
 
+  // ── Clinical conditions (multi-select + Other text) — see CreatePatientDto.
+  @ApiProperty({
+    type: [String],
+    required: false,
+    example: ['Crowding', 'Deep bite'],
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(30)
+  @IsString({ each: true })
+  clinicalConditions?: string[];
+
+  @ApiProperty({ required: false })
+  @Transform(({ value }: { value: unknown }) => normalizeOptionalString(value))
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  clinicalConditionsOther?: string;
+
   @ApiProperty({
     example: '8a45c87d-c66a-4f30-8504-c90f7d14e68e',
     required: false,
@@ -166,6 +216,10 @@ export class PatientResponseDto {
   address?: string;
   @ApiProperty({ required: false })
   notes?: string;
+  @ApiProperty({ type: [String], required: false })
+  clinicalConditions!: string[];
+  @ApiProperty({ required: false })
+  clinicalConditionsOther?: string;
   @ApiProperty({ required: false })
   doctor?: {
     id: string;

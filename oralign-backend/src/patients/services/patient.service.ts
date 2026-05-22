@@ -59,6 +59,10 @@ export class PatientService {
         dateOfBirth: createPatientDto.dateOfBirth,
         address: createPatientDto.address,
         notes: createPatientDto.notes,
+        // Default to empty array when the client omits the field so we
+        // never produce a row with NULL in a NOT NULL TEXT[] column.
+        clinicalConditions: createPatientDto.clinicalConditions ?? [],
+        clinicalConditionsOther: createPatientDto.clinicalConditionsOther,
       },
       include: this.includeDoctor,
     });
@@ -135,6 +139,12 @@ export class PatientService {
         dateOfBirth: updatePatientDto.dateOfBirth,
         address: updatePatientDto.address,
         notes: updatePatientDto.notes,
+        // Only overwrite when the client actually sent the field —
+        // PATCH semantics. Sending an empty array MUST clear the list,
+        // so we distinguish "field omitted" (undefined) from "sent as
+        // []" (clear), which is the natural Prisma update behaviour.
+        clinicalConditions: updatePatientDto.clinicalConditions,
+        clinicalConditionsOther: updatePatientDto.clinicalConditionsOther,
         doctorId,
       },
       include: this.includeDoctor,
@@ -244,6 +254,16 @@ export class PatientService {
   }
 
   private mapToDto(patient: PatientWithDoctor): PatientResponseDto {
+    // Cast `patient` to a wider shape because the Prisma client we
+    // currently have generated still predates the
+    // `clinicalConditions` + `clinicalConditionsOther` columns. After
+    // `prisma generate` the cast becomes a no-op; the cast lets the
+    // service compile against the new schema without forcing a
+    // generate step in every developer's editor first.
+    const p = patient as PatientWithDoctor & {
+      clinicalConditions?: string[];
+      clinicalConditionsOther?: string | null;
+    };
     return {
       id: patient.id,
       doctorId: patient.doctorId,
@@ -254,6 +274,8 @@ export class PatientService {
       dateOfBirth: patient.dateOfBirth ?? undefined,
       address: patient.address ?? undefined,
       notes: patient.notes ?? undefined,
+      clinicalConditions: p.clinicalConditions ?? [],
+      clinicalConditionsOther: p.clinicalConditionsOther ?? undefined,
       doctor: patient.doctor
         ? {
             id: patient.doctor.id,

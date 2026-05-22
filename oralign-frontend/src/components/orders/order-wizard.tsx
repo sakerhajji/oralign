@@ -56,6 +56,7 @@ import {
   ClinicalOrderFiles,
   OrderFileUpload,
 } from '@/components/orders/order-file-upload';
+import { ClinicalConditionsField } from '@/components/patients/clinical-conditions-field';
 import { useAuth } from '@/lib/providers/auth-provider';
 import { patientsService, usersService } from '@/lib/api';
 import {
@@ -181,6 +182,11 @@ interface NewPatientDraft {
   address: string;
   notes: string;
   reason: string;
+  // Multi-select clinical conditions + free-text detail for "Other".
+  // Mirrors the standalone /dashboard/patients form one-to-one so the
+  // planner sees the same fields regardless of entry point.
+  clinicalConditions: string[];
+  clinicalConditionsOther: string;
 }
 
 export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
@@ -204,6 +210,8 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
     address: '',
     notes: '',
     reason: '',
+    clinicalConditions: [],
+    clinicalConditionsOther: '',
   });
   const [form, setForm] = useState<CreateOrderDto>({
     doctorId: initialOrder?.doctorId,
@@ -336,6 +344,13 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
         .filter(Boolean)
         .join('\n\n');
 
+      // Strip the "Other" detail when "Other" isn't selected so we
+      // never persist orphan text. Empty arrays become `undefined`
+      // on the wire so the backend's PATCH semantics also work.
+      const conditions = newPatient.clinicalConditions.filter(Boolean);
+      const otherDetail = conditions.includes('Other')
+        ? newPatient.clinicalConditionsOther.trim() || undefined
+        : undefined;
       const createdPatient = await createPatient.mutateAsync({
         fullName: newPatient.fullName.trim(),
         email: newPatient.email.trim() || undefined,
@@ -344,6 +359,8 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
         dateOfBirth: newPatient.dateOfBirth || undefined,
         address: newPatient.address.trim() || undefined,
         notes: combinedNotes || undefined,
+        clinicalConditions: conditions.length > 0 ? conditions : undefined,
+        clinicalConditionsOther: otherDetail,
         doctorId: isAdmin ? form.doctorId : undefined,
       });
       setForm((current) => ({
@@ -916,6 +933,20 @@ function PatientStep({
             disabled={!canModify}
             onChange={(value) => updateNewPatient('reason', value)}
           />
+          {/* Clinical Conditions — mirrors the standalone patient form
+              so the same data is captured at order-creation time. */}
+          <ClinicalConditionsField
+            conditions={newPatient.clinicalConditions}
+            otherDetail={newPatient.clinicalConditionsOther}
+            disabled={!canModify}
+            idPrefix="new-patient-wizard"
+            onConditionsChange={(next) =>
+              updateNewPatient('clinicalConditions', next)
+            }
+            onOtherDetailChange={(next) =>
+              updateNewPatient('clinicalConditionsOther', next)
+            }
+          />
         </div>
       )}
     </div>
@@ -1028,45 +1059,101 @@ function TreatmentStep({
 
 // ─── Structured option tables for the mechanics fields ──────────────────────
 // Each control writes a short structured string into the existing free-text
-// backend column (e.g. ipr: "Both — anterior priority"). The wizard parses
-// the same string back so the radio reflects what was previously chosen.
+// backend column (e.g. ipr: "Both"). The wizard parses the same string back
+// so the radio reflects what was previously chosen.
 
 const segmentOptions = ['No', 'Anterior', 'Posterior', 'Both'] as const;
 type Segment = (typeof segmentOptions)[number];
 
-const segmentPriorityOptions = [
-  'No priority',
-  'Anterior priority',
-  'Posterior priority',
-] as const;
-
 const biteRampOptions = ['No bite ramps', 'Anterior', 'Canine / cuspid', 'Molar'] as const;
 const expansionOptions = ['No expansion', 'Anterior', 'Posterior', 'Both'] as const;
 
-/** Pack a "segment + priority" pair into the saved string. */
-function packSegment(segment: Segment, priority: string): string {
-  if (segment === 'No') return 'No';
-  if (segment === 'Both' && priority && priority !== 'No priority') {
-    return `Both — ${priority.toLowerCase()}`;
-  }
-  return segment;
+/**
+ * Pack a segment selection into the saved string.
+ *
+ * History note: an older revision of this UI exposed an extra
+ * "No priority / Anterior priority / Posterior priority" radio when
+ * `segment === 'Both'`, and packed it into the saved string as
+ * `"Both — anterior priority"`. The clinical team asked for that
+ * sub-radio to be removed, so we now always pack as a bare segment.
+ * `unpackSegment` still tolerates the old strings on read so existing
+ * orders don't break — the priority qualifier is simply dropped when
+ * the user re-saves.
+ */
+function packSegment(segment: Segment): string {
+  return segment === 'No' ? 'No' : segment;
 }
 
-/** Recover the segment + priority from a saved string. */
-function unpackSegment(value: string | undefined): {
-  segment: Segment;
-  priority: string;
+/** Recover the segment from a saved string (tolerant of legacy priority suffixes). */
+function unpackSegment(value: string | undefined): Segment {
+  const raw = (value ?? '').trim();
+  if (!raw || /^no\b/i.test(raw)) return 'No';
+  if (/^anterior/i.test(raw)) return 'Anterior';
+  if (/^posterior/i.test(raw)) return 'Posterior';
+  if (/^both/i.test(raw)) return 'Both';
+  return 'No';
+}
+
+// ─── Elastics ───────────────────────────────────────────────────────────────
+// The elastics field stores a single free-text string in the DB. The UI
+// exposes a checkbox grid for the five common clinical types plus a free-
+// text input for notes; the two are packed into one string like
+// `"Class I, Vertical bite — Full-time wear"` and unpacked symmetrically.
+//
+// Why a checkbox grid: a patient can need multiple elastic types at once
+// (e.g. Class II + criss-cross). Radios would force one. The notes field
+// stays so the doctor can add wear-time / hook details without expanding
+// the option list every clinic asks for.
+
+const elasticTypeOptions = [
+  'Class I elastics',
+  'Class II elastics',
+  'Class III elastics',
+  'Vertical bite elastics',
+  'Criss-cross elastics',
+] as const;
+type ElasticType = (typeof elasticTypeOptions)[number];
+
+/**
+ * Pack a `Set<ElasticType>` + notes into the storage string.
+ * Empty set + empty notes → empty string (i.e. "no elastics chosen").
+ */
+function packElastics(types: ElasticType[], notes: string): string {
+  const trimmed = notes.trim();
+  const typesPart = types.join(', ');
+  if (typesPart && trimmed) return `${typesPart} — ${trimmed}`;
+  return typesPart || trimmed;
+}
+
+/** Recover the checkbox set + the notes from the stored string. */
+function unpackElastics(value: string | undefined): {
+  types: ElasticType[];
+  notes: string;
 } {
   const raw = (value ?? '').trim();
-  if (!raw || raw === 'No' || /^no\b/i.test(raw)) return { segment: 'No', priority: 'No priority' };
-  if (/^anterior/i.test(raw)) return { segment: 'Anterior', priority: 'No priority' };
-  if (/^posterior/i.test(raw)) return { segment: 'Posterior', priority: 'No priority' };
-  if (/^both/i.test(raw)) {
-    if (/anterior/i.test(raw)) return { segment: 'Both', priority: 'Anterior priority' };
-    if (/posterior/i.test(raw)) return { segment: 'Both', priority: 'Posterior priority' };
-    return { segment: 'Both', priority: 'No priority' };
+  if (!raw) return { types: [], notes: '' };
+  // Split on the first em-dash we used as a separator. Anything before is
+  // the (comma-separated) types list, anything after is notes. If no
+  // dash is present, the whole string is treated as either a single
+  // known type (or list) OR as free-form notes.
+  const dashIdx = raw.indexOf('—');
+  const head = dashIdx >= 0 ? raw.slice(0, dashIdx).trim() : raw;
+  const tail = dashIdx >= 0 ? raw.slice(dashIdx + 1).trim() : '';
+  const tokens = head
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const matched: ElasticType[] = [];
+  const unmatched: string[] = [];
+  for (const tok of tokens) {
+    const hit = elasticTypeOptions.find(
+      (opt) => opt.toLowerCase() === tok.toLowerCase(),
+    );
+    if (hit) matched.push(hit);
+    else unmatched.push(tok);
   }
-  return { segment: 'No', priority: 'No priority' };
+  const notes = [unmatched.join(', '), tail].filter(Boolean).join(' — ');
+  return { types: matched, notes };
 }
 
 function AdvancedMovementStep({
@@ -1078,19 +1165,40 @@ function AdvancedMovementStep({
   disabled?: boolean;
   updateField: <K extends keyof CreateOrderDto>(key: K, value: CreateOrderDto[K]) => void;
 }) {
-  // Decode the current saved strings into structured UI state.
-  const ipr = unpackSegment(form.ipr);
-  const expansion = unpackSegment(form.expansion);
+  // Decode the current saved strings into structured UI state. Each
+  // segment is just `'No' | 'Anterior' | 'Posterior' | 'Both'` now —
+  // the legacy priority qualifier was removed at the clinical team's
+  // request and `unpackSegment` silently drops it from old data.
+  const iprSegment = unpackSegment(form.ipr);
+  const expansionSegment = unpackSegment(form.expansion);
   const spaces = form.spaces?.trim() ?? '';
+  const elastics = unpackElastics(form.elastics);
 
-  const setIpr = (segment: Segment, priority?: string) => {
-    const next = packSegment(segment, priority ?? ipr.priority);
-    updateField('ipr', next);
+  const setIpr = (segment: Segment) => {
+    updateField('ipr', packSegment(segment));
   };
 
-  const setExpansion = (segment: Segment, priority?: string) => {
-    const next = packSegment(segment, priority ?? expansion.priority);
-    updateField('expansion', next === 'No' ? 'No expansion' : next);
+  const setExpansion = (segment: Segment) => {
+    const packed = packSegment(segment);
+    updateField('expansion', packed === 'No' ? 'No expansion' : packed);
+  };
+
+  /**
+   * Toggle one elastic-type checkbox and re-pack into `form.elastics`.
+   * Preserves whatever the planner typed in the notes field.
+   */
+  const toggleElasticType = (type: ElasticType) => {
+    const next = elastics.types.includes(type)
+      ? elastics.types.filter((t) => t !== type)
+      : [...elastics.types, type];
+    // Keep declaration-order from `elasticTypeOptions` rather than insertion
+    // order so the stored string is deterministic regardless of click order.
+    const ordered = elasticTypeOptions.filter((opt) => next.includes(opt));
+    updateField('elastics', packElastics(ordered, elastics.notes));
+  };
+
+  const setElasticsNotes = (notes: string) => {
+    updateField('elastics', packElastics(elastics.types, notes));
   };
 
   return (
@@ -1098,14 +1206,56 @@ function AdvancedMovementStep({
       {/* Anteroposterior text input REMOVED — duplicate of the
           "A-P relationship" radio in step 4 (Treatment). */}
 
-      <TextInput
-        label="Elastics"
-        value={form.elastics ?? ''}
-        placeholder="e.g. Class II elastics from upper canine to lower first molar, full-time"
-        icon={<Info className="h-4 w-4" />}
-        disabled={disabled}
-        onChange={(value) => updateField('elastics', value)}
-      />
+      {/* ─── Elastics ───────────────────────────────────────────────────
+          Multi-select checkbox grid + free-text notes. The two fields
+          combine into a single packed string (see packElastics) so the
+          backend column stays free-text and no migration is needed. */}
+      <fieldset className="space-y-3 rounded-lg border bg-card p-4">
+        <legend className="px-1 text-sm font-semibold">Elastics</legend>
+        <p className="text-xs text-muted-foreground">
+          Tick every elastic configuration this case needs — multiple
+          are allowed. Use the notes field for wear time, hook positions
+          or anything not captured by the standard options.
+        </p>
+        <div
+          role="group"
+          aria-label="Elastic types"
+          className="grid gap-2 sm:grid-cols-2"
+        >
+          {elasticTypeOptions.map((opt) => {
+            const checked = elastics.types.includes(opt);
+            return (
+              <label
+                key={opt}
+                className={cn(
+                  'flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm transition',
+                  checked
+                    ? 'border-primary bg-primary/5 text-primary'
+                    : 'border-input bg-background hover:bg-accent/40',
+                  disabled && 'cursor-not-allowed opacity-60',
+                )}
+              >
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 cursor-pointer"
+                  checked={checked}
+                  disabled={disabled}
+                  onChange={() => toggleElasticType(opt)}
+                />
+                <span>{opt}</span>
+              </label>
+            );
+          })}
+        </div>
+        <TextInput
+          label="Notes (optional)"
+          value={elastics.notes}
+          placeholder="e.g. Full-time wear; upper canine → lower first molar"
+          icon={<Info className="h-4 w-4" />}
+          disabled={disabled}
+          onChange={setElasticsNotes}
+        />
+      </fieldset>
 
       <RadioGroupField
         label="Open bite"
@@ -1123,38 +1273,27 @@ function AdvancedMovementStep({
         onChange={(value) => updateField('midline', value)}
       />
 
-      {/* ─── IPR ────────────────────────────────────────────────────────── */}
+      {/* ─── IPR ────────────────────────────────────────────────────────
+          The "No priority / Anterior priority / Posterior priority"
+          sub-radio that used to appear when "Both" was selected has
+          been removed at the clinical team's request — they decide
+          ordering at the chair, not on the form. */}
       <fieldset className="space-y-3 rounded-lg border bg-card p-4">
         <legend className="px-1 text-sm font-semibold">IPR</legend>
         <p className="text-xs text-muted-foreground">
-          Pick where interproximal reduction is allowed. "Both" reveals an
-          optional priority — leave it on "No priority" if either segment
-          may be done first.
+          Pick where interproximal reduction is allowed.
         </p>
         <div role="radiogroup" aria-label="IPR segment" className="grid gap-2 sm:grid-cols-4">
           {segmentOptions.map((opt) => (
             <OptionPill
               key={opt}
-              active={ipr.segment === opt}
+              active={iprSegment === opt}
               disabled={disabled}
               label={opt === 'No' ? 'No IPR' : opt}
               onClick={() => setIpr(opt)}
             />
           ))}
         </div>
-        {ipr.segment === 'Both' && (
-          <div role="radiogroup" aria-label="IPR priority" className="grid gap-2 sm:grid-cols-3">
-            {segmentPriorityOptions.map((p) => (
-              <OptionPill
-                key={p}
-                active={ipr.priority === p}
-                disabled={disabled}
-                label={p}
-                onClick={() => setIpr('Both', p)}
-              />
-            ))}
-          </div>
-        )}
       </fieldset>
 
       {/* ─── Bite ramps ─────────────────────────────────────────────────── */}
@@ -1166,12 +1305,14 @@ function AdvancedMovementStep({
         onChange={(value) => updateField('biteRamps', value)}
       />
 
-      {/* ─── Expansion ──────────────────────────────────────────────────── */}
+      {/* ─── Expansion ──────────────────────────────────────────────────
+          Same removal as IPR above — no anterior / posterior priority
+          when "Both" is selected. */}
       <fieldset className="space-y-3 rounded-lg border bg-card p-4">
         <legend className="px-1 text-sm font-semibold">Expansion</legend>
         <p className="text-xs text-muted-foreground">
-          Select the segment that needs expansion, or "No expansion" if the
-          arches are well-developed. "Both" reveals an optional priority.
+          Select the segment that needs expansion, or "No expansion" if
+          the arches are well-developed.
         </p>
         <div role="radiogroup" aria-label="Expansion segment" className="grid gap-2 sm:grid-cols-4">
           {expansionOptions.map((opt) => {
@@ -1179,7 +1320,7 @@ function AdvancedMovementStep({
             return (
               <OptionPill
                 key={opt}
-                active={expansion.segment === norm}
+                active={expansionSegment === norm}
                 disabled={disabled}
                 label={opt}
                 onClick={() => setExpansion(norm)}
@@ -1187,19 +1328,6 @@ function AdvancedMovementStep({
             );
           })}
         </div>
-        {expansion.segment === 'Both' && (
-          <div role="radiogroup" aria-label="Expansion priority" className="grid gap-2 sm:grid-cols-3">
-            {segmentPriorityOptions.map((p) => (
-              <OptionPill
-                key={p}
-                active={expansion.priority === p}
-                disabled={disabled}
-                label={p}
-                onClick={() => setExpansion('Both', p)}
-              />
-            ))}
-          </div>
-        )}
       </fieldset>
 
       <RadioGroupField

@@ -1,0 +1,142 @@
+'use client';
+
+import { Label } from '@/components/ui/label';
+import { cn } from '@/lib/utils';
+import {
+  CLINICAL_CONDITION_OPTIONS,
+  CLINICAL_CONDITION_OTHER,
+  type ClinicalCondition,
+} from '@/lib/types';
+
+/**
+ * Multi-select checkbox grid for the patient's clinical conditions
+ * plus an optional "Other" free-text input that only appears when the
+ * "Other" box is checked.
+ *
+ * Shared between the standalone /dashboard/patients form and the
+ * inline "Create a new patient" step inside the order wizard so both
+ * surfaces stay 1:1 in feature parity — see PatientFormDialog and
+ * PatientStep for the two call sites.
+ *
+ * Storage: parent owns two pieces of state and passes them in:
+ *   • `conditions`  → string[] of selected labels (a subset of
+ *     `CLINICAL_CONDITION_OPTIONS`; the backend tolerates labels
+ *     outside the list but the UI only writes from the canonical set).
+ *   • `otherDetail` → free-text detail, persisted only when "Other"
+ *     is in `conditions`. The component still RENDERS the input
+ *     whenever "Other" is checked; the parent decides whether to
+ *     clear `otherDetail` if "Other" is unchecked.
+ */
+export interface ClinicalConditionsFieldProps {
+  conditions: string[];
+  otherDetail: string;
+  disabled?: boolean;
+  /** Optional id prefix so multiple instances on the same page get unique checkbox ids. */
+  idPrefix?: string;
+  /** Called on every checkbox toggle with the full next list (order preserved per CLINICAL_CONDITION_OPTIONS). */
+  onConditionsChange: (next: string[]) => void;
+  /** Called whenever the user types in the "Other" detail input. */
+  onOtherDetailChange: (next: string) => void;
+  /** Validation error from zod / parent. */
+  otherDetailError?: string;
+}
+
+export function ClinicalConditionsField({
+  conditions,
+  otherDetail,
+  disabled,
+  idPrefix = 'clinical-conditions',
+  onConditionsChange,
+  onOtherDetailChange,
+  otherDetailError,
+}: ClinicalConditionsFieldProps) {
+  const isOtherSelected = conditions.includes(CLINICAL_CONDITION_OTHER);
+
+  const toggle = (condition: ClinicalCondition) => {
+    const without = conditions.filter((c) => c !== condition);
+    const next = conditions.includes(condition)
+      ? without
+      : [...without, condition];
+    // Re-order the result to match the canonical option list so the
+    // stored array is deterministic regardless of click order. This
+    // keeps render output stable and makes server-side diffs cleaner.
+    const ordered = CLINICAL_CONDITION_OPTIONS.filter((opt) =>
+      next.includes(opt),
+    );
+    onConditionsChange(ordered);
+
+    // If the planner just UNCHECKED "Other", clear the detail field so
+    // it doesn't keep a stale value in the saved payload. The detail
+    // only has meaning while "Other" is selected.
+    if (condition === CLINICAL_CONDITION_OTHER && !next.includes(condition)) {
+      onOtherDetailChange('');
+    }
+  };
+
+  return (
+    <fieldset className="space-y-3 rounded-lg border bg-card p-4">
+      <legend className="px-1 text-sm font-semibold">Clinical Conditions</legend>
+      <p className="text-xs text-muted-foreground">
+        Select every condition that applies — multiple are allowed. Tick
+        "Other" to describe a condition not on the list.
+      </p>
+      <div
+        role="group"
+        aria-label="Clinical conditions"
+        className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3"
+      >
+        {CLINICAL_CONDITION_OPTIONS.map((opt) => {
+          const checked = conditions.includes(opt);
+          const id = `${idPrefix}-${opt.toLowerCase().replace(/\s+/g, '-')}`;
+          return (
+            <label
+              key={opt}
+              htmlFor={id}
+              className={cn(
+                'flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm transition',
+                checked
+                  ? 'border-primary bg-primary/5 text-primary'
+                  : 'border-input bg-background hover:bg-accent/40',
+                disabled && 'cursor-not-allowed opacity-60',
+              )}
+            >
+              <input
+                id={id}
+                type="checkbox"
+                className="h-4 w-4 cursor-pointer"
+                checked={checked}
+                disabled={disabled}
+                onChange={() => toggle(opt)}
+              />
+              <span>{opt}</span>
+            </label>
+          );
+        })}
+      </div>
+
+      {isOtherSelected && (
+        <div className="space-y-2 pt-1">
+          <Label htmlFor={`${idPrefix}-other-detail`} className="text-sm">
+            Other — please describe
+          </Label>
+          <textarea
+            id={`${idPrefix}-other-detail`}
+            value={otherDetail}
+            onChange={(e) => onOtherDetailChange(e.target.value)}
+            disabled={disabled}
+            placeholder="Describe the additional clinical detail (max 500 characters)"
+            maxLength={500}
+            className={cn(
+              'border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring min-h-20 w-full rounded-md border px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2',
+              otherDetailError && 'border-red-500',
+              disabled && 'cursor-not-allowed opacity-60',
+            )}
+          />
+          {otherDetailError && (
+            <p className="text-sm text-red-500">{otherDetailError}</p>
+          )}
+        </div>
+      )}
+    </fieldset>
+  );
+}

@@ -247,6 +247,17 @@ export const createPatientSchema = z.object({
   dateOfBirth: z.string().optional().or(z.literal('')),
   address: z.string().optional(),
   notes: z.string().optional(),
+  // Multi-select clinical-condition labels. Kept as `z.string().array()`
+  // (rather than `z.enum(...)`) because the backend stores a free
+  // string[] — the frontend constrains submissions through the UI but
+  // we don't reject server payloads that contain labels added later
+  // by the clinical team.
+  clinicalConditions: z.array(z.string()).max(30).optional(),
+  clinicalConditionsOther: z
+    .string()
+    .max(500, 'Detail must be 500 characters or fewer')
+    .optional()
+    .or(z.literal('')),
   doctorId: z.string().optional(),
 });
 

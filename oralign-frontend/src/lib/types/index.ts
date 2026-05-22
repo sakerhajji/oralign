@@ -451,6 +451,39 @@ export interface WorkingHours {
   updatedAt: string;
 }
 
+/**
+ * Canonical list of clinical-condition labels exposed by the patient
+ * forms. Kept as a string-literal union so the type system catches
+ * typos in code that constructs payloads, but the backend stores it
+ * as a free `text[]` so the clinic can add labels later without a
+ * Prisma migration.
+ */
+export const CLINICAL_CONDITION_OPTIONS = [
+  'Crowding',
+  'Spacing',
+  'Class II Division 1',
+  'Class II Division 2',
+  'Class III',
+  'Open bite',
+  'Anterior crossbite',
+  'Posterior crossbite',
+  'Deep bite',
+  'Narrow arch',
+  'Proclination',
+  'Increased overjet',
+  'Unesthetic smile',
+  'Dental shape anomaly',
+  'Other',
+] as const;
+
+export type ClinicalCondition = (typeof CLINICAL_CONDITION_OPTIONS)[number];
+
+/**
+ * Sentinel for the free-text "Other" entry. Kept as a constant so any
+ * code that needs to test for it doesn't repeat the literal string.
+ */
+export const CLINICAL_CONDITION_OTHER: ClinicalCondition = 'Other';
+
 export interface Patient {
   id: string;
   doctorId: string;
@@ -461,6 +494,16 @@ export interface Patient {
   dateOfBirth?: string;
   address?: string;
   notes?: string;
+  /**
+   * Multi-select clinical-condition labels. Empty array (or absent
+   * from a legacy payload) means "no conditions recorded".
+   */
+  clinicalConditions?: string[];
+  /**
+   * Free-text detail captured when "Other" is in `clinicalConditions`.
+   * UI is hidden unless "Other" is selected.
+   */
+  clinicalConditionsOther?: string;
   doctor?: {
     id: string;
     fullName: string;
@@ -709,6 +752,10 @@ export interface CreatePatientDto {
   dateOfBirth?: string;
   address?: string;
   notes?: string;
+  // Multi-select clinical-condition labels — see Patient.clinicalConditions
+  // for the canonical option list and the storage rationale.
+  clinicalConditions?: string[];
+  clinicalConditionsOther?: string;
   doctorId?: string;
 }
 
@@ -720,6 +767,8 @@ export interface UpdatePatientDto {
   dateOfBirth?: string;
   address?: string;
   notes?: string;
+  clinicalConditions?: string[];
+  clinicalConditionsOther?: string;
   doctorId?: string;
 }
 

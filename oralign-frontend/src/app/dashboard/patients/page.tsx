@@ -73,12 +73,28 @@ import {
 } from '@/lib/hooks';
 import { usersService } from '@/lib/api';
 import { createPatientSchema, CreatePatientFormData } from '@/lib/schemas';
-import { Gender, Patient, UserRole } from '@/lib/types';
+import {
+  CLINICAL_CONDITION_OTHER,
+  Gender,
+  Patient,
+  UserRole,
+} from '@/lib/types';
+import { ClinicalConditionsField } from '@/components/patients/clinical-conditions-field';
 
 const PAGE_SIZE = 10;
 const ALL_DOCTORS = 'all';
 
 function normalizePatientForm(data: CreatePatientFormData) {
+  // Conditions: empty array becomes `undefined` on the wire so the
+  // backend's PATCH semantics keep working ("field omitted" =
+  // "leave alone"). The CREATE path also accepts undefined and
+  // stores an empty array via the Prisma default.
+  const conditions = (data.clinicalConditions ?? []).filter(Boolean);
+  // "Other" detail only survives if "Other" is currently selected —
+  // otherwise we strip it so we never persist orphan detail text.
+  const otherDetail = conditions.includes(CLINICAL_CONDITION_OTHER)
+    ? data.clinicalConditionsOther?.trim() || undefined
+    : undefined;
   return {
     fullName: data.fullName.trim(),
     email: data.email?.trim() || undefined,
@@ -87,6 +103,8 @@ function normalizePatientForm(data: CreatePatientFormData) {
     dateOfBirth: data.dateOfBirth || undefined,
     address: data.address?.trim() || undefined,
     notes: data.notes?.trim() || undefined,
+    clinicalConditions: conditions.length > 0 ? conditions : undefined,
+    clinicalConditionsOther: otherDetail,
     doctorId: data.doctorId || undefined,
   };
 }
@@ -458,6 +476,12 @@ function PatientFormDialog({
 
   const gender = watch('gender');
   const doctorId = watch('doctorId');
+  // ClinicalConditionsField is a controlled component — react-hook-form
+  // stores the values but the field is fully driven from `watch` so the
+  // checkbox UI updates immediately on every toggle. (Using register +
+  // a hidden input doesn't work nicely for a multi-checkbox group.)
+  const clinicalConditions = watch('clinicalConditions') ?? [];
+  const clinicalConditionsOther = watch('clinicalConditionsOther') ?? '';
 
   useEffect(() => {
     if (!open) return;
@@ -471,6 +495,8 @@ function PatientFormDialog({
         : '',
       address: patient?.address ?? '',
       notes: patient?.notes ?? '',
+      clinicalConditions: patient?.clinicalConditions ?? [],
+      clinicalConditionsOther: patient?.clinicalConditionsOther ?? '',
       doctorId:
         patient?.doctorId ?? (isAdmin ? dentists[0]?.id : currentUserId),
     });
@@ -564,6 +590,25 @@ function PatientFormDialog({
                 id="notes"
                 {...register('notes')}
                 className="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring min-h-24 w-full rounded-md border px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+              />
+            </div>
+            {/* Clinical Conditions — multi-select + free-text "Other".
+                Rendered last in the grid (spans both columns) so it sits
+                visually below the demographic/contact block. */}
+            <div className="sm:col-span-2">
+              <ClinicalConditionsField
+                conditions={clinicalConditions}
+                otherDetail={clinicalConditionsOther}
+                idPrefix="patient-dialog"
+                onConditionsChange={(next) => {
+                  setValue('clinicalConditions', next, { shouldDirty: true });
+                }}
+                onOtherDetailChange={(next) => {
+                  setValue('clinicalConditionsOther', next, {
+                    shouldDirty: true,
+                  });
+                }}
+                otherDetailError={errors.clinicalConditionsOther?.message}
               />
             </div>
           </div>

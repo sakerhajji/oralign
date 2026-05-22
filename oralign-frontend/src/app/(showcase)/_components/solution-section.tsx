@@ -50,10 +50,11 @@ export function SolutionSection() {
           <Reveal>
             <figure className="relative min-h-[500px] overflow-hidden border border-[#303030] bg-[#202020]">
               <Image
-                src="/showcase/palndetaritemt.png"
+                src="/showcase/palndetaritemt.webp"
                 alt={lang === "fr" ? "Sourire aligné après traitement ORALIGN" : lang === "en" ? "Aligned smile after ORALIGN treatment" : "ابتسامة مصطفة بعد علاج ORALIGN"}
                 fill
                 sizes="(min-width: 1024px) 420px, 100vw"
+                unoptimized
                 className="object-cover"
               />
               <div

@@ -7,11 +7,11 @@ import { Reveal } from "./shared/reveal";
 import { SectionHeading } from "./shared/section-heading";
 
 const stepImagePaths = [
-  "/showcase/Consultationsourire.png",
-  "/showcase/Scan3D.png",
-  "/showcase/futurSourire.png",
-  "/showcase/Portez.png",
-  "/showcase/Sourire.png",
+  "/showcase/Consultationsourire.webp",
+  "/showcase/Scan3D.webp",
+  "/showcase/futurSourire.webp",
+  "/showcase/Portez.webp",
+  "/showcase/Sourire.webp",
 ];
 
 export function HowItWorks() {
@@ -132,6 +132,7 @@ export function HowItWorks() {
                             (max-width: 1024px) 50vw,
                             20vw
                           "
+                          unoptimized
                           className="
                             object-cover transition-transform duration-700
                             group-hover:scale-105

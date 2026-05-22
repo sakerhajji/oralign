@@ -45,6 +45,7 @@ export function Testimonials() {
                         alt={`${item.shortTitle[lang]} - ${dict.preview.after[lang]}`}
                         fill
                         sizes="(min-width: 768px) 33vw, 100vw"
+                        unoptimized={item.after.endsWith(".webp")}
                         className="object-contain"
                       />
                     </div>

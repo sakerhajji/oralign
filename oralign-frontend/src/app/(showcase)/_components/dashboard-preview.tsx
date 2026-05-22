@@ -185,6 +185,7 @@ function CaseImagePanel({
           alt={alt}
           fill
           sizes="(min-width: 1024px) 34vw, 45vw"
+          unoptimized={src.endsWith(".webp")}
           className="object-contain p-4 transition-transform duration-500 ease-out group-hover:scale-[1.015]"
         />
       </div>
@@ -259,6 +260,7 @@ function MobileComparison({
             alt={`${title} - ${afterLabel}`}
             fill
             sizes="100vw"
+            unoptimized={afterImage.endsWith(".webp")}
             className="object-contain p-3"
           />
           <span className="absolute right-0 top-0 z-20 bg-[var(--sc-sun)] px-3 py-2 text-[0.58rem] font-bold uppercase tracking-[0.18em] text-[var(--sc-black)]">
@@ -275,6 +277,7 @@ function MobileComparison({
             alt={`${title} - ${beforeLabel}`}
             fill
             sizes="100vw"
+            unoptimized={beforeImage.endsWith(".webp")}
             className="object-contain p-3"
           />
           <span className="absolute left-0 top-0 z-20 bg-[var(--sc-black)] px-3 py-2 text-[0.58rem] font-bold uppercase tracking-[0.18em] text-[var(--sc-white)]">
@@ -342,7 +345,14 @@ function CaseRail({
               ].join(" ")}
             >
               <span className="relative block h-10 w-12 shrink-0 overflow-hidden bg-[var(--sc-grey)]">
-                <Image src={item.after} alt="" fill sizes="48px" className="object-cover" />
+                <Image
+                  src={item.after}
+                  alt=""
+                  fill
+                  sizes="48px"
+                  unoptimized={item.after.endsWith(".webp")}
+                  className="object-cover"
+                />
               </span>
               <span className="min-w-0">
                 <span className={selected ? "block text-[0.5rem] uppercase tracking-[0.18em] text-[var(--sc-sun)]" : "block text-[0.5rem] uppercase tracking-[0.18em] text-[var(--sc-text-mid)]"}>

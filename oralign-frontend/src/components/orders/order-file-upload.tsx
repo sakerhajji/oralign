@@ -80,7 +80,7 @@ const patientImageSlots = [
     category: OrderFileCategory.LEFT_PHOTO,
     icon: ImageIcon,
     accept: 'image/*',
-    referenceImage: '/defaultImage/Profile%20photo.png',
+    referenceImage: '/defaultImage/Profile%20photo.webp',
   },
   {
     key: 'face-rest',
@@ -91,7 +91,7 @@ const patientImageSlots = [
     // Default reference swapped on purpose — the "smile" reference makes
     // it clearer to the dentist what view this slot expects, even though
     // the slot is technically "face at rest". See sibling slot below.
-    referenceImage: '/defaultImage/Smilephoto.png',
+    referenceImage: '/defaultImage/Smilephoto.webp',
   },
   {
     key: 'smile',
@@ -99,7 +99,7 @@ const patientImageSlots = [
     category: OrderFileCategory.FRONT_PHOTO,
     icon: ImageIcon,
     accept: 'image/*',
-    referenceImage: '/defaultImage/Faceatrestphoto.png',
+    referenceImage: '/defaultImage/Faceatrestphoto.webp',
   },
   // ── Row 2: intraoral left / frontal / right ────────────────────────────
   {
@@ -108,7 +108,7 @@ const patientImageSlots = [
     category: OrderFileCategory.LEFT_PHOTO,
     icon: ImageIcon,
     accept: 'image/*',
-    referenceImage: '/defaultImage/Leftlateralview.png',
+    referenceImage: '/defaultImage/Leftlateralview.webp',
   },
   {
     key: 'frontal-occlusion',
@@ -116,7 +116,7 @@ const patientImageSlots = [
     category: OrderFileCategory.FRONT_PHOTO,
     icon: ImageIcon,
     accept: 'image/*',
-    referenceImage: '/defaultImage/Frontalocclusionview.png',
+    referenceImage: '/defaultImage/Frontalocclusionview.webp',
   },
   {
     key: 'right-lateral',
@@ -124,7 +124,7 @@ const patientImageSlots = [
     category: OrderFileCategory.RIGHT_PHOTO,
     icon: ImageIcon,
     accept: 'image/*',
-    referenceImage: '/defaultImage/Rightlateralview.png',
+    referenceImage: '/defaultImage/Rightlateralview.webp',
   },
   // ── Row 3: intraoral occlusal views ────────────────────────────────────
   {
@@ -133,7 +133,7 @@ const patientImageSlots = [
     category: OrderFileCategory.UPPER_PHOTO,
     icon: ScanLine,
     accept: 'image/*',
-    referenceImage: '/defaultImage/Upperocclusalview.png',
+    referenceImage: '/defaultImage/Upperocclusalview.webp',
   },
   {
     key: 'lower-occlusal',
@@ -141,7 +141,7 @@ const patientImageSlots = [
     category: OrderFileCategory.LOWER_PHOTO,
     icon: ScanLine,
     accept: 'image/*',
-    referenceImage: '/defaultImage/Lowerocclusalview.png',
+    referenceImage: '/defaultImage/Lowerocclusalview.webp',
   },
 ] as const;
 
@@ -152,7 +152,7 @@ const radiographySlots = [
     category: OrderFileCategory.ORTHOPANTOMOGRAPHY,
     icon: ScanLine,
     accept: 'image/*,.pdf',
-    referenceImage: '/defaultImage/Panoramicradiography.png',
+    referenceImage: '/defaultImage/Panoramicradiography.webp',
   },
   {
     key: 'profile-tele',
@@ -160,7 +160,7 @@ const radiographySlots = [
     category: OrderFileCategory.IMAGE,
     icon: ScanLine,
     accept: 'image/*,.pdf',
-    referenceImage: '/defaultImage/Profileteleradiography.png',
+    referenceImage: '/defaultImage/Profileteleradiography.webp',
   },
 ] as const;
 

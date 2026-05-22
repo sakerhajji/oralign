@@ -97,6 +97,7 @@ export function IndicationsDetail() {
                     alt={`${item.title[lang]} — ${item.concern[lang]}`}
                     fill
                     sizes="(min-width: 1024px) 360px, (min-width: 640px) 50vw, 100vw"
+                    unoptimized={item.before.endsWith(".webp")}
                     className="object-cover transition-transform duration-700 ease-out group-hover:scale-105"
                   />
                   {/* Subtle bottom fade — adds premium depth, separates

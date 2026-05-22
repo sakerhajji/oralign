@@ -36,7 +36,7 @@ export function PrimeSection() {
         <Reveal>
           <div className="relative w-full mx-auto" style={{ maxWidth: 520 }}>
             <ImagePlaceholder
-              src="/showcase/boyalinger.png"
+              src="/showcase/boyalinger.webp"
               label={`${dict.prime.eyebrow["en"]} — lifestyle teen portrait`}
               aspect="tall"
               tone="dark"

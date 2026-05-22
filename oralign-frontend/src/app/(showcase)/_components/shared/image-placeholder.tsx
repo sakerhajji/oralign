@@ -72,6 +72,7 @@ export function ImagePlaceholder({
           alt={label}
           fill
           sizes="(min-width: 1280px) 380px, (min-width: 1024px) 340px, 100vw"
+          unoptimized={src.endsWith(".webp")}
           className="object-cover"
         />
       )}

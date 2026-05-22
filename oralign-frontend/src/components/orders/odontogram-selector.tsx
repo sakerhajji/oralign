@@ -28,10 +28,87 @@ const LOWER_LEFT = [31, 32, 33, 34, 35, 36, 37, 38] as const;
 
 const MIRRORED = new Set<number>([...UPPER_LEFT, ...LOWER_RIGHT]);
 
-// Sprite URL — Next.js serves /public files at the root. The browser fetches
-// this once, caches it as an SVG document, then resolves every <use> through
-// the cached document. Replaces the 4.3 MB inline JS module.
+// Sprite URL — Next.js serves /public files at the root.
 const SPRITE_URL = '/teeth-sprite.svg';
+const SPRITE_HOST_ID = 'oralign-tooth-sprite-host';
+
+let toothSpritePromise: Promise<boolean> | null = null;
+
+function normalizeSpriteMarkup(markup: string) {
+  if (typeof window === 'undefined') return markup;
+
+  const wrapper = document.createElement('div');
+  wrapper.innerHTML = markup;
+  const svg = wrapper.querySelector('svg');
+
+  if (svg) {
+    // External <use href="/teeth-sprite.svg#tooth-11"> is fragile behind
+    // some production proxy/CDN setups. Once fetched, keep the sprite in the
+    // live DOM as an invisible 0x0 SVG and reference local symbols instead.
+    svg.removeAttribute('style');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('focusable', 'false');
+    svg.setAttribute('width', '0');
+    svg.setAttribute('height', '0');
+    svg.style.position = 'absolute';
+    svg.style.width = '0';
+    svg.style.height = '0';
+    svg.style.overflow = 'hidden';
+  }
+
+  return wrapper.innerHTML;
+}
+
+function ensureToothSprite() {
+  if (typeof window === 'undefined') return Promise.resolve(false);
+  if (document.getElementById(SPRITE_HOST_ID)) return Promise.resolve(true);
+  if (toothSpritePromise) return toothSpritePromise;
+
+  toothSpritePromise = fetch(SPRITE_URL, { cache: 'force-cache' })
+    .then(async (response) => {
+      if (!response.ok) {
+        throw new Error(`Unable to load tooth sprite (${response.status})`);
+      }
+      const host = document.createElement('div');
+      host.id = SPRITE_HOST_ID;
+      host.setAttribute('aria-hidden', 'true');
+      host.style.position = 'absolute';
+      host.style.width = '0';
+      host.style.height = '0';
+      host.style.overflow = 'hidden';
+      host.innerHTML = normalizeSpriteMarkup(await response.text());
+      document.body.prepend(host);
+      return true;
+    })
+    .catch(() => {
+      toothSpritePromise = null;
+      return false;
+    });
+
+  return toothSpritePromise;
+}
+
+function useToothSpriteReady() {
+  const [ready, setReady] = useState(
+    () =>
+      typeof document !== 'undefined' &&
+      !!document.getElementById(SPRITE_HOST_ID),
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    ensureToothSprite().then((isReady) => {
+      if (!cancelled) setReady(isReady);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return ready;
+}
 
 // ── Color → instruction mapping ─────────────────────────────────────────────
 type ColorEntry = {
@@ -177,6 +254,7 @@ export function OdontogramSelector({
   /** Override the default section subheading. */
   subtitle?: string;
 }) {
+  const toothSpriteReady = useToothSpriteReady();
   const [showLegend, setShowLegend] = useState(true);
   const [popup, setPopup] = useState<{
     tooth: number;
@@ -406,6 +484,7 @@ export function OdontogramSelector({
               readonlyAssignments={readonlyAssignments}
               activeTooth={popup?.tooth ?? null}
               activeIpr={iprPopup?.tooth ?? null}
+              spriteReady={toothSpriteReady}
               preferEditableFill={mode === 'attachments'}
               disabled={disabled}
               iprValues={iprVisible ? iprValues : undefined}
@@ -424,6 +503,7 @@ export function OdontogramSelector({
               readonlyAssignments={readonlyAssignments}
               activeTooth={popup?.tooth ?? null}
               activeIpr={iprPopup?.tooth ?? null}
+              spriteReady={toothSpriteReady}
               preferEditableFill={mode === 'attachments'}
               disabled={disabled}
               iprValues={iprVisible ? iprValues : undefined}
@@ -579,6 +659,7 @@ function Arch({
   readonlyAssignments,
   activeTooth,
   activeIpr,
+  spriteReady,
   preferEditableFill,
   disabled,
   iprValues,
@@ -597,6 +678,7 @@ function Arch({
   readonlyAssignments: Map<number, ToothInstructionType>;
   activeTooth: number | null;
   activeIpr: number | null;
+  spriteReady: boolean;
   /**
    * When true, the editable layer owns the main tooth fill. Used by the
    * treatment attachment editor so selecting ATTACHMENT turns the tooth pink
@@ -673,6 +755,7 @@ function Arch({
               type={assignments.get(n)}
               readonlyType={readonlyAssignments.get(n)}
               active={activeTooth === n}
+              spriteReady={spriteReady}
               preferEditableFill={preferEditableFill}
               disabled={disabled}
               onClick={onToothClick}
@@ -752,6 +835,7 @@ type ToothButtonProps = {
    */
   readonlyType?: ToothInstructionType;
   active?: boolean;
+  spriteReady: boolean;
   preferEditableFill?: boolean;
   disabled?: boolean;
   onClick: (
@@ -768,6 +852,7 @@ const ToothButton = memo(
     type,
     readonlyType,
     active,
+    spriteReady,
     preferEditableFill,
     disabled,
     onClick,
@@ -815,6 +900,9 @@ const ToothButton = memo(
         }) as CSSProperties,
       [color?.hex, color?.outline, row],
     );
+    const spriteHref = spriteReady
+      ? `#tooth-${toothNumber}`
+      : `${SPRITE_URL}#tooth-${toothNumber}`;
 
     const handleClick = useCallback(
       (e: ReactMouseEvent<HTMLButtonElement>) => onClick(toothNumber, e),
@@ -861,7 +949,7 @@ const ToothButton = memo(
           aria-hidden
           focusable="false"
         >
-          <use href={`${SPRITE_URL}#tooth-${toothNumber}`} />
+          <use href={spriteHref} xlinkHref={spriteHref} />
         </svg>
 
         {/* Overlay dot — visible ONLY when both layers paint the tooth.

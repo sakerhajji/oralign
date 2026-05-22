@@ -29,9 +29,12 @@ function LoginContent() {
         </div>
       </div>
       <div className="relative hidden bg-muted lg:block">
-        <img
-          src="/loginPicture.png"
+        <Image
+          src="/loginPicture.webp"
           alt="Dental clinic"
+          fill
+          sizes="50vw"
+          unoptimized
           className="absolute inset-0 h-full w-full object-cover dark:brightness-[0.2] dark:grayscale"
         />
       </div>

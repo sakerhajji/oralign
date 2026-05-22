@@ -26,10 +26,11 @@ export function ConfidenceSection() {
         <div className="grid gap-12 lg:grid-cols-2 lg:items-center lg:gap-20">
           <Reveal>
             <Image
-              src="/showcase/imageSmileShowcase.png"
+              src="/showcase/imageSmileShowcase.webp"
               alt={dict.confidence.imageLabel[lang]}
               width={480}
               height={640}
+              unoptimized
               className="mx-auto max-w-[480px] rounded-lg object-cover"
             />
           </Reveal>

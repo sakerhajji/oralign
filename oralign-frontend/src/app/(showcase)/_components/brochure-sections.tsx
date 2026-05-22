@@ -155,7 +155,7 @@ export function AdultBrochureSection() {
       id="adults"
       lang={lang}
       copy={brochureCopy.adult}
-      imageSrc="/showcase/adulteAlinger.png"
+      imageSrc="/showcase/adulteAlinger.webp"
       imageTone="light"
     />
   );
@@ -237,10 +237,11 @@ export function ParentBrochureSection() {
             <figure className="relative h-full overflow-hidden border border-[rgba(242,245,239,0.16)] bg-[#101010]">
               <div className="relative aspect-[4/5] min-h-[420px] sm:aspect-[5/4] lg:aspect-auto lg:h-full lg:min-h-[640px]">
                 <Image
-                  src="/showcase/boyAndGirl.png"
+                  src="/showcase/boyAndGirl.webp"
                   alt={copy.imageLabel[lang]}
                   fill
                   sizes="(min-width: 1280px) 520px, (min-width: 1024px) 46vw, 100vw"
+                  unoptimized
                   className="object-cover"
                   priority={false}
                 />

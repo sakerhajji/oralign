@@ -33,6 +33,16 @@ export interface ClinicalConditionsFieldProps {
   disabled?: boolean;
   /** Optional id prefix so multiple instances on the same page get unique checkbox ids. */
   idPrefix?: string;
+  /**
+   * Override the section legend. Defaults to "Reason for consultation"
+   * because the clinical team treats this list as the chief-complaint
+   * source (`Crowding`, `Deep bite`, … are simultaneously the
+   * conditions and the reason the patient comes in). Pass a custom
+   * value if a different surface needs a different label.
+   */
+  legendLabel?: string;
+  /** Override the small descriptive paragraph above the grid. */
+  descriptionText?: string;
   /** Called on every checkbox toggle with the full next list (order preserved per CLINICAL_CONDITION_OPTIONS). */
   onConditionsChange: (next: string[]) => void;
   /** Called whenever the user types in the "Other" detail input. */
@@ -46,6 +56,8 @@ export function ClinicalConditionsField({
   otherDetail,
   disabled,
   idPrefix = 'clinical-conditions',
+  legendLabel = 'Reason for consultation',
+  descriptionText = 'Select every condition that applies — multiple are allowed. Tick "Other" to describe a reason not on the list.',
   onConditionsChange,
   onOtherDetailChange,
   otherDetailError,
@@ -75,11 +87,8 @@ export function ClinicalConditionsField({
 
   return (
     <fieldset className="space-y-3 rounded-lg border bg-card p-4">
-      <legend className="px-1 text-sm font-semibold">Clinical Conditions</legend>
-      <p className="text-xs text-muted-foreground">
-        Select every condition that applies — multiple are allowed. Tick
-        "Other" to describe a condition not on the list.
-      </p>
+      <legend className="px-1 text-sm font-semibold">{legendLabel}</legend>
+      <p className="text-xs text-muted-foreground">{descriptionText}</p>
       <div
         role="group"
         aria-label="Clinical conditions"

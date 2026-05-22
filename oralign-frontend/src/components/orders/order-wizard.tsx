@@ -181,10 +181,12 @@ interface NewPatientDraft {
   gender?: Gender;
   address: string;
   notes: string;
-  reason: string;
   // Multi-select clinical conditions + free-text detail for "Other".
-  // Mirrors the standalone /dashboard/patients form one-to-one so the
-  // planner sees the same fields regardless of entry point.
+  // These ALSO double as the order's "Reason for consultation" — the
+  // clinical team treats the two as the same concept (the patient
+  // comes in BECAUSE OF the conditions). The standalone free-text
+  // reason field was removed; the order's chiefComplaint is auto-
+  // derived from these values on submit.
   clinicalConditions: string[];
   clinicalConditionsOther: string;
 }
@@ -209,7 +211,6 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
     gender: undefined,
     address: '',
     notes: '',
-    reason: '',
     clinicalConditions: [],
     clinicalConditionsOther: '',
   });
@@ -318,8 +319,21 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
       if (!newPatient.gender) {
         errors['newPatient.gender'] = 'Gender selection is required.';
       }
-      if (!newPatient.reason.trim()) {
-        errors['newPatient.reason'] = 'Consultation reason is required.';
+      // ── Reason for consultation ───────────────────────────────────
+      // The clinical team merged "Reason for consultation" with the
+      // Clinical Conditions checkboxes (they're the same concept).
+      // Require AT LEAST ONE condition checked OR an "Other" entry
+      // with detail text — otherwise the planner is creating a
+      // patient with no documented chief complaint.
+      const checkedConditions = newPatient.clinicalConditions.filter(Boolean);
+      const otherSelected = checkedConditions.includes('Other');
+      const otherDetail = newPatient.clinicalConditionsOther.trim();
+      const hasReason = otherSelected
+        ? checkedConditions.length > 1 || otherDetail.length > 0
+        : checkedConditions.length > 0;
+      if (!hasReason) {
+        errors['newPatient.clinicalConditions'] =
+          'Pick at least one clinical condition (or tick "Other" and add a description).';
       }
       // email + phone + address + notes are OPTIONAL (same as the
       // dedicated patient form).
@@ -331,26 +345,31 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
     }
 
     if (patientMode === 'new' && !form.patientId) {
-      // Combine the consultation reason with any free-form notes the
-      // planner entered. The dedicated patients form treats `notes` as
-      // free-form too, so this stays consistent — and the chief
-      // complaint on the order is seeded separately below.
-      const combinedNotes = [
-        newPatient.notes.trim(),
-        newPatient.reason.trim()
-          ? `Consultation reason: ${newPatient.reason.trim()}`
-          : '',
-      ]
-        .filter(Boolean)
-        .join('\n\n');
-
       // Strip the "Other" detail when "Other" isn't selected so we
       // never persist orphan text. Empty arrays become `undefined`
       // on the wire so the backend's PATCH semantics also work.
       const conditions = newPatient.clinicalConditions.filter(Boolean);
-      const otherDetail = conditions.includes('Other')
+      const otherSelected = conditions.includes('Other');
+      const otherDetail = otherSelected
         ? newPatient.clinicalConditionsOther.trim() || undefined
         : undefined;
+
+      // Auto-derive the order's chief complaint from the conditions:
+      // the standard labels first, with the free-text "Other" detail
+      // appended after an em-dash separator. Clipped at 240 chars to
+      // stay within the column's reasonable size. Falls back to any
+      // chief-complaint the planner had already typed in this session
+      // (rare — the field doesn't appear on the patient step today,
+      // but kept for forward-compatibility).
+      const standardLabels = conditions.filter((c) => c !== 'Other');
+      const derivedChiefComplaint = [
+        standardLabels.join(', '),
+        otherDetail ?? '',
+      ]
+        .filter(Boolean)
+        .join(' — ')
+        .slice(0, 240);
+
       const createdPatient = await createPatient.mutateAsync({
         fullName: newPatient.fullName.trim(),
         email: newPatient.email.trim() || undefined,
@@ -358,7 +377,7 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
         gender: newPatient.gender,
         dateOfBirth: newPatient.dateOfBirth || undefined,
         address: newPatient.address.trim() || undefined,
-        notes: combinedNotes || undefined,
+        notes: newPatient.notes.trim() || undefined,
         clinicalConditions: conditions.length > 0 ? conditions : undefined,
         clinicalConditionsOther: otherDetail,
         doctorId: isAdmin ? form.doctorId : undefined,
@@ -366,7 +385,8 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
       setForm((current) => ({
         ...current,
         patientId: createdPatient.id,
-        chiefComplaint: current.chiefComplaint || newPatient.reason.trim(),
+        chiefComplaint:
+          current.chiefComplaint?.trim() || derivedChiefComplaint || undefined,
       }));
       return createdPatient.id;
     }
@@ -436,10 +456,25 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
     const patientId = await ensurePatientReady();
     if (!patientId) return undefined;
 
+    // The order's `chiefComplaint` falls back to a string derived from
+    // the new patient's clinical-conditions selection — the merged
+    // "Reason for consultation" concept. `ensurePatientReady` above
+    // already wrote this into `form.chiefComplaint` when the planner
+    // is creating a new patient, but we re-derive defensively in case
+    // the form was reset.
+    const derivedFromConditions = (() => {
+      const conditions = newPatient.clinicalConditions.filter(Boolean);
+      const standard = conditions.filter((c) => c !== 'Other');
+      const other = conditions.includes('Other')
+        ? newPatient.clinicalConditionsOther.trim()
+        : '';
+      return [standard.join(', '), other].filter(Boolean).join(' — ').slice(0, 240);
+    })();
+
     const draftPayload = {
       ...form,
       patientId,
-      chiefComplaint: form.chiefComplaint || newPatient.reason.trim(),
+      chiefComplaint: form.chiefComplaint?.trim() || derivedFromConditions || undefined,
       materials: (form.materials ?? []).filter(Boolean),
       toothInstructions,
     };
@@ -925,16 +960,12 @@ function PatientStep({
             disabled={!canModify}
             onChange={(value) => updateNewPatient('notes', value)}
           />
-          <TextAreaField
-            label="Reason for consultation"
-            value={newPatient.reason}
-            placeholder="Briefly describe why the patient is coming in…"
-            error={errors['newPatient.reason']}
-            disabled={!canModify}
-            onChange={(value) => updateNewPatient('reason', value)}
-          />
-          {/* Clinical Conditions — mirrors the standalone patient form
-              so the same data is captured at order-creation time. */}
+          {/* "Reason for consultation" — clinical-conditions checkboxes
+              replace the previous free-text textarea. The clinical
+              team treats the conditions list as the reason itself, and
+              free-form detail still has a home via the "Other" toggle.
+              The order's `chiefComplaint` is auto-derived from the
+              selection in `saveDraft` / `ensurePatientReady` above. */}
           <ClinicalConditionsField
             conditions={newPatient.clinicalConditions}
             otherDetail={newPatient.clinicalConditionsOther}
@@ -947,6 +978,9 @@ function PatientStep({
               updateNewPatient('clinicalConditionsOther', next)
             }
           />
+          {errors['newPatient.clinicalConditions'] && (
+            <FieldError message={errors['newPatient.clinicalConditions']} />
+          )}
         </div>
       )}
     </div>

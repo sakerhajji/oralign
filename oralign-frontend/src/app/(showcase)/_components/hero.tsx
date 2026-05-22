@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 import { dict } from "../_lib/i18n/dict";
 import { useShowcaseLang } from "../_lib/i18n/lang-context";
 import { gsap, prefersReducedMotion } from "../_lib/gsap";
@@ -20,12 +20,22 @@ export function Hero() {
   const { lang } = useShowcaseLang();
   const sectionRef = useRef<HTMLElement | null>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const section = sectionRef.current;
     if (!section) return;
 
+    const fallback = window.setTimeout(() => {
+      gsap.set(ANIMATED, {
+        opacity: 1,
+        y: 0,
+        scale: 1,
+        clearProps: "transform",
+      });
+    }, 1400);
+
     const ctx = gsap.context(() => {
       if (prefersReducedMotion()) {
+        window.clearTimeout(fallback);
         gsap.set(ANIMATED, {
           opacity: 1,
           y: 0,
@@ -63,6 +73,7 @@ export function Hero() {
       const tl = gsap.timeline({
         defaults: { ease: "power3.out" },
       });
+      tl.eventCallback("onComplete", () => window.clearTimeout(fallback));
 
       tl.to(
         ".sc-hero-orbit",
@@ -140,7 +151,10 @@ export function Hero() {
       });
     }, section);
 
-    return () => ctx.revert();
+    return () => {
+      window.clearTimeout(fallback);
+      ctx.revert();
+    };
   }, []);
 
   return (

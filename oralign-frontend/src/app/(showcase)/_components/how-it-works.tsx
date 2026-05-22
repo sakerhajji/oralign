@@ -10,8 +10,8 @@ const stepImagePaths = [
   "/showcase/Consultationsourire.png",
   "/showcase/Scan3D.png",
   "/showcase/futurSourire.png",
-  "/showcase/portez.png",
-  "/showcase/sourire.png",
+  "/showcase/Portez.png",
+  "/showcase/Sourire.png",
 ];
 
 export function HowItWorks() {

@@ -87,7 +87,7 @@ export function Header() {
           aria-label="Primary"
           className="mx-6 hidden flex-1 items-center justify-center lg:flex"
         >
-          <ul className="flex list-none items-center gap-8 xl:gap-10">
+          <ul className="flex list-none items-center gap-4 xl:gap-6">
             {NAV_ITEMS.map((item) => {
               const id = item.href.replace("#", "");
               const isActive = active === id;
@@ -97,7 +97,7 @@ export function Header() {
                     href={resolveAnchor(item.href)}
                     aria-current={isActive ? "true" : undefined}
                     className={[
-                      "relative inline-block py-2 text-[0.62rem] uppercase tracking-[0.25em] no-underline transition-colors",
+                      "relative inline-block py-2 text-[0.6rem] uppercase tracking-[0.18em] no-underline transition-colors",
                       isActive
                         ? "text-[var(--sc-black)]"
                         : "text-[var(--sc-text-mid)] hover:text-[var(--sc-black)]",

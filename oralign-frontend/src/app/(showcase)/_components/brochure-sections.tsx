@@ -237,7 +237,7 @@ export function ParentBrochureSection() {
             <figure className="relative h-full overflow-hidden border border-[rgba(242,245,239,0.16)] bg-[#101010]">
               <div className="relative aspect-[4/5] min-h-[420px] sm:aspect-[5/4] lg:aspect-auto lg:h-full lg:min-h-[640px]">
                 <Image
-                  src="/showcase/boyAndgirl.png"
+                  src="/showcase/boyAndGirl.png"
                   alt={copy.imageLabel[lang]}
                   fill
                   sizes="(min-width: 1280px) 520px, (min-width: 1024px) 46vw, 100vw"

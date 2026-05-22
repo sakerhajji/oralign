@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, type ElementType, type ReactNode, type Ref } from "react";
-import { gsap, prefersReducedMotion } from "../../_lib/gsap";
+import { useLayoutEffect, useRef, type ElementType, type ReactNode, type Ref } from "react";
+import { gsap, prefersReducedMotion, ScrollTrigger } from "../../_lib/gsap";
 
 type Props = {
   children: ReactNode;
@@ -20,38 +20,50 @@ type Props = {
 export function Reveal({ children, delay, className = "", as: Tag = "div" }: Props) {
   const ref = useRef<HTMLElement | null>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
 
     if (prefersReducedMotion()) {
-      gsap.set(el, { opacity: 1, y: 0 });
+      gsap.set(el, { opacity: 1, y: 0, clearProps: "transform" });
       return;
     }
 
+    const fallback = window.setTimeout(() => {
+      gsap.set(el, { opacity: 1, y: 0, clearProps: "transform" });
+    }, 1200);
+
     const ctx = gsap.context(() => {
-      gsap.set(el, { opacity: 0, y: 28 });
+      gsap.set(el, { opacity: 1, y: 24 });
       gsap.to(el, {
         opacity: 1,
         y: 0,
         duration: 0.95,
         ease: "power3.out",
         delay: delay ? 0.15 : 0,
+        clearProps: "transform",
+        onComplete: () => window.clearTimeout(fallback),
         scrollTrigger: {
           trigger: el,
           start: "top 86%",
           toggleActions: "play none none none",
           once: true,
+          onEnter: () => window.clearTimeout(fallback),
         },
       });
     }, el);
 
-    return () => ctx.revert();
+    const refresh = window.requestAnimationFrame(() => ScrollTrigger.refresh());
+
+    return () => {
+      window.clearTimeout(fallback);
+      window.cancelAnimationFrame(refresh);
+      ctx.revert();
+    };
   }, [delay]);
 
-  // The sc-rv / sc-rv-2 class only carries the initial-hidden state in CSS
-  // (see showcase.css). GSAP overrides those styles inline on commit, so the
-  // class is essentially a no-op once the animation runs.
+  // The sc-rv / sc-rv-2 class is kept as a stable hook for reveal styling.
+  // Content remains visible by default; JS progressively enhances it.
   const cls = [delay ? "sc-rv-2" : "sc-rv", className].filter(Boolean).join(" ");
 
   return (

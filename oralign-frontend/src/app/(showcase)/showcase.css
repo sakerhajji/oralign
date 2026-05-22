@@ -88,27 +88,22 @@ html { scroll-behavior: smooth; }
   letter-spacing: 0.18em;
 }
 
-/* ─── INITIAL HIDDEN STATES (GSAP animates them in) ─────────────────
-   Wrapped in @media (not reduced-motion) so users with motion-reduce
-   preferences see content immediately on first paint — no flash, no
-   delay. Motion-allowed users see the elements hidden until GSAP
-   takes over after hydration. */
+/* ─── MOTION RESILIENCE ─────────────────────────────────────────────
+   Showcase content stays visible by default. Client-side GSAP adds the
+   reveal/hero animation only after hydration, with a JS fallback that restores
+   visibility if route transitions or browser back/forward cache interrupt it.
+   This prevents the "blank until hard refresh" state when navigating from the
+   dashboard back to the marketing page. */
 @media not (prefers-reduced-motion: reduce) {
   [data-theme="showcase"] .sc-rv,
-  [data-theme="showcase"] .sc-rv-2 {
-    opacity: 0;
-    transform: translate3d(0, 28px, 0);
-  }
+  [data-theme="showcase"] .sc-rv-2,
   [data-theme="showcase"] .sc-hero-eyebrow,
   [data-theme="showcase"] .sc-hero-h1,
   [data-theme="showcase"] .sc-hero-sub,
   [data-theme="showcase"] .sc-hero-ctas,
-  [data-theme="showcase"] .sc-hero-scroll {
-    opacity: 0;
-  }
+  [data-theme="showcase"] .sc-hero-scroll,
   [data-theme="showcase"] .sc-hero-core {
-    opacity: 0;
-    transform: scale(0.92);
+    will-change: opacity, transform;
   }
 }
 

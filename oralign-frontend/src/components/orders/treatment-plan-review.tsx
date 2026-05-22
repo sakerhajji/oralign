@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { format } from 'date-fns';
 import {
   Check,
+  ClipboardPaste,
   Globe,
   Image as ImageIcon,
   Link2,
@@ -17,6 +18,7 @@ import {
   Upload,
   X,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -1450,6 +1452,101 @@ function DentalTreatmentTableSection({
     upload.mutate({ id: treatmentPlanId, file });
   };
 
+  // ── Paste-from-clipboard ─────────────────────────────────────────
+  // Two entry points so the planner can paste a screenshot without
+  // ever leaving the keyboard:
+  //
+  //   1. Ctrl-V / Cmd-V on a focused dropzone — `onPaste` reads the
+  //      bytes directly out of the React clipboard event. Works in
+  //      every browser; the dropzone is `tabIndex=0` so a click
+  //      (or Tab-to-focus) puts it in receive-paste mode.
+  //
+  //   2. A dedicated "Paste" button that uses the asynchronous
+  //      `navigator.clipboard.read()` API. Slicker when it works
+  //      but requires the page to be in focus AND the user to
+  //      have granted clipboard read permission (the browser asks
+  //      on first use). We fall back to a toast when either of
+  //      those fails so the user knows the Ctrl-V path still works.
+  //
+  // Either path goes through `handlePastedFile`, which validates
+  // the file LOCALLY (mime + size) before hitting the upload
+  // mutation. The backend re-validates on its own; the client
+  // check just avoids a pointless round-trip on obvious failures.
+
+  const handlePastedFile = (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      toast.error('Pasted content is not an image.');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('Image must be 10 MB or smaller.');
+      return;
+    }
+    upload.mutate({ id: treatmentPlanId, file });
+  };
+
+  const handleClipboardEventPaste = (
+    event: React.ClipboardEvent<HTMLDivElement>,
+  ) => {
+    if (!canEdit || upload.isPending || remove.isPending) return;
+    const items = event.clipboardData?.items;
+    if (!items || items.length === 0) return;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) {
+          event.preventDefault();
+          handlePastedFile(file);
+          return;
+        }
+      }
+    }
+  };
+
+  const handlePasteButtonClick = async () => {
+    if (!canEdit) return;
+    // Modern Clipboard API path. Browsers gate this behind a user
+    // gesture + permission prompt, so it can throw — fall through
+    // to a friendly toast pointing the user at Ctrl-V.
+    if (
+      typeof navigator !== 'undefined' &&
+      navigator.clipboard &&
+      'read' in navigator.clipboard
+    ) {
+      try {
+        const clipboardItems = await navigator.clipboard.read();
+        for (const clipItem of clipboardItems) {
+          const imgType = clipItem.types.find((t) => t.startsWith('image/'));
+          if (imgType) {
+            const blob = await clipItem.getType(imgType);
+            const ext = imgType.split('/')[1] ?? 'png';
+            const file = new File([blob], `pasted-image.${ext}`, {
+              type: imgType,
+            });
+            handlePastedFile(file);
+            return;
+          }
+        }
+        toast.error('No image found on the clipboard.');
+        return;
+      } catch (err) {
+        // Permission denied, no clipboard data, or browser doesn't
+        // support read(). Surface a hint pointing at Ctrl-V — that
+        // path doesn't need any permission grant.
+        const message =
+          err instanceof Error && err.message
+            ? err.message
+            : 'Clipboard read failed';
+        toast.error(`${message}. Tip: click the upload area and press Ctrl-V.`);
+        return;
+      }
+    }
+    toast.error(
+      'Your browser does not allow programmatic clipboard reads. Click the upload area and press Ctrl-V instead.',
+    );
+  };
+
   return (
     <Card>
       <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1479,6 +1576,17 @@ function DentalTreatmentTableSection({
             </Button>
             <Button
               type="button"
+              variant="secondary"
+              size="sm"
+              onClick={handlePasteButtonClick}
+              disabled={upload.isPending || remove.isPending}
+              className="gap-2"
+            >
+              <ClipboardPaste className="h-4 w-4" />
+              Paste
+            </Button>
+            <Button
+              type="button"
               variant="outline"
               size="sm"
               onClick={() => remove.mutate(treatmentPlanId)}
@@ -1504,7 +1612,20 @@ function DentalTreatmentTableSection({
         </p>
 
         {imageUrl ? (
-          <div className="overflow-hidden rounded-2xl border bg-card shadow-sm">
+          // tabIndex + onPaste mirror the empty-state dropzone so the
+          // planner can also paste a NEW screenshot directly over the
+          // existing one (replace via Ctrl-V) without going through
+          // the file picker.
+          <div
+            tabIndex={canEdit ? 0 : -1}
+            onPaste={handleClipboardEventPaste}
+            className="overflow-hidden rounded-2xl border bg-card shadow-sm outline-none transition focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/40"
+            aria-label={
+              canEdit
+                ? 'Dental treatment table — click then press Ctrl-V to paste a new image'
+                : undefined
+            }
+          >
             {imageBlob.loading ? (
               <div className="flex h-40 items-center justify-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -1548,29 +1669,59 @@ function DentalTreatmentTableSection({
             )}
           </div>
         ) : canEdit ? (
-          <div className="rounded-2xl border-2 border-dashed bg-muted/20 p-6">
+          // Dropzone is `tabIndex=0` + `onPaste` so the planner can
+          // click it once (giving it keyboard focus) and then press
+          // Ctrl-V to upload a screenshot directly. The focus-visible
+          // ring tells them paste is armed.
+          <div
+            tabIndex={0}
+            onPaste={handleClipboardEventPaste}
+            className="rounded-2xl border-2 border-dashed bg-muted/20 p-6 outline-none transition focus-visible:border-primary focus-visible:bg-primary/5 focus-visible:ring-2 focus-visible:ring-primary/40"
+            aria-label="Dental treatment table upload dropzone — click then press Ctrl-V to paste an image"
+          >
             <div className="flex flex-col items-center justify-center gap-3 text-center">
               <ImageIcon className="h-8 w-8 text-muted-foreground" />
               <div>
                 <p className="text-sm font-medium">No image uploaded yet</p>
                 <p className="text-xs text-muted-foreground">
-                  Upload the dental treatment table as PNG, JPG or WebP.
+                  Upload the dental treatment table as PNG, JPG or WebP, or
+                  click this area and press{' '}
+                  <kbd className="rounded border bg-background px-1 font-mono text-[10px]">
+                    Ctrl
+                  </kbd>{' '}
+                  +{' '}
+                  <kbd className="rounded border bg-background px-1 font-mono text-[10px]">
+                    V
+                  </kbd>{' '}
+                  to paste a screenshot.
                 </p>
               </div>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={upload.isPending}
-                className="gap-2"
-              >
-                {upload.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Upload className="h-4 w-4" />
-                )}
-                Upload image
-              </Button>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={upload.isPending}
+                  className="gap-2"
+                >
+                  {upload.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Upload className="h-4 w-4" />
+                  )}
+                  Upload image
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handlePasteButtonClick}
+                  disabled={upload.isPending}
+                  className="gap-2"
+                >
+                  <ClipboardPaste className="h-4 w-4" />
+                  Paste from clipboard
+                </Button>
+              </div>
             </div>
           </div>
         ) : (

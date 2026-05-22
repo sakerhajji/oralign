@@ -599,11 +599,30 @@ function ViewerModeOption({
 
 type IprMode = 'per-tooth' | 'image';
 
-const TREATMENT_COLOR_TYPES = new Set<string>([
+// ── Two strictly-disjoint type sets ───────────────────────────────
+// The treatment odontogram now renders TWO layers:
+//
+//   1. DOCTOR_ORDER_COLOR_TYPES — set by the prescribing doctor on
+//      the order itself (No Attachments / Do Not Move / No IPR /
+//      Extract). On this surface they are READ-ONLY: shown as a
+//      coloured background so the planner can see clinical context
+//      while placing attachments, but not clickable.
+//
+//   2. PLANNER_TREATMENT_COLOR_TYPES — set by the planner on this
+//      editor (Attachment only, in pink). This is what the picker
+//      shows in `mode="attachments"`.
+//
+// Keep these disjoint — a tooth that has BOTH a doctor flag AND a
+// planner attachment is rendered with the doctor colour as the fill
+// and a small pink corner dot overlay (see OdontogramSelector).
+const DOCTOR_ORDER_COLOR_TYPES = new Set<string>([
   ToothInstructionType.NO_ATTACHMENTS,
   ToothInstructionType.DO_NOT_MOVE,
   ToothInstructionType.NO_IPR,
   ToothInstructionType.EXTRACT,
+]);
+
+const PLANNER_TREATMENT_COLOR_TYPES = new Set<string>([
   ToothInstructionType.ATTACHMENT,
 ]);
 
@@ -615,8 +634,14 @@ const TREATMENT_CLINICAL_IMAGE_SLOTS = [
   { category: OrderFileCategory.LOWER_PHOTO, label: 'Lower occlusal view' },
 ] as const;
 
-function isTreatmentColorType(type: string): type is ToothInstructionType {
-  return TREATMENT_COLOR_TYPES.has(type);
+function isDoctorOrderColorType(type: string): type is ToothInstructionType {
+  return DOCTOR_ORDER_COLOR_TYPES.has(type);
+}
+
+function isPlannerTreatmentColorType(
+  type: string,
+): type is ToothInstructionType {
+  return PLANNER_TREATMENT_COLOR_TYPES.has(type);
 }
 
 function useAuthenticatedObjectUrl(url?: string | null) {
@@ -732,11 +757,21 @@ function MovementTableSection({
     }));
   }, [review.clinicalImages]);
 
-  // ── Decompose the review payload into two cleanly-separated layers:
-  //     • colorInstructions — treatment tooth flags only:
-  //       No Attachments / Do Not Move / No IPR / Extract / Attachment.
-  //       These still live in OrderToothInstruction and are written
-  //       via the existing `updateToothInstructions` endpoint.
+  // ── Decompose the review payload into THREE cleanly-separated layers:
+  //
+  //     • orderColors — doctor's prescription flags (No Attachments /
+  //       Do Not Move / No IPR / Extract). Rendered as a READ-ONLY
+  //       background so the planner sees clinical context while
+  //       placing attachments. The planner CANNOT change these on
+  //       this surface — they live on the order and are edited on
+  //       the order detail page only.
+  //
+  //     • colorInstructions — planner-set ATTACHMENT marks (pink).
+  //       Stored in OrderToothInstruction, written via
+  //       `updateToothInstructions`. The picker in `mode="attachments"`
+  //       only shows the pink swatch, so the planner can't write any
+  //       other type from here.
+  //
   //     • iprMap / iprNotes — per-CONTACT IPR mm value + optional
   //       stripping note, keyed by the right-anchor tooth number to
   //       match the OdontogramSelector's render contract. Sourced
@@ -746,12 +781,15 @@ function MovementTableSection({
   //       migrated out and the endpoint now rejects them — the team
   //       gets a clear error if any client still tries to write that
   //       legacy shape.
-  const { colorInstructions, iprMap, iprNotes } = useMemo(() => {
-    const colors: ToothInstruction[] = [];
+  const { orderColors, colorInstructions, iprMap, iprNotes } = useMemo(() => {
+    const doctorColors: ToothInstruction[] = [];
+    const plannerColors: ToothInstruction[] = [];
     for (const { toothNumber, entries } of review.odontogram ?? []) {
       for (const e of entries) {
-        if (isTreatmentColorType(e.type)) {
-          colors.push({ toothNumber, type: e.type });
+        if (isDoctorOrderColorType(e.type)) {
+          doctorColors.push({ toothNumber, type: e.type });
+        } else if (isPlannerTreatmentColorType(e.type)) {
+          plannerColors.push({ toothNumber, type: e.type });
         }
         // Ignore any stray `ipr_value` rows — they're legacy data
         // from before the migration. The backend will eventually
@@ -767,7 +805,8 @@ function MovementTableSection({
       if (row.note) notes.set(row.toTooth, row.note);
     }
     return {
-      colorInstructions: colors,
+      orderColors: doctorColors,
+      colorInstructions: plannerColors,
       iprMap: ipr,
       iprNotes: notes,
     };
@@ -865,14 +904,22 @@ function MovementTableSection({
       <CardContent className="space-y-6">
         <OdontogramSelector
           // mode="attachments" → the picker shows ONLY the pink
-          // ATTACHMENT swatch. The four doctor-level instruction
-          // colours (No Attachments / Do Not Move / No IPR / Extract)
-          // belong on the order odontogram and are hidden here per the
-          // clinical workflow: planners only add attachments + IPR on
-          // this surface.
+          // ATTACHMENT swatch. The planner can click teeth to add /
+          // remove attachments and can click between-tooth contacts
+          // for IPR + Step values. Doctor-level flags are NOT
+          // editable here — they come in via `readonlyValue` below.
           mode="attachments"
           value={colorInstructions}
           onChange={handleColorChange}
+          // ── Doctor's order odontogram painted as a read-only
+          //    background. Lets the planner see clinical context
+          //    (No Attachments / Do Not Move / No IPR / Extract)
+          //    while placing attachments, without risking accidental
+          //    edits. If both layers paint the same tooth, the
+          //    OdontogramSelector renders the doctor colour as the
+          //    fill and shows a small pink corner dot for the
+          //    planner's attachment.
+          readonlyValue={orderColors}
           disabled={
             !canEdit ||
             updateInstructions.isPending ||
@@ -887,7 +934,7 @@ function MovementTableSection({
             iprMode === 'per-tooth' && canEdit ? handleIprChange : undefined
           }
           title="Treatment odontogram"
-          subtitle="Choose tooth colors for No Attachments, Do Not Move, No IPR, Extract, and Attachment. Use the purple contacts for IPR and stripping values."
+          subtitle="The doctor's order colours are shown as a background reference. Add pink ATTACHMENT marks on individual teeth, and click the dotted contacts between teeth to set IPR (mm) and Step values."
         />
 
         {/* Editor instructions — only relevant when the planner is in

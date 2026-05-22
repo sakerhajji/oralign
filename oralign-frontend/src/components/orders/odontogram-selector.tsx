@@ -103,6 +103,7 @@ export function OdontogramSelector({
   iprValues,
   iprNotes,
   onIprChange,
+  readonlyValue,
   mode = 'movement',
   title,
   subtitle,
@@ -143,6 +144,26 @@ export function OdontogramSelector({
     toTooth: number,
     payload: { value: string | null; note: string | null },
   ) => void;
+  /**
+   * Tooth instructions painted as a READ-ONLY background layer. The
+   * treatment-plan editor passes the doctor's order colours through
+   * this prop so they paint INLINE on the same odontogram the planner
+   * uses for attachments — no separate "reference" panel, the doctor's
+   * prescription context lives right where the work happens.
+   *
+   * Rendering rules:
+   *   • If a tooth has only a readonly entry → painted with the doctor's
+   *     colour (blue / red / green / orange).
+   *   • If a tooth has only an editable ATTACHMENT → painted pink.
+   *   • If a tooth has BOTH → painted with the doctor's colour as the
+   *     primary fill PLUS a small pink corner dot signalling the
+   *     attachment. Both signals visible at once.
+   *
+   * The picker palette stays restricted to the mode's `visibleColors`
+   * regardless of what readonlyValue contains — the planner cannot
+   * edit the doctor's prescription from this surface.
+   */
+  readonlyValue?: ToothInstruction[];
   /**
    * 'movement'   — order-wizard context: shows all 4 instruction colors
    *                (No Attachments / Do Not Move / No IPR / Extract).
@@ -217,6 +238,27 @@ export function OdontogramSelector({
     }
     return map;
   }, [value, visibleTypes]);
+
+  // Read-only doctor instructions painted as a background layer.
+  // Filtered to types that are NOT in the picker's palette so we
+  // don't double-paint a tooth that's already in the editable set.
+  // Stable Map structure → memoised so a parent passing an array
+  // literal each render doesn't churn the ToothButton tree.
+  const readonlyAssignments = useMemo(() => {
+    const map = new Map<number, ToothInstructionType>();
+    if (!readonlyValue) return map;
+    for (const item of readonlyValue) {
+      // Skip any type that's ALSO part of the editable palette — the
+      // editable assignments take precedence for those. Doctor colours
+      // (no_attachments / do_not_move / no_ipr / extract) never overlap
+      // with the attachment-only editable layer, so this filter is a
+      // defensive no-op in practice; included so a future caller that
+      // passes a mixed `readonlyValue` doesn't silently double-paint.
+      if (visibleTypes.has(item.type)) continue;
+      if (!map.has(item.toothNumber)) map.set(item.toothNumber, item.type);
+    }
+    return map;
+  }, [readonlyValue, visibleTypes]);
 
   // Keep onChange / value / disabled reachable from stable callbacks so
   // ToothButton's memoization actually holds across renders.
@@ -359,6 +401,7 @@ export function OdontogramSelector({
               left={UPPER_RIGHT}
               right={UPPER_LEFT}
               assignments={assignments}
+              readonlyAssignments={readonlyAssignments}
               activeTooth={popup?.tooth ?? null}
               activeIpr={iprPopup?.tooth ?? null}
               disabled={disabled}
@@ -375,6 +418,7 @@ export function OdontogramSelector({
               left={LOWER_RIGHT}
               right={LOWER_LEFT}
               assignments={assignments}
+              readonlyAssignments={readonlyAssignments}
               activeTooth={popup?.tooth ?? null}
               activeIpr={iprPopup?.tooth ?? null}
               disabled={disabled}
@@ -528,6 +572,7 @@ function Arch({
   left,
   right,
   assignments,
+  readonlyAssignments,
   activeTooth,
   activeIpr,
   disabled,
@@ -540,6 +585,11 @@ function Arch({
   left: readonly number[];
   right: readonly number[];
   assignments: Map<number, ToothInstructionType>;
+  /**
+   * Doctor's order-level instructions painted as a background layer.
+   * Empty Map when the caller has no readonly context to pass.
+   */
+  readonlyAssignments: Map<number, ToothInstructionType>;
   activeTooth: number | null;
   activeIpr: number | null;
   disabled?: boolean;
@@ -610,6 +660,7 @@ function Arch({
               row={row}
               mirrored={MIRRORED.has(n)}
               type={assignments.get(n)}
+              readonlyType={readonlyAssignments.get(n)}
               active={activeTooth === n}
               disabled={disabled}
               onClick={onToothClick}
@@ -674,7 +725,20 @@ type ToothButtonProps = {
   toothNumber: number;
   row: 'upper' | 'lower';
   mirrored: boolean;
+  /**
+   * Active / editable instruction — drives the OVERLAY indicator
+   * (small corner dot) when also `readonlyType` is set, otherwise the
+   * tooth's main fill colour. Owned by the editable layer.
+   */
   type?: ToothInstructionType;
+  /**
+   * Doctor's read-only instruction. When set, this drives the tooth's
+   * main FILL colour even if `type` is also set — the doctor's
+   * prescription wins for the dominant visual, while the editable
+   * `type` becomes a small corner indicator. Owned by the read-only
+   * background layer.
+   */
+  readonlyType?: ToothInstructionType;
   active?: boolean;
   disabled?: boolean;
   onClick: (
@@ -689,11 +753,25 @@ const ToothButton = memo(
     row,
     mirrored,
     type,
+    readonlyType,
     active,
     disabled,
     onClick,
   }: ToothButtonProps) {
-    const color = type ? COLOR_BY_TYPE.get(type) : undefined;
+    // Resolution: doctor's readonly instruction wins the FILL colour
+    // (it's the prescription — the most important signal). The
+    // editable `type` becomes a small corner indicator when both
+    // are set. When only `type` is set, it drives the fill normally.
+    const editableColor = type ? COLOR_BY_TYPE.get(type) : undefined;
+    const readonlyColor = readonlyType
+      ? COLOR_BY_TYPE.get(readonlyType)
+      : undefined;
+    const fillColor = readonlyColor ?? editableColor;
+    // Overlay only appears when both layers paint the tooth — no point
+    // doubling up when only the editable layer is set (the fill
+    // already shows the editable colour).
+    const overlayColor = readonlyColor && editableColor ? editableColor : undefined;
+    const color = fillColor;
     // Normalise the host viewBox to "0 0 w h" — some source teeth (17, 27,
     // 37, 47) have content drawn far from the SVG origin (min-x ≈ 22.5).
     // Keeping the raw viewBox would push the <use> at (0, 0) outside the
@@ -764,6 +842,20 @@ const ToothButton = memo(
         >
           <use href={`${SPRITE_URL}#tooth-${toothNumber}`} />
         </svg>
+
+        {/* Overlay dot — visible ONLY when both layers paint the tooth.
+            Example: doctor prescribed "Extract" (orange fill) AND the
+            planner placed an attachment → orange tooth + small pink
+            corner dot. Single-layer teeth render without this dot
+            because their colour already lives on the fill. */}
+        {overlayColor && (
+          <span
+            className="odo-tooth-overlay"
+            style={{ background: overlayColor.hex }}
+            title={overlayColor.label}
+            aria-label={`Also: ${overlayColor.label}`}
+          />
+        )}
 
         {row === 'lower' && labelChip}
       </button>
@@ -1302,6 +1394,38 @@ const ODONTOGRAM_CSS = /* css */ `
   transform: scaleX(-1);
 }
 
+/* Overlay dot — pink attachment marker that sits on top of a tooth
+   already painted with the doctor's prescription colour. Anchored to
+   the inside-corner of the tooth glyph (top for upper row, bottom for
+   lower row) so it never clashes with the FDI number chip. */
+.odo-tooth-overlay {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  border: 1.5px solid #ffffff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.35);
+  pointer-events: none;
+  z-index: 2;
+}
+.odo-tooth-upper .odo-tooth-overlay {
+  /* Below the upper glyph, just above the FDI chip. */
+  bottom: 18px;
+  right: 4px;
+}
+.odo-tooth-lower .odo-tooth-overlay {
+  /* Above the lower glyph, just below the FDI chip. */
+  top: 18px;
+  right: 4px;
+}
+.odo-tooth-mirrored .odo-tooth-overlay {
+  /* Mirror keeps the dot on the SAME anatomical side (mesial) as the
+     unmirrored siblings — the tooth-button is flipped but the dot
+     should still read clearly on the same corner of the card. */
+  right: auto;
+  left: 4px;
+}
+
 /* The label chip: number is ALWAYS visible; colour state is communicated
    by filling the chip with the instruction colour and appending the short
    code. No overlap, no hidden numbers. */
@@ -1512,6 +1636,14 @@ const ODONTOGRAM_CSS = /* css */ `
 /* IPR and stripping are separate chips so the values do not collapse into a
    cramped pill when both are present. The mm value stays primary; stripping is
    a quieter secondary chip beneath it. */
+/* ── Slot label colour vocabulary ─────────────────────────────────
+   The IPR (mm) value is the PRIMARY clinical action — what the
+   planner actually performs at the chair. Painted in saturated
+   violet (#7c3aed) so it leaps off the page.
+   The Step indicator is METADATA — when in the protocol the IPR
+   happens. Painted in the brand amber (#feca16) so it reads as a
+   clearly separate signal, not just "the smaller pill next to the
+   mm value". Two distinct colours = two distinct decisions. */
 .odo-ipr-value {
   display: inline-flex;
   align-items: baseline;
@@ -1519,7 +1651,7 @@ const ODONTOGRAM_CSS = /* css */ `
   min-height: 16px;
   padding: 2px 6px;
   border-radius: 999px;
-  background: #7c3aed;
+  background: #7c3aed;                    /* violet-600 — IPR mm */
   box-shadow: 0 1px 4px rgba(124, 58, 237, 0.45);
   font-weight: 700;
   color: #fff;
@@ -1536,15 +1668,15 @@ const ODONTOGRAM_CSS = /* css */ `
   min-height: 15px;
   padding: 2px 5px;
   border-radius: 999px;
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  background: rgba(255, 255, 255, 0.95);
-  color: rgba(71, 85, 105, 0.95);         /* slate-600 */
+  background: #feca16;                    /* brand amber — Step */
+  color: #191919;                         /* Midnight Ink for legibility on amber */
+  box-shadow: 0 1px 3px rgba(254, 202, 22, 0.45);
   font-weight: 700;
   font-size: 8px;
   letter-spacing: 0.2px;
 }
 .odo-ipr-note-label {
-  color: rgba(100, 116, 139, 0.8);
+  color: rgba(25, 25, 25, 0.55);
   font-size: 7px;
   font-weight: 800;
   text-transform: uppercase;

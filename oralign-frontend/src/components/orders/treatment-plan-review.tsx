@@ -22,11 +22,13 @@ import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-} from '@/components/ui/dialog';
+// Dialog primitives are no longer used directly — the three full-view
+// modals (IPR reference, clinical photo, dental treatment table) all
+// go through the shared <ImageLightbox> below, which owns the
+// Radix Dialog primitives at the right layer to avoid the
+// rounded-corners / ring / popover-bg artefacts the default shadcn
+// DialogContent introduces on a full-bleed modal.
+import { ImageLightbox } from '@/components/ui/image-lightbox';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { getAccessToken } from '@/lib/api';
@@ -1107,34 +1109,17 @@ function MovementTableSection({
           }}
         />
 
-        {fullView && iprImage.objectUrl && (
-          <Dialog open onOpenChange={() => setFullView(false)}>
-            <DialogContent
-              className="h-[100dvh] w-screen max-w-none border-0 bg-black/95 p-0 text-white"
-              showCloseButton={false}
-            >
-              <DialogTitle className="sr-only">IPR Reference Image</DialogTitle>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                onClick={() => setFullView(false)}
-                className="absolute right-4 top-4 z-10 h-10 w-10 rounded-full bg-white/10 text-white hover:bg-white/20 hover:text-white"
-                aria-label="Close image viewer"
-              >
-                <X className="h-5 w-5" />
-              </Button>
-              <div className="flex h-full items-center justify-center p-4 sm:p-8">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={iprImage.objectUrl}
-                  alt="IPR reference image — full size"
-                  className="max-h-[92dvh] max-w-[96vw] object-contain"
-                />
-              </div>
-            </DialogContent>
-          </Dialog>
-        )}
+        {/* Full-screen IPR reference image. The shared <ImageLightbox>
+            avoids the default DialogContent's rounded-corners + ring +
+            popover-bg artefacts that used to bleed through the dark
+            backdrop and made the modal look "corrupt" at the edges. */}
+        <ImageLightbox
+          open={fullView}
+          onOpenChange={setFullView}
+          src={iprImage.objectUrl}
+          alt="IPR reference image — full size"
+          caption="IPR reference image"
+        />
 
         {/* The clinical-image preview Dialog moved with the gallery —
             it now lives inside <ClinicalImagesSection>. */}
@@ -1196,42 +1181,18 @@ function ClinicalImagesSection({
         onPreview={setClinicalPreview}
       />
 
-      {clinicalPreview && (
-        <Dialog open onOpenChange={() => setClinicalPreview(null)}>
-          <DialogContent
-            className="h-[100dvh] w-screen max-w-none border-0 bg-black/95 p-0 text-white"
-            showCloseButton={false}
-          >
-            <DialogTitle className="sr-only">
-              {clinicalPreview.label}
-            </DialogTitle>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              onClick={() => setClinicalPreview(null)}
-              className="absolute right-4 top-4 z-10 h-10 w-10 rounded-full bg-white/10 text-white hover:bg-white/20 hover:text-white"
-              aria-label="Close image viewer"
-            >
-              <X className="h-5 w-5" />
-            </Button>
-            <div className="flex h-full flex-col items-center justify-center gap-4 p-4 sm:p-8">
-              <div className="text-center">
-                <p className="text-sm font-semibold">{clinicalPreview.label}</p>
-                {clinicalPreview.name && (
-                  <p className="text-xs text-white/60">{clinicalPreview.name}</p>
-                )}
-              </div>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={clinicalPreview.src}
-                alt={clinicalPreview.label}
-                className="max-h-[84dvh] max-w-[96vw] object-contain"
-              />
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
+      {/* Clinical photo full-view — shared lightbox, solid black bg,
+          no rounded-corners / ring artefacts. */}
+      <ImageLightbox
+        open={!!clinicalPreview}
+        onOpenChange={(next) => {
+          if (!next) setClinicalPreview(null);
+        }}
+        src={clinicalPreview?.src}
+        alt={clinicalPreview?.label ?? 'Clinical image'}
+        caption={clinicalPreview?.label}
+        subCaption={clinicalPreview?.name}
+      />
     </>
   );
 }
@@ -1744,33 +1705,18 @@ function DentalTreatmentTableSection({
         />
       </CardContent>
 
-      {/* Full-screen viewer — escape closes, click outside closes. */}
-      <Dialog open={fullView} onOpenChange={setFullView}>
-        <DialogContent
-          showCloseButton={false}
-          className="h-[92dvh] w-[min(96vw,1280px)] max-w-none overflow-hidden bg-black/90 p-0 sm:max-w-none"
-        >
-          <DialogTitle className="sr-only">
-            Dental treatment table — full view
-          </DialogTitle>
-          <button
-            type="button"
-            onClick={() => setFullView(false)}
-            aria-label="Close full view"
-            className="absolute right-3 top-3 z-10 rounded-md bg-black/40 p-2 text-white hover:bg-black/60"
-          >
-            <X className="h-4 w-4" />
-          </button>
-          {imageBlob.objectUrl && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={imageBlob.objectUrl}
-              alt="Dental treatment table — full view"
-              className="h-full w-full object-contain"
-            />
-          )}
-        </DialogContent>
-      </Dialog>
+      {/* Full-screen viewer — shared <ImageLightbox> so the dental
+          treatment table opens with the same clean solid-black
+          experience as the clinical photo gallery. ESC, X button,
+          click-outside-image all close. */}
+      <ImageLightbox
+        open={fullView}
+        onOpenChange={setFullView}
+        src={imageBlob.objectUrl}
+        alt="Dental treatment table — full view"
+        caption="Dental treatment table"
+        subCaption={review.dentalTreatmentTableImageName ?? undefined}
+      />
     </Card>
   );
 }

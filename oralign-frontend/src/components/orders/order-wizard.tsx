@@ -1002,94 +1002,152 @@ function TreatmentStep({
   updateField: <K extends keyof CreateOrderDto>(key: K, value: CreateOrderDto[K]) => void;
 }) {
   return (
+    // Every field on Step 4 uses the SAME <fieldset> card pattern as
+    // Step 5 (Movement plan) — legend heading + one-line muted hint +
+    // OptionPill grid. Keeps the whole wizard visually consistent so
+    // the planner reads each control as the same kind of choice.
     <div className="space-y-6">
-      <div className="grid gap-5 md:grid-cols-2">
-        <div className="grid gap-2">
-          <Label>Patient stage</Label>
-          <div className="grid gap-2 sm:grid-cols-3">
-            {patientStageOptions.map(([value, label]) => (
-              <ChoiceCard
-                key={value}
-                active={form.patientStage === value}
-                disabled={disabled}
-                title={label}
-                description={stageDescription(value)}
-                onClick={() => updateField('patientStage', value)}
-              />
-            ))}
-          </div>
-          <FieldError message={errors.patientStage} />
+      {/* ─── Patient stage ────────────────────────────────────────────── */}
+      <fieldset className="space-y-3 rounded-lg border bg-card p-4">
+        <legend className="px-1 text-sm font-semibold">Patient stage</legend>
+        <p className="text-xs text-muted-foreground">
+          Where the patient is in their treatment lifecycle.
+        </p>
+        <div
+          role="radiogroup"
+          aria-label="Patient stage"
+          className="grid gap-2 sm:grid-cols-3"
+        >
+          {patientStageOptions.map(([value, label]) => (
+            <ChoiceCard
+              key={value}
+              active={form.patientStage === value}
+              disabled={disabled}
+              title={label}
+              description={stageDescription(value)}
+              onClick={() => updateField('patientStage', value)}
+            />
+          ))}
         </div>
-        <div className="grid gap-2">
-          <Label className="text-sm font-semibold">Arch treatment</Label>
-          <div
-            role="radiogroup"
-            aria-label="Arch treatment"
-            className="grid gap-2 sm:grid-cols-3"
-          >
-            <OptionPill
-              active={form.archTreatment === ArchTreatment.UPPER}
-              disabled={disabled}
-              label="Upper"
-              onClick={() => {
-                updateField('archTreatment', ArchTreatment.UPPER);
-                updateField('treatBothArch', false);
-              }}
-            />
-            <OptionPill
-              active={form.archTreatment === ArchTreatment.LOWER}
-              disabled={disabled}
-              label="Lower"
-              onClick={() => {
-                updateField('archTreatment', ArchTreatment.LOWER);
-                updateField('treatBothArch', false);
-              }}
-            />
-            <OptionPill
-              active={form.archTreatment === ArchTreatment.BOTH}
-              disabled={disabled}
-              label="Both arches"
-              onClick={() => {
-                updateField('archTreatment', ArchTreatment.BOTH);
-                updateField('treatBothArch', true);
-              }}
-            />
-          </div>
-          <FieldError message={errors.archTreatment} />
-        </div>
-      </div>
+        <FieldError message={errors.patientStage} />
+      </fieldset>
 
-      <div className="grid gap-5">
-        <TextInput
-          label="Chief complaint"
+      {/* ─── Arch treatment ───────────────────────────────────────────── */}
+      <fieldset className="space-y-3 rounded-lg border bg-card p-4">
+        <legend className="px-1 text-sm font-semibold">Arch treatment</legend>
+        <p className="text-xs text-muted-foreground">
+          Which arch(es) the planner will treat. Choosing "Both arches"
+          also sets the `treatBothArch` flag for downstream steps.
+        </p>
+        <div
+          role="radiogroup"
+          aria-label="Arch treatment"
+          className="grid gap-2 sm:grid-cols-3"
+        >
+          <OptionPill
+            active={form.archTreatment === ArchTreatment.UPPER}
+            disabled={disabled}
+            label="Upper"
+            onClick={() => {
+              updateField('archTreatment', ArchTreatment.UPPER);
+              updateField('treatBothArch', false);
+            }}
+          />
+          <OptionPill
+            active={form.archTreatment === ArchTreatment.LOWER}
+            disabled={disabled}
+            label="Lower"
+            onClick={() => {
+              updateField('archTreatment', ArchTreatment.LOWER);
+              updateField('treatBothArch', false);
+            }}
+          />
+          <OptionPill
+            active={form.archTreatment === ArchTreatment.BOTH}
+            disabled={disabled}
+            label="Both arches"
+            onClick={() => {
+              updateField('archTreatment', ArchTreatment.BOTH);
+              updateField('treatBothArch', true);
+            }}
+          />
+        </div>
+        <FieldError message={errors.archTreatment} />
+      </fieldset>
+
+      {/* ─── Chief complaint ──────────────────────────────────────────── */}
+      <fieldset className="space-y-3 rounded-lg border bg-card p-4">
+        <legend className="px-1 text-sm font-semibold">Chief complaint</legend>
+        <p className="text-xs text-muted-foreground">
+          The patient's main concern in their own words. Used by the
+          planner when designing the treatment plan and shown on the
+          order detail page.
+        </p>
+        {/* Inline <Input> rather than the TextInput helper because the
+            fieldset legend already supplies the field label. */}
+        <Input
+          type="text"
           value={form.chiefComplaint ?? ''}
           placeholder="Describe the patient's main concern..."
-          error={errors.chiefComplaint}
           disabled={disabled}
-          onChange={(value) => updateField('chiefComplaint', value)}
+          onChange={(event) => updateField('chiefComplaint', event.target.value)}
+          className={cn('h-11', errors.chiefComplaint && 'border-red-500')}
         />
-        {/* "Treat both arch" text input removed — it was a duplicate of the
-            "Both arches" pill above. Choosing the pill already sets the
-            boolean. The duplicate text input could leave the radio and the
-            boolean out of sync (a real bug). */}
-        <RadioGroupField
-          label="Treatment plan"
-          value={form.treatmentPlan ?? ''}
-          options={treatmentPlanOptions}
-          disabled={disabled}
-          error={errors.treatmentPlan}
-          onChange={(value) => updateField('treatmentPlan', value)}
-        />
-        {/* "Don't move" text removed — the Odontogram's "Do Not Move" colour
-            captures this per-tooth in step 5 (the canonical place). */}
-        <RadioGroupField
-          label="A-P relationship"
-          value={form.apRelationship ?? ''}
-          options={apRelationshipOptions}
-          disabled={disabled}
-          onChange={(value) => updateField('apRelationship', value)}
-        />
-      </div>
+        <FieldError message={errors.chiefComplaint} />
+      </fieldset>
+
+      {/* ─── Treatment plan ───────────────────────────────────────────── */}
+      {/* "Treat both arch" text input removed — it was a duplicate of the
+          "Both arches" pill above. Choosing the pill already sets the
+          boolean. The duplicate text input could leave the radio and the
+          boolean out of sync (a real bug). */}
+      <fieldset className="space-y-3 rounded-lg border bg-card p-4">
+        <legend className="px-1 text-sm font-semibold">Treatment plan</legend>
+        <p className="text-xs text-muted-foreground">
+          Which segments the planner is allowed to move.
+        </p>
+        <div
+          role="radiogroup"
+          aria-label="Treatment plan"
+          className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4"
+        >
+          {treatmentPlanOptions.map((opt) => (
+            <OptionPill
+              key={opt}
+              active={form.treatmentPlan === opt}
+              disabled={disabled}
+              label={opt}
+              onClick={() => updateField('treatmentPlan', opt)}
+            />
+          ))}
+        </div>
+        <FieldError message={errors.treatmentPlan} />
+      </fieldset>
+
+      {/* ─── A-P relationship ─────────────────────────────────────────── */}
+      {/* "Don't move" text removed — the Odontogram's "Do Not Move" colour
+          captures this per-tooth in step 5 (the canonical place). */}
+      <fieldset className="space-y-3 rounded-lg border bg-card p-4">
+        <legend className="px-1 text-sm font-semibold">A-P relationship</legend>
+        <p className="text-xs text-muted-foreground">
+          Antero-posterior treatment goal for canines and molars.
+        </p>
+        <div
+          role="radiogroup"
+          aria-label="A-P relationship"
+          className="grid gap-2 sm:grid-cols-2"
+        >
+          {apRelationshipOptions.map((opt) => (
+            <OptionPill
+              key={opt}
+              active={form.apRelationship === opt}
+              disabled={disabled}
+              label={opt}
+              onClick={() => updateField('apRelationship', opt)}
+            />
+          ))}
+        </div>
+      </fieldset>
     </div>
   );
 }

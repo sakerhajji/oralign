@@ -835,9 +835,20 @@ function MovementTableSection({
       for (const row of colors) {
         deduped.set(`${row.toothNumber}:${row.type}`, row);
       }
+      // Scope this save to ATTACHMENT only — the treatment-plan editor
+      // owns just that one type. The backend will wipe + recreate ONLY
+      // ATTACHMENT rows for this order, preserving the doctor's
+      // No Attachments / Do Not Move / No IPR / Extract prescriptions
+      // that show as the read-only background layer.
+      //
+      // Bug this fixes: without the scope, the very first save from
+      // this surface deleted every OrderToothInstruction row including
+      // the doctor's, so the order odontogram appeared to "lose" all
+      // four flags as soon as the planner placed any attachment.
       updateInstructions.mutate({
         id: review.orderId,
         instructions: Array.from(deduped.values()),
+        replaceTypes: [ToothInstructionType.ATTACHMENT],
       });
     },
     [review.orderId, updateInstructions],

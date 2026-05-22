@@ -973,12 +973,16 @@ const IprSlot = memo(function IprSlot({
     >
       <span className="odo-ipr-bar" aria-hidden />
       {/* Label rendered whenever the contact carries EITHER a Step OR
-          an IPR mm value. Visual hierarchy:
-            • IPR (mm) — clinical primary, bold (uses .odo-ipr-value
-              style for legibility against the purple bar).
-            • Step — secondary metadata, gray pill (.odo-ipr-note).
-          The `note` column holds the mm value (no DB rename — the
-          column name predates the relabel), `value` holds the step. */}
+          an IPR mm value. Visual hierarchy + colour mapping (per the
+          clinical team's request):
+            • IPR (mm) — YELLOW / brand amber pill (.odo-ipr-value).
+              Clinical primary action — what the planner performs at
+              the chair.
+            • Step — PURPLE / violet pill (.odo-ipr-note). Timing
+              metadata — when in the aligner protocol the IPR happens.
+          Storage caveat: the DB column `note` holds the mm value (no
+          rename — the column name predates the relabel), `value`
+          holds the step text. */}
       {(hasValue || hasNote) && (
         <span className="odo-ipr-label">
           {hasNote && (
@@ -1637,13 +1641,14 @@ const ODONTOGRAM_CSS = /* css */ `
    cramped pill when both are present. The mm value stays primary; stripping is
    a quieter secondary chip beneath it. */
 /* ── Slot label colour vocabulary ─────────────────────────────────
-   The IPR (mm) value is the PRIMARY clinical action — what the
-   planner actually performs at the chair. Painted in saturated
-   violet (#7c3aed) so it leaps off the page.
-   The Step indicator is METADATA — when in the protocol the IPR
-   happens. Painted in the brand amber (#feca16) so it reads as a
-   clearly separate signal, not just "the smaller pill next to the
-   mm value". Two distinct colours = two distinct decisions. */
+   Colour assignment (set per the clinical team's request):
+     • IPR (mm) — brand AMBER (#feca16). Clinical primary, the value
+       the planner actually performs at the chair. Amber matches the
+       Oralign brand so the mm leaps off the dark background.
+     • Step — VIOLET (#7c3aed). Timing metadata — which step in the
+       aligner sequence the IPR happens at. Purple/violet keeps it
+       visually distinct from the amber mm.
+   Two distinct colours = two distinct decisions. */
 .odo-ipr-value {
   display: inline-flex;
   align-items: baseline;
@@ -1651,15 +1656,15 @@ const ODONTOGRAM_CSS = /* css */ `
   min-height: 16px;
   padding: 2px 6px;
   border-radius: 999px;
-  background: #7c3aed;                    /* violet-600 — IPR mm */
-  box-shadow: 0 1px 4px rgba(124, 58, 237, 0.45);
+  background: #feca16;                    /* brand amber — IPR mm */
+  color: #191919;                         /* Midnight Ink for legibility on amber */
+  box-shadow: 0 1px 4px rgba(254, 202, 22, 0.45);
   font-weight: 700;
-  color: #fff;
 }
 .odo-ipr-unit {
   font-size: 7px;
   font-weight: 800;
-  opacity: 0.8;
+  opacity: 0.7;
 }
 .odo-ipr-note {
   display: inline-flex;
@@ -1668,15 +1673,15 @@ const ODONTOGRAM_CSS = /* css */ `
   min-height: 15px;
   padding: 2px 5px;
   border-radius: 999px;
-  background: #feca16;                    /* brand amber — Step */
-  color: #191919;                         /* Midnight Ink for legibility on amber */
-  box-shadow: 0 1px 3px rgba(254, 202, 22, 0.45);
+  background: #7c3aed;                    /* violet-600 — Step */
+  color: #fff;
+  box-shadow: 0 1px 3px rgba(124, 58, 237, 0.45);
   font-weight: 700;
   font-size: 8px;
   letter-spacing: 0.2px;
 }
 .odo-ipr-note-label {
-  color: rgba(25, 25, 25, 0.55);
+  color: rgba(255, 255, 255, 0.7);
   font-size: 7px;
   font-weight: 800;
   text-transform: uppercase;

@@ -66,6 +66,39 @@ export class UpdateToothInstructionsDto {
   @ValidateNested({ each: true })
   @Type(() => ToothInstructionDto)
   instructions!: ToothInstructionDto[];
+
+  /**
+   * Optional list of `ToothInstructionType` values the caller "owns" on
+   * this save. When provided, the endpoint's REPLACE-ALL semantics is
+   * scoped to ONLY these types — rows of other types are preserved.
+   *
+   * Without this scope, the order edit page (doctor edits) and the
+   * treatment-plan editor (planner edits) cannot coexist on the same
+   * order: each save would wipe the other side's data.
+   *
+   * Concretely:
+   *   • Order wizard sends `[NO_ATTACHMENTS, DO_NOT_MOVE, NO_IPR, EXTRACT]`
+   *     → planner-set ATTACHMENT rows are kept untouched.
+   *   • Treatment-plan editor sends `[ATTACHMENT]`
+   *     → doctor-set prescription rows are kept untouched.
+   *
+   * When omitted, the endpoint falls back to the legacy delete-all
+   * behaviour so older / unmigrated clients keep working. The
+   * `instructions` payload itself must still respect the array max
+   * size + per-row uniqueness rules either way.
+   */
+  @ApiProperty({
+    enum: ToothInstructionType,
+    isArray: true,
+    required: false,
+    description:
+      'Limits the REPLACE-ALL scope to these instruction types. ' +
+      'Rows of other types are preserved. Omit for legacy delete-all behaviour.',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsEnum(ToothInstructionType, { each: true })
+  replaceTypes?: ToothInstructionType[];
 }
 
 export class CreateOrderDto {

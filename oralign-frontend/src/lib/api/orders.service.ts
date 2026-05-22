@@ -9,6 +9,7 @@ import {
   OrderStatus,
   PaginatedResponse,
   ToothInstruction,
+  ToothInstructionType,
   UpdateOrderDto,
 } from '@/lib/types';
 
@@ -78,10 +79,17 @@ export const ordersService = {
   updateToothInstructions: async (
     id: string,
     instructions: ToothInstruction[],
+    // Optional replace-scope. When supplied, the backend's wipe-and-
+    // recreate semantics is limited to rows whose `type` is in this
+    // list — letting the doctor and the planner each own their own
+    // slice of OrderToothInstruction without overwriting each other.
+    // See backend `UpdateToothInstructionsDto.replaceTypes` for the
+    // full reasoning.
+    replaceTypes?: ToothInstructionType[],
   ): Promise<DentalOrder> => {
     const response = await apiClient.put<DentalOrder>(
       `/orders/${id}/tooth-instructions`,
-      { instructions },
+      { instructions, ...(replaceTypes ? { replaceTypes } : {}) },
     );
     return response.data;
   },

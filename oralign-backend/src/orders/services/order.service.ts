@@ -4,6 +4,7 @@ import {
   OrderFileCategory,
   OrderStatus,
   Prisma,
+  ToothInstructionType,
   UserRole,
 } from '@prisma/client';
 import * as fs from 'fs';
@@ -357,6 +358,7 @@ export class OrderService {
     id: string,
     instructions: ToothInstructionDto[],
     caller: Caller,
+    replaceTypes?: ToothInstructionType[],
   ): Promise<OrderResponseDto> {
     // Designers normally can't modify orders directly, but the odontogram
     // (per-tooth attachments + the doctor's no_attachments / do_not_move /
@@ -381,6 +383,31 @@ export class OrderService {
 
     this.ensureUniqueToothInstructions(instructions);
 
+    // Scope check — when the caller declares `replaceTypes`, every row
+    // in the payload must have a type in that set. Otherwise a caller
+    // could claim "I'm only replacing ATTACHMENT" but secretly also
+    // ship a DO_NOT_MOVE row, which would be created without ever
+    // wiping any prior DO_NOT_MOVE rows — splitting the source of
+    // truth across two writers.
+    //
+    // This is also why we accept an EMPTY `instructions` payload as
+    // long as `replaceTypes` is present: it means "wipe everything I
+    // own", which is the natural semantics for "the planner removed
+    // their last attachment".
+    const scope =
+      replaceTypes && replaceTypes.length > 0
+        ? new Set<ToothInstructionType>(replaceTypes)
+        : null;
+    if (scope) {
+      for (const ins of instructions) {
+        if (!scope.has(ins.type)) {
+          throw new BadRequestException(
+            `Instruction type '${ins.type}' is not in the declared replaceTypes scope.`,
+          );
+        }
+      }
+    }
+
     // Defence-in-depth dedupe: even after the per-payload uniqueness
     // check above passes, two CONCURRENT updateToothInstructions calls
     // for the same order can race each other (both pass the check
@@ -401,7 +428,20 @@ export class OrderService {
       // createMany race that otherwise throws P2002.
       await tx.$queryRaw`SELECT id FROM "DentalOrder" WHERE id = ${id} FOR UPDATE`;
 
-      await tx.orderToothInstruction.deleteMany({ where: { orderId: id } });
+      // REPLACE-ALL scope:
+      //   • With `scope`: only wipe rows whose type is in the caller's
+      //     declared set. This lets the doctor edit her four flags
+      //     (NO_ATTACHMENTS / DO_NOT_MOVE / NO_IPR / EXTRACT) without
+      //     touching the planner's ATTACHMENT rows, and vice versa.
+      //   • Without `scope`: legacy fall-back — wipe everything for
+      //     the order. Kept so older clients that don't yet send
+      //     `replaceTypes` don't break, but new callers should ALWAYS
+      //     send the scope.
+      await tx.orderToothInstruction.deleteMany({
+        where: scope
+          ? { orderId: id, type: { in: Array.from(scope) } }
+          : { orderId: id },
+      });
       if (uniqueInstructions.length > 0) {
         await tx.orderToothInstruction.createMany({
           data: uniqueInstructions.map((instruction) => ({

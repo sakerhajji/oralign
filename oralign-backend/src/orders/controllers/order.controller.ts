@@ -220,10 +220,15 @@ export class OrderController {
     @Body() dto: UpdateToothInstructionsDto,
     @CurrentUser() user: JwtPayload,
   ): Promise<OrderResponseDto> {
-    return this.orderService.updateToothInstructions(id, dto.instructions, {
-      userId: user.sub,
-      role: user.role,
-    });
+    return this.orderService.updateToothInstructions(
+      id,
+      dto.instructions,
+      {
+        userId: user.sub,
+        role: user.role,
+      },
+      dto.replaceTypes,
+    );
   }
 
   @Post(':id/files')

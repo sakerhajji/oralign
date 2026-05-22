@@ -73,6 +73,7 @@ import {
   OrderStatus,
   PatientStage,
   ToothInstruction,
+  ToothInstructionType,
   UserRole,
 } from '@/lib/types';
 import { createOrderSchema } from '@/lib/schemas';
@@ -440,9 +441,21 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
       ? await updateOrder.mutateAsync({ id: savedOrder.id, data: parsed.data })
       : await createOrder.mutateAsync(parsed.data);
 
+    // The order wizard owns the FOUR doctor-level instruction types
+    // (No Attachments / Do Not Move / No IPR / Extract). It does NOT
+    // own ATTACHMENT — that's the planner's surface in the treatment
+    // editor. Declare the scope explicitly so the backend's REPLACE-
+    // ALL never wipes planner-set attachment rows when the doctor
+    // re-saves her odontogram.
     await updateTeeth.mutateAsync({
       id: nextOrder.id,
       instructions: toothInstructions,
+      replaceTypes: [
+        ToothInstructionType.NO_ATTACHMENTS,
+        ToothInstructionType.DO_NOT_MOVE,
+        ToothInstructionType.NO_IPR,
+        ToothInstructionType.EXTRACT,
+      ],
     });
     setSavedOrder(nextOrder);
     return nextOrder;

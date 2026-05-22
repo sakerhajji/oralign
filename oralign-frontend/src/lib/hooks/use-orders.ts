@@ -19,6 +19,7 @@ import {
   OrderStatus,
   PaginatedResponse,
   ToothInstruction,
+  ToothInstructionType,
   UpdateOrderDto,
 } from '@/lib/types';
 
@@ -222,12 +223,23 @@ export function usePermanentDeleteOrder(): UseMutationResult<
 export function useUpdateToothInstructions(): UseMutationResult<
   DentalOrder,
   Error,
-  { id: string; instructions: ToothInstruction[] }
+  {
+    id: string;
+    instructions: ToothInstruction[];
+    /**
+     * Limits the backend's REPLACE-ALL to these types. Required for any
+     * caller that doesn't own the whole odontogram — otherwise the save
+     * would wipe rows that belong to a different surface (e.g. doctor
+     * flags when the planner saves attachments). See
+     * `UpdateToothInstructionsDto.replaceTypes` on the backend.
+     */
+    replaceTypes?: ToothInstructionType[];
+  }
 > {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, instructions }) =>
-      ordersService.updateToothInstructions(id, instructions),
+    mutationFn: ({ id, instructions, replaceTypes }) =>
+      ordersService.updateToothInstructions(id, instructions, replaceTypes),
     onSuccess: (order, variables) => {
       syncOrderCaches(queryClient, order);
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(variables.id) });

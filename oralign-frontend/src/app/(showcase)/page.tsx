@@ -43,11 +43,9 @@ export default function ShowcaseHomePage() {
       <SolutionSection />
       <HowItWorks />
       <AdultBrochureSection />
-      <PrimeSection />
       <ParentBrochureSection />
       <DashboardPreview />
       <Testimonials />
-      <PractitionerCallSection />
       <FaqSection />
       <FinalCta />
     </>

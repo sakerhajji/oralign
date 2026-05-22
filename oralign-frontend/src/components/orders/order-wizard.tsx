@@ -610,12 +610,14 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
           <div className="space-y-6">
             <ReviewStep
               savedOrder={savedOrder}
-              selectedPatient={selectedPatient?.fullName ?? savedOrder?.patient?.fullName}
-              selectedDentist={
-                selectedDentist?.fullName ?? savedOrder?.doctor?.fullName ?? user?.fullName
+              selectedPatient={selectedPatient}
+              newPatient={patientMode === 'new' ? newPatient : null}
+              selectedDentist={selectedDentist}
+              fallbackDentistName={
+                savedOrder?.doctor?.fullName ?? user?.fullName ?? null
               }
               form={form}
-              toothInstructionCount={toothInstructions.length}
+              toothInstructions={toothInstructions}
             />
             <OrderFileUpload orderId={savedOrder?.id} readOnly />
           </div>

@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -162,16 +163,153 @@ export function AdultBrochureSection() {
 
 export function ParentBrochureSection() {
   const { lang } = useShowcaseLang();
+  const copy = brochureCopy.parent;
 
   return (
-    <BrochureSection
+    <section
       id="parents"
-      lang={lang}
-      copy={brochureCopy.parent}
-      imageSrc="/showcase/boyalinger.png"
-      imageTone="dark"
-      dark
-    />
+      data-section-tone="dark"
+      aria-labelledby="parents-h2"
+      className="relative isolate overflow-hidden bg-[var(--sc-black)] px-4 py-16 text-[var(--sc-white)] sm:px-8 sm:py-24 lg:px-16 lg:py-32"
+    >
+      <div className="mx-auto max-w-[1400px]">
+        <Reveal>
+          <div className="grid gap-10 lg:grid-cols-[0.94fr_1.06fr] lg:items-end">
+            <div className="min-w-0">
+              <div className="mb-8 w-fit border border-[rgba(242,245,239,0.18)] bg-[#101010] px-5 py-4 shadow-[0_18px_60px_-42px_rgba(254,202,22,0.9)] sm:px-6">
+                <Image
+                  src="/showcase/oralingPrime.svg"
+                  alt="ORALIGN Prime"
+                  width={300}
+                  height={82}
+                  className="h-auto w-[210px] sm:w-[260px]"
+                />
+              </div>
+
+              <div
+                className="flex items-center gap-3"
+                style={{
+                  fontSize: "0.55rem",
+                  letterSpacing: "0.42em",
+                  textTransform: "uppercase",
+                  color: "var(--sc-sun)",
+                }}
+              >
+                <span className="sc-eyebrow-line h-px w-[18px] bg-[var(--sc-sun)]" aria-hidden="true" />
+                <span>{copy.eyebrow[lang]}</span>
+              </div>
+
+              <h2
+                id="parents-h2"
+                className="sc-serif mt-4 max-w-4xl text-[clamp(2rem,8vw,3.7rem)] font-normal leading-[1.05] sm:text-[clamp(2.5rem,5vw,4.6rem)]"
+              >
+                {copy.titleA[lang]}{" "}
+                <em className="text-[var(--sc-sun)]" style={{ fontStyle: "italic" }}>
+                  {copy.titleB[lang]}
+                </em>
+              </h2>
+
+              <p className="mt-7 max-w-2xl text-[0.95rem] leading-8 text-[var(--sc-text-mid-on-dark)] sm:text-[1rem]">
+                {copy.intro[lang]}
+              </p>
+            </div>
+
+            <div className="border-l-2 border-[var(--sc-sun)] pl-5 sm:pl-7 lg:mb-2">
+              <p className="sc-serif text-[1.35rem] leading-snug text-[var(--sc-white)] sm:text-[1.7rem]">
+                {copy.proof[lang]}
+              </p>
+              <div className="mt-7 flex flex-wrap gap-2.5">
+                {copy.benefits.map((benefit) => (
+                  <span
+                    key={benefit.fr}
+                    className="border border-[rgba(242,245,239,0.2)] px-3 py-2 text-[0.56rem] font-semibold uppercase tracking-[0.22em] text-[var(--sc-text-mid-on-dark)]"
+                  >
+                    {benefit[lang]}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Reveal>
+
+        <div className="mt-12 grid gap-8 lg:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)] lg:items-stretch">
+          <Reveal>
+            <figure className="relative h-full overflow-hidden border border-[rgba(242,245,239,0.16)] bg-[#101010]">
+              <div className="relative aspect-[4/5] min-h-[420px] sm:aspect-[5/4] lg:aspect-auto lg:h-full lg:min-h-[640px]">
+                <Image
+                  src="/showcase/boyAndgirl.png"
+                  alt={copy.imageLabel[lang]}
+                  fill
+                  sizes="(min-width: 1280px) 520px, (min-width: 1024px) 46vw, 100vw"
+                  className="object-cover"
+                  priority={false}
+                />
+                <span className="absolute inset-0 bg-[linear-gradient(180deg,rgba(25,25,25,0.04)_0%,rgba(25,25,25,0.28)_72%,rgba(25,25,25,0.78)_100%)]" aria-hidden="true" />
+              </div>
+
+              <figcaption className="absolute inset-x-0 bottom-0 p-5 sm:p-7">
+                <div className="max-w-sm border border-[rgba(242,245,239,0.2)] bg-[rgba(25,25,25,0.78)] p-4 backdrop-blur-md sm:p-5">
+                  <p className="text-[0.56rem] font-bold uppercase tracking-[0.28em] text-[var(--sc-sun)]">
+                    ORALIGN Prime
+                  </p>
+                  <p className="mt-2 text-sm leading-7 text-[rgba(242,245,239,0.78)]">
+                    {dict.brand.madeWhere[lang]}
+                  </p>
+                </div>
+              </figcaption>
+            </figure>
+          </Reveal>
+
+          <Reveal delay>
+            <div className="grid gap-px bg-[rgba(242,245,239,0.14)] sm:grid-cols-2">
+              {copy.steps.map((step, index) => {
+                const Icon = step.icon;
+                return (
+                  <article
+                    key={step.title.fr}
+                    className="group relative min-h-[230px] bg-[var(--sc-black)] p-6 transition-colors hover:bg-[#202020] sm:p-8"
+                  >
+                    <div className="flex items-start justify-between gap-5">
+                      <span className="flex h-12 w-12 shrink-0 items-center justify-center bg-[rgba(254,202,22,0.13)] text-[var(--sc-sun)] transition-colors group-hover:bg-[var(--sc-sun)] group-hover:text-[var(--sc-black)]">
+                        <Icon size={21} strokeWidth={1.55} />
+                      </span>
+                      <span className="sc-serif text-[2.2rem] leading-none text-[rgba(242,245,239,0.11)]">
+                        {String(index + 1).padStart(2, "0")}
+                      </span>
+                    </div>
+                    <h3 className="sc-serif mt-7 text-[1.18rem] font-medium leading-tight text-[var(--sc-white)]">
+                      {step.title[lang]}
+                    </h3>
+                    <p className="mt-4 text-sm leading-7 text-[var(--sc-text-mid-on-dark)]">
+                      {step.body[lang]}
+                    </p>
+                  </article>
+                );
+              })}
+            </div>
+          </Reveal>
+        </div>
+
+        <Reveal delay>
+          <div className="mt-9 flex flex-col gap-4 sm:flex-row sm:items-center">
+            <Link
+              href="#cta"
+              className="sc-serif inline-flex min-h-14 w-full items-center justify-center gap-3 bg-[var(--sc-sun)] px-6 py-4 text-center text-[0.66rem] font-bold uppercase tracking-[0.16em] text-[var(--sc-black)] no-underline transition-colors hover:bg-[var(--sc-sun-2)] sm:w-auto sm:tracking-[0.22em]"
+            >
+              <span>{copy.cta[lang]}</span>
+              <ArrowRight size={15} />
+            </Link>
+            <p className="max-w-lg text-xs leading-6 text-[var(--sc-text-mid-on-dark)]">
+              {lang === "fr"
+                ? "Une première consultation permet de savoir si ORALIGN Prime est adapté à l'âge, à la croissance et aux besoins de votre enfant."
+                : lang === "en"
+                  ? "A first consultation helps confirm whether ORALIGN Prime fits your child's age, growth and clinical needs."
+                  : "تساعد الاستشارة الأولى على معرفة ما إذا كان ORALIGN Prime مناسباً لعمر طفلك ونموّه واحتياجاته الطبية."}
+            </p>
+          </div>
+        </Reveal>
+      </div>
+    </section>
   );
 }
 

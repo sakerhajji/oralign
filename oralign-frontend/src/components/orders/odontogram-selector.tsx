@@ -123,14 +123,13 @@ export function OdontogramSelector({
    */
   iprValues?: Map<number, string>;
   /**
-   * Optional per-tooth stripping notes — a SECOND value persisted alongside
-   * the IPR amount. Used for things like "aligner step #" or "side"
-   * depending on the clinic's protocol. Rendered in muted gray next to the
-   * primary IPR mm label. Same key as `iprValues`.
+   * Optional per-contact STEP values persisted alongside the IPR amount.
+   * Rendered in the purple chip next to the primary yellow IPR mm label.
+   * Same key as `iprValues`.
    */
   iprNotes?: Map<number, string>;
   /**
-   * Combined setter for an IPR / stripping contact. Carries BOTH
+   * Combined setter for an IPR / STEP contact. Carries BOTH
    * tooth numbers explicitly — IPR is between TWO teeth and the
    * backend now stores it that way (TreatmentPlanIpr keyed on
    * fromTooth + toTooth). The parent uses this signature to call
@@ -266,18 +265,21 @@ export function OdontogramSelector({
   const onChangeRef = useRef(onChange);
   const disabledRef = useRef(disabled);
   const onIprChangeRef = useRef(onIprChange);
+  const visibleTypesRef = useRef(visibleTypes);
 
   useLayoutEffect(() => {
     valueRef.current = value;
     onChangeRef.current = onChange;
     disabledRef.current = disabled;
     onIprChangeRef.current = onIprChange;
-  }, [value, onChange, disabled, onIprChange]);
+    visibleTypesRef.current = visibleTypes;
+  }, [value, onChange, disabled, onIprChange, visibleTypes]);
 
   const setTooth = useCallback(
     (toothNumber: number, type: ToothInstructionType | null) => {
+      const editableTypes = visibleTypesRef.current;
       const without = valueRef.current.filter(
-        (i) => i.toothNumber !== toothNumber,
+        (i) => i.toothNumber !== toothNumber || !editableTypes.has(i.type),
       );
       onChangeRef.current(
         type ? [...without, { toothNumber, type }] : without,
@@ -370,9 +372,9 @@ export function OdontogramSelector({
           <p className="text-sm text-muted-foreground">
             {subtitle ??
               (mode === 'attachments'
-                ? 'Tap a tooth to mark an attachment. Tap between teeth to set IPR (mm) and the optional stripping value.'
+                ? 'Tap a tooth to mark an attachment. Tap between teeth to set IPR (mm) and the optional STEP value.'
                 : mode === 'treatment'
-                  ? 'Tap a tooth to choose a clinical instruction color. Tap between teeth to set IPR in millimetres and stripping notes.'
+                  ? 'Tap a tooth to choose a clinical instruction color. Tap between teeth to set IPR in millimetres and STEP values.'
                 : 'Tap any tooth to assign a color. Each tooth carries one instruction at a time.')}
           </p>
         </div>
@@ -404,6 +406,7 @@ export function OdontogramSelector({
               readonlyAssignments={readonlyAssignments}
               activeTooth={popup?.tooth ?? null}
               activeIpr={iprPopup?.tooth ?? null}
+              preferEditableFill={mode === 'attachments'}
               disabled={disabled}
               iprValues={iprVisible ? iprValues : undefined}
               iprNotes={iprVisible ? iprNotes : undefined}
@@ -421,6 +424,7 @@ export function OdontogramSelector({
               readonlyAssignments={readonlyAssignments}
               activeTooth={popup?.tooth ?? null}
               activeIpr={iprPopup?.tooth ?? null}
+              preferEditableFill={mode === 'attachments'}
               disabled={disabled}
               iprValues={iprVisible ? iprValues : undefined}
               iprNotes={iprVisible ? iprNotes : undefined}
@@ -499,7 +503,7 @@ export function OdontogramSelector({
           onCommit={(payload) =>
             commitIpr(iprPopup.fromTooth, iprPopup.tooth, payload)
           }
-          // Whether the popover should even show the stripping input
+          // Whether the popover should show the STEP input
           // is governed by whether `iprNotes` was wired by the parent
           // — same effective semantics as the old onCommitNote prop.
           showStripping={!!iprNotes}
@@ -575,6 +579,7 @@ function Arch({
   readonlyAssignments,
   activeTooth,
   activeIpr,
+  preferEditableFill,
   disabled,
   iprValues,
   iprNotes,
@@ -592,6 +597,12 @@ function Arch({
   readonlyAssignments: Map<number, ToothInstructionType>;
   activeTooth: number | null;
   activeIpr: number | null;
+  /**
+   * When true, the editable layer owns the main tooth fill. Used by the
+   * treatment attachment editor so selecting ATTACHMENT turns the tooth pink
+   * even if the doctor's read-only colour exists underneath.
+   */
+  preferEditableFill?: boolean;
   disabled?: boolean;
   iprValues?: Map<number, string>;
   iprNotes?: Map<number, string>;
@@ -624,8 +635,8 @@ function Arch({
   const midlineValue = iprValues?.get(midline);
   const midlineNote = iprNotes?.get(midline);
   // Render the midline slot if it has EITHER an IPR mm value OR a
-  // stripping note — previously only checked the mm side, so a
-  // stripping-only entry was invisible across the midline.
+  // STEP note — previously only checked the mm side, so a
+  // STEP-only entry was invisible across the midline.
   const midlineShouldRender =
     showEmptyPlaceholders ||
     (showFilledSlots && (!!midlineValue || !!midlineNote));
@@ -647,7 +658,7 @@ function Arch({
         const slotNote =
           idx < teeth.length - 1 ? iprNotes?.get(next) : undefined;
         // Render a non-midline slot when either field is populated —
-        // mirrors the midlineShouldRender check above so a stripping-
+        // mirrors the midlineShouldRender check above so a STEP-
         // only entry on any contact stays visible.
         const slotShouldRender =
           idx < teeth.length - 1 &&
@@ -662,6 +673,7 @@ function Arch({
               type={assignments.get(n)}
               readonlyType={readonlyAssignments.get(n)}
               active={activeTooth === n}
+              preferEditableFill={preferEditableFill}
               disabled={disabled}
               onClick={onToothClick}
             />
@@ -740,6 +752,7 @@ type ToothButtonProps = {
    */
   readonlyType?: ToothInstructionType;
   active?: boolean;
+  preferEditableFill?: boolean;
   disabled?: boolean;
   onClick: (
     tooth: number,
@@ -755,22 +768,30 @@ const ToothButton = memo(
     type,
     readonlyType,
     active,
+    preferEditableFill,
     disabled,
     onClick,
   }: ToothButtonProps) {
-    // Resolution: doctor's readonly instruction wins the FILL colour
-    // (it's the prescription — the most important signal). The
-    // editable `type` becomes a small corner indicator when both
-    // are set. When only `type` is set, it drives the fill normally.
+    // Resolution:
+    // - Order/prescription surfaces: doctor readonly instruction wins the fill.
+    // - Treatment attachment editor: editable ATTACHMENT wins the fill so the
+    //   selected tooth visibly turns pink. The doctor color remains as the
+    //   small overlay reference marker.
     const editableColor = type ? COLOR_BY_TYPE.get(type) : undefined;
     const readonlyColor = readonlyType
       ? COLOR_BY_TYPE.get(readonlyType)
       : undefined;
-    const fillColor = readonlyColor ?? editableColor;
-    // Overlay only appears when both layers paint the tooth — no point
-    // doubling up when only the editable layer is set (the fill
-    // already shows the editable colour).
-    const overlayColor = readonlyColor && editableColor ? editableColor : undefined;
+    const fillColor = preferEditableFill
+      ? editableColor ?? readonlyColor
+      : readonlyColor ?? editableColor;
+    // Overlay only appears when both layers paint the tooth. It displays the
+    // non-fill layer so both clinical signals stay visible.
+    const overlayColor =
+      readonlyColor && editableColor
+        ? preferEditableFill
+          ? readonlyColor
+          : editableColor
+        : undefined;
     const color = fillColor;
     // Normalise the host viewBox to "0 0 w h" — some source teeth (17, 27,
     // 37, 47) have content drawn far from the SVG origin (min-x ≈ 22.5).
@@ -872,8 +893,9 @@ type IprSlotProps = {
    *  AND as the `fromTooth` value emitted to the parent's onIprClick. */
   neighbour?: number;
   row: 'upper' | 'lower';
+  /** IPR amount in millimetres. Rendered in the yellow chip. */
   value?: string;
-  /** Optional stripping value rendered in muted gray next to the mm value. */
+  /** Optional STEP / staging value. Rendered in the purple chip. */
   note?: string;
   active?: boolean;
   disabled?: boolean;
@@ -931,70 +953,64 @@ const IprSlot = memo(function IprSlot({
       type="button"
       disabled={disabled || readOnly}
       onClick={readOnly ? undefined : handleClick}
-      aria-label={
-        readOnly
-          ? `IPR ${value} mm ${contactLabel}`
-          : hasValue
-            ? `Edit IPR ${value} mm — ${contactLabel}`
-            : `Add IPR ${contactLabel}`
-      }
+      aria-label={(() => {
+        const parts: string[] = [];
+        if (hasValue) parts.push(`IPR ${value} mm`);
+        if (hasNote) parts.push(`STEP ${note}`);
+        if (parts.length === 0) return `Add IPR ${contactLabel}`;
+        return readOnly
+          ? `${parts.join(' · ')} ${contactLabel}`
+          : `Edit ${parts.join(' · ')} — ${contactLabel}`;
+      })()}
       aria-pressed={readOnly ? undefined : active}
       data-active={active ? 'true' : undefined}
       data-readonly={readOnly ? 'true' : undefined}
       className={cn(
         'odo-ipr',
         row === 'upper' ? 'odo-ipr-upper' : 'odo-ipr-lower',
-        // Slot has CONTENT (either an IPR mm value OR a stripping note,
+        // Slot has CONTENT (either an IPR mm value OR a STEP value,
         // or both) → use the filled-purple-bar style so it's visually
         // distinct from an empty placeholder slot.
         (hasValue || hasNote) && 'odo-ipr-on',
         readOnly && 'odo-ipr-readonly',
       )}
       title={(() => {
-        // Tooltip uses the relabelled field semantics:
-        //   value → "Step" (the aligner-step encoding)
-        //   note  → "IPR mm" (the actual reduction amount)
-        // It iterates whichever fields are populated so a partial
-        // contact (mm-only OR step-only) reads cleanly.
         if (readOnly && (hasValue || hasNote)) {
           const parts: string[] = [];
-          if (hasNote) parts.push(`IPR ${note} mm`);
-          if (hasValue) parts.push(`step ${value}`);
+          if (hasValue) parts.push(`IPR ${value} mm`);
+          if (hasNote) parts.push(`STEP ${note}`);
           return `${parts.join(' · ')} · ${contactLabel}`;
         }
         if (hasValue || hasNote) {
           const parts: string[] = [];
-          if (hasNote) parts.push(`IPR ${note} mm`);
-          if (hasValue) parts.push(`step ${value}`);
+          if (hasValue) parts.push(`IPR ${value} mm`);
+          if (hasNote) parts.push(`STEP ${note}`);
           return `Edit ${parts.join(' · ')} — ${contactLabel}`;
         }
         return `Click to add IPR ${contactLabel}`;
       })()}
     >
       <span className="odo-ipr-bar" aria-hidden />
-      {/* Label rendered whenever the contact carries EITHER a Step OR
-          an IPR mm value. Visual hierarchy + colour mapping (per the
+      {/* Label rendered whenever the contact carries EITHER an IPR mm
+          value OR a STEP. Visual hierarchy + colour mapping (per the
           clinical team's request):
             • IPR (mm) — YELLOW / brand amber pill (.odo-ipr-value).
               Clinical primary action — what the planner performs at
               the chair.
             • Step — PURPLE / violet pill (.odo-ipr-note). Timing
-              metadata — when in the aligner protocol the IPR happens.
-          Storage caveat: the DB column `note` holds the mm value (no
-          rename — the column name predates the relabel), `value`
-          holds the step text. */}
+              metadata — when in the aligner protocol the IPR happens. */}
       {(hasValue || hasNote) && (
         <span className="odo-ipr-label">
-          {hasNote && (
+          {hasValue && (
             <span className="odo-ipr-value">
-              {note}
+              {value}
               <span className="odo-ipr-unit">mm</span>
             </span>
           )}
-          {hasValue && (
+          {hasNote && (
             <span className="odo-ipr-note">
               <span className="odo-ipr-note-label">Step</span>
-              {value}
+              {note}
             </span>
           )}
         </span>
@@ -1136,32 +1152,23 @@ function IprPopover({
   anchorX: number;
   anchorY: number;
   currentValue?: string;
-  /** Existing stripping value (note column). */
+  /** Existing STEP value. */
   currentNote?: string;
   /**
    * Single combined commit — emits BOTH the IPR mm value and the
-   * optional stripping note in one callback so the parent fires one
+   * optional STEP value in one callback so the parent fires one
    * persist mutation instead of two. Two separate callbacks raced
    * the backend's delete+createMany transaction and caused P2002.
    */
   onCommit: (payload: { value: string | null; note: string | null }) => void;
-  /** Whether to show the second "Stripping" input field. */
+  /** Whether to show the second "STEP" input field. */
   showStripping?: boolean;
   onClose: () => void;
 }) {
   const popupRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: anchorX, top: anchorY });
-  // `draft` holds the FIRST input — relabelled "Step" in the UI per the
-  // clinical team's terminology (the aligner step number when the IPR
-  // is performed). It's the row's required field on the backend, but
-  // not numerically clamped — clinics use various step encodings
-  // (numeric step #, letter, "mid", etc.).
-  const [draft, setDraft] = useState(currentValue ?? '');
-  // `noteDraft` holds the SECOND input — relabelled "IPR (mm)" per the
-  // clinical team. THIS is the actual interproximal-reduction amount in
-  // millimetres. We still write it into the `note` column so we don't
-  // need a DB migration; the column name is purely internal.
-  const [noteDraft, setNoteDraft] = useState(currentNote ?? '');
+  const [iprDraft, setIprDraft] = useState(currentValue ?? '');
+  const [stepDraft, setStepDraft] = useState(currentNote ?? '');
 
   useEffect(() => {
     let armed = false;
@@ -1195,29 +1202,23 @@ function IprPopover({
   if (typeof window === 'undefined') return null;
 
   const handleConfirm = () => {
-    const trimmedStep = draft.trim();
-    const trimmedMm = noteDraft.trim();
+    const trimmedIpr = iprDraft.trim();
+    const trimmedStep = stepDraft.trim();
     // Build one payload that carries BOTH fields so the parent persists
     // in a single mutation. Either field can independently be null —
-    // entering only a Step or only an IPR mm is a legal state.
-    //
-    // The Step value lives in `value` (the row's required column on
-    // the backend); the IPR mm lives in `note` (the optional column).
-    // We do NOT clamp Step — clinics encode it differently (numeric
-    // step, "mid", letter codes, etc.). We DO clamp IPR mm to a sane
-    // 0..2 mm range so a typo can't store "20" thinking it was "0.20".
+    // entering only an IPR amount or only a STEP is a legal state.
     const clampMm = (raw: string): string => {
       const num = Number(raw);
       return Number.isFinite(num) && num >= 0 && num <= 2 ? num.toString() : raw;
     };
 
     onCommit({
-      value: trimmedStep.length > 0 ? trimmedStep : null,
-      // showStripping=false means the parent never wants the second
+      value: trimmedIpr.length > 0 ? clampMm(trimmedIpr) : null,
+      // showStripping=false means the parent never wants the STEP
       // field at all (defensive — current call sites always opt in).
       note: showStripping
-        ? trimmedMm.length > 0
-          ? clampMm(trimmedMm)
+        ? trimmedStep.length > 0
+          ? trimmedStep
           : null
         : null,
     });
@@ -1258,55 +1259,50 @@ function IprPopover({
         IPR · {contactLabel}
       </div>
 
-      {/* ─── Step (free-form text) ─────────────────────────────────────
-          The aligner-step / sequence label when this IPR is performed.
+      {/* ─── IPR (mm) — yellow chip on the arch ─────────────────────── */}
+      <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+        IPR (mm)
+      </label>
+      <div className="flex items-center gap-2">
+        <Input
+          type="number"
+          step="0.1"
+          min="0"
+          max="2"
+          inputMode="decimal"
+          autoFocus
+          value={iprDraft}
+          onChange={(e) => setIprDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') handleConfirm();
+            if (e.key === 'Escape') onClose();
+          }}
+          placeholder="0.2"
+          className="h-9"
+        />
+        <span className="text-xs text-muted-foreground">mm</span>
+      </div>
+
+      {/* ─── STEP — purple chip on the arch ───────────────────────────
           Free text so clinics can use whatever encoding their protocol
           requires (`4`, `S5`, `mid`, etc.) — no numeric clamp. */}
-      <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-        Step
-      </label>
-      <Input
-        type="text"
-        inputMode="text"
-        autoFocus
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') handleConfirm();
-          if (e.key === 'Escape') onClose();
-        }}
-        placeholder="e.g. 4"
-        className="h-9"
-      />
-
-      {/* ─── IPR (mm) — the actual reduction amount ──────────────────
-          Only shown when the parent opted in via `showStripping`. Held
-          in the row's `note` column (we never renamed the column to
-          avoid a Prisma migration). 0..2 mm clamp catches typos like
-          "20" that were meant to be "0.20". */}
       {showStripping && (
         <>
           <label className="mb-1 mt-2 block text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-            IPR (mm)
+            STEP
           </label>
-          <div className="flex items-center gap-2">
-            <Input
-              type="number"
-              step="0.1"
-              min="0"
-              max="2"
-              inputMode="decimal"
-              value={noteDraft}
-              onChange={(e) => setNoteDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleConfirm();
-                if (e.key === 'Escape') onClose();
-              }}
-              placeholder="0.2"
-              className="h-9"
-            />
-            <span className="text-xs text-muted-foreground">mm</span>
-          </div>
+          <Input
+            type="text"
+            inputMode="text"
+            value={stepDraft}
+            onChange={(e) => setStepDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleConfirm();
+              if (e.key === 'Escape') onClose();
+            }}
+            placeholder="e.g. 10"
+            className="h-9"
+          />
         </>
       )}
       <div className="mt-3 grid grid-cols-2 gap-2">
@@ -1568,7 +1564,8 @@ const ODONTOGRAM_CSS = /* css */ `
   border: 0;
   cursor: pointer;
   user-select: none;
-  contain: layout style paint;
+  contain: layout style;
+  overflow: visible;
   outline: none;
   transition: transform 160ms ease;
 }
@@ -1629,6 +1626,7 @@ const ODONTOGRAM_CSS = /* css */ `
   line-height: 1.1;
   white-space: nowrap;
   pointer-events: none;
+  z-index: 8;
 }
 .odo-ipr-upper .odo-ipr-label {
   bottom: calc(100% - 12px);
@@ -1637,8 +1635,8 @@ const ODONTOGRAM_CSS = /* css */ `
   top: calc(100% - 12px);
 }
 
-/* IPR and stripping are separate chips so the values do not collapse into a
-   cramped pill when both are present. The mm value stays primary; stripping is
+/* IPR and STEP are separate chips so the values do not collapse into a
+   cramped pill when both are present. The mm value stays primary; STEP is
    a quieter secondary chip beneath it. */
 /* ── Slot label colour vocabulary ─────────────────────────────────
    Colour assignment (set per the clinical team's request):
@@ -1690,7 +1688,7 @@ const ODONTOGRAM_CSS = /* css */ `
 @media (max-width: 640px) {
   .odo-ipr { width: 10px; min-height: 72px; }
   .odo-ipr-on .odo-ipr-bar { height: 44px; width: 5px; }
-  .odo-ipr-label { font-size: 8px; min-width: 22px; padding: 0 4px; }
+  .odo-ipr-label { font-size: 8px; min-width: max-content; }
 }
 @media (max-width: 480px) {
   .odo-ipr { width: 8px; min-height: 60px; }

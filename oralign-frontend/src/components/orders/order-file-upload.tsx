@@ -977,7 +977,13 @@ function SlotFilePreview({
             <img
               src={objectUrl}
               alt={displayFileName(file)}
-              className="h-full w-full object-cover"
+              // `object-contain` so the FULL image is visible inside the
+              // 4:3 thumbnail card — previously `object-cover` cropped
+              // anything that wasn't a 4:3 photo (portrait shots, square
+              // crops, screenshots) and the planner couldn't tell what
+              // they'd uploaded without clicking through to the full
+              // viewer. Background tint already provides the framing.
+              className="h-full w-full object-contain bg-muted/40"
             />
           ) : (
             <span className="grid h-full w-full place-items-center text-muted-foreground">

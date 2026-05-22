@@ -3,7 +3,6 @@ import { Jost, DM_Sans } from "next/font/google";
 import Script from "next/script";
 import "./showcase.css";
 import { LangProvider } from "./_lib/i18n/lang-context";
-import { CustomCursor } from "./_components/shared/custom-cursor";
 import { Header } from "./_components/header";
 import { Footer } from "./_components/footer";
 import { FloatingLang } from "./_components/floating-lang";
@@ -154,7 +153,6 @@ export default function ShowcaseLayout({ children }: { children: React.ReactNode
         Skip to content
       </a>
       <LangProvider>
-        <CustomCursor />
         <Header />
         <FloatingLang />
         <main id="main">{children}</main>

@@ -1,7 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useRef, type ElementType, type ReactNode, type Ref } from "react";
-import { gsap, prefersReducedMotion, ScrollTrigger } from "../../_lib/gsap";
+import { useEffect, useRef, type ElementType, type ReactNode, type Ref } from "react";
 
 type Props = {
   children: ReactNode;
@@ -12,53 +11,55 @@ type Props = {
 };
 
 /**
- * Wraps children in a single element that fades+slides in when scrolled into
- * view. Built on GSAP's ScrollTrigger so easings, timing, and trigger points
- * can be tuned in one place. Each instance scopes itself with gsap.context()
- * so it cleans up its own ScrollTrigger on unmount.
+ * Tiny reveal primitive. Content is visible in SSR by default; after hydration
+ * we progressively enhance with IntersectionObserver + CSS transitions. This
+ * avoids pulling GSAP/ScrollTrigger into the initial marketing-page bundle,
+ * which was a major contributor to Total Blocking Time in Lighthouse.
  */
 export function Reveal({ children, delay, className = "", as: Tag = "div" }: Props) {
   const ref = useRef<HTMLElement | null>(null);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     const el = ref.current;
     if (!el) return;
 
-    if (prefersReducedMotion()) {
-      gsap.set(el, { opacity: 1, y: 0, clearProps: "transform" });
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      el.dataset.reveal = "visible";
       return;
     }
 
-    const fallback = window.setTimeout(() => {
-      gsap.set(el, { opacity: 1, y: 0, clearProps: "transform" });
-    }, 1200);
+    el.dataset.reveal = "pending";
 
-    const ctx = gsap.context(() => {
-      gsap.set(el, { opacity: 1, y: 24 });
-      gsap.to(el, {
-        opacity: 1,
-        y: 0,
-        duration: 0.95,
-        ease: "power3.out",
-        delay: delay ? 0.15 : 0,
-        clearProps: "transform",
-        onComplete: () => window.clearTimeout(fallback),
-        scrollTrigger: {
-          trigger: el,
-          start: "top 86%",
-          toggleActions: "play none none none",
-          once: true,
-          onEnter: () => window.clearTimeout(fallback),
-        },
+    const reveal = () => {
+      el.dataset.reveal = "visible";
+    };
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry?.isIntersecting) return;
+        reveal();
+        observer.disconnect();
+      },
+      { rootMargin: "0px 0px -12% 0px", threshold: 0.05 },
+    );
+
+    let cancelObserverSchedule: () => void;
+    if (typeof window.requestIdleCallback === "function") {
+      const idleId = window.requestIdleCallback(() => observer.observe(el), {
+        timeout: 900,
       });
-    }, el);
+      cancelObserverSchedule = () => window.cancelIdleCallback?.(idleId);
+    } else {
+      const timeoutId = globalThis.setTimeout(() => observer.observe(el), 120);
+      cancelObserverSchedule = () => globalThis.clearTimeout(timeoutId);
+    }
 
-    const refresh = window.requestAnimationFrame(() => ScrollTrigger.refresh());
+    const fallback = window.setTimeout(reveal, 1600);
 
     return () => {
       window.clearTimeout(fallback);
-      window.cancelAnimationFrame(refresh);
-      ctx.revert();
+      cancelObserverSchedule();
+      observer.disconnect();
     };
   }, [delay]);
 

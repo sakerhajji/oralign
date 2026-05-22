@@ -89,11 +89,10 @@ html { scroll-behavior: smooth; }
 }
 
 /* ─── MOTION RESILIENCE ─────────────────────────────────────────────
-   Showcase content stays visible by default. Client-side GSAP adds the
-   reveal/hero animation only after hydration, with a JS fallback that restores
-   visibility if route transitions or browser back/forward cache interrupt it.
-   This prevents the "blank until hard refresh" state when navigating from the
-   dashboard back to the marketing page. */
+   Showcase content stays visible by default. A tiny IntersectionObserver adds
+   data-reveal states after hydration; CSS handles the motion. This avoids
+   main-thread-heavy animation libraries on the landing page while preventing
+   the old "blank until hard refresh" route-transition failure mode. */
 @media not (prefers-reduced-motion: reduce) {
   [data-theme="showcase"] .sc-rv,
   [data-theme="showcase"] .sc-rv-2,
@@ -105,40 +104,71 @@ html { scroll-behavior: smooth; }
   [data-theme="showcase"] .sc-hero-core {
     will-change: opacity, transform;
   }
+
+  [data-theme="showcase"] .sc-rv[data-reveal="pending"],
+  [data-theme="showcase"] .sc-rv-2[data-reveal="pending"] {
+    opacity: 0;
+    transform: translate3d(0, 24px, 0);
+  }
+
+  [data-theme="showcase"] .sc-rv[data-reveal="visible"],
+  [data-theme="showcase"] .sc-rv-2[data-reveal="visible"] {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+    transition:
+      opacity 760ms cubic-bezier(0.16, 1, 0.3, 1),
+      transform 760ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  [data-theme="showcase"] .sc-rv-2[data-reveal="visible"] {
+    transition-delay: 120ms;
+  }
+
+  [data-theme="showcase"] .sc-hero-orbit {
+    animation: sc-hero-orbit-in 980ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  [data-theme="showcase"] .sc-hero-eyebrow,
+  [data-theme="showcase"] .sc-hero-h1,
+  [data-theme="showcase"] .sc-hero-sub,
+  [data-theme="showcase"] .sc-hero-ctas,
+  [data-theme="showcase"] .sc-hero-scroll {
+    animation: sc-hero-rise 760ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  [data-theme="showcase"] .sc-hero-eyebrow { animation-delay: 80ms; }
+  [data-theme="showcase"] .sc-hero-h1 { animation-delay: 180ms; }
+  [data-theme="showcase"] .sc-hero-sub { animation-delay: 300ms; }
+  [data-theme="showcase"] .sc-hero-ctas { animation-delay: 420ms; }
+  [data-theme="showcase"] .sc-hero-scroll { animation-delay: 620ms; }
+
+  [data-theme="showcase"] .sc-hero-orbit-pulse {
+    animation: sc-hero-soft-pulse 2.3s ease-in-out 1s infinite alternate;
+  }
+
+  [data-theme="showcase"] .sc-hero-orbit-core {
+    animation: sc-hero-core-pulse 2.3s ease-in-out 1s infinite alternate;
+  }
 }
 
-/* ─── CURSOR ─── */
-.sc-cursor-dot,
-.sc-cursor-ring {
-  position: fixed;
-  pointer-events: none;
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-  z-index: 9999;
-  display: none;
+@keyframes sc-hero-rise {
+  from { opacity: 0; transform: translate3d(0, 22px, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
 }
-.sc-cursor-dot {
-  width: 8px;
-  height: 8px;
-  background: var(--sc-black);
-  transition: background 0.2s, width 0.2s, height 0.2s;
-}
-.sc-cursor-ring {
-  width: 32px;
-  height: 32px;
-  border: 1.5px solid rgba(10, 10, 10, 0.3);
-  z-index: 9998;
-  transition: border-color 0.35s, width 0.35s, height 0.35s;
-}
-.sc-cursor-dot.sc-inv { background: var(--sc-white); }
-.sc-cursor-ring.sc-inv { border-color: rgba(248, 246, 242, 0.4); }
 
-@media (min-width: 1024px) and (pointer: fine) {
-  [data-theme="showcase"] { cursor: none; }
-  [data-theme="showcase"] a,
-  [data-theme="showcase"] button { cursor: none; }
-  .sc-cursor-dot,
-  .sc-cursor-ring { display: block; }
+@keyframes sc-hero-orbit-in {
+  from { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(0.94); }
+  to { opacity: 0.65; transform: translate3d(-50%, -50%, 0) scale(1); }
+}
+
+@keyframes sc-hero-soft-pulse {
+  from { transform: scale(1); }
+  to { transform: scale(1.045); }
+}
+
+@keyframes sc-hero-core-pulse {
+  from { opacity: 1; transform: translate3d(-50%, -50%, 0) scale(1); }
+  to { opacity: 0.72; transform: translate3d(-50%, -50%, 0) scale(1.28); }
 }
 
 /* ─── MARQUEE ─── */
@@ -187,8 +217,6 @@ html { scroll-behavior: smooth; }
 
 /* ─── REDUCED MOTION ─── */
 @media (prefers-reduced-motion: reduce) {
-  .sc-cursor-dot,
-  .sc-cursor-ring { display: none !important; }
   .sc-marquee-track,
   .sc-rotslow { animation: none !important; }
 }

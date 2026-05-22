@@ -1130,16 +1130,20 @@ function unpackSegment(value: string | undefined): Segment {
 
 // ─── Elastics ───────────────────────────────────────────────────────────────
 // The elastics field stores a single free-text string in the DB. The UI
-// exposes a checkbox grid for the five common clinical types plus a free-
-// text input for notes; the two are packed into one string like
-// `"Class I, Vertical bite — Full-time wear"` and unpacked symmetrically.
+// exposes a SINGLE-SELECT radio (pill grid) for the five common clinical
+// types plus a "No elastics" off-switch and a free-text notes input.
+// The two are packed into one string like `"Class II elastics — Full-time
+// wear"` and unpacked symmetrically.
 //
-// Why a checkbox grid: a patient can need multiple elastic types at once
-// (e.g. Class II + criss-cross). Radios would force one. The notes field
-// stays so the doctor can add wear-time / hook details without expanding
-// the option list every clinic asks for.
+// History note: an earlier revision used a multi-select checkbox grid.
+// The clinical team asked for radio semantics — a case picks ONE elastic
+// configuration; multi-elastic cases capture the secondary type in the
+// notes field. unpackElastics is tolerant of the old multi-comma format
+// on read so existing orders keep working: it picks the first known
+// label and folds the rest into notes.
 
 const elasticTypeOptions = [
+  'No elastics',
   'Class I elastics',
   'Class II elastics',
   'Class III elastics',
@@ -1149,27 +1153,32 @@ const elasticTypeOptions = [
 type ElasticType = (typeof elasticTypeOptions)[number];
 
 /**
- * Pack a `Set<ElasticType>` + notes into the storage string.
- * Empty set + empty notes → empty string (i.e. "no elastics chosen").
+ * Pack a single elastic type + notes into the storage string.
+ * Empty type + empty notes → empty string ("nothing chosen").
+ * "No elastics" packs to just "No elastics" (no trailing notes).
  */
-function packElastics(types: ElasticType[], notes: string): string {
+function packElastics(type: ElasticType | null, notes: string): string {
   const trimmed = notes.trim();
-  const typesPart = types.join(', ');
-  if (typesPart && trimmed) return `${typesPart} — ${trimmed}`;
-  return typesPart || trimmed;
+  if (!type && !trimmed) return '';
+  if (type === 'No elastics') return 'No elastics';
+  if (type && trimmed) return `${type} — ${trimmed}`;
+  return type ?? trimmed;
 }
 
-/** Recover the checkbox set + the notes from the stored string. */
+/**
+ * Recover the chosen elastic type + the notes from the stored string.
+ * Tolerant of the legacy multi-select format (`"Class I, Class III —
+ * notes"`) — first known label wins, the rest folds into notes.
+ */
 function unpackElastics(value: string | undefined): {
-  types: ElasticType[];
+  type: ElasticType | null;
   notes: string;
 } {
   const raw = (value ?? '').trim();
-  if (!raw) return { types: [], notes: '' };
-  // Split on the first em-dash we used as a separator. Anything before is
-  // the (comma-separated) types list, anything after is notes. If no
-  // dash is present, the whole string is treated as either a single
-  // known type (or list) OR as free-form notes.
+  if (!raw) return { type: null, notes: '' };
+  // Split on the first em-dash we use as separator between type list and
+  // notes. Anything before is the (possibly comma-separated) type list,
+  // anything after is notes.
   const dashIdx = raw.indexOf('—');
   const head = dashIdx >= 0 ? raw.slice(0, dashIdx).trim() : raw;
   const tail = dashIdx >= 0 ? raw.slice(dashIdx + 1).trim() : '';
@@ -1177,17 +1186,18 @@ function unpackElastics(value: string | undefined): {
     .split(',')
     .map((part) => part.trim())
     .filter(Boolean);
-  const matched: ElasticType[] = [];
+  let chosen: ElasticType | null = null;
   const unmatched: string[] = [];
   for (const tok of tokens) {
     const hit = elasticTypeOptions.find(
       (opt) => opt.toLowerCase() === tok.toLowerCase(),
     );
-    if (hit) matched.push(hit);
+    if (hit && !chosen) chosen = hit;
+    else if (hit) unmatched.push(hit);
     else unmatched.push(tok);
   }
   const notes = [unmatched.join(', '), tail].filter(Boolean).join(' — ');
-  return { types: matched, notes };
+  return { type: chosen, notes };
 }
 
 function AdvancedMovementStep({
@@ -1218,94 +1228,118 @@ function AdvancedMovementStep({
   };
 
   /**
-   * Toggle one elastic-type checkbox and re-pack into `form.elastics`.
-   * Preserves whatever the planner typed in the notes field.
+   * Select a single elastic type (radio semantics). Re-packs with
+   * whatever the planner has in the notes field. Picking "No
+   * elastics" silently clears notes too — they're meaningless when
+   * the case has no elastics planned.
    */
-  const toggleElasticType = (type: ElasticType) => {
-    const next = elastics.types.includes(type)
-      ? elastics.types.filter((t) => t !== type)
-      : [...elastics.types, type];
-    // Keep declaration-order from `elasticTypeOptions` rather than insertion
-    // order so the stored string is deterministic regardless of click order.
-    const ordered = elasticTypeOptions.filter((opt) => next.includes(opt));
-    updateField('elastics', packElastics(ordered, elastics.notes));
+  const setElasticType = (type: ElasticType) => {
+    if (type === 'No elastics') {
+      updateField('elastics', 'No elastics');
+      return;
+    }
+    updateField('elastics', packElastics(type, elastics.notes));
   };
 
   const setElasticsNotes = (notes: string) => {
-    updateField('elastics', packElastics(elastics.types, notes));
+    updateField('elastics', packElastics(elastics.type, notes));
   };
 
   return (
     <div className="space-y-6">
       {/* Anteroposterior text input REMOVED — duplicate of the
-          "A-P relationship" radio in step 4 (Treatment). */}
+          "A-P relationship" radio in step 4 (Treatment).
+
+          Every form field below uses the SAME pattern: a `<fieldset>`
+          card with a `<legend>` heading, a one-line muted description,
+          and a grid of OptionPill radios. The clinical team wanted a
+          balanced, consistent layout across IPR / Expansion / Spaces
+          / Elastics / Open bite / Midline / Bite ramps / Crossbite —
+          so they're all rendered the same way, with grid-column counts
+          chosen per option count to keep the pills aligned within each
+          card. */}
 
       {/* ─── Elastics ───────────────────────────────────────────────────
-          Multi-select checkbox grid + free-text notes. The two fields
-          combine into a single packed string (see packElastics) so the
-          backend column stays free-text and no migration is needed. */}
+          Single-select (radio) — clinical team asked for one elastic
+          configuration per case. Multi-elastic cases capture the
+          secondary type in the notes field. */}
       <fieldset className="space-y-3 rounded-lg border bg-card p-4">
         <legend className="px-1 text-sm font-semibold">Elastics</legend>
         <p className="text-xs text-muted-foreground">
-          Tick every elastic configuration this case needs — multiple
-          are allowed. Use the notes field for wear time, hook positions
-          or anything not captured by the standard options.
+          Pick the primary elastic configuration. Use the notes field for
+          wear time, hook positions or a secondary type if more than one
+          is needed.
         </p>
         <div
-          role="group"
-          aria-label="Elastic types"
-          className="grid gap-2 sm:grid-cols-2"
+          role="radiogroup"
+          aria-label="Elastic type"
+          className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3"
         >
-          {elasticTypeOptions.map((opt) => {
-            const checked = elastics.types.includes(opt);
-            return (
-              <label
-                key={opt}
-                className={cn(
-                  'flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm transition',
-                  checked
-                    ? 'border-primary bg-primary/5 text-primary'
-                    : 'border-input bg-background hover:bg-accent/40',
-                  disabled && 'cursor-not-allowed opacity-60',
-                )}
-              >
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 cursor-pointer"
-                  checked={checked}
-                  disabled={disabled}
-                  onChange={() => toggleElasticType(opt)}
-                />
-                <span>{opt}</span>
-              </label>
-            );
-          })}
+          {elasticTypeOptions.map((opt) => (
+            <OptionPill
+              key={opt}
+              active={elastics.type === opt}
+              disabled={disabled}
+              label={opt}
+              onClick={() => setElasticType(opt)}
+            />
+          ))}
         </div>
         <TextInput
           label="Notes (optional)"
           value={elastics.notes}
           placeholder="e.g. Full-time wear; upper canine → lower first molar"
           icon={<Info className="h-4 w-4" />}
-          disabled={disabled}
+          disabled={disabled || elastics.type === 'No elastics'}
           onChange={setElasticsNotes}
         />
       </fieldset>
 
-      <RadioGroupField
-        label="Open bite"
-        value={form.openBite ?? ''}
-        options={openBiteOptions}
-        disabled={disabled}
-        onChange={(value) => updateField('openBite', value)}
-      />
+      {/* ─── Open bite ────────────────────────────────────────────────── */}
+      <fieldset className="space-y-3 rounded-lg border bg-card p-4">
+        <legend className="px-1 text-sm font-semibold">Open bite</legend>
+        <p className="text-xs text-muted-foreground">
+          What should happen to the open bite during treatment?
+        </p>
+        <div
+          role="radiogroup"
+          aria-label="Open bite"
+          className="grid gap-2 sm:grid-cols-3"
+        >
+          {openBiteOptions.map((opt) => (
+            <OptionPill
+              key={opt}
+              active={form.openBite === opt}
+              disabled={disabled}
+              label={opt}
+              onClick={() => updateField('openBite', opt)}
+            />
+          ))}
+        </div>
+      </fieldset>
 
-      <RadioGroupField
-        label="Midline"
-        value={form.midline ?? ''}
-        options={midlineOptions}
-        disabled={disabled}
-        onChange={(value) => updateField('midline', value)}
-      />
+      {/* ─── Midline ──────────────────────────────────────────────────── */}
+      <fieldset className="space-y-3 rounded-lg border bg-card p-4">
+        <legend className="px-1 text-sm font-semibold">Midline</legend>
+        <p className="text-xs text-muted-foreground">
+          Should the dental midline be maintained or corrected?
+        </p>
+        <div
+          role="radiogroup"
+          aria-label="Midline"
+          className="grid gap-2 sm:grid-cols-2"
+        >
+          {midlineOptions.map((opt) => (
+            <OptionPill
+              key={opt}
+              active={form.midline === opt}
+              disabled={disabled}
+              label={opt}
+              onClick={() => updateField('midline', opt)}
+            />
+          ))}
+        </div>
+      </fieldset>
 
       {/* ─── IPR ────────────────────────────────────────────────────────
           The "No priority / Anterior priority / Posterior priority"
@@ -1317,7 +1351,11 @@ function AdvancedMovementStep({
         <p className="text-xs text-muted-foreground">
           Pick where interproximal reduction is allowed.
         </p>
-        <div role="radiogroup" aria-label="IPR segment" className="grid gap-2 sm:grid-cols-4">
+        <div
+          role="radiogroup"
+          aria-label="IPR segment"
+          className="grid gap-2 sm:grid-cols-4"
+        >
           {segmentOptions.map((opt) => (
             <OptionPill
               key={opt}
@@ -1331,13 +1369,27 @@ function AdvancedMovementStep({
       </fieldset>
 
       {/* ─── Bite ramps ─────────────────────────────────────────────────── */}
-      <RadioGroupField
-        label="Bite ramps"
-        value={form.biteRamps ?? ''}
-        options={biteRampOptions}
-        disabled={disabled}
-        onChange={(value) => updateField('biteRamps', value)}
-      />
+      <fieldset className="space-y-3 rounded-lg border bg-card p-4">
+        <legend className="px-1 text-sm font-semibold">Bite ramps</legend>
+        <p className="text-xs text-muted-foreground">
+          Where should the planner place bite ramps, if any?
+        </p>
+        <div
+          role="radiogroup"
+          aria-label="Bite ramps"
+          className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4"
+        >
+          {biteRampOptions.map((opt) => (
+            <OptionPill
+              key={opt}
+              active={form.biteRamps === opt}
+              disabled={disabled}
+              label={opt}
+              onClick={() => updateField('biteRamps', opt)}
+            />
+          ))}
+        </div>
+      </fieldset>
 
       {/* ─── Expansion ──────────────────────────────────────────────────
           Same removal as IPR above — no anterior / posterior priority
@@ -1348,7 +1400,11 @@ function AdvancedMovementStep({
           Select the segment that needs expansion, or "No expansion" if
           the arches are well-developed.
         </p>
-        <div role="radiogroup" aria-label="Expansion segment" className="grid gap-2 sm:grid-cols-4">
+        <div
+          role="radiogroup"
+          aria-label="Expansion segment"
+          className="grid gap-2 sm:grid-cols-4"
+        >
           {expansionOptions.map((opt) => {
             const norm: Segment = opt === 'No expansion' ? 'No' : opt;
             return (
@@ -1364,18 +1420,41 @@ function AdvancedMovementStep({
         </div>
       </fieldset>
 
-      <RadioGroupField
-        label="Crossbite"
-        value={form.crossbite ?? ''}
-        options={crossbiteOptions}
-        disabled={disabled}
-        onChange={(value) => updateField('crossbite', value)}
-      />
+      {/* ─── Crossbite ─────────────────────────────────────────────────── */}
+      <fieldset className="space-y-3 rounded-lg border bg-card p-4">
+        <legend className="px-1 text-sm font-semibold">Crossbite</legend>
+        <p className="text-xs text-muted-foreground">
+          What should happen to any present crossbite?
+        </p>
+        <div
+          role="radiogroup"
+          aria-label="Crossbite"
+          className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4"
+        >
+          {crossbiteOptions.map((opt) => (
+            <OptionPill
+              key={opt}
+              active={form.crossbite === opt}
+              disabled={disabled}
+              label={opt}
+              onClick={() => updateField('crossbite', opt)}
+            />
+          ))}
+        </div>
+      </fieldset>
 
       {/* ─── Spaces — single source of truth ────────────────────────────── */}
       <fieldset className="space-y-3 rounded-lg border bg-card p-4">
         <legend className="px-1 text-sm font-semibold">Spaces</legend>
-        <div role="radiogroup" aria-label="Spaces" className="grid gap-2 sm:grid-cols-2">
+        <p className="text-xs text-muted-foreground">
+          Close existing spaces or maintain them for future restorative
+          work? Add detail in the notes field below.
+        </p>
+        <div
+          role="radiogroup"
+          aria-label="Spaces"
+          className="grid gap-2 sm:grid-cols-2"
+        >
           {spacesOptions.map((opt) => (
             <OptionPill
               key={opt}

@@ -196,13 +196,20 @@ export function TreatmentPlanReview({
       />
 
       {/* New clinical artefact, placed AFTER the Treatment odontogram
-          (which lives inside MovementTableSection) per the clinical
-          team's layout request. */}
+          (which lives inside MovementTableSection) and BEFORE the
+          clinical image gallery — per the clinical team's layout
+          request. */}
       <DentalTreatmentTableSection
         review={review}
         canEdit={isPlanner}
         treatmentPlanId={treatmentPlanId}
       />
+
+      {/* Clinical image gallery — extracted from MovementTableSection
+          so it can sit after the Dental treatment table. The order
+          now reads: odontogram (inside MovementTable) → Dental
+          treatment table → Clinical photos → Chat. */}
+      <ClinicalImagesSection review={review} />
 
       <Card>
         <CardHeader>
@@ -754,11 +761,6 @@ function MovementTableSection({
   const removeIpr = useRemoveTreatmentPlanIpr(treatmentPlanId);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [fullView, setFullView] = useState(false);
-  const [clinicalPreview, setClinicalPreview] = useState<{
-    src: string;
-    label: string;
-    name?: string;
-  } | null>(null);
 
   const imageUrl = useMemo(
     () =>
@@ -769,27 +771,11 @@ function MovementTableSection({
   );
   const iprImage = useAuthenticatedObjectUrl(imageUrl);
 
-  const getOrderImageUrl = useCallback(
-    (file: OrderFile) => {
-      const base =
-        process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
-      return `${base}${ordersService.getDownloadUrl(review.orderId, file.id)}?t=${file.createdAt}`;
-    },
-    [review.orderId],
-  );
-
-  const clinicalImageSlots = useMemo(() => {
-    const latestByCategory = new Map<OrderFileCategory, OrderFile>();
-    for (const file of review.clinicalImages ?? []) {
-      if (!latestByCategory.has(file.category)) {
-        latestByCategory.set(file.category, file);
-      }
-    }
-    return TREATMENT_CLINICAL_IMAGE_SLOTS.map((slot) => ({
-      ...slot,
-      file: latestByCategory.get(slot.category),
-    }));
-  }, [review.clinicalImages]);
+  // Clinical-image-gallery state was hoisted to a sibling section
+  // (`ClinicalImagesSection`) so it can be reordered independently of
+  // the odontogram/IPR block above. See the parent render in
+  // `TreatmentPlanReview` for the new section order:
+  //   MovementTable → DentalTreatmentTable → ClinicalImages → Chat.
 
   // ── Decompose the review payload into THREE cleanly-separated layers:
   //
@@ -1102,11 +1088,10 @@ function MovementTableSection({
           </div>
         )}
 
-        <ClinicalImageGallery
-          slots={clinicalImageSlots}
-          getImageUrl={getOrderImageUrl}
-          onPreview={setClinicalPreview}
-        />
+        {/* ClinicalImageGallery moved to its own sibling section so
+            the planner can see Dental treatment table BEFORE the
+            clinical photo strip — see <ClinicalImagesSection> below
+            and the parent render in <TreatmentPlanReview>. */}
 
         <input
           ref={fileInputRef}
@@ -1149,46 +1134,103 @@ function MovementTableSection({
           </Dialog>
         )}
 
-        {clinicalPreview && (
-          <Dialog open onOpenChange={() => setClinicalPreview(null)}>
-            <DialogContent
-              className="h-[100dvh] w-screen max-w-none border-0 bg-black/95 p-0 text-white"
-              showCloseButton={false}
-            >
-              <DialogTitle className="sr-only">
-                {clinicalPreview.label}
-              </DialogTitle>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                onClick={() => setClinicalPreview(null)}
-                className="absolute right-4 top-4 z-10 h-10 w-10 rounded-full bg-white/10 text-white hover:bg-white/20 hover:text-white"
-                aria-label="Close image viewer"
-              >
-                <X className="h-5 w-5" />
-              </Button>
-              <div className="flex h-full flex-col items-center justify-center gap-4 p-4 sm:p-8">
-                <div className="text-center">
-                  <p className="text-sm font-semibold">{clinicalPreview.label}</p>
-                  {clinicalPreview.name && (
-                    <p className="text-xs text-white/60">
-                      {clinicalPreview.name}
-                    </p>
-                  )}
-                </div>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={clinicalPreview.src}
-                  alt={clinicalPreview.label}
-                  className="max-h-[84dvh] max-w-[96vw] object-contain"
-                />
-              </div>
-            </DialogContent>
-          </Dialog>
-        )}
+        {/* The clinical-image preview Dialog moved with the gallery —
+            it now lives inside <ClinicalImagesSection>. */}
       </CardContent>
     </Card>
+  );
+}
+
+// ─── Clinical image views (sibling section) ──────────────────────────────
+//
+// Hoisted out of MovementTableSection so its position can be reordered
+// independently. The clinical team asked to see the Dental treatment
+// table BEFORE this gallery — keeping it as its own card under the
+// parent gives a clean section stack:
+//
+//   MovementTable → DentalTreatmentTable → ClinicalImages → Chat
+//
+// Owns the preview-modal state because that modal is gallery-local;
+// no other surface opens a "clinical photo full view" dialog.
+
+function ClinicalImagesSection({
+  review,
+}: {
+  review: NonNullable<ReturnType<typeof useTreatmentPlanReview>['data']>;
+}) {
+  const [clinicalPreview, setClinicalPreview] = useState<{
+    src: string;
+    label: string;
+    name?: string;
+  } | null>(null);
+
+  const getOrderImageUrl = useCallback(
+    (file: OrderFile) => {
+      const base =
+        process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
+      return `${base}${ordersService.getDownloadUrl(review.orderId, file.id)}?t=${file.createdAt}`;
+    },
+    [review.orderId],
+  );
+
+  const clinicalImageSlots = useMemo(() => {
+    const latestByCategory = new Map<OrderFileCategory, OrderFile>();
+    for (const file of review.clinicalImages ?? []) {
+      if (!latestByCategory.has(file.category)) {
+        latestByCategory.set(file.category, file);
+      }
+    }
+    return TREATMENT_CLINICAL_IMAGE_SLOTS.map((slot) => ({
+      ...slot,
+      file: latestByCategory.get(slot.category),
+    }));
+  }, [review.clinicalImages]);
+
+  return (
+    <>
+      <ClinicalImageGallery
+        slots={clinicalImageSlots}
+        getImageUrl={getOrderImageUrl}
+        onPreview={setClinicalPreview}
+      />
+
+      {clinicalPreview && (
+        <Dialog open onOpenChange={() => setClinicalPreview(null)}>
+          <DialogContent
+            className="h-[100dvh] w-screen max-w-none border-0 bg-black/95 p-0 text-white"
+            showCloseButton={false}
+          >
+            <DialogTitle className="sr-only">
+              {clinicalPreview.label}
+            </DialogTitle>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => setClinicalPreview(null)}
+              className="absolute right-4 top-4 z-10 h-10 w-10 rounded-full bg-white/10 text-white hover:bg-white/20 hover:text-white"
+              aria-label="Close image viewer"
+            >
+              <X className="h-5 w-5" />
+            </Button>
+            <div className="flex h-full flex-col items-center justify-center gap-4 p-4 sm:p-8">
+              <div className="text-center">
+                <p className="text-sm font-semibold">{clinicalPreview.label}</p>
+                {clinicalPreview.name && (
+                  <p className="text-xs text-white/60">{clinicalPreview.name}</p>
+                )}
+              </div>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={clinicalPreview.src}
+                alt={clinicalPreview.label}
+                className="max-h-[84dvh] max-w-[96vw] object-contain"
+              />
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+    </>
   );
 }
 

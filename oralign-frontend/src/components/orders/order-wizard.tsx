@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -72,6 +72,7 @@ import {
   DentalOrder,
   Gender,
   OrderStatus,
+  Patient,
   PatientStage,
   ToothInstruction,
   ToothInstructionType,
@@ -1582,34 +1583,340 @@ function ManufacturingStep({
   );
 }
 
+/**
+ * Step 6 — Review & submit.
+ *
+ * Layout MIRRORS /dashboard/orders/[id] one-to-one: same Section + Info
+ * helpers, same column counts, same field order. The planner sees the
+ * order exactly as it will read on the detail page once submitted, so
+ * there are no surprises after the click. Sections rendered:
+ *
+ *   1. Patient information      (Section icon=UserRound)
+ *   2. Treatment plan + clinical objective  (icon=Target)
+ *   3. Tooth-level instructions + movement plan  (icon=ListChecks)
+ *      – read-only odontogram + the eight mechanics fields from step 5
+ *   4. Order metadata           (icon=ClipboardCheck)
+ *
+ * Files (patient images + radiography + STL) are rendered by the
+ * <OrderFileUpload readOnly /> block in the parent wizard render so
+ * they appear AFTER this component — keeps file management UI in one
+ * place and avoids double-rendering the upload grid.
+ */
 function ReviewStep({
   savedOrder,
   selectedPatient,
+  newPatient,
   selectedDentist,
+  fallbackDentistName,
   form,
-  toothInstructionCount,
+  toothInstructions,
 }: {
   savedOrder?: DentalOrder;
-  selectedPatient?: string;
-  selectedDentist?: string;
+  selectedPatient?: Patient;
+  /** Inline new-patient draft when the planner is creating a patient on this order. */
+  newPatient: NewPatientDraft | null;
+  selectedDentist?: { id: string; fullName: string };
+  /** Used when no specific dentist was picked (dentist creating their own order). */
+  fallbackDentistName: string | null;
   form: CreateOrderDto;
-  toothInstructionCount: number;
+  toothInstructions: ToothInstruction[];
 }) {
+  // Resolve patient demographics from whichever source is populated.
+  // `selectedPatient` wins when the planner picked an existing record;
+  // `newPatient` fills in for the inline-create flow before the draft
+  // is saved (savedOrder.patient won't yet exist for unsaved drafts).
+  const patientName =
+    selectedPatient?.fullName ??
+    savedOrder?.patient?.fullName ??
+    newPatient?.fullName ??
+    null;
+  const patientEmail =
+    selectedPatient?.email ?? savedOrder?.patient?.email ?? newPatient?.email ?? null;
+  const patientPhone =
+    selectedPatient?.phone ?? savedOrder?.patient?.phone ?? newPatient?.phone ?? null;
+  const patientGender =
+    selectedPatient?.gender ?? newPatient?.gender ?? undefined;
+  const patientDob =
+    selectedPatient?.dateOfBirth ?? newPatient?.dateOfBirth ?? null;
+  const patientAddress =
+    selectedPatient?.address ?? newPatient?.address ?? null;
+  const patientNotes =
+    selectedPatient?.notes ?? newPatient?.notes ?? null;
+  const patientClinicalConditions =
+    selectedPatient?.clinicalConditions ??
+    newPatient?.clinicalConditions ??
+    [];
+  const patientClinicalConditionsOther =
+    selectedPatient?.clinicalConditionsOther ??
+    newPatient?.clinicalConditionsOther ??
+    '';
+  const dentistName =
+    selectedDentist?.fullName ?? fallbackDentistName ?? null;
+
+  // Build the IPR map for the read-only odontogram — same logic as the
+  // detail page, so the purple bars show where the planner placed IPR.
+  const iprValues = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const i of toothInstructions) {
+      if (i.type === 'ipr_value' && i.value && i.value.trim().length > 0) {
+        map.set(i.toothNumber, i.value);
+      }
+    }
+    return map;
+  }, [toothInstructions]);
+
+  const conditionsValue = formatClinicalConditions(
+    patientClinicalConditions,
+    patientClinicalConditionsOther,
+  );
+
   return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-      <ReviewCard label="Order" value={savedOrder?.orderCode ?? 'Draft not saved'} />
-      <ReviewCard label="Patient" value={selectedPatient ?? 'Not selected'} />
-      <ReviewCard label="Dentist" value={selectedDentist ?? 'Current dentist'} />
-      <ReviewCard label="Status" value={savedOrder?.status ?? OrderStatus.DRAFT} />
-      <ReviewCard label="Stage" value={form.patientStage ?? 'Not set'} />
-      <ReviewCard label="Arch" value={form.archTreatment ?? 'Not set'} />
-      <ReviewCard label="Tooth rules" value={`${toothInstructionCount} selected`} />
-      <ReviewCard
-        label="Manufacturing"
-        value={form.wantsManufacturing ? 'Requested' : 'Not requested'}
-      />
+    <div className="space-y-6">
+      {/* ─── 1 · Patient information ─────────────────────────────── */}
+      <ReviewSection icon={UserRound} title="Patient information">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <ReviewInfo label="Patient" value={patientName} />
+          <ReviewInfo label="Dentist" value={dentistName} />
+          <ReviewInfo label="Patient stage" value={form.patientStage} />
+          <ReviewInfo label="Sex" value={reviewGenderLabel(patientGender)} />
+          <ReviewInfo label="Date of birth" value={reviewFormatBirthDate(patientDob)} />
+          <ReviewInfo label="Age" value={reviewAgeFromDob(patientDob)} />
+          <ReviewInfo label="Patient email" value={patientEmail} />
+          <ReviewInfo label="Patient phone" value={patientPhone} />
+          <ReviewInfo label="Arch treatment" value={form.archTreatment} />
+          {patientAddress && (
+            <ReviewInfo label="Address" value={patientAddress} wide />
+          )}
+          {patientNotes && (
+            <ReviewInfo label="Patient notes" value={patientNotes} wide />
+          )}
+          {conditionsValue && (
+            <ReviewInfo
+              label="Clinical conditions / reason"
+              value={conditionsValue}
+              wide
+            />
+          )}
+        </div>
+      </ReviewSection>
+
+      {/* ─── 2 · Treatment plan & clinical objective ─────────────── */}
+      <ReviewSection icon={Target} title="Treatment plan & clinical objective">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <ReviewInfo
+            label="Chief complaint"
+            value={form.chiefComplaint}
+            wide
+          />
+          <ReviewInfo
+            label="Treatment plan"
+            value={form.treatmentPlan}
+            wide
+          />
+          <ReviewInfo label="A-P relationship" value={form.apRelationship} />
+        </div>
+      </ReviewSection>
+
+      {/* ─── 3 · Movement plan + odontogram ──────────────────────── */}
+      <ReviewSection
+        icon={ListChecks}
+        title="Tooth-level instructions & movement plan"
+      >
+        <div className="space-y-8">
+          <OdontogramSelector
+            value={toothInstructions}
+            onChange={() => undefined}
+            disabled
+            iprValues={iprValues}
+          />
+
+          <div className="border-t pt-6">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <ReviewInfo label="Elastics" value={form.elastics} wide />
+              <ReviewInfo label="Open bite" value={form.openBite} />
+              <ReviewInfo label="Midline" value={form.midline} />
+              <ReviewInfo label="IPR" value={form.ipr} />
+              <ReviewInfo label="Bite ramps" value={form.biteRamps} />
+              <ReviewInfo
+                label="Expansion"
+                value={form.expansion ?? 'No expansion'}
+              />
+              <ReviewInfo label="Crossbite" value={form.crossbite} />
+              <ReviewInfo label="Spaces" value={form.spaces} wide />
+              <ReviewInfo label="Extractions" value={form.extractions} wide />
+            </div>
+          </div>
+
+          {(form.specialInstructions || form.additionalInstructions) && (
+            <div className="border-t pt-6">
+              <div className="grid gap-4">
+                <ReviewInfo
+                  label="Special instructions"
+                  value={form.specialInstructions}
+                  wide
+                />
+                <ReviewInfo
+                  label="Additional notes"
+                  value={form.additionalInstructions}
+                  wide
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      </ReviewSection>
+
+      {/* ─── 4 · Order metadata ──────────────────────────────────── */}
+      <ReviewSection icon={ClipboardCheck} title="Order metadata">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <ReviewInfo
+            label="CBCT requested"
+            value={form.useCbctWithScans ? 'Yes' : 'No'}
+          />
+          <ReviewInfo
+            label="Manufacturing"
+            value={form.wantsManufacturing ? 'Requested' : 'Not requested'}
+          />
+          <ReviewInfo
+            label="Materials"
+            value={
+              (form.materials ?? []).filter(Boolean).join(', ') || 'Not set'
+            }
+          />
+          <ReviewInfo
+            label="Order code"
+            value={savedOrder?.orderCode ?? 'Draft not saved'}
+          />
+          <ReviewInfo
+            label="Status"
+            value={savedOrder?.status ?? OrderStatus.DRAFT}
+          />
+        </div>
+      </ReviewSection>
     </div>
   );
+}
+
+// ─── Review-step layout helpers ────────────────────────────────────
+// Intentional duplicates of <Section>/<Info> from /dashboard/orders/[id]
+// so the wizard's final step LOOKS like the order detail page the
+// planner / doctor will land on after submit. Kept local to avoid a
+// circular import — the detail page lives in an app/ route and the
+// wizard lives in components/, so we keep the helpers next to their
+// only caller here. If the detail page ever shifts to a shared
+// component, swap in via a single import line.
+
+function ReviewSection({
+  icon: Icon,
+  title,
+  children,
+}: {
+  icon: typeof Target;
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="rounded-2xl border bg-card shadow-sm">
+      <header className="flex items-center gap-3 border-b px-4 py-3 sm:px-6 sm:py-4">
+        <span className="grid h-9 w-9 place-items-center rounded-full bg-primary/10 text-primary">
+          <Icon className="h-4 w-4" />
+        </span>
+        <h2 className="text-base font-semibold sm:text-lg">{title}</h2>
+      </header>
+      <div className="px-4 py-4 sm:px-6 sm:py-5">{children}</div>
+    </section>
+  );
+}
+
+function ReviewInfo({
+  label,
+  value,
+  wide,
+}: {
+  label: string;
+  value?: string | null;
+  wide?: boolean;
+}) {
+  const safeValue =
+    typeof value === 'string' && value.trim().length > 0 ? value : '—';
+  return (
+    <div className={wide ? 'sm:col-span-2 lg:col-span-3' : undefined}>
+      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </p>
+      <p className="mt-1 whitespace-pre-wrap text-sm font-medium text-foreground">
+        {safeValue}
+      </p>
+    </div>
+  );
+}
+
+function reviewGenderLabel(gender?: Gender | string | null): string | undefined {
+  switch (gender) {
+    case Gender.MALE:
+      return 'Male';
+    case Gender.FEMALE:
+      return 'Female';
+    case Gender.OTHER:
+      return 'Other';
+    default:
+      return undefined;
+  }
+}
+
+function reviewFormatBirthDate(dob?: string | null): string | undefined {
+  if (!dob) return undefined;
+  const date = new Date(dob);
+  if (Number.isNaN(date.getTime())) return undefined;
+  // Matches the locale-friendly format on the detail page.
+  return date.toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
+/**
+ * "32 yrs" / "2 yrs 4 mo" — same granularity as the detail page so the
+ * planner sees identical age formatting between this preview and the
+ * permanent record.
+ */
+function reviewAgeFromDob(dob?: string | null): string | undefined {
+  if (!dob) return undefined;
+  const birth = new Date(dob);
+  if (Number.isNaN(birth.getTime())) return undefined;
+  const now = new Date();
+  let years = now.getFullYear() - birth.getFullYear();
+  let months = now.getMonth() - birth.getMonth();
+  if (now.getDate() < birth.getDate()) months -= 1;
+  if (months < 0) {
+    years -= 1;
+    months += 12;
+  }
+  if (years < 0) return undefined;
+  if (years >= 3) return `${years} yrs`;
+  if (years === 0) {
+    if (months <= 1) return 'Less than 2 months';
+    return `${months} mo`;
+  }
+  return `${years} yrs${months ? ` ${months} mo` : ''}`;
+}
+
+/**
+ * Stitch the clinical-condition checkboxes + the "Other" free-text into
+ * one display string. Empty → undefined so the section row hides.
+ */
+function formatClinicalConditions(
+  conditions: string[] | undefined,
+  other: string | undefined,
+): string | undefined {
+  const list = (conditions ?? []).filter(Boolean);
+  const standard = list.filter((c) => c !== 'Other');
+  const hasOther = list.includes('Other') && other && other.trim().length > 0;
+  const parts: string[] = [];
+  if (standard.length > 0) parts.push(standard.join(', '));
+  if (hasOther) parts.push(other.trim());
+  return parts.length > 0 ? parts.join(' — ') : undefined;
 }
 
 function ChoiceCard({
@@ -1847,14 +2154,8 @@ function SectionDivider({ title }: { title: string }) {
   );
 }
 
-function ReviewCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-md border bg-background p-4">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="mt-1 truncate font-semibold">{value}</p>
-    </div>
-  );
-}
+// ReviewCard removed — replaced by the larger ReviewSection / ReviewInfo
+// helpers that mirror the order-detail page layout (see ReviewStep).
 
 function FieldError({ message }: { message?: string }) {
   if (!message) return null;

@@ -52,7 +52,11 @@ interface ZipAudit {
   blockers: string[];
 }
 
-const MAX_ZIP_SIZE = 50 * 1024 * 1024; // 50 MB
+// 1 GB — CBCT / DICOM volumes regularly land in the 200–800 MB range,
+// so the ZIP-bundle slot needs headroom. The backend enforces the same
+// cap (MAX_FILE_SIZE_ZIP_BUNDLE_BYTES in order.service.ts) so a payload
+// that slips past the dialog still hits a clear server-side rejection.
+const MAX_ZIP_SIZE = 1024 * 1024 * 1024;
 const BLOCKED_EXTENSIONS = new Set([
   'exe', 'bat', 'cmd', 'com', 'scr', 'pif', 'msi', 'lnk', 'hta',
   'vbs', 'wsh', 'ws', 'js', 'jse', 'ps1', 'psm1', 'reg',
@@ -140,8 +144,9 @@ export function ZipUploadDialog({
               <UploadCloud className="h-8 w-8 text-muted-foreground" />
               <p className="text-sm font-medium">Choose a ZIP file</p>
               <p className="text-xs text-muted-foreground">
-                Up to {Math.round(MAX_ZIP_SIZE / 1024 / 1024)} MB. We scan it
-                for executables and unsafe filenames before it uploads.
+                Up to {(MAX_ZIP_SIZE / (1024 * 1024 * 1024)).toFixed(0)} GB —
+                fits a full CBCT / DICOM volume. We scan it for executables
+                and unsafe filenames before it uploads.
               </p>
               <input
                 id="zip-upload-input"
@@ -448,5 +453,10 @@ function readUint32LE(view: DataView, offset: number): number {
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  // CBCT / DICOM bundles routinely cross the 1 GB threshold — the
+  // dialog and the error message both need to format that cleanly,
+  // hence the GB branch (the cap itself is 1 GB so 1.0 GB is the
+  // ceiling for what we'd ever format).
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }

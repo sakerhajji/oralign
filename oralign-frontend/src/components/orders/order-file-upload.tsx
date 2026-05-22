@@ -240,7 +240,13 @@ export function OrderFileUpload({
             }}
           />
           <span className="text-sm text-muted-foreground">
-            Max 50MB per file
+            {/* Mirrors the backend cap (order.service.ts:
+                MAX_FILE_SIZE_ZIP_BUNDLE_BYTES vs the default). Only the
+                ZIP category — used for CBCT / DICOM bundles — gets the
+                1 GB ceiling; everything else stays at 50 MB. */}
+            {category === OrderFileCategory.ZIP
+              ? 'Max 1 GB per ZIP bundle (CBCT / DICOM)'
+              : 'Max 50 MB per file'}
           </span>
         </div>
       )}

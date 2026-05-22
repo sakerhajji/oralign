@@ -89,7 +89,22 @@ type ClinicalOrderData = Partial<
 >;
 
 const ADMIN_ROLES: string[] = [UserRole.admin, UserRole.super_admin];
-const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024;
+
+// ── Per-category upload caps ─────────────────────────────────────────
+// Most slots (clinical photos, intra-oral scans as STL/PLY/OBJ, PDFs)
+// fit comfortably under 50 MB and we cap there to keep storage sane.
+//
+// The exception is CBCT / DICOM bundles, which the clinical team ships
+// as a single ZIP archive containing hundreds of slice files. Real-world
+// CBCT volumes sit between 200 MB and 800 MB; bumping the ZIP-category
+// ceiling to 1 GB covers everything we've seen so far without opening
+// the door for someone to drop a 1 GB JPEG into a clinical-photo slot.
+//
+// Bytes-only constants (no MB strings) so unit conversion is obvious
+// at the call site.
+const MAX_FILE_SIZE_DEFAULT_BYTES = 50 * 1024 * 1024;      //  50 MB
+const MAX_FILE_SIZE_ZIP_BUNDLE_BYTES = 1024 * 1024 * 1024; //   1 GB
+
 const UPLOAD_ROOT = path.join(process.cwd(), 'uploads');
 const ALLOWED_EXTENSIONS = new Set([
   '.jpg',
@@ -106,6 +121,12 @@ const ALLOWED_EXTENSIONS = new Set([
   '.obj',
   '.zip',
   '.pdf',
+  // DICOM single-volume files. The CBCT bundle path uses .zip, but
+  // some viewers export individual `.dcm` slices which the doctor
+  // wants to attach directly — kept in sync with the upload UI
+  // copy: "Single .dcm DICOM files are also accepted." (See
+  // order-file-upload.tsx → ZipUploadDialog description text.)
+  '.dcm',
 ]);
 
 @Injectable()
@@ -483,7 +504,7 @@ export class OrderService {
     const savedFiles: Prisma.OrderFileCreateManyInput[] = [];
 
     for (const file of files) {
-      this.validateFile(file);
+      this.validateFile(file, category);
       const saved = await this.saveFileToDisk(id, category, file);
       savedFiles.push(saved);
     }
@@ -742,9 +763,21 @@ export class OrderService {
     return `ORD-${stamp}-${String(count + 1).padStart(4, '0')}`;
   }
 
-  private validateFile(file: Express.Multer.File): void {
-    if (file.size > MAX_FILE_SIZE_BYTES) {
-      throw new BadRequestException('File size must be 50MB or less');
+  private validateFile(
+    file: Express.Multer.File,
+    category: OrderFileCategory,
+  ): void {
+    // CBCT / DICOM bundles arrive in the `zip` category and routinely
+    // hit 200–800 MB; only that category gets the 1 GB ceiling. Every
+    // other slot keeps the 50 MB cap so a stray giant JPEG can't
+    // sneak into a clinical-photo slot.
+    const isZipBundle = category === OrderFileCategory.zip;
+    const maxBytes = isZipBundle
+      ? MAX_FILE_SIZE_ZIP_BUNDLE_BYTES
+      : MAX_FILE_SIZE_DEFAULT_BYTES;
+    if (file.size > maxBytes) {
+      const maxMb = Math.round(maxBytes / (1024 * 1024));
+      throw new BadRequestException(`File size must be ${maxMb}MB or less`);
     }
 
     const extension = path.extname(file.originalname).toLowerCase();

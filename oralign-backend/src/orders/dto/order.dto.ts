@@ -261,6 +261,22 @@ export class CreateOrderDto {
 
 export class UpdateOrderDto extends PartialType(CreateOrderDto) {}
 
+// ── Sort fields the list endpoint honours ────────────────────────
+// Tied to columns the orders list page surfaces — keeping the enum
+// narrow means a typo in the client falls through to the default
+// `createdAt DESC` rather than silently producing nonsense ordering.
+export enum OrderSortField {
+  createdAt = 'createdAt',
+  updatedAt = 'updatedAt',
+  orderCode = 'orderCode',
+  status = 'status',
+}
+
+export enum SortOrder {
+  asc = 'asc',
+  desc = 'desc',
+}
+
 export class OrderFilterDto {
   @ApiProperty({ required: false })
   @IsOptional()
@@ -286,6 +302,35 @@ export class OrderFilterDto {
   @IsOptional()
   @IsString()
   orderCode?: string;
+
+  // ── Sort + pagination plumbing ─────────────────────────────────
+  // Whitelist of sort fields keeps the SQL generator safe — Prisma
+  // throws if `orderBy` contains an unknown field, but stronger to
+  // reject at the DTO boundary with a clear validation error.
+  @ApiProperty({ enum: OrderSortField, required: false, default: OrderSortField.createdAt })
+  @IsOptional()
+  @IsEnum(OrderSortField)
+  sortBy?: OrderSortField;
+
+  @ApiProperty({ enum: SortOrder, required: false, default: SortOrder.desc })
+  @IsOptional()
+  @IsEnum(SortOrder)
+  sortOrder?: SortOrder;
+
+  // ── Date range filter (createdAt) ───────────────────────────────
+  // ISO 8601 string ("2024-05-22" or "2024-05-22T00:00:00Z"). The
+  // service builds an inclusive `[from, to]` gte/lte pair so the
+  // semantics match "orders created between these two days" (no
+  // off-by-one timezone surprises — both bounds in UTC).
+  @ApiProperty({ required: false, example: '2024-05-22' })
+  @IsOptional()
+  @IsString()
+  createdFrom?: string;
+
+  @ApiProperty({ required: false, example: '2024-06-22' })
+  @IsOptional()
+  @IsString()
+  createdTo?: string;
 }
 
 export class UploadOrderFilesQueryDto {

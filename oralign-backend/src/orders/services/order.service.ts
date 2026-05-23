@@ -190,12 +190,20 @@ export class OrderService {
     const skip = (currentPage - 1) * take;
     const where = this.buildWhere(filters, caller);
 
+    // Sort key whitelisted by the DTO enum — Prisma throws on an
+    // unknown key, but the runtime validation is the real safety net.
+    const sortField = filters.sortBy ?? 'createdAt';
+    const sortOrder = filters.sortOrder ?? 'desc';
+    const orderBy: Prisma.DentalOrderOrderByWithRelationInput = {
+      [sortField]: sortOrder,
+    };
+
     const [orders, total] = await Promise.all([
       this.prisma.dentalOrder.findMany({
         where,
         skip,
         take,
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         include: this.includeOrder,
       }),
       this.prisma.dentalOrder.count({ where }),
@@ -612,6 +620,28 @@ export class OrderService {
           },
         },
       ];
+    }
+
+    // Inclusive [from, to] range on createdAt — same pattern as the
+    // patients service. ISO 8601 strings are parsed via Date(); invalid
+    // input falls through (undefined) so a malformed query param
+    // widens the result set rather than breaking the request.
+    const createdRange: Prisma.DateTimeFilter = {};
+    if (filters.createdFrom) {
+      const d = new Date(filters.createdFrom);
+      if (!Number.isNaN(d.getTime())) createdRange.gte = d;
+    }
+    if (filters.createdTo) {
+      const d = new Date(filters.createdTo);
+      if (!Number.isNaN(d.getTime())) {
+        // End-of-day so "to Sep 30" includes anything created that
+        // calendar date in UTC.
+        d.setUTCHours(23, 59, 59, 999);
+        createdRange.lte = d;
+      }
+    }
+    if (createdRange.gte || createdRange.lte) {
+      where.createdAt = createdRange;
     }
 
     return where;

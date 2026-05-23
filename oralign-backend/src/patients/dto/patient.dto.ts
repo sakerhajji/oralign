@@ -232,6 +232,20 @@ export class PatientResponseDto {
   updatedAt!: Date;
 }
 
+// Sort fields the patients-list endpoint honours. Narrow enum so a
+// typo in the client falls through to the default rather than producing
+// nonsense ordering.
+export enum PatientSortField {
+  createdAt = 'createdAt',
+  updatedAt = 'updatedAt',
+  fullName = 'fullName',
+}
+
+export enum PatientSortOrder {
+  asc = 'asc',
+  desc = 'desc',
+}
+
 export class PatientFilterDto {
   @ApiProperty({
     required: false,
@@ -245,4 +259,37 @@ export class PatientFilterDto {
   @IsOptional()
   @IsString()
   doctorId?: string;
+
+  @ApiProperty({ enum: Gender, required: false })
+  @IsOptional()
+  @IsEnum(Gender)
+  gender?: Gender;
+
+  @ApiProperty({
+    enum: PatientSortField,
+    required: false,
+    default: PatientSortField.createdAt,
+  })
+  @IsOptional()
+  @IsEnum(PatientSortField)
+  sortBy?: PatientSortField;
+
+  @ApiProperty({
+    enum: PatientSortOrder,
+    required: false,
+    default: PatientSortOrder.desc,
+  })
+  @IsOptional()
+  @IsEnum(PatientSortOrder)
+  sortOrder?: PatientSortOrder;
+
+  @ApiProperty({ required: false, example: '2024-05-22' })
+  @IsOptional()
+  @IsString()
+  createdFrom?: string;
+
+  @ApiProperty({ required: false, example: '2024-06-22' })
+  @IsOptional()
+  @IsString()
+  createdTo?: string;
 }

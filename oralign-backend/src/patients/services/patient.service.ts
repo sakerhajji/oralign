@@ -83,12 +83,21 @@ export class PatientService {
     const skip = (currentPage - 1) * take;
     const where = this.buildWhere(filters, caller);
 
+    // Sort whitelist already enforced by the DTO enum — Prisma will
+    // throw on any unexpected key, but the runtime validation is the
+    // real safety net.
+    const sortField = filters.sortBy ?? 'createdAt';
+    const sortOrder = filters.sortOrder ?? 'desc';
+    const orderBy: Prisma.PatientOrderByWithRelationInput = {
+      [sortField]: sortOrder,
+    };
+
     const [patients, total] = await Promise.all([
       this.prisma.patient.findMany({
         where,
         skip,
         take,
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         include: this.includeDoctor,
       }),
       this.prisma.patient.count({ where }),
@@ -198,6 +207,33 @@ export class PatientService {
         { email: { contains: filters.search, mode: 'insensitive' } },
         { phone: { contains: filters.search, mode: 'insensitive' } },
       ];
+    }
+
+    if (filters.gender) {
+      where.gender = filters.gender;
+    }
+
+    // Inclusive [from, to] range on createdAt. Strings come straight
+    // from the client (ISO 8601) — `new Date(str)` honours the timezone
+    // suffix if present, otherwise treats the string as local. We pass
+    // through invalid dates as `undefined` so a malformed query param
+    // doesn't crash the request — at worst it widens the result set.
+    const createdRange: Prisma.DateTimeFilter = {};
+    if (filters.createdFrom) {
+      const d = new Date(filters.createdFrom);
+      if (!Number.isNaN(d.getTime())) createdRange.gte = d;
+    }
+    if (filters.createdTo) {
+      const d = new Date(filters.createdTo);
+      if (!Number.isNaN(d.getTime())) {
+        // End-of-day so "to Sep 30" includes anything created that
+        // calendar date in UTC.
+        d.setUTCHours(23, 59, 59, 999);
+        createdRange.lte = d;
+      }
+    }
+    if (createdRange.gte || createdRange.lte) {
+      where.createdAt = createdRange;
     }
 
     return where;

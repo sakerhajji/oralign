@@ -44,6 +44,23 @@ export function usePatient(id: string): UseQueryResult<Patient, Error> {
   });
 }
 
+/**
+ * Hover-triggered prefetch for the patient detail. Same rationale as
+ * useOrderPrefetch — the moment the user hovers a row in the patients
+ * list, we kick off the detail GET so navigation feels instant.
+ */
+export function usePatientPrefetch(): (id: string) => void {
+  const queryClient = useQueryClient();
+  return (id: string) => {
+    if (!id) return;
+    queryClient.prefetchQuery({
+      queryKey: patientKeys.detail(id),
+      queryFn: () => patientsService.getPatientById(id),
+      staleTime: 1000 * 60 * 2,
+    });
+  };
+}
+
 export function useCreatePatient(): UseMutationResult<
   Patient,
   Error,

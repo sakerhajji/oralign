@@ -93,6 +93,31 @@ export function useOrders(
   });
 }
 
+/**
+ * Hover/focus-triggered prefetch for the order-detail page. Pulled
+ * from the list page so the moment the user moves the mouse over a
+ * row, React Query starts the GET /orders/:id request in the
+ * background — by the time the click navigates, the cache is warm
+ * and the detail page paints instantly.
+ *
+ * Returns a callback that the row can bind to `onMouseEnter` /
+ * `onFocus`. Re-binding is cheap (queryClient is stable) so a
+ * `useCallback` wrap isn't necessary in callers.
+ */
+export function useOrderPrefetch(): (id: string) => void {
+  const queryClient = useQueryClient();
+  return (id: string) => {
+    if (!id) return;
+    queryClient.prefetchQuery({
+      queryKey: orderKeys.detail(id),
+      queryFn: () => ordersService.getOrderById(id),
+      // Match the live query's staleness so the prefetched result is
+      // accepted as fresh by useOrder() when the detail page mounts.
+      staleTime: ORDER_DETAIL_STALE_TIME,
+    });
+  };
+}
+
 export function useOrder(id?: string): UseQueryResult<DentalOrder, Error> {
   return useQuery({
     queryKey: orderKeys.detail(id ?? ''),

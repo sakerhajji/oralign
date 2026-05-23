@@ -79,6 +79,29 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     return this.prisma.companyBillingSettings;
   }
 
+  // ─── Packs · Installments · Step batches · Payments ──────────────
+  // Added in 20260524 alongside the packs/payments migration.
+
+  get pack() {
+    return this.prisma.pack;
+  }
+
+  get packPrice() {
+    return this.prisma.packPrice;
+  }
+
+  get quoteInstallment() {
+    return this.prisma.quoteInstallment;
+  }
+
+  get quoteStepBatch() {
+    return this.prisma.quoteStepBatch;
+  }
+
+  get payment() {
+    return this.prisma.payment;
+  }
+
   // ─── Prisma utilities ─────────────────────────────────────────────────────
 
   /**

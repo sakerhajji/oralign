@@ -163,6 +163,69 @@ enum QuotationStatus {
 }
 
 // ─────────────────────────────────────────
+// PACKS / INSTALLMENTS / PAYMENTS
+// ─────────────────────────────────────────
+//
+// Commercial packs are sold as fixed offerings; a Quotation snapshots
+// the chosen pack + arch + price at creation time so later edits to
+// the pack catalogue never mutate already-issued quotes. Installments
+// are the payment schedule (money); step batches are the delivery
+// schedule (aligners). Paying an installment UNLOCKS the linked
+// batch — admin delivers manually. See:
+//   - PaymentsService.handleSuccess (the single SUCCESS transition)
+//   - InstallmentsService.configurePaymentPlan (sum + range checks)
+
+enum ArchType {
+  single_arch
+  two_arches
+}
+
+enum PaymentMode {
+  full_payment
+  installments
+}
+
+enum QuotationPaymentStatus {
+  pending
+  partially_paid
+  paid
+  failed
+  cancelled
+}
+
+enum InstallmentStatus {
+  pending
+  paid
+  overdue
+  cancelled
+}
+
+enum BatchStatus {
+  locked
+  unlocked
+  delivered
+}
+
+enum PaymentMethod {
+  card
+  bank_transfer
+  cash
+}
+
+// Lifecycle states for a Payment record. CARD goes pending → success
+// (gateway) or pending → failed. BANK_TRANSFER goes awaiting_confirmation
+// → success (admin confirm) or → rejected (admin reject). CASH goes
+// straight to success (admin records).
+enum PaymentRecordStatus {
+  pending
+  awaiting_confirmation
+  success
+  failed
+  rejected
+  cancelled
+}
+
+// ─────────────────────────────────────────
 // USER
 // ─────────────────────────────────────────
 
@@ -210,6 +273,13 @@ model User {
   createdQuotations    Quotation[]       @relation("QuotationCreatedBy")
   approvedQuotations   Quotation[]       @relation("QuotationApprovedBy")
   rejectedQuotations   Quotation[]       @relation("QuotationRejectedBy")
+
+  // Payment + delivery audit trails — populated by PaymentsService /
+  // BatchesService when an admin acts on a record.
+  confirmedPayments    Payment[]         @relation("PaymentConfirmedBy")
+  rejectedPayments     Payment[]         @relation("PaymentRejectedBy")
+  initiatedPayments    Payment[]         @relation("PaymentInitiatedBy")
+  deliveredBatches     QuoteStepBatch[]  @relation("BatchDeliveredBy")
 
   @@index([email])
   @@index([role])
@@ -319,6 +389,7 @@ model DentalOrder {
   // a fresh one can be created after cancel. The 1:1 is enforced by the
   // unique constraint on `Quotation.orderId`.
   quotation                     Quotation?
+  payments                      Payment[]
 
   @@index([doctorId])
   @@index([patientId])
@@ -725,14 +796,232 @@ model Quotation {
   updatedAt           DateTime         @updatedAt
   deletedAt           DateTime?
 
+  // ── Pack snapshot (added in 20260524 — packs/payments rollout) ───
+  // Stored at attach-pack time so a later pack/price edit can never
+  // mutate an already-issued quote. Legacy quotes leave these null
+  // and continue rendering against the Float totalTtc above.
+  packId                 String?
+  pack                   Pack?            @relation(fields: [packId], references: [id], onDelete: SetNull)
+  packName               String?
+  archType               ArchType?
+  maxStepsPerArch        Int?
+  includedCorrections    Int?
+  isUnlimitedSteps       Boolean          @default(false)
+  isUnlimitedCorrections Boolean          @default(false)
+  isForOrthodontists     Boolean          @default(false)
+
+  // ── Money (Decimal — new canonical) ─────────────────────────────
+  // Distinct from the legacy Float `totalTtc` so the PDF generator
+  // + existing UI keep working untouched. At pack-quote creation we
+  // copy `totalTtc` into `totalPrice` (rounded to 3dp). `paidAmount`
+  // is recalculated from successful Payments only — never trust the
+  // client.
+  totalPrice            Decimal?          @db.Decimal(12, 3)
+  paidAmount            Decimal           @default(0) @db.Decimal(12, 3)
+  remainingAmount       Decimal?          @db.Decimal(12, 3)
+
+  // ── Payment plan + status ───────────────────────────────────────
+  paymentMode           PaymentMode?
+  paymentStatus         QuotationPaymentStatus @default(pending)
+  doctorApprovedAt      DateTime?
+
   order               DentalOrder      @relation(fields: [orderId], references: [id], onDelete: Cascade)
   createdBy           User             @relation("QuotationCreatedBy",  fields: [createdById],  references: [id], onDelete: Cascade)
   approvedBy          User?            @relation("QuotationApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
   rejectedBy          User?            @relation("QuotationRejectedBy", fields: [rejectedById], references: [id], onDelete: SetNull)
+
+  installments         QuoteInstallment[]
+  stepBatches          QuoteStepBatch[]
+  payments             Payment[]
 
   @@index([orderId])
   @@index([status])
   @@index([language])
   @@index([deletedAt])
   @@index([createdAt])
+  @@index([packId])
+  @@index([paymentStatus])
+}
+
+// ─────────────────────────────────────────
+// PACK CATALOGUE
+// ─────────────────────────────────────────
+// Commercial offerings the admin manages. Quotations snapshot the
+// chosen pack so editing the catalogue never rewrites history. Active
+// flag + soft-delete (deletedAt) gate pack visibility for new quotes.
+
+model Pack {
+  id                       String      @id @default(uuid())
+  name                     String
+  description              String?
+
+  // null + the matching unlimited flag = pack covers unlimited steps /
+  // corrections. The two boolean flags are the source of truth — the
+  // numeric fields are NULL when unlimited.
+  maxStepsPerArch          Int?
+  includedCorrections      Int?
+  isUnlimitedSteps         Boolean     @default(false)
+  isUnlimitedCorrections   Boolean     @default(false)
+  isForOrthodontists       Boolean     @default(false)
+  isActive                 Boolean     @default(true)
+
+  deletedAt                DateTime?
+  createdAt                DateTime    @default(now())
+  updatedAt                DateTime    @updatedAt
+
+  prices                   PackPrice[]
+  quotations               Quotation[]
+
+  @@index([isActive, deletedAt])
+  @@index([name])
+}
+
+// One row per (pack, archType) combination. A pack can carry multiple
+// archived prices over time — `isActive=false` ones are kept for
+// snapshot integrity but excluded from new-quote selection. The
+// `@@unique([packId, archType, isActive])` constraint enforces "at
+// most one active price per (pack, arch)" at the database layer.
+model PackPrice {
+  id        String   @id @default(uuid())
+  packId    String
+  pack      Pack     @relation(fields: [packId], references: [id], onDelete: Cascade)
+  archType  ArchType
+  price     Decimal  @db.Decimal(12, 3)
+  currency  String   @default("TND")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([packId, archType, isActive])
+  @@index([packId])
+}
+
+// ─────────────────────────────────────────
+// INSTALLMENTS + STEP BATCHES
+// ─────────────────────────────────────────
+// One installment per scheduled payment. `availableFrom` gates when
+// the doctor can start a payment; `dueDate` is informational (overdue
+// derivation lives in the service). Each installment is linked 1:1
+// to a step batch — the batch holds the from/to-step range that
+// unlocks when the installment is paid.
+
+model QuoteInstallment {
+  id                String                @id @default(uuid())
+  quotationId       String
+  quotation         Quotation             @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+
+  installmentNumber Int
+  amount            Decimal               @db.Decimal(12, 3)
+  availableFrom     DateTime
+  dueDate           DateTime?
+  status            InstallmentStatus     @default(pending)
+  paidAt            DateTime?
+
+  stepBatch         QuoteStepBatch?
+  payments          Payment[]
+
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  @@unique([quotationId, installmentNumber])
+  @@index([status])
+}
+
+// The "delivery schedule" half of the system. Steps cover a contiguous
+// range `[fromStep, toStep]` of the aligner protocol. Multiple batches
+// on a quote MUST cover disjoint ranges — enforced in the service.
+// Status transitions: locked → unlocked (auto, on installment paid) →
+// delivered (manual, admin only). Locked batches CAN NEVER be
+// delivered — that invariant is enforced inside the deliver service.
+model QuoteStepBatch {
+  id             String           @id @default(uuid())
+  quotationId    String
+  quotation      Quotation        @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+
+  installmentId  String           @unique
+  installment    QuoteInstallment @relation(fields: [installmentId], references: [id], onDelete: Cascade)
+
+  batchNumber    Int
+  fromStep       Int
+  toStep         Int
+  status         BatchStatus      @default(locked)
+
+  unlockedAt     DateTime?
+  deliveredAt    DateTime?
+  deliveredById  String?
+  deliveredBy    User?            @relation("BatchDeliveredBy", fields: [deliveredById], references: [id], onDelete: SetNull)
+
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@unique([quotationId, batchNumber])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────
+// PAYMENTS
+// ─────────────────────────────────────────
+// One row per payment attempt regardless of method. The service's
+// `handleSuccess()` is the SINGLE transition path that flips a
+// payment to `success`, marks its installment paid, and unlocks the
+// linked batch — all inside one transaction with FOR UPDATE on the
+// installment row. CARD goes pending→success via the gateway,
+// BANK_TRANSFER goes awaiting_confirmation→success via admin
+// confirm, CASH is admin-recorded straight to success.
+
+model Payment {
+  id              String              @id @default(uuid())
+
+  orderId         String
+  order           DentalOrder         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  quotationId     String
+  quotation       Quotation           @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  installmentId   String
+  installment     QuoteInstallment    @relation(fields: [installmentId], references: [id], onDelete: Cascade)
+
+  // Amount is COPIED from the installment at payment-creation time
+  // and never trusted from the client. Stored here so the audit row
+  // is self-contained even if the installment is later edited (only
+  // possible before approval).
+  amount          Decimal             @db.Decimal(12, 3)
+
+  status          PaymentRecordStatus
+  paymentMethod   PaymentMethod
+
+  // CARD: gateway tx id. BANK_TRANSFER: bank reference (optional).
+  // CASH: receipt number (optional). Stored as text so we don't
+  // commit to a particular gateway's id format.
+  transactionId   String?
+
+  // Idempotency key for CARD callbacks. Unique so the second delivery
+  // of the same webhook hits a constraint violation (caught at the
+  // service layer and translated to an idempotent 200 OK).
+  idempotencyKey  String?             @unique
+
+  // BANK_TRANSFER: relative path under /uploads/payments/<id>/proof.<ext>.
+  proofUrl        String?
+  // Admin notes when confirming / rejecting manual payments.
+  notes           String?
+
+  declaredAt      DateTime?  // BANK_TRANSFER doctor declaration time
+  paidAt          DateTime?  // when money is considered received
+  confirmedAt     DateTime?  // admin confirmation timestamp
+  confirmedById   String?
+  confirmedBy     User?               @relation("PaymentConfirmedBy", fields: [confirmedById], references: [id], onDelete: SetNull)
+  rejectedAt      DateTime?
+  rejectedById    String?
+  rejectedBy      User?               @relation("PaymentRejectedBy", fields: [rejectedById], references: [id], onDelete: SetNull)
+  rejectionReason String?
+
+  initiatedById   String?
+  initiatedBy     User?               @relation("PaymentInitiatedBy", fields: [initiatedById], references: [id], onDelete: SetNull)
+
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  @@index([orderId])
+  @@index([quotationId])
+  @@index([installmentId])
+  @@index([status])
+  @@index([paymentMethod])
 }

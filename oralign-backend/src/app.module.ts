@@ -17,6 +17,7 @@ import { MailModule } from './mail/mail.module';
 import { PatientModule } from './patients/patient.module';
 import { OrderModule } from './orders/order.module';
 import { TreatmentPlanModule } from './treatment-plans/treatment-plan.module';
+import { PackModule } from './packs/pack.module';
 import { QuotationModule } from './quotations/quotation.module';
 
 // ─── Redis URL builder ──────────────────────────────────────────────────────
@@ -86,6 +87,7 @@ function buildRedisUrl(): string {
     OrderModule,
     TreatmentPlanModule,
     QuotationModule,
+    PackModule,
     StorageModule,
   ],
   controllers: [AppController],

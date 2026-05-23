@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -12,6 +12,7 @@ import {
   ArrowUpDown,
   CalendarClock,
   CheckCircle2,
+  CheckSquare2,
   ChevronLeft,
   ChevronRight,
   ClipboardList,
@@ -20,6 +21,7 @@ import {
   FileText,
   Filter,
   Hourglass,
+  Loader2,
   MoreHorizontal,
   Plus,
   RefreshCcw,
@@ -29,6 +31,7 @@ import {
   Stethoscope,
   Trash2,
   UserRound,
+  Wrench,
   X,
 } from 'lucide-react';
 import { useDebouncedCallback } from 'use-debounce';
@@ -45,6 +48,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -80,9 +84,12 @@ import {
 import { usersService } from '@/lib/api';
 import { useAuth } from '@/lib/providers/auth-provider';
 import {
+  useBulkDeleteOrders,
+  useBulkUpdateOrderStatus,
   useDeleteOrder,
   useOrderPrefetch,
   useOrders,
+  useOverrideOrderStatus,
   usePermanentDeleteOrder,
 } from '@/lib/hooks';
 import {
@@ -144,6 +151,9 @@ export default function OrdersPage() {
   const { isAdmin, isDentist, user } = useAuth();
   const deleteOrder = useDeleteOrder();
   const permanentDeleteOrder = usePermanentDeleteOrder();
+  const overrideStatus = useOverrideOrderStatus();
+  const bulkUpdateStatus = useBulkUpdateOrderStatus();
+  const bulkDelete = useBulkDeleteOrders();
   const prefetchOrder = useOrderPrefetch();
 
   // ── Query state (all in URL-derivable shape so a future "share this
@@ -151,12 +161,23 @@ export default function OrdersPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<PageSize>(10);
   const [search, setSearch] = useState('');
+  // Key bump so we can clear the uncontrolled search Input from outside
+  // (chip dismiss / Clear all). Without this, the displayed text stays
+  // stale even though `search` state is empty.
+  const [searchInputKey, setSearchInputKey] = useState(0);
   const [statusTab, setStatusTab] = useState<OrderStatus | 'all'>('all');
   const [doctorFilter, setDoctorFilter] = useState<string>('all');
   const [createdFrom, setCreatedFrom] = useState<string>('');
   const [createdTo, setCreatedTo] = useState<string>('');
   const [sortKey, setSortKey] = useState<string>('created-desc');
   const [showFilters, setShowFilters] = useState(false);
+
+  // ── Multi-select state ────────────────────────────────────────────
+  // Keeps the chosen IDs in a Set for O(1) hit-tests during render.
+  // Reset implicitly when the page changes (selections are scoped to
+  // the currently-visible page — the bulk action bar makes that
+  // intent explicit with "N orders selected").
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
 
   // Dentist filter list — admins can filter orders by owning doctor.
   // Capped at 200 to avoid an unbounded fetch on large clinics.
@@ -219,14 +240,97 @@ export default function OrdersPage() {
     (createdFrom ? 1 : 0) +
     (createdTo ? 1 : 0);
 
-  const clearAllFilters = () => {
-    setStatusTab('all');
+  // ── Selection derivations ────────────────────────────────────────
+  // The "select all on this page" checkbox tristates between unchecked,
+  // checked, and indeterminate based on what's already picked. The
+  // currentPageSelected count drives the bulk action bar copy.
+  const currentPageSelected = useMemo(
+    () => orders.filter((order) => selectedIds.has(order.id)).length,
+    [orders, selectedIds],
+  );
+  const allOnPageSelected =
+    orders.length > 0 && currentPageSelected === orders.length;
+  const someOnPageSelected =
+    currentPageSelected > 0 && currentPageSelected < orders.length;
+
+  // ── Memoised handlers ────────────────────────────────────────────
+  // Pulled out so the rendered row components don't re-create their
+  // callbacks on every keystroke in the search box — keeps the table
+  // re-render scoped to the row that actually changed selection.
+
+  const toggleRow = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleAllOnPage = useCallback(() => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const pageIds = orders.map((order) => order.id);
+      const allSelected = pageIds.every((id) => next.has(id));
+      if (allSelected) {
+        for (const id of pageIds) next.delete(id);
+      } else {
+        for (const id of pageIds) next.add(id);
+      }
+      return next;
+    });
+  }, [orders]);
+
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set());
+  }, []);
+
+  const clearSearch = useCallback(() => {
     setSearch('');
+    setSearchInputKey((current) => current + 1);
+    setPage(1);
+  }, []);
+
+  const clearAllFilters = useCallback(() => {
+    setStatusTab('all');
+    clearSearch();
     setDoctorFilter('all');
     setCreatedFrom('');
     setCreatedTo('');
-    setPage(1);
-  };
+  }, [clearSearch]);
+
+  // ── Bulk action handlers ─────────────────────────────────────────
+  // Each one runs ONE network call (the backend wraps the batch in a
+  // transaction). On success the selection is cleared so the next
+  // action starts from a clean slate.
+
+  const runBulkStatus = useCallback(
+    (status: OrderStatus) => {
+      if (selectedIds.size === 0) return;
+      bulkUpdateStatus.mutate(
+        { ids: Array.from(selectedIds), status },
+        { onSuccess: () => clearSelection() },
+      );
+    },
+    [bulkUpdateStatus, clearSelection, selectedIds],
+  );
+
+  const runBulkDelete = useCallback(() => {
+    if (selectedIds.size === 0) return;
+    bulkDelete.mutate(Array.from(selectedIds), {
+      onSuccess: () => clearSelection(),
+    });
+  }, [bulkDelete, clearSelection, selectedIds]);
+
+  const runSingleStatus = useCallback(
+    (id: string, status: OrderStatus) => {
+      overrideStatus.mutate({ id, status });
+    },
+    [overrideStatus],
+  );
+
+  const bulkPending =
+    bulkUpdateStatus.isPending || bulkDelete.isPending;
 
   return (
     <div className="@container/main flex flex-1 flex-col gap-5 p-4 lg:p-6">
@@ -296,6 +400,7 @@ export default function OrdersPage() {
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
+              key={searchInputKey}
               className="h-10 pl-10"
               placeholder="Search order code, patient, or dentist…"
               defaultValue={search}
@@ -432,12 +537,7 @@ export default function OrdersPage() {
           {search && (
             <FilterChip
               label={`Search: "${search}"`}
-              onRemove={() => {
-                setSearch('');
-                // The Input is uncontrolled (defaultValue) so we use a key bump
-                // trick: clearing search alone refetches and the placeholder
-                // returns next render — good enough for the chip dismiss.
-              }}
+              onRemove={clearSearch}
             />
           )}
           {isAdmin && doctorFilter !== 'all' && (
@@ -462,6 +562,20 @@ export default function OrdersPage() {
             />
           )}
         </div>
+      )}
+
+      {/* ─── Bulk action bar (admin-only) ─────────────────────────────
+          Appears whenever the admin has selected at least one row.
+          Sticky at the top of the results region so it remains in
+          view while the planner scrolls a long table. */}
+      {isAdmin && selectedIds.size > 0 && (
+        <BulkActionBar
+          count={selectedIds.size}
+          pending={bulkPending}
+          onCancel={clearSelection}
+          onSetStatus={runBulkStatus}
+          onDelete={runBulkDelete}
+        />
       )}
 
       {/* ─── Results ───────────────────────────────────────────────── */}
@@ -514,6 +628,15 @@ export default function OrdersPage() {
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/40">
+                  {isAdmin && (
+                    <TableHead className="w-10">
+                      <SelectAllCheckbox
+                        checked={allOnPageSelected}
+                        indeterminate={someOnPageSelected}
+                        onChange={toggleAllOnPage}
+                      />
+                    </TableHead>
+                  )}
                   <TableHead className="w-[200px]">Order</TableHead>
                   <TableHead>Patient</TableHead>
                   {isAdmin && <TableHead>Dentist</TableHead>}
@@ -551,8 +674,26 @@ export default function OrdersPage() {
                         router.push(`/dashboard/orders/${order.id}`);
                       }
                     }}
-                    className="cursor-pointer transition hover:bg-muted/30 focus:bg-muted/50 focus:outline-none"
+                    data-state={
+                      selectedIds.has(order.id) ? 'selected' : undefined
+                    }
+                    className={cn(
+                      'cursor-pointer transition hover:bg-muted/30 focus:bg-muted/50 focus:outline-none',
+                      selectedIds.has(order.id) && 'bg-primary/5',
+                    )}
                   >
+                    {isAdmin && (
+                      <TableCell
+                        className="w-10"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <Checkbox
+                          checked={selectedIds.has(order.id)}
+                          onCheckedChange={() => toggleRow(order.id)}
+                          aria-label={`Select ${order.orderCode}`}
+                        />
+                      </TableCell>
+                    )}
                     <TableCell>
                       <div className="flex items-center gap-3">
                         <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary/10 text-primary">
@@ -613,12 +754,14 @@ export default function OrdersPage() {
                         order={order}
                         canManage={canManage}
                         canPermanentDelete={isAdmin}
+                        isAdmin={isAdmin}
                         isDeleting={deleteOrder.isPending}
                         isPermanentDeleting={permanentDeleteOrder.isPending}
                         onDelete={() => deleteOrder.mutate(order.id)}
                         onPermanentDelete={() =>
                           permanentDeleteOrder.mutate(order.id)
                         }
+                        onChangeStatus={runSingleStatus}
                       />
                     </TableCell>
                   </TableRow>
@@ -643,6 +786,7 @@ export default function OrdersPage() {
                 onPrefetch={() => prefetchOrder(order.id)}
                 onDelete={() => deleteOrder.mutate(order.id)}
                 onPermanentDelete={() => permanentDeleteOrder.mutate(order.id)}
+                onChangeStatus={runSingleStatus}
               />
             ))}
           </div>
@@ -757,21 +901,27 @@ function OrderRowActions({
   order,
   canManage,
   canPermanentDelete,
+  isAdmin,
   isDeleting,
   isPermanentDeleting,
   onDelete,
   onPermanentDelete,
+  onChangeStatus,
 }: {
   order: DentalOrder;
   canManage: boolean;
   canPermanentDelete: boolean;
+  /** Admin-only flag drives the visibility of the inline status menu. */
+  isAdmin: boolean;
   isDeleting: boolean;
   isPermanentDeleting: boolean;
   onDelete: () => void;
   onPermanentDelete: () => void;
+  onChangeStatus?: (id: string, status: OrderStatus) => void;
 }) {
   const [softOpen, setSoftOpen] = useState(false);
   const [hardOpen, setHardOpen] = useState(false);
+  const [statusPickerOpen, setStatusPickerOpen] = useState(false);
   return (
     <>
       <DropdownMenu>
@@ -787,7 +937,7 @@ function OrderRowActions({
             <MoreHorizontal className="h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuContent align="end" className="w-52">
           <DropdownMenuLabel className="text-xs uppercase tracking-wide text-muted-foreground">
             {order.orderCode}
           </DropdownMenuLabel>
@@ -808,6 +958,21 @@ function OrderRowActions({
                 Edit order
               </Link>
             </DropdownMenuItem>
+          )}
+          {isAdmin && onChangeStatus && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={(event) => {
+                  event.preventDefault();
+                  setStatusPickerOpen(true);
+                }}
+                className="gap-2"
+              >
+                <Wrench className="h-4 w-4" />
+                Change status…
+              </DropdownMenuItem>
+            </>
           )}
           {(canManage || canPermanentDelete) && <DropdownMenuSeparator />}
           {canManage && (
@@ -838,6 +1003,21 @@ function OrderRowActions({
           )}
         </DropdownMenuContent>
       </DropdownMenu>
+
+      {/* Single-order status picker dialog — admins only.
+          Uses the existing `PUT /orders/:id/status` route under the
+          hood (no submitted-at gymnastics needed; the service handles
+          the back-and-forth fix-up). */}
+      <StatusPickerDialog
+        open={statusPickerOpen}
+        onOpenChange={setStatusPickerOpen}
+        title={`Change status of ${order.orderCode}`}
+        currentStatus={order.status}
+        onConfirm={(status) => {
+          if (onChangeStatus) onChangeStatus(order.id, status);
+          setStatusPickerOpen(false);
+        }}
+      />
 
       <ConfirmDeleteDialog
         open={softOpen}
@@ -927,6 +1107,7 @@ function OrderMobileCard({
   onPrefetch,
   onDelete,
   onPermanentDelete,
+  onChangeStatus,
 }: {
   order: DentalOrder;
   isAdmin: boolean;
@@ -937,6 +1118,7 @@ function OrderMobileCard({
   onPrefetch: () => void;
   onDelete: () => void;
   onPermanentDelete: () => void;
+  onChangeStatus?: (id: string, status: OrderStatus) => void;
 }) {
   const router = useRouter();
   return (
@@ -966,10 +1148,12 @@ function OrderMobileCard({
             order={order}
             canManage={canManage}
             canPermanentDelete={canPermanentDelete}
+            isAdmin={isAdmin}
             isDeleting={isDeleting}
             isPermanentDeleting={isPermanentDeleting}
             onDelete={onDelete}
             onPermanentDelete={onPermanentDelete}
+            onChangeStatus={onChangeStatus}
           />
         </div>
         <div className="flex flex-wrap gap-1.5">
@@ -1008,6 +1192,223 @@ function MobileMeta({ label, value }: { label: string; value: string }) {
  * Treatment-plan notification badge shown alongside the order status.
  * Role-aware wording so the chip is actionable rather than descriptive.
  */
+// ── Bulk action bar (admin-only) ─────────────────────────────────────
+//
+// Floating action region that appears above the table when at least
+// one row is selected. Keeps the high-impact admin operations one
+// click away without bloating the per-row dropdown menu. The actions
+// hit the bulk endpoints once per click — server-side transactions
+// keep the whole batch atomic.
+
+function BulkActionBar({
+  count,
+  pending,
+  onCancel,
+  onSetStatus,
+  onDelete,
+}: {
+  count: number;
+  pending: boolean;
+  onCancel: () => void;
+  onSetStatus: (status: OrderStatus) => void;
+  onDelete: () => void;
+}) {
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [statusPickerOpen, setStatusPickerOpen] = useState(false);
+  return (
+    <>
+      <Card className="border-primary/40 bg-primary/5 shadow-sm">
+        <CardContent className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4">
+          <div className="flex items-center gap-3">
+            <span className="grid h-9 w-9 place-items-center rounded-full bg-primary/15 text-primary">
+              <CheckSquare2 className="h-4 w-4" />
+            </span>
+            <div>
+              <p className="text-sm font-semibold">
+                {count} order{count === 1 ? '' : 's'} selected
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Bulk actions are admin-only — every row in the batch is updated
+                inside a single transaction.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Quick "Mark as Finished" — the most common bulk move
+                at the end of the lifecycle. Other statuses are
+                reachable through the picker dialog. */}
+            <Button
+              size="sm"
+              variant="default"
+              disabled={pending}
+              className="gap-2"
+              onClick={() => onSetStatus(OrderStatus.FINISHED)}
+            >
+              {pending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <CheckCircle2 className="h-4 w-4" />
+              )}
+              Mark as Finished
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={pending}
+              className="gap-2"
+              onClick={() => setStatusPickerOpen(true)}
+            >
+              <Wrench className="h-4 w-4" />
+              Change status…
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={pending}
+              className="gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onClick={() => setConfirmDeleteOpen(true)}
+            >
+              <Trash2 className="h-4 w-4" />
+              Delete selected
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={pending}
+              onClick={onCancel}
+            >
+              Cancel
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <StatusPickerDialog
+        open={statusPickerOpen}
+        onOpenChange={setStatusPickerOpen}
+        title={`Change status of ${count} order${count === 1 ? '' : 's'}`}
+        onConfirm={(status) => {
+          setStatusPickerOpen(false);
+          onSetStatus(status);
+        }}
+      />
+
+      <ConfirmDeleteDialog
+        open={confirmDeleteOpen}
+        onOpenChange={setConfirmDeleteOpen}
+        title={`Delete ${count} order${count === 1 ? '' : 's'}?`}
+        description={`This soft-deletes ${count} order${
+          count === 1 ? '' : 's'
+        }. The records stay in the database but disappear from active order lists. Hard-delete remains per-order from the row menu.`}
+        confirmLabel={`Delete ${count} order${count === 1 ? '' : 's'}`}
+        disabled={pending}
+        onConfirm={() => {
+          setConfirmDeleteOpen(false);
+          onDelete();
+        }}
+      />
+    </>
+  );
+}
+
+// ── Select-all-on-page checkbox ─────────────────────────────────────
+// Wraps Radix Checkbox to expose a tri-state "indeterminate" indicator
+// the way classic mail-app inboxes do — half-filled when some rows on
+// the page are selected, fully filled when all are.
+
+function SelectAllCheckbox({
+  checked,
+  indeterminate,
+  onChange,
+}: {
+  checked: boolean;
+  indeterminate: boolean;
+  onChange: () => void;
+}) {
+  return (
+    <Checkbox
+      checked={checked || (indeterminate ? 'indeterminate' : false)}
+      onCheckedChange={onChange}
+      aria-label={checked ? 'Deselect all on page' : 'Select all on page'}
+    />
+  );
+}
+
+// ── Status picker dialog (single + bulk reuse) ──────────────────────
+// A small modal that lets the admin pick any OrderStatus value. Used
+// by the single-row "Change status…" action AND the bulk action bar
+// so the picker UI is centralised — change the option list once,
+// both call sites pick up the change.
+
+function StatusPickerDialog({
+  open,
+  onOpenChange,
+  title,
+  currentStatus,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: string;
+  /** When set, used to highlight the current value in the dropdown. */
+  currentStatus?: OrderStatus;
+  onConfirm: (status: OrderStatus) => void;
+}) {
+  const [picked, setPicked] = useState<OrderStatus | undefined>(currentStatus);
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle className="flex items-center gap-2">
+            <span className="grid h-9 w-9 place-items-center rounded-full bg-primary/10 text-primary">
+              <Wrench className="h-4 w-4" />
+            </span>
+            {title}
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            Admins can move orders to any lifecycle status. Choose the target
+            phase below — related side-tables (treatment plan, quotation) are
+            NOT modified.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <div className="space-y-2 py-2">
+          <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Target status
+          </Label>
+          <Select
+            value={picked}
+            onValueChange={(value) => setPicked(value as OrderStatus)}
+          >
+            <SelectTrigger className="h-10">
+              <SelectValue placeholder="Select status" />
+            </SelectTrigger>
+            <SelectContent>
+              {Object.values(OrderStatus)
+                .filter((value) => !LEGACY_STATUSES.has(value))
+                .map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {orderStatusLabel[value] ?? value}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={!picked || picked === currentStatus}
+            onClick={() => {
+              if (picked) onConfirm(picked);
+            }}
+          >
+            Apply status
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 function PlanBadge({
   order,
   isDoctor,

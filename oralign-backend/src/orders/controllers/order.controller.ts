@@ -37,6 +37,8 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import {
+  BulkDeleteOrdersDto,
+  BulkUpdateOrderStatusDto,
   CreateOrderDto,
   OrderFilterDto,
   OrderResponseDto,
@@ -205,6 +207,49 @@ export class OrderController {
     @CurrentUser() user: JwtPayload,
   ): Promise<OrderResponseDto> {
     return this.orderService.overrideStatus(id, dto.status, dto.reason, {
+      userId: user.sub,
+      role: user.role,
+    });
+  }
+
+  // ── Bulk admin actions ─────────────────────────────────────────────
+  // Both routes are POST (not PATCH or DELETE-with-body) because the
+  // payload contains the target ID list — a DELETE with a body has
+  // hostile coverage across proxies, and a GET with a long query
+  // string hits URL-length limits at the 200-id cap.
+
+  @Post('bulk-status')
+  @Roles(UserRole.admin, UserRole.super_admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Bulk admin-only status update for N orders. ' +
+      'Wrapped in a transaction so the whole batch succeeds or rolls back.',
+  })
+  async bulkUpdateStatus(
+    @Body() dto: BulkUpdateOrderStatusDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.orderService.bulkUpdateStatus(
+      dto.ids,
+      dto.status,
+      dto.reason,
+      { userId: user.sub, role: user.role },
+    );
+  }
+
+  @Post('bulk-delete')
+  @Roles(UserRole.admin, UserRole.super_admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Bulk soft-delete for N orders. Hard-delete is intentionally not exposed in bulk.',
+  })
+  async bulkDelete(
+    @Body() dto: BulkDeleteOrdersDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.orderService.bulkDelete(dto.ids, {
       userId: user.sub,
       role: user.role,
     });

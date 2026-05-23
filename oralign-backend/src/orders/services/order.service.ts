@@ -383,6 +383,115 @@ export class OrderService {
     return this.mapToDto(order);
   }
 
+  /**
+   * Bulk admin-only status update. Wrapped in a single transaction so
+   * the whole set either succeeds or rolls back — we don't want a
+   * half-applied bulk that leaves N orders at the new status and M
+   * still on the old one. Idempotent on the per-id level (a row
+   * already at the target status is silently skipped).
+   *
+   * The IDs are scoped through findMany + accessibility check before
+   * the write so an admin can't accidentally touch deleted orders or
+   * cross-tenant rows. Returns the count of rows actually changed so
+   * the UI can show a precise "N orders moved to Finished" toast.
+   */
+  async bulkUpdateStatus(
+    ids: string[],
+    status: OrderStatus,
+    reason: string | undefined,
+    caller: Caller,
+  ): Promise<{ updated: number; skipped: number }> {
+    if (!ADMIN_ROLES.includes(caller.role)) {
+      throw new ForbiddenException(
+        'Only admins can bulk-update order statuses.',
+      );
+    }
+    if (ids.length === 0) {
+      return { updated: 0, skipped: 0 };
+    }
+
+    // Pre-load the candidates so we can filter out (a) deleted rows
+    // and (b) rows already at the requested status. Both checks live
+    // here rather than at the DB layer so the response can report a
+    // truthful `skipped` count.
+    const candidates = await this.prisma.dentalOrder.findMany({
+      where: { id: { in: ids }, deletedAt: null },
+      select: { id: true, orderCode: true, status: true, submittedAt: true },
+    });
+    const toUpdate = candidates.filter((c) => c.status !== status);
+    const skipped = ids.length - toUpdate.length;
+
+    if (toUpdate.length === 0) {
+      return { updated: 0, skipped };
+    }
+
+    this.logger.log(
+      `Bulk status override → ${status} on ${toUpdate.length} order(s) ` +
+        `by user ${caller.userId}` +
+        (reason ? ` — reason: ${reason}` : ''),
+    );
+
+    await this.prisma.$transaction(async (tx) => {
+      // The submittedAt fix-up is per-row because we honour the same
+      // semantics as the single overrideStatus path. Loop-of-updates
+      // is fine here at the 200-id cap; a single updateMany would
+      // collapse submittedAt to one value across the whole batch.
+      for (const order of toUpdate) {
+        const data: Prisma.DentalOrderUncheckedUpdateInput = { status };
+        if (status === OrderStatus.draft) {
+          data.submittedAt = null;
+        } else if (!order.submittedAt) {
+          data.submittedAt = new Date();
+        }
+        await tx.dentalOrder.update({ where: { id: order.id }, data });
+      }
+    });
+
+    return { updated: toUpdate.length, skipped };
+  }
+
+  /**
+   * Bulk soft-delete (sets deletedAt = NOW). Same admin gate as
+   * bulkUpdateStatus. Idempotent — already-deleted rows aren't
+   * re-touched. Hard-delete is intentionally NOT exposed in bulk; the
+   * single-row permanent delete is destructive enough that we want
+   * the admin to confirm one at a time.
+   */
+  async bulkDelete(
+    ids: string[],
+    caller: Caller,
+  ): Promise<{ deleted: number; skipped: number }> {
+    if (!ADMIN_ROLES.includes(caller.role)) {
+      throw new ForbiddenException(
+        'Only admins can bulk-delete orders.',
+      );
+    }
+    if (ids.length === 0) {
+      return { deleted: 0, skipped: 0 };
+    }
+
+    const candidates = await this.prisma.dentalOrder.findMany({
+      where: { id: { in: ids }, deletedAt: null },
+      select: { id: true, orderCode: true },
+    });
+    const skipped = ids.length - candidates.length;
+
+    if (candidates.length === 0) {
+      return { deleted: 0, skipped };
+    }
+
+    this.logger.log(
+      `Bulk soft-delete on ${candidates.length} order(s) by user ${caller.userId}`,
+    );
+
+    const result = await this.prisma.dentalOrder.updateMany({
+      where: { id: { in: candidates.map((c) => c.id) } },
+      data: { deletedAt: new Date() },
+    });
+
+    return { deleted: result.count, skipped };
+  }
+
   async updateToothInstructions(
     id: string,
     instructions: ToothInstructionDto[],

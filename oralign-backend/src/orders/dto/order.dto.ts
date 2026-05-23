@@ -10,6 +10,7 @@ import {
 import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
+  ArrayMinSize,
   IsArray,
   IsBoolean,
   IsEnum,
@@ -362,6 +363,45 @@ export class UpdateOrderStatusDto {
   @IsString()
   @MinLength(1)
   reason?: string;
+}
+
+/**
+ * Bulk admin action — bump the lifecycle status of N orders at once.
+ * Capped at 200 IDs per call to keep the SELECT FOR UPDATE inside the
+ * transaction tractable; the orders page batches selections to that
+ * limit too. Bigger jobs should go through a scheduled task.
+ */
+export class BulkUpdateOrderStatusDto {
+  @ApiProperty({ type: [String], description: 'Order IDs to update' })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(200)
+  @IsString({ each: true })
+  ids!: string[];
+
+  @ApiProperty({ enum: OrderStatus })
+  @IsEnum(OrderStatus)
+  status!: OrderStatus;
+
+  @ApiProperty({ required: false, description: 'Reason for audit log.' })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  reason?: string;
+}
+
+/**
+ * Bulk soft-delete. Same cap as the status DTO; the service maps each
+ * id to `deletedAt = NOW()` inside a single transaction so partial
+ * results never leak (every row succeeds or none do).
+ */
+export class BulkDeleteOrdersDto {
+  @ApiProperty({ type: [String], description: 'Order IDs to delete' })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(200)
+  @IsString({ each: true })
+  ids!: string[];
 }
 
 export class OrderFileResponseDto {

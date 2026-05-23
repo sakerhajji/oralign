@@ -76,6 +76,37 @@ export const ordersService = {
     return response.data;
   },
 
+  /**
+   * Bulk admin-only status update. The backend returns
+   * `{ updated, skipped }` so the UI can show a precise toast
+   * (e.g. "12 orders moved to Finished, 3 already there").
+   */
+  bulkUpdateStatus: async (
+    ids: string[],
+    status: OrderStatus,
+    reason?: string,
+  ): Promise<{ updated: number; skipped: number }> => {
+    const response = await apiClient.post<{ updated: number; skipped: number }>(
+      `/orders/bulk-status`,
+      { ids, status, reason: reason?.trim() || undefined },
+    );
+    return response.data;
+  },
+
+  /**
+   * Bulk soft-delete. Backend returns the count of rows it actually
+   * marked deleted plus how many were already deleted (skipped).
+   */
+  bulkDelete: async (
+    ids: string[],
+  ): Promise<{ deleted: number; skipped: number }> => {
+    const response = await apiClient.post<{ deleted: number; skipped: number }>(
+      `/orders/bulk-delete`,
+      { ids },
+    );
+    return response.data;
+  },
+
   updateToothInstructions: async (
     id: string,
     instructions: ToothInstruction[],

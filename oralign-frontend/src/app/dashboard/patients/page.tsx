@@ -1,14 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useCallback, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
 import { useDebouncedCallback } from 'use-debounce';
 import { format } from 'date-fns';
 import {
-  AlertTriangle,
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
@@ -29,27 +25,9 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -77,7 +55,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { ClinicalConditionsField } from '@/components/patients/clinical-conditions-field';
+import { PatientDetailSheet } from '@/components/patients/patient-detail-sheet';
 import { useAuth } from '@/lib/providers/auth-provider';
 import {
   useCreatePatient,
@@ -87,14 +65,12 @@ import {
   useUpdatePatient,
 } from '@/lib/hooks';
 import { usersService } from '@/lib/api';
-import { createPatientSchema, CreatePatientFormData } from '@/lib/schemas';
 import {
-  CLINICAL_CONDITION_OTHER,
   Gender,
-  Patient,
-  PatientFilterParams,
-  PatientSortField,
-  SortOrder,
+  type Patient,
+  type PatientFilterParams,
+  type PatientSortField,
+  type SortOrder,
   UserRole,
 } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -115,34 +91,21 @@ const SORT_OPTIONS: Array<{
   { key: 'updated-desc', label: 'Recently updated', field: 'updatedAt', order: 'desc' },
 ];
 
-function normalizePatientForm(data: CreatePatientFormData) {
-  const conditions = (data.clinicalConditions ?? []).filter(Boolean);
-  const otherDetail = conditions.includes(CLINICAL_CONDITION_OTHER)
-    ? data.clinicalConditionsOther?.trim() || undefined
-    : undefined;
-  return {
-    fullName: data.fullName.trim(),
-    email: data.email?.trim() || undefined,
-    phone: data.phone?.trim() || undefined,
-    gender: data.gender,
-    dateOfBirth: data.dateOfBirth || undefined,
-    address: data.address?.trim() || undefined,
-    notes: data.notes?.trim() || undefined,
-    clinicalConditions: conditions.length > 0 ? conditions : undefined,
-    clinicalConditionsOther: otherDetail,
-    doctorId: data.doctorId || undefined,
-  };
-}
-
 export default function PatientsPage() {
   const { isAdmin, isDentist, user } = useAuth();
   const prefetchPatient = usePatientPrefetch();
 
-  // Query state — keep all knobs at the page level so the URL-bound
-  // version (future) can replace each one with a search param hook.
+  // ── Query state ─────────────────────────────────────────────────
+  // All knobs at the page level so a future "share this view" URL
+  // hook can replace each one with a `useSearchParams` binding.
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<PageSize>(10);
   const [search, setSearch] = useState('');
+  // `searchInputKey` is bumped when we wipe the search from outside
+  // the Input (chip dismiss, "Clear filters" button) so the uncontrolled
+  // Input re-mounts with the new defaultValue. Without it, the displayed
+  // text would stay stale even though `search` state is empty.
+  const [searchInputKey, setSearchInputKey] = useState(0);
   const [doctorFilter, setDoctorFilter] = useState<string>('all');
   const [genderFilter, setGenderFilter] = useState<string>('all');
   const [createdFrom, setCreatedFrom] = useState('');
@@ -150,9 +113,9 @@ export default function PatientsPage() {
   const [sortKey, setSortKey] = useState<string>('created-desc');
   const [showFilters, setShowFilters] = useState(false);
 
-  const [formOpen, setFormOpen] = useState(false);
+  // Sheet state.
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [editingPatient, setEditingPatient] = useState<Patient | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<Patient | null>(null);
 
   const debouncedSearch = useDebouncedCallback((value: string) => {
     setSearch(value.trim());
@@ -213,23 +176,53 @@ export default function PatientsPage() {
     (createdFrom ? 1 : 0) +
     (createdTo ? 1 : 0);
 
-  const clearAllFilters = () => {
+  // ── Handlers (memoised so child rows don't re-render on every keystroke) ─
+  const clearSearch = useCallback(() => {
     setSearch('');
+    setSearchInputKey((current) => current + 1);
+    setPage(1);
+  }, []);
+
+  const clearAllFilters = useCallback(() => {
+    clearSearch();
     setDoctorFilter('all');
     setGenderFilter('all');
     setCreatedFrom('');
     setCreatedTo('');
-    setPage(1);
-  };
+  }, [clearSearch]);
 
-  const openCreate = () => {
+  const openCreate = useCallback(() => {
     setEditingPatient(null);
-    setFormOpen(true);
-  };
-  const openEdit = (patient: Patient) => {
+    setSheetOpen(true);
+  }, []);
+
+  const openEdit = useCallback((patient: Patient) => {
     setEditingPatient(patient);
-    setFormOpen(true);
-  };
+    setSheetOpen(true);
+  }, []);
+
+  const handleSubmit = useCallback(
+    (payload: ReturnType<typeof import('@/components/patients/patient-detail-sheet').normalizePatientForm>) => {
+      if (editingPatient) {
+        updatePatient.mutate(
+          { id: editingPatient.id, data: payload },
+          { onSuccess: () => setSheetOpen(false) },
+        );
+        return;
+      }
+      createPatient.mutate(payload, {
+        onSuccess: () => setSheetOpen(false),
+      });
+    },
+    [createPatient, editingPatient, updatePatient],
+  );
+
+  const handleDelete = useCallback(() => {
+    if (!editingPatient) return;
+    removePatient.mutate(editingPatient.id, {
+      onSuccess: () => setSheetOpen(false),
+    });
+  }, [editingPatient, removePatient]);
 
   if (!isAdmin && !isDentist) {
     return (
@@ -279,6 +272,7 @@ export default function PatientsPage() {
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
+              key={searchInputKey}
               className="h-10 pl-10"
               placeholder="Search by name, email, or phone…"
               defaultValue={search}
@@ -423,7 +417,7 @@ export default function PatientsPage() {
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <span className="text-muted-foreground">Active:</span>
           {search && (
-            <FilterChip label={`Search: "${search}"`} onRemove={() => setSearch('')} />
+            <FilterChip label={`Search: "${search}"`} onRemove={clearSearch} />
           )}
           {isAdmin && doctorFilter !== 'all' && (
             <FilterChip
@@ -509,71 +503,13 @@ export default function PatientsPage() {
               </TableHeader>
               <TableBody>
                 {patients.map((patient) => (
-                  <TableRow
+                  <PatientRow
                     key={patient.id}
-                    tabIndex={0}
-                    onMouseEnter={() => prefetchPatient(patient.id)}
-                    onFocus={() => prefetchPatient(patient.id)}
-                    onClick={(event) => {
-                      // Only treat as a row activation if the click landed
-                      // on the row chrome, not a button / link / menu item.
-                      if (
-                        (event.target as HTMLElement).closest(
-                          'button, a, [role="menuitem"], [role="dialog"]',
-                        )
-                      ) {
-                        return;
-                      }
-                      openEdit(patient);
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        openEdit(patient);
-                      }
-                    }}
-                    className="cursor-pointer transition hover:bg-muted/30 focus:bg-muted/50 focus:outline-none"
-                  >
-                    <TableCell className="font-medium">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
-                          <UserRound className="h-5 w-5" />
-                        </div>
-                        <div className="min-w-0">
-                          <p className="truncate font-semibold">
-                            {patient.fullName}
-                          </p>
-                          {patient.dateOfBirth && (
-                            <p className="text-xs text-muted-foreground">
-                              DOB {format(new Date(patient.dateOfBirth), 'MMM d, yyyy')}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {patient.email ?? <span className="text-muted-foreground">—</span>}
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {patient.phone ?? <span className="text-muted-foreground">—</span>}
-                    </TableCell>
-                    <TableCell className="text-sm">{genderLabel(patient.gender) ?? '—'}</TableCell>
-                    {isAdmin && (
-                      <TableCell className="text-sm">
-                        {patient.doctor?.fullName ?? '—'}
-                      </TableCell>
-                    )}
-                    <TableCell className="text-sm text-muted-foreground">
-                      {format(new Date(patient.createdAt), 'MMM d, yyyy')}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <PatientRowActions
-                        patient={patient}
-                        onEdit={openEdit}
-                        onDelete={setDeleteTarget}
-                      />
-                    </TableCell>
-                  </TableRow>
+                    patient={patient}
+                    isAdmin={isAdmin}
+                    onOpen={openEdit}
+                    onPrefetch={prefetchPatient}
+                  />
                 ))}
               </TableBody>
             </Table>
@@ -586,8 +522,7 @@ export default function PatientsPage() {
                 patient={patient}
                 isAdmin={isAdmin}
                 onPrefetch={() => prefetchPatient(patient.id)}
-                onEdit={openEdit}
-                onDelete={setDeleteTarget}
+                onOpen={openEdit}
               />
             ))}
           </div>
@@ -606,61 +541,19 @@ export default function PatientsPage() {
         </>
       )}
 
-      <PatientFormDialog
-        open={formOpen}
-        onOpenChange={setFormOpen}
+      {/* ─── Detail sheet (create + edit) ─────────────────────────── */}
+      <PatientDetailSheet
+        open={sheetOpen}
+        onOpenChange={setSheetOpen}
         patient={editingPatient}
         isAdmin={isAdmin}
         currentUserId={user?.id}
         dentists={dentistsQuery.data?.data ?? []}
         isSaving={createPatient.isPending || updatePatient.isPending}
-        onSubmit={(data) => {
-          const payload = normalizePatientForm(data);
-          if (editingPatient) {
-            updatePatient.mutate(
-              { id: editingPatient.id, data: payload },
-              { onSuccess: () => setFormOpen(false) },
-            );
-            return;
-          }
-          createPatient.mutate(payload, { onSuccess: () => setFormOpen(false) });
-        }}
+        isDeleting={removePatient.isPending}
+        onSubmit={handleSubmit}
+        onDelete={editingPatient ? handleDelete : undefined}
       />
-
-      <AlertDialog
-        open={!!deleteTarget}
-        onOpenChange={(open) => !open && setDeleteTarget(null)}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              <span className="grid h-9 w-9 place-items-center rounded-full bg-destructive/10 text-destructive">
-                <AlertTriangle className="h-4 w-4" />
-              </span>
-              Delete patient?
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              This soft-deletes <span className="font-semibold">{deleteTarget?.fullName}</span>.
-              The record stays in the database but disappears from active patient
-              lists. Existing orders for this patient stay visible.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={() => {
-                if (!deleteTarget) return;
-                removePatient.mutate(deleteTarget.id, {
-                  onSuccess: () => setDeleteTarget(null),
-                });
-              }}
-            >
-              Delete patient
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }
@@ -732,16 +625,83 @@ function FilterChip({
   );
 }
 
-// ── Row actions ─────────────────────────────────────────────────────
+// ── Row + mobile card (memoised so list virtualisation stays cheap) ─
+
+const PatientRow = function PatientRow({
+  patient,
+  isAdmin,
+  onOpen,
+  onPrefetch,
+}: {
+  patient: Patient;
+  isAdmin: boolean;
+  onOpen: (patient: Patient) => void;
+  onPrefetch: (id: string) => void;
+}) {
+  return (
+    <TableRow
+      tabIndex={0}
+      onMouseEnter={() => onPrefetch(patient.id)}
+      onFocus={() => onPrefetch(patient.id)}
+      onClick={(event) => {
+        if (
+          (event.target as HTMLElement).closest(
+            'button, a, [role="menuitem"], [role="dialog"]',
+          )
+        ) {
+          return;
+        }
+        onOpen(patient);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onOpen(patient);
+        }
+      }}
+      className="cursor-pointer transition hover:bg-muted/30 focus:bg-muted/50 focus:outline-none"
+    >
+      <TableCell className="font-medium">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
+            <UserRound className="h-5 w-5" />
+          </div>
+          <div className="min-w-0">
+            <p className="truncate font-semibold">{patient.fullName}</p>
+            {patient.dateOfBirth && (
+              <p className="text-xs text-muted-foreground">
+                DOB {format(new Date(patient.dateOfBirth), 'MMM d, yyyy')}
+              </p>
+            )}
+          </div>
+        </div>
+      </TableCell>
+      <TableCell className="text-sm">
+        {patient.email ?? <span className="text-muted-foreground">—</span>}
+      </TableCell>
+      <TableCell className="text-sm">
+        {patient.phone ?? <span className="text-muted-foreground">—</span>}
+      </TableCell>
+      <TableCell className="text-sm">{genderLabel(patient.gender) ?? '—'}</TableCell>
+      {isAdmin && (
+        <TableCell className="text-sm">{patient.doctor?.fullName ?? '—'}</TableCell>
+      )}
+      <TableCell className="text-sm text-muted-foreground">
+        {format(new Date(patient.createdAt), 'MMM d, yyyy')}
+      </TableCell>
+      <TableCell className="text-right">
+        <PatientRowActions patient={patient} onOpen={onOpen} />
+      </TableCell>
+    </TableRow>
+  );
+};
 
 function PatientRowActions({
   patient,
-  onEdit,
-  onDelete,
+  onOpen,
 }: {
   patient: Patient;
-  onEdit: (patient: Patient) => void;
-  onDelete: (patient: Patient) => void;
+  onOpen: (patient: Patient) => void;
 }) {
   return (
     <DropdownMenu>
@@ -761,37 +721,25 @@ function PatientRowActions({
           {patient.fullName}
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => onEdit(patient)} className="gap-2">
+        <DropdownMenuItem onClick={() => onOpen(patient)} className="gap-2">
           <Edit className="h-4 w-4" />
-          Edit patient
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onClick={() => onDelete(patient)}
-          className="gap-2 text-destructive focus:text-destructive"
-        >
-          <Trash2 className="h-4 w-4" />
-          Delete patient
+          Open patient
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
 }
 
-// ── Mobile card ─────────────────────────────────────────────────────
-
 function PatientMobileCard({
   patient,
   isAdmin,
   onPrefetch,
-  onEdit,
-  onDelete,
+  onOpen,
 }: {
   patient: Patient;
   isAdmin: boolean;
   onPrefetch: () => void;
-  onEdit: (patient: Patient) => void;
-  onDelete: (patient: Patient) => void;
+  onOpen: (patient: Patient) => void;
 }) {
   return (
     <Card
@@ -800,7 +748,7 @@ function PatientMobileCard({
         if ((event.target as HTMLElement).closest('button, a, [role="menuitem"]')) {
           return;
         }
-        onEdit(patient);
+        onOpen(patient);
       }}
       className="cursor-pointer transition active:scale-[0.99]"
     >
@@ -814,11 +762,7 @@ function PatientMobileCard({
               </p>
             )}
           </div>
-          <PatientRowActions
-            patient={patient}
-            onEdit={onEdit}
-            onDelete={onDelete}
-          />
+          <PatientRowActions patient={patient} onOpen={onOpen} />
         </div>
         <div className="mt-4 grid gap-2 text-sm text-muted-foreground">
           <span className="flex items-center gap-2">
@@ -838,236 +782,6 @@ function PatientMobileCard({
         </div>
       </CardContent>
     </Card>
-  );
-}
-
-// ── Patient form dialog (sectioned for clarity) ─────────────────────
-
-function PatientFormDialog({
-  open,
-  onOpenChange,
-  patient,
-  isAdmin,
-  currentUserId,
-  dentists,
-  isSaving,
-  onSubmit,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  patient: Patient | null;
-  isAdmin: boolean;
-  currentUserId?: string;
-  dentists: { id: string; fullName: string }[];
-  isSaving: boolean;
-  onSubmit: (data: CreatePatientFormData) => void;
-}) {
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-    reset,
-    setValue,
-    watch,
-  } = useForm<CreatePatientFormData>({
-    resolver: zodResolver(createPatientSchema),
-  });
-
-  const gender = watch('gender');
-  const doctorId = watch('doctorId');
-  const clinicalConditions = watch('clinicalConditions') ?? [];
-  const clinicalConditionsOther = watch('clinicalConditionsOther') ?? '';
-
-  useEffect(() => {
-    if (!open) return;
-    reset({
-      fullName: patient?.fullName ?? '',
-      email: patient?.email ?? '',
-      phone: patient?.phone ?? '',
-      gender: patient?.gender,
-      dateOfBirth: patient?.dateOfBirth ? patient.dateOfBirth.slice(0, 10) : '',
-      address: patient?.address ?? '',
-      notes: patient?.notes ?? '',
-      clinicalConditions: patient?.clinicalConditions ?? [],
-      clinicalConditionsOther: patient?.clinicalConditionsOther ?? '',
-      doctorId: patient?.doctorId ?? (isAdmin ? dentists[0]?.id : currentUserId),
-    });
-  }, [currentUserId, dentists, isAdmin, open, patient, reset]);
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92dvh] w-[min(96vw,720px)] max-w-none overflow-y-auto sm:max-w-none">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <span className="grid h-9 w-9 place-items-center rounded-full bg-primary/10 text-primary">
-              <UserRound className="h-4 w-4" />
-            </span>
-            {patient ? 'Edit patient' : 'Add patient'}
-          </DialogTitle>
-          <DialogDescription>
-            {patient
-              ? 'Update demographics, clinical conditions and dentist assignment.'
-              : 'Capture identity + clinical context so the planner has everything needed for the first order.'}
-          </DialogDescription>
-        </DialogHeader>
-
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
-          {/* ── Identity ─────────────────────────────────────────── */}
-          <fieldset className="space-y-3 rounded-lg border bg-card p-4">
-            <legend className="px-1 text-sm font-semibold">Identity</legend>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="sm:col-span-2">
-                <Label htmlFor="fullName">
-                  Patient name <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="fullName"
-                  {...register('fullName')}
-                  placeholder="Full legal name"
-                  className="mt-1.5"
-                />
-                {errors.fullName && (
-                  <p className="mt-1 text-xs text-destructive">
-                    {errors.fullName.message}
-                  </p>
-                )}
-              </div>
-              <div>
-                <Label htmlFor="dateOfBirth">Date of birth</Label>
-                <Input
-                  id="dateOfBirth"
-                  type="date"
-                  {...register('dateOfBirth')}
-                  className="mt-1.5"
-                />
-              </div>
-              <div>
-                <Label>Gender</Label>
-                <Select
-                  value={gender}
-                  onValueChange={(value) => setValue('gender', value as Gender)}
-                >
-                  <SelectTrigger className="mt-1.5">
-                    <SelectValue placeholder="Select gender" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={Gender.FEMALE}>Female</SelectItem>
-                    <SelectItem value={Gender.MALE}>Male</SelectItem>
-                    <SelectItem value={Gender.OTHER}>Other</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              {isAdmin && (
-                <div className="sm:col-span-2">
-                  <Label>
-                    Assigned dentist <span className="text-destructive">*</span>
-                  </Label>
-                  <Select
-                    value={doctorId}
-                    onValueChange={(value) => setValue('doctorId', value)}
-                  >
-                    <SelectTrigger className="mt-1.5">
-                      <SelectValue placeholder="Select dentist" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {dentists.map((doctor) => (
-                        <SelectItem key={doctor.id} value={doctor.id}>
-                          {doctor.fullName}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-            </div>
-          </fieldset>
-
-          {/* ── Contact ──────────────────────────────────────────── */}
-          <fieldset className="space-y-3 rounded-lg border bg-card p-4">
-            <legend className="px-1 text-sm font-semibold">Contact</legend>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  {...register('email')}
-                  placeholder="patient@example.com"
-                  className="mt-1.5"
-                />
-                {errors.email && (
-                  <p className="mt-1 text-xs text-destructive">
-                    {errors.email.message}
-                  </p>
-                )}
-              </div>
-              <div>
-                <Label htmlFor="phone">Phone</Label>
-                <Input
-                  id="phone"
-                  placeholder="+21612345678"
-                  {...register('phone')}
-                  className="mt-1.5"
-                />
-                {errors.phone && (
-                  <p className="mt-1 text-xs text-destructive">
-                    {errors.phone.message}
-                  </p>
-                )}
-              </div>
-              <div className="sm:col-span-2">
-                <Label htmlFor="address">Address</Label>
-                <Input
-                  id="address"
-                  {...register('address')}
-                  placeholder="Street, city, postal code"
-                  className="mt-1.5"
-                />
-              </div>
-            </div>
-          </fieldset>
-
-          {/* ── Notes ────────────────────────────────────────────── */}
-          <fieldset className="space-y-3 rounded-lg border bg-card p-4">
-            <legend className="px-1 text-sm font-semibold">Notes</legend>
-            <textarea
-              id="notes"
-              {...register('notes')}
-              placeholder="Allergies, relevant medical history, anything the planner should know…"
-              className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-            />
-          </fieldset>
-
-          {/* ── Clinical conditions / reason for consultation ────── */}
-          <ClinicalConditionsField
-            conditions={clinicalConditions}
-            otherDetail={clinicalConditionsOther}
-            idPrefix="patient-dialog"
-            onConditionsChange={(next) =>
-              setValue('clinicalConditions', next, { shouldDirty: true })
-            }
-            onOtherDetailChange={(next) =>
-              setValue('clinicalConditionsOther', next, { shouldDirty: true })
-            }
-            otherDetailError={errors.clinicalConditionsOther?.message}
-          />
-
-          <DialogFooter className="gap-2 sm:gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-              disabled={isSaving}
-            >
-              Cancel
-            </Button>
-            <Button type="submit" disabled={isSaving}>
-              {isSaving ? 'Saving…' : patient ? 'Save changes' : 'Create patient'}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
   );
 }
 
@@ -1105,9 +819,7 @@ function EmptyState({
         </div>
         <div>
           <h2 className="text-xl font-semibold">{title}</h2>
-          <p className="mt-1 max-w-md text-sm text-muted-foreground">
-            {description}
-          </p>
+          <p className="mt-1 max-w-md text-sm text-muted-foreground">{description}</p>
         </div>
         {action}
       </CardContent>

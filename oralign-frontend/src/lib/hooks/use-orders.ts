@@ -245,6 +245,81 @@ export function usePermanentDeleteOrder(): UseMutationResult<
   });
 }
 
+/**
+ * Bulk admin-only status update for N orders. Invalidates the LIST
+ * caches (one re-fetch covers the whole table) and each affected
+ * DETAIL cache so an open detail page re-syncs to the new status.
+ *
+ * The toast leans on the `{ updated, skipped }` payload returned by
+ * the backend so the planner sees the exact count of rows that
+ * actually moved.
+ */
+export function useBulkUpdateOrderStatus(): UseMutationResult<
+  { updated: number; skipped: number },
+  Error,
+  { ids: string[]; status: OrderStatus; reason?: string }
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ids, status, reason }) =>
+      ordersService.bulkUpdateStatus(ids, status, reason),
+    onSuccess: ({ updated, skipped }, { ids }) => {
+      queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
+      for (const id of ids) {
+        queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
+      }
+      queryClient.invalidateQueries({ queryKey: ['treatment-plans'] });
+      queryClient.invalidateQueries({ queryKey: ['quotations'] });
+      if (updated === 0) {
+        toast.info('No orders changed — already at the requested status.');
+      } else if (skipped > 0) {
+        toast.success(
+          `${updated} order${updated === 1 ? '' : 's'} updated · ${skipped} skipped.`,
+        );
+      } else {
+        toast.success(
+          `${updated} order${updated === 1 ? '' : 's'} updated.`,
+        );
+      }
+    },
+    onError: (error) => toast.error(extractApiErrorMessage(error)),
+  });
+}
+
+/**
+ * Bulk soft-delete (sets deletedAt). Removes the deleted ids from
+ * any cached list pages so the table re-paints instantly without
+ * waiting for the refetch — same optimistic-removal helper the
+ * single-row delete uses.
+ */
+export function useBulkDeleteOrders(): UseMutationResult<
+  { deleted: number; skipped: number },
+  Error,
+  string[]
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) => ordersService.bulkDelete(ids),
+    onSuccess: ({ deleted, skipped }, ids) => {
+      for (const id of ids) {
+        removeOrderFromLists(queryClient, id);
+        queryClient.removeQueries({ queryKey: orderKeys.detail(id) });
+      }
+      queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
+      if (skipped > 0) {
+        toast.success(
+          `${deleted} order${deleted === 1 ? '' : 's'} deleted · ${skipped} skipped.`,
+        );
+      } else {
+        toast.success(
+          `${deleted} order${deleted === 1 ? '' : 's'} deleted.`,
+        );
+      }
+    },
+    onError: (error) => toast.error(extractApiErrorMessage(error)),
+  });
+}
+
 export function useUpdateToothInstructions(): UseMutationResult<
   DentalOrder,
   Error,

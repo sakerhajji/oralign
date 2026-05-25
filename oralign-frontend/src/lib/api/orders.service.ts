@@ -172,6 +172,9 @@ export const ordersService = {
     id: string,
     files: File[],
     category: OrderFileCategory,
+    // Optional progress callback. Receives a 0–100 percentage so the
+    // caller can drive a progress bar without knowing about axios.
+    onProgress?: (percent: number) => void,
   ): Promise<OrderFile[]> => {
     const formData = new FormData();
     files.forEach((file) => formData.append('files', file));
@@ -179,11 +182,27 @@ export const ordersService = {
     // emits `multipart/form-data; boundary=...` automatically. Forcing
     // the header strips the boundary parameter and the server can no
     // longer parse the body. (Same fix as users.service.ts uploadAvatar.)
+    //
+    // `timeout: 0` disables the global 30-second axios timeout for THIS
+    // request only. CBCT / DICOM ZIPs routinely run 200–800 MB and even
+    // on a 30 Mbit/s clinic uplink that's 1–4 minutes of wall time —
+    // well past the default 30 s, which is what produced the
+    // "Network Error" toast on big uploads. The reverse proxy already
+    // caps the body window at 15 minutes (nginx client_body_timeout),
+    // so this isn't an unbounded wait either.
     const response = await apiClient.post<OrderFile[]>(
       `/orders/${id}/files`,
       formData,
       {
         params: { category },
+        timeout: 0,
+        onUploadProgress: onProgress
+          ? (event) => {
+              if (event.total && event.total > 0) {
+                onProgress(Math.round((event.loaded * 100) / event.total));
+              }
+            }
+          : undefined,
       },
     );
     return response.data;

@@ -454,18 +454,40 @@ export function useOrderFiles(id?: string): UseQueryResult<OrderFile[], Error> {
 export function useUploadOrderFiles(): UseMutationResult<
   OrderFile[],
   Error,
-  { id: string; files: File[]; category: OrderFileCategory }
+  {
+    id: string;
+    files: File[];
+    category: OrderFileCategory;
+    /** Optional 0–100 progress callback for big ZIP / CBCT uploads. */
+    onProgress?: (percent: number) => void;
+  }
 > {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, files, category }) =>
-      ordersService.uploadFiles(id, files, category),
+    mutationFn: ({ id, files, category, onProgress }) =>
+      ordersService.uploadFiles(id, files, category, onProgress),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: orderKeys.files(variables.id) });
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(variables.id) });
       toast.success('Files uploaded');
     },
-    onError: (error) => toast.error(extractApiErrorMessage(error)),
+    onError: (error) => {
+      // Friendlier message for the most common big-upload failures.
+      // Plain `axios.isAxiosError` would be cleaner but we already lean
+      // on the shared extractor for status-code → human-readable text.
+      const msg = extractApiErrorMessage(error);
+      if (/network error|timeout/i.test(msg)) {
+        toast.error(
+          'Upload failed — connection lost or too slow. Try again with a stable internet connection.',
+        );
+      } else if (/413|payload too large|file too large/i.test(msg)) {
+        toast.error(
+          'File is larger than the 1 GB upload limit. Compress further or split the volume.',
+        );
+      } else {
+        toast.error(msg);
+      }
+    },
   });
 }
 

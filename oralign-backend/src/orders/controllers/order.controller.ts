@@ -325,7 +325,17 @@ export class OrderController {
 
   @Post(':id/files')
   @HttpCode(HttpStatus.CREATED)
-  @UseInterceptors(FilesInterceptor('files', 20))
+  // Per-file ceiling = 1 GB to match the service's CBCT/DICOM ZIP cap
+  // (MAX_FILE_SIZE_ZIP_BUNDLE_BYTES). Multer enforces this BEFORE the
+  // file is fully buffered, so an oversized upload aborts cleanly with
+  // a 413 instead of OOM'ing the container. The service still does a
+  // finer per-category check (50 MB for non-ZIP slots) after multer
+  // hands the file over.
+  @UseInterceptors(
+    FilesInterceptor('files', 20, {
+      limits: { fileSize: 1024 * 1024 * 1024 }, // 1 GB per file
+    }),
+  )
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Upload order files' })
   @ApiParam({ name: 'id', type: String })

@@ -434,6 +434,34 @@ export class BulkDeleteOrdersDto {
   ids!: string[];
 }
 
+/**
+ * Bulk restore — clears `deletedAt` on N soft-deleted orders so they
+ * re-appear in the active list. Idempotent on already-live rows.
+ */
+export class BulkRestoreOrdersDto {
+  @ApiProperty({ type: [String], description: 'Order IDs to restore' })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(200)
+  @IsString({ each: true })
+  ids!: string[];
+}
+
+/**
+ * Bulk PERMANENT delete — irrecoverable hard-delete + file blob cleanup
+ * for N orders. Capped lower than the soft-delete bucket because the
+ * blast radius (FK cascades + filesystem writes) is bigger, and the UX
+ * already forces a confirm dialog before this fires.
+ */
+export class BulkPermanentDeleteOrdersDto {
+  @ApiProperty({ type: [String], description: 'Order IDs to permanently delete' })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(100)
+  @IsString({ each: true })
+  ids!: string[];
+}
+
 export class OrderFileResponseDto {
   @ApiProperty()
   id!: string;

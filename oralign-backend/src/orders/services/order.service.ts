@@ -562,6 +562,98 @@ export class OrderService {
     return { deleted: result.count, skipped };
   }
 
+  /**
+   * Bulk restore — clear `deletedAt` for the subset of `ids` that
+   * are currently soft-deleted. Already-live rows are skipped silently
+   * so the call is idempotent. Admin-only; mirrors `restoreOrder`
+   * but in a single UPDATE for the whole batch.
+   */
+  async bulkRestoreOrders(
+    ids: string[],
+    caller: Caller,
+  ): Promise<{ restored: number; skipped: number }> {
+    if (!ADMIN_ROLES.includes(caller.role)) {
+      throw new ForbiddenException(
+        'Only admins can bulk-restore orders.',
+      );
+    }
+    if (ids.length === 0) return { restored: 0, skipped: 0 };
+
+    const candidates = await this.prisma.dentalOrder.findMany({
+      where: { id: { in: ids }, deletedAt: { not: null } },
+      select: { id: true },
+    });
+    const skipped = ids.length - candidates.length;
+    if (candidates.length === 0) return { restored: 0, skipped };
+
+    this.logger.log(
+      `Bulk restore on ${candidates.length} order(s) by user ${caller.userId}`,
+    );
+
+    const result = await this.prisma.dentalOrder.updateMany({
+      where: { id: { in: candidates.map((c) => c.id) } },
+      data: { deletedAt: null },
+    });
+
+    return { restored: result.count, skipped };
+  }
+
+  /**
+   * Bulk PERMANENT delete — hard-delete N orders + wipe their files
+   * from disk. Mirrors the single-row `permanentDeleteOrder` semantics:
+   * tooth instructions + order-file records cascade inside the
+   * transaction, then the file blobs are unlinked from disk best-effort.
+   * Admin-only; never partially commits.
+   */
+  async bulkPermanentDeleteOrders(
+    ids: string[],
+    caller: Caller,
+  ): Promise<{ deleted: number; skipped: number }> {
+    this.ensureCanPermanentDelete(caller);
+    if (ids.length === 0) return { deleted: 0, skipped: 0 };
+
+    // Fetch orders + their files so we can clean up disk blobs after
+    // the DB transaction commits. Orders that don't exist (already
+    // hard-deleted, bogus ids) are simply skipped.
+    const candidates = await this.prisma.dentalOrder.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true,
+        files: { select: { relativePath: true } },
+      },
+    });
+    const skipped = ids.length - candidates.length;
+    if (candidates.length === 0) return { deleted: 0, skipped };
+
+    const candidateIds = candidates.map((c) => c.id);
+
+    this.logger.warn(
+      `Bulk PERMANENT delete on ${candidates.length} order(s) by user ${caller.userId} — irreversible`,
+    );
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.orderToothInstruction.deleteMany({
+        where: { orderId: { in: candidateIds } },
+      });
+      await tx.orderFile.deleteMany({
+        where: { orderId: { in: candidateIds } },
+      });
+      await tx.dentalOrder.deleteMany({
+        where: { id: { in: candidateIds } },
+      });
+    });
+
+    // Disk cleanup — best-effort, run after the DB commit so a failed
+    // unlink can't roll back the orders. Errors are logged but don't
+    // throw because the order record is already gone.
+    const allFiles = candidates.flatMap((c) => c.files);
+    await Promise.all(
+      allFiles.map((file) => this.removeFileFromDisk(file.relativePath)),
+    );
+
+    return { deleted: candidateIds.length, skipped };
+  }
+
   async updateToothInstructions(
     id: string,
     instructions: ToothInstructionDto[],

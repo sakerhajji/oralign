@@ -121,6 +121,35 @@ export const ordersService = {
     return response.data;
   },
 
+  /**
+   * Bulk restore — clears `deletedAt` for N soft-deleted orders.
+   * Idempotent: already-live rows are skipped silently.
+   */
+  bulkRestore: async (
+    ids: string[],
+  ): Promise<{ restored: number; skipped: number }> => {
+    const response = await apiClient.post<{
+      restored: number;
+      skipped: number;
+    }>(`/orders/bulk-restore`, { ids });
+    return response.data;
+  },
+
+  /**
+   * Bulk PERMANENT delete — hard-deletes N orders and removes their
+   * file blobs from disk. Capped at 100 per call by the backend.
+   * Admin-only; irreversible.
+   */
+  bulkPermanentDelete: async (
+    ids: string[],
+  ): Promise<{ deleted: number; skipped: number }> => {
+    const response = await apiClient.post<{ deleted: number; skipped: number }>(
+      `/orders/bulk-permanent-delete`,
+      { ids },
+    );
+    return response.data;
+  },
+
   updateToothInstructions: async (
     id: string,
     instructions: ToothInstruction[],

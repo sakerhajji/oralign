@@ -38,6 +38,8 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import {
   BulkDeleteOrdersDto,
+  BulkPermanentDeleteOrdersDto,
+  BulkRestoreOrdersDto,
   BulkUpdateOrderStatusDto,
   CreateOrderDto,
   OrderFilterDto,
@@ -254,13 +256,47 @@ export class OrderController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Bulk soft-delete for N orders. Hard-delete is intentionally not exposed in bulk.',
+      'Bulk soft-delete for N orders. Hard-delete now also has a bulk endpoint.',
   })
   async bulkDelete(
     @Body() dto: BulkDeleteOrdersDto,
     @CurrentUser() user: JwtPayload,
   ) {
     return this.orderService.bulkDelete(dto.ids, {
+      userId: user.sub,
+      role: user.role,
+    });
+  }
+
+  @Post('bulk-restore')
+  @Roles(UserRole.admin, UserRole.super_admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Bulk restore N soft-deleted orders (clears deletedAt). Idempotent on already-live rows. Admin-only.',
+  })
+  async bulkRestore(
+    @Body() dto: BulkRestoreOrdersDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.orderService.bulkRestoreOrders(dto.ids, {
+      userId: user.sub,
+      role: user.role,
+    });
+  }
+
+  @Post('bulk-permanent-delete')
+  @Roles(UserRole.admin, UserRole.super_admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Bulk PERMANENT delete for N orders — hard-delete + file-blob cleanup. Capped at 100/call. Admin-only; irreversible.',
+  })
+  async bulkPermanentDelete(
+    @Body() dto: BulkPermanentDeleteOrdersDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.orderService.bulkPermanentDeleteOrders(dto.ids, {
       userId: user.sub,
       role: user.role,
     });

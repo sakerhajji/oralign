@@ -344,6 +344,67 @@ export function useBulkDeleteOrders(): UseMutationResult<
   });
 }
 
+/**
+ * Bulk restore N soft-deleted orders. Invalidates every list query so
+ * the rows hop from the trash view back into the active list.
+ */
+export function useBulkRestoreOrders(): UseMutationResult<
+  { restored: number; skipped: number },
+  Error,
+  string[]
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) => ordersService.bulkRestore(ids),
+    onSuccess: ({ restored, skipped }) => {
+      queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
+      if (skipped > 0) {
+        toast.success(
+          `${restored} order${restored === 1 ? '' : 's'} restored · ${skipped} skipped.`,
+        );
+      } else {
+        toast.success(
+          `${restored} order${restored === 1 ? '' : 's'} restored.`,
+        );
+      }
+    },
+    onError: (error) => toast.error(extractApiErrorMessage(error)),
+  });
+}
+
+/**
+ * Bulk PERMANENT delete — hard-delete N orders + their files.
+ * Removes both the list cache entries AND any detail cache so a
+ * stale prefetched detail doesn't keep showing the gone order.
+ */
+export function useBulkPermanentDeleteOrders(): UseMutationResult<
+  { deleted: number; skipped: number },
+  Error,
+  string[]
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) => ordersService.bulkPermanentDelete(ids),
+    onSuccess: ({ deleted, skipped }, ids) => {
+      for (const id of ids) {
+        removeOrderFromLists(queryClient, id);
+        queryClient.removeQueries({ queryKey: orderKeys.detail(id) });
+      }
+      queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
+      if (skipped > 0) {
+        toast.success(
+          `${deleted} order${deleted === 1 ? '' : 's'} permanently deleted · ${skipped} skipped.`,
+        );
+      } else {
+        toast.success(
+          `${deleted} order${deleted === 1 ? '' : 's'} permanently deleted.`,
+        );
+      }
+    },
+    onError: (error) => toast.error(extractApiErrorMessage(error)),
+  });
+}
+
 export function useUpdateToothInstructions(): UseMutationResult<
   DentalOrder,
   Error,

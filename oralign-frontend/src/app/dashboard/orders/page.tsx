@@ -87,6 +87,8 @@ import { usersService } from '@/lib/api';
 import { useAuth } from '@/lib/providers/auth-provider';
 import {
   useBulkDeleteOrders,
+  useBulkPermanentDeleteOrders,
+  useBulkRestoreOrders,
   useBulkUpdateOrderStatus,
   useDeleteOrder,
   useOrderPrefetch,
@@ -158,6 +160,10 @@ export default function OrdersPage() {
   const overrideStatus = useOverrideOrderStatus();
   const bulkUpdateStatus = useBulkUpdateOrderStatus();
   const bulkDelete = useBulkDeleteOrders();
+  // Bulk operations that ONLY make sense in trash view — restore N
+  // soft-deleted orders, or hard-delete them with file blob cleanup.
+  const bulkRestore = useBulkRestoreOrders();
+  const bulkPermanentDelete = useBulkPermanentDeleteOrders();
   const prefetchOrder = useOrderPrefetch();
 
   // ── Query state (all in URL-derivable shape so a future "share this
@@ -336,6 +342,22 @@ export default function OrdersPage() {
     });
   }, [bulkDelete, clearSelection, selectedIds]);
 
+  /** Trash-view: bring N selected deleted orders back to the catalogue. */
+  const runBulkRestore = useCallback(() => {
+    if (selectedIds.size === 0) return;
+    bulkRestore.mutate(Array.from(selectedIds), {
+      onSuccess: () => clearSelection(),
+    });
+  }, [bulkRestore, clearSelection, selectedIds]);
+
+  /** Trash-view: hard-delete N selected orders + wipe their files. */
+  const runBulkPermanentDelete = useCallback(() => {
+    if (selectedIds.size === 0) return;
+    bulkPermanentDelete.mutate(Array.from(selectedIds), {
+      onSuccess: () => clearSelection(),
+    });
+  }, [bulkPermanentDelete, clearSelection, selectedIds]);
+
   const runSingleStatus = useCallback(
     (id: string, status: OrderStatus) => {
       overrideStatus.mutate({ id, status });
@@ -345,6 +367,8 @@ export default function OrdersPage() {
 
   const bulkPending =
     bulkUpdateStatus.isPending || bulkDelete.isPending;
+  const trashBulkPending =
+    bulkRestore.isPending || bulkPermanentDelete.isPending;
 
   return (
     <div className="@container/main flex flex-1 flex-col gap-5 p-4 lg:p-6">
@@ -634,9 +658,10 @@ export default function OrdersPage() {
       )}
 
       {/* ─── Bulk action bar (admin-only) ─────────────────────────────
-          Appears whenever the admin has selected at least one row.
-          Sticky at the top of the results region so it remains in
-          view while the planner scrolls a long table. */}
+          Two variants, mutually exclusive on `showDeleted`:
+            • Active view → status changes + soft delete
+            • Trash view  → restore + permanent delete (file-blob wipe)
+          The action bar only renders when at least one row is checked. */}
       {isAdmin && selectedIds.size > 0 && !showDeleted && (
         <BulkActionBar
           count={selectedIds.size}
@@ -644,6 +669,15 @@ export default function OrdersPage() {
           onCancel={clearSelection}
           onSetStatus={runBulkStatus}
           onDelete={runBulkDelete}
+        />
+      )}
+      {isAdmin && selectedIds.size > 0 && showDeleted && (
+        <TrashBulkActionBar
+          count={selectedIds.size}
+          pending={trashBulkPending}
+          onCancel={clearSelection}
+          onRestore={runBulkRestore}
+          onPermanentDelete={runBulkPermanentDelete}
         />
       )}
 
@@ -1473,6 +1507,115 @@ function BulkActionBar({
         onConfirm={() => {
           setConfirmDeleteOpen(false);
           onDelete();
+        }}
+      />
+    </>
+  );
+}
+
+// ── Trash bulk action bar ──────────────────────────────────────────
+// Mirrors `BulkActionBar` shape but with trash-mode buttons:
+//   • Restore selected     → un-deletes N rows (idempotent on live ones)
+//   • Delete forever       → hard-delete + wipe files from disk
+// Sits above the deleted-orders table so the admin doesn't have to
+// open each row's `⋮` menu to clean up the trash.
+function TrashBulkActionBar({
+  count,
+  pending,
+  onCancel,
+  onRestore,
+  onPermanentDelete,
+}: {
+  count: number;
+  pending: boolean;
+  onCancel: () => void;
+  onRestore: () => void;
+  onPermanentDelete: () => void;
+}) {
+  const [confirmRestoreOpen, setConfirmRestoreOpen] = useState(false);
+  const [confirmHardOpen, setConfirmHardOpen] = useState(false);
+  return (
+    <>
+      <Card className="border-amber-400/50 bg-amber-50 shadow-sm">
+        <CardContent className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4">
+          <div className="flex items-center gap-3">
+            <span className="grid h-9 w-9 place-items-center rounded-full bg-amber-200/70 text-amber-900">
+              <Trash className="h-4 w-4" />
+            </span>
+            <div>
+              <p className="text-sm font-semibold text-amber-900">
+                {count} deleted order{count === 1 ? '' : 's'} selected
+              </p>
+              <p className="text-xs text-amber-900/80">
+                Restore brings rows back into the catalogue. Delete forever
+                wipes them and their files from disk — irreversible.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="default"
+              disabled={pending}
+              className="gap-2"
+              onClick={() => setConfirmRestoreOpen(true)}
+            >
+              {pending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <ArchiveRestore className="h-4 w-4" />
+              )}
+              Restore selected
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={pending}
+              className="gap-2"
+              onClick={() => setConfirmHardOpen(true)}
+            >
+              <Trash2 className="h-4 w-4" />
+              Delete forever
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={pending}
+              onClick={onCancel}
+            >
+              Cancel
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <ConfirmDeleteDialog
+        open={confirmRestoreOpen}
+        onOpenChange={setConfirmRestoreOpen}
+        title={`Restore ${count} order${count === 1 ? '' : 's'}?`}
+        description={`The ${count === 1 ? 'order' : 'orders'} will reappear in the active orders list. You can soft-delete ${count === 1 ? 'it' : 'them'} again later if needed.`}
+        confirmLabel={`Restore ${count} order${count === 1 ? '' : 's'}`}
+        disabled={pending}
+        onConfirm={() => {
+          setConfirmRestoreOpen(false);
+          onRestore();
+        }}
+      />
+
+      <ConfirmDeleteDialog
+        open={confirmHardOpen}
+        onOpenChange={setConfirmHardOpen}
+        title={`Delete ${count} order${count === 1 ? '' : 's'} forever?`}
+        description={`This permanently wipes ${count} order${
+          count === 1 ? '' : 's'
+        } and ${
+          count === 1 ? 'its' : 'their'
+        } attached files from disk. The database rows go too — there is no undo.`}
+        confirmLabel="Delete forever"
+        disabled={pending}
+        onConfirm={() => {
+          setConfirmHardOpen(false);
+          onPermanentDelete();
         }}
       />
     </>

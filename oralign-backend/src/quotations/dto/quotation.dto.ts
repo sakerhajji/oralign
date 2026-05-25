@@ -1,16 +1,22 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
   IsDateString,
   IsEnum,
   IsInt,
+  IsNumber,
   IsOptional,
+  IsPositive,
   IsString,
   Max,
   MaxLength,
   Min,
+  ValidateNested,
 } from 'class-validator';
-import { DevisLanguage, QuotationStatus } from '@prisma/client';
+import { ArchType, DevisLanguage, PaymentMode, QuotationStatus } from '@prisma/client';
 
 // ─── Create ────────────────────────────────────────────────────────────────
 
@@ -200,4 +206,105 @@ export class QuotationResponseDto {
 
   @ApiProperty() createdAt!: Date;
   @ApiProperty() updatedAt!: Date;
+}
+
+// ─── Pack attachment + payment plan configuration ────────────────
+// Admin-only DTOs added in the packs/payments rollout. The service
+// computes price from the selected (pack, archType) — the client
+// NEVER provides an amount.
+
+/**
+ * Attach a pack + arch to a draft quotation. Service looks up the
+ * active PackPrice, snapshots its fields onto the Quotation, sets
+ * totalPrice. Cannot be used once the quote is approved or partially
+ * paid — those gates are enforced server-side.
+ */
+export class AttachPackToQuotationDto {
+  @ApiProperty()
+  @IsString()
+  packId!: string;
+
+  // archType is OPTIONAL now — the admin UI shows a single price per
+  // pack (no arch picker), so callers default to two_arches. The
+  // enum stays in the schema for backward compatibility with legacy
+  // quotations + the historical PDF "(Single arch)" suffix, but new
+  // attachments don't need to pass it.
+  @ApiPropertyOptional({
+    enum: ArchType,
+    default: ArchType.two_arches,
+    description:
+      'Defaults to two_arches when omitted — the canonical pricing unit.',
+  })
+  @IsOptional()
+  @IsEnum(ArchType)
+  archType?: ArchType;
+}
+
+/**
+ * Step range linked to a single installment. Declared BEFORE
+ * PaymentPlanInstallmentDto so the `@Type(() => PaymentPlanBatchDto)`
+ * decorator metadata emitted by tsc resolves at class-definition time
+ * — referencing it from a later class triggers a `ReferenceError:
+ * Cannot access ... before initialization` TDZ crash at module load.
+ */
+export class PaymentPlanBatchDto {
+  @ApiProperty({ example: 1, description: '1-based step index' })
+  @IsInt()
+  @Min(1)
+  fromStep!: number;
+
+  @ApiProperty({ example: 8 })
+  @IsInt()
+  @Min(1)
+  toStep!: number;
+}
+
+/**
+ * One row of the installment plan. `batch.fromStep`/`toStep` carry
+ * the linked step batch range — the service enforces that:
+ *   • ranges within the plan are disjoint
+ *   • every step ≤ pack.maxStepsPerArch (when not unlimited)
+ *   • Σ amounts == quote.totalPrice (with the diff parked on the
+ *     last row to absorb rounding)
+ *
+ * `availableFrom` defaults to "now" when omitted, but for installments
+ * 2+ the admin typically sets a later date.
+ */
+export class PaymentPlanInstallmentDto {
+  @ApiProperty({ example: '350.000' })
+  @IsNumber({ maxDecimalPlaces: 3 })
+  @IsPositive()
+  @Type(() => Number)
+  amount!: number;
+
+  @ApiPropertyOptional({ example: '2026-06-01T00:00:00Z' })
+  @IsOptional()
+  @IsDateString()
+  availableFrom?: string;
+
+  @ApiPropertyOptional({ example: '2026-06-15T00:00:00Z' })
+  @IsOptional()
+  @IsDateString()
+  dueDate?: string;
+
+  @ApiProperty()
+  @ValidateNested()
+  @Type(() => PaymentPlanBatchDto)
+  batch!: PaymentPlanBatchDto;
+}
+
+export class ConfigurePaymentPlanDto {
+  @ApiProperty({ enum: PaymentMode })
+  @IsEnum(PaymentMode)
+  paymentMode!: PaymentMode;
+
+  // FULL_PAYMENT requires exactly one installment covering the whole
+  // step range. INSTALLMENTS requires 2+; the service enforces both.
+  @ApiProperty({ type: [PaymentPlanInstallmentDto] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(24)
+  @ValidateNested({ each: true })
+  @Type(() => PaymentPlanInstallmentDto)
+  installments!: PaymentPlanInstallmentDto[];
 }

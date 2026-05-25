@@ -13,12 +13,19 @@
  */
 
 const APP_NAME = 'Oralign';
-const BRAND_COLOR = '#0f172a';
-const ACCENT_COLOR = '#0ea5e9';
-const TEXT_COLOR = '#0f172a';
-const MUTED_COLOR = '#64748b';
-const BORDER_COLOR = '#e2e8f0';
-const SUBTLE_BG = '#f8fafc';
+// Strict black-and-white palette. Everything renders the same on a
+// laser printer, on a dark-mode client, and inside Outlook's quirky
+// inline CSS engine. Past revisions used slate / sky-blue / red / green
+// accents — they shipped well on screen but read as gimmicky on the
+// brand and inconsistent with the PDF quotation aesthetic. One source
+// of truth here keeps the visual language uniform across every channel.
+const TEXT_COLOR = '#000000';
+const BRAND_COLOR = '#000000';      // button background + buttons
+const ACCENT_COLOR = '#000000';     // eyebrows, link colour
+const MUTED_COLOR = '#555555';      // secondary text
+const BORDER_COLOR = '#000000';     // outer card + dividers
+const SOFT_BORDER = '#cccccc';      // table inner rows
+const SUBTLE_BG = '#f5f5f5';        // footer + metadata block fill
 
 function logoUrl(): string {
   // Public URL the frontend serves. Set MAIL_LOGO_URL in env to override
@@ -65,15 +72,17 @@ function shell({
       <tr>
         <td align="center" style="padding:24px 12px;">
           <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"
-                 style="max-width:600px;width:100%;background:#ffffff;border:1px solid ${BORDER_COLOR};border-radius:16px;overflow:hidden;">
-            <!-- Header: logo on the left -->
+                 style="max-width:600px;width:100%;background:#ffffff;border:1px solid ${BORDER_COLOR};overflow:hidden;">
+            <!-- Header: logo centered. Reads as a letterhead instead of
+                 a dashboard chrome strip — pairs with the formal B&W
+                 invoice aesthetic the PDF quotation also uses. -->
             <tr>
-              <td style="padding:24px 32px;border-bottom:1px solid ${BORDER_COLOR};">
+              <td style="padding:32px 32px 28px;border-bottom:1px solid ${BORDER_COLOR};">
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                   <tr>
-                    <td align="left">
-                      <img src="${logoUrl()}" alt="${APP_NAME}" width="120" height="auto"
-                           style="display:block;max-width:120px;height:auto;border:0;outline:none;text-decoration:none;" />
+                    <td align="center">
+                      <img src="${logoUrl()}" alt="${APP_NAME}" width="140" height="auto"
+                           style="display:block;margin:0 auto;max-width:140px;height:auto;border:0;outline:none;text-decoration:none;" />
                     </td>
                   </tr>
                 </table>
@@ -128,14 +137,18 @@ function divider(): string {
 }
 
 function button(href: string, label: string): string {
+  // Square, full-black CTA — matches the new B&W brand. Removed the
+  // rounded radius so the button reads like the table-driven shapes
+  // we use everywhere else (PDF totals strip, dashboard buttons).
   return `<table role="presentation" cellpadding="0" cellspacing="0" border="0"
            style="margin:0 auto 24px;">
     <tr>
       <td align="center" bgcolor="${BRAND_COLOR}"
-          style="border-radius:10px;background:${BRAND_COLOR};">
+          style="background:${BRAND_COLOR};">
         <a href="${href}"
-           style="display:inline-block;padding:14px 32px;font-size:15px;font-weight:600;
-                  color:#ffffff;text-decoration:none;border-radius:10px;
+           style="display:inline-block;padding:14px 32px;font-size:13px;font-weight:700;
+                  letter-spacing:1.5px;text-transform:uppercase;
+                  color:#ffffff;text-decoration:none;
                   font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
           ${label}
         </a>
@@ -149,12 +162,12 @@ function otpBlock(code: string): string {
            style="margin:0 0 24px;">
     <tr>
       <td align="center"
-          style="background:${SUBTLE_BG};border:1px solid ${BORDER_COLOR};border-radius:12px;padding:24px;">
-        <p style="margin:0 0 8px;font-size:11px;font-weight:700;letter-spacing:1.4px;
-                  text-transform:uppercase;color:${ACCENT_COLOR};">
+          style="background:${SUBTLE_BG};border:1px solid ${BORDER_COLOR};padding:28px 24px;">
+        <p style="margin:0 0 10px;font-size:11px;font-weight:700;letter-spacing:2px;
+                  text-transform:uppercase;color:${MUTED_COLOR};">
           Verification code
         </p>
-        <p style="margin:0;font-size:36px;font-weight:800;letter-spacing:10px;
+        <p style="margin:0;font-size:38px;font-weight:800;letter-spacing:12px;
                   color:${TEXT_COLOR};font-variant-numeric:tabular-nums;">
           ${escape(code)}
         </p>
@@ -166,7 +179,7 @@ function otpBlock(code: string): string {
 function urlFallback(url: string): string {
   return `<p style="margin:16px 0 0;font-size:12px;color:${MUTED_COLOR};text-align:center;">
     Button not working? Paste this link into your browser:<br/>
-    <a href="${url}" style="color:${ACCENT_COLOR};word-break:break-all;">${url}</a>
+    <a href="${url}" style="color:${TEXT_COLOR};text-decoration:underline;word-break:break-all;">${url}</a>
   </p>`;
 }
 
@@ -264,36 +277,46 @@ export function renderApprovalGrantedEmail(args: {
  * Gmail / Outlook render it consistently.
  */
 function metaTable(rows: Array<{ label: string; value: string }>): string {
+  // Inner row dividers use a softer grey so the table reads as a list,
+  // not a heavy grid. The outer card border stays pure black to match
+  // the new B&W envelope.
   const body = rows
     .map(
-      (r) => `
+      (r, idx) => {
+        const borderRule =
+          idx === rows.length - 1 ? '' : `border-bottom:1px solid ${SOFT_BORDER};`;
+        return `
       <tr>
-        <td style="padding:8px 12px;border-bottom:1px solid ${BORDER_COLOR};
-                   font-size:12px;font-weight:600;letter-spacing:0.4px;
+        <td style="padding:10px 14px;${borderRule}
+                   font-size:11px;font-weight:700;letter-spacing:1.2px;
                    text-transform:uppercase;color:${MUTED_COLOR};width:40%;">
           ${escape(r.label)}
         </td>
-        <td style="padding:8px 12px;border-bottom:1px solid ${BORDER_COLOR};
+        <td style="padding:10px 14px;${borderRule}
                    font-size:14px;color:${TEXT_COLOR};">
           ${escape(r.value)}
         </td>
-      </tr>`,
+      </tr>`;
+      },
     )
     .join('');
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
-           style="margin:0 0 24px;background:${SUBTLE_BG};border:1px solid ${BORDER_COLOR};border-radius:12px;overflow:hidden;">
+           style="margin:0 0 24px;background:${SUBTLE_BG};border:1px solid ${BORDER_COLOR};overflow:hidden;">
     ${body}
   </table>`;
 }
 
 function decisionBadge(decision: 'approved' | 'rejected'): string {
+  // B&W badge — solid black for approved, inverted (white-fill /
+  // black-border / black-text) for rejected. Same legible contrast
+  // as the old green/red palette, no chroma.
   const isApproved = decision === 'approved';
-  const bg = isApproved ? '#dcfce7' : '#fee2e2';
-  const fg = isApproved ? '#166534' : '#991b1b';
   const label = isApproved ? 'Approved' : 'Rejected';
-  return `<span style="display:inline-block;padding:4px 12px;font-size:12px;
-                       font-weight:700;text-transform:uppercase;letter-spacing:0.6px;
-                       border-radius:999px;background:${bg};color:${fg};">
+  const bg = isApproved ? '#000000' : '#ffffff';
+  const fg = isApproved ? '#ffffff' : '#000000';
+  return `<span style="display:inline-block;padding:5px 14px;font-size:11px;
+                       font-weight:800;text-transform:uppercase;letter-spacing:1.5px;
+                       background:${bg};color:${fg};border:1px solid #000000;">
     ${label}
   </span>`;
 }

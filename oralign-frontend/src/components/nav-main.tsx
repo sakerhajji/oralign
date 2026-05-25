@@ -17,6 +17,16 @@ export function NavMain({
     title: string
     url: string
     icon?: React.ReactNode
+    /**
+     * Optional unread/notification counter rendered next to the
+     * item. Currently used by the admin "Support" entry to surface
+     * the number of unread support messages. When > 0:
+     *   • Expanded sidebar → red pill on the right of the title.
+     *   • Collapsed (icon)  → small red dot anchored to the icon's
+     *     top-right corner.
+     * Set to 0 / undefined to hide the badge entirely.
+     */
+    badge?: number
   }[]
 }) {
   const pathname = usePathname()
@@ -37,20 +47,55 @@ export function NavMain({
     <SidebarGroup>
       <SidebarGroupContent className="flex flex-col gap-2">
         <SidebarMenu>
-          {items.map((item) => (
-            <SidebarMenuItem key={item.title}>
-              <SidebarMenuButton
-                asChild
-                tooltip={item.title}
-                isActive={isItemActive(item.url)}
-              >
-                <Link href={item.url}>
-                  {item.icon}
-                  <span>{item.title}</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          ))}
+          {items.map((item) => {
+            const badgeCount = item.badge ?? 0
+            const hasBadge = badgeCount > 0
+            // Pretty-printed count: cap at 99+ so the pill never
+            // grows wider than the icon-rail badge in collapsed mode.
+            const badgeLabel = badgeCount > 99 ? "99+" : String(badgeCount)
+            return (
+              <SidebarMenuItem key={item.title} className="relative">
+                <SidebarMenuButton
+                  asChild
+                  tooltip={
+                    hasBadge ? `${item.title} (${badgeLabel} unread)` : item.title
+                  }
+                  isActive={isItemActive(item.url)}
+                  className="group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:justify-center"
+                >
+                  <Link href={item.url}>
+                    {item.icon}
+                    <span>{item.title}</span>
+                    {/* Inline pill — only visible while the sidebar
+                        is expanded. `ml-auto` shoves it to the right
+                        edge of the row. */}
+                    {hasBadge ? (
+                      <span
+                        aria-hidden
+                        className="ml-auto grid min-h-5 min-w-5 place-items-center rounded-full bg-destructive px-1.5 text-[10px] font-bold leading-none text-white group-data-[collapsible=icon]:hidden"
+                      >
+                        {badgeLabel}
+                      </span>
+                    ) : null}
+                  </Link>
+                </SidebarMenuButton>
+                {/* Collapsed (icon-rail) badge — absolutely-positioned
+                    red dot anchored to the menu button's top-right
+                    corner so it stays visible even when the title
+                    text is hidden. `ring-background` lifts it off
+                    the icon visually. Pointer-events-none so it
+                    can't intercept the menu-button click. */}
+                {hasBadge ? (
+                  <span
+                    aria-hidden
+                    className="pointer-events-none absolute right-1 top-1 hidden min-h-4 min-w-4 place-items-center rounded-full bg-destructive px-1 text-[9px] font-bold leading-none text-white ring-2 ring-background group-data-[collapsible=icon]:grid"
+                  >
+                    {badgeLabel}
+                  </span>
+                ) : null}
+              </SidebarMenuItem>
+            )
+          })}
         </SidebarMenu>
       </SidebarGroupContent>
     </SidebarGroup>

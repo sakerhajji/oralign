@@ -16,9 +16,17 @@ import {
 } from '../dto/pack.dto';
 
 /**
- * PRO + PRO+ are orthodontist-only and must be priced for two arches
- * only. The whitelist below is the single source of truth — adding a
- * future "PRO STARTER" works by listing it here.
+ * PRO + PRO+ ship as two-arches-only — clinical constraint, not an
+ * audience one. Their step counts (36, unlimited) only make sense
+ * across both arches, so a single-arch price would be misleading.
+ * The whitelist below is the single source of truth — add future
+ * two-arches-only packs ("PRO STARTER", …) by listing them here.
+ *
+ * The legacy `isForOrthodontists` flag has been retired from product
+ * behaviour: every pack is available to every practitioner. We still
+ * accept the field in the DTOs for backward-compat (legacy rows in
+ * the DB carry `true`), but it has no effect on what packs a doctor
+ * can pick or which prices they see.
  */
 const TWO_ARCH_ONLY_PACK_NAMES = new Set<string>(['PRO', 'PRO+']);
 
@@ -57,6 +65,35 @@ export class PackService {
     return new PaginatedResponse(rows, total, page, take, Math.ceil(total / take));
   }
 
+  /**
+   * Public catalogue — used by the marketing showcase to render the
+   * Packs section dynamically. Returns ACTIVE, non-deleted packs only,
+   * with each pack's ACTIVE prices attached. Deactivating a pack from
+   * `/dashboard/packs` removes it from the public response on the
+   * next fetch (React-Query stale-time is short on the marketing
+   * page).
+   *
+   * No auth guard fronts this method — it's served by the public
+   * `/api/packs/public` route, and the response shape is deliberately
+   * limited to fields safe to expose (no audit columns, no admin
+   * filtering primitives). Ordering matches the LITE → ESSENTIAL →
+   * SMART → PRO → PRO+ commercial sequence so the showcase grid is
+   * stable across renders.
+   */
+  async listPublic(): Promise<PackWithPrices[]> {
+    return this.prisma.pack.findMany({
+      where: { deletedAt: null, isActive: true },
+      include: {
+        // Only the active prices land in the public payload. An admin
+        // who archives a single-arch price keeps the row in the DB
+        // for audit; the marketing page only sees what's currently
+        // sellable.
+        prices: { where: { isActive: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
   async get(id: string): Promise<PackWithPrices> {
     const pack = await this.prisma.pack.findUnique({
       where: { id },
@@ -70,23 +107,49 @@ export class PackService {
 
   async create(dto: CreatePackDto): Promise<PackWithPrices> {
     this.assertUnlimitedShape(dto);
-    const pack = await this.prisma.pack.create({
-      data: {
-        name: dto.name,
-        description: dto.description ?? null,
-        maxStepsPerArch: dto.isUnlimitedSteps ? null : dto.maxStepsPerArch ?? null,
-        includedCorrections: dto.isUnlimitedCorrections
-          ? null
-          : dto.includedCorrections ?? null,
-        isUnlimitedSteps: dto.isUnlimitedSteps ?? false,
-        isUnlimitedCorrections: dto.isUnlimitedCorrections ?? false,
-        isForOrthodontists: dto.isForOrthodontists ?? false,
-        isActive: dto.isActive ?? true,
-      },
-      include: { prices: true },
+    // One transaction so the pack + its initial price land together
+    // (or neither does). If the admin didn't pass a price, we create
+    // the pack alone — they can add prices later via the inline
+    // Update flow. The two-arches archType is the canonical pricing
+    // unit; the per-arch concept is invisible in the admin UI now.
+    return this.prisma.$transaction(async (tx) => {
+      const pack = await tx.pack.create({
+        data: {
+          name: dto.name,
+          description: dto.description ?? null,
+          maxStepsPerArch: dto.isUnlimitedSteps
+            ? null
+            : dto.maxStepsPerArch ?? null,
+          includedCorrections: dto.isUnlimitedCorrections
+            ? null
+            : dto.includedCorrections ?? null,
+          isUnlimitedSteps: dto.isUnlimitedSteps ?? false,
+          isUnlimitedCorrections: dto.isUnlimitedCorrections ?? false,
+          isForOrthodontists: dto.isForOrthodontists ?? false,
+          isActive: dto.isActive ?? true,
+        },
+      });
+      if (dto.price !== undefined) {
+        await tx.packPrice.create({
+          data: {
+            packId: pack.id,
+            archType: ArchType.two_arches,
+            price: new Prisma.Decimal(dto.price.toFixed(3)),
+            currency: dto.currency ?? 'TND',
+            isActive: true,
+          },
+        });
+      }
+      this.logger.log(
+        `Created pack ${pack.id} (${pack.name})${
+          dto.price !== undefined ? ` with price ${dto.price}` : ''
+        }`,
+      );
+      return tx.pack.findUniqueOrThrow({
+        where: { id: pack.id },
+        include: { prices: true },
+      });
     });
-    this.logger.log(`Created pack ${pack.id} (${pack.name})`);
-    return pack;
   }
 
   async update(id: string, dto: UpdatePackDto): Promise<PackWithPrices> {
@@ -104,31 +167,75 @@ export class PackService {
           ? dto.includedCorrections
           : current.includedCorrections,
     });
-    const updated = await this.prisma.pack.update({
-      where: { id },
-      data: {
-        name: dto.name,
-        description: dto.description,
-        maxStepsPerArch:
-          dto.isUnlimitedSteps === true
-            ? null
-            : dto.maxStepsPerArch !== undefined
-              ? dto.maxStepsPerArch
-              : undefined,
-        includedCorrections:
-          dto.isUnlimitedCorrections === true
-            ? null
-            : dto.includedCorrections !== undefined
-              ? dto.includedCorrections
-              : undefined,
-        isUnlimitedSteps: dto.isUnlimitedSteps,
-        isUnlimitedCorrections: dto.isUnlimitedCorrections,
-        isForOrthodontists: dto.isForOrthodontists,
-        isActive: dto.isActive,
-      },
-      include: { prices: true },
+    // One transaction: pack columns + inline-price update land
+    // together so a partial save can't leave the catalogue in a
+    // half-stale state. When `dto.price` is provided we update the
+    // active two_arches price (or create one if none exists yet).
+    // Existing quotations that snapshotted the previous price are
+    // unaffected — we never touch a snapshot.
+    return this.prisma.$transaction(async (tx) => {
+      await tx.pack.update({
+        where: { id },
+        data: {
+          name: dto.name,
+          description: dto.description,
+          maxStepsPerArch:
+            dto.isUnlimitedSteps === true
+              ? null
+              : dto.maxStepsPerArch !== undefined
+                ? dto.maxStepsPerArch
+                : undefined,
+          includedCorrections:
+            dto.isUnlimitedCorrections === true
+              ? null
+              : dto.includedCorrections !== undefined
+                ? dto.includedCorrections
+                : undefined,
+          isUnlimitedSteps: dto.isUnlimitedSteps,
+          isUnlimitedCorrections: dto.isUnlimitedCorrections,
+          isForOrthodontists: dto.isForOrthodontists,
+          isActive: dto.isActive,
+        },
+      });
+      if (dto.price !== undefined) {
+        const activeTwoArches = await tx.packPrice.findFirst({
+          where: { packId: id, archType: ArchType.two_arches, isActive: true },
+        });
+        const decimalPrice = new Prisma.Decimal(dto.price.toFixed(3));
+        if (activeTwoArches) {
+          // Same currency + same number → no-op (skip the write).
+          // Avoids generating a churny audit trail when the admin
+          // re-submits the form without changing the price.
+          const currencyChanged =
+            dto.currency !== undefined &&
+            dto.currency !== activeTwoArches.currency;
+          const priceChanged = !activeTwoArches.price.equals(decimalPrice);
+          if (priceChanged || currencyChanged) {
+            await tx.packPrice.update({
+              where: { id: activeTwoArches.id },
+              data: {
+                price: priceChanged ? decimalPrice : undefined,
+                currency: currencyChanged ? dto.currency : undefined,
+              },
+            });
+          }
+        } else {
+          await tx.packPrice.create({
+            data: {
+              packId: id,
+              archType: ArchType.two_arches,
+              price: decimalPrice,
+              currency: dto.currency ?? 'TND',
+              isActive: true,
+            },
+          });
+        }
+      }
+      return tx.pack.findUniqueOrThrow({
+        where: { id },
+        include: { prices: true },
+      });
     });
-    return updated;
   }
 
   async softDelete(id: string): Promise<{ id: string; deletedAt: Date }> {

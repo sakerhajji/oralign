@@ -33,7 +33,7 @@ export class CreatePackDto {
   @Transform(({ value }) => normalizeOptionalString(value))
   name!: string;
 
-  @ApiPropertyOptional({ example: '24 steps per arch · 2 included corrections' })
+  @ApiPropertyOptional({ example: '24 steps · 2 included corrections' })
   @IsOptional()
   @IsString()
   @MaxLength(280)
@@ -79,6 +79,29 @@ export class CreatePackDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  // ─── Inline price (single source of truth in the admin UI) ──
+  // When provided, the service creates an ACTIVE PackPrice (archType
+  // defaults to two_arches — the canonical pricing unit) atomically
+  // with the Pack so the admin doesn't need a second "Manage prices"
+  // trip. Passing only one of price/currency is treated as a
+  // configuration error.
+  @ApiPropertyOptional({
+    example: '2100.000',
+    description:
+      'Optional inline price. When set, the service creates an ACTIVE PackPrice with archType=two_arches atomically with the pack.',
+  })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 3 })
+  @IsPositive()
+  @Type(() => Number)
+  price?: number;
+
+  @ApiPropertyOptional({ example: 'TND', default: 'TND' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(8)
+  currency?: string;
 }
 
 export class UpdatePackDto {
@@ -130,6 +153,28 @@ export class UpdatePackDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  // ─── Inline price update ────────────────────────────────────
+  // When provided, the service updates the pack's ACTIVE
+  // two_arches price atomically with the pack update. If no
+  // active price exists yet, one is created. Existing quotations
+  // that snapshotted the old price are untouched (we never edit
+  // the snapshot — only the catalogue row).
+  @ApiPropertyOptional({
+    description:
+      'Inline price update. Updates (or creates) the ACTIVE PackPrice row for archType=two_arches.',
+  })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 3 })
+  @IsPositive()
+  @Type(() => Number)
+  price?: number;
+
+  @ApiPropertyOptional({ example: 'TND' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(8)
+  currency?: string;
 }
 
 export class CreatePackPriceDto {

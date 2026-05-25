@@ -456,21 +456,26 @@ export function OdontogramSelector({
                 : 'Tap any tooth to assign a color. Each tooth carries one instruction at a time.')}
           </p>
         </div>
-        {mode !== 'attachments' && (
-          <Button
-            type="button"
-            variant="ghost"
-            className="justify-start text-primary"
-            onClick={() => setShowLegend((s) => !s)}
-          >
-            <Palette className="mr-2 h-4 w-4" />
-            {showLegend ? 'Hide' : 'View'} color legend
-          </Button>
-        )}
+        <Button
+          type="button"
+          variant="ghost"
+          className="justify-start text-primary"
+          onClick={() => setShowLegend((s) => !s)}
+        >
+          <Palette className="mr-2 h-4 w-4" />
+          {showLegend ? 'Hide' : 'View'} color guide
+        </Button>
       </div>
 
-      {mode !== 'attachments' && showLegend && (
-        <ColorLegend assignments={assignments} colors={visibleColors} />
+      {showLegend && (
+        <ColorLegend
+          assignments={assignments}
+          readonlyAssignments={readonlyAssignments}
+          colors={visibleColors}
+          mode={mode}
+          iprValues={iprValues}
+          iprNotes={iprNotes}
+        />
       )}
 
       <div className="rounded-2xl border bg-card shadow-sm">
@@ -596,11 +601,78 @@ export function OdontogramSelector({
 
 // ── Legend ─────────────────────────────────────────────────────────────────
 
+/**
+ * Long-form clinical descriptions for each tooth-instruction color.
+ * Shown in the legend so the team has the *meaning* — not just the
+ * label — alongside every swatch. Keys are the enum values so the
+ * lookup tolerates legacy data exactly the way the renderer does.
+ */
+const COLOR_DESCRIPTION: Record<ToothInstructionType, string> = {
+  [ToothInstructionType.NO_ATTACHMENTS]:
+    'Tooth will not carry an aligner attachment during treatment.',
+  [ToothInstructionType.DO_NOT_MOVE]:
+    'Tooth must stay anchored — planner will not move it.',
+  [ToothInstructionType.NO_IPR]:
+    'Tooth contact is excluded from interproximal reduction.',
+  [ToothInstructionType.EXTRACT]:
+    'Tooth flagged for extraction before or during treatment.',
+  [ToothInstructionType.ATTACHMENT]:
+    'Planner placed an aligner attachment on this tooth.',
+  [ToothInstructionType.IPR_VALUE]:
+    'Legacy per-tooth IPR marker (kept for backwards compatibility).',
+};
+
+/**
+ * Extra-legend swatch — the "between teeth" markers (IPR mm and STEP).
+ * Hard-coded HEX values mirror the CSS so the swatch and the chip on
+ * the odontogram match exactly. Kept here instead of in COLORS so the
+ * picker palette stays focused on tooth-level marks only.
+ */
+type BetweenTeethEntry = {
+  key: 'ipr_mm' | 'step';
+  label: string;
+  short: string;
+  hex: string;
+  textHex: string;
+  description: string;
+};
+
+const BETWEEN_TEETH: readonly BetweenTeethEntry[] = [
+  {
+    key: 'ipr_mm',
+    label: 'IPR amount (mm)',
+    short: 'IPR',
+    hex: '#feca16',        // brand amber — matches `.odo-ipr-value`
+    textHex: '#191919',
+    description:
+      'Interproximal reduction performed at the chair, in millimetres. The primary clinical decision between two adjacent teeth.',
+  },
+  {
+    key: 'step',
+    label: 'Step / treatment growth',
+    short: 'STEP',
+    hex: '#7c3aed',        // violet-600 — matches `.odo-ipr-note`
+    textHex: '#ffffff',
+    description:
+      'Which aligner step the IPR is performed at — the treatment progression timing. Sits next to the IPR amount as a secondary chip.',
+  },
+] as const;
+
 function ColorLegend({
   assignments,
+  readonlyAssignments,
   colors,
+  mode,
+  iprValues,
+  iprNotes,
 }: {
   assignments: Map<number, ToothInstructionType>;
+  /**
+   * Treatment-plan editor draws the doctor's order marks as a read-only
+   * background. The legend lists those too so the planner doesn't have
+   * to remember which orange tooth is "the doctor's" vs "their own".
+   */
+  readonlyAssignments?: Map<number, ToothInstructionType>;
   /**
    * Restricted palette — only iterate over the colours that are valid
    * for the current mode. Otherwise the order-page legend would list
@@ -608,32 +680,169 @@ function ColorLegend({
    * treatment-plan editor.
    */
   colors: readonly ColorEntry[];
+  mode: 'movement' | 'attachments' | 'treatment';
+  /** Optional IPR (mm) values — drives the populated-tooth counter. */
+  iprValues?: Map<number, string>;
+  /** Optional STEP values — same idea, separate counter. */
+  iprNotes?: Map<number, string>;
 }) {
-  return (
-    <div className="grid gap-3 rounded-xl border bg-card p-4 sm:grid-cols-2 lg:grid-cols-4">
-      {colors.map((c) => {
-        const teeth: number[] = [];
-        assignments.forEach((type, tooth) => {
-          if (type === c.type) teeth.push(tooth);
-        });
-        teeth.sort((a, b) => a - b);
+  // For 'treatment' and 'attachments' mode the doctor's order marks
+  // (no_attachments / do_not_move / no_ipr / extract) bleed in as
+  // read-only background. Surface them in the legend too so the
+  // planner can read the full picture at a glance.
+  const showReadonly =
+    (mode === 'treatment' || mode === 'attachments') &&
+    !!readonlyAssignments &&
+    readonlyAssignments.size > 0;
+  const showBetweenTeeth = mode === 'treatment' || mode === 'attachments';
 
-        return (
-          <div key={c.type} className="flex items-start gap-3">
-            <span
-              className="mt-0.5 inline-block h-6 w-6 shrink-0 rounded-full border-2 border-background shadow-sm"
-              style={{ background: c.hex }}
-              aria-hidden
-            />
-            <div className="min-w-0">
-              <p className="text-sm font-semibold leading-tight">{c.label}</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {teeth.length > 0 ? teeth.join(', ') : 'No teeth assigned'}
-              </p>
-            </div>
+  // Pre-compute the list of read-only doctor marks we'll actually
+  // render — empty marks are skipped, so on a fresh treatment plan
+  // the section title disappears entirely instead of showing a blank
+  // strip of "No teeth assigned" cards.
+  const readonlyRows = showReadonly
+    ? COLORS.filter((c) => c.type !== ToothInstructionType.ATTACHMENT)
+        .map((c) => {
+          const teeth: number[] = [];
+          readonlyAssignments!.forEach((type, tooth) => {
+            if (type === c.type) teeth.push(tooth);
+          });
+          teeth.sort((a, b) => a - b);
+          return { entry: c, teeth };
+        })
+        .filter((row) => row.teeth.length > 0)
+    : [];
+
+  return (
+    <div className="space-y-4 rounded-xl border bg-card p-4">
+      {/* ─── Tooth-level marks ─────────────────────────────────────── */}
+      <section>
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Tooth-level marks
+        </h3>
+        <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          {colors.map((c) => {
+            const teeth: number[] = [];
+            assignments.forEach((type, tooth) => {
+              if (type === c.type) teeth.push(tooth);
+            });
+            teeth.sort((a, b) => a - b);
+            return (
+              <LegendRow
+                key={c.type}
+                hex={c.hex}
+                label={c.label}
+                teeth={teeth}
+              />
+            );
+          })}
+        </div>
+      </section>
+
+      {/* ─── Doctor's prescription (read-only on treatment view) ──── */}
+      {readonlyRows.length > 0 ? (
+        <section>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            From the order (read-only)
+          </h3>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            {readonlyRows.map(({ entry, teeth }) => (
+              <LegendRow
+                key={`ro-${entry.type}`}
+                hex={entry.hex}
+                label={entry.label}
+                teeth={teeth}
+                readonly
+              />
+            ))}
           </div>
-        );
-      })}
+        </section>
+      ) : null}
+
+      {/* ─── Between-teeth markers: IPR + Step ─────────────────────── */}
+      {showBetweenTeeth ? (
+        <section>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Between-teeth (IPR · step)
+          </h3>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            {BETWEEN_TEETH.map((b) => {
+              const populated =
+                b.key === 'ipr_mm'
+                  ? iprValues?.size ?? 0
+                  : iprNotes?.size ?? 0;
+              return (
+                <LegendRow
+                  key={b.key}
+                  hex={b.hex}
+                  label={b.label}
+                  count={populated}
+                  countLabel="contact"
+                />
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Compact legend row — matches the original order-page legend density
+ * (one swatch + label + small assignment summary). Used everywhere
+ * now: movement marks, doctor read-only marks, and between-teeth
+ * markers (IPR amount + Step). One small subtitle hint sits under the
+ * label so each row carries both *what* the colour is and *where* it
+ * currently shows on the chart.
+ */
+function LegendRow({
+  hex,
+  label,
+  teeth,
+  count,
+  countLabel,
+  readonly,
+}: {
+  hex: string;
+  label: string;
+  teeth?: number[];
+  count?: number;
+  countLabel?: string;
+  readonly?: boolean;
+}) {
+  let subtitle: React.ReactNode = null;
+  if (teeth) {
+    subtitle =
+      teeth.length > 0
+        ? teeth.join(', ')
+        : 'No teeth assigned';
+  } else if (typeof count === 'number') {
+    subtitle =
+      count > 0
+        ? `${count} ${countLabel ?? 'item'}${count === 1 ? '' : 's'}`
+        : `No ${countLabel ?? 'item'}s set`;
+  }
+  return (
+    <div className="flex items-start gap-3">
+      <span
+        className="mt-0.5 inline-block h-6 w-6 shrink-0 rounded-full border-2 border-background shadow-sm"
+        style={{ background: hex }}
+        aria-hidden
+      />
+      <div className="min-w-0">
+        <p className="flex items-center gap-1.5 text-sm font-semibold leading-tight">
+          {label}
+          {readonly ? (
+            <span className="rounded bg-muted px-1 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+              Order
+            </span>
+          ) : null}
+        </p>
+        <p className="mt-1 truncate text-xs text-muted-foreground">
+          {subtitle}
+        </p>
+      </div>
     </div>
   );
 }
@@ -1707,9 +1916,12 @@ const ODONTOGRAM_CSS = /* css */ `
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  min-width: 34px;
-  font-size: 9px;
+  gap: 3px;
+  min-width: 38px;
+  /* Was 9px — bumped per the clinical team's request so the IPR + Step
+     values are readable without zooming in. Sub-element font sizes
+     downstream are tuned proportionally. */
+  font-size: 11px;
   font-weight: 700;
   line-height: 1.1;
   white-space: nowrap;
@@ -1738,17 +1950,19 @@ const ODONTOGRAM_CSS = /* css */ `
 .odo-ipr-value {
   display: inline-flex;
   align-items: baseline;
-  gap: 2px;
-  min-height: 16px;
-  padding: 2px 6px;
+  gap: 3px;
+  min-height: 18px;
+  padding: 3px 7px;
   border-radius: 999px;
   background: #feca16;                    /* brand amber — IPR mm */
   color: #191919;                         /* Midnight Ink for legibility on amber */
   box-shadow: 0 1px 4px rgba(254, 202, 22, 0.45);
   font-weight: 700;
+  /* Inherits the parent .odo-ipr-label font-size (11px) — keeps the
+     mm number proportional to the chip's overall scale. */
 }
 .odo-ipr-unit {
-  font-size: 7px;
+  font-size: 9px;
   font-weight: 800;
   opacity: 0.7;
 }
@@ -1756,19 +1970,19 @@ const ODONTOGRAM_CSS = /* css */ `
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  min-height: 15px;
-  padding: 2px 5px;
+  min-height: 17px;
+  padding: 3px 6px;
   border-radius: 999px;
   background: #7c3aed;                    /* violet-600 — Step */
   color: #fff;
   box-shadow: 0 1px 3px rgba(124, 58, 237, 0.45);
   font-weight: 700;
-  font-size: 8px;
+  font-size: 10px;
   letter-spacing: 0.2px;
 }
 .odo-ipr-note-label {
   color: rgba(255, 255, 255, 0.7);
-  font-size: 7px;
+  font-size: 9px;
   font-weight: 800;
   text-transform: uppercase;
 }
@@ -1776,7 +1990,9 @@ const ODONTOGRAM_CSS = /* css */ `
 @media (max-width: 640px) {
   .odo-ipr { width: 10px; min-height: 72px; }
   .odo-ipr-on .odo-ipr-bar { height: 44px; width: 5px; }
-  .odo-ipr-label { font-size: 8px; min-width: max-content; }
+  /* Slightly smaller on phones but still significantly bigger than
+     the pre-bump 8px so the value stays legible on a small screen. */
+  .odo-ipr-label { font-size: 10px; min-width: max-content; }
 }
 @media (max-width: 480px) {
   .odo-ipr { width: 8px; min-height: 60px; }

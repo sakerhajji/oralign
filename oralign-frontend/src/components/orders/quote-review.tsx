@@ -5,14 +5,19 @@ import { format } from 'date-fns';
 import { toast } from 'sonner';
 import {
   AlertTriangle,
+  Calendar,
   Check,
+  ChevronDown,
+  ChevronUp,
   Download,
   FileText,
   Globe,
   Loader2,
+  RotateCcw,
   Send,
   Sparkles,
   Trash2,
+  User as UserIcon,
   X,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -37,16 +42,21 @@ import {
   useGenerateQuotationPdf,
   useQuotationForOrder,
   useRejectQuotation,
+  useRevertQuotationToDraft,
   useSendQuotation,
   useUpdateQuotation,
 } from '@/lib/hooks/use-quotations';
 import { useCompanyBilling } from '@/lib/hooks/use-company-billing';
+import { useOrder } from '@/lib/hooks/use-orders';
 import {
   DevisLanguage,
   type Quotation,
   QuotationStatus,
   UserRole,
 } from '@/lib/types';
+import { QuotePackPanel } from './quote-pack-panel';
+
+// ─── Visual tokens ────────────────────────────────────────────────────────
 
 interface Props {
   orderId: string;
@@ -75,33 +85,6 @@ const LANG_LABEL: Record<DevisLanguage, string> = {
   [DevisLanguage.AR]: 'العربية',
 };
 
-/**
- * Locally compute the same totals the backend persists. Single source
- * of truth lives in `QuotationService.computeTotals` server-side; this
- * helper is purely for the live preview while the admin is typing.
- */
-function computeTotals(
-  treatmentFees: number,
-  fabricationFees: number,
-  deliveryFees: number,
-  discountAmount: number,
-  tvaRate: number,
-) {
-  const grossFees =
-    Math.max(0, treatmentFees) +
-    Math.max(0, fabricationFees) +
-    Math.max(0, deliveryFees);
-  const discount = Math.min(Math.max(0, discountAmount), grossFees);
-  const subTotalHt = grossFees - discount;
-  const safeRate = Math.max(0, Math.min(100, tvaRate));
-  const tvaAmount = (subTotalHt * safeRate) / 100;
-  return {
-    subTotalHt,
-    tvaAmount,
-    totalTtc: subTotalHt + tvaAmount,
-  };
-}
-
 function formatMoney(amount: number, currency: string): string {
   const formatted = Math.abs(amount).toLocaleString('fr-FR', {
     minimumFractionDigits: 3,
@@ -111,18 +94,24 @@ function formatMoney(amount: number, currency: string): string {
   return `${signed} ${currency}`;
 }
 
-/**
- * Quotation tab content for the order-detail page. Admin sees the
- * editable form + send/PDF/cancel actions; the doctor (order owner)
- * sees a read-only summary + approve / reject buttons. Designer sees
- * the empty state.
- */
+const dateOrDash = (iso?: string | null) =>
+  iso ? format(new Date(iso), 'MMM d, yyyy') : '—';
+
+// ─────────────────────────────────────────────────────────────────────────
+// Entry point
+// ─────────────────────────────────────────────────────────────────────────
+
 export function QuoteReview({ orderId, role }: Props) {
   const isAdmin = role === UserRole.ADMIN || role === UserRole.SUPER_ADMIN;
   const isDoctor = role === UserRole.DENTIST;
 
   const { data: quote, isLoading } = useQuotationForOrder(orderId);
   const { data: settings } = useCompanyBilling(isAdmin);
+  // Order fetch is shared by both admin + doctor — we use it for the
+  // patient name + creation date in the new header. It's already in
+  // the React-Query cache after the page's main order query, so this
+  // is effectively free.
+  const { data: order } = useOrder(orderId);
 
   if (!isAdmin && !isDoctor) {
     return (
@@ -150,7 +139,6 @@ export function QuoteReview({ orderId, role }: Props) {
       <AdminCreate
         orderId={orderId}
         defaultCurrency={settings?.defaultCurrency ?? 'TND'}
-        defaultTvaRate={settings?.defaultTvaRate ?? 19}
       />
     );
   }
@@ -165,23 +153,106 @@ export function QuoteReview({ orderId, role }: Props) {
     );
   }
 
+  const patientName = order?.patient?.fullName ?? 'Patient';
+  const orderCode = order?.orderCode ?? '';
+
+  // Both roles get the same header → controls → pack panel → footer
+  // structure. The pack panel is the centerpiece; the admin's controls
+  // shrink to one compact row (language + optional discount + notes).
   return isAdmin ? (
-    <AdminView quote={quote} orderId={orderId} />
+    <AdminLayout
+      quote={quote}
+      orderId={orderId}
+      patientName={patientName}
+      orderCode={orderCode}
+    />
   ) : (
-    <DoctorView quote={quote} />
+    <DoctorLayout
+      quote={quote}
+      patientName={patientName}
+      orderCode={orderCode}
+    />
   );
 }
 
-// ─── Admin: empty-state create form ───────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
+// Shared header — patient + dates + status
+// ─────────────────────────────────────────────────────────────────────────
+
+function QuoteHeader({
+  quote,
+  patientName,
+  orderCode,
+  rightSlot,
+}: {
+  quote: Quotation;
+  patientName: string;
+  orderCode: string;
+  rightSlot?: React.ReactNode;
+}) {
+  return (
+    <Card className="overflow-hidden">
+      <div className="bg-gradient-to-r from-primary/8 via-primary/4 to-transparent">
+        <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
+              <UserIcon className="h-3 w-3" />
+              Patient
+            </div>
+            <h2 className="mt-0.5 truncate text-2xl font-semibold tracking-tight">
+              {patientName}
+            </h2>
+            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+              {orderCode ? (
+                <span className="flex items-center gap-1">
+                  <FileText className="h-3 w-3" />
+                  Order #{orderCode}
+                </span>
+              ) : null}
+              <span className="flex items-center gap-1">
+                <Calendar className="h-3 w-3" />
+                Created {dateOrDash(quote.createdAt)}
+              </span>
+              {quote.sentAt ? (
+                <span>Sent {dateOrDash(quote.sentAt)}</span>
+              ) : null}
+              {quote.approvedAt ? (
+                <span>Approved {dateOrDash(quote.approvedAt)}</span>
+              ) : null}
+              {quote.rejectedAt ? (
+                <span>Rejected {dateOrDash(quote.rejectedAt)}</span>
+              ) : null}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge
+              variant="outline"
+              className={cn('text-xs', STATUS_TONE[quote.status])}
+            >
+              {STATUS_LABEL[quote.status]}
+            </Badge>
+            <Badge variant="outline" className="text-xs">
+              <Globe className="mr-1 h-3 w-3" />
+              {LANG_LABEL[quote.language]}
+            </Badge>
+            {rightSlot}
+          </div>
+        </CardContent>
+      </div>
+    </Card>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Admin: empty-state create form
+// ─────────────────────────────────────────────────────────────────────────
 
 function AdminCreate({
   orderId,
   defaultCurrency,
-  defaultTvaRate,
 }: {
   orderId: string;
   defaultCurrency: string;
-  defaultTvaRate: number;
 }) {
   const create = useCreateQuotation();
   const [language, setLanguage] = useState<DevisLanguage>(DevisLanguage.FR);
@@ -194,8 +265,8 @@ function AdminCreate({
           New quotation
         </CardTitle>
         <p className="text-sm text-muted-foreground">
-          Pick a language and start a draft. You can fill the fees and
-          generate the PDF before sending it to the doctor.
+          Pick a language and start a draft. You&apos;ll attach a pack
+          and split the total into tranches on the next screen.
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -224,7 +295,8 @@ function AdminCreate({
               dto: {
                 language,
                 currency: defaultCurrency,
-                tvaRate: defaultTvaRate,
+                // VAT rate stays at billing-config default — admin
+                // doesn't tweak it on the quote anymore.
               },
             })
           }
@@ -243,51 +315,54 @@ function AdminCreate({
   );
 }
 
-// ─── Admin view ────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
+// Admin layout
+// ─────────────────────────────────────────────────────────────────────────
 
-function AdminView({ quote, orderId }: { quote: Quotation; orderId: string }) {
+function AdminLayout({
+  quote,
+  orderId,
+  patientName,
+  orderCode,
+}: {
+  quote: Quotation;
+  orderId: string;
+  patientName: string;
+  orderCode: string;
+}) {
   const update = useUpdateQuotation();
   const generate = useGenerateQuotationPdf();
   const send = useSendQuotation();
   const cancel = useCancelQuotation();
+  const recall = useRevertQuotationToDraft();
+  // Local confirm flag — recall is a one-click action with consequences
+  // for the doctor (their bell pings), so we ask once before firing.
+  const [confirmRecall, setConfirmRecall] = useState(false);
 
+  // Only the fields admins still touch directly: language (controls PDF
+  // rendering), delivery fees (admin-added to the pack), discount
+  // (subtracted from pack), notes, admin message. Fees/VAT are owned
+  // by the pack snapshot + billing settings now.
   const [form, setForm] = useState({
     language: quote.language,
-    treatmentFees: quote.treatmentFees,
-    fabricationFees: quote.fabricationFees,
     deliveryFees: quote.deliveryFees,
     discountAmount: quote.discountAmount,
-    tvaRate: quote.tvaRate,
-    currency: quote.currency,
     notes: quote.notes ?? '',
     adminMessage: quote.adminMessage ?? '',
   });
+  const [notesOpen, setNotesOpen] = useState(
+    !!(quote.notes || quote.adminMessage),
+  );
 
   useEffect(() => {
     setForm({
       language: quote.language,
-      treatmentFees: quote.treatmentFees,
-      fabricationFees: quote.fabricationFees,
       deliveryFees: quote.deliveryFees,
       discountAmount: quote.discountAmount,
-      tvaRate: quote.tvaRate,
-      currency: quote.currency,
       notes: quote.notes ?? '',
       adminMessage: quote.adminMessage ?? '',
     });
   }, [quote]);
-
-  const totals = useMemo(
-    () =>
-      computeTotals(
-        form.treatmentFees,
-        form.fabricationFees,
-        form.deliveryFees,
-        form.discountAmount,
-        form.tvaRate,
-      ),
-    [form],
-  );
 
   const isEditable = quote.status === QuotationStatus.DRAFT;
   const canCancel =
@@ -295,54 +370,54 @@ function AdminView({ quote, orderId }: { quote: Quotation; orderId: string }) {
     quote.status === QuotationStatus.SENT;
   const hasPdf = !!quote.pdfFilePath;
 
-  // Compose the current form into a save-able DTO. Used by both the
-  // explicit "Save draft" button AND the implicit save that fires
-  // before Generate PDF / Send to doctor so the admin never loses
-  // un-saved typed values to a misclick.
-  const draftDto = (): {
-    language: typeof form.language;
-    treatmentFees: number;
-    fabricationFees: number;
-    deliveryFees: number;
-    discountAmount: number;
-    tvaRate: number;
-    currency: string;
-    notes: string;
-    adminMessage: string;
-  } => ({
+  // Pack price snapshot lives on `treatmentFees` for pack quotes —
+  // we don't surface the field name to the admin (no more "Treatment
+  // fees" UI), it's just the original pack catalog price. The net the
+  // doctor will pay is `pack + delivery − discount`.
+  const packPrice = quote.treatmentFees;
+  const netAfter = Math.max(
+    0,
+    packPrice +
+      (Number(form.deliveryFees) || 0) -
+      (Number(form.discountAmount) || 0),
+  );
+
+  const draftDto = () => ({
     language: form.language,
-    treatmentFees: Number(form.treatmentFees) || 0,
-    fabricationFees: Number(form.fabricationFees) || 0,
+    // `treatmentFees` carries the pack-price snapshot for pack quotes
+    // — we forward it untouched so the backend can recompute totals
+    // without flipping back to fees-mode. For legacy non-pack drafts
+    // the field is still 0, same as before.
+    treatmentFees: quote.treatmentFees,
+    fabricationFees: 0,
     deliveryFees: Number(form.deliveryFees) || 0,
     discountAmount: Number(form.discountAmount) || 0,
-    tvaRate: Number(form.tvaRate) || 0,
-    currency: form.currency,
+    tvaRate: quote.tvaRate, // sourced from billing settings on create
+    currency: quote.currency,
     notes: form.notes,
     adminMessage: form.adminMessage,
   });
 
-  // Persist whatever's currently in the form, but only when the quote
-  // is still in draft state (server rejects edits on sent/approved/
-  // rejected anyway). Returns the updated quote so the caller can chain
-  // the next mutation against the FRESH server state.
   const saveCurrentDraftIfNeeded = async () => {
     if (!isEditable) return;
-    try {
-      await update.mutateAsync({ id: quote.id, dto: draftDto() });
-    } catch (err) {
-      // Swallow the toast that useUpdateQuotation already raised — we
-      // still want the caller to know it failed so it doesn't continue
-      // sending stale data.
-      throw err;
-    }
+    await update.mutateAsync({ id: quote.id, dto: draftDto() });
+  };
+
+  const handleSaveDraft = () => {
+    update.mutate({ id: quote.id, dto: draftDto() });
   };
 
   const handleGeneratePdf = async () => {
     try {
+      // Draft → persist the new fee shape before rendering.
+      // Sent/approved → form is otherwise locked, but the language
+      // dropdown stays live so admin can issue a translated copy on
+      // demand. Either way we hand the current selection to the
+      // backend as a `?lang=` override.
       await saveCurrentDraftIfNeeded();
-      await generate.mutateAsync(quote.id);
+      await generate.mutateAsync({ id: quote.id, lang: form.language });
     } catch {
-      // toast already raised by the mutation hook
+      /* toast raised by hook */
     }
   };
 
@@ -351,7 +426,7 @@ function AdminView({ quote, orderId }: { quote: Quotation; orderId: string }) {
       await saveCurrentDraftIfNeeded();
       await send.mutateAsync(quote.id);
     } catch {
-      // toast already raised by the mutation hook
+      /* toast raised by hook */
     }
   };
 
@@ -371,85 +446,56 @@ function AdminView({ quote, orderId }: { quote: Quotation; orderId: string }) {
 
   return (
     <div className="space-y-4">
-      {/* Status / metadata */}
-      <Card>
-        <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <CardTitle className="flex flex-wrap items-center gap-2 text-base">
-              <FileText className="h-4 w-4 text-primary" />
-              {quote.quotationNumber ?? 'Quotation (draft)'}
-              <Badge
-                variant="outline"
-                className={cn('text-xs', STATUS_TONE[quote.status])}
-              >
-                {STATUS_LABEL[quote.status]}
-              </Badge>
-              <Badge variant="outline" className="text-xs">
-                <Globe className="mr-1 h-3 w-3" />
-                {LANG_LABEL[quote.language]}
-              </Badge>
-            </CardTitle>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Created {format(new Date(quote.createdAt), 'MMM d, yyyy HH:mm')}
-              {quote.sentAt &&
-                ` · Sent ${format(new Date(quote.sentAt), 'MMM d, yyyy')}`}
-              {quote.approvedAt &&
-                ` · Approved ${format(new Date(quote.approvedAt), 'MMM d, yyyy')}`}
-              {quote.rejectedAt &&
-                ` · Rejected ${format(new Date(quote.rejectedAt), 'MMM d, yyyy')}`}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {hasPdf && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleDownloadPdf}
-                className="gap-2"
-              >
-                <Download className="h-4 w-4" />
-                Download PDF
-              </Button>
-            )}
-            {canCancel && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => cancel.mutate({ id: quote.id, orderId })}
-                disabled={cancel.isPending}
-                className="gap-2 text-red-600"
-              >
-                <Trash2 className="h-4 w-4" />
-                Cancel quotation
-              </Button>
-            )}
-          </div>
-        </CardHeader>
-      </Card>
+      <QuoteHeader
+        quote={quote}
+        patientName={patientName}
+        orderCode={orderCode}
+        rightSlot={
+          hasPdf ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleDownloadPdf}
+              className="gap-2"
+            >
+              <Download className="h-4 w-4" />
+              PDF
+            </Button>
+          ) : null
+        }
+      />
 
-      {/* Editable form (draft only) — read-only summary otherwise */}
+      {/* Compact admin controls — language + delivery + discount + net.
+          Delivery and discount only get touched AFTER the admin has
+          attached a pack; the workflow is intentional: pick the pack
+          first (in the panel below), then dial in the line-item
+          adjustments here. */}
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Fees &amp; language</CardTitle>
-          {!isEditable && (
-            <p className="text-xs text-muted-foreground">
-              This quotation is no longer editable. Cancel it first if you
-              need to make changes.
+        <CardContent className="space-y-4 p-5">
+          {!quote.packId ? (
+            <p className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
+              Pick a pack in the panel below to unlock delivery fees and
+              discount. The price snapshot lives on the quote once a
+              pack is attached.
             </p>
-          )}
-        </CardHeader>
-        <CardContent className="space-y-5">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="grid gap-2 sm:col-span-2">
-              <Label>Language</Label>
+          ) : null}
+          <div className="grid gap-4 sm:grid-cols-4">
+            <div className="grid gap-1.5">
+              <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                Document language
+              </Label>
+              {/* Always interactive — once sent the rest of the form
+                  locks, but the language pick stays live so admins
+                  can issue a translated copy of the SAME quote on
+                  demand. "Regenerate PDF" below picks this value up
+                  and passes it to the backend as a `?lang=` override
+                  without rolling back the lifecycle. */}
               <Select
                 value={form.language}
                 onValueChange={(v) =>
                   setForm((s) => ({ ...s, language: v as DevisLanguage }))
                 }
-                disabled={!isEditable}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -460,126 +506,179 @@ function AdminView({ quote, orderId }: { quote: Quotation; orderId: string }) {
                   <SelectItem value={DevisLanguage.AR}>العربية</SelectItem>
                 </SelectContent>
               </Select>
+              {!isEditable ? (
+                <p className="text-[10px] leading-tight text-muted-foreground">
+                  Pick another language and click <b>Regenerate PDF</b>{' '}
+                  to send the doctor a translated copy.
+                </p>
+              ) : null}
             </div>
-
-            <FeeField
-              label="Treatment fees"
-              value={form.treatmentFees}
-              onChange={(v) =>
-                setForm((s) => ({ ...s, treatmentFees: v }))
-              }
-              currency={form.currency}
-              disabled={!isEditable}
-            />
-            <FeeField
-              label="Fabrication fees"
-              value={form.fabricationFees}
-              onChange={(v) =>
-                setForm((s) => ({ ...s, fabricationFees: v }))
-              }
-              currency={form.currency}
-              disabled={!isEditable}
-            />
-            <FeeField
-              label="Delivery fees"
-              value={form.deliveryFees}
-              onChange={(v) =>
-                setForm((s) => ({ ...s, deliveryFees: v }))
-              }
-              currency={form.currency}
-              disabled={!isEditable}
-            />
-            <FeeField
-              label="Discount"
-              value={form.discountAmount}
-              onChange={(v) =>
-                setForm((s) => ({ ...s, discountAmount: v }))
-              }
-              currency={form.currency}
-              disabled={!isEditable}
-            />
-            <div className="grid gap-2">
-              <Label>VAT rate (%)</Label>
+            <div className="grid gap-1.5">
+              <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                Delivery fees ({quote.currency})
+              </Label>
               <Input
                 type="number"
-                step="0.1"
-                value={form.tvaRate}
+                step="0.001"
+                min={0}
+                value={form.deliveryFees}
                 onChange={(e) =>
                   setForm((s) => ({
                     ...s,
-                    tvaRate: Number(e.target.value) || 0,
+                    deliveryFees: Number(e.target.value) || 0,
                   }))
                 }
-                disabled={!isEditable}
+                disabled={!isEditable || !quote.packId}
+                placeholder="0.000"
               />
             </div>
-            <div className="grid gap-2">
-              <Label>Currency</Label>
+            <div className="grid gap-1.5">
+              <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                Discount ({quote.currency})
+              </Label>
               <Input
-                value={form.currency}
+                type="number"
+                step="0.001"
+                min={0}
+                value={form.discountAmount}
                 onChange={(e) =>
                   setForm((s) => ({
                     ...s,
-                    currency: e.target.value.toUpperCase(),
+                    discountAmount: Number(e.target.value) || 0,
                   }))
                 }
-                disabled={!isEditable}
+                disabled={!isEditable || !quote.packId}
+                placeholder="0.000"
               />
             </div>
-            <div className="grid gap-2 sm:col-span-2">
-              <Label>Notes (visible to doctor)</Label>
-              <Textarea
-                rows={2}
-                value={form.notes}
-                onChange={(e) =>
-                  setForm((s) => ({ ...s, notes: e.target.value }))
-                }
-                disabled={!isEditable}
-              />
-            </div>
-            <div className="grid gap-2 sm:col-span-2">
-              <Label>Admin message (rendered on PDF above totals)</Label>
-              <Textarea
-                rows={2}
-                value={form.adminMessage}
-                onChange={(e) =>
-                  setForm((s) => ({ ...s, adminMessage: e.target.value }))
-                }
-                disabled={!isEditable}
-              />
+            <div className="grid gap-1.5">
+              <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                Net to bill
+              </Label>
+              <div className="flex h-9 items-center rounded-md border bg-muted/30 px-3 text-sm font-semibold tabular-nums">
+                {quote.packId
+                  ? formatMoney(netAfter, quote.currency)
+                  : '—'}
+              </div>
             </div>
           </div>
 
-          {/* Totals preview */}
-          <div className="rounded-lg border bg-muted/30 p-4">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Live totals
-            </p>
-            <div className="grid gap-1 text-sm">
-              <Row
-                label="Subtotal (HT)"
-                value={formatMoney(totals.subTotalHt, form.currency)}
-              />
-              <Row
-                label={`VAT (${form.tvaRate.toFixed(2)} %)`}
-                value={formatMoney(totals.tvaAmount, form.currency)}
-              />
-              <Row
-                label="Total (TTC)"
-                value={formatMoney(totals.totalTtc, form.currency)}
-                emphasis
-              />
+          {/* Collapsible notes — keep the surface uncluttered until the
+              admin actually needs to write something. */}
+          <button
+            type="button"
+            onClick={() => setNotesOpen((v) => !v)}
+            className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+          >
+            {notesOpen ? (
+              <ChevronUp className="h-3 w-3" />
+            ) : (
+              <ChevronDown className="h-3 w-3" />
+            )}
+            Notes & admin message
+            {(form.notes || form.adminMessage) && !notesOpen ? (
+              <span className="text-[10px] text-amber-700">
+                · has content
+              </span>
+            ) : null}
+          </button>
+          {notesOpen ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-1.5">
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Notes (visible to doctor)
+                </Label>
+                <Textarea
+                  rows={3}
+                  value={form.notes}
+                  onChange={(e) =>
+                    setForm((s) => ({ ...s, notes: e.target.value }))
+                  }
+                  disabled={!isEditable}
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Admin message (PDF, above totals)
+                </Label>
+                <Textarea
+                  rows={3}
+                  value={form.adminMessage}
+                  onChange={(e) =>
+                    setForm((s) => ({ ...s, adminMessage: e.target.value }))
+                  }
+                  disabled={!isEditable}
+                />
+              </div>
             </div>
-          </div>
+          ) : null}
+        </CardContent>
+      </Card>
 
-          {/* Actions. Save / Generate / Send all funnel through helpers
-              that auto-save the current form FIRST so the admin can't
-              accidentally send a quote with stale zeros. */}
+      {/* Pack + plan + tranches — the real workhorse. */}
+      <QuotePackPanel quote={quote} role={UserRole.ADMIN} />
+
+      {/* Sticky-ish action bar at the bottom. */}
+      <Card>
+        <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+          <div className="text-xs text-muted-foreground">
+            {isEditable
+              ? 'Drafts stay editable until you send to the doctor.'
+              : quote.status === QuotationStatus.SENT
+                ? 'Sent — locked. Click "Recall to edit" to pull it back as a draft if anything is wrong.'
+                : 'This quotation is locked. Cancel it first to make changes.'}
+          </div>
           <div className="flex flex-wrap gap-2">
-            {isEditable && (
+            {/* Recall — only shown on SENT quotes. Two-click: first
+                click flips into confirm mode; second click fires the
+                mutation. We use the same button slot so the bar
+                doesn't shift, and clear the confirm flag on success
+                via the hook's invalidation re-render. */}
+            {quote.status === QuotationStatus.SENT ? (
               <Button
                 type="button"
-                onClick={() => update.mutate({ id: quote.id, dto: draftDto() })}
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  if (confirmRecall) {
+                    recall.mutate(quote.id, {
+                      onSuccess: () => setConfirmRecall(false),
+                    });
+                  } else {
+                    setConfirmRecall(true);
+                  }
+                }}
+                onBlur={() => setConfirmRecall(false)}
+                disabled={recall.isPending}
+                className="gap-2 border-amber-300 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
+              >
+                {recall.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RotateCcw className="h-4 w-4" />
+                )}
+                {confirmRecall ? 'Click again to confirm' : 'Recall to edit'}
+              </Button>
+            ) : null}
+            {canCancel ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => cancel.mutate({ id: quote.id, orderId })}
+                disabled={cancel.isPending}
+                className="gap-2 text-red-600"
+              >
+                <Trash2 className="h-4 w-4" />
+                Cancel
+              </Button>
+            ) : null}
+            {isEditable ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleSaveDraft}
                 disabled={update.isPending}
                 className="gap-2"
               >
@@ -588,12 +687,13 @@ function AdminView({ quote, orderId }: { quote: Quotation; orderId: string }) {
                 ) : (
                   <Check className="h-4 w-4" />
                 )}
-                Save draft
+                Save
               </Button>
-            )}
+            ) : null}
             <Button
               type="button"
               variant="secondary"
+              size="sm"
               onClick={handleGeneratePdf}
               disabled={generate.isPending || update.isPending}
               className="gap-2"
@@ -605,9 +705,10 @@ function AdminView({ quote, orderId }: { quote: Quotation; orderId: string }) {
               )}
               {hasPdf ? 'Regenerate PDF' : 'Generate PDF'}
             </Button>
-            {quote.status === QuotationStatus.DRAFT && (
+            {quote.status === QuotationStatus.DRAFT ? (
               <Button
                 type="button"
+                size="sm"
                 onClick={handleSendToDoctor}
                 disabled={send.isPending || update.isPending}
                 className="gap-2 bg-emerald-600 hover:bg-emerald-700"
@@ -619,7 +720,7 @@ function AdminView({ quote, orderId }: { quote: Quotation; orderId: string }) {
                 )}
                 Send to doctor
               </Button>
-            )}
+            ) : null}
           </div>
         </CardContent>
       </Card>
@@ -627,36 +728,61 @@ function AdminView({ quote, orderId }: { quote: Quotation; orderId: string }) {
   );
 }
 
-// ─── Doctor view ──────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
+// Doctor layout
+// ─────────────────────────────────────────────────────────────────────────
 
-function DoctorView({ quote }: { quote: Quotation }) {
+function DoctorLayout({
+  quote,
+  patientName,
+  orderCode,
+}: {
+  quote: Quotation;
+  patientName: string;
+  orderCode: string;
+}) {
   const approve = useApproveQuotation();
   const reject = useRejectQuotation();
+  const generate = useGenerateQuotationPdf();
   const [showReject, setShowReject] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
+  // Doctor-side language override — defaults to whatever the admin
+  // sent the quote in. The doctor can flip this and hit "Regenerate"
+  // to receive a translated copy of the same quote. Keeps the PDF on
+  // the server identical for everyone (no per-user files), but the
+  // doctor controls the language they read.
+  const [docLang, setDocLang] = useState<DevisLanguage>(quote.language);
+  useEffect(() => {
+    setDocLang(quote.language);
+  }, [quote.language]);
 
+  // Doctors only ever see a quote that's been sent. Draft = waiting.
   if (quote.status === QuotationStatus.DRAFT) {
     return (
-      <Card>
-        <CardContent className="flex min-h-48 flex-col items-center justify-center gap-2 text-center">
-          <p className="text-sm font-medium text-foreground">
-            Quotation pending
-          </p>
-          <p className="max-w-md text-xs text-muted-foreground">
-            The team is still finalising the fees for your treatment. You
-            will receive a notification once the quotation is sent.
-          </p>
-        </CardContent>
-      </Card>
+      <div className="space-y-4">
+        <QuoteHeader
+          quote={quote}
+          patientName={patientName}
+          orderCode={orderCode}
+        />
+        <Card>
+          <CardContent className="flex min-h-32 flex-col items-center justify-center gap-2 text-center">
+            <p className="text-sm font-medium text-foreground">
+              Quotation pending
+            </p>
+            <p className="max-w-md text-xs text-muted-foreground">
+              The team is still finalising the pack for your treatment.
+              You&apos;ll be notified once it&apos;s ready to review.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 
   const isActionable = quote.status === QuotationStatus.SENT;
   const hasPdf = !!quote.pdfFilePath;
 
-  // Doctors download through the authenticated axios client so the
-  // Bearer token actually rides the request (a plain `<a href>` would
-  // 401 against the JwtAuthGuard with "Invalid or expired token").
   const handleDownloadPdf = async () => {
     if (!hasPdf) return;
     try {
@@ -671,21 +797,29 @@ function DoctorView({ quote }: { quote: Quotation }) {
     }
   };
 
+  const handleRegenerateInLanguage = async () => {
+    // Re-render then auto-download so the doctor gets the translated
+    // file in a single click rather than picking a language + clicking
+    // "regenerate" + clicking "download".
+    try {
+      await generate.mutateAsync({ id: quote.id, lang: docLang });
+      const fileName = `${quote.quotationNumber ?? 'quotation'}.pdf`;
+      await quotationsService.downloadPdf(quote.id, fileName);
+    } catch (err) {
+      if (err instanceof Error && err.message) {
+        toast.error(err.message);
+      }
+    }
+  };
+
   return (
     <div className="space-y-4">
-      <Card>
-        <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <CardTitle className="flex flex-wrap items-center gap-2 text-base">
-            <FileText className="h-4 w-4 text-primary" />
-            {quote.quotationNumber ?? 'Quotation'}
-            <Badge
-              variant="outline"
-              className={cn('text-xs', STATUS_TONE[quote.status])}
-            >
-              {STATUS_LABEL[quote.status]}
-            </Badge>
-          </CardTitle>
-          {hasPdf && (
+      <QuoteHeader
+        quote={quote}
+        patientName={patientName}
+        orderCode={orderCode}
+        rightSlot={
+          hasPdf ? (
             <Button
               type="button"
               variant="outline"
@@ -694,66 +828,96 @@ function DoctorView({ quote }: { quote: Quotation }) {
               className="gap-2"
             >
               <Download className="h-4 w-4" />
-              Download PDF
+              PDF
             </Button>
-          )}
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm">
-          <Row
-            label="Treatment fees"
-            value={formatMoney(quote.treatmentFees, quote.currency)}
-          />
-          <Row
-            label="Fabrication fees"
-            value={formatMoney(quote.fabricationFees, quote.currency)}
-          />
-          <Row
-            label="Delivery fees"
-            value={formatMoney(quote.deliveryFees, quote.currency)}
-          />
-          {quote.discountAmount > 0 && (
-            <Row
-              label="Discount"
-              value={`-${formatMoney(quote.discountAmount, quote.currency)}`}
-            />
-          )}
-          <div className="border-t pt-2" />
-          <Row
-            label="Subtotal (HT)"
-            value={formatMoney(quote.subTotalHt, quote.currency)}
-          />
-          <Row
-            label={`VAT (${quote.tvaRate.toFixed(2)} %)`}
-            value={formatMoney(quote.tvaAmount, quote.currency)}
-          />
-          <Row
-            label="Total (TTC)"
-            value={formatMoney(quote.totalTtc, quote.currency)}
-            emphasis
-          />
-          {quote.adminMessage && (
-            <div className="rounded-md border bg-muted/30 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Message
-              </p>
-              <p className="mt-1 whitespace-pre-wrap text-sm">
-                {quote.adminMessage}
-              </p>
-            </div>
-          )}
-          {quote.notes && (
-            <div className="rounded-md border bg-muted/30 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Notes
-              </p>
-              <p className="mt-1 whitespace-pre-wrap text-sm">{quote.notes}</p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+          ) : null
+        }
+      />
 
-      {/* Approval bar — only when the quote is awaiting the doctor */}
-      {isActionable && (
+      {/* Language picker — doctor can request the same quote in
+          another language (FR / EN / AR) and the backend re-renders
+          the PDF on the fly. The fresh file auto-downloads so the
+          interaction is one click, not three. Disabled while the
+          render is in flight; the chosen language persists on the
+          row so subsequent default downloads also serve this lang. */}
+      {hasPdf ? (
+        <Card>
+          <CardContent className="flex flex-wrap items-center gap-3 p-4">
+            <Globe className="h-4 w-4 text-muted-foreground" />
+            <div className="flex flex-1 flex-wrap items-center gap-2">
+              <Label className="text-xs font-medium text-muted-foreground">
+                Read this quote in
+              </Label>
+              <Select
+                value={docLang}
+                onValueChange={(v) => setDocLang(v as DevisLanguage)}
+                disabled={generate.isPending}
+              >
+                <SelectTrigger className="h-8 w-[160px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={DevisLanguage.FR}>Français</SelectItem>
+                  <SelectItem value={DevisLanguage.EN}>English</SelectItem>
+                  <SelectItem value={DevisLanguage.AR}>العربية</SelectItem>
+                </SelectContent>
+              </Select>
+              <span className="text-[10px] text-muted-foreground">
+                Currently: {LANG_LABEL[quote.language]}
+              </span>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleRegenerateInLanguage}
+              disabled={generate.isPending || docLang === quote.language}
+              className="gap-2"
+              title={
+                docLang === quote.language
+                  ? 'Pick a different language to request another version.'
+                  : undefined
+              }
+            >
+              {generate.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )}
+              Regenerate &amp; download
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {quote.adminMessage ? (
+        <Card className="border-amber-200/60 bg-amber-50/40">
+          <CardContent className="p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-amber-900/70">
+              From the team
+            </p>
+            <p className="mt-1 whitespace-pre-wrap text-sm text-amber-900">
+              {quote.adminMessage}
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <QuotePackPanel quote={quote} role={UserRole.DENTIST} />
+
+      {quote.notes ? (
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Notes
+            </p>
+            <p className="mt-1 whitespace-pre-wrap text-sm">{quote.notes}</p>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {/* Approve / reject — only when awaiting doctor */}
+      {isActionable ? (
         <Card className="border-2 border-amber-300 bg-gradient-to-br from-amber-50 via-white to-amber-50 shadow-md">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base text-amber-900">
@@ -763,19 +927,19 @@ function DoctorView({ quote }: { quote: Quotation }) {
               Action required — review this quotation
             </CardTitle>
             <p className="ml-10 text-sm text-amber-900/80">
-              Approve to move the order to fabrication, or reject to
-              decline (the order will be canceled).
+              Approve to start the payment plan, or reject if anything is
+              off.
             </p>
           </CardHeader>
           <CardContent className="space-y-3">
-            {showReject && (
+            {showReject ? (
               <Textarea
                 rows={2}
                 value={rejectReason}
                 onChange={(e) => setRejectReason(e.target.value)}
-                placeholder="Optional: explain why you're rejecting (e.g. fees out of range, missing item…)"
+                placeholder="Optional: explain why you're rejecting…"
               />
-            )}
+            ) : null}
             <div className="grid gap-3 sm:grid-cols-2">
               <Button
                 type="button"
@@ -818,9 +982,9 @@ function DoctorView({ quote }: { quote: Quotation }) {
             </div>
           </CardContent>
         </Card>
-      )}
+      ) : null}
 
-      {quote.status === QuotationStatus.REJECTED && quote.rejectionReason && (
+      {quote.status === QuotationStatus.REJECTED && quote.rejectionReason ? (
         <Card className="border-red-200 bg-red-50/40">
           <CardContent className="p-4 text-sm text-red-900">
             <p className="font-semibold">You rejected this quotation</p>
@@ -829,60 +993,7 @@ function DoctorView({ quote }: { quote: Quotation }) {
             </p>
           </CardContent>
         </Card>
-      )}
-    </div>
-  );
-}
-
-// ─── Small helpers ────────────────────────────────────────────────────────
-
-function FeeField({
-  label,
-  value,
-  onChange,
-  currency,
-  disabled,
-}: {
-  label: string;
-  value: number;
-  onChange: (next: number) => void;
-  currency: string;
-  disabled?: boolean;
-}) {
-  return (
-    <div className="grid gap-2">
-      <Label>
-        {label} <span className="text-muted-foreground">({currency})</span>
-      </Label>
-      <Input
-        type="number"
-        step="0.001"
-        min={0}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value) || 0)}
-        disabled={disabled}
-      />
-    </div>
-  );
-}
-
-function Row({
-  label,
-  value,
-  emphasis,
-}: {
-  label: string;
-  value: string;
-  emphasis?: boolean;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <span className={emphasis ? 'font-semibold' : 'text-muted-foreground'}>
-        {label}
-      </span>
-      <span className={emphasis ? 'text-lg font-bold' : 'font-medium'}>
-        {value}
-      </span>
+      ) : null}
     </div>
   );
 }

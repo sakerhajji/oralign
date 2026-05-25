@@ -1,9 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MailService } from '../../mail/mail.service';
 import { requiredSecret } from '../../common/config/required-secret';
+import { NotificationEvents } from '../../notifications/events/notification-events';
 
 /** OWASP-recommended bcrypt cost as of 2024+. */
 const BCRYPT_COST = 12;
@@ -42,6 +44,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly mailService: MailService,
+    private readonly events: EventEmitter2,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -80,6 +83,17 @@ export class AuthService {
       .catch(() => {
         /* already logged inside MailService */
       });
+
+    // Fan a notification out to every admin so they know a new doctor is
+    // awaiting approval. Emission is synchronous but the listener runs
+    // async with its own try/catch — a notification failure can never
+    // unwind this sign-up.
+    this.events.emit(NotificationEvents.UserRegistered, {
+      userId: user.id,
+      fullName: user.fullName,
+      email: user.email,
+      role: user.role,
+    });
 
     const authToken = this.generateTokens(user.id, user.email, user.role);
 

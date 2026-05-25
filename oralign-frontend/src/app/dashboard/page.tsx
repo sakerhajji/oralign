@@ -1,19 +1,46 @@
-import { ChartAreaInteractive } from "@/components/chart-area-interactive"
-import { DataTable } from "@/components/data-table"
-import { SectionCards } from "@/components/section-cards"
+'use client';
 
-import data from "./data.json"
+import { Suspense } from 'react';
+import { useAuth } from '@/lib/providers/auth-provider';
+import { UserRole } from '@/lib/types';
+import { AdminDashboard } from '@/components/dashboard/admin-dashboard';
+import { DoctorDashboard } from '@/components/dashboard/doctor-dashboard';
 
-export default function Page() {
+/**
+ * Dashboard landing — role-aware dispatcher.
+ *
+ * Admin / super_admin → platform-wide KPIs + analytics blocks.
+ * Dentist            → personal KPIs + slider + available packs.
+ * Designer / unknown → fallback panel; designers live in /orders
+ *                      and don't have a dedicated dashboard yet.
+ *
+ * Page itself is a thin Suspense shell; the real components own
+ * their data fetching + WS subscriptions.
+ */
+export default function DashboardPage() {
+  const { user, isAdmin } = useAuth();
+
   return (
-    <div className="@container/main flex flex-1 flex-col gap-2">
-      <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
-        <SectionCards />
-        <div className="px-4 lg:px-6">
-          <ChartAreaInteractive />
-        </div>
-        <DataTable data={data} />
-      </div>
+    <div className="@container/main flex flex-1 flex-col">
+      <Suspense
+        fallback={
+          <div className="p-6 text-sm text-muted-foreground">Loading…</div>
+        }
+      >
+        {!user ? (
+          <div className="p-6 text-sm text-muted-foreground">
+            Loading your dashboard…
+          </div>
+        ) : isAdmin ? (
+          <AdminDashboard />
+        ) : user.role === UserRole.DENTIST ? (
+          <DoctorDashboard />
+        ) : (
+          <div className="p-6 text-sm text-muted-foreground">
+            No dashboard view is configured for your role yet.
+          </div>
+        )}
+      </Suspense>
     </div>
-  )
+  );
 }

@@ -3,14 +3,18 @@ import { Gender } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
+  ArrayMinSize,
   IsArray,
   IsDate,
   IsEmail,
   IsEnum,
+  IsInt,
   IsOptional,
   IsString,
   Matches,
+  Max,
   MaxLength,
+  Min,
   MinLength,
 } from 'class-validator';
 
@@ -247,6 +251,21 @@ export enum PatientSortOrder {
 }
 
 export class PatientFilterDto {
+  @ApiProperty({ required: false, default: 1, minimum: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @ApiProperty({ required: false, default: 10, minimum: 1, maximum: 100 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number;
+
   @ApiProperty({
     required: false,
     description: 'Search by name, email, or phone',
@@ -292,4 +311,16 @@ export class PatientFilterDto {
   @IsOptional()
   @IsString()
   createdTo?: string;
+}
+
+export class BulkDeletePatientsDto {
+  @ApiProperty({
+    type: [String],
+    description: 'Array of patient IDs to soft-delete',
+    example: ['uuid-1', 'uuid-2'],
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsString({ each: true })
+  ids!: string[];
 }

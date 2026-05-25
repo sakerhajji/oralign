@@ -28,6 +28,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import {
+  BulkDeletePatientsDto,
   CreatePatientDto,
   PatientFilterDto,
   PatientResponseDto,
@@ -81,18 +82,16 @@ export class PatientController {
   @ApiResponse({ status: 200, description: 'Patients fetched successfully' })
   async getPatients(
     @CurrentUser() user: JwtPayload,
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-    @Query('search') search?: string,
-    @Query('doctorId') doctorId?: string,
+    // Bind the FULL DTO so every documented filter (gender, sort,
+    // date range, doctor, search) reaches the service. The previous
+    // hand-rolled `@Query('search') ... @Query('doctorId') ...`
+    // signature silently dropped every other field, which is why
+    // gender / from / to / sortBy never had any effect.
+    @Query() filters: PatientFilterDto,
   ) {
-    const filters: PatientFilterDto = {};
-    if (search) filters.search = search;
-    if (doctorId) filters.doctorId = doctorId;
-
     return this.patientService.getPatients(
-      page ? parseInt(page, 10) : 1,
-      limit ? parseInt(limit, 10) : 10,
+      filters.page ?? 1,
+      filters.limit ?? 10,
       filters,
       {
         userId: user.sub,
@@ -135,6 +134,22 @@ export class PatientController {
     @CurrentUser() user: JwtPayload,
   ): Promise<PatientResponseDto> {
     return this.patientService.updatePatient(id, updatePatientDto, {
+      userId: user.sub,
+      role: user.role,
+    });
+  }
+
+  // IMPORTANT: @Delete('bulk') MUST come before @Delete(':id') so NestJS
+  // doesn't treat the literal string "bulk" as a UUID parameter.
+  @Delete('bulk')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Bulk soft-delete patients by IDs' })
+  @ApiResponse({ status: 200, description: 'Patients deleted successfully' })
+  async bulkDeletePatients(
+    @Body() dto: BulkDeletePatientsDto,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<{ message: string; deleted: number }> {
+    return this.patientService.bulkDeletePatients(dto.ids, {
       userId: user.sub,
       role: user.role,
     });

@@ -20,7 +20,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
-import { UserRole } from '@prisma/client';
+import { DevisLanguage, UserRole } from '@prisma/client';
 import { Response } from 'express';
 import {
   CurrentUser,
@@ -46,6 +46,18 @@ const ALL_AUTHED: UserRole[] = [
   UserRole.super_admin,
   UserRole.designer,
 ];
+
+function contentDispositionFileName(fileName: string): string {
+  const asciiName =
+    fileName
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^\x20-\x7E]+/g, '_')
+      .replace(/["\\]/g, '_')
+      .slice(0, 120) || 'quotation.pdf';
+
+  return `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+}
 
 @ApiTags('quotations')
 @ApiBearerAuth('access-token')
@@ -136,19 +148,37 @@ export class QuotationController {
 
   @Post('quotations/:id/generate-pdf')
   @HttpCode(HttpStatus.OK)
-  @Roles(...ADMIN_ROLES)
+  // Both admins AND the owning dentist can hit this — dentists need it
+  // so they can request a translated version of the PDF in their own
+  // language (FR/EN/AR). The service does the fine-grained RBAC via
+  // `getForOrderByQuotationId` (admin / owning doctor / assigned
+  // designer).
+  @Roles(UserRole.dentist, UserRole.admin, UserRole.super_admin)
   @ApiOperation({
     summary:
-      'Render (or re-render) the PDF for a quotation using the chosen language. Auto-allocates the quotation number and snapshots if missing.',
+      'Render (or re-render) the PDF for a quotation. Pass ?lang=fr|en|ar to request a translated version — the chosen language is persisted on the row so subsequent downloads stay consistent. Auto-allocates the quotation number and snapshots if missing.',
   })
   @ApiParam({ name: 'id', type: String })
+  @ApiQuery({
+    name: 'lang',
+    required: false,
+    enum: DevisLanguage,
+    description:
+      'Override the document language without unsending the quote. Defaults to the language already on the row.',
+  })
   @ApiResponse({ status: 200, type: QuotationResponseDto })
-  async generatePdf(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
-    let quote = await this.service.getForOrderByQuotationId(id, {
+  async generatePdf(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @Query('lang') lang?: DevisLanguage,
+  ) {
+    // Re-render path is identical for admin and dentist — service
+    // handles language switching (which is a pure translation, NOT a
+    // business edit, so it works even on already-sent quotes).
+    const quote = await this.service.regeneratePdfInLanguage(id, lang, {
       userId: user.sub,
       role: user.role as UserRole,
     });
-    quote = await this.service.ensureSnapshotAndNumber(quote);
     return this.pdfService.generateAndPersist(quote);
   }
 
@@ -171,10 +201,7 @@ export class QuotationController {
     const { stream, fileName, mimeType } =
       await this.pdfService.openPdfStream(quote);
     res.setHeader('Content-Type', mimeType);
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${encodeURIComponent(fileName)}"`,
-    );
+    res.setHeader('Content-Disposition', contentDispositionFileName(fileName));
     stream.pipe(res);
   }
 
@@ -188,6 +215,25 @@ export class QuotationController {
   @ApiParam({ name: 'id', type: String })
   async cancel(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.service.cancel(id, {
+      userId: user.sub,
+      role: user.role as UserRole,
+    });
+  }
+
+  @Post('quotations/:id/revert-to-draft')
+  @HttpCode(HttpStatus.OK)
+  @Roles(...ADMIN_ROLES)
+  @ApiOperation({
+    summary:
+      'Recall a sent quotation back to draft so admin can correct it (wrong pack, wrong fees, wrong language, typo). The order goes back to treatment_approved and the doctor receives a "revision incoming" bell ping.',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiResponse({ status: 200, type: QuotationResponseDto })
+  async revertToDraft(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.revertToDraft(id, {
       userId: user.sub,
       role: user.role as UserRole,
     });

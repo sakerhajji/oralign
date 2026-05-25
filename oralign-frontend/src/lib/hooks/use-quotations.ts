@@ -11,7 +11,7 @@ import { toast } from 'sonner';
 import { quotationsService } from '@/lib/api/quotations.service';
 import { extractApiErrorMessage } from '@/lib/api/error';
 import { orderKeys } from './use-orders';
-import type { Quotation, UpsertQuotationDto } from '@/lib/types';
+import type { DevisLanguage, Quotation, UpsertQuotationDto } from '@/lib/types';
 
 export const quotationKeys = {
   all: ['quotations'] as const,
@@ -98,14 +98,21 @@ export function useSendQuotation(): UseMutationResult<Quotation, Error, string> 
   });
 }
 
+/**
+ * Render (or re-render) the quotation PDF in a given language.
+ * Variables: `{ id, lang? }`. Omit `lang` to use whatever language is
+ * already on the row — useful for the first render. Pass `lang` to
+ * issue another language version on demand (admin re-send or doctor
+ * "I want the EN copy").
+ */
 export function useGenerateQuotationPdf(): UseMutationResult<
   Quotation,
   Error,
-  string
+  { id: string; lang?: DevisLanguage }
 > {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id) => quotationsService.generatePdf(id),
+    mutationFn: ({ id, lang }) => quotationsService.generatePdf(id, lang),
     onSuccess: (quote) => {
       invalidateQuotation(queryClient, quote);
       toast.success('Quotation PDF generated.');
@@ -129,6 +136,28 @@ export function useCancelQuotation(): UseMutationResult<
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(orderId) });
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
       toast.success('Quotation canceled. You can issue a new one now.');
+    },
+    onError: (err) => toast.error(extractApiErrorMessage(err)),
+  });
+}
+
+/**
+ * Recall a sent quotation back to draft so the admin can edit + resend.
+ * The doctor receives an in-app "revision incoming" notification.
+ * Reuses the same cache-invalidation set as send/update — the doctor's
+ * order detail page should immediately reflect the new draft state.
+ */
+export function useRevertQuotationToDraft(): UseMutationResult<
+  Quotation,
+  Error,
+  string
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => quotationsService.revertToDraft(id),
+    onSuccess: (quote) => {
+      invalidateQuotation(queryClient, quote);
+      toast.success('Quote recalled to draft. Edit it and resend.');
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });

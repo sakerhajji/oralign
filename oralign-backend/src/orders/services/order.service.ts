@@ -18,6 +18,9 @@ import {
 } from '../../common/exceptions/app.exception';
 import { OrderNotificationService } from '../../mail/order-notification.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { formatDateStamp, slugifyForCode } from '../../common/utils/code-naming.util';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { NotificationEvents } from '../../notifications/events/notification-events';
 import {
   CreateOrderDto,
   OrderFileResponseDto,
@@ -136,6 +139,7 @@ export class OrderService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: OrderNotificationService,
+    private readonly events: EventEmitter2,
   ) {}
 
   readonly includeOrder = orderInclude;
@@ -161,7 +165,9 @@ export class OrderService {
     const order = await this.prisma.dentalOrder.create({
       data: {
         ...this.buildClinicalData(createOrderDto),
-        orderCode: createOrderDto.orderCode ?? (await this.generateOrderCode()),
+        orderCode:
+          createOrderDto.orderCode ??
+          (await this.generateOrderCode(createOrderDto.patientId)),
         doctorId,
         patientId: createOrderDto.patientId,
         toothInstructions: createOrderDto.toothInstructions?.length
@@ -175,6 +181,11 @@ export class OrderService {
       },
       include: this.includeOrder,
     });
+
+    // Draft creation is intentionally silent — admins only get pinged
+    // when the doctor actually submits for review (see submitOrder).
+    // Notifying on every saved draft was noise: a doctor often opens
+    // a new order and abandons it during photo prep.
 
     return this.mapToDto(order);
   }
@@ -272,6 +283,44 @@ export class OrderService {
     return { message: 'Order deleted successfully' };
   }
 
+  /**
+   * Restore a soft-deleted order. Admin-only — clearing `deletedAt`
+   * makes the row visible to all the standard list/detail queries
+   * again. Idempotent: an already-live order returns the same shape
+   * so re-clicking "Restore" doesn't error.
+   *
+   * We intentionally skip `findAccessibleOrder` here because that
+   * helper filters by `deletedAt: null` — we explicitly need to
+   * fetch deleted rows. RBAC is enforced by the role check first.
+   */
+  async restoreOrder(
+    id: string,
+    caller: Caller,
+  ): Promise<{ message: string }> {
+    if (!ADMIN_ROLES.includes(caller.role)) {
+      throw new ForbiddenException(
+        'Only admins can restore deleted orders.',
+      );
+    }
+    const order = await this.prisma.dentalOrder.findFirst({
+      where: { id },
+      select: { id: true, deletedAt: true },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+
+    if (order.deletedAt === null) {
+      // Already live — no-op (idempotent).
+      return { message: 'Order is already active' };
+    }
+
+    await this.prisma.dentalOrder.update({
+      where: { id },
+      data: { deletedAt: null },
+    });
+
+    return { message: 'Order restored successfully' };
+  }
+
   async permanentDeleteOrder(
     id: string,
     caller: Caller,
@@ -321,6 +370,15 @@ export class OrderService {
     // are logged inside the notification service so a flaky SMTP relay
     // can't break the submit-order transaction the user is waiting on.
     void this.notifications.notifyOrderSubmitted(order.id);
+
+    // In-app bell ping for the admin team.
+    this.events.emit(NotificationEvents.OrderSubmitted, {
+      orderId: order.id,
+      orderCode: order.orderCode,
+      doctorId: order.doctorId,
+      doctorName: order.doctor?.fullName ?? null,
+      patientName: order.patient?.fullName ?? null,
+    });
 
     return this.mapToDto(order);
   }
@@ -378,6 +436,18 @@ export class OrderService {
       where: { id },
       data,
       include: this.includeOrder,
+    });
+
+    // Tell the doctor the order moved — admin already saw the transition
+    // because they performed it, no point pinging them back.
+    this.events.emit(NotificationEvents.OrderStatusChanged, {
+      orderId: order.id,
+      orderCode: order.orderCode,
+      doctorId: order.doctorId,
+      doctorName: order.doctor?.fullName ?? null,
+      patientName: order.patient?.fullName ?? null,
+      previousStatus: current.status,
+      nextStatus: status,
     });
 
     return this.mapToDto(order);
@@ -698,7 +768,16 @@ export class OrderService {
     filters: OrderFilterDto,
     caller: Caller,
   ): Prisma.DentalOrderWhereInput {
-    const where: Prisma.DentalOrderWhereInput = { deletedAt: null };
+    // Trash-bin view: admin opted in via `includeDeleted=true`. We
+    // return ONLY soft-deleted rows so the same list endpoint can
+    // back both the live catalogue AND the deleted-orders trash UI
+    // without a second route. Non-admin callers always see the live
+    // set — the flag is silently ignored for safety.
+    const showOnlyDeleted =
+      ADMIN_ROLES.includes(caller.role) && filters.includeDeleted === true;
+    const where: Prisma.DentalOrderWhereInput = showOnlyDeleted
+      ? { deletedAt: { not: null } }
+      : { deletedAt: null };
 
     if (ADMIN_ROLES.includes(caller.role)) {
       if (filters.doctorId) where.doctorId = filters.doctorId;
@@ -889,17 +968,47 @@ export class OrderService {
     };
   }
 
-  private async generateOrderCode(): Promise<string> {
-    const date = new Date();
-    const stamp = date.toISOString().slice(0, 10).replace(/-/g, '');
-    const count = await this.prisma.dentalOrder.count({
+  /**
+   * Build the human-readable order code from the patient's name and
+   * the creation date — `<PatientNameSlug>_YYYYMMDD`. When the same
+   * patient already has an order created today we append a `-N` suffix
+   * so the code stays unique without blowing up callers that rely on
+   * `orderCode` being a primary search key.
+   *
+   * Falls back to a date-only stem when we can't read the patient
+   * (deleted, missing, etc.) — better than throwing on what is really
+   * a cosmetic field.
+   */
+  private async generateOrderCode(patientId: string): Promise<string> {
+    const now = new Date();
+    const datePart = formatDateStamp(now);
+
+    let stem = datePart;
+    try {
+      const patient = await this.prisma.patient.findUnique({
+        where: { id: patientId },
+        select: { fullName: true },
+      });
+      const slug = slugifyForCode(patient?.fullName);
+      if (slug) stem = `${slug}_${datePart}`;
+    } catch {
+      // Cosmetic only — fall through to the date-only stem.
+    }
+
+    // Tack on a counter if the same patient already has an order today.
+    // We look at the full stem rather than the date alone so two
+    // *different* patients can share a clean code on the same day.
+    const todayStart = new Date(now);
+    todayStart.setUTCHours(0, 0, 0, 0);
+    const existingToday = await this.prisma.dentalOrder.count({
       where: {
-        createdAt: {
-          gte: new Date(`${date.toISOString().slice(0, 10)}T00:00:00.000Z`),
-        },
+        createdAt: { gte: todayStart },
+        orderCode: { startsWith: stem },
       },
     });
-    return `ORD-${stamp}-${String(count + 1).padStart(4, '0')}`;
+    return existingToday === 0
+      ? stem
+      : `${stem}-${String(existingToday + 1).padStart(2, '0')}`;
   }
 
   private validateFile(

@@ -27,6 +27,8 @@ import {
 import { cn, getAvatarUrl } from '@/lib/utils';
 import { treatmentPlansService } from '@/lib/api/treatment-plans.service';
 import { useSendTreatmentMessage } from '@/lib/hooks/use-treatment-plans';
+import { useAuthedImage } from '@/lib/hooks';
+import { ImageLightbox } from '@/components/ui/image-lightbox';
 import {
   TreatmentAttachmentCategory,
   TreatmentMessageType,
@@ -86,6 +88,20 @@ export function TreatmentConversation({
   );
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
+
+  // Lightbox state lifted to the conversation level so the WHOLE thread
+  // shares one viewer instead of mounting a Dialog per image bubble.
+  // The download endpoint is JWT-guarded — a plain `<img src=>` returns
+  // 401 because the browser doesn't attach Authorization headers for
+  // resource loads. We fetch through the authed axios client and feed
+  // the resulting blob URL to the lightbox + the inline thumbnails.
+  const [lightboxAttachment, setLightboxAttachment] = useState<
+    ChatAttachment | null
+  >(null);
+  const lightboxApiUrl = lightboxAttachment
+    ? treatmentPlansService.attachmentDownloadUrl(lightboxAttachment.id)
+    : null;
+  const lightboxImg = useAuthedImage(lightboxApiUrl);
   const isPlanner =
     role === UserRole.ADMIN ||
     role === UserRole.SUPER_ADMIN ||
@@ -216,13 +232,13 @@ export function TreatmentConversation({
           </p>
         ) : (
           <ol className="space-y-1.5">
-            {items.map((it, i) => (
+            {items.map((it) => (
               <li key={it.message.id}>
                 {it.showDateSeparator && <DateSeparator date={it.message.createdAt} />}
                 {it.isSystem ? (
                   <SystemRow message={it.message} />
                 ) : (
-                  <Bubble item={it} />
+                  <Bubble item={it} onOpenImage={setLightboxAttachment} />
                 )}
               </li>
             ))}
@@ -337,6 +353,24 @@ export function TreatmentConversation({
           </div>
         )}
       </div>
+
+      {/* Shared lightbox — one viewer for every image bubble in this
+          conversation. Fed by the authed-blob URL so the JWT-guarded
+          download endpoint isn't bypassed. */}
+      <ImageLightbox
+        open={!!lightboxAttachment}
+        onOpenChange={(open) => {
+          if (!open) setLightboxAttachment(null);
+        }}
+        src={lightboxImg.src}
+        alt={lightboxAttachment?.fileName ?? 'attachment'}
+        caption={lightboxAttachment?.fileName ?? undefined}
+        subCaption={
+          lightboxAttachment
+            ? `${lightboxAttachment.category.replaceAll('_', ' ')} · ${formatBytes(lightboxAttachment.sizeBytes ?? 0)}`
+            : undefined
+        }
+      />
     </div>
   );
 }
@@ -367,6 +401,7 @@ function SystemRow({ message }: { message: TreatmentMessage }) {
 
 function Bubble({
   item,
+  onOpenImage,
 }: {
   item: {
     message: TreatmentMessage;
@@ -374,6 +409,7 @@ function Bubble({
     isFirstOfCluster: boolean;
     isLastOfCluster: boolean;
   };
+  onOpenImage: (att: ChatAttachment) => void;
 }) {
   const { message, isOwn, isFirstOfCluster, isLastOfCluster } = item;
   const initials = (message.sender?.fullName ?? '?')
@@ -454,13 +490,22 @@ function Bubble({
           )}
           {message.attachments.length > 0 && (
             <div className={cn('grid gap-2', message.message && 'mt-2')}>
-              {message.attachments.map((att) => (
-                <ChatAttachmentLink
-                  key={att.id}
-                  attachment={att}
-                  isOwn={isOwn}
-                />
-              ))}
+              {message.attachments.map((att) =>
+                att.mimeType?.startsWith('image/') ? (
+                  <ChatAttachmentImage
+                    key={att.id}
+                    attachment={att}
+                    isOwn={isOwn}
+                    onOpen={() => onOpenImage(att)}
+                  />
+                ) : (
+                  <ChatAttachmentLink
+                    key={att.id}
+                    attachment={att}
+                    isOwn={isOwn}
+                  />
+                ),
+              )}
             </div>
           )}
         </div>
@@ -565,6 +610,74 @@ function ChatAttachmentLink({
         </p>
       </div>
       <Download className="h-3.5 w-3.5 shrink-0" />
+    </button>
+  );
+}
+
+/**
+ * Inline image thumbnail rendered directly inside the chat bubble.
+ *
+ * Why a dedicated component (and not just `<img src={downloadUrl(id)}>`):
+ * the download endpoint is JWT-guarded — Passport reads the bearer
+ * token from `Authorization: Bearer …` and the browser does NOT
+ * attach that header for `<img>` resource loads. The plain tag would
+ * return 401 and render a broken image icon. We fetch via the authed
+ * axios client (token attached) and feed the resulting `blob:` URL
+ * to the `<img>` instead.
+ *
+ * Click → fires `onOpen()` so the parent conversation's shared
+ * lightbox can take over. Single viewer for the whole thread — no
+ * per-bubble Dialog DOM nodes.
+ */
+function ChatAttachmentImage({
+  attachment,
+  isOwn,
+  onOpen,
+}: {
+  attachment: ChatAttachment;
+  isOwn: boolean;
+  onOpen: () => void;
+}) {
+  const apiUrl = treatmentPlansService.attachmentDownloadUrl(attachment.id);
+  const { src, loading } = useAuthedImage(apiUrl);
+
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      disabled={!src}
+      aria-label={`Open ${attachment.fileName} in full view`}
+      className={cn(
+        'group relative block overflow-hidden rounded-lg border focus:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default',
+        isOwn ? 'border-primary-foreground/30' : 'border-border',
+      )}
+    >
+      {loading ? (
+        <div className="grid h-40 w-56 animate-pulse place-items-center bg-muted/40">
+          <ImageIcon className="h-5 w-5 text-muted-foreground" />
+        </div>
+      ) : src ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={src}
+          alt={attachment.fileName}
+          className="block max-h-60 w-auto max-w-full cursor-zoom-in object-contain transition-transform group-hover:scale-[1.02]"
+        />
+      ) : (
+        <div className="grid h-32 w-48 place-items-center bg-muted/40 text-[11px] text-muted-foreground">
+          Could not load image
+        </div>
+      )}
+      {/* File-name strip — keeps the chat looking like Messenger while
+          still telling the user what they're about to open. */}
+      <span
+        className={cn(
+          'absolute inset-x-0 bottom-0 block truncate bg-gradient-to-t from-black/55 to-transparent px-2 py-1 text-left text-[10px] text-white',
+        )}
+      >
+        {attachment.fileName} ·{' '}
+        {attachment.category.replaceAll('_', ' ')}
+      </span>
     </button>
   );
 }

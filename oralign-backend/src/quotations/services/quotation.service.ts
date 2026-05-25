@@ -23,6 +23,9 @@ import {
 } from '../dto/quotation.dto';
 import { CompanyBillingSettingsService } from './company-billing-settings.service';
 import { pickTranslation } from './quotation-i18n';
+import { QuotationPaymentPlanService } from './quotation-payment-plan.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { NotificationEvents } from '../../notifications/events/notification-events';
 
 type Caller = { userId: string; role: UserRole };
 
@@ -62,6 +65,8 @@ export class QuotationService {
     private readonly prisma: PrismaService,
     private readonly settingsService: CompanyBillingSettingsService,
     private readonly notifications: OrderNotificationService,
+    private readonly paymentPlan: QuotationPaymentPlanService,
+    private readonly events: EventEmitter2,
   ) {}
 
   // ─── Authorisation helpers ────────────────────────────────────────────────
@@ -168,6 +173,18 @@ export class QuotationService {
       selectedLanguage: language,
       legalText: pickTranslation(settings.legalTextTranslations, language),
       footerText: pickTranslation(settings.footerTextTranslations, language),
+      // Carry the FULL translation maps so the PDF renderer can
+      // re-resolve when the admin or doctor regenerates in a
+      // different language without losing the historical snapshot.
+      // Legacy snapshots without these fields stay valid — the
+      // renderer falls back to the resolved `legalText`/`footerText`
+      // strings above.
+      legalTextTranslations:
+        (settings.legalTextTranslations as Record<string, unknown> | null) ??
+        null,
+      footerTextTranslations:
+        (settings.footerTextTranslations as Record<string, unknown> | null) ??
+        null,
       bankDetails:
         (settings.bankDetails as Record<string, string> | null) ?? null,
       generatedAt: new Date().toISOString(),
@@ -181,11 +198,17 @@ export class QuotationService {
   private buildClinicSnapshot(
     doctor: { id: string; fullName: string; email: string },
     profile: DentistProfile | null,
+    patient: { fullName: string | null } | null = null,
   ) {
     return {
       doctorId: doctor.id,
       doctorFullName: doctor.fullName,
       doctorEmail: doctor.email,
+      // Patient name is snapshotted alongside the clinic so the PDF
+      // header has it without re-joining the live Patient row at
+      // render time. Optional — legacy quotes pre-date this field and
+      // the PDF renderer falls back to `—` when it's missing.
+      patientFullName: patient?.fullName ?? null,
       clinicName: profile?.clinicName ?? null,
       clinicAddress: profile?.clinicAddress ?? null,
       city: profile?.city ?? null,
@@ -307,30 +330,65 @@ export class QuotationService {
     }
 
     const tvaRate = dto.tvaRate ?? quote.tvaRate;
+    const deliveryFees = dto.deliveryFees ?? quote.deliveryFees;
+    const discountAmount = dto.discountAmount ?? quote.discountAmount;
     const totals = QuotationService.computeTotals(
       dto.treatmentFees ?? quote.treatmentFees,
       dto.fabricationFees ?? quote.fabricationFees,
-      dto.deliveryFees ?? quote.deliveryFees,
-      dto.discountAmount ?? quote.discountAmount,
+      deliveryFees,
+      discountAmount,
       tvaRate,
     );
 
-    return this.prisma.quotation.update({
-      where: { id: quote.id },
-      data: {
-        language: dto.language ?? quote.language,
-        treatmentFees: dto.treatmentFees ?? quote.treatmentFees,
-        fabricationFees: dto.fabricationFees ?? quote.fabricationFees,
-        deliveryFees: dto.deliveryFees ?? quote.deliveryFees,
-        discountAmount: dto.discountAmount ?? quote.discountAmount,
-        tvaRate,
-        currency: dto.currency ?? quote.currency,
-        notes: dto.notes ?? quote.notes,
-        adminMessage: dto.adminMessage ?? quote.adminMessage,
-        subTotalHt: totals.subTotalHt,
-        tvaAmount: totals.tvaAmount,
-        totalTtc: totals.totalTtc,
-      },
+    // Pack-based quotes need their Decimal `totalPrice` field kept in
+    // sync with the new net, otherwise the payment-plan validator
+    // (which compares Σinstallments against `totalPrice`) would still
+    // be looking at the pre-discount pack price. We use the Decimal
+    // arithmetic via `toFixed(3)` so we never round through Number.
+    //
+    // If a plan exists when the totals change, wipe it — the admin
+    // has to reconfigure the installments to match the new total.
+    // Cheaper than silently leaving an out-of-balance plan around.
+    const isPackQuote = !!quote.packId;
+    const newTotalDecimal = isPackQuote
+      ? new Prisma.Decimal(totals.totalTtc.toFixed(3))
+      : null;
+    const totalChanged =
+      isPackQuote &&
+      newTotalDecimal !== null &&
+      (!quote.totalPrice || !quote.totalPrice.equals(newTotalDecimal));
+
+    return this.prisma.$transaction(async (tx) => {
+      if (totalChanged) {
+        // No payment has cleared yet (status === draft asserted above),
+        // so this is safe — the SUCCESS transition can only happen on
+        // installments that already exist after `approve()`.
+        await tx.quoteStepBatch.deleteMany({ where: { quotationId: quote.id } });
+        await tx.quoteInstallment.deleteMany({ where: { quotationId: quote.id } });
+      }
+      return tx.quotation.update({
+        where: { id: quote.id },
+        data: {
+          language: dto.language ?? quote.language,
+          treatmentFees: dto.treatmentFees ?? quote.treatmentFees,
+          fabricationFees: dto.fabricationFees ?? quote.fabricationFees,
+          deliveryFees,
+          discountAmount,
+          tvaRate,
+          currency: dto.currency ?? quote.currency,
+          notes: dto.notes ?? quote.notes,
+          adminMessage: dto.adminMessage ?? quote.adminMessage,
+          subTotalHt: totals.subTotalHt,
+          tvaAmount: totals.tvaAmount,
+          totalTtc: totals.totalTtc,
+          ...(isPackQuote && newTotalDecimal
+            ? {
+                totalPrice: newTotalDecimal,
+                remainingAmount: newTotalDecimal,
+              }
+            : {}),
+        },
+      });
     });
   }
 
@@ -360,6 +418,10 @@ export class QuotationService {
             dentistProfile: true,
           },
         },
+        // Patient is needed both for the snapshot (PDF "billed to"
+        // section) and for the new `dv_<patient>_<date>` number
+        // format. Single join, both consumers happy.
+        patient: { select: { fullName: true } },
       },
     });
 
@@ -376,11 +438,15 @@ export class QuotationService {
         email: order.doctor.email,
       },
       order.doctor.dentistProfile ?? null,
+      order.patient,
     );
 
     const quotationNumber =
       quote.quotationNumber ??
-      (await this.settingsService.allocateNextQuotationNumber());
+      (await this.settingsService.allocateQuotationNumber({
+        patientFullName: order.patient?.fullName ?? null,
+        createdAt: quote.createdAt,
+      }));
 
     return this.prisma.quotation.update({
       where: { id: quote.id },
@@ -429,13 +495,49 @@ export class QuotationService {
     });
     // Email the doctor: their quotation is ready for review.
     void this.notifications.notifyQuoteSent(updated.id);
+    // Bell ping for the doctor — the email goes too, this is just the
+    // in-app version that backs the badge in the header. Joins
+    // doctor + patient so the notification body has the full
+    // "Quotation Q-… for patient X (ORD-…)" context.
+    const order = await this.prisma.dentalOrder.findUnique({
+      where: { id: updated.orderId },
+      select: {
+        doctorId: true,
+        orderCode: true,
+        doctor: { select: { fullName: true } },
+        patient: { select: { fullName: true } },
+      },
+    });
+    if (order) {
+      this.events.emit(NotificationEvents.QuotationSent, {
+        quotationId: updated.id,
+        orderId: updated.orderId,
+        orderCode: order.orderCode ?? null,
+        doctorId: order.doctorId,
+        doctorName: order.doctor?.fullName ?? null,
+        patientName: order.patient?.fullName ?? null,
+        language: updated.language ?? null,
+        quotationNumber: updated.quotationNumber ?? null,
+      });
+    }
     return updated;
   }
 
   /**
    * Doctor (or admin) approves the Quote.
-   *   quotation.status → approved
-   *   order.status → fabrication
+   *
+   * Two flavours of approval:
+   *   • **Legacy quote** (no pack attached): quotation.status → approved,
+   *     order.status → fabrication. Single path that's existed since
+   *     day one.
+   *   • **Pack-based quote** (`packId` set): delegated to
+   *     QuotationPaymentPlanService.tryApprovePackQuote(). That path
+   *     requires a configured payment plan and moves the order to
+   *     `payment_plan_selected` instead of fabrication.
+   *
+   * The branch is decided by the quote row itself — callers don't pick
+   * a flow, so we can't accidentally send a pack quote down the legacy
+   * fabrication path (which would skip payment entirely).
    */
   async approve(id: string, caller: Caller): Promise<Quotation> {
     const quote = await this.loadQuotation(id);
@@ -452,6 +554,20 @@ export class QuotationService {
       throw new BadRequestException(
         `Only a "sent" quotation can be approved (current: ${quote.status}).`,
       );
+    }
+
+    // Pack-based quote → defer to the payment-plan service. Returns
+    // `true` when it took ownership, in which case we re-load + notify
+    // and return. `false` means it's a legacy quote and we fall through
+    // to the existing fabrication path.
+    const handledByPack = await this.paymentPlan.tryApprovePackQuote(
+      quote,
+      caller,
+    );
+    if (handledByPack) {
+      const fresh = await this.loadQuotation(id);
+      void this.notifications.notifyQuoteDecision(fresh.id, 'approved');
+      return fresh;
     }
 
     const approved = await this.prisma.$transaction(async (tx) => {
@@ -526,6 +642,151 @@ export class QuotationService {
   }
 
   /**
+   * Pull a sent quote back to draft so admin can correct it (wrong
+   * pack, wrong fees, typo in the admin message, wrong language at
+   * send time — anything). The doctor is notified so they don't act
+   * on the stale copy.
+   *
+   * Lifecycle effect:
+   *   • quote.status: sent → draft (sentAt cleared)
+   *   • order.status: quotation_sent → treatment_approved (the
+   *     canonical state right before the quote was issued)
+   *
+   * Refused on:
+   *   • draft (no-op — already editable; would be confusing)
+   *   • approved / rejected / canceled (terminal; if the quote was
+   *     wrong AND a doctor already approved, that's a refund flow —
+   *     not this method)
+   *
+   * Authorisation: admin only. The doctor side has the explicit
+   * reject path with a reason — this is for the team's own
+   * "we made a mistake, hold on" correction loop.
+   */
+  async revertToDraft(id: string, caller: Caller): Promise<Quotation> {
+    if (!this.isAdmin(caller)) {
+      throw new ForbiddenException(
+        'Only admins can recall a sent quotation for correction.',
+      );
+    }
+    const quote = await this.loadQuotation(id);
+    await this.assertOrderReadable(quote.orderId, caller);
+
+    if (quote.status !== QuotationStatus.sent) {
+      throw new BadRequestException(
+        `Only "sent" quotations can be recalled to draft (current: ${quote.status}).`,
+      );
+    }
+
+    const order = await this.prisma.dentalOrder.findUnique({
+      where: { id: quote.orderId },
+      select: {
+        doctorId: true,
+        orderCode: true,
+        doctor: { select: { fullName: true } },
+        patient: { select: { fullName: true } },
+      },
+    });
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const u = await tx.quotation.update({
+        where: { id: quote.id },
+        data: {
+          status: QuotationStatus.draft,
+          sentAt: null,
+        },
+      });
+      // Snap the order back to the pre-send state. We do NOT touch
+      // installments / batches because they're only created when the
+      // doctor approves a pack quote (i.e. post-sent path); a sent
+      // quote that hasn't been approved has no plan rows to worry
+      // about. Belt-and-braces: even if it did, those wouldn't
+      // become payable until the quote re-enters approved state.
+      await tx.dentalOrder.update({
+        where: { id: quote.orderId },
+        data: { status: OrderStatus.treatment_approved },
+      });
+      return u;
+    });
+
+    if (order) {
+      this.events.emit(NotificationEvents.QuotationRecalled, {
+        quotationId: updated.id,
+        orderId: updated.orderId,
+        orderCode: order.orderCode ?? null,
+        doctorId: order.doctorId,
+        doctorName: order.doctor?.fullName ?? null,
+        patientName: order.patient?.fullName ?? null,
+        language: updated.language ?? null,
+        quotationNumber: updated.quotationNumber ?? null,
+      });
+    }
+
+    return updated;
+  }
+
+  /**
+   * Re-render the quote PDF in any supported language without rolling
+   * back the lifecycle. Admin OR the owning dentist can call this —
+   * picking the document language is presentation, not a business
+   * edit, so it's safe even on already-sent / approved / rejected
+   * quotes (the company snapshot stores the translation maps so we
+   * can re-resolve labels without losing the historical context).
+   *
+   * Behaviour:
+   *   • `lang` provided + different from current → updates
+   *     `quote.language` (a fresh PDF in that language will be
+   *     rendered by the caller).
+   *   • `lang` omitted → idempotent. Just ensures the quote has a
+   *     number + snapshot so the caller's render call has everything
+   *     it needs.
+   *
+   * Authorisation: admins always pass; dentists must be the order's
+   * doctor; designers can't trigger a re-render (read-only on
+   * quotes). RBAC is reused from `assertOrderReadable` to stay
+   * consistent with the rest of the service.
+   */
+  async regeneratePdfInLanguage(
+    id: string,
+    lang: DevisLanguage | undefined,
+    caller: Caller,
+  ): Promise<Quotation> {
+    let quote = await this.loadQuotation(id);
+    const order = await this.assertOrderReadable(quote.orderId, caller);
+
+    // Designers can read the quote but they don't pick the document
+    // language — that's a doctor / admin call. Block them here so the
+    // file on disk doesn't change under their fingertips.
+    const isOwningDoctor =
+      caller.role === UserRole.dentist && order.doctorId === caller.userId;
+    if (!this.isAdmin(caller) && !isOwningDoctor) {
+      throw new ForbiddenException(
+        'Only the order doctor or an admin can change the document language.',
+      );
+    }
+
+    // Make sure the row has a number + snapshots before we ever try to
+    // render. This is also where legacy quotes pre-dating the
+    // translation-maps field get their snapshot enriched.
+    quote = await this.ensureSnapshotAndNumber(quote);
+
+    // No language switch requested → just hand the quote back. The
+    // caller renders with whatever language is already on the row.
+    if (!lang || lang === quote.language) {
+      return quote;
+    }
+
+    // Update language only. We intentionally do NOT touch the
+    // companySnapshot — its translation maps already let the renderer
+    // pick the right legalText/footerText for the new language. This
+    // keeps the historical snapshot honest (the original send-time
+    // company state stays preserved).
+    return this.prisma.quotation.update({
+      where: { id: quote.id },
+      data: { language: lang },
+    });
+  }
+
+  /**
    * Cancel a draft/sent quotation (admin). Used to "re-issue" — admin
    * iterated, decided the fees were wrong, wants to start over.
    *
@@ -557,7 +818,40 @@ export class QuotationService {
       );
     }
 
+    // Pull the doctorId before we delete the quote — once the row is
+    // gone we can't re-derive the recipient. Only notify when the
+    // quote had actually been sent (admin canceling a draft is
+    // invisible to the doctor). We also pull doctor + patient names +
+    // orderCode here so the bell body can read as "Quotation Q-… for
+    // patient X (ORD-…) was canceled."
+    const wasSent = quote.status === QuotationStatus.sent;
+    const order = wasSent
+      ? await this.prisma.dentalOrder.findUnique({
+          where: { id: quote.orderId },
+          select: {
+            doctorId: true,
+            orderCode: true,
+            doctor: { select: { fullName: true } },
+            patient: { select: { fullName: true } },
+          },
+        })
+      : null;
+
     await this.prisma.quotation.delete({ where: { id: quote.id } });
+
+    if (wasSent && order) {
+      this.events.emit(NotificationEvents.QuotationCanceled, {
+        quotationId: quote.id,
+        orderId: quote.orderId,
+        orderCode: order.orderCode ?? null,
+        doctorId: order.doctorId,
+        doctorName: order.doctor?.fullName ?? null,
+        patientName: order.patient?.fullName ?? null,
+        language: quote.language ?? null,
+        quotationNumber: quote.quotationNumber ?? null,
+      });
+    }
+
     return { id: quote.id, canceled: true };
   }
 

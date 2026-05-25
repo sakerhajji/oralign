@@ -108,9 +108,14 @@ const EN: QuotationLabels = {
   deliveryFees: 'Delivery fees',
   discount: 'Discount',
   subtotalHt: 'Subtotal',
-  vatRate: 'VAT',
-  vatAmount: 'VAT amount',
-  totalTtc: 'Total incl. VAT',
+  // Even in English we use "TVA" — the platform operates in Tunisia
+  // (TND), the bills carry Tunisian tax registration, and TVA is the
+  // term clinics and labs actually invoice with. Keeping the label
+  // consistent across languages avoids the "VAT vs TVA" confusion in
+  // audit trails.
+  vatRate: 'TVA',
+  vatAmount: 'TVA amount',
+  totalTtc: 'Total incl. TVA',
   currencyLabel: 'Currency',
   status: 'Status',
   statusDraft: 'Draft',

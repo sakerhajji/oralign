@@ -1,9 +1,10 @@
 'use client';
 
+import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import Link from 'next/link';
-import { AlertCircle, WifiOff } from 'lucide-react';
+import { AlertCircle, Eye, EyeOff, WifiOff } from 'lucide-react';
 import { cn } from "@/lib/utils";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,7 @@ export function LoginForm({
   className,
   ...props
 }: React.ComponentProps<"form">) {
+  const [showPassword, setShowPassword] = useState(false);
   const {
     mutate: signIn,
     isPending,
@@ -91,12 +93,27 @@ export function LoginForm({
               Forgot your password?
             </Link>
           </div>
-          <Input
-            id="password"
-            type="password"
-            {...register('password', { onChange: resetSignInError })}
-            className="bg-background"
-          />
+          <div className="relative">
+            <Input
+              id="password"
+              type={showPassword ? 'text' : 'password'}
+              {...register('password', { onChange: resetSignInError })}
+              className="bg-background pr-10"
+            />
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+              onClick={() => setShowPassword((v) => !v)}
+              className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground focus:outline-none"
+            >
+              {showPassword ? (
+                <EyeOff className="h-4 w-4" />
+              ) : (
+                <Eye className="h-4 w-4" />
+              )}
+            </button>
+          </div>
           {errors.password && (
             <p className="text-sm text-red-500">{errors.password.message}</p>
           )}

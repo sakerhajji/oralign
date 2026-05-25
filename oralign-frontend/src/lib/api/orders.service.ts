@@ -54,6 +54,20 @@ export const ordersService = {
     return response.data;
   },
 
+  /**
+   * Restore a soft-deleted order — clears `deletedAt` so the row
+   * shows up in the standard list/detail queries again. Admin only
+   * (backend rejects non-admins with 403). Idempotent — re-clicking
+   * Restore on an already-live order returns a no-op message.
+   */
+  restoreOrder: async (id: string): Promise<MessageResponse> => {
+    const response = await apiClient.post<MessageResponse>(
+      `/orders/${id}/restore`,
+      {},
+    );
+    return response.data;
+  },
+
   submitOrder: async (id: string): Promise<DentalOrder> => {
     const response = await apiClient.post<DentalOrder>(`/orders/${id}/submit`);
     return response.data;

@@ -1,0 +1,163 @@
+'use client';
+
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  CheckCircle2Icon,
+  InfinityIcon,
+  PackageIcon,
+  SparklesIcon,
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { useDoctorAvailablePacks } from '@/lib/hooks';
+import type { AvailablePack } from '@/lib/types';
+import Link from 'next/link';
+
+const TND = (n: number) =>
+  new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(n) + ' TND';
+
+/**
+ * Doctor-facing available packs grid. Mirrors the marketing pack
+ * cards but lives inside the dashboard, with a "Current" badge on
+ * the pack the doctor most recently paid for.
+ */
+export function AvailablePacks({ recommendedId }: { recommendedId?: string }) {
+  const { data, isLoading } = useDoctorAvailablePacks();
+
+  if (isLoading) {
+    return (
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Skeleton key={i} className="h-64 w-full rounded-2xl" />
+        ))}
+      </div>
+    );
+  }
+
+  if (!data || data.length === 0) {
+    return (
+      <Card>
+        <CardContent className="grid h-32 place-items-center text-sm text-muted-foreground">
+          No packs are currently available.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+      {data.map((pack) => (
+        <PackCard
+          key={pack.id}
+          pack={pack}
+          isRecommended={recommendedId === pack.id && !pack.isCurrent}
+        />
+      ))}
+    </div>
+  );
+}
+
+function PackCard({
+  pack,
+  isRecommended,
+}: {
+  pack: AvailablePack;
+  isRecommended: boolean;
+}) {
+  const features: { label: string; ok: boolean }[] = [
+    {
+      label: pack.isUnlimitedSteps
+        ? 'Unlimited treatment steps'
+        : `${pack.maxStepsPerArch ?? 0} steps per arch`,
+      ok: true,
+    },
+    {
+      label: pack.isUnlimitedCorrections
+        ? 'Unlimited corrections'
+        : `${pack.includedCorrections ?? 0} corrections included`,
+      ok: true,
+    },
+    {
+      label: pack.isForOrthodontists
+        ? 'Tailored for orthodontists'
+        : 'General dentists welcome',
+      ok: true,
+    },
+  ];
+
+  return (
+    <Card
+      className={cn(
+        'relative flex h-full flex-col transition-all hover:shadow-md',
+        pack.isCurrent && 'ring-2 ring-primary',
+        isRecommended && 'border-emerald-300/60',
+      )}
+    >
+      {pack.isCurrent ? (
+        <Badge
+          variant="default"
+          className="absolute right-4 top-4 gap-1"
+        >
+          <CheckCircle2Icon className="size-3" /> Current
+        </Badge>
+      ) : isRecommended ? (
+        <Badge
+          variant="outline"
+          className="absolute right-4 top-4 gap-1 border-emerald-400 text-emerald-700 dark:text-emerald-300"
+        >
+          <SparklesIcon className="size-3" /> Recommended
+        </Badge>
+      ) : null}
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <div className="grid size-9 place-items-center rounded-xl bg-primary/10 text-primary">
+            <PackageIcon className="size-4" />
+          </div>
+          <CardTitle className="text-lg">{pack.name}</CardTitle>
+        </div>
+        <CardDescription className="line-clamp-2 min-h-[2.5rem]">
+          {pack.description ?? 'Customized aligner workflow tailored to your clinic.'}
+        </CardDescription>
+        <div className="mt-2 flex items-baseline gap-1.5">
+          <span className="text-3xl font-bold tabular-nums">
+            {TND(pack.price)}
+          </span>
+        </div>
+      </CardHeader>
+      <CardContent className="flex-1">
+        <ul className="space-y-2 text-sm">
+          {features.map((f, i) => (
+            <li key={i} className="flex items-start gap-2">
+              {f.ok ? (
+                <CheckCircle2Icon className="mt-0.5 size-4 text-emerald-600" />
+              ) : (
+                <InfinityIcon className="mt-0.5 size-4 text-muted-foreground" />
+              )}
+              <span>{f.label}</span>
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+      <CardFooter>
+        <Button
+          asChild
+          variant={pack.isCurrent ? 'outline' : 'default'}
+          className="w-full"
+        >
+          <Link href={`/dashboard/orders/new?packId=${pack.id}`}>
+            {pack.isCurrent ? 'Use this pack again' : 'Subscribe / Upgrade'}
+          </Link>
+        </Button>
+      </CardFooter>
+    </Card>
+  );
+}

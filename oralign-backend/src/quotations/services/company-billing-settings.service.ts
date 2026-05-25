@@ -9,6 +9,10 @@ import {
   CompanyBillingSettingsResponseDto,
   UpsertCompanyBillingSettingsDto,
 } from '../dto/company-billing-settings.dto';
+import {
+  formatDateStamp,
+  slugifyForCode,
+} from '../../common/utils/code-naming.util';
 
 /**
  * CompanyBillingSettings is treated as a singleton: there is at most
@@ -151,13 +155,26 @@ export class CompanyBillingSettingsService {
   }
 
   /**
-   * Atomically pull the next quotationNumber and increment the counter.
-   * Used by QuotationService when assigning the human-readable number.
+   * Build the human-readable quotation number from the patient's name
+   * and the quote's creation date — `dv_<PatientNameSlug>_YYYYMMDD`.
+   * Falls back to the legacy `DEV-XXXXXX` counter when we can't slug
+   * the patient (missing patient, non-Latin name with no ASCII
+   * fallback, etc.), so this is always safe to call.
    *
-   * Wrapped in a serializable Prisma transaction so two simultaneous
-   * `POST /quotations/.../send` calls cannot allocate the same number.
+   * Collisions (same patient, same day) are resolved with a `-N`
+   * suffix. We wrap the existence-check + counter-bump in a single
+   * Prisma transaction so two concurrent `POST /quotations/.../send`
+   * calls cannot allocate the same number.
+   *
+   * Kept the legacy counter (`devisNextNumber`) bumping inside the
+   * fallback branch so existing audit trails / number sequences in
+   * the billing settings stay intact even though new quotes use the
+   * patient-stamped format.
    */
-  async allocateNextQuotationNumber(): Promise<string> {
+  async allocateQuotationNumber(args: {
+    patientFullName?: string | null;
+    createdAt?: Date | null;
+  }): Promise<string> {
     return this.prisma.$transaction(async (tx) => {
       const settings = await tx.companyBillingSettings.findFirst({
         where: { isActive: true },
@@ -168,15 +185,43 @@ export class CompanyBillingSettingsService {
           'Cannot allocate quotation number — company billing settings missing.',
         );
       }
-      const prefix = settings.devisPrefix || 'DEV';
-      const next = settings.devisNextNumber;
-      const numberString = `${prefix}-${String(next).padStart(6, '0')}`;
-      await tx.companyBillingSettings.update({
-        where: { id: settings.id },
-        data: { devisNextNumber: next + 1 },
+
+      const date = args.createdAt ?? new Date();
+      const datePart = formatDateStamp(date);
+      const slug = slugifyForCode(args.patientFullName ?? '');
+
+      // Fast path: patient slug is empty → fall back to the legacy
+      // counter-based number so we still produce *something* sensible.
+      if (!slug) {
+        const prefix = settings.devisPrefix || 'DEV';
+        const next = settings.devisNextNumber;
+        const numberString = `${prefix}-${String(next).padStart(6, '0')}`;
+        await tx.companyBillingSettings.update({
+          where: { id: settings.id },
+          data: { devisNextNumber: next + 1 },
+        });
+        return numberString;
+      }
+
+      const stem = `dv_${slug}_${datePart}`;
+      // Same patient + same day → tack on a -02, -03, … suffix so
+      // each quote stays uniquely addressable.
+      const existing = await tx.quotation.count({
+        where: { quotationNumber: { startsWith: stem } },
       });
-      return numberString;
+      return existing === 0
+        ? stem
+        : `${stem}-${String(existing + 1).padStart(2, '0')}`;
     });
+  }
+
+  /**
+   * Legacy entry point — kept so any external caller that hasn't been
+   * updated still resolves to a sensible counter-based number. New
+   * code should call `allocateQuotationNumber({ patientFullName, … })`.
+   */
+  async allocateNextQuotationNumber(): Promise<string> {
+    return this.allocateQuotationNumber({});
   }
 
   // ─── Mapping ─────────────────────────────────────────────────────────────

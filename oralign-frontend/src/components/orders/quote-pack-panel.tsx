@@ -1,0 +1,1306 @@
+'use client';
+
+/**
+ * Pack + payment-plan panel — mounted under the existing quote
+ * admin/doctor surface to handle:
+ *   • Admin: attach pack, build the installment plan (2/3/N tranches
+ *     with explicit step ranges), record cash, deliver unlocked batches.
+ *   • Doctor: pay by card (mock), declare a bank transfer with proof
+ *     upload, view installments + batch progress.
+ *
+ * The component is intentionally self-contained — it reads the quote
+ * via the props passed from `QuoteReview` and refetches its own
+ * installments/batches via React-Query. State on the existing quote
+ * surface is left untouched.
+ */
+
+import { useEffect, useMemo, useState } from 'react';
+import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
+import {
+  ArchType,
+  BatchStatus,
+  InstallmentStatus,
+  PaymentMethod,
+  PaymentMode,
+  PaymentRecordStatus,
+  QuotationStatus,
+  UserRole,
+  type Pack,
+  type Payment,
+  type Quotation,
+  type QuoteInstallment,
+  type QuoteStepBatch,
+} from '@/lib/types';
+import {
+  usePacks,
+  useAttachPackToQuotation,
+  useConfigurePaymentPlan,
+  useInstallments,
+  useStepBatches,
+  useDeliverBatch,
+  usePayByCard,
+  useDeclareBankTransfer,
+  useRecordCash,
+} from '@/lib/hooks';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  CheckCircle2,
+  CreditCard,
+  Landmark,
+  Lock,
+  Package,
+  Plus,
+  Send,
+  Trash2,
+  Truck,
+  Unlock,
+  Wallet,
+} from 'lucide-react';
+
+interface Props {
+  quote: Quotation;
+  role: UserRole;
+}
+
+// ─── Money helpers ────────────────────────────────────────────────────
+// Decimal money lives as strings on the wire so the 3rd-decimal-place
+// precision of TND doesn't get clobbered by Number conversion. The
+// `toDec` helper still returns Number — but we only use it for display
+// + the sum-equality check, which uses a 0.001 tolerance the backend
+// also honors.
+
+const toDec = (s: string | number | null | undefined): number =>
+  typeof s === 'number' ? s : s ? Number(s) : 0;
+
+const money = (s: string | number | null | undefined, ccy = 'TND'): string =>
+  `${toDec(s).toFixed(3)} ${ccy}`;
+
+// ─────────────────────────────────────────────────────────────────────
+
+export function QuotePackPanel({ quote, role }: Props) {
+  const isAdmin = role === UserRole.ADMIN || role === UserRole.SUPER_ADMIN;
+  const isDoctor = role === UserRole.DENTIST;
+
+  const hasPack = !!quote.packId;
+  // Fetch installments + batches in parallel; both queries are
+  // cheap and the admin/doctor views read the same data.
+  const installmentsQ = useInstallments(quote.id, hasPack);
+  const batchesQ = useStepBatches(quote.id, hasPack);
+
+  if (!isAdmin && !isDoctor) return null;
+
+  return (
+    <div className="mt-6 flex flex-col gap-4">
+      {isAdmin ? (
+        <>
+          {!hasPack ? (
+            <AttachPackCard quote={quote} />
+          ) : (
+            <PackSnapshotCard quote={quote} />
+          )}
+          {hasPack ? (
+            (installmentsQ.data?.length ?? 0) === 0 ? (
+              <PlanBuilderCard quote={quote} />
+            ) : (
+              <AdminPlanView
+                quote={quote}
+                installments={installmentsQ.data ?? []}
+                batches={batchesQ.data ?? []}
+              />
+            )
+          ) : null}
+        </>
+      ) : (
+        hasPack && (
+          <DoctorPlanView
+            quote={quote}
+            installments={installmentsQ.data ?? []}
+            batches={batchesQ.data ?? []}
+          />
+        )
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Admin — Attach pack
+// ═══════════════════════════════════════════════════════════════════════
+
+function AttachPackCard({ quote }: { quote: Quotation }) {
+  const packsQ = usePacks({ limit: 100 });
+  const attach = useAttachPackToQuotation();
+  const [packId, setPackId] = useState<string>('');
+
+  const activePacks = (packsQ.data?.data ?? []).filter((p) => p.isActive);
+  const selectedPack = activePacks.find((p) => p.id === packId);
+
+  // Single-price-per-pack model — every pack has ONE active price
+  // (archType=two_arches as the canonical pricing unit on the
+  // backend). The admin doesn't pick arch here anymore; the
+  // catalogue exposes one price per pack and that's what we
+  // snapshot.
+  const activePrice = useMemo(() => {
+    if (!selectedPack) return null;
+    const active = (selectedPack.prices ?? []).filter((p) => p.isActive);
+    return (
+      active.find((p) => p.archType === ArchType.TWO_ARCHES) ??
+      active[0] ??
+      null
+    );
+  }, [selectedPack]);
+
+  const submit = () => {
+    if (!packId) return;
+    // Always send `archType: TWO_ARCHES` explicitly — even though the
+    // refactored backend defaults to two_arches when omitted, the
+    // running container may still be the older build that REQUIRES
+    // a value. Passing the canonical pricing unit keeps the call
+    // working in both versions without a forced redeploy. The
+    // catalogue is single-price-per-pack now, so two_arches is the
+    // only valid value the admin would pick anyway.
+    attach.mutate({
+      quotationId: quote.id,
+      dto: { packId, archType: ArchType.TWO_ARCHES },
+    });
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Package className="h-4 w-4 text-primary" />
+          Attach a pack to this quotation
+        </CardTitle>
+        <CardDescription>
+          Pick the commercial pack — the total price is snapshotted
+          onto the quote so later catalogue edits don&apos;t affect this
+          quotation.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-2 md:col-span-2">
+          <Label>Pack</Label>
+          <Select value={packId} onValueChange={setPackId}>
+            <SelectTrigger>
+              <SelectValue placeholder="Pick a pack…" />
+            </SelectTrigger>
+            <SelectContent>
+              {activePacks.length === 0 ? (
+                <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                  No active pack — create one in /dashboard/packs first.
+                </div>
+              ) : (
+                activePacks.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}
+                  </SelectItem>
+                ))
+              )}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="grid gap-2">
+          <Label>Active price</Label>
+          <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+            {selectedPack ? (
+              activePrice ? (
+                <strong>{money(activePrice.price, activePrice.currency)}</strong>
+              ) : (
+                <span className="text-destructive">
+                  No active price configured
+                </span>
+              )
+            ) : (
+              <span className="text-muted-foreground">—</span>
+            )}
+          </div>
+        </div>
+        <div className="md:col-span-3 flex justify-end">
+          <Button
+            onClick={submit}
+            disabled={!packId || !activePrice || attach.isPending}
+          >
+            Attach pack
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Admin — Pack snapshot summary (read-only header above the plan)
+// ═══════════════════════════════════════════════════════════════════════
+
+function PackSnapshotCard({ quote }: { quote: Quotation }) {
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <div>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Package className="h-4 w-4 text-primary" />
+            {quote.packName ?? 'Pack'}
+            {/* Arch badge only surfaces on legacy single-arch quotes
+                — the consolidated model only uses two_arches and the
+                badge is redundant there. Kept for historical
+                quotations that were attached when the picker still
+                existed. */}
+            {quote.archType && quote.archType !== ArchType.TWO_ARCHES ? (
+              <Badge variant="secondary" className="font-normal">
+                Single arch
+              </Badge>
+            ) : null}
+          </CardTitle>
+          <CardDescription>
+            {quote.isUnlimitedSteps
+              ? 'Unlimited steps'
+              : `Max ${quote.maxStepsPerArch ?? 0} steps`}
+            {' · '}
+            {quote.isUnlimitedCorrections
+              ? 'unlimited corrections'
+              : `${quote.includedCorrections ?? 0} corrections`}
+          </CardDescription>
+        </div>
+        <div className="text-right">
+          <div className="text-xs text-muted-foreground">Total price</div>
+          <div className="text-lg font-semibold">
+            {money(quote.totalPrice, quote.currency)}
+          </div>
+        </div>
+      </CardHeader>
+    </Card>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Admin — Plan builder (full_payment OR installments with N tranches)
+// ═══════════════════════════════════════════════════════════════════════
+
+interface DraftRow {
+  amount: string;        // string while editing — parsed at submit
+  fromStep: string;
+  toStep: string;
+  availableFrom: string; // YYYY-MM-DD
+  dueDate: string;       // YYYY-MM-DD or ''
+}
+
+const todayISO = () => new Date().toISOString().slice(0, 10);
+
+function emptyRow(fromStep = 1, toStep = 1, amount = '0'): DraftRow {
+  return {
+    amount,
+    fromStep: String(fromStep),
+    toStep: String(toStep),
+    availableFrom: todayISO(),
+    dueDate: '',
+  };
+}
+
+function PlanBuilderCard({ quote }: { quote: Quotation }) {
+  const total = toDec(quote.totalPrice);
+  const maxSteps = quote.maxStepsPerArch ?? 0;
+  const isUnlimited = !!quote.isUnlimitedSteps;
+  const configure = useConfigurePaymentPlan();
+
+  const [mode, setMode] = useState<PaymentMode>(PaymentMode.INSTALLMENTS);
+  const [rows, setRows] = useState<DraftRow[]>(() => [
+    emptyRow(1, isUnlimited ? 1 : Math.max(1, maxSteps), total.toFixed(3)),
+  ]);
+
+  // Switching modes resets the draft so the admin never accidentally
+  // submits a 3-tranche plan still labelled "full_payment".
+  const setModeWithReset = (next: PaymentMode) => {
+    setMode(next);
+    if (next === PaymentMode.FULL_PAYMENT) {
+      setRows([
+        emptyRow(
+          1,
+          isUnlimited ? 1 : Math.max(1, maxSteps),
+          total.toFixed(3),
+        ),
+      ]);
+    } else {
+      // Default to two tranches halving the total + step range.
+      const half = (total / 2).toFixed(3);
+      const mid = isUnlimited ? 1 : Math.max(1, Math.floor(maxSteps / 2));
+      setRows([
+        emptyRow(1, mid, half),
+        emptyRow(mid + 1, isUnlimited ? mid + 1 : maxSteps, half),
+      ]);
+    }
+  };
+
+  const updateRow = (i: number, patch: Partial<DraftRow>) =>
+    setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+
+  const addRow = () =>
+    setRows((rs) => {
+      const last = rs[rs.length - 1];
+      const nextFrom = last ? Number(last.toStep) + 1 : 1;
+      return [
+        ...rs,
+        emptyRow(nextFrom, isUnlimited ? nextFrom : maxSteps, '0'),
+      ];
+    });
+
+  const removeRow = (i: number) =>
+    setRows((rs) => rs.filter((_, idx) => idx !== i));
+
+  // Live validation — sum vs total, overlap, range bounds. Errors are
+  // printed inline so the admin can fix them before submitting.
+  const validation = useMemo(() => {
+    const errors: string[] = [];
+    const numeric = rows.map((r) => ({
+      amount: Number(r.amount),
+      from: Number(r.fromStep),
+      to: Number(r.toStep),
+    }));
+    const sum = numeric.reduce((acc, r) => acc + (isFinite(r.amount) ? r.amount : 0), 0);
+    if (Math.abs(sum - total) > 0.001) {
+      errors.push(
+        `Σ amounts (${sum.toFixed(3)}) must equal total (${total.toFixed(3)}).`,
+      );
+    }
+    for (let i = 0; i < numeric.length; i++) {
+      const r = numeric[i]!;
+      if (!isFinite(r.amount) || r.amount <= 0) {
+        errors.push(`Tranche ${i + 1}: amount must be positive.`);
+      }
+      if (!isFinite(r.from) || !isFinite(r.to) || r.from > r.to) {
+        errors.push(`Tranche ${i + 1}: from-step must be ≤ to-step.`);
+      }
+      if (!isUnlimited && r.to > maxSteps) {
+        errors.push(
+          `Tranche ${i + 1}: to-step exceeds pack max (${maxSteps}).`,
+        );
+      }
+    }
+    const sorted = [...numeric].sort((a, b) => a.from - b.from);
+    for (let i = 1; i < sorted.length; i++) {
+      if (sorted[i]!.from <= sorted[i - 1]!.to) {
+        errors.push(`Step ranges overlap.`);
+        break;
+      }
+    }
+    if (mode === PaymentMode.FULL_PAYMENT && rows.length !== 1) {
+      errors.push('Full payment requires exactly one tranche.');
+    }
+    if (mode === PaymentMode.INSTALLMENTS && rows.length < 2) {
+      errors.push('Installments mode requires at least two tranches.');
+    }
+    return { errors, sum };
+  }, [rows, total, mode, maxSteps, isUnlimited]);
+
+  const submit = () => {
+    if (validation.errors.length > 0) {
+      toast.error(validation.errors[0]);
+      return;
+    }
+    configure.mutate({
+      quotationId: quote.id,
+      dto: {
+        paymentMode: mode,
+        installments: rows.map((r) => ({
+          amount: Number(r.amount),
+          availableFrom: r.availableFrom
+            ? new Date(r.availableFrom).toISOString()
+            : undefined,
+          dueDate: r.dueDate ? new Date(r.dueDate).toISOString() : undefined,
+          batch: {
+            fromStep: Number(r.fromStep),
+            toStep: Number(r.toStep),
+          },
+        })),
+      },
+    });
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Payment & delivery plan</CardTitle>
+        <CardDescription>
+          Split the {money(quote.totalPrice, quote.currency)} total into as
+          many tranches as you need. Each tranche unlocks a step range
+          when paid (or admin-confirmed for cash/transfer). Locked steps
+          can never be delivered.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Label>Mode:</Label>
+          <Button
+            size="sm"
+            variant={mode === PaymentMode.FULL_PAYMENT ? 'default' : 'outline'}
+            onClick={() => setModeWithReset(PaymentMode.FULL_PAYMENT)}
+          >
+            Full payment
+          </Button>
+          <Button
+            size="sm"
+            variant={mode === PaymentMode.INSTALLMENTS ? 'default' : 'outline'}
+            onClick={() => setModeWithReset(PaymentMode.INSTALLMENTS)}
+          >
+            Installments
+          </Button>
+        </div>
+
+        <div className="overflow-x-auto rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-12">#</TableHead>
+                <TableHead>Amount</TableHead>
+                <TableHead>From step</TableHead>
+                <TableHead>To step</TableHead>
+                <TableHead>Available from</TableHead>
+                <TableHead>Due date</TableHead>
+                <TableHead className="w-12" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((row, i) => (
+                <TableRow key={i}>
+                  <TableCell className="font-medium">{i + 1}</TableCell>
+                  <TableCell>
+                    <Input
+                      type="number"
+                      step="0.001"
+                      min={0.001}
+                      value={row.amount}
+                      onChange={(e) =>
+                        updateRow(i, { amount: e.target.value })
+                      }
+                      className="w-32"
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={row.fromStep}
+                      onChange={(e) =>
+                        updateRow(i, { fromStep: e.target.value })
+                      }
+                      className="w-20"
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={row.toStep}
+                      onChange={(e) =>
+                        updateRow(i, { toStep: e.target.value })
+                      }
+                      className="w-20"
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      type="date"
+                      value={row.availableFrom}
+                      onChange={(e) =>
+                        updateRow(i, { availableFrom: e.target.value })
+                      }
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      type="date"
+                      value={row.dueDate}
+                      onChange={(e) =>
+                        updateRow(i, { dueDate: e.target.value })
+                      }
+                    />
+                  </TableCell>
+                  <TableCell>
+                    {mode === PaymentMode.INSTALLMENTS && rows.length > 1 ? (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => removeRow(i)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    ) : null}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+
+        <div className="flex items-center justify-between text-xs">
+          <div className="text-muted-foreground">
+            Σ tranches: <strong>{validation.sum.toFixed(3)}</strong> ·
+            target: <strong>{total.toFixed(3)}</strong>{' '}
+            {Math.abs(validation.sum - total) <= 0.001 ? (
+              <CheckCircle2 className="ml-1 inline h-3 w-3 text-emerald-600" />
+            ) : null}
+          </div>
+          {mode === PaymentMode.INSTALLMENTS ? (
+            <Button size="sm" variant="outline" onClick={addRow}>
+              <Plus className="mr-1 h-4 w-4" />
+              Add tranche
+            </Button>
+          ) : null}
+        </div>
+
+        {validation.errors.length > 0 ? (
+          <ul className="space-y-1 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
+            {validation.errors.map((err, i) => (
+              <li key={i}>• {err}</li>
+            ))}
+          </ul>
+        ) : null}
+
+        <div className="flex justify-end">
+          <Button
+            onClick={submit}
+            disabled={configure.isPending || validation.errors.length > 0}
+          >
+            Save plan
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Admin — Plan view (installments, batches, record-cash, deliver)
+// ═══════════════════════════════════════════════════════════════════════
+
+function statusBadge(status: InstallmentStatus): React.ReactNode {
+  switch (status) {
+    case InstallmentStatus.PAID:
+      return <Badge className="bg-emerald-600">Paid</Badge>;
+    case InstallmentStatus.OVERDUE:
+      return <Badge variant="destructive">Overdue</Badge>;
+    case InstallmentStatus.CANCELLED:
+      return <Badge variant="outline">Cancelled</Badge>;
+    default:
+      return <Badge variant="secondary">Pending</Badge>;
+  }
+}
+
+function batchBadge(status: BatchStatus): React.ReactNode {
+  switch (status) {
+    case BatchStatus.DELIVERED:
+      return (
+        <Badge className="bg-emerald-600">
+          <Truck className="mr-1 h-3 w-3" />
+          Delivered
+        </Badge>
+      );
+    case BatchStatus.UNLOCKED:
+      return (
+        <Badge className="bg-amber-500">
+          <Unlock className="mr-1 h-3 w-3" />
+          Unlocked
+        </Badge>
+      );
+    default:
+      return (
+        <Badge variant="outline">
+          <Lock className="mr-1 h-3 w-3" />
+          Locked
+        </Badge>
+      );
+  }
+}
+
+function AdminPlanView({
+  quote,
+  installments,
+  batches,
+}: {
+  quote: Quotation;
+  installments: QuoteInstallment[];
+  batches: QuoteStepBatch[];
+}) {
+  const deliver = useDeliverBatch();
+  const [cashTarget, setCashTarget] = useState<QuoteInstallment | null>(null);
+
+  // Index batches by installment id so each row can show its linked
+  // delivery range without an O(n²) lookup.
+  const batchByInstallment = useMemo(() => {
+    const m = new Map<string, QuoteStepBatch>();
+    batches.forEach((b) => m.set(b.installmentId, b));
+    return m;
+  }, [batches]);
+
+  return (
+    <>
+      <PackSnapshotCard quote={quote} />
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Tranches & deliveries</CardTitle>
+          <CardDescription>
+            Confirm cash payments inline; unlocked batches get a
+            &quot;Mark delivered&quot; button. Bank transfers come in
+            through the <strong>/dashboard/payments/pending</strong>{' '}
+            queue.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>#</TableHead>
+                <TableHead>Amount</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Steps</TableHead>
+                <TableHead>Batch</TableHead>
+                <TableHead>Available</TableHead>
+                <TableHead>Due</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {installments.map((inst) => {
+                const batch = batchByInstallment.get(inst.id);
+                const isPayable =
+                  inst.status === InstallmentStatus.PENDING ||
+                  inst.status === InstallmentStatus.OVERDUE;
+                return (
+                  <TableRow key={inst.id}>
+                    <TableCell>{inst.installmentNumber}</TableCell>
+                    <TableCell className="font-mono">
+                      {money(inst.amount, quote.currency)}
+                    </TableCell>
+                    <TableCell>{statusBadge(inst.status)}</TableCell>
+                    <TableCell className="text-xs">
+                      {batch
+                        ? `${batch.fromStep} → ${batch.toStep}`
+                        : '—'}
+                    </TableCell>
+                    <TableCell>
+                      {batch ? batchBadge(batch.status) : null}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {new Date(inst.availableFrom).toLocaleDateString()}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {inst.dueDate
+                        ? new Date(inst.dueDate).toLocaleDateString()
+                        : '—'}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-2">
+                        {isPayable ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setCashTarget(inst)}
+                          >
+                            <Wallet className="mr-1 h-3 w-3" />
+                            Record cash
+                          </Button>
+                        ) : null}
+                        {batch?.status === BatchStatus.UNLOCKED ? (
+                          <Button
+                            size="sm"
+                            onClick={() =>
+                              deliver.mutate({
+                                quotationId: quote.id,
+                                orderId: quote.orderId,
+                                batchId: batch.id,
+                              })
+                            }
+                            disabled={deliver.isPending}
+                          >
+                            <Truck className="mr-1 h-3 w-3" />
+                            Mark delivered
+                          </Button>
+                        ) : null}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      <RecordCashDialog
+        target={cashTarget}
+        quote={quote}
+        onClose={() => setCashTarget(null)}
+      />
+    </>
+  );
+}
+
+function RecordCashDialog({
+  target,
+  quote,
+  onClose,
+}: {
+  target: QuoteInstallment | null;
+  quote: Quotation;
+  onClose: () => void;
+}) {
+  const record = useRecordCash();
+  const [receiptNumber, setReceiptNumber] = useState('');
+  const [notes, setNotes] = useState('');
+
+  useEffect(() => {
+    if (target) {
+      setReceiptNumber('');
+      setNotes('');
+    }
+  }, [target]);
+
+  return (
+    <Dialog open={!!target} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Record cash payment</DialogTitle>
+          <DialogDescription>
+            Mark installment #{target?.installmentNumber} (
+            {money(target?.amount, quote.currency)}) as paid in cash.
+            The linked step batch will unlock immediately.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-3">
+          <div className="grid gap-1.5">
+            <Label htmlFor="receipt">Receipt number</Label>
+            <Input
+              id="receipt"
+              value={receiptNumber}
+              onChange={(e) => setReceiptNumber(e.target.value)}
+              placeholder="Optional"
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="notes">Notes</Label>
+            <Textarea
+              id="notes"
+              rows={3}
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            disabled={record.isPending}
+            onClick={() => {
+              if (!target) return;
+              record.mutate(
+                {
+                  quotationId: quote.id,
+                  installmentId: target.id,
+                  orderId: quote.orderId,
+                  dto: {
+                    receiptNumber: receiptNumber.trim() || undefined,
+                    notes: notes.trim() || undefined,
+                  },
+                },
+                { onSuccess: onClose },
+              );
+            }}
+          >
+            Record cash
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Doctor — timeline + pay-by-card + declare-bank-transfer
+// ═══════════════════════════════════════════════════════════════════════
+
+function DoctorPlanView({
+  quote,
+  installments,
+  batches,
+}: {
+  quote: Quotation;
+  installments: QuoteInstallment[];
+  batches: QuoteStepBatch[];
+}) {
+  const isApproved = quote.status === QuotationStatus.APPROVED;
+  const batchByInstallment = useMemo(() => {
+    const m = new Map<string, QuoteStepBatch>();
+    batches.forEach((b) => m.set(b.installmentId, b));
+    return m;
+  }, [batches]);
+
+  // All currently-payable rows (pending/overdue and the available-from
+  // date has arrived). The first one drives the per-row "Pay now"
+  // button; the full list drives the "Pay all" affordance + the
+  // dialog's scope toggle. The backend still enforces availableFrom
+  // and the sequential-pay rule, so the UI just filters proactively.
+  const now = Date.now();
+  const payable = useMemo(
+    () =>
+      installments.filter(
+        (i) =>
+          (i.status === InstallmentStatus.PENDING ||
+            i.status === InstallmentStatus.OVERDUE) &&
+          new Date(i.availableFrom).getTime() <= now,
+      ),
+    [installments, now],
+  );
+  const nextPayable = payable[0];
+
+  // Sum of every payable row — shown both on the timeline header and
+  // inside the dialog when the doctor toggles "all remaining".
+  const payableSum = useMemo(
+    () => payable.reduce((acc, r) => acc + toDec(r.amount), 0),
+    [payable],
+  );
+
+  return (
+    <>
+      <PackSnapshotCard quote={quote} />
+
+      {isApproved && payable.length > 1 ? (
+        <Card className="border-emerald-200/60 bg-emerald-50/40">
+          <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-emerald-900/70">
+                Pay everything at once
+              </div>
+              <p className="mt-0.5 text-sm text-emerald-900">
+                You have <strong>{payable.length}</strong> tranches available —{' '}
+                <strong>{payableSum.toFixed(3)} {quote.currency}</strong> in
+                total. Pay them tranche by tranche, or in one go.
+              </p>
+            </div>
+            <DoctorPayActions
+              quote={quote}
+              installment={nextPayable!}
+              payable={payable}
+              defaultScope="all"
+              label="Pay all now"
+            />
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Payment timeline</CardTitle>
+          <CardDescription>
+            {isApproved
+              ? 'Pay each tranche when it becomes available. Steps unlock automatically once the payment is confirmed.'
+              : 'Approve the quotation first to start paying.'}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>#</TableHead>
+                <TableHead>Amount</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Steps</TableHead>
+                <TableHead>Available</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {installments.map((inst) => {
+                const batch = batchByInstallment.get(inst.id);
+                const available =
+                  new Date(inst.availableFrom).getTime() <= now;
+                const isNext = nextPayable?.id === inst.id;
+                return (
+                  <TableRow key={inst.id}>
+                    <TableCell>{inst.installmentNumber}</TableCell>
+                    <TableCell className="font-mono">
+                      {money(inst.amount, quote.currency)}
+                    </TableCell>
+                    <TableCell className="space-y-1">
+                      {statusBadge(inst.status)}
+                      {batch ? (
+                        <div className="text-xs">{batchBadge(batch.status)}</div>
+                      ) : null}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {batch
+                        ? `${batch.fromStep} → ${batch.toStep}`
+                        : '—'}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {new Date(inst.availableFrom).toLocaleDateString()}
+                      {!available ? (
+                        <div className="text-muted-foreground">
+                          locked until then
+                        </div>
+                      ) : null}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {isApproved && isNext && available ? (
+                        <DoctorPayActions
+                          quote={quote}
+                          installment={inst}
+                          payable={payable}
+                        />
+                      ) : null}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </>
+  );
+}
+
+function DoctorPayActions({
+  quote,
+  installment,
+  payable,
+  defaultScope = 'single',
+  label = 'Pay now',
+}: {
+  quote: Quotation;
+  installment: QuoteInstallment;
+  /** Every currently-payable installment, including `installment`. */
+  payable: QuoteInstallment[];
+  /** Which mode the dialog opens in. */
+  defaultScope?: 'single' | 'all';
+  label?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Button size="sm" onClick={() => setOpen(true)}>
+        <CreditCard className="mr-1 h-3 w-3" />
+        {label}
+      </Button>
+      <PaymentMethodDialog
+        open={open}
+        onClose={() => setOpen(false)}
+        quote={quote}
+        installment={installment}
+        payable={payable}
+        defaultScope={defaultScope}
+      />
+    </>
+  );
+}
+
+type PayScope = 'single' | 'all';
+
+function PaymentMethodDialog({
+  open,
+  onClose,
+  quote,
+  installment,
+  payable,
+  defaultScope,
+}: {
+  open: boolean;
+  onClose: () => void;
+  quote: Quotation;
+  installment: QuoteInstallment;
+  payable: QuoteInstallment[];
+  defaultScope: PayScope;
+}) {
+  // Backend currently allows all three methods. If the project later
+  // adds `allowedPaymentMethods` on the quote, swap this constant for
+  // `quote.allowedPaymentMethods ?? METHODS`.
+  const METHODS: PaymentMethod[] = [
+    PaymentMethod.CARD,
+    PaymentMethod.BANK_TRANSFER,
+    PaymentMethod.CASH,
+  ];
+  const [method, setMethod] = useState<PaymentMethod>(PaymentMethod.CARD);
+  const [scope, setScope] = useState<PayScope>(defaultScope);
+
+  // Keep the dialog state in sync with the trigger button — when the
+  // doctor opens "Pay all" from the banner we want the toggle in
+  // "all" mode without them having to click again.
+  useEffect(() => {
+    if (open) setScope(defaultScope);
+  }, [open, defaultScope]);
+
+  const payCard = usePayByCard();
+  const declareBT = useDeclareBankTransfer();
+  const [bankReference, setBankReference] = useState('');
+  const [proofFile, setProofFile] = useState<File | null>(null);
+  // The "all" path fires one request per installment — we surface
+  // progress to the doctor so it doesn't look frozen on the 2nd of N.
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(
+    null,
+  );
+
+  const canPickAll = payable.length > 1;
+  const targets = scope === 'all' ? payable : [installment];
+  const total = targets.reduce((acc, t) => acc + toDec(t.amount), 0);
+
+  const close = () => {
+    setProgress(null);
+    setBankReference('');
+    setProofFile(null);
+    onClose();
+  };
+
+  const submit = async () => {
+    if (method === PaymentMethod.CASH) {
+      // Cash is admin-recorded. No doctor endpoint either way.
+      toast.info(
+        'Cash payments are recorded by the clinic admin once they receive the funds.',
+      );
+      close();
+      return;
+    }
+
+    // Sequential loop — per-installment idempotency keys so a retry on
+    // the same row never double-charges, and we surface partial
+    // progress to the doctor in case one tranche fails mid-way.
+    setProgress({ done: 0, total: targets.length });
+    try {
+      for (let i = 0; i < targets.length; i++) {
+        const t = targets[i]!;
+        if (method === PaymentMethod.CARD) {
+          const idempotencyKey =
+            typeof crypto !== 'undefined' && 'randomUUID' in crypto
+              ? crypto.randomUUID()
+              : `${Date.now()}-${Math.random()}-${i}`;
+          await payCard.mutateAsync({
+            quotationId: quote.id,
+            installmentId: t.id,
+            idempotencyKey,
+            orderId: quote.orderId,
+            mockOutcome: 'success',
+          });
+        } else {
+          // BANK_TRANSFER — one declaration per installment, same
+          // reference + proof so the admin can match them to the
+          // doctor's single bank wire.
+          await declareBT.mutateAsync({
+            quotationId: quote.id,
+            installmentId: t.id,
+            orderId: quote.orderId,
+            bankReference: bankReference.trim() || undefined,
+            proofFile,
+          });
+        }
+        setProgress({ done: i + 1, total: targets.length });
+      }
+      close();
+    } catch {
+      // Per-mutation hook has already raised a toast; surface progress
+      // so the doctor sees what landed.
+      setProgress((p) => (p ? { ...p } : null));
+    }
+  };
+
+  const isPending = payCard.isPending || declareBT.isPending;
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && close()}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>
+            Pay {total.toFixed(3)} {quote.currency}
+          </DialogTitle>
+          <DialogDescription>
+            {scope === 'all'
+              ? `Covers ${payable.length} tranches in one go.`
+              : `Installment #${installment.installmentNumber}.`}{' '}
+            Pick how you want to pay.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid gap-3">
+          {/* Scope toggle — only when there's a real choice to make. */}
+          {canPickAll ? (
+            <div className="grid grid-cols-2 gap-2 rounded-md border bg-muted/20 p-1">
+              <button
+                type="button"
+                onClick={() => setScope('single')}
+                disabled={isPending}
+                className={cn(
+                  'rounded-md px-3 py-2 text-left text-xs transition',
+                  scope === 'single'
+                    ? 'bg-background shadow'
+                    : 'opacity-70 hover:opacity-100',
+                )}
+              >
+                <div className="font-medium">This tranche</div>
+                <div className="text-muted-foreground">
+                  {money(installment.amount, quote.currency)} · #
+                  {installment.installmentNumber}
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => setScope('all')}
+                disabled={isPending}
+                className={cn(
+                  'rounded-md px-3 py-2 text-left text-xs transition',
+                  scope === 'all'
+                    ? 'bg-background shadow'
+                    : 'opacity-70 hover:opacity-100',
+                )}
+              >
+                <div className="font-medium">All remaining</div>
+                <div className="text-muted-foreground">
+                  {payable
+                    .reduce((acc, t) => acc + toDec(t.amount), 0)
+                    .toFixed(3)}{' '}
+                  {quote.currency} · {payable.length} tranches
+                </div>
+              </button>
+            </div>
+          ) : null}
+
+          <div className="grid grid-cols-3 gap-2">
+            {METHODS.map((m) => (
+              <Button
+                key={m}
+                type="button"
+                variant={method === m ? 'default' : 'outline'}
+                className="h-auto flex-col items-center gap-1 py-3"
+                onClick={() => setMethod(m)}
+                disabled={isPending}
+              >
+                {m === PaymentMethod.CARD ? (
+                  <CreditCard className="h-4 w-4" />
+                ) : m === PaymentMethod.BANK_TRANSFER ? (
+                  <Landmark className="h-4 w-4" />
+                ) : (
+                  <Wallet className="h-4 w-4" />
+                )}
+                <span className="text-xs capitalize">
+                  {m.replace('_', ' ')}
+                </span>
+              </Button>
+            ))}
+          </div>
+
+          {method === PaymentMethod.CARD ? (
+            <p className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
+              The real card processor isn&apos;t connected yet — for now
+              we run a deterministic mock that returns SUCCESS.{' '}
+              {scope === 'all'
+                ? 'Each tranche is paid in sequence; you can retry safely if one fails.'
+                : 'Your installment will be marked paid immediately.'}
+            </p>
+          ) : method === PaymentMethod.BANK_TRANSFER ? (
+            <div className="grid gap-3">
+              <div className="grid gap-1.5">
+                <Label htmlFor="ref">Bank reference</Label>
+                <Input
+                  id="ref"
+                  value={bankReference}
+                  onChange={(e) => setBankReference(e.target.value)}
+                  placeholder="e.g. SWIFT/IBAN ref or memo"
+                  disabled={isPending}
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="proof">
+                  Proof (PNG/JPG/WebP/HEIC/PDF, ≤5 MB)
+                </Label>
+                <Input
+                  id="proof"
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/heic,application/pdf"
+                  onChange={(e) => setProofFile(e.target.files?.[0] ?? null)}
+                  disabled={isPending}
+                />
+              </div>
+              <p className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
+                {scope === 'all'
+                  ? `One declaration per tranche, sharing the same reference and proof — the admin can confirm all ${payable.length} together.`
+                  : 'The clinic admin reviews the transfer + proof before marking it confirmed.'}{' '}
+                You&apos;ll see the status update here.
+              </p>
+            </div>
+          ) : (
+            <p className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
+              Hand the cash to the clinic. They&apos;ll record the
+              payment on their side and the installment{scope === 'all' ? 's' : ''}{' '}
+              will be marked paid here.
+            </p>
+          )}
+
+          {progress ? (
+            <div className="rounded-md border bg-muted/30 p-2 text-xs">
+              Processing tranche {progress.done}/{progress.total}…
+            </div>
+          ) : null}
+        </div>
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={close} disabled={isPending}>
+            Cancel
+          </Button>
+          <Button onClick={submit} disabled={isPending}>
+            {method === PaymentMethod.CARD ? (
+              <>
+                <CreditCard className="mr-1 h-3 w-3" />
+                {scope === 'all'
+                  ? `Pay ${payable.length} tranches`
+                  : 'Pay by card'}
+              </>
+            ) : method === PaymentMethod.BANK_TRANSFER ? (
+              <>
+                <Send className="mr-1 h-3 w-3" />
+                {scope === 'all'
+                  ? `Submit ${payable.length} declarations`
+                  : 'Submit declaration'}
+              </>
+            ) : (
+              'Got it'
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}

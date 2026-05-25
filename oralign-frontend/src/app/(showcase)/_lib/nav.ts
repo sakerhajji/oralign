@@ -5,7 +5,7 @@
  *
  * Update this array first when adding, moving, or removing a section.
  *
- * The page renders sections in this order (per page.tsx):
+ * The patient page renders sections in this order:
  *   Hero → Ribbon → Confidence → Solution → HowItWorks
  *     → AdultBrochure → ParentBrochure → DashboardPreview
  *     → Testimonials → FAQ → FinalCta
@@ -23,7 +23,7 @@
  * Keep the public nav intentionally compact on mobile; the practitioner
  * and CTA sections remain reachable through page CTAs.
  */
-export const NAV_ITEMS = [
+export const PATIENT_NAV_ITEMS = [
   { id: "confidence", labelKey: "confidence" as const, href: "#confidence" },
   { id: "solution", labelKey: "solution" as const, href: "#solution" },
   { id: "how-it-works", labelKey: "howItWorks" as const, href: "#how-it-works" },
@@ -33,3 +33,33 @@ export const NAV_ITEMS = [
   { id: "testimonials", labelKey: "testimonials" as const, href: "#testimonials" },
   { id: "faq", labelKey: "about" as const, href: "#faq" },
 ] as const;
+
+export const PRACTITIONER_NAV_ITEMS = [
+  { id: "contrast", labelKey: "contrast" as const, href: "#contrast" },
+  { id: "workflow", labelKey: "workflow" as const, href: "#workflow" },
+  { id: "clinical", labelKey: "clinical" as const, href: "#clinical" },
+  { id: "platform-b2b", labelKey: "platformB2B" as const, href: "#platform-b2b" },
+  { id: "cta", labelKey: "challenge" as const, href: "#cta" },
+] as const;
+
+export const NAV_ITEMS = PATIENT_NAV_ITEMS;
+
+export type ShowcaseAudience = "chooser" | "patient" | "practitioner";
+
+export function getShowcaseAudience(pathname: string | null): ShowcaseAudience {
+  if (pathname?.startsWith("/practitioner")) return "practitioner";
+  if (pathname?.startsWith("/patient")) return "patient";
+  if (pathname === "/" || !pathname) return "chooser";
+  return "patient";
+}
+
+export function getShowcaseBasePath(pathname: string | null): "/patient" | "/practitioner" {
+  return getShowcaseAudience(pathname) === "practitioner" ? "/practitioner" : "/patient";
+}
+
+export function getShowcaseNavItems(pathname: string | null) {
+  const audience = getShowcaseAudience(pathname);
+  if (audience === "practitioner") return PRACTITIONER_NAV_ITEMS;
+  if (audience === "patient") return PATIENT_NAV_ITEMS;
+  return [];
+}

@@ -246,6 +246,30 @@ export function usePermanentDeleteOrder(): UseMutationResult<
 }
 
 /**
+ * Restore a soft-deleted order. Wipes the cached row from any list
+ * (so the trash bin drops it) and invalidates both the live lists
+ * and the detail query so the restored row shows up in the standard
+ * catalogue on next fetch.
+ */
+export function useRestoreOrder(): UseMutationResult<
+  MessageResponse,
+  Error,
+  string
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ordersService.restoreOrder,
+    onSuccess: (_data, id) => {
+      removeOrderFromLists(queryClient, id);
+      queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
+      toast.success('Order restored');
+    },
+    onError: (error) => toast.error(extractApiErrorMessage(error)),
+  });
+}
+
+/**
  * Bulk admin-only status update for N orders. Invalidates the LIST
  * caches (one re-fetch covers the whole table) and each affected
  * DETAIL cache so an open detail page re-syncs to the new status.

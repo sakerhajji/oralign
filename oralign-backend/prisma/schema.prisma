@@ -281,6 +281,25 @@ model User {
   initiatedPayments    Payment[]         @relation("PaymentInitiatedBy")
   deliveredBatches     QuoteStepBatch[]  @relation("BatchDeliveredBy")
 
+  // In-app notifications addressed to this user. The NotificationsModule
+  // owns the read-state lifecycle; the relation is here purely so we can
+  // ON DELETE CASCADE clean them up when a user is hard-deleted.
+  notifications        Notification[]
+
+  // Support chat — doctors author conversations; admins assign/reply.
+  // Two named relations because a User can be either side depending
+  // on role. Cascade on User delete: drop the doctor's conversations
+  // entirely; assigned-admin reference is SetNull so a deleted admin
+  // doesn't orphan a doctor's open ticket.
+  doctorSupportConversations SupportConversation[] @relation("SupportConvDoctor")
+  assignedSupportConversations SupportConversation[] @relation("SupportConvAdmin")
+  sentSupportMessages          SupportMessage[]    @relation("SupportMessageSender")
+
+  // Slider media authored by this admin. SetNull on user delete keeps
+  // the slide in the gallery even after the admin who uploaded it
+  // is removed.
+  createdSliderMedia       SliderMedia[]       @relation("SliderMediaCreatedBy")
+
   @@index([email])
   @@index([role])
   @@index([verificationStatus])
@@ -1024,4 +1043,299 @@ model Payment {
   @@index([installmentId])
   @@index([status])
   @@index([paymentMethod])
+  // Added 2026-05-25 for the payment-history filter UI at scale.
+  //  • (status, createdAt DESC)   — admin queue narrowing + default sort
+  //  • (paymentMethod, status)    — method-filtered queries
+  //  • (orderId, createdAt DESC)  — doctor-scoped history with sort
+  @@index([status, createdAt(sort: Desc)])
+  @@index([paymentMethod, status])
+  @@index([orderId, createdAt(sort: Desc)])
 }
+
+// ─────────────────────────────────────────
+// NOTIFICATIONS
+// ─────────────────────────────────────────
+//
+// In-app notification ledger. Every event in the system that the user
+// should know about (a quote was sent, a payment was confirmed, an order
+// changed status, …) writes one row here keyed to the recipient's
+// userId. The frontend polls the unread count + recent rows from
+// /api/notifications, and the user marks them read on click.
+//
+// Why a single table for both roles:
+//   • Each notification has exactly one recipient, regardless of role
+//   • Admin-targeted events (e.g. "new payment to confirm") simply
+//     create one row per admin user — same shape, same lifecycle, no
+//     special "broadcast" column to keep in sync.
+// The `type` enum is intentionally flat (no "audience" field): the
+// listener that produces the row already knows whether it should be
+// reaching an admin or a doctor.
+
+enum NotificationType {
+  // ── Admin-facing ─────────────────────────────────────────────
+  user_registered          // new user signed up, awaiting approval
+  order_created            // doctor created an order
+  order_submitted          // doctor submitted an order for review
+  payment_received         // a doctor card-paid an installment
+  payment_declared         // a doctor declared a bank transfer
+  cash_payment_recorded    // admin colleague recorded a cash payment
+  // ── Doctor-facing ────────────────────────────────────────────
+  order_status_changed     // admin moved the order along the lifecycle
+  treatment_plan_ready     // planner marked the treatment plan ready
+  treatment_plan_updated   // planner edited the plan after sending it
+  quotation_sent           // admin sent the quote to the doctor
+  quotation_canceled       // admin canceled a sent quote
+  quotation_recalled       // admin pulled a sent quote back to draft for correction
+  payment_confirmed        // admin confirmed a bank/cash payment
+  payment_rejected         // admin rejected a bank transfer proof
+  batch_unlocked           // a step batch moved from locked → unlocked
+  batch_delivered          // admin marked a step batch as delivered
+  installment_overdue      // an installment passed its due date unpaid
+  // ── Generic ──────────────────────────────────────────────────
+  system_message
+}
+
+model Notification {
+  id          String           @id @default(uuid())
+  recipientId String
+  type        NotificationType
+  title       String           // short human-readable headline
+  message     String           // one-line body shown in the dropdown
+  /// Deep link the UI uses on click. Path-only (e.g.
+  /// `/dashboard/orders/abc?tab=quote`), never an absolute URL.
+  link        String?
+  /// Structured payload for rich previews / future filters. JSON shape
+  /// is owned by the emitting listener — never read it as authoritative
+  /// state, always re-fetch from the real resource.
+  metadata    Json?
+  readAt      DateTime?
+  createdAt   DateTime         @default(now())
+
+  recipient   User             @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+
+  // Hot path: "list the unread ones for this user, newest first" — the
+  // composite index serves both filters in one scan.
+  @@index([recipientId, readAt])
+  @@index([recipientId, createdAt])
+}
+
+// ─────────────────────────────────────────
+// SUPPORT CHAT
+//
+// Direct doctor↔admin messaging with image attachments. Conversations
+// are scoped per-doctor; doctors can open multiple threads (one per
+// topic) and admins manage every active thread from /dashboard/support.
+//
+// Lifecycle: open → pending → resolved → closed. Soft-delete is the
+// terminal state, admin-only.
+//
+// Per-message read receipts (`readAt`) PLUS aggregate `unreadBy*`
+// counters on the conversation — the counters back the bell badge
+// without scanning every message on every fetch.
+// ─────────────────────────────────────────
+
+enum SupportConversationStatus {
+  open       // active thread waiting on admin or doctor reply
+  pending    // admin is investigating but no immediate action
+  resolved   // admin has handled; doctor can re-open by replying
+  closed     // terminal; no further messages accepted
+}
+
+enum SupportPriority {
+  low
+  normal
+  high
+  urgent
+}
+
+model SupportConversation {
+  id              String                     @id @default(uuid())
+  doctorId        String
+  doctor          User                       @relation("SupportConvDoctor", fields: [doctorId], references: [id], onDelete: Cascade)
+
+  // Optional one-line topic shown in the admin list. Doctors don't
+  // have to provide one — falls back to the first message preview.
+  subject         String?
+
+  status          SupportConversationStatus  @default(open)
+  priority        SupportPriority            @default(normal)
+
+  // Optional admin who took ownership. Cleared when the admin user is
+  // deleted (SetNull) so the conversation doesn't orphan.
+  assignedAdminId String?
+  assignedAdmin   User?                      @relation("SupportConvAdmin", fields: [assignedAdminId], references: [id], onDelete: SetNull)
+
+  // Aggregate unread counters — incremented by the WRITE path and
+  // reset to 0 by the READ path (mark-as-read). Cheap to query from
+  // the admin queue and from the doctor's bubble badge.
+  unreadByAdmin   Int                        @default(0)
+  unreadByDoctor  Int                        @default(0)
+
+  // Surface the most-recent message metadata for the conversation
+  // list rendering — saves a join + sub-query on every page load.
+  lastMessageAt   DateTime                   @default(now())
+  lastMessagePreview String?                 // first ~120 chars of the latest body
+
+  resolvedAt      DateTime?
+  closedAt        DateTime?
+
+  deletedAt       DateTime?                  // admin-only soft delete
+  deletedById     String?
+
+  createdAt       DateTime                   @default(now())
+  updatedAt       DateTime                   @updatedAt
+
+  messages        SupportMessage[]
+
+  // Hot paths:
+  //  • doctor side: "my open conversations, newest first"
+  //  • admin queue: "every conversation, sorted by lastMessageAt DESC,
+  //    optionally narrowed by status"
+  //  • trash view: "deletedAt IS NOT NULL, newest first"
+  @@index([doctorId, deletedAt, lastMessageAt(sort: Desc)])
+  @@index([status, deletedAt, lastMessageAt(sort: Desc)])
+  @@index([assignedAdminId])
+  @@index([deletedAt])
+}
+
+model SupportMessage {
+  id              String                @id @default(uuid())
+  conversationId  String
+  conversation    SupportConversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  senderId        String
+  sender          User                  @relation("SupportMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  // Snapshot of the sender's role at write-time. Cheaper than a join
+  // on every render and keeps the bubble for legacy users intact
+  // even if the user's role changes later.
+  senderRole      UserRole
+
+  // Text body. Optional — a message can be image-only.
+  body            String?
+
+  // ONE attachment per message keeps the schema simple. A doctor who
+  // wants to attach 3 screenshots sends 3 consecutive messages, which
+  // also gives the admin a clearer thread.
+  attachmentRelativePath String?         // path under /uploads/support/<convId>/...
+  attachmentMime         String?
+  attachmentName         String?         // original filename (display only)
+  attachmentSize         Int?            // bytes
+
+  // Per-message read receipt — the recipient's read time. Updated
+  // when the recipient calls mark-as-read on the conversation.
+  readAt          DateTime?
+
+  // Soft delete (admin only — for moderation). Not exposed to doctors.
+  deletedAt       DateTime?
+
+  createdAt       DateTime              @default(now())
+
+  @@index([conversationId, createdAt])
+  @@index([senderId])
+  @@index([conversationId, readAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Doctor-dashboard slider media (admin-managed)
+// ─────────────────────────────────────────────────────────────────────
+//
+// Admins curate a rotating gallery of images + short videos that the
+// doctor dashboard renders above the available-packs section. Two
+// independent lists — desktop vs mobile — so the admin can ship
+// different aspect ratios per device without coupling counts.
+//
+// A single row can be flagged `both` (deviceTargets contains BOTH
+// DESKTOP and MOBILE) when the same asset works on every viewport —
+// in that case we render it on both surfaces but keep the row count
+// down. Most rows will target a single device.
+//
+// Source can be a local upload (uploaded to /uploads/slider/...) or
+// an external URL (CDN, S3, YouTube/Vimeo for videos). External
+// links bypass our disk quota and are useful for high-traffic CDNs.
+
+enum SliderMediaType {
+  image
+  video
+}
+
+enum SliderMediaSourceType {
+  upload
+  external
+}
+
+enum SliderMediaDeviceTarget {
+  desktop
+  mobile
+}
+
+enum SliderMediaStatus {
+  active
+  inactive
+}
+
+model SliderMedia {
+  id          String                    @id @default(uuid())
+
+  // Short human-readable label shown in the admin table and used as
+  // the slide's alt-text on the doctor dashboard. Required so the
+  // admin always knows what they uploaded a week from now.
+  title       String
+
+  // image | video — drives the renderer on the doctor side (<img> vs
+  // <video autoplay muted loop playsinline>) and the file-type guard
+  // on upload.
+  mediaType   SliderMediaType
+
+  // upload (multipart file → /uploads/slider) vs external (admin
+  // pastes a CDN URL). When upload, *Url fields point at our static
+  // server; when external, they hold the absolute CDN URL.
+  sourceType  SliderMediaSourceType
+
+  // Resolved URL the doctor browser will load. We snapshot one URL
+  // per device so the admin can ship a wide hero on desktop and a
+  // tall portrait on mobile from the same logical "slide". Either
+  // can be null — if `desktopUrl` is set and `mobileUrl` is null and
+  // the row targets BOTH devices, the doctor mobile dashboard
+  // gracefully falls back to the desktop URL.
+  desktopUrl  String?
+  mobileUrl   String?
+
+  // Which device list this row belongs to. Stored as a postgres
+  // array so the admin can pick desktop / mobile / both with one
+  // checkbox group. The composite index below uses an array-contains
+  // filter so listing "desktop slides" stays cheap at 100k rows.
+  deviceTargets SliderMediaDeviceTarget[]
+
+  // Lifecycle flag — `inactive` rows are hidden from the doctor
+  // dashboard but kept in the admin table for re-activation later.
+  // Soft delete (deletedAt) is the harder kill.
+  status      SliderMediaStatus         @default(active)
+
+  // Manual ordering — admin drags rows to set the carousel order.
+  // We use an integer (not a fractional rank) because reordering
+  // happens rarely; a full re-write on save is cheap at gallery
+  // sizes (< 100 rows realistic, but the index covers 100k+).
+  displayOrder Int                      @default(0)
+
+  // Optional UTC link target — clicking the slide opens this URL in
+  // a new tab. Used to point at a pack page, a support article, etc.
+  linkUrl     String?
+
+  // Admin who last touched the row. Useful for audit + "who broke
+  // the slider" questions. SetNull on user delete so the row
+  // doesn't orphan.
+  createdById String?
+  createdBy   User?                     @relation("SliderMediaCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  deletedAt   DateTime?
+  createdAt   DateTime                  @default(now())
+  updatedAt   DateTime                  @updatedAt
+
+  // Hot paths:
+  //   • doctor dashboard "active slides for this device, ordered":
+  //     status=active AND deletedAt IS NULL AND deviceTargets @> {desktop|mobile}
+  //   • admin list with filter chips: status, deviceTargets, deletedAt
+  @@index([status, deletedAt, displayOrder])
+  @@index([deletedAt, displayOrder])
+}
+

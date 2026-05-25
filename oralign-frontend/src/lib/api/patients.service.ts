@@ -41,4 +41,14 @@ export const patientsService = {
     const response = await apiClient.delete<MessageResponse>(`/patients/${id}`);
     return response.data;
   },
+
+  bulkDeletePatients: async (
+    ids: string[],
+  ): Promise<{ message: string; deleted: number }> => {
+    const response = await apiClient.delete<{ message: string; deleted: number }>(
+      '/patients/bulk',
+      { data: { ids } },
+    );
+    return response.data;
+  },
 };

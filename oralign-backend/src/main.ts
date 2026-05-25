@@ -110,6 +110,7 @@ async function bootstrap(): Promise<void> {
       callback(new Error(`CORS: origin ${origin} is not allowed`));
     },
     credentials: true,
+    exposedHeaders: ['Content-Disposition'],
     maxAge: 600,
   });
 

@@ -87,24 +87,16 @@ export class OrderController {
   @ApiQuery({ name: 'orderCode', required: false, type: String })
   async getOrders(
     @CurrentUser() user: JwtPayload,
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-    @Query('search') search?: string,
-    @Query('doctorId') doctorId?: string,
-    @Query('patientId') patientId?: string,
-    @Query('status') status?: OrderStatus,
-    @Query('orderCode') orderCode?: string,
+    // Bind the FULL DTO instead of cherry-picking specific fields —
+    // the previous signature silently dropped `sortBy`, `sortOrder`,
+    // `createdFrom`, `createdTo`, and `includeDeleted`, which is why
+    // the date range / sort / trash-bin filters weren't reaching the
+    // service.
+    @Query() filters: OrderFilterDto,
   ) {
-    const filters: OrderFilterDto = {};
-    if (search) filters.search = search;
-    if (doctorId) filters.doctorId = doctorId;
-    if (patientId) filters.patientId = patientId;
-    if (status) filters.status = status;
-    if (orderCode) filters.orderCode = orderCode;
-
     return this.orderService.getOrders(
-      page ? parseInt(page, 10) : 1,
-      limit ? parseInt(limit, 10) : 10,
+      filters.page ?? 1,
+      filters.limit ?? 10,
       filters,
       { userId: user.sub, role: user.role },
     );
@@ -170,6 +162,25 @@ export class OrderController {
     @CurrentUser() user: JwtPayload,
   ): Promise<{ message: string }> {
     return this.orderService.permanentDeleteOrder(id, {
+      userId: user.sub,
+      role: user.role,
+    });
+  }
+
+  @Post(':id/restore')
+  @Roles(UserRole.admin, UserRole.super_admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Restore a soft-deleted order (clears deletedAt). Idempotent — already-live orders return a no-op message. Admin-only.',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiResponse({ status: 200, description: 'Order restored successfully' })
+  async restoreOrder(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<{ message: string }> {
+    return this.orderService.restoreOrder(id, {
       userId: user.sub,
       role: user.role,
     });

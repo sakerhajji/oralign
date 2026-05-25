@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/sidebar"
 import { EllipsisVerticalIcon, CircleUserRoundIcon, CreditCardIcon, BellIcon, LogOutIcon } from "lucide-react"
 import { useLogout } from "@/lib/hooks/use-auth"
+import { useUnreadNotificationCount } from "@/lib/hooks/use-notifications"
 
 function getInitials(name: string): string {
   return name
@@ -35,25 +36,29 @@ function getInitials(name: string): string {
 
 export function NavUser({
   user,
+  onOpenChange,
 }: {
   user: {
     name: string
     email: string
     avatar: string
   }
+  onOpenChange?: (open: boolean) => void
 }) {
   const { isMobile } = useSidebar()
   const handleLogout = useLogout()
   const initials = getInitials(user.name)
+  const unreadQuery = useUnreadNotificationCount()
+  const unread = unreadQuery.data ?? 0
 
   return (
     <SidebarMenu>
       <SidebarMenuItem>
-        <DropdownMenu>
+        <DropdownMenu onOpenChange={onOpenChange}>
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton
               size="lg"
-              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:justify-center"
             >
               <Avatar className="h-8 w-8 rounded-lg">
                 <AvatarImage src={user.avatar} alt={user.name} />
@@ -102,15 +107,22 @@ export function NavUser({
                   Account
                 </Link>
               </DropdownMenuItem>
-              <DropdownMenuItem>
-                <CreditCardIcon
-                />
-                Billing
+              <DropdownMenuItem asChild>
+                <Link href="/account/billing">
+                  <CreditCardIcon />
+                  Billing
+                </Link>
               </DropdownMenuItem>
-              <DropdownMenuItem>
-                <BellIcon
-                />
-                Notifications
+              <DropdownMenuItem asChild>
+                <Link href="/dashboard/notifications" className="gap-2">
+                  <BellIcon />
+                  Notifications
+                  {unread > 0 ? (
+                    <span className="ml-auto grid min-h-5 min-w-5 place-items-center rounded-full bg-destructive px-1.5 text-[10px] font-bold leading-none text-white">
+                      {unread > 99 ? "99+" : unread}
+                    </span>
+                  ) : null}
+                </Link>
               </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />

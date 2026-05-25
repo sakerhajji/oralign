@@ -3,8 +3,12 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
-import { NAV_ITEMS } from "../_lib/nav";
+import { useEffect, useMemo, useState } from "react";
+import {
+  getShowcaseAudience,
+  getShowcaseBasePath,
+  getShowcaseNavItems,
+} from "../_lib/nav";
 import { dict } from "../_lib/i18n/dict";
 import { useShowcaseLang } from "../_lib/i18n/lang-context";
 import { MobileNav } from "./mobile-nav";
@@ -14,19 +18,20 @@ export function Header() {
   const pathname = usePathname();
   const [active, setActive] = useState<string | null>(null);
   const [scrolled, setScrolled] = useState(false);
+  const audience = getShowcaseAudience(pathname);
+  const basePath = getShowcaseBasePath(pathname);
+  const navItems = useMemo(() => getShowcaseNavItems(pathname), [pathname]);
+  const showAudienceNav = audience !== "chooser";
 
   /**
-   * Nav items target homepage anchors (#indications, #how-it-works, …).
-   * On the homepage itself we use the bare hash so Next.js / the browser
-   * just smooth-scrolls. On every OTHER page (e.g. /created_for_you/<token>,
-   * /login, /signup) we prepend "/" so clicking actually navigates back to
-   * the homepage and then scrolls to the section. Without this prefix the
-   * browser would just dump the hash onto the current URL and nothing
-   * would happen.
+   * Patient and practitioner pages each own their anchors. If the user is on
+   * another route, prefix the active audience path before the hash.
    */
-  const onHome = pathname === "/";
   const resolveAnchor = (hashHref: string): string =>
-    hashHref.startsWith("#") && !onHome ? `/${hashHref}` : hashHref;
+    hashHref.startsWith("#") && pathname !== basePath ? `${basePath}${hashHref}` : hashHref;
+  const ctaHref = audience === "practitioner" ? "/signup" : resolveAnchor("#cta");
+  const ctaLabel =
+    audience === "practitioner" ? dict.nav.createAccount[lang] : dict.nav.bookDemo[lang];
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
@@ -36,7 +41,7 @@ export function Header() {
   }, []);
 
   useEffect(() => {
-    const ids = NAV_ITEMS.map((i) => i.href.replace("#", ""));
+    const ids = navItems.map((i) => i.href.replace("#", ""));
     const els = ids
       .map((id) => document.getElementById(id))
       .filter((e): e is HTMLElement => !!e);
@@ -52,7 +57,7 @@ export function Header() {
     );
     els.forEach((el) => obs.observe(el));
     return () => obs.disconnect();
-  }, []);
+  }, [navItems]);
 
   return (
     <header
@@ -88,7 +93,7 @@ export function Header() {
           className="mx-6 hidden flex-1 items-center justify-center lg:flex"
         >
           <ul className="flex list-none items-center gap-4 xl:gap-6">
-            {NAV_ITEMS.map((item) => {
+            {navItems.map((item) => {
               const id = item.href.replace("#", "");
               const isActive = active === id;
               return (
@@ -127,13 +132,20 @@ export function Header() {
           >
             {dict.nav.login[lang]}
           </Link>
-          <Link
-            href={resolveAnchor("#cta")}
-            className="hidden lg:inline-flex items-center bg-[var(--sc-sun)] px-5 py-3 text-[0.6rem] font-medium uppercase tracking-[0.28em] text-[var(--sc-black)] no-underline transition-colors hover:bg-[var(--sc-sun-2,#f9d96a)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sc-black)]"
-          >
-            {dict.nav.bookDemo[lang]}
-          </Link>
-          <MobileNav />
+          {showAudienceNav ? (
+            <Link
+              href={ctaHref}
+              className={[
+                "hidden items-center px-5 py-3 text-[0.6rem] font-medium uppercase tracking-[0.28em] no-underline transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 lg:inline-flex",
+                audience === "practitioner"
+                  ? "bg-[var(--sc-black)] text-[var(--sc-white)] hover:bg-[rgba(25,25,25,0.82)] focus-visible:outline-[var(--sc-sun)]"
+                  : "bg-[var(--sc-sun)] text-[var(--sc-black)] hover:bg-[var(--sc-sun-2,#f9d96a)] focus-visible:outline-[var(--sc-black)]",
+              ].join(" ")}
+            >
+              {ctaLabel}
+            </Link>
+          ) : null}
+          {showAudienceNav ? <MobileNav /> : null}
         </div>
       </div>
     </header>

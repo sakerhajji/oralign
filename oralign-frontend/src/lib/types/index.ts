@@ -378,6 +378,25 @@ export interface Quotation {
   rejectedById?: string | null;
   createdAt: string;
   updatedAt: string;
+  // ── Pack snapshot (set when admin attaches a Pack) ────────────────
+  // All optional because legacy (pre-packs) quotes don't carry these.
+  // `totalPrice` / `paidAmount` / `remainingAmount` are strings on the
+  // wire because the backend serialises Prisma.Decimal as a string to
+  // avoid Number-precision drift on the client.
+  packId?: string | null;
+  packName?: string | null;
+  archType?: ArchType | null;
+  maxStepsPerArch?: number | null;
+  includedCorrections?: number | null;
+  isUnlimitedSteps?: boolean | null;
+  isUnlimitedCorrections?: boolean | null;
+  isForOrthodontists?: boolean | null;
+  totalPrice?: string | null;
+  paidAmount?: string | null;
+  remainingAmount?: string | null;
+  paymentMode?: PaymentMode | null;
+  paymentStatus?: QuotationPaymentStatus | null;
+  doctorApprovedAt?: string | null;
 }
 
 /** Create / update payload shared by admin form. */
@@ -391,6 +410,265 @@ export interface UpsertQuotationDto {
   currency?: string;
   notes?: string;
   adminMessage?: string;
+}
+
+// ─── Packs + payment-plan + payments ──────────────────────────────────────
+// Mirrors backend Prisma enums + models. Decimal money fields cross the
+// wire as strings — never parse them with `Number()` before doing
+// arithmetic; use a string-based decimal helper instead, otherwise
+// totals will drift at the 3rd decimal place (TND is 3-decimal).
+
+// Frontend mirror of the backend Prisma `ArchType` enum. Wire values
+// MUST match the backend exactly — class-validator's `@IsEnum` on the
+// server rejects anything else with "archType must be one of …". The
+// constant NAMES (ONE_ARCH / TWO_ARCHES) are a frontend convention so
+// every call site reads cleanly without leaking the snake_case wire
+// format into the UI code.
+export enum ArchType {
+  ONE_ARCH = 'single_arch',
+  TWO_ARCHES = 'two_arches',
+}
+
+export enum PaymentMode {
+  FULL_PAYMENT = 'full_payment',
+  INSTALLMENTS = 'installments',
+}
+
+export enum QuotationPaymentStatus {
+  PENDING = 'pending',
+  PARTIALLY_PAID = 'partially_paid',
+  PAID = 'paid',
+  FAILED = 'failed',
+  CANCELLED = 'cancelled',
+}
+
+export enum InstallmentStatus {
+  PENDING = 'pending',
+  PAID = 'paid',
+  OVERDUE = 'overdue',
+  CANCELLED = 'cancelled',
+}
+
+export enum BatchStatus {
+  LOCKED = 'locked',
+  UNLOCKED = 'unlocked',
+  DELIVERED = 'delivered',
+}
+
+export enum PaymentMethod {
+  CARD = 'card',
+  BANK_TRANSFER = 'bank_transfer',
+  CASH = 'cash',
+}
+
+/**
+ * Payment lifecycle. CARD: `pending → success | failed | cancelled`.
+ * BANK_TRANSFER: `awaiting_confirmation → success | rejected`.
+ * CASH: created directly in `success` by an admin endpoint.
+ */
+export enum PaymentRecordStatus {
+  PENDING = 'pending',
+  AWAITING_CONFIRMATION = 'awaiting_confirmation',
+  SUCCESS = 'success',
+  FAILED = 'failed',
+  REJECTED = 'rejected',
+  CANCELLED = 'cancelled',
+}
+
+export interface Pack {
+  id: string;
+  name: string;
+  description?: string | null;
+  maxStepsPerArch?: number | null;
+  includedCorrections?: number | null;
+  isUnlimitedSteps: boolean;
+  isUnlimitedCorrections: boolean;
+  isForOrthodontists: boolean;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string | null;
+  prices?: PackPrice[];
+}
+
+export interface PackPrice {
+  id: string;
+  packId: string;
+  archType: ArchType;
+  price: string;          // decimal-as-string
+  currency: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreatePackDto {
+  name: string;
+  description?: string;
+  maxStepsPerArch?: number;
+  includedCorrections?: number;
+  isUnlimitedSteps?: boolean;
+  isUnlimitedCorrections?: boolean;
+  isForOrthodontists?: boolean;
+  isActive?: boolean;
+  // Inline price — when set, the backend atomically creates a single
+  // ACTIVE PackPrice (archType=two_arches) alongside the pack so the
+  // admin form is the only place an admin has to touch.
+  price?: number;
+  currency?: string;
+}
+
+export type UpdatePackDto = Partial<CreatePackDto>;
+
+export interface CreatePackPriceDto {
+  archType: ArchType;
+  price: number;          // sent as number, persisted as Decimal
+  currency?: string;
+}
+
+export type UpdatePackPriceDto = Partial<CreatePackPriceDto> & {
+  isActive?: boolean;
+};
+
+export interface AttachPackToQuotationDto {
+  packId: string;
+  // Optional — defaults to two_arches on the backend. The admin UI
+  // consolidated to a single price per pack, so callers don't need
+  // to pass an arch.
+  archType?: ArchType;
+}
+
+export interface PaymentPlanBatchDto {
+  fromStep: number;
+  toStep: number;
+}
+
+export interface PaymentPlanInstallmentDto {
+  amount: number;
+  availableFrom?: string;   // ISO date
+  dueDate?: string;         // ISO date
+  batch: PaymentPlanBatchDto;
+}
+
+export interface ConfigurePaymentPlanDto {
+  paymentMode: PaymentMode;
+  installments: PaymentPlanInstallmentDto[];
+}
+
+export interface QuoteInstallment {
+  id: string;
+  quotationId: string;
+  installmentNumber: number;
+  amount: string;
+  availableFrom: string;
+  dueDate?: string | null;
+  status: InstallmentStatus;
+  paidAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface QuoteStepBatch {
+  id: string;
+  quotationId: string;
+  installmentId: string;
+  batchNumber: number;
+  fromStep: number;
+  toStep: number;
+  status: BatchStatus;
+  deliveredAt?: string | null;
+  deliveredById?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Payment {
+  id: string;
+  quotationId: string;
+  installmentId: string;
+  amount: string;
+  currency: string;
+  // Backend serialises the Prisma column verbatim as `paymentMethod`.
+  // `method` is kept as an optional alias for any legacy consumer
+  // that still reads it; the table + every new caller should rely
+  // on `paymentMethod`.
+  paymentMethod: PaymentMethod;
+  /** @deprecated — historical alias for `paymentMethod`. */
+  method?: PaymentMethod;
+  status: PaymentRecordStatus;
+  idempotencyKey?: string | null;
+  transactionId?: string | null;
+  bankReference?: string | null;
+  proofUrl?: string | null;
+  receiptNumber?: string | null;
+  notes?: string | null;
+  rejectionReason?: string | null;
+  initiatedById?: string | null;
+  confirmedById?: string | null;
+  rejectedById?: string | null;
+  initiatedAt?: string | null;
+  confirmedAt?: string | null;
+  rejectedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DeclareBankTransferDto {
+  bankReference?: string;
+  // proofFile is sent as multipart FormData — not on the DTO type itself.
+}
+
+export interface ConfirmPaymentDto {
+  notes?: string;
+}
+
+export interface RejectPaymentDto {
+  rejectionReason: string;
+}
+
+export interface RecordCashPaymentDto {
+  receiptNumber?: string;
+  notes?: string;
+}
+
+export enum PaymentSortBy {
+  CREATED_AT = 'createdAt',
+  AMOUNT = 'amount',
+  PAID_AT = 'paidAt',
+  STATUS = 'status',
+}
+
+export enum PaymentSortOrder {
+  ASC = 'asc',
+  DESC = 'desc',
+}
+
+/**
+ * Filter shape for the payment history + pending queue. Mirrors the
+ * backend `PaymentFilterDto`. Multi-value `methods` and `statuses`
+ * arrays are sent as comma-separated strings on the wire (service
+ * layer handles the join).
+ */
+export interface PaymentFilterDto {
+  page?: number;
+  limit?: number;
+  // Legacy single-value (kept for backward compat — multi versions win).
+  method?: PaymentMethod;
+  paymentMethod?: PaymentMethod;
+  status?: PaymentRecordStatus;
+  // Canonical multi-value filters.
+  methods?: PaymentMethod[];
+  statuses?: PaymentRecordStatus[];
+  // Search + structural narrowing.
+  search?: string;
+  doctorId?: string;
+  patientId?: string;
+  // Date range.
+  createdFrom?: string;
+  createdTo?: string;
+  // Sorting.
+  sortBy?: PaymentSortBy;
+  sortOrder?: PaymentSortOrder;
 }
 
 export enum OrderFileCategory {
@@ -827,6 +1105,54 @@ export interface PaginatedResponse<T> {
   totalPages: number;
 }
 
+// ─── Notifications ──────────────────────────────────────────────────────────
+// Mirrors the backend `NotificationType` Prisma enum + Notification model.
+// Stays role-agnostic: the bell dropdown renders any type that lands in the
+// recipient's inbox.
+
+export enum NotificationType {
+  // Admin-facing
+  USER_REGISTERED = 'user_registered',
+  ORDER_CREATED = 'order_created',
+  ORDER_SUBMITTED = 'order_submitted',
+  PAYMENT_RECEIVED = 'payment_received',
+  PAYMENT_DECLARED = 'payment_declared',
+  CASH_PAYMENT_RECORDED = 'cash_payment_recorded',
+  // Doctor-facing
+  ORDER_STATUS_CHANGED = 'order_status_changed',
+  TREATMENT_PLAN_READY = 'treatment_plan_ready',
+  TREATMENT_PLAN_UPDATED = 'treatment_plan_updated',
+  QUOTATION_SENT = 'quotation_sent',
+  QUOTATION_CANCELED = 'quotation_canceled',
+  PAYMENT_CONFIRMED = 'payment_confirmed',
+  PAYMENT_REJECTED = 'payment_rejected',
+  BATCH_UNLOCKED = 'batch_unlocked',
+  BATCH_DELIVERED = 'batch_delivered',
+  INSTALLMENT_OVERDUE = 'installment_overdue',
+  // Generic
+  SYSTEM_MESSAGE = 'system_message',
+}
+
+export interface Notification {
+  id: string;
+  recipientId: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  /** Deep link the UI navigates to on click; path-only. */
+  link?: string | null;
+  /** Free-form structured payload — type-narrow at the call site. */
+  metadata?: Record<string, unknown> | null;
+  readAt?: string | null;
+  createdAt: string;
+}
+
+export interface NotificationFilters {
+  page?: number;
+  limit?: number;
+  unreadOnly?: boolean;
+}
+
 export interface ApiErrorResponse {
   statusCode: number;
   message: string;
@@ -886,6 +1212,9 @@ export interface OrderFilterParams extends PaginationParams {
   sortOrder?: SortOrder;
   createdFrom?: string;
   createdTo?: string;
+  // Admin trash-bin view — backend returns ONLY soft-deleted rows
+  // when this is true. Non-admin callers are silently ignored.
+  includeDeleted?: boolean;
 }
 
 export interface BulkActionDto {
@@ -895,4 +1224,320 @@ export interface BulkActionDto {
 export interface BulkUpdateStatusDto {
   ids: string[];
   isActive: boolean;
+}
+
+// ==========================================
+// SUPPORT CHAT (doctor ↔ admin)
+// ==========================================
+
+export enum SupportConversationStatus {
+  OPEN = 'open',
+  PENDING = 'pending',
+  RESOLVED = 'resolved',
+  CLOSED = 'closed',
+}
+
+export enum SupportPriority {
+  LOW = 'low',
+  NORMAL = 'normal',
+  HIGH = 'high',
+  URGENT = 'urgent',
+}
+
+export interface SupportMessage {
+  id: string;
+  conversationId: string;
+  senderId: string;
+  senderRole: UserRole;
+  body?: string | null;
+  attachmentRelativePath?: string | null;
+  attachmentMime?: string | null;
+  attachmentName?: string | null;
+  attachmentSize?: number | null;
+  readAt?: string | null;
+  deletedAt?: string | null;
+  createdAt: string;
+  sender?: {
+    id: string;
+    fullName: string;
+    role: UserRole;
+    avatarUrl?: string | null;
+  } | null;
+}
+
+export interface SupportConversation {
+  id: string;
+  doctorId: string;
+  subject?: string | null;
+  status: SupportConversationStatus;
+  priority: SupportPriority;
+  assignedAdminId?: string | null;
+  unreadByAdmin: number;
+  unreadByDoctor: number;
+  lastMessageAt: string;
+  lastMessagePreview?: string | null;
+  resolvedAt?: string | null;
+  closedAt?: string | null;
+  deletedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  doctor?: {
+    id: string;
+    fullName: string;
+    email: string;
+    avatarUrl?: string | null;
+  } | null;
+  assignedAdmin?: {
+    id: string;
+    fullName: string;
+    email: string;
+  } | null;
+}
+
+export interface SupportConversationFilters {
+  page?: number;
+  limit?: number;
+  search?: string;
+  statuses?: SupportConversationStatus[];
+  priorities?: SupportPriority[];
+  unreadOnly?: boolean;
+  includeDeleted?: boolean;
+}
+
+// ==========================================
+// DASHBOARD (Admin + Doctor)
+// ==========================================
+
+export interface DashboardRange {
+  from?: string;
+  to?: string;
+}
+
+export interface AdminDashboardKpis {
+  range: { from: string; to: string };
+  revenue: {
+    total: number;
+    today: number;
+    thisMonth: number;
+    prevMonth: number;
+    monthlyGrowthPct: number;
+    collected: number;
+    unpaid: number;
+  };
+  doctors: { total: number; active: number; inactive: number; newInRange: number };
+  patients: { total: number; newInRange: number };
+  orders: {
+    total: number;
+    inRange: number;
+    today: number;
+    thisMonth: number;
+    paid: number;
+    unpaid: number;
+  };
+  payments: {
+    pending: number;
+    awaitingConfirmation: number;
+    completed: number;
+    failed: number;
+    rejected: number;
+  };
+  packs: {
+    active: number;
+    bestSelling: { id: string; name: string; soldCount: number; revenue: number } | null;
+    conversionRatePct: number;
+    averageOrderValue: number;
+  };
+}
+
+export interface AdminTopDoctorRow {
+  doctorId: string;
+  fullName: string;
+  email: string;
+  avatarUrl: string | null;
+  clinicName: string | null;
+  city: string | null;
+  orders: number;
+  paidOrders: number;
+  revenue: number;
+  outstanding: number;
+}
+
+export interface AdminTopDoctorsResponse {
+  byOrders: AdminTopDoctorRow[];
+  byPaidOrders: AdminTopDoctorRow[];
+  byOutstanding: AdminTopDoctorRow[];
+}
+
+export interface AdminBestPackRow {
+  packId: string;
+  name: string;
+  isActive: boolean;
+  sold: number;
+  revenue: number;
+  collected: number;
+  currentPrice: number;
+  currency: string;
+}
+
+export interface AdminTrendPoint {
+  date: string;
+  revenue: number;
+  orders: number;
+  newDoctors: number;
+  newPatients: number;
+}
+
+export interface AdminTrendsResponse {
+  range: { from: string; to: string };
+  points: AdminTrendPoint[];
+}
+
+export interface DoctorDashboardKpis {
+  doctorId: string;
+  generatedAt: string;
+  orders: {
+    total: number;
+    today: number;
+    thisMonth: number;
+    prevMonth: number;
+    paid: number;
+    unpaid: number;
+  };
+  patients: { total: number; newThisMonth: number };
+  revenue: { totalGenerated: number; collected: number; unpaidDebt: number };
+  payments: {
+    pending: number;
+    completed: number;
+    failed: number;
+    awaitingConfirmation: number;
+  };
+  quotations: { total: number; paid: number; unpaid: number };
+  currentPack: {
+    id: string;
+    name: string;
+    description: string | null;
+    approvedAt: string | null;
+    expiresAt: string | null;
+    remainingDays: number | null;
+    usagePct: number | null;
+    isUnlimitedSteps: boolean;
+  } | null;
+  suggestedPack: {
+    id: string;
+    name: string;
+    description: string | null;
+    isActive: boolean;
+  } | null;
+}
+
+export interface AvailablePack {
+  id: string;
+  name: string;
+  description: string | null;
+  maxStepsPerArch: number | null;
+  includedCorrections: number | null;
+  isUnlimitedSteps: boolean;
+  isUnlimitedCorrections: boolean;
+  isForOrthodontists: boolean;
+  price: number;
+  currency: string;
+  isCurrent: boolean;
+}
+
+// ==========================================
+// SLIDER MEDIA (Doctor dashboard carousel)
+// ==========================================
+
+export enum SliderMediaType {
+  IMAGE = 'image',
+  VIDEO = 'video',
+}
+
+export enum SliderMediaSourceType {
+  UPLOAD = 'upload',
+  EXTERNAL = 'external',
+}
+
+export enum SliderMediaDeviceTarget {
+  DESKTOP = 'desktop',
+  MOBILE = 'mobile',
+}
+
+export enum SliderMediaStatus {
+  ACTIVE = 'active',
+  INACTIVE = 'inactive',
+}
+
+export interface SliderMedia {
+  id: string;
+  title: string;
+  mediaType: SliderMediaType;
+  sourceType: SliderMediaSourceType;
+  deviceTargets: SliderMediaDeviceTarget[];
+  desktopUrl: string | null;
+  mobileUrl: string | null;
+  status: SliderMediaStatus;
+  displayOrder: number;
+  linkUrl: string | null;
+  createdById: string | null;
+  createdBy?: { id: string; fullName: string } | null;
+  deletedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SliderMediaFilters {
+  page?: number;
+  limit?: number;
+  status?: SliderMediaStatus;
+  device?: SliderMediaDeviceTarget;
+  mediaType?: SliderMediaType;
+  search?: string;
+  includeDeleted?: boolean;
+  deletedOnly?: boolean;
+}
+
+export interface CreateSliderMediaInput {
+  title: string;
+  mediaType: SliderMediaType;
+  sourceType: SliderMediaSourceType;
+  deviceTargets: SliderMediaDeviceTarget[];
+  desktopUrl?: string;
+  mobileUrl?: string;
+  status?: SliderMediaStatus;
+  displayOrder?: number;
+  linkUrl?: string;
+  desktopFile?: File;
+  mobileFile?: File;
+}
+
+export interface UpdateSliderMediaInput {
+  title?: string;
+  mediaType?: SliderMediaType;
+  sourceType?: SliderMediaSourceType;
+  deviceTargets?: SliderMediaDeviceTarget[];
+  desktopUrl?: string;
+  mobileUrl?: string;
+  clearDesktopUrl?: boolean;
+  clearMobileUrl?: boolean;
+  status?: SliderMediaStatus;
+  displayOrder?: number;
+  linkUrl?: string;
+  desktopFile?: File;
+  mobileFile?: File;
+}
+
+// ==========================================
+// REPORTS
+// ==========================================
+
+export type ReportExportType = 'revenue' | 'doctors' | 'packs';
+
+export interface ReportSummary {
+  generatedAt: string;
+  range: { from: string; to: string };
+  kpis: AdminDashboardKpis;
+  topDoctors: AdminTopDoctorsResponse;
+  bestPacks: AdminBestPackRow[];
+  trends: AdminTrendsResponse;
 }

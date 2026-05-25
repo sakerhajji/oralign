@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
 import {
   AlertTriangle,
+  ArchiveRestore,
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
@@ -29,6 +30,7 @@ import {
   Search,
   ShieldX,
   Stethoscope,
+  Trash,
   Trash2,
   UserRound,
   Wrench,
@@ -91,6 +93,7 @@ import {
   useOrders,
   useOverrideOrderStatus,
   usePermanentDeleteOrder,
+  useRestoreOrder,
 } from '@/lib/hooks';
 import {
   DentalOrder,
@@ -151,6 +154,7 @@ export default function OrdersPage() {
   const { isAdmin, isDentist, user } = useAuth();
   const deleteOrder = useDeleteOrder();
   const permanentDeleteOrder = usePermanentDeleteOrder();
+  const restoreOrder = useRestoreOrder();
   const overrideStatus = useOverrideOrderStatus();
   const bulkUpdateStatus = useBulkUpdateOrderStatus();
   const bulkDelete = useBulkDeleteOrders();
@@ -171,6 +175,12 @@ export default function OrdersPage() {
   const [createdTo, setCreatedTo] = useState<string>('');
   const [sortKey, setSortKey] = useState<string>('created-desc');
   const [showFilters, setShowFilters] = useState(false);
+  // Trash bin — admin-only toggle. When ON the page swaps to the
+  // deleted-orders view (rows with deletedAt set) and the row menu
+  // surfaces Restore + Delete forever instead of Edit + Delete. We
+  // clear the multi-select when flipping so bulk-status doesn't fire
+  // against deleted rows by accident.
+  const [showDeleted, setShowDeleted] = useState(false);
 
   // ── Multi-select state ────────────────────────────────────────────
   // Keeps the chosen IDs in a Set for O(1) hit-tests during render.
@@ -209,6 +219,9 @@ export default function OrdersPage() {
       ...(isAdmin && doctorFilter !== 'all' ? { doctorId: doctorFilter } : {}),
       ...(createdFrom ? { createdFrom } : {}),
       ...(createdTo ? { createdTo } : {}),
+      // Trash-bin filter is admin-only on the backend — sending it
+      // from a doctor session is a no-op (silently ignored).
+      ...(isAdmin && showDeleted ? { includeDeleted: true } : {}),
       sortBy: sortOption.field,
       sortOrder: sortOption.order,
     };
@@ -222,6 +235,7 @@ export default function OrdersPage() {
     createdFrom,
     createdTo,
     sortKey,
+    showDeleted,
   ]);
 
   const ordersQuery = useOrders(params);
@@ -428,6 +442,29 @@ export default function OrdersPage() {
 
             <SortMenu sortKey={sortKey} onChange={setSortKey} />
 
+            {/* Trash-bin toggle — admin only. When ON the page swaps
+                to deleted-orders view: the row menu surfaces Restore
+                + Delete forever (the hard-delete that "deletes
+                infinity"). Flipping the toggle clears the multi-
+                select so bulk operations can't cross modes. */}
+            {isAdmin && (
+              <Button
+                variant={showDeleted ? 'default' : 'outline'}
+                size="sm"
+                className="h-10 gap-2"
+                onClick={() => {
+                  setShowDeleted((current) => !current);
+                  setPage(1);
+                  clearSelection();
+                }}
+                aria-pressed={showDeleted}
+                title={showDeleted ? 'Back to active orders' : 'Show deleted orders'}
+              >
+                <Trash className="h-4 w-4" />
+                {showDeleted ? 'Active orders' : 'Trash'}
+              </Button>
+            )}
+
             <Button
               variant="ghost"
               size="icon"
@@ -564,11 +601,43 @@ export default function OrdersPage() {
         </div>
       )}
 
+      {/* ─── Trash banner ────────────────────────────────────────────
+          Surfaces the "viewing deleted orders" state so the admin
+          can't lose track of what they're acting on. Recall: the
+          row chrome is muted too, but a top banner makes the mode
+          unmissable. */}
+      {isAdmin && showDeleted && (
+        <Card className="border-amber-300 bg-amber-50">
+          <CardContent className="flex flex-col gap-2 p-3 text-sm text-amber-900 sm:flex-row sm:items-center sm:justify-between sm:p-4">
+            <div className="flex items-center gap-2">
+              <Trash className="h-4 w-4" />
+              <span>
+                Viewing <strong>deleted orders</strong>. Restore brings
+                them back into the catalogue; <em>Delete forever</em>{' '}
+                wipes them and their files from disk — irreversible.
+              </span>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-amber-300 bg-white text-amber-900 hover:bg-amber-100"
+              onClick={() => {
+                setShowDeleted(false);
+                setPage(1);
+                clearSelection();
+              }}
+            >
+              Back to active
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
       {/* ─── Bulk action bar (admin-only) ─────────────────────────────
           Appears whenever the admin has selected at least one row.
           Sticky at the top of the results region so it remains in
           view while the planner scrolls a long table. */}
-      {isAdmin && selectedIds.size > 0 && (
+      {isAdmin && selectedIds.size > 0 && !showDeleted && (
         <BulkActionBar
           count={selectedIds.size}
           pending={bulkPending}
@@ -594,27 +663,49 @@ export default function OrdersPage() {
         />
       ) : orders.length === 0 ? (
         <EmptyState
-          icon={<ClipboardList className="h-10 w-10" />}
-          title="No orders found"
+          icon={
+            showDeleted ? (
+              <Trash className="h-10 w-10" />
+            ) : (
+              <ClipboardList className="h-10 w-10" />
+            )
+          }
+          title={showDeleted ? 'Trash is empty' : 'No orders found'}
           description={
-            activeFilterCount > 0
-              ? 'No orders match the current filters. Try widening the search or clearing filters.'
-              : 'Create a new order to get started.'
+            showDeleted
+              ? 'There are no soft-deleted orders to review. Newly deleted orders will show up here.'
+              : activeFilterCount > 0
+                ? 'No orders match the current filters. Try widening the search or clearing filters.'
+                : 'Create a new order to get started.'
           }
           action={
             <div className="flex flex-wrap justify-center gap-2">
-              {activeFilterCount > 0 && (
-                <Button variant="outline" onClick={clearAllFilters}>
-                  Clear filters
+              {showDeleted ? (
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowDeleted(false);
+                    setPage(1);
+                  }}
+                >
+                  Back to active orders
                 </Button>
-              )}
-              {canCreate && (
-                <Button asChild>
-                  <Link href="/dashboard/orders/new">
-                    <Plus className="mr-2 h-4 w-4" />
-                    New Order
-                  </Link>
-                </Button>
+              ) : (
+                <>
+                  {activeFilterCount > 0 && (
+                    <Button variant="outline" onClick={clearAllFilters}>
+                      Clear filters
+                    </Button>
+                  )}
+                  {canCreate && (
+                    <Button asChild>
+                      <Link href="/dashboard/orders/new">
+                        <Plus className="mr-2 h-4 w-4" />
+                        New Order
+                      </Link>
+                    </Button>
+                  )}
+                </>
               )}
             </div>
           }
@@ -680,6 +771,11 @@ export default function OrdersPage() {
                     className={cn(
                       'cursor-pointer transition hover:bg-muted/30 focus:bg-muted/50 focus:outline-none',
                       selectedIds.has(order.id) && 'bg-primary/5',
+                      // Trash-view tinting: muted background + amber
+                      // left rule so deleted rows are visually
+                      // recoverable but unmistakably "not live".
+                      showDeleted &&
+                        'bg-amber-50/40 text-muted-foreground hover:bg-amber-50/60',
                     )}
                   >
                     {isAdmin && (
@@ -755,12 +851,15 @@ export default function OrdersPage() {
                         canManage={canManage}
                         canPermanentDelete={isAdmin}
                         isAdmin={isAdmin}
+                        isDeletedView={showDeleted}
                         isDeleting={deleteOrder.isPending}
                         isPermanentDeleting={permanentDeleteOrder.isPending}
+                        isRestoring={restoreOrder.isPending}
                         onDelete={() => deleteOrder.mutate(order.id)}
                         onPermanentDelete={() =>
                           permanentDeleteOrder.mutate(order.id)
                         }
+                        onRestore={() => restoreOrder.mutate(order.id)}
                         onChangeStatus={runSingleStatus}
                       />
                     </TableCell>
@@ -781,11 +880,14 @@ export default function OrdersPage() {
                 isAdmin={isAdmin}
                 canManage={canManage}
                 canPermanentDelete={isAdmin}
+                isDeletedView={showDeleted}
                 isDeleting={deleteOrder.isPending}
                 isPermanentDeleting={permanentDeleteOrder.isPending}
+                isRestoring={restoreOrder.isPending}
                 onPrefetch={() => prefetchOrder(order.id)}
                 onDelete={() => deleteOrder.mutate(order.id)}
                 onPermanentDelete={() => permanentDeleteOrder.mutate(order.id)}
+                onRestore={() => restoreOrder.mutate(order.id)}
                 onChangeStatus={runSingleStatus}
               />
             ))}
@@ -902,10 +1004,13 @@ function OrderRowActions({
   canManage,
   canPermanentDelete,
   isAdmin,
+  isDeletedView,
   isDeleting,
   isPermanentDeleting,
+  isRestoring,
   onDelete,
   onPermanentDelete,
+  onRestore,
   onChangeStatus,
 }: {
   order: DentalOrder;
@@ -913,10 +1018,15 @@ function OrderRowActions({
   canPermanentDelete: boolean;
   /** Admin-only flag drives the visibility of the inline status menu. */
   isAdmin: boolean;
+  /** When true, the row belongs to the trash bin: surface Restore +
+   *  Delete forever instead of Edit + Soft-delete. */
+  isDeletedView?: boolean;
   isDeleting: boolean;
   isPermanentDeleting: boolean;
+  isRestoring?: boolean;
   onDelete: () => void;
   onPermanentDelete: () => void;
+  onRestore?: () => void;
   onChangeStatus?: (id: string, status: OrderStatus) => void;
 }) {
   const [softOpen, setSoftOpen] = useState(false);
@@ -940,6 +1050,9 @@ function OrderRowActions({
         <DropdownMenuContent align="end" className="w-52">
           <DropdownMenuLabel className="text-xs uppercase tracking-wide text-muted-foreground">
             {order.orderCode}
+            {isDeletedView ? (
+              <span className="ml-1 text-amber-700">· deleted</span>
+            ) : null}
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem asChild>
@@ -948,58 +1061,94 @@ function OrderRowActions({
               View order
             </Link>
           </DropdownMenuItem>
-          {canManage && (
-            <DropdownMenuItem asChild>
-              <Link
-                href={`/dashboard/orders/${order.id}/edit`}
-                className="gap-2"
-              >
-                <Edit className="h-4 w-4" />
-                Edit order
-              </Link>
-            </DropdownMenuItem>
-          )}
-          {isAdmin && onChangeStatus && (
+          {/* Trash-view branch — Restore + Delete forever ONLY.
+              Everything else (edit, soft-delete, status change) is
+              hidden because the order is not in the live catalogue
+              and those operations don't make sense yet. */}
+          {isDeletedView && canPermanentDelete ? (
             <>
               <DropdownMenuSeparator />
+              {onRestore ? (
+                <DropdownMenuItem
+                  onClick={(event) => {
+                    event.preventDefault();
+                    onRestore();
+                  }}
+                  disabled={isRestoring}
+                  className="gap-2 text-emerald-700 focus:text-emerald-800"
+                >
+                  <ArchiveRestore className="h-4 w-4" />
+                  Restore
+                </DropdownMenuItem>
+              ) : null}
               <DropdownMenuItem
                 onClick={(event) => {
                   event.preventDefault();
-                  setStatusPickerOpen(true);
+                  setHardOpen(true);
                 }}
-                className="gap-2"
+                disabled={isPermanentDeleting}
+                className="gap-2 text-destructive focus:text-destructive"
               >
-                <Wrench className="h-4 w-4" />
-                Change status…
+                <ShieldX className="h-4 w-4" />
+                Delete forever
               </DropdownMenuItem>
             </>
-          )}
-          {(canManage || canPermanentDelete) && <DropdownMenuSeparator />}
-          {canManage && (
-            <DropdownMenuItem
-              onClick={(event) => {
-                event.preventDefault();
-                setSoftOpen(true);
-              }}
-              disabled={isDeleting}
-              className="gap-2 text-destructive focus:text-destructive"
-            >
-              <Trash2 className="h-4 w-4" />
-              Delete order
-            </DropdownMenuItem>
-          )}
-          {canPermanentDelete && (
-            <DropdownMenuItem
-              onClick={(event) => {
-                event.preventDefault();
-                setHardOpen(true);
-              }}
-              disabled={isPermanentDeleting}
-              className="gap-2 text-destructive focus:text-destructive"
-            >
-              <ShieldX className="h-4 w-4" />
-              Delete forever
-            </DropdownMenuItem>
+          ) : (
+            <>
+              {canManage && (
+                <DropdownMenuItem asChild>
+                  <Link
+                    href={`/dashboard/orders/${order.id}/edit`}
+                    className="gap-2"
+                  >
+                    <Edit className="h-4 w-4" />
+                    Edit order
+                  </Link>
+                </DropdownMenuItem>
+              )}
+              {isAdmin && onChangeStatus && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={(event) => {
+                      event.preventDefault();
+                      setStatusPickerOpen(true);
+                    }}
+                    className="gap-2"
+                  >
+                    <Wrench className="h-4 w-4" />
+                    Change status…
+                  </DropdownMenuItem>
+                </>
+              )}
+              {(canManage || canPermanentDelete) && <DropdownMenuSeparator />}
+              {canManage && (
+                <DropdownMenuItem
+                  onClick={(event) => {
+                    event.preventDefault();
+                    setSoftOpen(true);
+                  }}
+                  disabled={isDeleting}
+                  className="gap-2 text-destructive focus:text-destructive"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete order
+                </DropdownMenuItem>
+              )}
+              {canPermanentDelete && (
+                <DropdownMenuItem
+                  onClick={(event) => {
+                    event.preventDefault();
+                    setHardOpen(true);
+                  }}
+                  disabled={isPermanentDeleting}
+                  className="gap-2 text-destructive focus:text-destructive"
+                >
+                  <ShieldX className="h-4 w-4" />
+                  Delete forever
+                </DropdownMenuItem>
+              )}
+            </>
           )}
         </DropdownMenuContent>
       </DropdownMenu>
@@ -1102,22 +1251,28 @@ function OrderMobileCard({
   isAdmin,
   canManage,
   canPermanentDelete,
+  isDeletedView,
   isDeleting,
   isPermanentDeleting,
+  isRestoring,
   onPrefetch,
   onDelete,
   onPermanentDelete,
+  onRestore,
   onChangeStatus,
 }: {
   order: DentalOrder;
   isAdmin: boolean;
   canManage: boolean;
   canPermanentDelete: boolean;
+  isDeletedView?: boolean;
   isDeleting: boolean;
   isPermanentDeleting: boolean;
+  isRestoring?: boolean;
   onPrefetch: () => void;
   onDelete: () => void;
   onPermanentDelete: () => void;
+  onRestore?: () => void;
   onChangeStatus?: (id: string, status: OrderStatus) => void;
 }) {
   const router = useRouter();
@@ -1130,7 +1285,12 @@ function OrderMobileCard({
         }
         router.push(`/dashboard/orders/${order.id}`);
       }}
-      className="cursor-pointer transition active:scale-[0.99]"
+      className={cn(
+        'cursor-pointer transition active:scale-[0.99]',
+        // Match the desktop trash tint so the deleted-card chrome
+        // is unmistakable on mobile too.
+        isDeletedView && 'border-amber-200 bg-amber-50/40 text-muted-foreground',
+      )}
     >
       <CardContent className="space-y-4 p-4">
         <div className="flex items-start justify-between gap-3">
@@ -1138,6 +1298,11 @@ function OrderMobileCard({
             <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
               <ClipboardList className="h-3.5 w-3.5" />
               {format(new Date(order.createdAt), 'MMM d, yyyy')}
+              {isDeletedView ? (
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-900">
+                  Deleted
+                </span>
+              ) : null}
             </div>
             <h3 className="truncate text-lg font-semibold">{order.orderCode}</h3>
             <p className="truncate text-sm text-muted-foreground">
@@ -1149,10 +1314,13 @@ function OrderMobileCard({
             canManage={canManage}
             canPermanentDelete={canPermanentDelete}
             isAdmin={isAdmin}
+            isDeletedView={isDeletedView}
             isDeleting={isDeleting}
             isPermanentDeleting={isPermanentDeleting}
+            isRestoring={isRestoring}
             onDelete={onDelete}
             onPermanentDelete={onPermanentDelete}
+            onRestore={onRestore}
             onChangeStatus={onChangeStatus}
           />
         </div>

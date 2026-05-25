@@ -1,5 +1,56 @@
 import apiClient from './client';
-import type { Quotation, UpsertQuotationDto } from '@/lib/types';
+import type { DevisLanguage, Quotation, UpsertQuotationDto } from '@/lib/types';
+
+function parseContentDispositionFilename(
+  header: string | undefined,
+): string | null {
+  if (!header) return null;
+  const star = /filename\*\s*=\s*[^']*''([^;]+)/i.exec(header);
+  if (star?.[1]) {
+    try {
+      return decodeURIComponent(star[1]).replace(/^"|"$/g, '');
+    } catch {
+      return star[1].replace(/^"|"$/g, '');
+    }
+  }
+  const plain = /filename\s*=\s*"?([^";]+)"?/i.exec(header);
+  return plain?.[1] ?? null;
+}
+
+function safePdfFileName(input: string): string {
+  const base =
+    input
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9._-]+/g, '_')
+      .replace(/^[._-]+|[._-]+$/g, '')
+      .slice(0, 120) || 'quotation';
+
+  return base.toLowerCase().endsWith('.pdf') ? base : `${base}.pdf`;
+}
+
+async function extractBlobErrorMessage(error: unknown): Promise<string | null> {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'response' in error &&
+    error.response &&
+    typeof error.response === 'object' &&
+    'data' in error.response &&
+    error.response.data instanceof Blob
+  ) {
+    const text = await error.response.data.text();
+    if (!text) return null;
+    try {
+      const parsed = JSON.parse(text) as { message?: string | string[] };
+      if (Array.isArray(parsed.message)) return parsed.message[0] ?? null;
+      return parsed.message ?? null;
+    } catch {
+      return text;
+    }
+  }
+  return null;
+}
 
 /**
  * Quotation API client. The doctor + admin both use these endpoints —
@@ -35,10 +86,22 @@ export const quotationsService = {
     return res.data;
   },
 
-  generatePdf: async (id: string): Promise<Quotation> => {
+  /**
+   * Regenerate the quotation PDF. Both admins and the owning dentist
+   * can call this — the admin uses it to issue the first PDF or
+   * switch the document language; the dentist uses it to request
+   * another version in their own language (FR/EN/AR). Backend
+   * persists the chosen language on the row so subsequent downloads
+   * stay consistent.
+   */
+  generatePdf: async (
+    id: string,
+    lang?: DevisLanguage,
+  ): Promise<Quotation> => {
     const res = await apiClient.post<Quotation>(
       `/quotations/${id}/generate-pdf`,
       {},
+      lang ? { params: { lang } } : undefined,
     );
     return res.data;
   },
@@ -46,6 +109,23 @@ export const quotationsService = {
   cancel: async (id: string): Promise<{ id: string; canceled: true }> => {
     const res = await apiClient.post<{ id: string; canceled: true }>(
       `/quotations/${id}/cancel`,
+      {},
+    );
+    return res.data;
+  },
+
+  /**
+   * Recall a SENT quote back to draft so the admin can correct it
+   * (wrong pack, wrong fees, wrong language, typo, …). The backend:
+   *   • flips quote.status: sent → draft
+   *   • snaps the order back to `treatment_approved`
+   *   • notifies the doctor that a revision is incoming
+   *
+   * The admin then edits and re-sends like any draft.
+   */
+  revertToDraft: async (id: string): Promise<Quotation> => {
+    const res = await apiClient.post<Quotation>(
+      `/quotations/${id}/revert-to-draft`,
       {},
     );
     return res.data;
@@ -95,11 +175,17 @@ export const quotationsService = {
    * "Invalid or expired token".
    */
   downloadPdf: async (id: string, fileName: string): Promise<void> => {
-    const res = await apiClient.get(`/quotations/${id}/pdf`, {
-      // Important: tell axios this is a binary payload so the response
-      // doesn't get coerced to a string and corrupted.
-      responseType: 'blob',
-    });
+    let res;
+    try {
+      res = await apiClient.get(`/quotations/${id}/pdf`, {
+        // Important: tell axios this is a binary payload so the response
+        // doesn't get coerced to a string and corrupted.
+        responseType: 'blob',
+      });
+    } catch (error) {
+      const message = await extractBlobErrorMessage(error);
+      throw new Error(message ?? 'Could not download the quotation PDF.');
+    }
     const blob =
       res.data instanceof Blob
         ? res.data
@@ -108,7 +194,11 @@ export const quotationsService = {
     try {
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = fileName;
+      const headerFileName = parseContentDispositionFilename(
+        res.headers['content-disposition'] ??
+          res.headers['Content-Disposition'],
+      );
+      anchor.download = safePdfFileName(headerFileName ?? fileName);
       // Some browsers require the element to be in the DOM to honour
       // a programmatic .click().
       document.body.appendChild(anchor);

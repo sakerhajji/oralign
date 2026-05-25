@@ -279,6 +279,21 @@ export enum SortOrder {
 }
 
 export class OrderFilterDto {
+  @ApiProperty({ required: false, default: 1, minimum: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @ApiProperty({ required: false, default: 10, minimum: 1, maximum: 100 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number;
+
   @ApiProperty({ required: false })
   @IsOptional()
   @IsString()
@@ -332,6 +347,21 @@ export class OrderFilterDto {
   @IsOptional()
   @IsString()
   createdTo?: string;
+
+  // ── Trash bin filter ────────────────────────────────────────────
+  // Admin-only behaviour at the service layer — a dentist passing
+  // this flag still sees only their own non-deleted rows. When set
+  // to `true` the response surfaces ONLY soft-deleted orders so the
+  // admin can review / restore / hard-delete from the same list.
+  @ApiProperty({
+    required: false,
+    description:
+      'Admin only — return only soft-deleted orders (deletedAt is set). Used to render the trash-bin view.',
+  })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  includeDeleted?: boolean;
 }
 
 export class UploadOrderFilesQueryDto {

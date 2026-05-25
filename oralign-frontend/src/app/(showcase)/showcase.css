@@ -39,6 +39,11 @@
   position: relative;
 }
 
+[data-theme="showcase"],
+[data-theme="showcase"] * {
+  box-sizing: border-box;
+}
+
 body:has([data-theme="showcase"]),
 html:has([data-theme="showcase"]) {
   overflow-x: clip;

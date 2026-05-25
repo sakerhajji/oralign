@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { CacheModule } from '@nestjs/cache-manager';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { APP_GUARD } from '@nestjs/core';
 import { createKeyv } from '@keyv/redis';
 import { AppController } from './app.controller';
@@ -19,6 +20,12 @@ import { OrderModule } from './orders/order.module';
 import { TreatmentPlanModule } from './treatment-plans/treatment-plan.module';
 import { PackModule } from './packs/pack.module';
 import { QuotationModule } from './quotations/quotation.module';
+import { PaymentsModule } from './payments/payments.module';
+import { NotificationsModule } from './notifications/notification.module';
+import { SupportModule } from './support/support.module';
+import { DashboardModule } from './dashboard/dashboard.module';
+import { SliderMediaModule } from './slider-media/slider-media.module';
+import { ReportsModule } from './reports/reports.module';
 
 // ─── Redis URL builder ──────────────────────────────────────────────────────
 // Compose injects REDIS_HOST / REDIS_PORT / REDIS_PASSWORD individually; this
@@ -36,6 +43,19 @@ function buildRedisUrl(): string {
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
+    }),
+
+    // ─── Event bus (in-process, in-memory) ─────────────────────────────────
+    // Powers the decoupled notification pipeline: business services emit
+    // domain events (`user.registered`, `payment.confirmed`, …) and the
+    // NotificationsListener materialises them into Notification rows.
+    // We don't need cross-process delivery — a single Nest instance owns
+    // the bus and the writes are committed before any listener runs.
+    EventEmitterModule.forRoot({
+      wildcard: true,         // allow listener globs like `payment.*` later
+      delimiter: '.',
+      maxListeners: 50,
+      verboseMemoryLeak: false,
     }),
 
     // ─── Rate limiting ──────────────────────────────────────────────────────
@@ -88,6 +108,12 @@ function buildRedisUrl(): string {
     TreatmentPlanModule,
     QuotationModule,
     PackModule,
+    PaymentsModule,
+    NotificationsModule,
+    SupportModule,
+    SliderMediaModule,
+    DashboardModule,
+    ReportsModule,
     StorageModule,
   ],
   controllers: [AppController],

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma, UserRole } from '@prisma/client';
 import {
+  BadRequestException,
   ForbiddenException,
   NotFoundException,
 } from '../../common/exceptions/app.exception';
@@ -49,6 +50,34 @@ export class PatientService {
 
     await this.ensureDentistExists(doctorId);
 
+    // ── Per-doctor duplicate guard ─────────────────────────────────
+    // This is a healthcare platform: every doctor maintains their own
+    // patient list, and the same human can legitimately exist for
+    // multiple doctors at the same clinic. So the check is *scoped to
+    // the target doctorId*, never global — Doctor B can register a
+    // patient that Doctor A already has; only the SAME doctor is
+    // blocked from creating two records that point at the same person.
+    //
+    // The match key is fullName (case-insensitive) AND — when the
+    // client provided either — phone OR dateOfBirth. That avoids
+    // bouncing legitimate name-collisions (siblings, common names)
+    // while still catching the "I forgot I already added them" case
+    // that motivated this guard.
+    const dedupeMatches = await this.findPotentialDuplicates({
+      doctorId,
+      fullName: createPatientDto.fullName,
+      phone: createPatientDto.phone ?? null,
+      dateOfBirth: createPatientDto.dateOfBirth ?? null,
+    });
+    if (dedupeMatches.length > 0) {
+      const existing = dedupeMatches[0]!;
+      throw new BadRequestException(
+        `You already have a patient named "${existing.fullName}" in your list` +
+          (existing.phone ? ` (phone ${existing.phone})` : '') +
+          '. Open that record instead of creating a new one.',
+      );
+    }
+
     const patient = await this.prisma.patient.create({
       data: {
         doctorId,
@@ -68,6 +97,42 @@ export class PatientService {
     });
 
     return this.mapToDto(patient);
+  }
+
+  /**
+   * Look for non-deleted patients in the target doctor's list that
+   * share the same fullName (case-insensitive). When the new record
+   * carries a phone or date-of-birth we also require those to match —
+   * so we catch the "same person, same doctor" case without bouncing
+   * the "doctor has two unrelated patients with the same first/last
+   * name" case (siblings, common names).
+   */
+  private async findPotentialDuplicates(args: {
+    doctorId: string;
+    fullName: string;
+    phone: string | null;
+    dateOfBirth: Date | string | null;
+  }) {
+    const trimmedName = args.fullName.trim();
+    if (!trimmedName) return [];
+    const where: Prisma.PatientWhereInput = {
+      doctorId: args.doctorId,
+      deletedAt: null,
+      fullName: { equals: trimmedName, mode: 'insensitive' },
+    };
+    // Only narrow when the client *gave* us the disambiguator —
+    // requiring a NULL match would force callers to send a phone even
+    // when they don't have one, which is hostile UX.
+    if (args.phone && args.phone.trim()) {
+      where.phone = args.phone.trim();
+    } else if (args.dateOfBirth) {
+      where.dateOfBirth = new Date(args.dateOfBirth);
+    }
+    return this.prisma.patient.findMany({
+      where,
+      select: { id: true, fullName: true, phone: true },
+      take: 1,
+    });
   }
 
   async getPatients(
@@ -175,6 +240,28 @@ export class PatientService {
     });
 
     return { message: 'Patient deleted successfully' };
+  }
+
+  /**
+   * Soft-delete multiple patients in parallel.
+   * Patients the caller cannot access are silently skipped —
+   * the count in the response reflects only those successfully deleted.
+   */
+  async bulkDeletePatients(
+    ids: string[],
+    caller: Caller,
+  ): Promise<{ message: string; deleted: number }> {
+    this.ensureCanManagePatients(caller);
+
+    const results = await Promise.allSettled(
+      ids.map((id) => this.deletePatient(id, caller)),
+    );
+
+    const deleted = results.filter((r) => r.status === 'fulfilled').length;
+    return {
+      message: `${deleted} patient(s) deleted successfully`,
+      deleted,
+    };
   }
 
   private readonly includeDoctor = {

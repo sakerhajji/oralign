@@ -39,8 +39,8 @@ export function NavSecondary({
             <SidebarMenuItem key={item.title}>
               <SidebarMenuButton
                 asChild
-                tooltip={item.title}
                 isActive={isItemActive(item.url)}
+                className="group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:justify-center"
               >
                 {/* Use next/link for client-side navigation. Plain
                     <a href> was triggering full-page reloads on every

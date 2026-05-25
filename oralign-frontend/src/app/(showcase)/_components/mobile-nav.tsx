@@ -13,7 +13,11 @@ import {
   SheetTrigger,
   SheetClose,
 } from "@/components/ui/sheet";
-import { NAV_ITEMS } from "../_lib/nav";
+import {
+  getShowcaseAudience,
+  getShowcaseBasePath,
+  getShowcaseNavItems,
+} from "../_lib/nav";
 import { dict, LANGS, type Lang } from "../_lib/i18n/dict";
 import { useShowcaseLang } from "../_lib/i18n/lang-context";
 
@@ -21,13 +25,17 @@ export function MobileNav() {
   const { lang, setLang } = useShowcaseLang();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const audience = getShowcaseAudience(pathname);
+  const basePath = getShowcaseBasePath(pathname);
+  const navItems = getShowcaseNavItems(pathname);
 
-  // Same trick as the desktop Header: when we're not on the homepage,
-  // anchor links need a "/" prefix so clicking actually navigates home
-  // instead of just appending the hash to the current URL.
-  const onHome = pathname === "/";
+  // Same trick as the desktop Header: anchor links must target the active
+  // audience page before adding a hash.
   const resolveAnchor = (hashHref: string): string =>
-    hashHref.startsWith("#") && !onHome ? `/${hashHref}` : hashHref;
+    hashHref.startsWith("#") && pathname !== basePath ? `${basePath}${hashHref}` : hashHref;
+  const ctaHref = audience === "practitioner" ? "/signup" : resolveAnchor("#cta");
+  const ctaLabel =
+    audience === "practitioner" ? dict.nav.createAccount[lang] : dict.nav.bookDemo[lang];
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
@@ -92,7 +100,7 @@ export function MobileNav() {
 
         <nav aria-label="Mobile" className="flex min-h-[calc(100dvh-76px)] flex-col px-5 pb-8 pt-6">
           <ul className="flex list-none flex-col border-t border-[var(--sc-grey)]">
-            {NAV_ITEMS.map((item) => (
+            {navItems.map((item) => (
               <li key={item.id}>
                 <SheetClose asChild>
                   <Link
@@ -139,10 +147,15 @@ export function MobileNav() {
           <div className="mt-auto flex flex-col gap-3 pt-8">
             <SheetClose asChild>
               <Link
-                href={resolveAnchor("#cta")}
-                className="block w-full bg-[var(--sc-sun)] px-5 py-4 text-center text-[0.72rem] font-bold uppercase tracking-[0.18em] text-[var(--sc-black)] no-underline transition-colors hover:bg-[var(--sc-sun-2)]"
+                href={ctaHref}
+                className={[
+                  "block w-full px-5 py-4 text-center text-[0.72rem] font-bold uppercase tracking-[0.18em] no-underline transition-colors",
+                  audience === "practitioner"
+                    ? "bg-[var(--sc-black)] text-[var(--sc-white)] hover:bg-[rgba(25,25,25,0.82)]"
+                    : "bg-[var(--sc-sun)] text-[var(--sc-black)] hover:bg-[var(--sc-sun-2)]",
+                ].join(" ")}
               >
-                {dict.nav.bookDemo[lang]}
+                {ctaLabel}
               </Link>
             </SheetClose>
             <SheetClose asChild>

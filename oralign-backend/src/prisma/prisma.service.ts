@@ -102,6 +102,26 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     return this.prisma.payment;
   }
 
+  get notification() {
+    return this.prisma.notification;
+  }
+
+  // ─── Support chat ─────────────────────────────────────────────────────────
+
+  get supportConversation() {
+    return this.prisma.supportConversation;
+  }
+
+  get supportMessage() {
+    return this.prisma.supportMessage;
+  }
+
+  // ─── Doctor-dashboard slider media ─────────────────────────────────
+
+  get sliderMedia() {
+    return this.prisma.sliderMedia;
+  }
+
   // ─── Prisma utilities ─────────────────────────────────────────────────────
 
   /**

@@ -118,3 +118,22 @@ export function useDeletePatient(): UseMutationResult<
     },
   });
 }
+
+export function useBulkDeletePatients(): UseMutationResult<
+  { message: string; deleted: number },
+  Error,
+  string[]
+> {
+  const queryClient = useQueryClient();
+
+  return useMutation<{ message: string; deleted: number }, Error, string[]>({
+    mutationFn: patientsService.bulkDeletePatients,
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: patientKeys.lists() });
+      toast.success(`${data.deleted} patient(s) deleted`);
+    },
+    onError: (error) => {
+      toast.error(extractApiErrorMessage(error));
+    },
+  });
+}

@@ -1,74 +1,65 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { DevisLanguage, Quotation, QuotationStatus } from '@prisma/client';
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { ArchType, DevisLanguage, Quotation, QuotationStatus } from '@prisma/client';
 import * as fs from 'fs';
 import * as path from 'path';
-import PDFDocument from 'pdfkit';
+import puppeteer, { Browser } from 'puppeteer-core';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   BadRequestException,
   NotFoundException,
 } from '../../common/exceptions/app.exception';
-import { getQuotationLabels, isRtl } from './quotation-i18n';
-import { QuotationService } from './quotation.service';
+import { getQuotationLabels, isRtl, pickTranslation } from './quotation-i18n';
 
-// ── Filesystem layout ──────────────────────────────────────────────────────
-
-/**
- * Where PDFs land on disk. Always written under `uploads/` so the
- * existing static-files middleware at `/uploads` could serve them in
- * theory — BUT note we never expose Quote PDFs via the static route;
- * download is gated through a controller endpoint with RBAC. The
- * relative path stored on the row is the unprefixed segment after
- * `uploads/`.
- */
 const UPLOAD_ROOT = path.join(process.cwd(), 'uploads');
+const ARABIC_FONT_PATH =
+  process.env.ORALIGN_ARABIC_FONT_PATH ??
+  path.join(process.cwd(), 'assets', 'fonts', 'Amiri-Regular.ttf');
 
-// Bundled font path (optional — see assets/fonts/README.md).
-const ARABIC_FONT_PATH = path.join(
-  process.cwd(),
-  'assets',
-  'fonts',
-  'Amiri-Regular.ttf',
-);
+type JsonRecord = Record<string, unknown>;
+
+interface QuoteLine {
+  label: string;
+  note?: string;
+  amount: number;
+  kind?: 'normal' | 'discount';
+}
+
+interface TotalLine {
+  label: string;
+  value: string;
+  emphasis?: boolean;
+}
 
 /**
- * PDF generation for the Quotation module.
+ * Browser-backed quotation PDF renderer.
  *
- * Layout strategy:
- *   • All amounts and PDF labels come from the i18n dictionary.
- *   • Header has company logo + name + tax block on top, document
- *     metadata on the right.
- *   • Two-column "Issued by" / "Billed to" block uses the snapshots
- *     stored on the Quotation row so the document remains correct even
- *     after admins or doctors edit their settings later.
- *   • Line-item table renders rows for treatment/fabrication/delivery/
- *     discount, then a totals block (HT, VAT, TTC).
- *   • Footer carries legal text + footer text (translated at snapshot
- *     time) + optional bank details.
- *
- * Arabic limitation:
- *   pdfkit doesn't shape Arabic letters (no contextual joining). With
- *   Amiri-Regular.ttf in `assets/fonts/`, Arabic strings render in
- *   isolated forms; without the font, they render as missing-glyph
- *   boxes. Both cases right-align the text. Document: see
- *   `assets/fonts/README.md`.
+ * Why HTML -> PDF instead of drawing with PDFKit:
+ * - CSS handles line wrapping, table widths, page breaks, and long text safely.
+ * - Chromium + HarfBuzz shapes Arabic correctly, so Arabic text is readable.
+ * - The template stays closer to the dashboard visual language while still
+ *   printing like a clean clinical invoice.
  */
 @Injectable()
-export class QuotationPdfService {
+export class QuotationPdfService implements OnModuleDestroy {
   private readonly logger = new Logger(QuotationPdfService.name);
+  private browserPromise: Promise<Browser> | null = null;
   private arabicFontBuffer: Buffer | null = null;
   private arabicFontChecked = false;
 
   constructor(private readonly prisma: PrismaService) {}
 
-  // ─── Public API ───────────────────────────────────────────────────────────
+  async onModuleDestroy(): Promise<void> {
+    if (!this.browserPromise) return;
+    try {
+      const browser = await this.browserPromise;
+      await browser.close();
+    } catch {
+      // The process is shutting down; a stale browser is not useful to report.
+    } finally {
+      this.browserPromise = null;
+    }
+  }
 
-  /**
-   * Generate the PDF for a quote, write it to disk, and persist the
-   * relative path on the row. Quote must have a number + snapshots —
-   * the caller is expected to have already invoked
-   * QuotationService.ensureSnapshotAndNumber() before this.
-   */
   async generateAndPersist(quote: Quotation): Promise<Quotation> {
     if (!quote.quotationNumber) {
       throw new BadRequestException(
@@ -85,7 +76,7 @@ export class QuotationPdfService {
     const absDir = path.join(UPLOAD_ROOT, relDir);
     await fs.promises.mkdir(absDir, { recursive: true });
 
-    const safeName = `${quote.quotationNumber}.pdf`;
+    const safeName = this.safePdfFileName(quote.quotationNumber);
     const absPath = path.join(absDir, safeName);
     const relPath = path.posix.join(relDir, safeName);
 
@@ -97,7 +88,6 @@ export class QuotationPdfService {
     });
   }
 
-  /** Stream a generated PDF off disk. */
   async openPdfStream(
     quote: Quotation,
   ): Promise<{ stream: fs.ReadStream; fileName: string; mimeType: string }> {
@@ -110,27 +100,603 @@ export class QuotationPdfService {
     }
     return {
       stream: fs.createReadStream(abs),
-      fileName: `${quote.quotationNumber ?? quote.id}.pdf`,
+      fileName: this.safePdfFileName(quote.quotationNumber ?? quote.id),
       mimeType: 'application/pdf',
     };
   }
 
-  // ─── Internals ────────────────────────────────────────────────────────────
+  private async renderToFile(quote: Quotation, absPath: string): Promise<void> {
+    let page: Awaited<ReturnType<Browser['newPage']>> | null = null;
+    try {
+      const browser = await this.getBrowser();
+      page = await browser.newPage();
+      page.setDefaultTimeout(45_000);
+      await page.setContent(this.renderHtml(quote), {
+        waitUntil: 'load',
+        timeout: 45_000,
+      });
+      await page.emulateMediaType('print');
+      await page.pdf({
+        path: absPath,
+        format: 'A4',
+        printBackground: true,
+        preferCSSPageSize: true,
+        margin: { top: '0', right: '0', bottom: '0', left: '0' },
+      });
+    } catch (err) {
+      await fs.promises.rm(absPath, { force: true }).catch(() => undefined);
+      this.logger.error(
+        `Failed to render quotation PDF ${quote.id}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      throw err;
+    } finally {
+      if (page) await page.close().catch(() => undefined);
+    }
+  }
+
+  private async getBrowser(): Promise<Browser> {
+    if (!this.browserPromise) {
+      this.browserPromise = this.launchBrowser().catch((err) => {
+        this.browserPromise = null;
+        throw err;
+      });
+    }
+    return this.browserPromise;
+  }
+
+  private async launchBrowser(): Promise<Browser> {
+    const executablePath = this.resolveChromiumExecutable();
+    this.logger.log(`Launching Chromium PDF renderer at ${executablePath}`);
+    return puppeteer.launch({
+      executablePath,
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--font-render-hinting=medium',
+      ],
+    });
+  }
+
+  private resolveChromiumExecutable(): string {
+    const envCandidates = [
+      process.env.PUPPETEER_EXECUTABLE_PATH,
+      process.env.CHROME_BIN,
+      process.env.CHROMIUM_PATH,
+    ].filter(Boolean) as string[];
+
+    const candidates = [
+      ...envCandidates,
+      '/usr/bin/chromium-browser',
+      '/usr/bin/chromium',
+      '/usr/bin/google-chrome-stable',
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+      path.join(
+        process.env.LOCALAPPDATA ?? '',
+        'Google\\Chrome\\Application\\chrome.exe',
+      ),
+    ].filter(Boolean);
+
+    const found = candidates.find((candidate) => fs.existsSync(candidate));
+    if (found) return found;
+
+    throw new Error(
+      'Chromium executable was not found. Install chromium in Docker or set PUPPETEER_EXECUTABLE_PATH.',
+    );
+  }
+
+  private renderHtml(quote: Quotation): string {
+    const labels = getQuotationLabels(quote.language);
+    const rtl = isRtl(quote.language);
+    const company = (quote.companySnapshot as JsonRecord | null) ?? {};
+    const clinic = (quote.clinicSnapshot as JsonRecord | null) ?? {};
+    const logo = this.resolveImageDataUrl(
+      company.companyLogoPath as string | null | undefined,
+    );
+    const rows = this.buildLineItems(quote, labels);
+    const totals = this.buildTotals(quote, labels);
+    const legal = this.resolveSnapshotTranslation(
+      company,
+      'legalTextTranslations',
+      'legalText',
+      quote.language,
+    );
+    const footer = this.resolveSnapshotTranslation(
+      company,
+      'footerTextTranslations',
+      'footerText',
+      quote.language,
+    );
+    const bank = company.bankDetails as Record<string, string> | null;
+    const cityCountry = [company.companyCity, company.companyCountry]
+      .filter(Boolean)
+      .join(', ');
+    const clinicCity = [clinic.city, clinic.country].filter(Boolean).join(', ');
+    const brandName = String(company.companyName ?? 'ORALIGN').trim() || 'ORALIGN';
+
+    return `<!doctype html>
+<html lang="${this.htmlAttr(quote.language)}" dir="${rtl ? 'rtl' : 'ltr'}">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      ${this.fontFaceCss()}
+      @page { size: A4; margin: 12mm; }
+      * { box-sizing: border-box; }
+      html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      body {
+        margin: 0;
+        color: #111111;
+        background: #ffffff;
+        font-family: Inter, Roboto, Arial, "DejaVu Sans", sans-serif;
+        font-size: 10.5px;
+        line-height: 1.45;
+      }
+      body.rtl {
+        direction: rtl;
+        font-family: "OralignArabic", "Noto Naskh Arabic", "Noto Sans Arabic", "DejaVu Sans", Arial, sans-serif;
+        font-size: 11px;
+        line-height: 1.65;
+      }
+      .document { width: 100%; }
+      .topbar {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 18px;
+        align-items: start;
+        padding-bottom: 14px;
+        border-bottom: 2px solid #111111;
+        break-inside: avoid;
+      }
+      body.rtl .topbar { grid-template-columns: auto 1fr; }
+      .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+      body.rtl .brand { flex-direction: row-reverse; text-align: right; }
+      .logo-img { max-width: 122px; max-height: 56px; object-fit: contain; }
+      .logo-fallback {
+        display: grid;
+        width: 54px;
+        height: 54px;
+        place-items: center;
+        border: 1px solid #111111;
+        border-radius: 16px;
+        font-weight: 800;
+        letter-spacing: .04em;
+      }
+      .brand-name { font-size: 17px; font-weight: 800; letter-spacing: .14em; overflow-wrap: anywhere; }
+      body.rtl .brand-name { letter-spacing: 0; }
+      .brand-sub { margin-top: 2px; color: #666666; overflow-wrap: anywhere; }
+      .doc-meta { min-width: 205px; text-align: right; }
+      body.rtl .doc-meta { text-align: left; }
+      .title {
+        margin: 0;
+        font-size: 30px;
+        line-height: 1;
+        letter-spacing: .14em;
+        font-weight: 850;
+        text-transform: uppercase;
+      }
+      body.rtl .title { font-size: 27px; letter-spacing: 0; text-transform: none; }
+      .meta-line { margin-top: 6px; color: #555555; overflow-wrap: anywhere; }
+      .status {
+        display: inline-flex;
+        margin-top: 9px;
+        max-width: 100%;
+        align-items: center;
+        border: 1px solid #111111;
+        border-radius: 999px;
+        padding: 3px 9px;
+        font-size: 9.5px;
+        font-weight: 700;
+        overflow-wrap: anywhere;
+      }
+      .section { margin-top: 14px; }
+      .section.keep { break-inside: avoid; page-break-inside: avoid; }
+      .section-title {
+        margin: 0 0 8px;
+        color: #666666;
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: .14em;
+        text-transform: uppercase;
+      }
+      body.rtl .section-title { letter-spacing: 0; text-transform: none; }
+      .party-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      .box {
+        min-width: 0;
+        min-height: 118px;
+        border: 1px solid #d7d7d7;
+        border-radius: 14px;
+        padding: 12px;
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+      .box-line {
+        margin: 2px 0;
+        overflow-wrap: anywhere;
+        word-break: normal;
+      }
+      .box-line.strong { font-weight: 750; }
+      table {
+        width: 100%;
+        border: 1px solid #111111;
+        border-radius: 14px;
+        border-collapse: separate;
+        border-spacing: 0;
+        table-layout: fixed;
+        overflow: hidden;
+      }
+      thead { display: table-header-group; }
+      tr { break-inside: avoid; page-break-inside: avoid; }
+      th {
+        background: #111111;
+        color: #ffffff;
+        padding: 10px 12px;
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: .14em;
+        text-transform: uppercase;
+      }
+      body.rtl th { letter-spacing: 0; text-transform: none; }
+      th.desc, td.desc { width: 70%; text-align: start; }
+      th.amount, td.amount { width: 30%; text-align: end; white-space: nowrap; }
+      body.rtl th.amount, body.rtl td.amount { text-align: start; }
+      td {
+        padding: 11px 12px;
+        border-top: 1px solid #dcdcdc;
+        vertical-align: top;
+        overflow-wrap: anywhere;
+      }
+      .line-label { font-weight: 700; }
+      .line-note { margin-top: 3px; color: #666666; font-size: 9.5px; overflow-wrap: anywhere; }
+      .discount { color: #111111; }
+      .totals {
+        width: min(100%, 285px);
+        margin-top: 13px;
+        margin-left: auto;
+        border: 1px solid #d7d7d7;
+        border-radius: 14px;
+        padding: 9px;
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+      body.rtl .totals { margin-right: auto; margin-left: 0; }
+      .total-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 6px 5px;
+        border-bottom: 1px solid #ededed;
+      }
+      .total-row span:first-child { overflow-wrap: anywhere; }
+      .total-row span:last-child { white-space: nowrap; font-variant-numeric: tabular-nums; }
+      .total-row.final {
+        margin-top: 4px;
+        border: 0;
+        border-radius: 11px;
+        background: #111111;
+        color: #ffffff;
+        padding: 11px 10px;
+        font-size: 13px;
+        font-weight: 850;
+      }
+      .text-block {
+        margin-top: 13px;
+        border: 1px solid #d7d7d7;
+        border-radius: 14px;
+        padding: 11px 12px;
+        break-inside: auto;
+      }
+      .text-block-title {
+        margin: 0 0 6px;
+        color: #666666;
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: .14em;
+        text-transform: uppercase;
+      }
+      body.rtl .text-block-title { letter-spacing: 0; text-transform: none; }
+      .text-block-body {
+        margin: 0;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .footer {
+        margin-top: 16px;
+        padding-top: 11px;
+        border-top: 1px solid #cfcfcf;
+        color: #555555;
+        font-size: 9px;
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+      .footer p { margin: 0 0 5px; overflow-wrap: anywhere; }
+      .bank-title {
+        margin-top: 8px;
+        color: #111111;
+        font-weight: 800;
+      }
+      .bank-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 3px 14px;
+        margin-top: 4px;
+      }
+      .bank-grid div { overflow-wrap: anywhere; }
+    </style>
+  </head>
+  <body class="${rtl ? 'rtl' : 'ltr'}">
+    <main class="document">
+      <header class="topbar">
+        <section class="brand">
+          ${
+            logo
+              ? `<img class="logo-img" src="${logo}" alt="${this.htmlAttr(brandName)}" />`
+              : `<div class="logo-fallback">${this.html(brandName.slice(0, 2).toUpperCase())}</div>`
+          }
+          <div>
+            <div class="brand-name">${this.html(brandName)}</div>
+            <div class="brand-sub">${this.html(String(company.companyEmail ?? company.companyPhone ?? ''))}</div>
+          </div>
+        </section>
+
+        <section class="doc-meta">
+          <h1 class="title">${this.html(this.titleLabel(labels.documentTitle, rtl))}</h1>
+          <div class="meta-line">${this.html(labels.number)}: <strong>${this.html(quote.quotationNumber ?? '—')}</strong></div>
+          <div class="meta-line">${this.html(labels.date)}: ${this.html(this.formatDate(quote.createdAt, quote.language))}</div>
+          <div class="status">${this.html(labels.status)}: ${this.html(this.statusLabel(quote.status, labels))}</div>
+        </section>
+      </header>
+
+      <section class="section keep party-grid">
+        <article class="box">
+          <h2 class="section-title">${this.html(labels.issuedBy)}</h2>
+          ${this.renderBoxLines([
+            { text: String(company.companyName ?? ''), strong: true },
+            { text: String(company.companyAddress ?? '') },
+            { text: cityCountry },
+            { text: String(company.companyPhone ?? '') },
+            { text: String(company.companyEmail ?? '') },
+            {
+              text: company.taxRegistrationNumber
+                ? `${labels.taxNumber}: ${company.taxRegistrationNumber}`
+                : '',
+            },
+          ])}
+        </article>
+
+        <article class="box">
+          <h2 class="section-title">${this.html(labels.billedTo)}</h2>
+          ${this.renderBoxLines([
+            {
+              text: `${labels.doctor}: ${String(clinic.doctorFullName ?? '—')}`,
+              strong: true,
+            },
+            {
+              text: (clinic as { patientFullName?: string | null }).patientFullName
+                ? `${labels.patient}: ${(clinic as { patientFullName?: string | null }).patientFullName}`
+                : '',
+            },
+            { text: String(clinic.clinicName ?? '') },
+            { text: String(clinic.clinicAddress ?? '') },
+            { text: clinicCity },
+            { text: String(clinic.clinicPhone ?? '') },
+            { text: String(clinic.clinicEmail ?? '') },
+          ])}
+        </article>
+      </section>
+
+      <section class="section">
+        <table>
+          <thead>
+            <tr>
+              <th class="desc">${this.html(labels.description)}</th>
+              <th class="amount">${this.html(labels.amount)}</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((row) => this.renderLineRow(row, quote)).join('')}
+          </tbody>
+        </table>
+        <section class="totals">
+          ${totals.map((line) => this.renderTotalLine(line)).join('')}
+        </section>
+      </section>
+
+      ${quote.adminMessage ? this.renderTextBlock(labels.adminMessage, quote.adminMessage) : ''}
+      ${quote.notes ? this.renderTextBlock(labels.notes, quote.notes) : ''}
+
+      <footer class="footer">
+        ${legal ? `<p>${this.html(legal)}</p>` : ''}
+        ${footer ? `<p>${this.html(footer)}</p>` : ''}
+        ${
+          bank && Object.values(bank).some(Boolean)
+            ? `<div class="bank-title">${this.html(labels.bankDetails)}</div>
+               <div class="bank-grid">
+                 ${this.renderBankLine(labels.bankName, bank.bankName)}
+                 ${this.renderBankLine(labels.accountName, bank.accountName)}
+                 ${this.renderBankLine(labels.rib, bank.rib)}
+                 ${this.renderBankLine(labels.iban, bank.iban)}
+                 ${this.renderBankLine(labels.swift, bank.swift)}
+               </div>`
+            : ''
+        }
+      </footer>
+    </main>
+  </body>
+</html>`;
+  }
+
+  private buildLineItems(
+    quote: Quotation,
+    labels: ReturnType<typeof getQuotationLabels>,
+  ): QuoteLine[] {
+    const rows: QuoteLine[] = [];
+    const isPackQuote = !!(quote as { packId?: string | null }).packId;
+    const deliveryFees = this.toNumber(quote.deliveryFees);
+    const discountAmount = this.toNumber(quote.discountAmount);
+
+    if (isPackQuote) {
+      const packName = (quote as { packName?: string | null }).packName ?? '—';
+      const archType = (quote as { archType?: ArchType | null }).archType ?? null;
+      const packBase = this.toNumber(
+        quote.treatmentFees,
+        this.toNumber((quote as { totalPrice?: unknown }).totalPrice, quote.totalTtc),
+      );
+      rows.push({
+        label: `${this.packLabel(quote.language)}: ${packName}${this.archSuffix(archType, quote.language)}`,
+        note: this.packMeta(quote),
+        amount: packBase,
+      });
+      if (deliveryFees > 0) {
+        rows.push({ label: labels.deliveryFees, amount: deliveryFees });
+      }
+    } else {
+      rows.push(
+        { label: labels.treatmentFees, amount: this.toNumber(quote.treatmentFees) },
+        {
+          label: labels.fabricationFees,
+          amount: this.toNumber(quote.fabricationFees),
+        },
+        { label: labels.deliveryFees, amount: deliveryFees },
+      );
+    }
+
+    if (discountAmount > 0) {
+      rows.push({
+        label: labels.discount,
+        amount: -discountAmount,
+        kind: 'discount',
+      });
+    }
+    return rows;
+  }
+
+  private buildTotals(
+    quote: Quotation,
+    labels: ReturnType<typeof getQuotationLabels>,
+  ): TotalLine[] {
+    const tvaRate = this.toNumber(quote.tvaRate);
+    const showTva = tvaRate > 0 || this.toNumber(quote.tvaAmount) > 0;
+    const lines: TotalLine[] = [
+      {
+        label: labels.subtotalHt,
+        value: this.formatMoney(quote.subTotalHt, quote.currency, quote.language),
+      },
+    ];
+
+    if (showTva) {
+      lines.push({
+        label: `${labels.vatRate} (${tvaRate.toFixed(2)} %)`,
+        value: this.formatMoney(quote.tvaAmount, quote.currency, quote.language),
+      });
+    }
+
+    lines.push({
+      label: labels.totalTtc,
+      value: this.formatMoney(quote.totalTtc, quote.currency, quote.language),
+      emphasis: true,
+    });
+    return lines;
+  }
+
+  private renderLineRow(row: QuoteLine, quote: Quotation): string {
+    return `<tr>
+      <td class="desc ${row.kind === 'discount' ? 'discount' : ''}">
+        <div class="line-label">${this.html(row.label)}</div>
+        ${row.note ? `<div class="line-note">${this.html(row.note)}</div>` : ''}
+      </td>
+      <td class="amount ${row.kind === 'discount' ? 'discount' : ''}">
+        ${this.html(this.formatMoney(row.amount, quote.currency, quote.language))}
+      </td>
+    </tr>`;
+  }
+
+  private renderTotalLine(line: TotalLine): string {
+    return `<div class="total-row${line.emphasis ? ' final' : ''}">
+      <span>${this.html(line.label)}</span>
+      <span>${this.html(line.value)}</span>
+    </div>`;
+  }
+
+  private renderTextBlock(title: string, body: string): string {
+    return `<section class="text-block">
+      <h2 class="text-block-title">${this.html(title)}</h2>
+      <p class="text-block-body">${this.html(body)}</p>
+    </section>`;
+  }
+
+  private renderBoxLines(lines: Array<{ text: string; strong?: boolean }>): string {
+    const html = lines
+      .map((line) => ({ ...line, text: line.text.trim() }))
+      .filter((line) => line.text.length > 0)
+      .map(
+        (line) =>
+          `<p class="box-line${line.strong ? ' strong' : ''}">${this.html(line.text)}</p>`,
+      )
+      .join('');
+
+    return html || '<p class="box-line">—</p>';
+  }
+
+  private renderBankLine(label: string, value?: string): string {
+    if (!value) return '';
+    return `<div><strong>${this.html(label)}:</strong> ${this.html(value)}</div>`;
+  }
+
+  private resolveImageDataUrl(relPath: string | null | undefined): string | null {
+    if (!relPath) return null;
+    try {
+      const abs = this.resolveSafe(relPath);
+      if (!fs.existsSync(abs)) return null;
+      const ext = path.extname(abs).toLowerCase();
+      const mime =
+        ext === '.png'
+          ? 'image/png'
+          : ext === '.jpg' || ext === '.jpeg'
+            ? 'image/jpeg'
+            : ext === '.webp'
+              ? 'image/webp'
+              : null;
+      if (!mime) return null;
+      const stat = fs.statSync(abs);
+      if (stat.size > 2 * 1024 * 1024) return null;
+      return `data:${mime};base64,${fs.readFileSync(abs).toString('base64')}`;
+    } catch {
+      return null;
+    }
+  }
+
+  private resolveSnapshotTranslation(
+    snapshot: JsonRecord,
+    translationsKey: string,
+    fallbackKey: string,
+    language: DevisLanguage,
+  ): string {
+    return String(
+      pickTranslation(snapshot[translationsKey], language) ||
+        snapshot[fallbackKey] ||
+        '',
+    ).trim();
+  }
 
   private resolveSafe(relPath: string): string {
-    const abs = path.resolve(UPLOAD_ROOT, relPath);
-    const root = path.resolve(UPLOAD_ROOT) + path.sep;
-    if (!abs.startsWith(root)) {
+    if (!relPath || path.isAbsolute(relPath)) {
+      throw new BadRequestException('Invalid stored file path.');
+    }
+    const root = path.resolve(UPLOAD_ROOT);
+    const abs = path.resolve(root, relPath);
+    const relative = path.relative(root, abs);
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
       throw new BadRequestException('Invalid stored file path.');
     }
     return abs;
   }
 
-  /**
-   * Lazy-load Amiri once per process. Returns null if the font isn't
-   * present so callers can fall back to the built-in default — the PDF
-   * still generates, Arabic just renders as missing-glyph boxes.
-   */
   private loadArabicFont(): Buffer | null {
     if (this.arabicFontChecked) return this.arabicFontBuffer;
     this.arabicFontChecked = true;
@@ -138,501 +704,72 @@ export class QuotationPdfService {
       this.arabicFontBuffer = fs.readFileSync(ARABIC_FONT_PATH);
     } catch {
       this.arabicFontBuffer = null;
-      this.logger.warn(
-        `Arabic font not found at ${ARABIC_FONT_PATH} — Arabic glyphs in PDFs will be missing. See assets/fonts/README.md.`,
-      );
     }
     return this.arabicFontBuffer;
   }
 
-  private async renderToFile(quote: Quotation, absPath: string): Promise<void> {
-    await new Promise<void>((resolve, reject) => {
-      const doc = new PDFDocument({
-        size: 'A4',
-        margin: 50,
-        info: {
-          Title: quote.quotationNumber ?? 'Quotation',
-          Author: 'Oralign',
-          Subject: getQuotationLabels(quote.language).documentTitle,
-        },
-      });
-
-      const output = fs.createWriteStream(absPath);
-      doc.pipe(output);
-      output.on('finish', () => resolve());
-      output.on('error', reject);
-
-      try {
-        this.renderDocument(doc, quote);
-      } catch (err) {
-        reject(err as Error);
-        return;
+  private fontFaceCss(): string {
+    const font = this.loadArabicFont();
+    if (!font) return '';
+    return `
+      @font-face {
+        font-family: "OralignArabic";
+        src: url("data:font/ttf;base64,${font.toString('base64')}") format("truetype");
+        font-weight: 400 900;
+        font-style: normal;
+        font-display: swap;
       }
-
-      doc.end();
-    });
+    `;
   }
 
-  private renderDocument(doc: PDFKit.PDFDocument, quote: Quotation): void {
-    const labels = getQuotationLabels(quote.language);
-    const rtl = isRtl(quote.language);
+  private safePdfFileName(input: string): string {
+    const base =
+      input
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-zA-Z0-9._-]+/g, '_')
+        .replace(/^[._-]+|[._-]+$/g, '')
+        .slice(0, 120) || 'quotation';
 
-    const company =
-      (quote.companySnapshot as Record<string, unknown> | null) ?? {};
-    const clinic =
-      (quote.clinicSnapshot as Record<string, unknown> | null) ?? {};
-
-    // Pick the right font for the document body. Latin (FR/EN) uses
-    // pdfkit's built-in Helvetica. Arabic uses Amiri if bundled,
-    // otherwise falls back to Helvetica with a documented loss.
-    if (rtl) {
-      const buf = this.loadArabicFont();
-      if (buf) {
-        doc.registerFont('Amiri', buf);
-        doc.font('Amiri');
-      } else {
-        doc.font('Helvetica');
-      }
-    } else {
-      doc.font('Helvetica');
-    }
-
-    this.renderHeader(doc, quote, labels, company, rtl);
-    doc.moveDown(2);
-    this.renderParties(doc, quote, labels, company, clinic, rtl);
-    doc.moveDown(1.5);
-    this.renderLineItems(doc, quote, labels, rtl);
-    this.renderTotalsBlock(doc, quote, labels, rtl);
-    doc.moveDown(1.5);
-    if (quote.adminMessage) {
-      this.renderTextBlock(doc, labels.adminMessage, quote.adminMessage, rtl);
-      doc.moveDown(0.8);
-    }
-    if (quote.notes) {
-      this.renderTextBlock(doc, labels.notes, quote.notes, rtl);
-      doc.moveDown(0.8);
-    }
-    this.renderFooter(doc, quote, labels, company, rtl);
+    return base.toLowerCase().endsWith('.pdf') ? base : `${base}.pdf`;
   }
 
-  // ── Header ─────────────────────────────────────────────────────────────
-
-  private renderHeader(
-    doc: PDFKit.PDFDocument,
-    quote: Quotation,
-    labels: ReturnType<typeof getQuotationLabels>,
-    company: Record<string, unknown>,
-    rtl: boolean,
-  ): void {
-    const left = doc.page.margins.left;
-    const right = doc.page.width - doc.page.margins.right;
-    const startY = doc.y;
-
-    // Logo (if available).
-    const logoPath = company.companyLogoPath as string | null | undefined;
-    if (logoPath) {
-      try {
-        const abs = this.resolveSafe(logoPath);
-        if (fs.existsSync(abs)) {
-          doc.image(abs, rtl ? right - 100 : left, startY, {
-            fit: [100, 60],
-          });
-        }
-      } catch {
-        // logo missing — silently skip
+  private toNumber(value: unknown, fallback = 0): number {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : fallback;
+    if (typeof value === 'string') {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : fallback;
+    }
+    if (value && typeof value === 'object') {
+      const decimalLike = value as {
+        toNumber?: () => number;
+        toString?: () => string;
+      };
+      if (typeof decimalLike.toNumber === 'function') {
+        const parsed = decimalLike.toNumber();
+        return Number.isFinite(parsed) ? parsed : fallback;
+      }
+      if (typeof decimalLike.toString === 'function') {
+        const parsed = Number(decimalLike.toString());
+        return Number.isFinite(parsed) ? parsed : fallback;
       }
     }
-
-    // Document title + number + date (opposite side from logo).
-    const blockX = rtl ? left : right - 220;
-    const blockW = 220;
-    doc
-      .fontSize(20)
-      .fillColor('#0a0a0a')
-      .text(labels.documentTitle, blockX, startY, {
-        width: blockW,
-        align: rtl ? 'left' : 'right',
-      });
-
-    doc.fontSize(10).fillColor('#555');
-    doc.text(
-      `${labels.number}: ${quote.quotationNumber ?? '—'}`,
-      blockX,
-      doc.y + 4,
-      { width: blockW, align: rtl ? 'left' : 'right' },
-    );
-    doc.text(
-      `${labels.date}: ${this.formatDate(quote.createdAt, quote.language)}`,
-      blockX,
-      doc.y,
-      { width: blockW, align: rtl ? 'left' : 'right' },
-    );
-
-    // Status pill — small caps text.
-    doc
-      .fontSize(9)
-      .fillColor('#0a0a0a')
-      .text(
-        `${labels.status}: ${this.statusLabel(quote.status, labels)}`,
-        blockX,
-        doc.y + 6,
-        { width: blockW, align: rtl ? 'left' : 'right' },
-      );
-
-    doc.fillColor('#0a0a0a');
-    // Advance the cursor below the taller of the two columns.
-    doc.y = Math.max(doc.y, startY + 80);
-  }
-
-  // ── Issuer + Billed-to ─────────────────────────────────────────────────
-
-  private renderParties(
-    doc: PDFKit.PDFDocument,
-    quote: Quotation,
-    labels: ReturnType<typeof getQuotationLabels>,
-    company: Record<string, unknown>,
-    clinic: Record<string, unknown>,
-    rtl: boolean,
-  ): void {
-    const left = doc.page.margins.left;
-    const right = doc.page.width - doc.page.margins.right;
-    const colW = (right - left - 20) / 2;
-    const startY = doc.y;
-
-    const issuedByX = rtl ? right - colW : left;
-    const billedToX = rtl ? left : right - colW;
-
-    // Issued by — company snapshot.
-    doc
-      .fontSize(9)
-      .fillColor('#666')
-      .text(labels.issuedBy.toUpperCase(), issuedByX, startY, {
-        width: colW,
-        align: rtl ? 'right' : 'left',
-      });
-    doc.fontSize(11).fillColor('#0a0a0a');
-    this.lineRtl(
-      doc,
-      String(company.companyName ?? ''),
-      issuedByX,
-      colW,
-      rtl,
-      true,
-    );
-    this.lineRtl(
-      doc,
-      String(company.companyAddress ?? ''),
-      issuedByX,
-      colW,
-      rtl,
-    );
-    const cityCountry = [company.companyCity, company.companyCountry]
-      .filter(Boolean)
-      .join(', ');
-    if (cityCountry) this.lineRtl(doc, cityCountry, issuedByX, colW, rtl);
-    if (company.companyPhone)
-      this.lineRtl(doc, String(company.companyPhone), issuedByX, colW, rtl);
-    if (company.companyEmail)
-      this.lineRtl(doc, String(company.companyEmail), issuedByX, colW, rtl);
-    if (company.taxRegistrationNumber) {
-      this.lineRtl(
-        doc,
-        `${labels.taxNumber}: ${company.taxRegistrationNumber}`,
-        issuedByX,
-        colW,
-        rtl,
-      );
-    }
-    const issuedByBottom = doc.y;
-
-    // Billed to — clinic snapshot.
-    doc.y = startY;
-    doc
-      .fontSize(9)
-      .fillColor('#666')
-      .text(labels.billedTo.toUpperCase(), billedToX, startY, {
-        width: colW,
-        align: rtl ? 'right' : 'left',
-      });
-    doc.fontSize(11).fillColor('#0a0a0a');
-    const doctorName = clinic.doctorFullName ?? '';
-    this.lineRtl(
-      doc,
-      `${labels.doctor}: ${doctorName}`,
-      billedToX,
-      colW,
-      rtl,
-      true,
-    );
-    if (clinic.clinicName) {
-      this.lineRtl(doc, String(clinic.clinicName), billedToX, colW, rtl);
-    }
-    if (clinic.clinicAddress) {
-      this.lineRtl(doc, String(clinic.clinicAddress), billedToX, colW, rtl);
-    }
-    const clinicCity = [clinic.city, clinic.country].filter(Boolean).join(', ');
-    if (clinicCity) this.lineRtl(doc, clinicCity, billedToX, colW, rtl);
-    if (clinic.clinicPhone)
-      this.lineRtl(doc, String(clinic.clinicPhone), billedToX, colW, rtl);
-    if (clinic.clinicEmail)
-      this.lineRtl(doc, String(clinic.clinicEmail), billedToX, colW, rtl);
-
-    doc.y = Math.max(issuedByBottom, doc.y);
-  }
-
-  // ── Line-item table ────────────────────────────────────────────────────
-
-  private renderLineItems(
-    doc: PDFKit.PDFDocument,
-    quote: Quotation,
-    labels: ReturnType<typeof getQuotationLabels>,
-    rtl: boolean,
-  ): void {
-    const left = doc.page.margins.left;
-    const right = doc.page.width - doc.page.margins.right;
-    const tableW = right - left;
-    const amountColW = 120;
-    const descColW = tableW - amountColW;
-
-    const descX = rtl ? left + amountColW : left;
-    const amountX = rtl ? left : left + descColW;
-
-    // Header row.
-    doc.fillColor('#0a0a0a').fontSize(10);
-    doc.rect(left, doc.y, tableW, 24).fillAndStroke('#f4f4f5', '#e4e4e7');
-    doc.fillColor('#111').fontSize(10);
-    const headY = doc.y - 24 + 7;
-    doc.text(labels.description, descX + 8, headY, {
-      width: descColW - 16,
-      align: rtl ? 'right' : 'left',
-    });
-    doc.text(labels.amount, amountX + 8, headY, {
-      width: amountColW - 16,
-      align: rtl ? 'left' : 'right',
-    });
-    doc.fillColor('#0a0a0a');
-
-    const rows: Array<{ label: string; amount: number; muted?: boolean }> = [
-      { label: labels.treatmentFees, amount: quote.treatmentFees },
-      { label: labels.fabricationFees, amount: quote.fabricationFees },
-      { label: labels.deliveryFees, amount: quote.deliveryFees },
-    ];
-    if (quote.discountAmount > 0) {
-      rows.push({
-        label: labels.discount,
-        amount: -quote.discountAmount,
-        muted: true,
-      });
-    }
-
-    for (const row of rows) {
-      const rowY = doc.y + 8;
-      doc.fillColor(row.muted ? '#dc2626' : '#0a0a0a').fontSize(10);
-      doc.text(row.label, descX + 8, rowY, {
-        width: descColW - 16,
-        align: rtl ? 'right' : 'left',
-      });
-      doc.text(
-        this.formatMoney(row.amount, quote.currency, quote.language),
-        amountX + 8,
-        rowY,
-        { width: amountColW - 16, align: rtl ? 'left' : 'right' },
-      );
-      doc.moveDown(0.6);
-      doc
-        .strokeColor('#e4e4e7')
-        .lineWidth(0.5)
-        .moveTo(left, doc.y)
-        .lineTo(right, doc.y)
-        .stroke();
-      doc.strokeColor('#000').lineWidth(1);
-    }
-    doc.fillColor('#0a0a0a');
-  }
-
-  // ── Totals ─────────────────────────────────────────────────────────────
-
-  private renderTotalsBlock(
-    doc: PDFKit.PDFDocument,
-    quote: Quotation,
-    labels: ReturnType<typeof getQuotationLabels>,
-    rtl: boolean,
-  ): void {
-    const left = doc.page.margins.left;
-    const right = doc.page.width - doc.page.margins.right;
-    const blockW = 240;
-    const blockX = rtl ? left : right - blockW;
-
-    const lines: Array<{ label: string; value: string; emphasis?: boolean }> = [
-      {
-        label: labels.subtotalHt,
-        value: this.formatMoney(
-          quote.subTotalHt,
-          quote.currency,
-          quote.language,
-        ),
-      },
-      {
-        label: `${labels.vatRate} (${quote.tvaRate.toFixed(2)} %)`,
-        value: this.formatMoney(
-          quote.tvaAmount,
-          quote.currency,
-          quote.language,
-        ),
-      },
-      {
-        label: labels.totalTtc,
-        value: this.formatMoney(quote.totalTtc, quote.currency, quote.language),
-        emphasis: true,
-      },
-    ];
-
-    doc.moveDown(0.4);
-    for (const ln of lines) {
-      const fontSize = ln.emphasis ? 13 : 11;
-      const color = ln.emphasis ? '#0a0a0a' : '#374151';
-      doc.fillColor(color).fontSize(fontSize);
-      const baseY = doc.y;
-      doc.text(ln.label, blockX, baseY, {
-        width: blockW / 2,
-        align: rtl ? 'right' : 'left',
-      });
-      doc.fillColor(color).fontSize(fontSize);
-      doc.text(ln.value, blockX + blockW / 2, baseY, {
-        width: blockW / 2,
-        align: rtl ? 'left' : 'right',
-      });
-      doc.moveDown(0.4);
-    }
-    doc.fillColor('#0a0a0a').fontSize(10);
-  }
-
-  // ── Notes / message blocks ────────────────────────────────────────────
-
-  private renderTextBlock(
-    doc: PDFKit.PDFDocument,
-    title: string,
-    body: string,
-    rtl: boolean,
-  ): void {
-    const left = doc.page.margins.left;
-    const right = doc.page.width - doc.page.margins.right;
-    const w = right - left;
-    doc
-      .fontSize(9)
-      .fillColor('#666')
-      .text(title.toUpperCase(), left, doc.y, {
-        width: w,
-        align: rtl ? 'right' : 'left',
-      });
-    doc
-      .fontSize(10)
-      .fillColor('#0a0a0a')
-      .text(body, left, doc.y + 2, {
-        width: w,
-        align: rtl ? 'right' : 'left',
-      });
-  }
-
-  // ── Footer (legal + footer text + bank details) ───────────────────────
-
-  private renderFooter(
-    doc: PDFKit.PDFDocument,
-    _quote: Quotation,
-    labels: ReturnType<typeof getQuotationLabels>,
-    company: Record<string, unknown>,
-    rtl: boolean,
-  ): void {
-    const left = doc.page.margins.left;
-    const right = doc.page.width - doc.page.margins.right;
-    const w = right - left;
-    doc.fontSize(9).fillColor('#666');
-
-    const legal = String(company.legalText ?? '').trim();
-    if (legal) {
-      doc.text(legal, left, doc.y, {
-        width: w,
-        align: rtl ? 'right' : 'left',
-      });
-      doc.moveDown(0.5);
-    }
-
-    const footer = String(company.footerText ?? '').trim();
-    if (footer) {
-      doc.text(footer, left, doc.y, {
-        width: w,
-        align: rtl ? 'right' : 'left',
-      });
-      doc.moveDown(0.5);
-    }
-
-    const bank = company.bankDetails as Record<string, string> | null;
-    if (bank && Object.values(bank).some(Boolean)) {
-      doc.moveDown(0.5);
-      doc
-        .fontSize(9)
-        .fillColor('#666')
-        .text(labels.bankDetails.toUpperCase(), left, doc.y, {
-          width: w,
-          align: rtl ? 'right' : 'left',
-        });
-      doc.fontSize(10).fillColor('#0a0a0a');
-      const pairs: Array<[string, string | undefined]> = [
-        [labels.bankName, bank.bankName],
-        [labels.accountName, bank.accountName],
-        [labels.rib, bank.rib],
-        [labels.iban, bank.iban],
-        [labels.swift, bank.swift],
-      ];
-      for (const [label, value] of pairs) {
-        if (!value) continue;
-        doc.text(`${label}: ${value}`, left, doc.y, {
-          width: w,
-          align: rtl ? 'right' : 'left',
-        });
-      }
-    }
-  }
-
-  // ── Helpers ────────────────────────────────────────────────────────────
-
-  private lineRtl(
-    doc: PDFKit.PDFDocument,
-    text: string,
-    x: number,
-    width: number,
-    rtl: boolean,
-    bold = false,
-  ): void {
-    if (!text) return;
-    const prev = doc.fontSize;
-    doc.font(
-      bold
-        ? 'Helvetica-Bold'
-        : doc.font('Helvetica')
-          ? 'Helvetica'
-          : 'Helvetica',
-    );
-    // Note: bold in Arabic falls back to non-bold gracefully if Amiri
-    // doesn't expose a bold variant — that's fine for v1.
-    doc.text(text, x, doc.y, {
-      width,
-      align: rtl ? 'right' : 'left',
-    });
-    void prev;
+    return fallback;
   }
 
   private formatMoney(
-    amount: number,
+    amount: unknown,
     currency: string,
-    _language: DevisLanguage,
+    language: DevisLanguage,
   ): string {
-    const abs = Math.abs(amount);
-    const formatted = abs.toLocaleString('fr-FR', {
+    const numericAmount = this.toNumber(amount);
+    const abs = Math.abs(numericAmount);
+    const locale = language === DevisLanguage.ar ? 'ar-TN' : 'fr-FR';
+    const formatted = abs.toLocaleString(locale, {
       minimumFractionDigits: 3,
       maximumFractionDigits: 3,
     });
-    const withSign = amount < 0 ? `-${formatted}` : formatted;
+    const withSign = numericAmount < 0 ? `-${formatted}` : formatted;
     return `${withSign} ${currency}`;
   }
 
@@ -643,11 +780,11 @@ export class QuotationPdfService {
         : language === DevisLanguage.ar
           ? 'ar-TN'
           : 'en-GB';
-    return date.toLocaleDateString(locale, {
+    return new Intl.DateTimeFormat(locale, {
       year: 'numeric',
-      month: '2-digit',
+      month: 'short',
       day: '2-digit',
-    });
+    }).format(date);
   }
 
   private statusLabel(
@@ -669,8 +806,100 @@ export class QuotationPdfService {
         return labels.statusPending;
     }
   }
-}
 
-// Keep a non-`unused` reference to the QuotationService import so the
-// dependency graph stays unambiguous to readers.
-void QuotationService;
+  private titleLabel(title: string, rtl: boolean): string {
+    return rtl ? title : title.toUpperCase();
+  }
+
+  private packLabel(language: DevisLanguage): string {
+    switch (language) {
+      case DevisLanguage.ar:
+        return 'الباقة';
+      case DevisLanguage.en:
+        return 'Pack';
+      default:
+        return 'Pack';
+    }
+  }
+
+  private archSuffix(archType: ArchType | null, language: DevisLanguage): string {
+    if (!archType) return '';
+    const label =
+      archType === ArchType.two_arches
+        ? language === DevisLanguage.ar
+          ? 'القوسان'
+          : language === DevisLanguage.en
+            ? 'Two arches'
+            : 'Deux arcades'
+        : language === DevisLanguage.ar
+          ? 'قوس واحد'
+          : language === DevisLanguage.en
+            ? 'Single arch'
+            : 'Une arcade';
+    return ` (${label})`;
+  }
+
+  private packMeta(quote: Quotation): string {
+    const language = quote.language;
+    const parts: string[] = [];
+    const maxSteps = (quote as { maxStepsPerArch?: number | null }).maxStepsPerArch;
+    const corrections = (quote as { includedCorrections?: number | null })
+      .includedCorrections;
+    const isUnlimitedSteps = (quote as { isUnlimitedSteps?: boolean | null })
+      .isUnlimitedSteps;
+    const isUnlimitedCorrections = (
+      quote as { isUnlimitedCorrections?: boolean | null }
+    ).isUnlimitedCorrections;
+
+    if (isUnlimitedSteps) {
+      parts.push(
+        language === DevisLanguage.ar
+          ? 'خطوات غير محدودة'
+          : language === DevisLanguage.en
+            ? 'Unlimited steps'
+            : 'Étapes illimitées',
+      );
+    } else if (maxSteps) {
+      parts.push(
+        language === DevisLanguage.ar
+          ? `${maxSteps} خطوة لكل قوس`
+          : language === DevisLanguage.en
+            ? `${maxSteps} steps per arch`
+            : `${maxSteps} étapes par arcade`,
+      );
+    }
+
+    if (isUnlimitedCorrections) {
+      parts.push(
+        language === DevisLanguage.ar
+          ? 'تصحيحات غير محدودة'
+          : language === DevisLanguage.en
+            ? 'Unlimited corrections'
+            : 'Corrections illimitées',
+      );
+    } else if (corrections) {
+      parts.push(
+        language === DevisLanguage.ar
+          ? `${corrections} تصحيح مضمّن`
+          : language === DevisLanguage.en
+            ? `${corrections} included correction${corrections > 1 ? 's' : ''}`
+            : `${corrections} correction${corrections > 1 ? 's' : ''} incluse${corrections > 1 ? 's' : ''}`,
+      );
+    }
+
+    return parts.join(' · ');
+  }
+
+  private html(value: unknown): string {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  private htmlAttr(value: unknown): string {
+    return this.html(value).replace(/`/g, '&#96;');
+  }
+}

@@ -1,5 +1,7 @@
 import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { NotificationEvents } from '../../notifications/events/notification-events';
 import type { Cache } from 'cache-manager';
 import { randomBytes } from 'crypto';
 import * as fs from 'fs';
@@ -65,6 +67,7 @@ export class TreatmentPlanService {
     @Inject(forwardRef(() => TreatmentChatGateway))
     private readonly chatGateway: TreatmentChatGateway,
     private readonly notifications: OrderNotificationService,
+    private readonly events: EventEmitter2,
   ) {}
 
   /** Fire-and-forget broadcast helper. Sockets are advisory. */
@@ -318,6 +321,14 @@ export class TreatmentPlanService {
       this.safeBroadcastPlanChanged(plan.orderId, 'ready', id);
       // Email the doctor: their plan is ready for review.
       void this.notifications.notifyTreatmentReady(id);
+      // Bell ping for the doctor. Fetch the doctor + order once for
+      // the event payload — adminByline / metadata on the doctor side
+      // also lean on it.
+      void this.emitPlanEvent(NotificationEvents.TreatmentPlanReady, {
+        treatmentPlanId: id,
+        orderId: plan.orderId,
+        planName: plan.name,
+      });
       return updated;
     }
 
@@ -393,6 +404,12 @@ export class TreatmentPlanService {
       this.safeBroadcastPlanChanged(plan.orderId, 'ready', created.id);
       // Email the doctor: replacement plan is ready for review.
       void this.notifications.notifyTreatmentReady(created.id);
+      // Doctor bell ping — same flow as the first-send branch above.
+      void this.emitPlanEvent(NotificationEvents.TreatmentPlanReady, {
+        treatmentPlanId: created.id,
+        orderId: plan.orderId,
+        planName: created.name,
+      });
       return created;
     }
 
@@ -484,6 +501,13 @@ export class TreatmentPlanService {
     this.safeBroadcastPlanChanged(plan.orderId, 'approved', id);
     // Email all admins: doctor approved the plan.
     void this.notifications.notifyTreatmentDecision(id, 'approved');
+    // Bell ping → admin team. Payload carries doctor name + order code
+    // so the message body reads as a self-contained sentence.
+    void this.emitPlanEvent(NotificationEvents.TreatmentPlanApproved, {
+      treatmentPlanId: id,
+      orderId: plan.orderId,
+      decision: 'approved' as const,
+    });
     return approved;
   }
 
@@ -550,7 +574,74 @@ export class TreatmentPlanService {
     this.safeBroadcastPlanChanged(plan.orderId, 'rejected', id);
     // Email all admins: doctor requested a revision.
     void this.notifications.notifyTreatmentDecision(id, 'rejected');
+    // Same admin bell-ping path as approval, just with `decision`.
+    void this.emitPlanEvent(NotificationEvents.TreatmentPlanRejected, {
+      treatmentPlanId: id,
+      orderId: plan.orderId,
+      decision: 'rejected' as const,
+    });
     return rejected;
+  }
+
+  /**
+   * Helper — turns a planId/orderId pair into a full Notification
+   * event payload by joining the doctor + plan name out of the DB.
+   * Fire-and-forget: a missing doctor / deleted plan must not unwind
+   * the business write that already committed. The wrapping `void`
+   * at the call sites makes this explicit at the boundary.
+   */
+  private async emitPlanEvent<
+    Event extends
+      | typeof NotificationEvents.TreatmentPlanReady
+      | typeof NotificationEvents.TreatmentPlanUpdated
+      | typeof NotificationEvents.TreatmentPlanApproved
+      | typeof NotificationEvents.TreatmentPlanRejected,
+  >(
+    eventName: Event,
+    base: {
+      treatmentPlanId: string;
+      orderId: string;
+      planName?: string | null;
+      decision?: 'approved' | 'rejected';
+    },
+  ): Promise<void> {
+    try {
+      const enriched = await this.prisma.dentalOrder.findUnique({
+        where: { id: base.orderId },
+        select: {
+          orderCode: true,
+          doctorId: true,
+          doctor: { select: { fullName: true } },
+          // Patient name flows into every TreatmentPlan event so the
+          // doctor/admin bells can read as "Treatment plan for
+          // patient X (ORD-…)" — see notifications.listener.ts.
+          patient: { select: { fullName: true } },
+          treatmentPlans: {
+            where: { id: base.treatmentPlanId },
+            select: { name: true },
+            take: 1,
+          },
+        },
+      });
+      if (!enriched) return;
+      this.events.emit(eventName, {
+        treatmentPlanId: base.treatmentPlanId,
+        orderId: base.orderId,
+        orderCode: enriched.orderCode,
+        doctorId: enriched.doctorId,
+        doctorName: enriched.doctor?.fullName ?? null,
+        patientName: enriched.patient?.fullName ?? null,
+        planName:
+          base.planName ?? enriched.treatmentPlans[0]?.name ?? null,
+        ...(base.decision ? { decision: base.decision } : {}),
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Failed to emit ${eventName} for plan ${base.treatmentPlanId}: ${
+          (err as Error).message
+        }`,
+      );
+    }
   }
 
   // ─── Movement table image ─────────────────────────────────────────────────

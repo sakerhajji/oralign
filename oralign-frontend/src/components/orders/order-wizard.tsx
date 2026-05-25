@@ -602,6 +602,7 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
                 form={form}
                 disabled={!canModify}
                 updateField={updateField}
+                toothInstructions={toothInstructions}
               />
             </div>
           </div>
@@ -1265,10 +1266,18 @@ function AdvancedMovementStep({
   form,
   disabled,
   updateField,
+  toothInstructions,
 }: {
   form: CreateOrderDto;
   disabled?: boolean;
   updateField: <K extends keyof CreateOrderDto>(key: K, value: CreateOrderDto[K]) => void;
+  /**
+   * Pass-through of the tooth-level marks chosen in the odontogram
+   * above. We mirror the EXTRACT picks into the Extractions card so
+   * the doctor sees the source of truth (clicked teeth) next to the
+   * free-text field that gets persisted in `form.extractions`.
+   */
+  toothInstructions: ToothInstruction[];
 }) {
   // Decode the current saved strings into structured UI state. Each
   // segment is just `'No' | 'Anterior' | 'Posterior' | 'Both'` now —
@@ -1276,8 +1285,23 @@ function AdvancedMovementStep({
   // request and `unpackSegment` silently drops it from old data.
   const iprSegment = unpackSegment(form.ipr);
   const expansionSegment = unpackSegment(form.expansion);
-  const spaces = form.spaces?.trim() ?? '';
+  // Don't trim here — that strips trailing spaces while the doctor is
+  // still typing notes, which made it feel like the spacebar didn't
+  // work in the Spaces card. We only need leading whitespace ignored
+  // so the option-pill activity check matches; `trimStart` is enough.
+  const spaces = form.spaces?.trimStart() ?? '';
   const elastics = unpackElastics(form.elastics);
+
+  // Teeth the doctor flagged for extraction in the odontogram above.
+  // FDI numbering, sorted ascending for a stable display.
+  const extractTeeth = useMemo(
+    () =>
+      toothInstructions
+        .filter((t) => t.type === ToothInstructionType.EXTRACT)
+        .map((t) => t.toothNumber)
+        .sort((a, b) => a - b),
+    [toothInstructions],
+  );
 
   const setIpr = (segment: Segment) => {
     updateField('ipr', packSegment(segment));
@@ -1540,24 +1564,61 @@ function AdvancedMovementStep({
           placeholder="e.g. Close upper midline diastema; maintain space at #15 for future implant"
           disabled={disabled}
           onChange={(detail) => {
+            // Preserve the doctor's whitespace as-is while they type —
+            // trimming in onChange used to swallow trailing spaces and
+            // made the spacebar feel broken. We still strip the prefix
+            // back on read via the regex above, so the saved value
+            // stays clean.
             const base = spacesOptions.find((o) => spaces.startsWith(o)) ?? '';
-            const trimmed = detail.trim();
             updateField(
               'spaces',
-              trimmed ? `${base ? `${base} — ` : ''}${trimmed}` : base,
+              detail ? `${base ? `${base} — ` : ''}${detail}` : base,
             );
           }}
         />
       </fieldset>
 
-      <TextInput
-        label="Extractions"
-        value={form.extractions ?? ''}
-        placeholder="e.g. UR4 and UL4 (FDI 14, 24); confirmed with patient"
-        icon={<Info className="h-4 w-4" />}
-        disabled={disabled}
-        onChange={(value) => updateField('extractions', value)}
-      />
+      {/* ─── Extractions — odontogram picks + free-text notes ──────── */}
+      <fieldset className="space-y-3 rounded-lg border bg-card p-4">
+        <legend className="px-1 text-sm font-semibold">Extractions</legend>
+        <p className="text-xs text-muted-foreground">
+          Teeth flagged with the orange <strong>Extract</strong> chip in
+          the odontogram above appear here automatically. Use the notes
+          field for confirmation status, sequencing, or extra context.
+        </p>
+
+        <div className="rounded-md border bg-muted/30 p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Selected tooth-level instructions (FDI)
+          </p>
+          {extractTeeth.length === 0 ? (
+            <p className="mt-2 text-xs italic text-muted-foreground">
+              No teeth marked for extraction yet. Click a tooth in the
+              odontogram above and pick <em>Extract</em> to add it here.
+            </p>
+          ) : (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {extractTeeth.map((n) => (
+                <span
+                  key={n}
+                  className="inline-flex items-center gap-1 rounded-full bg-orange-100 px-2.5 py-1 text-xs font-medium text-orange-800 ring-1 ring-orange-200"
+                >
+                  #{n}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <TextInput
+          label="Notes (optional)"
+          value={form.extractions ?? ''}
+          placeholder="e.g. Confirmed with patient; extract before treatment start"
+          icon={<Info className="h-4 w-4" />}
+          disabled={disabled}
+          onChange={(value) => updateField('extractions', value)}
+        />
+      </fieldset>
     </div>
   );
 }

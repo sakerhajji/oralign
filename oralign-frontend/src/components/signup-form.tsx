@@ -1,8 +1,10 @@
 'use client';
 
+import { useState } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import Link from 'next/link';
+import { Eye, EyeOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
@@ -16,6 +18,7 @@ export function SignupForm({
   ...props
 }: React.ComponentProps<'form'>) {
   const { mutate: signUp, isPending } = useSignUp();
+  const [showPassword, setShowPassword] = useState(false);
 
   const {
     register,
@@ -33,12 +36,9 @@ export function SignupForm({
   });
 
   const onSubmit = (data: SignUpFormData) => {
-    const trimmedPhone = data.phone?.trim();
-    signUp({
-      ...data,
-      phone: trimmedPhone || undefined,
-      country: trimmedPhone ? data.country?.trim() : undefined,
-    });
+    // fullName is already normalised by Zod (Title Case + "Dr." prefix).
+    // phone + country are required, so no need to strip them.
+    signUp(data);
   };
 
   const countryValue = watch('country');
@@ -71,6 +71,9 @@ export function SignupForm({
             {...register('fullName')}
             className="bg-background"
           />
+          <FieldDescription>
+            &ldquo;Dr.&rdquo; will be added automatically if not included.
+          </FieldDescription>
           {errors.fullName && (
             <p className="text-sm text-destructive">{errors.fullName.message}</p>
           )}
@@ -94,21 +97,36 @@ export function SignupForm({
         {/* Password */}
         <Field>
           <FieldLabel htmlFor="password">Password</FieldLabel>
-          <Input
-            id="password"
-            type="password"
-            {...register('password')}
-            className="bg-background"
-          />
+          <div className="relative">
+            <Input
+              id="password"
+              type={showPassword ? 'text' : 'password'}
+              {...register('password')}
+              className="bg-background pr-10"
+            />
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+              onClick={() => setShowPassword((v) => !v)}
+              className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground focus:outline-none"
+            >
+              {showPassword ? (
+                <EyeOff className="h-4 w-4" />
+              ) : (
+                <Eye className="h-4 w-4" />
+              )}
+            </button>
+          </div>
           <FieldDescription>Must be at least 8 characters.</FieldDescription>
           {errors.password && (
             <p className="text-sm text-destructive">{errors.password.message}</p>
           )}
         </Field>
 
-        {/* Phone (optional) */}
+        {/* Phone (required) */}
         <Field>
-          <FieldLabel htmlFor="phone">Phone (Optional)</FieldLabel>
+          <FieldLabel htmlFor="phone">Phone</FieldLabel>
           <Controller
             name="phone"
             control={control}

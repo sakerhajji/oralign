@@ -1,20 +1,20 @@
-# Bundled fonts for the Quotation PDF
+# Bundled fonts for quotation PDFs
 
 The Quotation PDF service (`src/quotations/services/quotation-pdf.service.ts`)
-embeds the fonts in this folder. Files are loaded lazily at runtime
-and never committed binaries — the operator deploys whichever they
-are licensed to ship.
+renders an HTML template with Chromium and embeds optional fonts from
+this folder. Files are loaded lazily at runtime and never committed
+binaries — the operator deploys whichever they are licensed to ship.
 
 | File                  | Used for | Required? |
 |-----------------------|----------|-----------|
 | `Amiri-Regular.ttf`   | Arabic (`language=ar`) | Optional but strongly recommended |
 
-## Why Arabic needs its own font
+## Arabic rendering
 
-`pdfkit`'s built-in fonts (Helvetica, Times, Courier) don't include
-Arabic glyphs. With no Arabic-capable TTF in this folder, an Arabic
-Quote PDF will still generate but Arabic strings will render as
-missing-glyph rectangles.
+Chromium handles RTL direction and Arabic glyph shaping. The Docker
+runtime also installs system fonts, so Arabic PDFs still generate when
+this optional file is absent. Adding Amiri keeps the document style more
+consistent and readable.
 
 ## How to enable Arabic rendering
 
@@ -24,17 +24,8 @@ missing-glyph rectangles.
 3. Restart the backend container — the file is read on first PDF
    generation and cached for the process lifetime.
 
-## Arabic shaping limitation
+You can also point the backend to another mounted font path with:
 
-`pdfkit` does not perform RTL bidirectional reordering or Arabic glyph
-shaping (contextual letter joining). Even with the Amiri font, Arabic
-text in the PDF will render letter-by-letter (isolated forms) rather
-than as proper cursive script.
-
-The PDF service does its best: right-aligns Arabic blocks, picks the
-Amiri font when available, and reverses string direction at the line
-level for headings.
-
-If you need fully shaped Arabic output, swap the PDF backend to
-**puppeteer** (HTML → PDF, full browser-grade shaping). That's a
-separate, larger PR — track it as a follow-up.
+```bash
+ORALIGN_ARABIC_FONT_PATH=/app/secrets/fonts/Amiri-Regular.ttf
+```

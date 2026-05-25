@@ -37,16 +37,64 @@ export const optionalCountrySchema = z.preprocess(
     .optional(),
 );
 
+/** Required phone: strips whitespace but does NOT coerce empty → undefined. */
+export const requiredE164PhoneSchema = z.preprocess(
+  (val) => (typeof val === 'string' ? val.trim() : val),
+  z
+    .string()
+    .min(1, 'Phone number is required')
+    .regex(E164_PHONE_REGEX, 'Phone must be in international format (e.g. +21612345678)'),
+);
+
+/** Required ISO-2 country code (companion to requiredE164PhoneSchema). */
+export const requiredCountrySchema = z.preprocess(
+  (val) => {
+    if (typeof val !== 'string') return val;
+    return val.trim().toUpperCase();
+  },
+  z
+    .string()
+    .min(1, 'Country is required')
+    .regex(ISO_COUNTRY_REGEX, 'Country must be a 2-letter ISO code (e.g. TN)'),
+);
+
+/**
+ * Normalises a dentist's full name:
+ *   1. Trims surrounding whitespace.
+ *   2. Strips any existing "Dr" / "Dr." prefix (any casing).
+ *   3. Title-Cases every remaining word.
+ *   4. Always prepends the canonical "Dr. " prefix.
+ *
+ * Examples:
+ *   "saker hajji"        → "Dr. Saker Hajji"
+ *   "dr. saker hajji"    → "Dr. Saker Hajji"
+ *   "DR SAKER HAJJI"     → "Dr. Saker Hajji"
+ *   "Dr. Saker Hajji"    → "Dr. Saker Hajji"
+ */
+function normalizeDoctorName(value: string): string {
+  const words = value.trim().split(/\s+/);
+  // Drop any leading "dr" or "dr." token (case-insensitive)
+  const nameWords =
+    words.length > 0 && /^dr\.?$/i.test(words[0]) ? words.slice(1) : words;
+  const titleCased = nameWords
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+  return `Dr. ${titleCased}`;
+}
+
 // ==========================================
 // AUTH SCHEMAS
 // ==========================================
 
 export const signUpSchema = z.object({
   email: z.string().email('Invalid email address').toLowerCase().trim(),
-  fullName: z.string().min(2, 'Full name must be at least 2 characters'),
+  fullName: z
+    .string()
+    .min(2, 'Full name must be at least 2 characters')
+    .transform((val) => normalizeDoctorName(val)),
   password: z.string().min(8, 'Password must be at least 8 characters'),
-  phone: optionalE164PhoneSchema,
-  country: optionalCountrySchema,
+  phone: requiredE164PhoneSchema,
+  country: requiredCountrySchema,
 });
 
 export const signInSchema = z.object({

@@ -1,25 +1,40 @@
 import { Module } from '@nestjs/common';
+import { PackModule } from '../packs/pack.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { StorageModule } from '../storage/storage.module';
 import { CompanyBillingSettingsController } from './controllers/company-billing-settings.controller';
 import { QuotationController } from './controllers/quotation.controller';
+import { QuotationPaymentPlanController } from './controllers/quotation-payment-plan.controller';
 import { CompanyBillingSettingsService } from './services/company-billing-settings.service';
 import { QuotationService } from './services/quotation.service';
+import { QuotationPaymentPlanService } from './services/quotation-payment-plan.service';
 import { QuotationPdfService } from './services/quotation-pdf.service';
 
 /**
  * Quotation / Devis module — admin company-billing-settings + per-order
- * quote lifecycle + PDF rendering. Imports PrismaModule (DB) and
- * StorageModule (logo upload).
+ * quote lifecycle + PDF rendering. Imports PrismaModule (DB),
+ * StorageModule (logo upload), and PackModule so the pack-aware
+ * payment-plan service can resolve active prices.
+ *
+ * QuotationPaymentPlanService lives next to QuotationService rather
+ * than in a separate module so the two services can collaborate
+ * cheaply (e.g. approve() delegates pack quotes to it). Exporting
+ * both keeps consumers from having to know which file owns the
+ * behaviour they need.
  */
 @Module({
-  imports: [PrismaModule, StorageModule],
-  controllers: [CompanyBillingSettingsController, QuotationController],
+  imports: [PrismaModule, StorageModule, PackModule],
+  controllers: [
+    CompanyBillingSettingsController,
+    QuotationController,
+    QuotationPaymentPlanController,
+  ],
   providers: [
     CompanyBillingSettingsService,
     QuotationService,
+    QuotationPaymentPlanService,
     QuotationPdfService,
   ],
-  exports: [QuotationService, QuotationPdfService],
+  exports: [QuotationService, QuotationPaymentPlanService, QuotationPdfService],
 })
 export class QuotationModule {}

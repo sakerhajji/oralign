@@ -109,6 +109,44 @@ apiClient.interceptors.request.use(
   }
 );
 
+/**
+ * URLs the refresh-on-401 dance must NEVER touch.
+ *
+ * These endpoints either issue tokens themselves or are part of the
+ * password-recovery flow — running them through the refresh path is
+ * both wrong and dangerous:
+ *
+ *   • `/auth/sign-in` returns 401 for wrong-password / locked-account.
+ *     The previous behaviour was: 401 → enter refresh flow → set the
+ *     module-level `isRefreshing = true` → early-return when there's
+ *     no refresh token but FORGET to reset `isRefreshing`. The next
+ *     login attempt then queued forever on the never-drained
+ *     `failedQueue`, leaving the button stuck on "Logging in…" until
+ *     a page reload re-initialised the module. That's the 2-strike
+ *     login-hang the user reported.
+ *
+ *   • `/auth/refresh-token` returning 401 should NOT recurse into
+ *     itself — we always call it via the plain `axios` instance
+ *     anyway, but this guards `apiClient` users that route through it.
+ *
+ *   • Sign-up, forgot-password, reset-password are pre-auth and
+ *     wouldn't make sense to retry with a refreshed token.
+ */
+const PRE_AUTH_PATHS = [
+  '/auth/sign-in',
+  '/auth/sign-up',
+  '/auth/refresh-token',
+  '/auth/forgot-password',
+  '/auth/reset-password',
+  '/auth/verify-email',
+  '/auth/resend-verification',
+];
+
+function isPreAuthRequest(config: InternalAxiosRequestConfig | undefined): boolean {
+  if (!config?.url) return false;
+  return PRE_AUTH_PATHS.some((p) => config.url!.includes(p));
+}
+
 // Response interceptor - Handle token refresh
 apiClient.interceptors.response.use(
   (response) => {
@@ -118,6 +156,14 @@ apiClient.interceptors.response.use(
     const originalRequest = error.config as InternalAxiosRequestConfig & {
       _retry?: boolean;
     };
+
+    // Hard skip for pre-auth endpoints. A 401 from /auth/sign-in is
+    // "wrong password", not "your token expired" — refreshing makes
+    // no sense and used to leak `isRefreshing = true`, which deadlocked
+    // every subsequent request on the failedQueue.
+    if (isPreAuthRequest(originalRequest)) {
+      return Promise.reject(error);
+    }
 
     // If error is 401 and we haven't retried yet
     if (error.response?.status === 401 && !originalRequest._retry) {
@@ -140,22 +186,27 @@ apiClient.interceptors.response.use(
       originalRequest._retry = true;
       isRefreshing = true;
 
-      const refreshToken = getRefreshToken();
-
-      if (!refreshToken) {
-        // No refresh token. Only redirect to /login when the user is
-        // actually inside the authenticated dashboard area — otherwise
-        // visiting a public page (e.g. /created_for_you/<token> as a
-        // patient with stale localStorage tokens) would bounce them
-        // out of a page they were entitled to see.
-        clearTokens();
-        if (typeof window !== 'undefined' && isOnAuthedPath()) {
-          window.location.href = '/login';
-        }
-        return Promise.reject(error);
-      }
-
+      // Single `finally` cleanup so every exit path resets the lock.
+      // Previously the `if (!refreshToken)` early-return skipped the
+      // try/finally entirely and left `isRefreshing = true` forever —
+      // the next 401 then queued indefinitely on `failedQueue`.
       try {
+        const refreshToken = getRefreshToken();
+
+        if (!refreshToken) {
+          // No refresh token. Only redirect to /login when the user is
+          // actually inside the authenticated dashboard area — otherwise
+          // visiting a public page (e.g. /created_for_you/<token> as a
+          // patient with stale localStorage tokens) would bounce them
+          // out of a page they were entitled to see.
+          processQueue(error as Error, null);
+          clearTokens();
+          if (typeof window !== 'undefined' && isOnAuthedPath()) {
+            window.location.href = '/login';
+          }
+          return Promise.reject(error);
+        }
+
         // Call refresh token endpoint
         const response = await axios.post(`${API_URL}/auth/refresh-token`, {
           refreshToken,

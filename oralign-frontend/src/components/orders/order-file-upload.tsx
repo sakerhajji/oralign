@@ -2041,6 +2041,22 @@ function ZipUploadAction({
                       )}
                     </p>
                   </div>
+                  {/* Download — always visible (both modes). Uses the
+                      shared `downloadOrderFile` helper which fetches
+                      the file with the JWT then streams it to a
+                      hidden <a download> click, so the browser saves
+                      under the original filename without ever exposing
+                      a token in the URL bar. */}
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="h-9 w-9 shrink-0 text-muted-foreground hover:bg-primary/10 hover:text-primary"
+                    aria-label={`Download ${file.originalName}`}
+                    onClick={() => downloadOrderFile(orderId, file)}
+                  >
+                    <Download className="h-4 w-4" />
+                  </Button>
                   {!readOnly && (
                     <Button
                       type="button"

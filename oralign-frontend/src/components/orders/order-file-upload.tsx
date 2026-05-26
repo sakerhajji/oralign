@@ -1575,7 +1575,7 @@ function StlModelViewer({
         // Dark grey model material — Tailwind slate-600 (#475569). Reads
         // as clearly dental but contrasts strongly against the white card.
         material = new THREE.MeshStandardMaterial({
-          color: 0x475569,
+          color: 0x596b80,
           metalness: 0.08,
           roughness: 0.48,
           side: THREE.DoubleSide,

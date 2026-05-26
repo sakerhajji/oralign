@@ -60,20 +60,20 @@ export const metadata: Metadata = {
     siteName: APP_NAME,
     title: `${APP_NAME} — Clear aligner care`,
     description: APP_DESCRIPTION,
-    images: [
-      {
-        url: "/iconLogo.svg",
-        width: 213,
-        height: 192,
-        alt: `${APP_NAME} brand mark`,
-      },
-    ],
+    // `images` is intentionally omitted — Next.js auto-discovers
+    // `src/app/opengraph-image.tsx` (a 1200×630 branded PNG) and
+    // injects it here. Hard-coding `/iconLogo.svg` would override
+    // with a 213×192 icon that Google can't crop into a search card
+    // (it shows up as a small square that browsers and crawlers
+    // largely ignore — that's how the stale "Nova Studio" template
+    // card lingered on as the visible result).
   },
   twitter: {
-    card: "summary",
+    // `summary_large_image` picks up the 1200×630 OG card too, so the
+    // Twitter / X share preview matches Google.
+    card: "summary_large_image",
     title: `${APP_NAME} — Clear aligner care`,
     description: APP_DESCRIPTION,
-    images: ["/iconLogo.svg"],
   },
   robots: {
     index: true,

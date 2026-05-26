@@ -4,11 +4,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   Box,
+  CheckCircle2,
   ClipboardPaste,
   Copy,
   Download,
   Eye,
   FileArchive,
+  FileImage,
   FileText,
   FileUp,
   ImageIcon,
@@ -40,6 +42,17 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { formatDistanceToNow } from 'date-fns';
 import {
   useDeleteOrderFile,
   useOrderFiles,
@@ -487,6 +500,8 @@ export function ClinicalOrderFiles({
             title="Upload bundle (.zip) or CBCT (.dcm)"
             description="Ship a single ZIP archive (e.g. a CBCT DICOM volume, or a multi-file STL export). We audit it client-side for executables and unsafe filenames before saving. Single .dcm DICOM files are also accepted."
             category={OrderFileCategory.ZIP}
+            files={files}
+            onDelete={(fileId) => deleteFile.mutate({ id: orderId, fileId })}
           />
         )}
         {/* Legacy "Other scan files" list removed for the same reason —
@@ -1762,11 +1777,21 @@ function ZipUploadAction({
   title,
   description,
   category,
+  files,
+  onDelete,
 }: {
   orderId: string;
   title: string;
   description: string;
   category: OrderFileCategory;
+  /**
+   * Full file list for the order — we filter to ZIP-category items
+   * plus single-file .dcm uploads so the bundle area renders BOTH
+   * shapes the upload flow can produce.
+   */
+  files: OrderFile[];
+  /** Soft-delete a single file by id. Called from the confirm dialog. */
+  onDelete: (fileId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const uploadFiles = useUploadOrderFiles();
@@ -1774,6 +1799,26 @@ function ZipUploadAction({
     () => `dicom-upload-${orderId}-${category}`,
     [orderId, category],
   );
+
+  // Pick the bundles that belong to THIS slot: anything in the ZIP
+  // category PLUS standalone .dcm uploads (which land in IMAGE
+  // category to keep them out of the photo-slot routing).
+  const bundleFiles = useMemo(
+    () =>
+      files
+        .filter((f) => {
+          if (f.category === OrderFileCategory.ZIP) return true;
+          const ext = f.originalName?.split('.').pop()?.toLowerCase();
+          return ext === 'dcm';
+        })
+        .sort(
+          (a, b) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        ),
+    [files],
+  );
+
+  const [pendingDelete, setPendingDelete] = useState<OrderFile | null>(null);
 
   // ── Live progress state ────────────────────────────────────────
   // CBCT / DICOM archives sit between 200 MB and 1 GB; the previous
@@ -1895,6 +1940,88 @@ function ZipUploadAction({
         </div>
       )}
 
+      {/* ── Uploaded bundles list ────────────────────────────────────
+          Without this strip the user has no idea their 200 MB CBCT
+          actually landed — they see the progress bar finish and the
+          slot reverts to its empty state. This list is the authoritative
+          "yes, it's saved" feedback, with metadata + a destructive
+          confirm before any file is removed. */}
+      {bundleFiles.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+            {bundleFiles.length} bundle file
+            {bundleFiles.length === 1 ? '' : 's'} uploaded
+          </div>
+          <ul className="divide-y rounded-xl border bg-card">
+            {bundleFiles.map((file) => {
+              const ext = (file.originalName?.split('.').pop() ?? '').toLowerCase();
+              const isDicom = ext === 'dcm';
+              const isZip = ext === 'zip' || file.category === OrderFileCategory.ZIP;
+              const Icon = isDicom ? FileImage : isZip ? FileArchive : FileText;
+              const iconTint = isDicom
+                ? 'bg-violet-100 text-violet-700'
+                : 'bg-primary/10 text-primary';
+              return (
+                <li
+                  key={file.id}
+                  className="flex items-center gap-3 px-3 py-2.5 sm:px-4"
+                >
+                  <span
+                    className={cn(
+                      'grid h-10 w-10 shrink-0 place-items-center rounded-lg',
+                      iconTint,
+                    )}
+                  >
+                    <Icon className="h-5 w-5" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p
+                      className="truncate text-sm font-medium"
+                      title={file.originalName}
+                    >
+                      {file.originalName}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      <span className="tabular-nums">
+                        {formatBytes(file.size)}
+                      </span>
+                      <span className="mx-1.5 opacity-60">·</span>
+                      <span
+                        title={new Date(file.createdAt).toLocaleString()}
+                      >
+                        {formatDistanceToNow(new Date(file.createdAt), {
+                          addSuffix: true,
+                        })}
+                      </span>
+                      {(isDicom || isZip) && (
+                        <>
+                          <span className="mx-1.5 opacity-60">·</span>
+                          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
+                            {isDicom ? 'DICOM' : 'ZIP bundle'}
+                          </span>
+                        </>
+                      )}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="h-9 w-9 shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    aria-label={`Delete ${file.originalName}`}
+                    disabled={uploadFiles.isPending}
+                    onClick={() => setPendingDelete(file)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
       <ZipUploadDialog
         open={open}
         title={title}
@@ -1904,6 +2031,37 @@ function ZipUploadAction({
           startUpload(file, category);
         }}
       />
+
+      {/* Destructive confirm — CBCT volumes are typically the
+          single biggest asset on an order, so an inline single-tap
+          delete would be a foot-gun. */}
+      <AlertDialog
+        open={!!pendingDelete}
+        onOpenChange={(o) => !o && setPendingDelete(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this bundle?</AlertDialogTitle>
+            <AlertDialogDescription>
+              <span className="font-medium">{pendingDelete?.originalName}</span>{' '}
+              will be removed from this order. The file is soft-deleted on
+              the server and can be restored by an admin if needed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => {
+                if (pendingDelete) onDelete(pendingDelete.id);
+                setPendingDelete(null);
+              }}
+            >
+              Delete file
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

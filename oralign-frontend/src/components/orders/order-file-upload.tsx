@@ -25,6 +25,7 @@ import {
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Progress } from '@/components/ui/progress';
 import {
   Dialog,
   DialogContent,
@@ -1774,6 +1775,45 @@ function ZipUploadAction({
     [orderId, category],
   );
 
+  // ── Live progress state ────────────────────────────────────────
+  // CBCT / DICOM archives sit between 200 MB and 1 GB; the previous
+  // UI just disabled the button and showed nothing, so a doctor would
+  // alt-tab to check email and assume the upload had failed silently.
+  // We now drive a real progress bar from axios's onUploadProgress
+  // event, with the current file name + the percentage rendered
+  // inline so the upload's clearly in flight.
+  const [progress, setProgress] = useState<number | null>(null);
+  const [currentFile, setCurrentFile] = useState<{
+    name: string;
+    size: number;
+  } | null>(null);
+
+  const startUpload = (file: File, cat: OrderFileCategory) => {
+    setCurrentFile({ name: file.name, size: file.size });
+    setProgress(0);
+    uploadFiles.mutate(
+      {
+        id: orderId,
+        files: [file],
+        category: cat,
+        onProgress: (percent) => setProgress(percent),
+      },
+      {
+        onSettled: () => {
+          // Slight delay so the user sees "100%" before the bar disappears
+          // — masks the fact that "100% transferred" isn't quite "saved"
+          // (the server still needs to flush + DB insert).
+          window.setTimeout(() => {
+            setProgress(null);
+            setCurrentFile(null);
+          }, 600);
+        },
+      },
+    );
+  };
+
+  const isUploading = uploadFiles.isPending || progress !== null;
+
   return (
     <>
       <div className="flex flex-col items-start gap-3 rounded-xl border border-dashed bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -1790,7 +1830,7 @@ function ZipUploadAction({
             variant="outline"
             size="sm"
             onClick={() => setOpen(true)}
-            disabled={uploadFiles.isPending}
+            disabled={isUploading}
             className="gap-2"
           >
             <UploadCloud className="h-4 w-4" />
@@ -1804,7 +1844,7 @@ function ZipUploadAction({
             variant="ghost"
             size="sm"
             asChild
-            disabled={uploadFiles.isPending}
+            disabled={isUploading}
           >
             <label htmlFor={dicomInputId} className="cursor-pointer gap-2">
               <UploadCloud className="h-4 w-4" />
@@ -1816,33 +1856,68 @@ function ZipUploadAction({
             type="file"
             accept=".dcm,application/dicom"
             className="sr-only"
-            disabled={uploadFiles.isPending}
+            disabled={isUploading}
             onChange={(event) => {
               const picked = event.target.files?.[0];
               event.currentTarget.value = '';
               if (!picked) return;
-              uploadFiles.mutate({
-                id: orderId,
-                files: [picked],
-                category: OrderFileCategory.IMAGE,
-              });
+              startUpload(picked, OrderFileCategory.IMAGE);
             }}
           />
         </div>
       </div>
+
+      {/* ── Live progress bar ──────────────────────────────────────
+          Visible only while an upload is in flight. Stays on screen
+          for ~600 ms after the request settles so the user sees the
+          final 100% — important UX when the upload took minutes. */}
+      {isUploading && currentFile && (
+        <div className="space-y-2 rounded-xl border border-primary/30 bg-primary/5 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
+              <p className="truncate text-sm font-medium">
+                Uploading {currentFile.name}
+              </p>
+            </div>
+            <span className="shrink-0 text-sm font-semibold tabular-nums text-primary">
+              {progress ?? 0}%
+            </span>
+          </div>
+          <Progress value={progress ?? 0} className="h-2" />
+          <p className="text-xs text-muted-foreground">
+            {formatBytes(((progress ?? 0) / 100) * currentFile.size)} /{' '}
+            {formatBytes(currentFile.size)}
+            {progress === 100 && (
+              <span className="ml-2 text-primary">· finalising on server…</span>
+            )}
+          </p>
+        </div>
+      )}
+
       <ZipUploadDialog
         open={open}
         title={title}
         onClose={() => setOpen(false)}
         onConfirm={(file) => {
-          uploadFiles.mutate(
-            { id: orderId, files: [file], category },
-            { onSettled: () => setOpen(false) },
-          );
+          setOpen(false);
+          startUpload(file, category);
         }}
       />
     </>
   );
+}
+
+/**
+ * Human-friendly byte formatter (1.2 MB, 873 KB, 1.4 GB, …). Used by
+ * the upload progress strip; rounds to one decimal so a 207 MB CBCT
+ * archive reads as "207.4 MB" not "207426742 B".
+ */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 function SectionIntro({

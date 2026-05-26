@@ -2149,8 +2149,7 @@ function extensionFor(fileName: string) {
   return fileName.split('.').pop()?.toLowerCase() ?? 'file';
 }
 
-function formatBytes(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
+// Note: `formatBytes` lives near ZipUploadAction above (line ~1916).
+// That version handles GB too — required for the 1 GB CBCT bundles —
+// so we share it from here instead of defining a second, MB-capped
+// variant that quietly disagrees with the upload-progress strip.

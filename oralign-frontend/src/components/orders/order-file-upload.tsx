@@ -494,16 +494,23 @@ export function ClinicalOrderFiles({
             ZipUploadDialog audits archive contents client-side before
             anything leaves the browser; CBCT .dcm files are also
             accepted as individual uploads. */}
-        {!readOnly && (
-          <ZipUploadAction
-            orderId={orderId}
-            title="Upload bundle (.zip) or CBCT (.dcm)"
-            description="Ship a single ZIP archive (e.g. a CBCT DICOM volume, or a multi-file STL export). We audit it client-side for executables and unsafe filenames before saving. Single .dcm DICOM files are also accepted."
-            category={OrderFileCategory.ZIP}
-            files={files}
-            onDelete={(fileId) => deleteFile.mutate({ id: orderId, fileId })}
-          />
-        )}
+        {/* Always render — in read-only mode (order-detail page) the
+            component drops the upload action row + delete buttons but
+            keeps the uploaded-bundles list so admins / patients can
+            see the CBCT / ZIP volumes shipped with this order. */}
+        <ZipUploadAction
+          orderId={orderId}
+          title="Upload bundle (.zip) or CBCT (.dcm)"
+          description="Ship a single ZIP archive (e.g. a CBCT DICOM volume, or a multi-file STL export). We audit it client-side for executables and unsafe filenames before saving. Single .dcm DICOM files are also accepted."
+          category={OrderFileCategory.ZIP}
+          files={files}
+          onDelete={
+            readOnly
+              ? undefined
+              : (fileId) => deleteFile.mutate({ id: orderId, fileId })
+          }
+          readOnly={readOnly}
+        />
         {/* Legacy "Other scan files" list removed for the same reason —
             keep the page focused on the structured slots. */}
       </section>
@@ -1779,6 +1786,7 @@ function ZipUploadAction({
   category,
   files,
   onDelete,
+  readOnly,
 }: {
   orderId: string;
   title: string;
@@ -1790,8 +1798,18 @@ function ZipUploadAction({
    * shapes the upload flow can produce.
    */
   files: OrderFile[];
-  /** Soft-delete a single file by id. Called from the confirm dialog. */
-  onDelete: (fileId: string) => void;
+  /**
+   * Soft-delete a single file by id. Required when readOnly is false;
+   * ignored when readOnly is true.
+   */
+  onDelete?: (fileId: string) => void;
+  /**
+   * When true, render a view-only variant for the order-detail page:
+   * the upload action row + per-file trash buttons are hidden, but
+   * the uploaded-bundles list still renders so admins / patients can
+   * see what was provided.
+   */
+  readOnly?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const uploadFiles = useUploadOrderFiles();
@@ -1861,6 +1879,24 @@ function ZipUploadAction({
 
   return (
     <>
+      {/* Upload action row — hidden on the order-detail page. When read-
+          only we still render a compact header so the bundles list has
+          context ("here are the uploaded archives for this order"). */}
+      {readOnly ? (
+        bundleFiles.length > 0 ? (
+          <div className="flex items-start gap-3 rounded-xl border border-dashed bg-muted/20 p-4">
+            <FileArchive className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+            <div className="min-w-0">
+              <p className="text-sm font-semibold">
+                Uploaded bundle (.zip) or CBCT (.dcm)
+              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                CBCT volumes and STL / DICOM bundles shipped with this order.
+              </p>
+            </div>
+          </div>
+        ) : null
+      ) : (
       <div className="flex flex-col items-start gap-3 rounded-xl border border-dashed bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-start gap-3">
           <FileArchive className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
@@ -1911,6 +1947,7 @@ function ZipUploadAction({
           />
         </div>
       </div>
+      )}
 
       {/* ── Live progress bar ──────────────────────────────────────
           Visible only while an upload is in flight. Stays on screen
@@ -2004,17 +2041,19 @@ function ZipUploadAction({
                       )}
                     </p>
                   </div>
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    className="h-9 w-9 shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                    aria-label={`Delete ${file.originalName}`}
-                    disabled={uploadFiles.isPending}
-                    onClick={() => setPendingDelete(file)}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  {!readOnly && (
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="h-9 w-9 shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                      aria-label={`Delete ${file.originalName}`}
+                      disabled={uploadFiles.isPending}
+                      onClick={() => setPendingDelete(file)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
                 </li>
               );
             })}
@@ -2022,46 +2061,54 @@ function ZipUploadAction({
         </div>
       )}
 
-      <ZipUploadDialog
-        open={open}
-        title={title}
-        onClose={() => setOpen(false)}
-        onConfirm={(file) => {
-          setOpen(false);
-          startUpload(file, category);
-        }}
-      />
+      {/* Upload-only dialogs — never mount when the parent is rendering
+          a read-only view (order detail page). */}
+      {!readOnly && (
+        <>
+          <ZipUploadDialog
+            open={open}
+            title={title}
+            onClose={() => setOpen(false)}
+            onConfirm={(file) => {
+              setOpen(false);
+              startUpload(file, category);
+            }}
+          />
 
-      {/* Destructive confirm — CBCT volumes are typically the
-          single biggest asset on an order, so an inline single-tap
-          delete would be a foot-gun. */}
-      <AlertDialog
-        open={!!pendingDelete}
-        onOpenChange={(o) => !o && setPendingDelete(null)}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete this bundle?</AlertDialogTitle>
-            <AlertDialogDescription>
-              <span className="font-medium">{pendingDelete?.originalName}</span>{' '}
-              will be removed from this order. The file is soft-deleted on
-              the server and can be restored by an admin if needed.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={() => {
-                if (pendingDelete) onDelete(pendingDelete.id);
-                setPendingDelete(null);
-              }}
-            >
-              Delete file
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+          {/* Destructive confirm — CBCT volumes are typically the
+              single biggest asset on an order, so an inline single-tap
+              delete would be a foot-gun. */}
+          <AlertDialog
+            open={!!pendingDelete}
+            onOpenChange={(o) => !o && setPendingDelete(null)}
+          >
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete this bundle?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  <span className="font-medium">
+                    {pendingDelete?.originalName}
+                  </span>{' '}
+                  will be removed from this order. The file is soft-deleted
+                  on the server and can be restored by an admin if needed.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  variant="destructive"
+                  onClick={() => {
+                    if (pendingDelete && onDelete) onDelete(pendingDelete.id);
+                    setPendingDelete(null);
+                  }}
+                >
+                  Delete file
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </>
+      )}
     </>
   );
 }

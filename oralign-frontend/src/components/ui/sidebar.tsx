@@ -241,11 +241,25 @@ function Sidebar({
       data-side={side}
       data-slot="sidebar"
     >
-      {/* This is what handles the sidebar gap on desktop */}
+      {/* Sidebar gap — the layout placeholder that pushes the main
+          content over. Animating `width` here forces a full document
+          reflow on every frame because every descendant of
+          sidebar-wrapper is re-flowed. We can't avoid animating width
+          (we need the rail to actually shrink), but we CAN:
+            • Promise the browser the property is changing
+              (`will-change: width`) so it pre-allocates a composite
+              layer instead of rasterising from scratch each frame.
+            • Force a GPU layer via `translateZ(0)` so the animation
+              doesn't fight the main thread.
+            • Scope reflow with `contain: layout` — the descendants of
+              this element don't influence the rest of the document's
+              layout calculation, so the dashboard table / cards
+              don't reflow alongside the rail. */}
       <div
         data-slot="sidebar-gap"
         className={cn(
           "relative w-(--sidebar-width) bg-transparent transition-[width] duration-200 ease-linear",
+          "[contain:layout] [will-change:width] [transform:translateZ(0)]",
           "group-data-[collapsible=offcanvas]:w-0",
           "group-data-[side=right]:rotate-180",
           variant === "floating" || variant === "inset"
@@ -258,6 +272,8 @@ function Sidebar({
         data-side={side}
         className={cn(
           "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-linear data-[side=left]:left-0 data-[side=left]:group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)] data-[side=right]:right-0 data-[side=right]:group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)] md:flex",
+          // Same perf treatment as the gap — see comment above.
+          "[contain:layout_style] [will-change:width] [transform:translateZ(0)] [backface-visibility:hidden]",
           // Adjust the padding for floating and inset variants.
           variant === "floating" || variant === "inset"
             ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"

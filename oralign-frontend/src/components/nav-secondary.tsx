@@ -12,7 +12,10 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
 
-export function NavSecondary({
+/** Memo'd export at the bottom — same reasoning as NavMain.
+ *  Polling hooks in <AppSidebar> trigger re-renders that would
+ *  otherwise cascade into this static footer nav for no reason. */
+function NavSecondaryImpl({
   items,
   ...props
 }: {
@@ -58,3 +61,5 @@ export function NavSecondary({
     </SidebarGroup>
   )
 }
+
+export const NavSecondary = React.memo(NavSecondaryImpl)

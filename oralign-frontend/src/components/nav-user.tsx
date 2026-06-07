@@ -58,19 +58,46 @@ export function NavUser({
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton
               size="lg"
-              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:justify-center"
+              // Collapsed-state overrides:
+              //   • `!p-0 !h-12 !w-12` reshape the button into a square
+              //     tile that exactly matches the 48 px icon rail. The
+              //     default size-lg gives `h-12 px-2 py-1.5` which left
+              //     a 6 px gap on each side and made the avatar look
+              //     "floating" inside the rail.
+              //   • `mx-auto justify-center` centres the avatar
+              //     horizontally so it lines up with the other rail
+              //     icons above it.
+              //   • The base `data-[state=open]:…` keeps the dropdown
+              //     open-state highlight from the original UI.
+              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:!h-12 group-data-[collapsible=icon]:!w-12 group-data-[collapsible=icon]:!p-0"
             >
-              <Avatar className="h-8 w-8 rounded-lg">
-                <AvatarImage src={user.avatar} alt={user.name} />
-                <AvatarFallback className="rounded-lg">{initials}</AvatarFallback>
+              {/* Avatar — `rounded-full` always, so it reads as a
+                  proper profile chip both expanded and collapsed.
+                  In collapsed mode we bump to `h-9 w-9` so it has
+                  visual weight in the rail (the cramped 32 px square
+                  was the reason it looked off in the screenshot). */}
+              <Avatar className="h-8 w-8 rounded-full group-data-[collapsible=icon]:h-9 group-data-[collapsible=icon]:w-9">
+                <AvatarImage
+                  src={user.avatar}
+                  alt={user.name}
+                  className="object-cover"
+                />
+                <AvatarFallback className="rounded-full bg-primary/10 text-xs font-semibold text-primary">
+                  {initials}
+                </AvatarFallback>
               </Avatar>
-              <div className="grid flex-1 text-left text-sm leading-tight">
+              {/* Name + email — hidden in icon-rail mode so they
+                  don't try to wrap inside a 48 px wide button (which
+                  is what produced the squashed text behind the avatar
+                  in the previous screenshot). */}
+              <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
                 <span className="truncate font-medium">{user.name}</span>
                 <span className="truncate text-xs text-muted-foreground">
                   {user.email}
                 </span>
               </div>
-              <EllipsisVerticalIcon className="ml-auto size-4" />
+              {/* Caret — same treatment as the name block above. */}
+              <EllipsisVerticalIcon className="ml-auto size-4 group-data-[collapsible=icon]:hidden" />
             </SidebarMenuButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent

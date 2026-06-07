@@ -1,5 +1,6 @@
 "use client"
 
+import * as React from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
@@ -10,7 +11,17 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
 
-export function NavMain({
+/**
+ * NavMain is wrapped in React.memo at the bottom of the file.
+ *
+ * Why: the parent <AppSidebar> hosts polling hooks (`useSupportUnreadCount`
+ * every 20 s, `useUnreadNotificationCount` every 15 s, plus the support
+ * socket). Every poll re-renders <AppSidebar>. Without memo, this whole
+ * 8-item nav tree re-renders too — bad mid-animation.
+ * With memo, NavMain only re-renders when its `items` prop changes
+ * (i.e. when the support badge actually changes, not every tick).
+ */
+function NavMainImpl({
   items,
 }: {
   items: {
@@ -101,3 +112,6 @@ export function NavMain({
     </SidebarGroup>
   )
 }
+
+// Memo'd export — see the comment above NavMainImpl for the rationale.
+export const NavMain = React.memo(NavMainImpl)

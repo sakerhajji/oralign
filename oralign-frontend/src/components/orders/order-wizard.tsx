@@ -1819,7 +1819,41 @@ function ReviewStep({
         </div>
       </ReviewSection>
 
-      {/* ─── 2 · Treatment plan & clinical objective ─────────────── */}
+      {/* ─── 2 · Patient images ──────────────────────────────────────
+          Use the exact same <ClinicalOrderFiles> grid the planner
+          interacted with in step 2 of the wizard. Passing readOnly
+          drops the upload affordances + the per-slot trash button but
+          keeps every photo card (Profile, Face at rest, Smile, lateral
+          views, occlusal views) in the SAME 3-column layout — so
+          Review reads as a faithful preview of the order detail page
+          the doctor will see post-submit.
+
+          If `savedOrder` isn't there yet (draft hasn't been saved at
+          all), the component already renders its own "save the draft
+          first" notice — we don't gate it here. */}
+      <ReviewSection icon={Camera} title="Patient images">
+        <ClinicalOrderFiles
+          orderId={savedOrder?.id}
+          readOnly
+          section="patient-images"
+        />
+      </ReviewSection>
+
+      {/* ─── 3 · Radiography, STL scans & bundles ────────────────────
+          Same component, same grid layout, different section key. This
+          surface also renders the read-only ZIP/CBCT bundles list
+          (with the Download button) that we just polished. Avoiding
+          a separate "Files" block keeps Review one-to-one with the
+          upload flow above. */}
+      <ReviewSection icon={ScanLine} title="Radiography & STL scans">
+        <ClinicalOrderFiles
+          orderId={savedOrder?.id}
+          readOnly
+          section="radiography-stl"
+        />
+      </ReviewSection>
+
+      {/* ─── 4 · Treatment plan & clinical objective ─────────────── */}
       <ReviewSection icon={Target} title="Treatment plan & clinical objective">
         <div className="grid gap-4 sm:grid-cols-2">
           <ReviewInfo

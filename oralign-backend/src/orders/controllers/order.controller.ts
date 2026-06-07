@@ -322,6 +322,56 @@ export class OrderController {
     });
   }
 
+  // ── Admin treatment-fee list endpoints ────────────────────────────
+  //
+  // Hosted at `admin/treatment-fees/...` (NOT `:id/treatment-fee/...`)
+  // because they're listing operations, not per-order actions. Same
+  // paginated envelope as the installment-Payment queue so the
+  // admin /payments/pending and /payments/history pages can render
+  // both sources side-by-side with the same UI primitives.
+
+  @Get('admin/treatment-fees/pending')
+  @Roles(UserRole.admin, UserRole.super_admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Admin: bank-transfer treatment-fee payments awaiting confirmation.',
+  })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async listPendingTreatmentFees(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @CurrentUser() user?: JwtPayload,
+  ) {
+    return this.orderService.listPendingTreatmentFees({
+      page: page ? Number(page) : undefined,
+      limit: limit ? Number(limit) : undefined,
+      caller: { userId: user!.sub, role: user!.role },
+    });
+  }
+
+  @Get('admin/treatment-fees')
+  @Roles(UserRole.admin, UserRole.super_admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Admin: every treatment-fee payment (history). Sorted by paid date desc.',
+  })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async listTreatmentFees(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @CurrentUser() user?: JwtPayload,
+  ) {
+    return this.orderService.listTreatmentFees({
+      page: page ? Number(page) : undefined,
+      limit: limit ? Number(limit) : undefined,
+      caller: { userId: user!.sub, role: user!.role },
+    });
+  }
+
   @Put(':id/status')
   @Roles(UserRole.admin, UserRole.super_admin)
   @HttpCode(HttpStatus.OK)

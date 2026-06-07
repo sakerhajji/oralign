@@ -61,6 +61,7 @@ import {
   PaymentHistoryTable,
   type PaymentRow,
 } from '@/components/payments/payment-history-table';
+import { TreatmentFeesHistorySection } from '@/components/payments/treatment-fees-section';
 
 // ─── Filter primitives ────────────────────────────────────────────────
 
@@ -545,12 +546,22 @@ export function PaymentHistoryContent() {
         </div>
       ) : null}
 
+      {/*
+        ─── Admin-only: treatment-fee payments ─────────────────────
+        These are denormalised onto DentalOrder (treatmentFeePaid*
+        fields) and are NOT in the Payment table, so the installment
+        filter UI below can't reach them. Surface them as a separate
+        admin card up here so they're discoverable. The section returns
+        null when empty so we don't ship a blank card on first install.
+      */}
+      {isAdmin ? <TreatmentFeesHistorySection /> : null}
+
       {/* ─── Results ───────────────────────────────────────────────── */}
       <Card>
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 pb-3">
           <div>
             <CardTitle>
-              {isAdmin ? 'All payments' : 'My payments'}
+              {isAdmin ? 'Installment payments' : 'My payments'}
             </CardTitle>
             <CardDescription>
               {listQuery.isLoading

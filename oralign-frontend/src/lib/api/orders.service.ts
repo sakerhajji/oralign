@@ -8,10 +8,31 @@ import {
   OrderFilterParams,
   OrderStatus,
   PaginatedResponse,
+  PaymentMethod,
+  PaymentRecordStatus,
   ToothInstruction,
   ToothInstructionType,
   UpdateOrderDto,
 } from '@/lib/types';
+
+/**
+ * Row returned by the admin treatment-fee list endpoints. The shape
+ * intentionally mirrors a subset of the installment Payment row so
+ * the UI can switch between sources without rewriting the table.
+ */
+export interface TreatmentFeeRow {
+  orderId: string;
+  orderCode: string;
+  amount: number | null;
+  method: PaymentMethod | null;
+  status: PaymentRecordStatus | null;
+  paidAt: string | null;
+  proofPath: string | null;
+  submittedAt: string | null;
+  updatedAt: string;
+  doctor: { id: string; fullName: string; email: string } | null;
+  patient: { id: string; fullName: string } | null;
+}
 
 export const ordersService = {
   getOrders: async (
@@ -121,6 +142,29 @@ export const ordersService = {
     const response = await apiClient.post<DentalOrder>(
       `/orders/${id}/treatment-fee/confirm`,
     );
+    return response.data;
+  },
+
+  /**
+   * Admin: paginated treatment-fee bank-transfer payments awaiting
+   * confirmation. Same envelope shape as the installment-payment
+   * pending queue so the UI can render both with one table primitive.
+   */
+  listPendingTreatmentFees: async (params: {
+    page?: number;
+    limit?: number;
+  }) => {
+    const response = await apiClient.get<
+      PaginatedResponse<TreatmentFeeRow>
+    >('/orders/admin/treatment-fees/pending', { params });
+    return response.data;
+  },
+
+  /** Admin: full treatment-fee payment history. */
+  listTreatmentFees: async (params: { page?: number; limit?: number }) => {
+    const response = await apiClient.get<
+      PaginatedResponse<TreatmentFeeRow>
+    >('/orders/admin/treatment-fees', { params });
     return response.data;
   },
 

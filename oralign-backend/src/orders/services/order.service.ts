@@ -500,6 +500,153 @@ export class OrderService {
   }
 
   /**
+   * Paginated admin queue of treatment-fee bank-transfer payments
+   * awaiting confirmation. Mirrors the shape of the installment
+   * Payment "pending confirmations" list so the admin /pending page
+   * can render both in one consistent layout.
+   *
+   * Filter envelope: { page, limit } — same as the installment list.
+   */
+  async listPendingTreatmentFees(args: {
+    page?: number;
+    limit?: number;
+    caller: Caller;
+  }) {
+    if (!ADMIN_ROLES.includes(args.caller.role)) {
+      throw new ForbiddenException(
+        'Only admins can view the treatment-fee queue.',
+      );
+    }
+    const page = Math.max(1, args.page ?? 1);
+    const limit = Math.min(100, Math.max(1, args.limit ?? 20));
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.DentalOrderWhereInput = {
+      deletedAt: null,
+      treatmentFeePaymentStatus: PaymentRecordStatus.awaiting_confirmation,
+      treatmentFeePaidAt: null,
+    };
+
+    const [rows, total] = await Promise.all([
+      this.prisma.dentalOrder.findMany({
+        where,
+        orderBy: { updatedAt: 'desc' },
+        skip,
+        take: limit,
+        select: this.treatmentFeeSelect,
+      }),
+      this.prisma.dentalOrder.count({ where }),
+    ]);
+
+    return {
+      data: rows.map((r) => this.mapTreatmentFeeRow(r)),
+      total,
+      page,
+      limit,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+    };
+  }
+
+  /**
+   * Admin history of treatment-fee payments. Returns every order
+   * where a method has been recorded, sorted by paid date (most
+   * recent first; unpaid rows fall to the bottom).
+   */
+  async listTreatmentFees(args: {
+    page?: number;
+    limit?: number;
+    caller: Caller;
+  }) {
+    if (!ADMIN_ROLES.includes(args.caller.role)) {
+      throw new ForbiddenException(
+        'Only admins can view the treatment-fee history.',
+      );
+    }
+    const page = Math.max(1, args.page ?? 1);
+    const limit = Math.min(100, Math.max(1, args.limit ?? 20));
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.DentalOrderWhereInput = {
+      deletedAt: null,
+      treatmentFeePaymentMethod: { not: null },
+    };
+
+    const [rows, total] = await Promise.all([
+      this.prisma.dentalOrder.findMany({
+        where,
+        orderBy: [
+          { treatmentFeePaidAt: 'desc' },
+          { updatedAt: 'desc' },
+        ],
+        skip,
+        take: limit,
+        select: this.treatmentFeeSelect,
+      }),
+      this.prisma.dentalOrder.count({ where }),
+    ]);
+
+    return {
+      data: rows.map((r) => this.mapTreatmentFeeRow(r)),
+      total,
+      page,
+      limit,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+    };
+  }
+
+  /**
+   * Tight Prisma projection used by both treatment-fee list endpoints.
+   * Pulls only the fields the admin queue UI actually renders — order
+   * code, doctor + patient names for the row header, the four
+   * treatment-fee fields, and the timestamps the table sorts on.
+   */
+  private readonly treatmentFeeSelect = {
+    id: true,
+    orderCode: true,
+    treatmentFeeAmount: true,
+    treatmentFeePaymentMethod: true,
+    treatmentFeePaymentStatus: true,
+    treatmentFeePaidAt: true,
+    treatmentFeeProofPath: true,
+    submittedAt: true,
+    updatedAt: true,
+    doctor: { select: { id: true, fullName: true, email: true } },
+    patient: { select: { id: true, fullName: true } },
+  } satisfies Prisma.DentalOrderSelect;
+
+  /** Decimal → Number at the DTO boundary; matches the rest of the API. */
+  private mapTreatmentFeeRow(row: {
+    id: string;
+    orderCode: string;
+    treatmentFeeAmount: Prisma.Decimal | null;
+    treatmentFeePaymentMethod: PaymentMethod | null;
+    treatmentFeePaymentStatus: PaymentRecordStatus | null;
+    treatmentFeePaidAt: Date | null;
+    treatmentFeeProofPath: string | null;
+    submittedAt: Date | null;
+    updatedAt: Date;
+    doctor?: { id: string; fullName: string; email: string } | null;
+    patient?: { id: string; fullName: string } | null;
+  }) {
+    return {
+      orderId: row.id,
+      orderCode: row.orderCode,
+      amount:
+        row.treatmentFeeAmount !== null
+          ? Number(row.treatmentFeeAmount)
+          : null,
+      method: row.treatmentFeePaymentMethod,
+      status: row.treatmentFeePaymentStatus,
+      paidAt: row.treatmentFeePaidAt,
+      proofPath: row.treatmentFeeProofPath,
+      submittedAt: row.submittedAt,
+      updatedAt: row.updatedAt,
+      doctor: row.doctor ?? null,
+      patient: row.patient ?? null,
+    };
+  }
+
+  /**
    * Admin confirms a bank-transfer payment. Flips the status to
    * `success` and stamps `treatmentFeePaidAt`, which unlocks the
    * treatment-plan gate in `TreatmentPlanService.create()`.

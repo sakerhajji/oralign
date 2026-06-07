@@ -31,6 +31,7 @@ import {
   PaymentHistoryTable,
   type PaymentRow,
 } from '@/components/payments/payment-history-table';
+import { PendingTreatmentFeesSection } from '@/components/payments/treatment-fees-section';
 
 export function PendingPaymentsContent() {
   const [page, setPage] = useState(1);
@@ -55,16 +56,28 @@ export function PendingPaymentsContent() {
           Pending payment confirmations
         </h1>
         <p className="text-sm text-muted-foreground">
-          Doctor-declared bank transfers awaiting verification. Confirming
-          a payment runs the SUCCESS transition: the linked installment is
-          marked paid and the associated step batch unlocks.
+          Doctor-declared bank transfers awaiting verification — both the
+          per-order treatment fee and individual installments. Confirming
+          a payment runs the SUCCESS transition: for installments the
+          linked step batch unlocks; for treatment fees the order's
+          treatment plan unlocks.
         </p>
       </header>
+
+      {/*
+        Treatment-fee bank-transfer receipts awaiting confirmation. The
+        section returns null on an empty queue so we don't double-stack
+        empty cards above the installment queue on a clean dashboard.
+        It uses the same PaymentMethod / PaymentRecordStatus vocabulary
+        as the installment payments below so admins read both with one
+        mental model.
+       */}
+      <PendingTreatmentFeesSection />
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
-            <CardTitle>Awaiting confirmation</CardTitle>
+            <CardTitle>Installment payments awaiting confirmation</CardTitle>
             <CardDescription>
               {data?.total ?? 0} payment{data?.total === 1 ? '' : 's'} in
               queue

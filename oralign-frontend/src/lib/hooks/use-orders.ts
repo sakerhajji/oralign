@@ -246,9 +246,39 @@ export function useConfirmTreatmentFeePayment(): UseMutationResult<
       syncOrderCaches(queryClient, order);
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
+      // Bust both treatment-fee list caches so the confirmed row
+      // hops from the pending queue into the history table.
+      queryClient.invalidateQueries({ queryKey: ['treatment-fees'] });
       toast.success('Bank transfer confirmed');
     },
     onError: (error) => toast.error(extractApiErrorMessage(error)),
+  });
+}
+
+/**
+ * Admin queue of treatment-fee bank-transfer payments awaiting
+ * confirmation. 30-second poll because admin queues feel sluggish
+ * without near-real-time updates; the data is small.
+ */
+export function usePendingTreatmentFees(
+  params: { page?: number; limit?: number } = {},
+) {
+  return useQuery({
+    queryKey: ['treatment-fees', 'pending', params],
+    queryFn: () => ordersService.listPendingTreatmentFees(params),
+    staleTime: 1000 * 15,
+    refetchInterval: 1000 * 30,
+  });
+}
+
+/** Admin: paginated treatment-fee payment history. */
+export function useTreatmentFeesHistory(
+  params: { page?: number; limit?: number } = {},
+) {
+  return useQuery({
+    queryKey: ['treatment-fees', 'history', params],
+    queryFn: () => ordersService.listTreatmentFees(params),
+    staleTime: 1000 * 60,
   });
 }
 

@@ -45,7 +45,7 @@ import { useTreatmentChatSocket } from '@/lib/hooks/use-treatment-chat-socket';
 import { FileText, Plus, Sparkles } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
-  useCompanyBilling,
+  useBillingPublicDefaults,
   useConfirmTreatmentFeePayment,
   useDeleteOrder,
   useOrder,
@@ -903,12 +903,21 @@ function TreatmentFeeGateBanner({
   canActAsAdmin: boolean;
   canActAsDoctor: boolean;
 }) {
-  const { data: settings } = useCompanyBilling();
+  // Doctor-safe public-defaults endpoint, same as the payment dialog.
+  // Was previously `useCompanyBilling()` which hits the admin-only
+  // /admin/company-billing-settings route — for a dentist it returned
+  // 403, `settings` was undefined, fee fell through to 0, and the
+  // banner returned `null` early. Result: a submitted-but-unpaid
+  // order showed no "Pay treatment fee" CTA at all, and the doctor
+  // couldn't action it. This swap is the same fix we already applied
+  // to TreatmentFeePaymentDialog — the banner is the second consumer
+  // of the same setting and needed the same treatment.
+  const { data: defaults } = useBillingPublicDefaults();
   const confirmBT = useConfirmTreatmentFeePayment();
   const [payOpen, setPayOpen] = useState(false);
 
-  const fee = settings?.defaultTreatmentFee ?? 0;
-  const currency = settings?.defaultCurrency ?? 'TND';
+  const fee = defaults?.defaultTreatmentFee ?? 0;
+  const currency = defaults?.defaultCurrency ?? 'TND';
   const isSubmitted = order.status !== OrderStatus.DRAFT;
   if (!isSubmitted || fee <= 0) return null;
 

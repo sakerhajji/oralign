@@ -351,6 +351,26 @@ function SidebarInset({ className, ...props }: React.ComponentProps<"main">) {
       data-slot="sidebar-inset"
       className={cn(
         "relative flex w-full flex-1 flex-col bg-background md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow-sm md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-2",
+        // Performance: the inset gets RESIZED on every frame of the
+        // sidebar open/close animation (the sibling gap div animates
+        // its width). Without containment, every child component is
+        // forced to participate in the layout calculation each frame
+        // — that's expensive on the dashboard, which has KPI cards,
+        // a Recharts AreaChart (which fires its ResponsiveContainer
+        // resize observer 60×), avatar lists, and the slider. The
+        // observable result is sidebar-toggle jank.
+        //
+        // `contain: layout style paint` tells the browser:
+        //   • layout — descendant size changes can't escape upward.
+        //     Combined with the sidebar's own `contain: layout`, the
+        //     two boxes form a clean reflow boundary.
+        //   • style — style changes inside don't trigger style
+        //     re-computation for siblings of the inset.
+        //   • paint — descendants are clipped to the inset's bounds
+        //     so the compositor doesn't paint outside it.
+        // `translateZ(0)` promotes the inset to its own GPU layer
+        // so its paint runs off the main thread.
+        "[contain:layout_style_paint] [transform:translateZ(0)]",
         className
       )}
       {...props}

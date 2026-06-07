@@ -363,6 +363,16 @@ export function AdminDashboard() {
                   stroke="hsl(var(--primary))"
                   fill="url(#revenueFill)"
                   strokeWidth={2}
+                  // Recharts' default 1.5 s SVG path animation re-runs
+                  // every time ResponsiveContainer fires a resize event
+                  // — and ResponsiveContainer's ResizeObserver fires on
+                  // every frame of the sidebar's width transition.
+                  // Disabling animation kills that re-run and is the
+                  // single biggest fix for the sidebar lag on this page.
+                  // Data updates still appear instantly when the
+                  // backend pushes a new dataset; only the entry
+                  // animation is suppressed.
+                  isAnimationActive={false}
                 />
                 <Area
                   type="monotone"
@@ -370,6 +380,7 @@ export function AdminDashboard() {
                   stroke="hsl(var(--muted-foreground))"
                   fill="url(#ordersFill)"
                   strokeWidth={2}
+                  isAnimationActive={false}
                 />
               </AreaChart>
             </ResponsiveContainer>

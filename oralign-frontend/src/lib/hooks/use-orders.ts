@@ -181,6 +181,33 @@ export function useSubmitOrder(): UseMutationResult<DentalOrder, Error, string> 
 }
 
 /**
+ * Mark the treatment / professional fee as paid. Used both by:
+ *   • the doctor — paying their own order's fee
+ *   • the admin  — recording cash / bank-transfer collection
+ *
+ * Without this, the backend refuses to start a treatment plan
+ * whenever the company has a non-zero defaultTreatmentFee.
+ */
+export function useMarkTreatmentFeePaid(): UseMutationResult<
+  DentalOrder,
+  Error,
+  { id: string; amount: number }
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, amount }) =>
+      ordersService.markTreatmentFeePaid(id, amount),
+    onSuccess: (order, { id }) => {
+      syncOrderCaches(queryClient, order);
+      queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
+      toast.success('Treatment fee marked as paid');
+    },
+    onError: (error) => toast.error(extractApiErrorMessage(error)),
+  });
+}
+
+/**
  * Admin-only manual status override (roll forward or roll back the
  * order to any lifecycle value). The backend enforces the role check;
  * the UI hides the affordance for non-admins.

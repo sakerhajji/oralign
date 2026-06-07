@@ -203,6 +203,40 @@ export class OrderController {
     });
   }
 
+  /**
+   * Mark the order's professional/clinical (treatment) fee as paid.
+   *
+   * Either side can call:
+   *   • Doctor — paying their own order's fee
+   *   • Admin  — recording cash / bank-transfer collection
+   *
+   * Stamps `treatmentFeePaidAt = now()` and snapshots the amount.
+   * Without this, the treatment-plan creation flow refuses to start
+   * (gate enforced inside TreatmentPlanService.create).
+   *
+   * Body `amount` is the snapshot value — usually the configured
+   * `CompanyBillingSettings.defaultTreatmentFee` echoed back so the
+   * server doesn't have to re-read the setting under contention.
+   */
+  @Post(':id/treatment-fee/mark-paid')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Mark the treatment fee as paid. Unblocks treatment-plan creation.',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiResponse({ status: 200, type: OrderResponseDto })
+  async markTreatmentFeePaid(
+    @Param('id') id: string,
+    @Body() body: { amount?: number },
+    @CurrentUser() user: JwtPayload,
+  ): Promise<OrderResponseDto> {
+    return this.orderService.markTreatmentFeePaid(id, body.amount ?? 0, {
+      userId: user.sub,
+      role: user.role,
+    });
+  }
+
   @Put(':id/status')
   @Roles(UserRole.admin, UserRole.super_admin)
   @HttpCode(HttpStatus.OK)

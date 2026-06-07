@@ -384,6 +384,52 @@ export class OrderService {
   }
 
   /**
+   * Mark the treatment fee as paid on an order.
+   *
+   * Both the doctor (paying their own order's fee) and an admin
+   * (recording cash / bank transfer on behalf of the doctor) can call
+   * this. The amount is snapshot AT payment time so a later change
+   * to CompanyBillingSettings.defaultTreatmentFee can't rewrite an
+   * already-paid order.
+   *
+   * Idempotent: calling on an already-paid order returns the row
+   * unchanged so a double-click doesn't double-stamp.
+   */
+  async markTreatmentFeePaid(
+    id: string,
+    amount: number,
+    caller: Caller,
+  ): Promise<OrderResponseDto> {
+    this.ensureCanCreateOrModify(caller);
+    const current = await this.findAccessibleOrder(id, caller);
+
+    if (current.treatmentFeePaidAt) {
+      // Already paid — return as-is. Avoids accidental double-stamp
+      // when the admin double-clicks "Mark as paid".
+      return this.mapToDto(current);
+    }
+
+    if (amount < 0) {
+      throw new BadRequestException('Treatment fee amount must be ≥ 0.');
+    }
+
+    const order = await this.prisma.dentalOrder.update({
+      where: { id },
+      data: {
+        treatmentFeePaidAt: new Date(),
+        treatmentFeeAmount: amount,
+      },
+      include: this.includeOrder,
+    });
+
+    this.logger.log(
+      `Treatment fee paid for order ${id} by user ${caller.userId} — amount ${amount}`,
+    );
+
+    return this.mapToDto(order);
+  }
+
+  /**
    * Admin-only manual status override.
    *
    * Sets `order.status` to any valid OrderStatus value, no state-machine
@@ -1250,6 +1296,14 @@ export class OrderService {
       createdAt: order.createdAt,
       updatedAt: order.updatedAt,
       submittedAt: order.submittedAt ?? undefined,
+      treatmentFeePaidAt: order.treatmentFeePaidAt ?? undefined,
+      // Decimal → Number at the DTO boundary so the frontend can format
+      // it with the rest of the money fields without a Decimal lib.
+      treatmentFeeAmount:
+        order.treatmentFeeAmount !== null &&
+        order.treatmentFeeAmount !== undefined
+          ? Number(order.treatmentFeeAmount)
+          : undefined,
       // Notification fields used by the orders list to render badges
       // ("Awaiting your review", "Approved", "Replanning requested", …).
       latestPlanStatus: order.treatmentPlans?.[0]?.status ?? undefined,

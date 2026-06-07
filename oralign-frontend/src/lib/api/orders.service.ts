@@ -74,6 +74,23 @@ export const ordersService = {
   },
 
   /**
+   * Mark the order's professional/treatment fee as paid. Stamps
+   * `treatmentFeePaidAt = now()` on the order and snapshots the
+   * amount. Without this, the backend refuses to start a treatment
+   * plan whenever the company has a non-zero `defaultTreatmentFee`.
+   */
+  markTreatmentFeePaid: async (
+    id: string,
+    amount: number,
+  ): Promise<DentalOrder> => {
+    const response = await apiClient.post<DentalOrder>(
+      `/orders/${id}/treatment-fee/mark-paid`,
+      { amount },
+    );
+    return response.data;
+  },
+
+  /**
    * Admin-only manual status override. Accepts any valid OrderStatus,
    * including rollback to earlier phases. `reason` is logged on the
    * backend for auditability.

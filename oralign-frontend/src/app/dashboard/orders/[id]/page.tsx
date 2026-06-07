@@ -45,7 +45,9 @@ import { useTreatmentChatSocket } from '@/lib/hooks/use-treatment-chat-socket';
 import { FileText, Plus, Sparkles } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
+  useCompanyBilling,
   useDeleteOrder,
+  useMarkTreatmentFeePaid,
   useOrder,
   usePatient,
   usePermanentDeleteOrder,
@@ -261,6 +263,18 @@ export default function OrderDetailPage() {
           )}
         </div>
       </header>
+
+      {/* ─── Treatment-fee gate banner ─────────────────────────────────────
+          Renders only when there's a configured treatment fee > 0 and the
+          order hasn't paid it yet. The doctor sees a "Pay treatment fee"
+          CTA; the admin sees "Mark as paid" so they can record cash /
+          transfer collection. Either action stamps `treatmentFeePaidAt`,
+          which the backend uses to unlock treatment-plan creation. */}
+      <TreatmentFeeGateBanner
+        order={order}
+        canActAsAdmin={isAdmin}
+        canActAsDoctor={isDentist}
+      />
 
       {/* ─── Tab visibility + default selection ─────────────────────────────
             Doctors only see what's been created — no empty Quote tab on a
@@ -857,5 +871,95 @@ function OrderDeleteAction({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  );
+}
+
+/**
+ * Treatment-fee gate banner.
+ *
+ * Visibility rules (server-side gate mirrored here as UX guidance):
+ *  • Show ONLY when the order has been submitted at least once
+ *    (treatment fee on a draft makes no sense).
+ *  • If `treatmentFeePaidAt` is set → green "paid" confirmation card.
+ *  • If `defaultTreatmentFee` from CompanyBillingSettings is 0 → render
+ *    nothing (legacy / fee-free tenants keep the previous flow).
+ *  • Otherwise → amber "fee pending" card with an action button.
+ *
+ * Action affordance:
+ *  • Doctor sees "Pay treatment fee" — currently records as paid; a
+ *    full doctor-self-pay flow can be wired to the Payments service in
+ *    a follow-up. For now the action does the same DB write the admin
+ *    would do, so the gate clears either way.
+ *  • Admin sees "Mark as paid" — for cash / bank-transfer collection
+ *    recorded out-of-band.
+ */
+function TreatmentFeeGateBanner({
+  order,
+  canActAsAdmin,
+  canActAsDoctor,
+}: {
+  order: import('@/lib/types').DentalOrder;
+  canActAsAdmin: boolean;
+  canActAsDoctor: boolean;
+}) {
+  const { data: settings } = useCompanyBilling();
+  const markPaid = useMarkTreatmentFeePaid();
+
+  const fee = settings?.defaultTreatmentFee ?? 0;
+  const currency = settings?.defaultCurrency ?? 'TND';
+  // Don't fire on drafts — fee semantics don't apply until submission.
+  const isSubmitted = order.status !== OrderStatus.DRAFT;
+  // Tenants without a treatment fee → no banner.
+  if (!isSubmitted || fee <= 0) return null;
+  const isPaid = !!order.treatmentFeePaidAt;
+
+  if (isPaid) {
+    return (
+      <Card className="border-emerald-200 bg-emerald-50">
+        <CardContent className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-semibold text-emerald-900">
+              Treatment fee paid
+            </p>
+            <p className="text-xs text-emerald-800/80">
+              Amount: {order.treatmentFeeAmount ?? fee} {currency}
+              {order.treatmentFeePaidAt &&
+                ` · Paid ${format(new Date(order.treatmentFeePaidAt), 'MMM d, yyyy')}`}
+              . The treatment plan can now be sent.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const canAct = canActAsAdmin || canActAsDoctor;
+  const actionLabel = canActAsAdmin ? 'Mark as paid' : 'Pay treatment fee';
+
+  return (
+    <Card className="border-amber-300 bg-amber-50">
+      <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold text-amber-900">
+            Awaiting treatment fee — {fee} {currency}
+          </p>
+          <p className="text-xs text-amber-800/80">
+            The professional fee must be settled before the admin can send
+            the treatment plan. This is a one-time payment per order.
+          </p>
+        </div>
+        {canAct && (
+          <Button
+            type="button"
+            size="sm"
+            className="bg-amber-600 hover:bg-amber-700"
+            disabled={markPaid.isPending}
+            onClick={() => markPaid.mutate({ id: order.id, amount: fee })}
+          >
+            {markPaid.isPending ? 'Saving…' : actionLabel}
+          </Button>
+        )}
+      </CardContent>
+    </Card>
   );
 }

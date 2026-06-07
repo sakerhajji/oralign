@@ -860,6 +860,12 @@ export interface DentalOrder {
   createdAt: string;
   updatedAt: string;
   submittedAt?: string;
+  // Treatment-fee gate fields. The doctor pays this professional fee
+  // BEFORE the admin can start the treatment plan; the UI surfaces a
+  // "Pay treatment fee" / "Mark as paid" card while paidAt is null
+  // and the configured default fee is > 0.
+  treatmentFeePaidAt?: string;
+  treatmentFeeAmount?: number;
   // ── Notification badges (computed by the backend list endpoint) ───────────
   // `latestPlanStatus` is undefined when no treatment plan has been started.
   latestPlanStatus?: TreatmentPlanStatus;

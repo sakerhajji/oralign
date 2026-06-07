@@ -395,6 +395,18 @@ model DentalOrder {
   submittedAt                   DateTime?
   deletedAt                     DateTime?
 
+  // ── Treatment-fee gate ──────────────────────────────────────────
+  // Filled the moment the clinical/professional fee is collected
+  // (admin records cash/transfer or doctor pays online). The
+  // treatment-plan creation flow refuses to start until this is
+  // non-null AND the company setting `defaultTreatmentFee > 0`.
+  // If the tenant hasn't configured a treatment fee (=0), the gate
+  // is bypassed and the legacy flow keeps working as before.
+  // treatmentFeeAmount snapshots the amount AT payment time so a
+  // later setting change can't rewrite an already-paid order.
+  treatmentFeePaidAt            DateTime?
+  treatmentFeeAmount            Decimal?                  @db.Decimal(12, 3)
+
   // Approved treatment plan reference — used by the order's lifecycle.
   approvedTreatmentPlanId       String?
 

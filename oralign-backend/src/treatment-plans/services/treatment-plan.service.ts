@@ -153,6 +153,36 @@ export class TreatmentPlanService {
       throw new ForbiddenException('Only planners can create treatment plans.');
     }
 
+    // ── Treatment-fee gate ────────────────────────────────────────
+    // The doctor must pay the professional/clinical fee BEFORE the
+    // admin starts the treatment plan. We look up the configured
+    // default — if the tenant has set it > 0 and the order's
+    // `treatmentFeePaidAt` is still null, refuse to create.
+    //
+    // Tenants who never configured a fee (=0) keep the legacy flow:
+    // the gate is bypassed entirely so this change is non-breaking
+    // for installations that haven't opted into the new policy.
+    //
+    // Direct prisma query (vs. injecting the settings service) keeps
+    // this module free of a cross-module dependency just for a single
+    // numeric read on the singleton row.
+    const orderRecord = await this.prisma.dentalOrder.findUnique({
+      where: { id: orderId },
+      select: { treatmentFeePaidAt: true },
+    });
+    if (!orderRecord?.treatmentFeePaidAt) {
+      const settings = await this.prisma.companyBillingSettings.findFirst({
+        where: { isActive: true },
+        select: { defaultTreatmentFee: true },
+      });
+      const fee = Number(settings?.defaultTreatmentFee ?? 0);
+      if (fee > 0) {
+        throw new BadRequestException(
+          'Treatment fee has not been paid yet. The doctor must pay the professional fee before the treatment plan can be sent.',
+        );
+      }
+    }
+
     // Block creation once a plan is already approved unless an admin
     // explicitly reopens the order (admin can also force a new plan).
     const approved = await this.prisma.treatmentPlan.findFirst({

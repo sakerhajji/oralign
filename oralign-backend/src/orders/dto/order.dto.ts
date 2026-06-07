@@ -552,6 +552,10 @@ export class OrderResponseDto {
   updatedAt!: Date;
   @ApiProperty({ required: false })
   submittedAt?: Date;
+  @ApiProperty({ required: false, description: 'When the treatment fee was marked paid; gates treatment-plan creation.' })
+  treatmentFeePaidAt?: Date;
+  @ApiProperty({ required: false, description: 'Snapshot of treatment fee amount at payment time.' })
+  treatmentFeeAmount?: number;
 
   // ── Notification badges shown in the orders list ───────────────────────────
   // Computed server-side so the table doesn't have to issue per-row calls to

@@ -4,6 +4,7 @@ export * from './use-dentist-profiles';
 export * from './use-working-hours';
 export * from './use-patients';
 export * from './use-orders';
+export * from './use-company-billing';
 export * from './use-account';
 export * from './use-onboarding';
 export * from './use-packs';

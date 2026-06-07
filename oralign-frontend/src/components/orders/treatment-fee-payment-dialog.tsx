@@ -204,48 +204,56 @@ export function TreatmentFeePaymentDialog({
           </span>
         </div>
 
-        {/* Step 1 — method picker */}
-        <div className="space-y-2">
-          <p className="text-sm font-medium">Payment method</p>
-          <div className="grid gap-2">
-            {methods.map((m) => {
-              const Icon = m.icon;
-              const isSelected = selected === m.key;
-              return (
-                <button
-                  key={m.key}
-                  type="button"
-                  disabled={busy}
-                  onClick={() => setSelected(m.key)}
-                  className={cn(
-                    'flex items-start gap-3 rounded-lg border bg-card p-3 text-left transition',
-                    'hover:border-primary/70',
-                    'disabled:cursor-not-allowed disabled:opacity-60',
-                    isSelected && 'border-primary bg-primary/5 ring-2 ring-primary/20',
-                  )}
-                >
-                  <span
+        {/*
+          Step 1 — payment method.
+
+          Two states:
+          • No selection → full description tiles so the doctor learns
+            what each method does (most users only pick once).
+          • A method picked → collapse to a compact strip ("Bank
+            transfer ✓  [Change]") so the bank-instructions + receipt
+            upload below get the vertical real estate they need on
+            mobile. Hitting Change re-renders the full picker.
+         */}
+        {selected ? (
+          <SelectedMethodStrip
+            method={METHODS.find((m) => m.key === selected)!}
+            disabled={busy}
+            onChange={() => setSelected(null)}
+          />
+        ) : (
+          <div className="space-y-2">
+            <p className="text-sm font-medium">Payment method</p>
+            <div className="grid gap-2">
+              {methods.map((m) => {
+                const Icon = m.icon;
+                return (
+                  <button
+                    key={m.key}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => setSelected(m.key)}
                     className={cn(
-                      'grid h-9 w-9 shrink-0 place-items-center rounded-full',
-                      isSelected ? 'bg-primary text-white' : 'bg-muted text-foreground',
+                      'flex items-start gap-3 rounded-lg border bg-card p-3 text-left transition',
+                      'hover:border-primary/70',
+                      'disabled:cursor-not-allowed disabled:opacity-60',
                     )}
                   >
-                    <Icon className="h-4 w-4" />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold">{m.label}</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {m.description}
-                    </p>
-                  </div>
-                  {isSelected && (
-                    <CheckCircle2 className="mt-1 h-4 w-4 shrink-0 text-primary" />
-                  )}
-                </button>
-              );
-            })}
+                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-muted text-foreground">
+                      <Icon className="h-4 w-4" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold">{m.label}</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {m.description}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
+        )}
 
         {/*
           Step 2 (bank transfer only) — show the clinic's bank account
@@ -415,26 +423,30 @@ function BankTransferInstructions({
       <CardContent className="space-y-3 pt-4">
         <div className="flex items-start gap-2">
           <Landmark className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-          <div className="flex-1">
+          <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold">
               Where to send the money
             </p>
-            <p className="text-xs text-muted-foreground">
-              Use these details in your bank app. Add the payment
-              reference below so we can match the wire to your order.
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Copy each field into your bank app. Include the payment
+              reference so we can match the wire to your order.
             </p>
           </div>
         </div>
 
-        <div className="space-y-1.5 rounded-lg border bg-muted/30 p-3">
+        {/*
+          Bank-account block. Each row is a self-contained
+          label/value/copy unit that lays out flat when the value is
+          short and stacks the value below the label when the value
+          is long (IBAN / RIB / SWIFT). `break-all` keeps long mono
+          strings inside the card no matter the dialog width.
+         */}
+        <div className="divide-y rounded-lg border bg-muted/30">
           {beneficiary && (
             <CopyableRow label="Beneficiary" value={beneficiary} />
           )}
           {beneficiaryAddress && (
-            <CopyableRow
-              label="Beneficiary address"
-              value={beneficiaryAddress}
-            />
+            <CopyableRow label="Address" value={beneficiaryAddress} />
           )}
           {bankDetails.bankName && (
             <CopyableRow label="Bank" value={bankDetails.bankName} />
@@ -446,11 +458,7 @@ function BankTransferInstructions({
             />
           )}
           {bankDetails.iban && (
-            <CopyableRow
-              label="IBAN"
-              value={bankDetails.iban}
-              mono
-            />
+            <CopyableRow label="IBAN" value={bankDetails.iban} mono />
           )}
           {bankDetails.rib && (
             <CopyableRow label="RIB" value={bankDetails.rib} mono />
@@ -464,33 +472,28 @@ function BankTransferInstructions({
           )}
         </div>
 
-        {/* Pay-to + reference call-out — these two are the most
-            commonly fat-fingered fields, so we give them a visually
-            distinct panel with extra contrast. */}
+        {/*
+          The two fields most commonly fat-fingered: amount + order
+          code as wire reference. We give them their own primary-tinted
+          panel with the copy button on the SAME LINE as the label, and
+          the value on its own row beneath at full card width — that
+          way a long order code (e.g. "Ahlem_r9i9_20260607-02") wraps
+          cleanly instead of overflowing the cell.
+         */}
         <div className="grid gap-2 sm:grid-cols-2">
-          <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-primary/80">
-              Amount to transfer
-            </p>
-            <p className="mt-1 text-base font-bold tabular-nums text-primary">
-              {amount} {currency}
-            </p>
-          </div>
-          <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-primary/80">
-              Payment reference
-            </p>
-            <div className="mt-1 flex items-center justify-between gap-2">
-              <p className="font-mono text-sm font-bold text-primary">
-                {paymentReference}
-              </p>
-              <CopyButton
-                value={paymentReference}
-                successLabel="Reference copied"
-                size="sm"
-              />
-            </div>
-          </div>
+          <HighlightCard
+            label="Amount to transfer"
+            value={`${amount} ${currency}`}
+            // Money goes one step bigger than the reference — eyes
+            // should land here first when scanning the panel.
+            valueClassName="text-base tabular-nums"
+          />
+          <HighlightCard
+            label="Payment reference"
+            value={paymentReference}
+            valueClassName="font-mono break-all"
+            copyable
+          />
         </div>
       </CardContent>
     </Card>
@@ -498,10 +501,102 @@ function BankTransferInstructions({
 }
 
 /**
- * One row inside the bank-details block: a left-aligned label, a
- * truncating-but-selectable value, and a tight copy button. `mono`
- * switches the value to a monospaced font so digits in IBAN/RIB/SWIFT
- * line up.
+ * Compact "selected method" strip. Replaces the full picker once the
+ * user has chosen a method so the dialog body can give vertical real
+ * estate to the bank-instructions + receipt-upload steps. Hitting
+ * Change re-renders the full picker.
+ */
+function SelectedMethodStrip({
+  method,
+  disabled,
+  onChange,
+}: {
+  method: MethodConfig;
+  disabled?: boolean;
+  onChange: () => void;
+}) {
+  const Icon = method.icon;
+  return (
+    <div className="flex items-center gap-3 rounded-lg border border-primary bg-primary/5 px-3 py-2 ring-2 ring-primary/10">
+      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary text-white">
+        <Icon className="h-4 w-4" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="flex items-center gap-1.5 text-sm font-semibold">
+          {method.label}
+          <CheckCircle2 className="h-3.5 w-3.5 text-primary" />
+        </p>
+        <p className="truncate text-[11px] text-muted-foreground">
+          {method.description}
+        </p>
+      </div>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        disabled={disabled}
+        onClick={onChange}
+        className="shrink-0 text-xs"
+      >
+        Change
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * Primary-tinted call-out card for the two critical fields (amount +
+ * payment reference). The label sits on its own row with an optional
+ * copy button beside it, and the value lives on a second row at full
+ * card width — long values get `break-all` so they wrap inside the
+ * card instead of overflowing.
+ */
+function HighlightCard({
+  label,
+  value,
+  valueClassName,
+  copyable,
+}: {
+  label: string;
+  value: string;
+  valueClassName?: string;
+  copyable?: boolean;
+}) {
+  return (
+    <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-primary/80">
+          {label}
+        </p>
+        {copyable && (
+          <CopyButton value={value} successLabel={`${label} copied`} />
+        )}
+      </div>
+      <p
+        className={cn(
+          'mt-1 text-sm font-bold leading-snug text-primary',
+          valueClassName,
+        )}
+      >
+        {value}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * One row inside the bank-details block.
+ *
+ * Layout shape — never overflows, regardless of value length:
+ *   ┌────────────────────────────────┬──────┐
+ *   │ LABEL (uppercase, muted)       │  📋  │
+ *   │ Value (full width, break-all)  │      │
+ *   └────────────────────────────────┴──────┘
+ *
+ * The label + copy sit on the top line so the copy target stays
+ * reachable even when the value wraps onto multiple lines. `mono`
+ * switches the value to a monospaced font so digits in IBAN / RIB /
+ * SWIFT line up.
  */
 function CopyableRow({
   label,
@@ -513,14 +608,19 @@ function CopyableRow({
   mono?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 py-1">
+    <div className="flex items-start gap-2 px-3 py-2.5">
       <div className="min-w-0 flex-1">
         <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
           {label}
         </p>
         <p
           className={cn(
-            'truncate text-sm text-foreground',
+            // `break-all` is the right call for IBAN/RIB/SWIFT: those
+            // are atomic strings (no spaces) that would otherwise
+            // overflow the parent. For regular labelled values
+            // (Beneficiary, Address) the same rule is harmless —
+            // browsers only break when the line genuinely can't fit.
+            'mt-0.5 break-all text-sm leading-snug text-foreground',
             mono && 'font-mono tracking-tight',
           )}
           title={value}
@@ -586,18 +686,22 @@ function CopyButton({
       type="button"
       variant="ghost"
       size={size === 'icon' ? 'icon' : 'sm'}
+      // Sized for touch: icon = 36 × 36 px (square, hits the iOS
+      // minimum at the corners and is comfortable on Android too).
+      // Text + icon variant stays slim so it fits next to a label
+      // inside the highlight cards.
       className={cn(
         'shrink-0',
-        size === 'icon' && 'h-7 w-7',
-        size === 'sm' && 'h-7 gap-1 px-2',
+        size === 'icon' && 'h-9 w-9',
+        size === 'sm' && 'h-8 gap-1 px-2',
       )}
       onClick={handleCopy}
       aria-label={`Copy ${successLabel.replace(' copied', '')}`}
     >
       {justCopied ? (
-        <Check className="h-3.5 w-3.5 text-emerald-600" />
+        <Check className="h-4 w-4 text-emerald-600" />
       ) : (
-        <Copy className="h-3.5 w-3.5" />
+        <Copy className="h-4 w-4" />
       )}
       {size === 'sm' && (
         <span className="text-xs">

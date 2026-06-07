@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -11,11 +12,14 @@ import {
   Put,
   Query,
   Res,
+  UploadedFile,
   UploadedFiles,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { FilesInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import { join } from 'path';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -27,7 +31,12 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
-import { OrderFileCategory, OrderStatus, UserRole } from '@prisma/client';
+import {
+  OrderFileCategory,
+  OrderStatus,
+  PaymentMethod,
+  UserRole,
+} from '@prisma/client';
 import { Response } from 'express';
 import {
   CurrentUser,
@@ -204,34 +213,110 @@ export class OrderController {
   }
 
   /**
-   * Mark the order's professional/clinical (treatment) fee as paid.
+   * Pay the order's treatment fee. Routes by `body.method`:
    *
-   * Either side can call:
-   *   • Doctor — paying their own order's fee
-   *   • Admin  — recording cash / bank-transfer collection
-   *
-   * Stamps `treatmentFeePaidAt = now()` and snapshots the amount.
-   * Without this, the treatment-plan creation flow refuses to start
-   * (gate enforced inside TreatmentPlanService.create).
-   *
-   * Body `amount` is the snapshot value — usually the configured
-   * `CompanyBillingSettings.defaultTreatmentFee` echoed back so the
-   * server doesn't have to re-read the setting under contention.
+   *   • `card`          → instant (mock collector); stamps paidAt
+   *   • `cash`          → admin-only; stamps paidAt
+   *   • `bank_transfer` → marks status=awaiting_confirmation; the
+   *     doctor still owes a proof upload via /treatment-fee/proof,
+   *     and the admin must confirm via /treatment-fee/confirm.
    */
-  @Post(':id/treatment-fee/mark-paid')
+  @Post(':id/treatment-fee/pay')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Mark the treatment fee as paid. Unblocks treatment-plan creation.',
+      'Pay the treatment fee. Card/Cash → instant. Bank transfer → records intent; needs proof + admin confirm.',
   })
   @ApiParam({ name: 'id', type: String })
   @ApiResponse({ status: 200, type: OrderResponseDto })
-  async markTreatmentFeePaid(
+  async payTreatmentFee(
     @Param('id') id: string,
+    @Body() body: { method: PaymentMethod; amount?: number },
+    @CurrentUser() user: JwtPayload,
+  ): Promise<OrderResponseDto> {
+    return this.orderService.payTreatmentFee(
+      id,
+      body.method,
+      body.amount ?? 0,
+      { userId: user.sub, role: user.role },
+    );
+  }
+
+  /**
+   * Upload the bank-transfer receipt for the treatment fee. Sets the
+   * payment lifecycle to `awaiting_confirmation`. Multer handles the
+   * file; we store the relative path under uploads/.
+   */
+  @Post(':id/treatment-fee/proof')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Upload a bank-transfer receipt for the treatment fee.',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        proof: { type: 'string', format: 'binary' },
+        amount: { type: 'number' },
+      },
+    },
+  })
+  @UseInterceptors(
+    FileInterceptor('proof', {
+      limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB cap on receipts
+      storage: diskStorage({
+        destination: join(process.cwd(), 'uploads', 'treatment-fee-proofs'),
+        filename: (_req, file, cb) =>
+          cb(
+            null,
+            `${Date.now()}-${file.originalname.replace(/[^\w.-]+/g, '_')}`,
+          ),
+      }),
+    }),
+  )
+  async uploadTreatmentFeeProof(
+    @Param('id') id: string,
+    @UploadedFile() proof: Express.Multer.File,
     @Body() body: { amount?: number },
     @CurrentUser() user: JwtPayload,
   ): Promise<OrderResponseDto> {
-    return this.orderService.markTreatmentFeePaid(id, body.amount ?? 0, {
+    if (!proof) {
+      throw new BadRequestException(
+        'A bank-transfer receipt file is required.',
+      );
+    }
+    // Store relative to uploads/ so the resolver in the frontend
+    // matches every other media path.
+    const relativePath = `/uploads/treatment-fee-proofs/${proof.filename}`;
+    return this.orderService.uploadTreatmentFeeProof(
+      id,
+      relativePath,
+      body.amount ?? 0,
+      { userId: user.sub, role: user.role },
+    );
+  }
+
+  /**
+   * Admin confirms a bank-transfer payment. Flips the payment status
+   * to `success` and stamps `treatmentFeePaidAt`, which unlocks
+   * treatment-plan creation. Cash + card don't need this endpoint —
+   * they stamp `treatmentFeePaidAt` directly.
+   */
+  @Post(':id/treatment-fee/confirm')
+  @Roles(UserRole.admin, UserRole.super_admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Admin confirms a pending bank-transfer treatment-fee payment.',
+  })
+  @ApiParam({ name: 'id', type: String })
+  async confirmTreatmentFeePayment(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<OrderResponseDto> {
+    return this.orderService.confirmTreatmentFeePayment(id, {
       userId: user.sub,
       role: user.role,
     });

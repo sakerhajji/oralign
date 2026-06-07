@@ -181,27 +181,72 @@ export function useSubmitOrder(): UseMutationResult<DentalOrder, Error, string> 
 }
 
 /**
- * Mark the treatment / professional fee as paid. Used both by:
- *   • the doctor — paying their own order's fee
- *   • the admin  — recording cash / bank-transfer collection
- *
- * Without this, the backend refuses to start a treatment plan
- * whenever the company has a non-zero defaultTreatmentFee.
+ * Pay the treatment fee on an order. Routes by method:
+ *   • card / cash         → instant success (admin only for cash)
+ *   • bank_transfer       → records intent; doctor must still upload
+ *     a receipt with `useUploadTreatmentFeeProof` and an admin must
+ *     confirm with `useConfirmTreatmentFeePayment`.
  */
-export function useMarkTreatmentFeePaid(): UseMutationResult<
+export function usePayTreatmentFee(): UseMutationResult<
   DentalOrder,
   Error,
-  { id: string; amount: number }
+  { id: string; method: 'card' | 'cash' | 'bank_transfer'; amount: number }
 > {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, amount }) =>
-      ordersService.markTreatmentFeePaid(id, amount),
-    onSuccess: (order, { id }) => {
+    mutationFn: ({ id, method, amount }) =>
+      ordersService.payTreatmentFee(id, method, amount),
+    onSuccess: (order, { id, method }) => {
       syncOrderCaches(queryClient, order);
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
-      toast.success('Treatment fee marked as paid');
+      if (method === 'bank_transfer') {
+        toast.success(
+          'Bank-transfer payment recorded. Upload your receipt next.',
+        );
+      } else {
+        toast.success('Treatment fee paid');
+      }
+    },
+    onError: (error) => toast.error(extractApiErrorMessage(error)),
+  });
+}
+
+/** Upload the bank-transfer receipt for the treatment fee. */
+export function useUploadTreatmentFeeProof(): UseMutationResult<
+  DentalOrder,
+  Error,
+  { id: string; proof: File; amount: number }
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, proof, amount }) =>
+      ordersService.uploadTreatmentFeeProof(id, proof, amount),
+    onSuccess: (order, { id }) => {
+      syncOrderCaches(queryClient, order);
+      queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
+      toast.success(
+        'Receipt uploaded. An admin will confirm once funds land.',
+      );
+    },
+    onError: (error) => toast.error(extractApiErrorMessage(error)),
+  });
+}
+
+/** Admin confirms a pending bank-transfer treatment-fee payment. */
+export function useConfirmTreatmentFeePayment(): UseMutationResult<
+  DentalOrder,
+  Error,
+  string
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => ordersService.confirmTreatmentFeePayment(id),
+    onSuccess: (order, id) => {
+      syncOrderCaches(queryClient, order);
+      queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
+      toast.success('Bank transfer confirmed');
     },
     onError: (error) => toast.error(extractApiErrorMessage(error)),
   });

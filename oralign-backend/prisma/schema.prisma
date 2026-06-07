@@ -407,6 +407,26 @@ model DentalOrder {
   treatmentFeePaidAt            DateTime?
   treatmentFeeAmount            Decimal?                  @db.Decimal(12, 3)
 
+  // Payment method + status: reuse the same PaymentMethod and
+  // PaymentRecordStatus enums the installment Payment table uses, so
+  // admin payment-queue tooling can read both surfaces identically.
+  // Lifecycle:
+  //   • CARD   → set to (card, success) the moment the doctor "pays"
+  //              and `treatmentFeePaidAt = now()`. Card collection
+  //              is instant in the existing mock flow.
+  //   • CASH   → admin-only path; (cash, success) recorded by admin
+  //              with `treatmentFeePaidAt = now()`.
+  //   • BANK_TRANSFER →
+  //              doctor uploads proof → (bank_transfer,
+  //              awaiting_confirmation) + proofPath set, but
+  //              `treatmentFeePaidAt` stays NULL. Admin reviews the
+  //              proof and confirms → status flips to `success` and
+  //              `treatmentFeePaidAt` stamped.
+  treatmentFeePaymentMethod     PaymentMethod?
+  treatmentFeePaymentStatus     PaymentRecordStatus?
+  // Relative path under uploads/ for the bank-transfer receipt.
+  treatmentFeeProofPath         String?
+
   // Approved treatment plan reference — used by the order's lifecycle.
   approvedTreatmentPlanId       String?
 

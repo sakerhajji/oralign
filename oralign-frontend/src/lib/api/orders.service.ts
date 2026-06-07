@@ -74,18 +74,52 @@ export const ordersService = {
   },
 
   /**
-   * Mark the order's professional/treatment fee as paid. Stamps
-   * `treatmentFeePaidAt = now()` on the order and snapshots the
-   * amount. Without this, the backend refuses to start a treatment
-   * plan whenever the company has a non-zero `defaultTreatmentFee`.
+   * Pay the treatment fee on an order. The backend routes by method:
+   *   • card / cash         → instant success, stamps treatmentFeePaidAt
+   *   • bank_transfer       → records `awaiting_confirmation`; the
+   *     caller should ALSO upload a receipt with `uploadTreatmentFeeProof`
+   *     and an admin will then call `confirmTreatmentFeePayment` once
+   *     the funds land.
    */
-  markTreatmentFeePaid: async (
+  payTreatmentFee: async (
     id: string,
+    method: 'card' | 'cash' | 'bank_transfer',
     amount: number,
   ): Promise<DentalOrder> => {
     const response = await apiClient.post<DentalOrder>(
-      `/orders/${id}/treatment-fee/mark-paid`,
-      { amount },
+      `/orders/${id}/treatment-fee/pay`,
+      { method, amount },
+    );
+    return response.data;
+  },
+
+  /**
+   * Upload the bank-transfer receipt for the treatment fee. The
+   * backend stores the file and sets the lifecycle to
+   * `awaiting_confirmation`.
+   */
+  uploadTreatmentFeeProof: async (
+    id: string,
+    proof: File,
+    amount: number,
+  ): Promise<DentalOrder> => {
+    const form = new FormData();
+    form.append('proof', proof);
+    form.append('amount', String(amount));
+    const response = await apiClient.post<DentalOrder>(
+      `/orders/${id}/treatment-fee/proof`,
+      form,
+    );
+    return response.data;
+  },
+
+  /**
+   * Admin endpoint — confirms a pending bank-transfer payment.
+   * Stamps `treatmentFeePaidAt`, which unlocks treatment-plan creation.
+   */
+  confirmTreatmentFeePayment: async (id: string): Promise<DentalOrder> => {
+    const response = await apiClient.post<DentalOrder>(
+      `/orders/${id}/treatment-fee/confirm`,
     );
     return response.data;
   },

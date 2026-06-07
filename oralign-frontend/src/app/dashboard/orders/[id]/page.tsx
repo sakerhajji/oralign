@@ -46,13 +46,14 @@ import { FileText, Plus, Sparkles } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   useCompanyBilling,
+  useConfirmTreatmentFeePayment,
   useDeleteOrder,
-  useMarkTreatmentFeePaid,
   useOrder,
   usePatient,
   usePermanentDeleteOrder,
 } from '@/lib/hooks';
 import { useQuotationForOrder } from '@/lib/hooks/use-quotations';
+import { TreatmentFeePaymentDialog } from '@/components/orders/treatment-fee-payment-dialog';
 import { useAuth } from '@/lib/providers/auth-provider';
 import {
   Gender,
@@ -903,15 +904,22 @@ function TreatmentFeeGateBanner({
   canActAsDoctor: boolean;
 }) {
   const { data: settings } = useCompanyBilling();
-  const markPaid = useMarkTreatmentFeePaid();
+  const confirmBT = useConfirmTreatmentFeePayment();
+  const [payOpen, setPayOpen] = useState(false);
 
   const fee = settings?.defaultTreatmentFee ?? 0;
   const currency = settings?.defaultCurrency ?? 'TND';
-  // Don't fire on drafts — fee semantics don't apply until submission.
   const isSubmitted = order.status !== OrderStatus.DRAFT;
-  // Tenants without a treatment fee → no banner.
   if (!isSubmitted || fee <= 0) return null;
+
   const isPaid = !!order.treatmentFeePaidAt;
+  // The three intermediate states we care about:
+  //   • awaiting_confirmation → bank-transfer proof uploaded, admin
+  //     hasn't confirmed yet. Show a different banner that lets the
+  //     admin confirm one tap (or surfaces "waiting for admin" to
+  //     the doctor).
+  const awaitingConfirm =
+    !isPaid && order.treatmentFeePaymentStatus === 'awaiting_confirmation';
 
   if (isPaid) {
     return (
@@ -922,9 +930,11 @@ function TreatmentFeeGateBanner({
               Treatment fee paid
             </p>
             <p className="text-xs text-emerald-800/80">
-              Amount: {order.treatmentFeeAmount ?? fee} {currency}
+              {order.treatmentFeeAmount ?? fee} {currency}
+              {order.treatmentFeePaymentMethod &&
+                ` · via ${order.treatmentFeePaymentMethod.replace('_', ' ')}`}
               {order.treatmentFeePaidAt &&
-                ` · Paid ${format(new Date(order.treatmentFeePaidAt), 'MMM d, yyyy')}`}
+                ` · ${format(new Date(order.treatmentFeePaidAt), 'MMM d, yyyy')}`}
               . The treatment plan can now be sent.
             </p>
           </div>
@@ -933,33 +943,69 @@ function TreatmentFeeGateBanner({
     );
   }
 
-  const canAct = canActAsAdmin || canActAsDoctor;
-  const actionLabel = canActAsAdmin ? 'Mark as paid' : 'Pay treatment fee';
+  if (awaitingConfirm) {
+    return (
+      <Card className="border-blue-200 bg-blue-50">
+        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-semibold text-blue-900">
+              Bank transfer awaiting confirmation — {order.treatmentFeeAmount ?? fee}{' '}
+              {currency}
+            </p>
+            <p className="text-xs text-blue-800/80">
+              {canActAsAdmin
+                ? 'A receipt was uploaded by the doctor. Confirm once the funds land in the account.'
+                : 'Your receipt has been received. An admin will confirm the payment shortly.'}
+            </p>
+          </div>
+          {canActAsAdmin && (
+            <Button
+              type="button"
+              size="sm"
+              className="bg-blue-600 hover:bg-blue-700"
+              disabled={confirmBT.isPending}
+              onClick={() => confirmBT.mutate(order.id)}
+            >
+              {confirmBT.isPending ? 'Confirming…' : 'Confirm payment'}
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+    );
+  }
 
+  const canAct = canActAsAdmin || canActAsDoctor;
   return (
-    <Card className="border-amber-300 bg-amber-50">
-      <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-sm font-semibold text-amber-900">
-            Awaiting treatment fee — {fee} {currency}
-          </p>
-          <p className="text-xs text-amber-800/80">
-            The professional fee must be settled before the admin can send
-            the treatment plan. This is a one-time payment per order.
-          </p>
-        </div>
-        {canAct && (
-          <Button
-            type="button"
-            size="sm"
-            className="bg-amber-600 hover:bg-amber-700"
-            disabled={markPaid.isPending}
-            onClick={() => markPaid.mutate({ id: order.id, amount: fee })}
-          >
-            {markPaid.isPending ? 'Saving…' : actionLabel}
-          </Button>
-        )}
-      </CardContent>
-    </Card>
+    <>
+      <Card className="border-amber-300 bg-amber-50">
+        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-semibold text-amber-900">
+              Awaiting treatment fee — {fee} {currency}
+            </p>
+            <p className="text-xs text-amber-800/80">
+              The professional fee must be settled before the admin can send
+              the treatment plan. One-time payment per order.
+            </p>
+          </div>
+          {canAct && (
+            <Button
+              type="button"
+              size="sm"
+              className="bg-amber-600 hover:bg-amber-700"
+              onClick={() => setPayOpen(true)}
+            >
+              Pay treatment fee
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+      <TreatmentFeePaymentDialog
+        open={payOpen}
+        onOpenChange={setPayOpen}
+        order={order}
+        isAdmin={canActAsAdmin}
+      />
+    </>
   );
 }

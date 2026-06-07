@@ -556,6 +556,12 @@ export class OrderResponseDto {
   treatmentFeePaidAt?: Date;
   @ApiProperty({ required: false, description: 'Snapshot of treatment fee amount at payment time.' })
   treatmentFeeAmount?: number;
+  @ApiProperty({ required: false, description: 'Treatment fee payment method (reuses installment Payment enum).' })
+  treatmentFeePaymentMethod?: string;
+  @ApiProperty({ required: false, description: 'Treatment fee payment lifecycle status.' })
+  treatmentFeePaymentStatus?: string;
+  @ApiProperty({ required: false, description: 'Relative path to bank-transfer receipt for the treatment fee.' })
+  treatmentFeeProofPath?: string;
 
   // ── Notification badges shown in the orders list ───────────────────────────
   // Computed server-side so the table doesn't have to issue per-row calls to

@@ -55,6 +55,7 @@ const OdontogramSelector = dynamic(
 import {
   ClinicalOrderFiles,
 } from '@/components/orders/order-file-upload';
+import { TreatmentFeePaymentDialog } from '@/components/orders/treatment-fee-payment-dialog';
 import { ClinicalConditionsField } from '@/components/patients/clinical-conditions-field';
 import { useAuth } from '@/lib/providers/auth-provider';
 import { patientsService, usersService } from '@/lib/api';
@@ -197,6 +198,11 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
   const [step, setStep] = useState(0);
   const [patientMode, setPatientMode] = useState<PatientMode>('existing');
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  // After Submit succeeds we open the treatment-fee dialog instead of
+  // navigating away immediately. The dialog handles the pay flow and
+  // pushes the user to /dashboard/orders/[id] on success/skip.
+  const [payDialogOpen, setPayDialogOpen] = useState(false);
+  const [submittedOrderId, setSubmittedOrderId] = useState<string | null>(null);
   const [savedOrder, setSavedOrder] = useState<DentalOrder | undefined>(
     initialOrder,
   );
@@ -682,8 +688,16 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
                 if (!valid) return;
                 const order = await saveDraft();
                 if (!order) return;
-                await submitOrder.mutateAsync(order.id);
-                router.push(`/dashboard/orders/${order.id}`);
+                const submitted = await submitOrder.mutateAsync(order.id);
+                // If the order is already paid (admin pre-paid an
+                // older order, or no fee is configured) skip the
+                // dialog and go straight to the detail page.
+                if (submitted.treatmentFeePaidAt) {
+                  router.push(`/dashboard/orders/${order.id}`);
+                  return;
+                }
+                setSubmittedOrderId(order.id);
+                setPayDialogOpen(true);
               }}
             >
               <Send className="mr-2 h-4 w-4" />
@@ -692,6 +706,28 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
           )}
         </div>
       </footer>
+
+      {/* Treatment fee payment dialog — shown after Submit succeeds.
+          The doctor (or admin) picks card / bank transfer / cash, the
+          backend stamps the right lifecycle status, and the dialog
+          navigates to the order detail page on success. Closing
+          without paying STILL navigates (the gate banner on the detail
+          page picks up the conversation). */}
+      {submittedOrderId && (
+        <TreatmentFeePaymentDialog
+          open={payDialogOpen}
+          onOpenChange={(next) => {
+            setPayDialogOpen(next);
+            if (!next) router.push(`/dashboard/orders/${submittedOrderId}`);
+          }}
+          order={savedOrder ?? ({ id: submittedOrderId } as DentalOrder)}
+          isAdmin={isAdmin}
+          onPaid={() => {
+            // No-op — the dialog will close itself which triggers
+            // the router push above.
+          }}
+        />
+      )}
     </div>
   );
 }

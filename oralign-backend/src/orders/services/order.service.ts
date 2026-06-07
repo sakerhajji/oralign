@@ -3,6 +3,8 @@ import {
   OrderFile,
   OrderFileCategory,
   OrderStatus,
+  PaymentMethod,
+  PaymentRecordStatus,
   Prisma,
   ToothInstructionType,
   UserRole,
@@ -384,19 +386,27 @@ export class OrderService {
   }
 
   /**
-   * Mark the treatment fee as paid on an order.
+   * Pay the order's treatment fee. Routes by payment method, mirroring
+   * the lifecycle of the installment Payment record:
    *
-   * Both the doctor (paying their own order's fee) and an admin
-   * (recording cash / bank transfer on behalf of the doctor) can call
-   * this. The amount is snapshot AT payment time so a later change
-   * to CompanyBillingSettings.defaultTreatmentFee can't rewrite an
-   * already-paid order.
+   *   • CARD          → instant success. The mock card collector
+   *                     stamps `treatmentFeePaidAt = now()`.
+   *   • CASH          → admin-only. Same shape as CARD but only an
+   *                     admin can call (the doctor doesn't see the
+   *                     button in their UI). Stamps `treatmentFeePaidAt`.
+   *   • BANK_TRANSFER → doctor uploads a receipt via
+   *                     `uploadTreatmentFeeProof()`. We record the
+   *                     method + status=awaiting_confirmation but do
+   *                     NOT stamp `treatmentFeePaidAt` — the admin
+   *                     must call `confirmTreatmentFeePayment()` once
+   *                     the funds land.
    *
-   * Idempotent: calling on an already-paid order returns the row
-   * unchanged so a double-click doesn't double-stamp.
+   * Idempotent on already-paid orders (both card + cash branches
+   * return the row unchanged so a double-click is harmless).
    */
-  async markTreatmentFeePaid(
+  async payTreatmentFee(
     id: string,
+    method: PaymentMethod,
     amount: number,
     caller: Caller,
   ): Promise<OrderResponseDto> {
@@ -404,28 +414,128 @@ export class OrderService {
     const current = await this.findAccessibleOrder(id, caller);
 
     if (current.treatmentFeePaidAt) {
-      // Already paid — return as-is. Avoids accidental double-stamp
-      // when the admin double-clicks "Mark as paid".
       return this.mapToDto(current);
     }
-
     if (amount < 0) {
       throw new BadRequestException('Treatment fee amount must be ≥ 0.');
     }
 
+    // Cash collection is an in-clinic flow — only an admin records it.
+    if (
+      method === PaymentMethod.cash &&
+      !ADMIN_ROLES.includes(caller.role)
+    ) {
+      throw new ForbiddenException(
+        'Cash payment can only be recorded by an admin.',
+      );
+    }
+
+    // Bank transfer takes a dedicated path — admin confirmation gates
+    // the actual `paidAt`. Direct callers should use uploadProof + confirm.
+    if (method === PaymentMethod.bank_transfer) {
+      const order = await this.prisma.dentalOrder.update({
+        where: { id },
+        data: {
+          treatmentFeePaymentMethod: method,
+          treatmentFeePaymentStatus: PaymentRecordStatus.awaiting_confirmation,
+          treatmentFeeAmount: amount,
+        },
+        include: this.includeOrder,
+      });
+      this.logger.log(
+        `Treatment fee bank-transfer recorded (awaiting admin confirmation) for order ${id} by user ${caller.userId}`,
+      );
+      return this.mapToDto(order);
+    }
+
+    // CARD or CASH — instant success.
     const order = await this.prisma.dentalOrder.update({
       where: { id },
       data: {
+        treatmentFeePaymentMethod: method,
+        treatmentFeePaymentStatus: PaymentRecordStatus.success,
         treatmentFeePaidAt: new Date(),
         treatmentFeeAmount: amount,
       },
       include: this.includeOrder,
     });
-
     this.logger.log(
-      `Treatment fee paid for order ${id} by user ${caller.userId} — amount ${amount}`,
+      `Treatment fee paid (${method}) for order ${id} by user ${caller.userId} — amount ${amount}`,
     );
+    return this.mapToDto(order);
+  }
 
+  /**
+   * Attach a bank-transfer receipt to an order's treatment fee. Called
+   * by the doctor as part of the BANK_TRANSFER flow. Also bumps the
+   * payment lifecycle to `awaiting_confirmation` if it isn't already.
+   */
+  async uploadTreatmentFeeProof(
+    id: string,
+    relativePath: string,
+    amount: number,
+    caller: Caller,
+  ): Promise<OrderResponseDto> {
+    this.ensureCanCreateOrModify(caller);
+    const current = await this.findAccessibleOrder(id, caller);
+    if (current.treatmentFeePaidAt) {
+      throw new BadRequestException(
+        'Treatment fee is already paid — receipt upload not allowed.',
+      );
+    }
+    const order = await this.prisma.dentalOrder.update({
+      where: { id },
+      data: {
+        treatmentFeePaymentMethod: PaymentMethod.bank_transfer,
+        treatmentFeePaymentStatus: PaymentRecordStatus.awaiting_confirmation,
+        treatmentFeeProofPath: relativePath,
+        treatmentFeeAmount: amount,
+      },
+      include: this.includeOrder,
+    });
+    this.logger.log(
+      `Treatment fee bank-transfer proof uploaded for order ${id} by user ${caller.userId}`,
+    );
+    return this.mapToDto(order);
+  }
+
+  /**
+   * Admin confirms a bank-transfer payment. Flips the status to
+   * `success` and stamps `treatmentFeePaidAt`, which unlocks the
+   * treatment-plan gate in `TreatmentPlanService.create()`.
+   */
+  async confirmTreatmentFeePayment(
+    id: string,
+    caller: Caller,
+  ): Promise<OrderResponseDto> {
+    if (!ADMIN_ROLES.includes(caller.role)) {
+      throw new ForbiddenException(
+        'Only admins can confirm a bank-transfer payment.',
+      );
+    }
+    const current = await this.findAccessibleOrder(id, caller);
+    if (current.treatmentFeePaidAt) {
+      return this.mapToDto(current);
+    }
+    if (
+      current.treatmentFeePaymentStatus !==
+      PaymentRecordStatus.awaiting_confirmation
+    ) {
+      throw new BadRequestException(
+        'No bank-transfer payment is awaiting confirmation on this order.',
+      );
+    }
+    const order = await this.prisma.dentalOrder.update({
+      where: { id },
+      data: {
+        treatmentFeePaymentStatus: PaymentRecordStatus.success,
+        treatmentFeePaidAt: new Date(),
+      },
+      include: this.includeOrder,
+    });
+    this.logger.log(
+      `Treatment fee bank-transfer CONFIRMED for order ${id} by admin ${caller.userId}`,
+    );
     return this.mapToDto(order);
   }
 
@@ -1304,6 +1414,9 @@ export class OrderService {
         order.treatmentFeeAmount !== undefined
           ? Number(order.treatmentFeeAmount)
           : undefined,
+      treatmentFeePaymentMethod: order.treatmentFeePaymentMethod ?? undefined,
+      treatmentFeePaymentStatus: order.treatmentFeePaymentStatus ?? undefined,
+      treatmentFeeProofPath: order.treatmentFeeProofPath ?? undefined,
       // Notification fields used by the orders list to render badges
       // ("Awaiting your review", "Approved", "Replanning requested", …).
       latestPlanStatus: order.treatmentPlans?.[0]?.status ?? undefined,

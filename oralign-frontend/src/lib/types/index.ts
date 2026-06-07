@@ -866,6 +866,9 @@ export interface DentalOrder {
   // and the configured default fee is > 0.
   treatmentFeePaidAt?: string;
   treatmentFeeAmount?: number;
+  treatmentFeePaymentMethod?: PaymentMethod;
+  treatmentFeePaymentStatus?: PaymentRecordStatus;
+  treatmentFeeProofPath?: string;
   // ── Notification badges (computed by the backend list endpoint) ───────────
   // `latestPlanStatus` is undefined when no treatment plan has been started.
   latestPlanStatus?: TreatmentPlanStatus;

@@ -1,5 +1,6 @@
 import apiClient from './client';
 import type {
+  BankDetails,
   CompanyBillingSettings,
   UpsertCompanyBillingSettingsDto,
 } from '@/lib/types';
@@ -10,9 +11,24 @@ import type {
  * link from non-admin roles for affordance only — RBAC is enforced by
  * the backend regardless.
  */
+
+/**
+ * Doctor-facing projection of the singleton settings row. Read via
+ * `/company-billing-settings/public-defaults`, callable by dentist +
+ * admin. Includes the bank-transfer details on purpose — they're the
+ * money's destination, so payers need them.
+ *
+ * `bankDetails` is `null` until the admin saves it under
+ * /account/billing-settings, and the backend collapses an empty `{}`
+ * shape to null so the UI doesn't have to guard for blank strings.
+ */
 export interface BillingPublicDefaults {
   defaultTreatmentFee: number;
   defaultCurrency: string;
+  companyName: string | null;
+  companyAddress: string | null;
+  companyCity: string | null;
+  bankDetails: BankDetails | null;
 }
 
 export const companyBillingService = {

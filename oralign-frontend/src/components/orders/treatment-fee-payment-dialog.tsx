@@ -2,14 +2,18 @@
 
 import { useMemo, useState } from 'react';
 import {
+  AlertTriangle,
   Banknote,
+  Check,
   CheckCircle2,
+  Copy,
   CreditCard,
   Landmark,
   Loader2,
   Upload,
   X,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import {
   Dialog,
   DialogContent,
@@ -26,7 +30,7 @@ import {
   usePayTreatmentFee,
   useUploadTreatmentFeeProof,
 } from '@/lib/hooks';
-import type { DentalOrder } from '@/lib/types';
+import type { BankDetails, DentalOrder } from '@/lib/types';
 
 type MethodKey = 'card' | 'bank_transfer' | 'cash';
 
@@ -119,6 +123,14 @@ export function TreatmentFeePaymentDialog({
   const amount =
     defaults?.defaultTreatmentFee ?? order.treatmentFeeAmount ?? 0;
   const currency = defaults?.defaultCurrency ?? 'TND';
+  const bankDetails = defaults?.bankDetails ?? null;
+  const beneficiary = defaults?.companyName ?? null;
+  // City + address rolled into a single beneficiary-address line so
+  // we don't render an empty row when only one of the two is filled.
+  const beneficiaryAddress =
+    [defaults?.companyAddress, defaults?.companyCity]
+      .filter((v): v is string => !!v && v.trim().length > 0)
+      .join(', ') || null;
 
   // Filter methods by role (doctor doesn't see Cash).
   const methods = useMemo(
@@ -174,7 +186,7 @@ export function TreatmentFeePaymentDialog({
         onOpenChange(next);
       }}
     >
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-h-[90vh] max-w-xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Pay treatment fee</DialogTitle>
           <DialogDescription>
@@ -235,14 +247,39 @@ export function TreatmentFeePaymentDialog({
           </div>
         </div>
 
+        {/*
+          Step 2 (bank transfer only) — show the clinic's bank account
+          details so the doctor knows where to wire the money. This is
+          the same data the admin enters under /account/billing-settings;
+          we read it through the doctor-safe public-defaults endpoint so
+          it stays in lockstep with the admin form.
+
+          UX rationale: bank instructions come BEFORE the receipt upload
+          because the doctor needs the IBAN/SWIFT to execute the transfer
+          first; the receipt only exists after that.
+         */}
+        {isBankTransferSelected && (
+          <BankTransferInstructions
+            bankDetails={bankDetails}
+            beneficiary={beneficiary}
+            beneficiaryAddress={beneficiaryAddress}
+            amount={amount}
+            currency={currency}
+            paymentReference={order.orderCode}
+          />
+        )}
+
         {/* Step 2 (bank transfer only) — receipt upload affordance */}
         {isBankTransferSelected && (
           <Card>
             <CardContent className="space-y-3 pt-4">
               <div>
-                <p className="text-sm font-medium">Upload bank-transfer receipt</p>
+                <p className="text-sm font-medium">
+                  Upload bank-transfer receipt
+                </p>
                 <p className="text-xs text-muted-foreground">
-                  Accepted: PDF, JPG, PNG · max 10 MB.
+                  Once the wire is sent, upload the bank&apos;s receipt /
+                  proof. Accepted: PDF, JPG, PNG · max 10 MB.
                 </p>
               </div>
               <label
@@ -314,5 +351,259 @@ export function TreatmentFeePaymentDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Bank-transfer sub-components
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * "Where to send the money" panel. Renders the company's bank-transfer
+ * destination — beneficiary, bank name, IBAN, RIB, SWIFT — each row
+ * carrying a copy-to-clipboard button because the doctor will paste
+ * these values into their bank app. Also surfaces the order code as
+ * the payment reference so the admin can match the wire to the order.
+ *
+ * Falls back to an amber alert when the admin hasn't filled in the
+ * bank details yet, so the user gets a clear next step instead of an
+ * empty card.
+ */
+function BankTransferInstructions({
+  bankDetails,
+  beneficiary,
+  beneficiaryAddress,
+  amount,
+  currency,
+  paymentReference,
+}: {
+  bankDetails: BankDetails | null;
+  beneficiary: string | null;
+  beneficiaryAddress: string | null;
+  amount: number;
+  currency: string;
+  paymentReference: string;
+}) {
+  // Empty-state — admin hasn't configured the bank account yet. We
+  // surface this as a warning rather than silently rendering an empty
+  // card so the doctor knows to contact support before wiring blind.
+  if (!bankDetails) {
+    return (
+      <Card className="border-amber-200 bg-amber-50/50">
+        <CardContent className="flex items-start gap-3 pt-4 text-sm">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+          <div className="space-y-1">
+            <p className="font-medium text-amber-900">
+              Bank account not configured yet
+            </p>
+            <p className="text-xs text-amber-800/90">
+              The clinic admin needs to fill in the bank details under{' '}
+              <span className="font-medium">
+                Account → Billing settings
+              </span>{' '}
+              before bank transfers can be paid this way. Please contact
+              support — or pick Card / Cash instead.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardContent className="space-y-3 pt-4">
+        <div className="flex items-start gap-2">
+          <Landmark className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+          <div className="flex-1">
+            <p className="text-sm font-semibold">
+              Where to send the money
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Use these details in your bank app. Add the payment
+              reference below so we can match the wire to your order.
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-1.5 rounded-lg border bg-muted/30 p-3">
+          {beneficiary && (
+            <CopyableRow label="Beneficiary" value={beneficiary} />
+          )}
+          {beneficiaryAddress && (
+            <CopyableRow
+              label="Beneficiary address"
+              value={beneficiaryAddress}
+            />
+          )}
+          {bankDetails.bankName && (
+            <CopyableRow label="Bank" value={bankDetails.bankName} />
+          )}
+          {bankDetails.accountName && (
+            <CopyableRow
+              label="Account holder"
+              value={bankDetails.accountName}
+            />
+          )}
+          {bankDetails.iban && (
+            <CopyableRow
+              label="IBAN"
+              value={bankDetails.iban}
+              mono
+            />
+          )}
+          {bankDetails.rib && (
+            <CopyableRow label="RIB" value={bankDetails.rib} mono />
+          )}
+          {bankDetails.swift && (
+            <CopyableRow
+              label="SWIFT / BIC"
+              value={bankDetails.swift}
+              mono
+            />
+          )}
+        </div>
+
+        {/* Pay-to + reference call-out — these two are the most
+            commonly fat-fingered fields, so we give them a visually
+            distinct panel with extra contrast. */}
+        <div className="grid gap-2 sm:grid-cols-2">
+          <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-primary/80">
+              Amount to transfer
+            </p>
+            <p className="mt-1 text-base font-bold tabular-nums text-primary">
+              {amount} {currency}
+            </p>
+          </div>
+          <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-primary/80">
+              Payment reference
+            </p>
+            <div className="mt-1 flex items-center justify-between gap-2">
+              <p className="font-mono text-sm font-bold text-primary">
+                {paymentReference}
+              </p>
+              <CopyButton
+                value={paymentReference}
+                successLabel="Reference copied"
+                size="sm"
+              />
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * One row inside the bank-details block: a left-aligned label, a
+ * truncating-but-selectable value, and a tight copy button. `mono`
+ * switches the value to a monospaced font so digits in IBAN/RIB/SWIFT
+ * line up.
+ */
+function CopyableRow({
+  label,
+  value,
+  mono,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-1">
+      <div className="min-w-0 flex-1">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {label}
+        </p>
+        <p
+          className={cn(
+            'truncate text-sm text-foreground',
+            mono && 'font-mono tracking-tight',
+          )}
+          title={value}
+        >
+          {value}
+        </p>
+      </div>
+      <CopyButton value={value} successLabel={`${label} copied`} />
+    </div>
+  );
+}
+
+/**
+ * One-shot copy-to-clipboard button. Shows a checkmark for 1.5 s after
+ * a successful copy so the user gets immediate visual confirmation in
+ * addition to the toast. Falls back to a manual `execCommand` shim on
+ * insecure contexts (older browsers / non-HTTPS dev hosts) since the
+ * Clipboard API is gated behind a secure context.
+ */
+function CopyButton({
+  value,
+  successLabel,
+  size = 'icon',
+}: {
+  value: string;
+  successLabel: string;
+  size?: 'icon' | 'sm';
+}) {
+  const [justCopied, setJustCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      if (
+        typeof navigator !== 'undefined' &&
+        navigator.clipboard &&
+        window.isSecureContext
+      ) {
+        await navigator.clipboard.writeText(value);
+      } else {
+        // Legacy fallback for non-HTTPS dev origins. Creates a
+        // hidden textarea, selects it, and triggers the deprecated
+        // execCommand('copy'). Older browsers / Cypress / etc.
+        const ta = document.createElement('textarea');
+        ta.value = value;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      setJustCopied(true);
+      toast.success(successLabel);
+      window.setTimeout(() => setJustCopied(false), 1500);
+    } catch {
+      toast.error('Could not copy — please copy manually.');
+    }
+  };
+
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size={size === 'icon' ? 'icon' : 'sm'}
+      className={cn(
+        'shrink-0',
+        size === 'icon' && 'h-7 w-7',
+        size === 'sm' && 'h-7 gap-1 px-2',
+      )}
+      onClick={handleCopy}
+      aria-label={`Copy ${successLabel.replace(' copied', '')}`}
+    >
+      {justCopied ? (
+        <Check className="h-3.5 w-3.5 text-emerald-600" />
+      ) : (
+        <Copy className="h-3.5 w-3.5" />
+      )}
+      {size === 'sm' && (
+        <span className="text-xs">
+          {justCopied ? 'Copied' : 'Copy'}
+        </span>
+      )}
+    </Button>
   );
 }

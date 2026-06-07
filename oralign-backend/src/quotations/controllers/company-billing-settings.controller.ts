@@ -140,15 +140,21 @@ export class CompanyBillingSettingsController {
  * Doctor-safe "public defaults" surface.
  *
  * The treatment-fee payment dialog (and any future doctor-facing
- * pricing surface) needs to read `defaultTreatmentFee` + `defaultCurrency`.
- * The admin controller above is gated to admins only — exposing the
- * whole singleton (company name, logo path, bank IBAN, legal text)
- * to dentists would leak admin configuration into the doctor surface.
+ * pricing surface) needs to read:
+ *   • `defaultTreatmentFee` + `defaultCurrency` — what to pay
+ *   • `companyName` / `companyAddress` / `companyCity` — beneficiary
+ *   • `bankDetails` — where to wire bank transfers (bank name,
+ *     account holder, RIB, IBAN, SWIFT)
+ *
+ * The admin controller above returns the WHOLE singleton (logo paths,
+ * legal text translations, devisNextNumber, tax registration number,
+ * etc.) and is gated to admins-only.
  *
  * This second controller mounts a separate route that returns ONLY
- * the two safe public defaults, and allows the dentist role to read
- * them. Same singleton row underneath, narrowed projection at the
- * DTO boundary.
+ * the doctor-relevant subset above, narrowed at the DTO boundary, and
+ * allows the dentist role to read it. Bank details are intentionally
+ * shared with the payer (that's the whole point — you can't wire
+ * without them) so exposing them to doctors is by design, not a leak.
  */
 @ApiTags('company-billing-settings')
 @ApiBearerAuth('access-token')
@@ -163,7 +169,7 @@ export class PublicBillingDefaultsController {
   @Get('public-defaults')
   @ApiOperation({
     summary:
-      'Read the doctor-safe defaults: treatment fee + currency. Used by the treatment-fee payment dialog.',
+      'Read the doctor-safe defaults: treatment fee, currency, and the company bank-transfer details. Used by the treatment-fee payment dialog so the doctor sees where to wire the money — same source of truth the admin manages at /account/billing-settings.',
   })
   @ApiResponse({
     status: 200,
@@ -172,19 +178,73 @@ export class PublicBillingDefaultsController {
       properties: {
         defaultTreatmentFee: { type: 'number', example: 100 },
         defaultCurrency: { type: 'string', example: 'TND' },
+        companyName: { type: 'string', nullable: true },
+        companyAddress: { type: 'string', nullable: true },
+        companyCity: { type: 'string', nullable: true },
+        bankDetails: {
+          type: 'object',
+          nullable: true,
+          properties: {
+            bankName: { type: 'string' },
+            accountName: { type: 'string' },
+            rib: { type: 'string' },
+            iban: { type: 'string' },
+            swift: { type: 'string' },
+          },
+        },
       },
     },
   })
   async getPublicDefaults(): Promise<{
     defaultTreatmentFee: number;
     defaultCurrency: string;
+    companyName: string | null;
+    companyAddress: string | null;
+    companyCity: string | null;
+    bankDetails: {
+      bankName?: string;
+      accountName?: string;
+      rib?: string;
+      iban?: string;
+      swift?: string;
+    } | null;
   }> {
     const settings = await this.service.getActive();
+    // `bankDetails` is stored as Prisma.Json — Prisma types it as
+    // JsonValue, but our DTO at write-time is BankDetailsDto, so the
+    // runtime shape matches the structural subtype below. We cast
+    // through `unknown` to make TypeScript accept the narrowing
+    // without weakening callers' types.
+    const rawBank = (settings?.bankDetails ?? null) as
+      | {
+          bankName?: string;
+          accountName?: string;
+          rib?: string;
+          iban?: string;
+          swift?: string;
+        }
+      | null;
+    // Treat an empty `{}` (admin saved nothing) as null so the UI
+    // shows the friendly "not configured yet" fallback instead of an
+    // empty panel.
+    const bankDetails =
+      rawBank &&
+      (rawBank.bankName ||
+        rawBank.accountName ||
+        rawBank.rib ||
+        rawBank.iban ||
+        rawBank.swift)
+        ? rawBank
+        : null;
     return {
       defaultTreatmentFee: settings
         ? Number(settings.defaultTreatmentFee)
         : 0,
       defaultCurrency: settings?.defaultCurrency ?? 'TND',
+      companyName: settings?.companyName ?? null,
+      companyAddress: settings?.companyAddress ?? null,
+      companyCity: settings?.companyCity ?? null,
+      bankDetails,
     };
   }
 }

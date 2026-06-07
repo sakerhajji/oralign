@@ -10,11 +10,31 @@ import type {
  * link from non-admin roles for affordance only — RBAC is enforced by
  * the backend regardless.
  */
+export interface BillingPublicDefaults {
+  defaultTreatmentFee: number;
+  defaultCurrency: string;
+}
+
 export const companyBillingService = {
   /** Returns null when the admin hasn't saved anything yet. */
   get: async (): Promise<CompanyBillingSettings | null> => {
     const res = await apiClient.get<CompanyBillingSettings | null>(
       '/admin/company-billing-settings',
+    );
+    return res.data;
+  },
+
+  /**
+   * Doctor-safe "public defaults" projection — returns ONLY the
+   * treatment fee + currency from the singleton settings row. Hits
+   * a different controller (`/company-billing-settings/...`, NOT
+   * the admin one above) and is callable by `dentist` + admin roles.
+   * Used by the treatment-fee payment dialog so the doctor sees the
+   * same amount the admin configured under /account/billing-settings.
+   */
+  getPublicDefaults: async (): Promise<BillingPublicDefaults> => {
+    const res = await apiClient.get<BillingPublicDefaults>(
+      '/company-billing-settings/public-defaults',
     );
     return res.data;
   },

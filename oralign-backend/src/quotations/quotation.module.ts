@@ -2,7 +2,10 @@ import { Module } from '@nestjs/common';
 import { PackModule } from '../packs/pack.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { StorageModule } from '../storage/storage.module';
-import { CompanyBillingSettingsController } from './controllers/company-billing-settings.controller';
+import {
+  CompanyBillingSettingsController,
+  PublicBillingDefaultsController,
+} from './controllers/company-billing-settings.controller';
 import { QuotationController } from './controllers/quotation.controller';
 import { QuotationPaymentPlanController } from './controllers/quotation-payment-plan.controller';
 import { CompanyBillingSettingsService } from './services/company-billing-settings.service';
@@ -26,6 +29,7 @@ import { QuotationPdfService } from './services/quotation-pdf.service';
   imports: [PrismaModule, StorageModule, PackModule],
   controllers: [
     CompanyBillingSettingsController,
+    PublicBillingDefaultsController,
     QuotationController,
     QuotationPaymentPlanController,
   ],

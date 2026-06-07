@@ -135,3 +135,56 @@ export class CompanyBillingSettingsController {
     return updated ? CompanyBillingSettingsService.toDto(updated) : null;
   }
 }
+
+/**
+ * Doctor-safe "public defaults" surface.
+ *
+ * The treatment-fee payment dialog (and any future doctor-facing
+ * pricing surface) needs to read `defaultTreatmentFee` + `defaultCurrency`.
+ * The admin controller above is gated to admins only — exposing the
+ * whole singleton (company name, logo path, bank IBAN, legal text)
+ * to dentists would leak admin configuration into the doctor surface.
+ *
+ * This second controller mounts a separate route that returns ONLY
+ * the two safe public defaults, and allows the dentist role to read
+ * them. Same singleton row underneath, narrowed projection at the
+ * DTO boundary.
+ */
+@ApiTags('company-billing-settings')
+@ApiBearerAuth('access-token')
+@Controller('company-billing-settings')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.dentist, UserRole.admin, UserRole.super_admin)
+export class PublicBillingDefaultsController {
+  constructor(
+    private readonly service: CompanyBillingSettingsService,
+  ) {}
+
+  @Get('public-defaults')
+  @ApiOperation({
+    summary:
+      'Read the doctor-safe defaults: treatment fee + currency. Used by the treatment-fee payment dialog.',
+  })
+  @ApiResponse({
+    status: 200,
+    schema: {
+      type: 'object',
+      properties: {
+        defaultTreatmentFee: { type: 'number', example: 100 },
+        defaultCurrency: { type: 'string', example: 'TND' },
+      },
+    },
+  })
+  async getPublicDefaults(): Promise<{
+    defaultTreatmentFee: number;
+    defaultCurrency: string;
+  }> {
+    const settings = await this.service.getActive();
+    return {
+      defaultTreatmentFee: settings
+        ? Number(settings.defaultTreatmentFee)
+        : 0,
+      defaultCurrency: settings?.defaultCurrency ?? 'TND',
+    };
+  }
+}

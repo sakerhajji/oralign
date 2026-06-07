@@ -22,7 +22,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import {
-  useCompanyBilling,
+  useBillingPublicDefaults,
   usePayTreatmentFee,
   useUploadTreatmentFeeProof,
 } from '@/lib/hooks';
@@ -101,14 +101,24 @@ export function TreatmentFeePaymentDialog({
   /** Fired after a terminal success so the parent can navigate. */
   onPaid?: () => void;
 }) {
-  const { data: settings } = useCompanyBilling();
+  // Doctor-safe defaults endpoint. The previous version called
+  // `useCompanyBilling()` which hits `/admin/company-billing-settings`
+  // and returned 403 for dentists, so the modal silently showed 0
+  // TND. The dedicated `/company-billing-settings/public-defaults`
+  // route returns only the two fields we need (fee + currency) and
+  // is callable by dentist + admin.
+  const { data: defaults } = useBillingPublicDefaults();
   const pay = usePayTreatmentFee();
   const uploadProof = useUploadTreatmentFeeProof();
 
   // Settings-driven amount + currency so the doctor sees what the
-  // admin actually set, not a stale hard-coded value.
-  const amount = settings?.defaultTreatmentFee ?? order.treatmentFeeAmount ?? 0;
-  const currency = settings?.defaultCurrency ?? 'TND';
+  // admin set under /account/billing-settings, not a stale hard-coded
+  // value. We fall back to a snapshot already stamped on the order
+  // (e.g. for an order created when the fee was different) and then
+  // to zero.
+  const amount =
+    defaults?.defaultTreatmentFee ?? order.treatmentFeeAmount ?? 0;
+  const currency = defaults?.defaultCurrency ?? 'TND';
 
   // Filter methods by role (doctor doesn't see Cash).
   const methods = useMemo(

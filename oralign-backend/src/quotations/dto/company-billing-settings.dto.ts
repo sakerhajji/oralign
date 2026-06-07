@@ -111,6 +111,21 @@ export class UpsertCompanyBillingSettingsDto {
   @Max(100)
   defaultTvaRate?: number;
 
+  // Default professional/treatment fee in the org's currency.
+  // QuotationService prefills `Quotation.treatmentFees` from this on
+  // new quote creation. Decimal in the DB; carried as Number across
+  // the API so the admin form can use a plain number input.
+  @ApiPropertyOptional({
+    minimum: 0,
+    default: 0,
+    description:
+      'Default professional / treatment fee auto-applied to every new quotation.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @Min(0)
+  defaultTreatmentFee?: number;
+
   @ApiPropertyOptional({
     default: 'TND',
     description: 'ISO 4217 currency code',
@@ -184,6 +199,7 @@ export class CompanyBillingSettingsResponseDto {
   @ApiPropertyOptional() taxRegistrationNumber?: string | null;
 
   @ApiProperty() defaultTvaRate!: number;
+  @ApiProperty() defaultTreatmentFee!: number;
   @ApiProperty() defaultCurrency!: string;
   @ApiProperty() devisPrefix!: string;
   @ApiProperty() devisNextNumber!: number;

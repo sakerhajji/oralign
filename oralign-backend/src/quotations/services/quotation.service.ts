@@ -278,8 +278,16 @@ export class QuotationService {
     const currency = dto.currency ?? settings.defaultCurrency ?? 'TND';
     const tvaRate = dto.tvaRate ?? settings.defaultTvaRate ?? 19;
 
+    // Treatment fee precedence (top → bottom):
+    //   1. Admin-typed value on this quote (explicit override)
+    //   2. CompanyBillingSettings.defaultTreatmentFee (the "policy")
+    //   3. 0 (fallback for tenants who haven't configured a default yet)
+    // Number() unwraps the Prisma Decimal so computeTotals stays Float-only.
+    const defaultTreatmentFee = Number(settings.defaultTreatmentFee ?? 0);
+    const treatmentFees = dto.treatmentFees ?? defaultTreatmentFee;
+
     const totals = QuotationService.computeTotals(
-      dto.treatmentFees ?? 0,
+      treatmentFees,
       dto.fabricationFees ?? 0,
       dto.deliveryFees ?? 0,
       dto.discountAmount ?? 0,
@@ -291,7 +299,7 @@ export class QuotationService {
         orderId,
         language,
         status: QuotationStatus.draft,
-        treatmentFees: dto.treatmentFees ?? 0,
+        treatmentFees,
         fabricationFees: dto.fabricationFees ?? 0,
         deliveryFees: dto.deliveryFees ?? 0,
         discountAmount: dto.discountAmount ?? 0,

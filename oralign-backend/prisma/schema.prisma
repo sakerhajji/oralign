@@ -727,6 +727,16 @@ model CompanyBillingSettings {
   defaultTvaRate          Float         @default(19)
   defaultCurrency         String        @default("TND")
 
+  // Default professional / treatment fee. The QuotationService prefills
+  // `Quotation.treatmentFees` from this when a new quote is created so
+  // the admin no longer has to retype the clinical fee every time. The
+  // admin can still override per quote (e.g. for a discount or a free
+  // first quote). Decimal(12,3) matches PackPrice so both fee lines
+  // round identically when computing TTC. Cast back to Float at the
+  // DTO boundary — the Quotation row itself still stores Float fees
+  // until a wider migration moves them to Decimal across the board.
+  defaultTreatmentFee     Decimal       @default(0) @db.Decimal(12, 3)
+
   // Devis numbering. Incremented inside a transaction when each quote
   // is first assigned a number, so two concurrent quote-creations can't
   // collide on the same DEV-XXXXXX value.

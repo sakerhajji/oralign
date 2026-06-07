@@ -284,6 +284,9 @@ export interface CompanyBillingSettings {
   taxRegistrationNumber?: string | null;
 
   defaultTvaRate: number;
+  // Professional/clinical fee auto-applied to new quotes. The admin
+  // can still override per-quote — this is just the policy default.
+  defaultTreatmentFee: number;
   defaultCurrency: string;
   devisPrefix: string;
   devisNextNumber: number;
@@ -306,6 +309,7 @@ export interface UpsertCompanyBillingSettingsDto {
   companyEmail?: string;
   taxRegistrationNumber?: string;
   defaultTvaRate?: number;
+  defaultTreatmentFee?: number;
   defaultCurrency?: string;
   devisPrefix?: string;
   devisNextNumber?: number;

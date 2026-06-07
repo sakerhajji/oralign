@@ -35,6 +35,7 @@ import {
 interface FormState extends UpsertCompanyBillingSettingsDto {
   companyName: string;
   defaultTvaRate: number;
+  defaultTreatmentFee: number;
   defaultCurrency: string;
   devisPrefix: string;
   devisNextNumber: number;
@@ -52,6 +53,7 @@ const emptyState: FormState = {
   companyEmail: '',
   taxRegistrationNumber: '',
   defaultTvaRate: 19,
+  defaultTreatmentFee: 0,
   defaultCurrency: 'TND',
   devisPrefix: 'DEV',
   devisNextNumber: 1,
@@ -95,6 +97,7 @@ export function CompanyBillingSettingsForm() {
       companyEmail: settings.companyEmail ?? '',
       taxRegistrationNumber: settings.taxRegistrationNumber ?? '',
       defaultTvaRate: settings.defaultTvaRate ?? 19,
+      defaultTreatmentFee: settings.defaultTreatmentFee ?? 0,
       defaultCurrency: settings.defaultCurrency ?? 'TND',
       devisPrefix: settings.devisPrefix ?? 'DEV',
       devisNextNumber: settings.devisNextNumber ?? 1,
@@ -149,6 +152,7 @@ export function CompanyBillingSettingsForm() {
       companyEmail: form.companyEmail?.trim() || undefined,
       taxRegistrationNumber: form.taxRegistrationNumber?.trim() || undefined,
       defaultTvaRate: form.defaultTvaRate,
+      defaultTreatmentFee: form.defaultTreatmentFee,
       defaultCurrency: form.defaultCurrency.trim() || 'TND',
       devisPrefix: form.devisPrefix.trim() || 'DEV',
       devisNextNumber: form.devisNextNumber,
@@ -292,6 +296,10 @@ export function CompanyBillingSettingsForm() {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Quote defaults</CardTitle>
+          <p className="text-xs text-muted-foreground">
+            These values are auto-applied to every new quotation. The admin
+            can still override them per-quote when editing a specific case.
+          </p>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
           <Field
@@ -300,6 +308,18 @@ export function CompanyBillingSettingsForm() {
             type="number"
             onChange={(v) => updateField('defaultTvaRate', Number(v) || 0)}
             placeholder="19"
+          />
+          {/* Professional / clinical fee. This used to be re-typed on
+              every quote (or accidentally left at 0 = revenue leak).
+              Now lives here as a policy default. The admin form on the
+              quote itself remains editable, so promotions and free
+              first-consults still work without touching this. */}
+          <Field
+            label={`Default treatment fee (${form.defaultCurrency || 'TND'})`}
+            value={String(form.defaultTreatmentFee)}
+            type="number"
+            onChange={(v) => updateField('defaultTreatmentFee', Number(v) || 0)}
+            placeholder="0"
           />
           <Field
             label="Default currency"

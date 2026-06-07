@@ -13,18 +13,77 @@ import apiClient from '@/lib/api/client';
  * pointing it at a Bearer-protected route returns 401. This hook
  * sidesteps that by doing the fetch in JS (where axios attaches the
  * token), then handing the resulting blob to the browser as a local
- * URL. The lightbox + chat bubble share the same blob URL — only one
- * round-trip per image.
+ * URL.
  *
- * Lifecycle:
- *   • On `url` change → revoke the previous object URL and fetch the
- *     new one. Prevents memory leaks even if the user scrolls through
- *     dozens of images.
- *   • On unmount → revoke the active object URL.
- *   • Stale fetches (url changed mid-flight) are dropped via a local
- *     `cancelled` flag so the older response can never overwrite the
- *     newer one.
+ * Module-level LRU cache
+ * ──────────────────────
+ * Phone-camera clinical photos are 4–12 MB each. The previous
+ * implementation refetched every time the component remounted (e.g.
+ * the user navigates away and back, or React strict-mode unmounts a
+ * dev render), turning every revisit into a multi-second wait. We
+ * now keep an in-memory map from URL → blob-URL. A repeat
+ * `useAuthedImage(url)` for the same URL hands back the cached blob
+ * URL synchronously — the browser only sees the network hit once
+ * per session per image.
+ *
+ * Eviction: hard cap at MAX_CACHE_ENTRIES. When full we drop the
+ * least-recently-accessed entry and revoke its blob URL. That keeps
+ * the page memory bounded even if a clinic uploads 100+ photos in
+ * one session. The cap is generous enough (50) that the same set of
+ * images rendered across the wizard + detail view never thrash.
+ *
+ * In-flight dedupe: when two components request the same URL at the
+ * same time, we cache the Promise so only one axios call goes out.
  */
+
+const MAX_CACHE_ENTRIES = 50;
+type CacheEntry = { promise: Promise<string>; blobUrl?: string };
+const blobCache = new Map<string, CacheEntry>();
+
+function touchCacheKey(key: string): void {
+  // Re-inserting moves to the end (most-recent). Map preserves
+  // insertion order, so the first key is always the LRU candidate.
+  const entry = blobCache.get(key);
+  if (!entry) return;
+  blobCache.delete(key);
+  blobCache.set(key, entry);
+}
+
+function evictIfNeeded(): void {
+  while (blobCache.size > MAX_CACHE_ENTRIES) {
+    const oldestKey = blobCache.keys().next().value;
+    if (!oldestKey) break;
+    const entry = blobCache.get(oldestKey);
+    if (entry?.blobUrl) URL.revokeObjectURL(entry.blobUrl);
+    blobCache.delete(oldestKey);
+  }
+}
+
+function fetchBlobUrl(url: string): Promise<string> {
+  const existing = blobCache.get(url);
+  if (existing) {
+    touchCacheKey(url);
+    return existing.promise;
+  }
+  const promise = apiClient
+    .get<Blob>(url, { responseType: 'blob' })
+    .then((res) => {
+      const objectUrl = URL.createObjectURL(res.data);
+      const entry = blobCache.get(url);
+      if (entry) entry.blobUrl = objectUrl;
+      return objectUrl;
+    })
+    .catch((err: Error) => {
+      // Failed fetches shouldn't poison the cache — drop the entry
+      // so the next call retries instead of replaying the rejection.
+      blobCache.delete(url);
+      throw err;
+    });
+  blobCache.set(url, { promise });
+  evictIfNeeded();
+  return promise;
+}
+
 export function useAuthedImage(url: string | null | undefined): {
   src: string | null;
   loading: boolean;
@@ -34,25 +93,41 @@ export function useAuthedImage(url: string | null | undefined): {
     src: string | null;
     loading: boolean;
     error: Error | null;
-  }>({ src: null, loading: !!url, error: null });
+  }>(() => {
+    // Synchronously hand back the cached blob URL on first render
+    // when the image is already in cache — avoids the brief skeleton
+    // flash on every re-mount of an already-loaded photo.
+    if (!url) return { src: null, loading: false, error: null };
+    const entry = blobCache.get(url);
+    if (entry?.blobUrl) {
+      touchCacheKey(url);
+      return { src: entry.blobUrl, loading: false, error: null };
+    }
+    return { src: null, loading: true, error: null };
+  });
 
   useEffect(() => {
     let cancelled = false;
-    let createdObjectUrl: string | null = null;
 
     if (!url) {
       setState({ src: null, loading: false, error: null });
       return;
     }
 
+    // Cached + ready → done.
+    const entry = blobCache.get(url);
+    if (entry?.blobUrl) {
+      touchCacheKey(url);
+      setState({ src: entry.blobUrl, loading: false, error: null });
+      return;
+    }
+
     setState((prev) => ({ ...prev, loading: true, error: null }));
 
-    apiClient
-      .get<Blob>(url, { responseType: 'blob' })
-      .then((res) => {
+    fetchBlobUrl(url)
+      .then((blobUrl) => {
         if (cancelled) return;
-        createdObjectUrl = URL.createObjectURL(res.data);
-        setState({ src: createdObjectUrl, loading: false, error: null });
+        setState({ src: blobUrl, loading: false, error: null });
       })
       .catch((err: Error) => {
         if (cancelled) return;
@@ -61,10 +136,9 @@ export function useAuthedImage(url: string | null | undefined): {
 
     return () => {
       cancelled = true;
-      // The object URL we created in this effect run can be revoked
-      // safely — the React reconciler has already swapped the <img>
-      // away by the time cleanup runs.
-      if (createdObjectUrl) URL.revokeObjectURL(createdObjectUrl);
+      // IMPORTANT: do NOT revoke the blob URL here. With caching it
+      // lives at module scope and may still be in use by another
+      // mount. Eviction handles revocation when the cache is full.
     };
   }, [url]);
 

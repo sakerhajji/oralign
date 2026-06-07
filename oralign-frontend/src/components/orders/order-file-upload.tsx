@@ -784,6 +784,8 @@ function PreviewSurface({
       <img
         src={objectUrl}
         alt={displayFileName(file)}
+        loading="lazy"
+        decoding="async"
         className={cn(
           large
             ? 'max-h-full max-w-full object-contain'
@@ -923,8 +925,24 @@ function FullscreenFileViewer({
             stop propagating the height cap, leaving the image at intrinsic
             size and clipping past the viewport. */}
         {type === 'image' && objectUrl ? (
+          // ── Image preview surface ──
+          // Was `flex h-full w-full` with inline `maxWidth/maxHeight:100%`
+          // on the <img>. That path breaks for portrait phone photos
+          // (4000×6000+) because `h-full` only resolves correctly when
+          // every ancestor up the chain explicitly defines a height —
+          // and shadcn's DialogContent doesn't propagate it through
+          // the flex flow once the absolute-positioned top bar is
+          // present. Result: image rendered at intrinsic size and only
+          // the top of the head showed.
+          //
+          // Switching the container to `absolute inset-0` pins it to
+          // the fixed-positioned DialogContent on all four sides, so
+          // the box has a real computed height. The image then uses
+          // Tailwind's `max-h-full max-w-full object-contain` which is
+          // the reliable pattern for "fit inside its parent, preserve
+          // aspect" and works for any source size.
           <div
-            className="flex h-full w-full items-center justify-center px-2 pt-14 pb-4 sm:px-6 sm:pt-16 sm:pb-6"
+            className="absolute inset-0 flex items-center justify-center p-2 pt-14 pb-4 sm:p-6 sm:pt-16 sm:pb-6"
             onClick={onBackdropClick}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -932,15 +950,9 @@ function FullscreenFileViewer({
               src={objectUrl}
               alt={displayFileName(file)}
               draggable={false}
+              decoding="async"
               onClick={(event) => event.stopPropagation()}
-              className="block select-none rounded-md shadow-2xl"
-              style={{
-                maxWidth: '100%',
-                maxHeight: '100%',
-                width: 'auto',
-                height: 'auto',
-                objectFit: 'contain',
-              }}
+              className="block max-h-full max-w-full select-none rounded-md object-contain shadow-2xl"
             />
           </div>
         ) : (
@@ -1000,6 +1012,8 @@ function SlotFilePreview({
             <img
               src={objectUrl}
               alt={displayFileName(file)}
+              loading="lazy"
+              decoding="async"
               // `object-contain` so the FULL image is visible inside the
               // 4:3 thumbnail card — previously `object-cover` cropped
               // anything that wasn't a 4:3 photo (portrait shots, square

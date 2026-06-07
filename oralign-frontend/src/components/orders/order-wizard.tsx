@@ -2200,14 +2200,26 @@ function OptionPill({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        'inline-flex min-h-11 items-center justify-center rounded-md border bg-background px-3 text-sm font-semibold transition',
+        // `relative` so the absolute-positioned check badge can pin
+        // itself to the top-right corner without nudging the label.
+        // `pr-9` reserves room for the badge so a long label
+        // ("Don't Move 6 - 7 only") never gets clipped by it.
+        'group relative inline-flex min-h-11 items-center justify-center rounded-md border bg-background px-3 pr-9 text-sm font-semibold transition',
         'hover:border-primary/70',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1',
         'disabled:cursor-not-allowed disabled:opacity-60',
         active && 'border-primary bg-primary/5 text-primary shadow-sm',
       )}
     >
-      {label}
+      <span className="text-center">{label}</span>
+      {/* Selection check badge — same visual the ChoiceCard uses, so
+          every radio-style block in the wizard reads identically. */}
+      {active && (
+        <CheckCircle2
+          className="absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-primary"
+          aria-hidden
+        />
+      )}
     </button>
   );
 }

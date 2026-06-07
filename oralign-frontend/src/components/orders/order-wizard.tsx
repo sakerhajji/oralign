@@ -54,7 +54,6 @@ const OdontogramSelector = dynamic(
 );
 import {
   ClinicalOrderFiles,
-  OrderFileUpload,
 } from '@/components/orders/order-file-upload';
 import { ClinicalConditionsField } from '@/components/patients/clinical-conditions-field';
 import { useAuth } from '@/lib/providers/auth-provider';
@@ -610,6 +609,13 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
 
         {step === 5 && (
           <div className="space-y-6">
+            {/* ReviewStep already renders the slot-based Patient images
+                grid + Radiography & STL grid (via ClinicalOrderFiles in
+                readOnly mode). The legacy `<OrderFileUpload readOnly />`
+                block that USED to live below this was a flat
+                category-grouped gallery — it duplicated every file the
+                slot grid above already shows (same file appearing
+                twice in the review). Removed for that reason. */}
             <ReviewStep
               savedOrder={savedOrder}
               selectedPatient={selectedPatient}
@@ -621,7 +627,6 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
               form={form}
               toothInstructions={toothInstructions}
             />
-            <OrderFileUpload orderId={savedOrder?.id} readOnly />
           </div>
         )}
       </main>
@@ -1716,10 +1721,11 @@ function ManufacturingStep({
  *      – read-only odontogram + the eight mechanics fields from step 5
  *   4. Order metadata           (icon=ClipboardCheck)
  *
- * Files (patient images + radiography + STL) are rendered by the
- * <OrderFileUpload readOnly /> block in the parent wizard render so
- * they appear AFTER this component — keeps file management UI in one
- * place and avoids double-rendering the upload grid.
+ * Files (patient images + radiography + STL) are rendered INSIDE this
+ * component as the new sections 2 + 3 (via <ClinicalOrderFiles
+ * readOnly />). The previous flat `<OrderFileUpload readOnly />`
+ * block at the parent level has been removed because it duplicated
+ * every file the slot grid here already shows.
  */
 function ReviewStep({
   savedOrder,

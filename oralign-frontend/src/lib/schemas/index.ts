@@ -289,10 +289,29 @@ export const updateWorkingHoursSchema = z.object({
 
 export const createPatientSchema = z.object({
   fullName: z.string().min(2, 'Patient name must be at least 2 characters'),
-  email: z.string().email('Invalid email address').optional().or(z.literal('')),
+  // Email is explicitly OPTIONAL. The `preprocess` step coerces empty
+  // strings + whitespace-only entries to `undefined` BEFORE Zod's
+  // `.email()` runs — without this, a user who typed a few characters
+  // and then cleared the field would see an "Invalid email address"
+  // error linger (react-hook-form passes the controlled empty string
+  // through verbatim, hitting the email validator before any
+  // `.or(z.literal(''))` fallback). Coercing to undefined up front
+  // makes the optional path the ONLY path for "no email provided".
+  // Same `normalizeOptionalString` helper the phone field uses, so
+  // both fields behave identically for the user.
+  email: z.preprocess(
+    normalizeOptionalString,
+    z.string().email('Invalid email address').optional(),
+  ),
   phone: optionalE164PhoneSchema,
   gender: z.nativeEnum(Gender).optional(),
-  dateOfBirth: z.string().optional().or(z.literal('')),
+  // Same coercion treatment as `email` so an empty date string never
+  // surfaces as a validation failure — the field is genuinely
+  // optional and an empty input is the same as "not provided".
+  dateOfBirth: z.preprocess(
+    normalizeOptionalString,
+    z.string().optional(),
+  ),
   address: z.string().optional(),
   notes: z.string().optional(),
   // Multi-select clinical-condition labels. Kept as `z.string().array()`

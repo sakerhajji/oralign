@@ -1018,6 +1018,12 @@ function TreatmentFeeGateBanner({
           currency={currency}
           doctorName={order.doctor?.fullName ?? null}
           patientName={order.patient?.fullName ?? null}
+          method={order.treatmentFeePaymentMethod ?? null}
+          // The order doesn't carry a dedicated "treatment fee submitted at"
+          // timestamp — but updatedAt is the most recent edit (the receipt
+          // upload is the latest write in awaiting-confirmation state), so
+          // it's the right approximation. Falls back gracefully if missing.
+          submittedAt={order.updatedAt ?? null}
           canConfirm={canActAsAdmin}
         />
       </>

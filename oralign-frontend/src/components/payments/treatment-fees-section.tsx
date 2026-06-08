@@ -274,6 +274,8 @@ export function PendingTreatmentFeesSection() {
           currency="TND"
           doctorName={active.doctor?.fullName ?? null}
           patientName={active.patient?.fullName ?? null}
+          method={active.method}
+          submittedAt={active.submittedAt ?? active.updatedAt ?? null}
           canConfirm
         />
       )}

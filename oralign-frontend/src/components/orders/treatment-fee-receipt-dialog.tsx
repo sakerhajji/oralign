@@ -1,12 +1,21 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { format } from 'date-fns';
 import {
   AlertTriangle,
+  Banknote,
+  Calendar,
   CheckCircle2,
+  Clock,
+  CreditCard,
   Download,
   FileText,
+  Landmark,
   Loader2,
+  Maximize2,
+  Stethoscope,
+  User,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -21,26 +30,39 @@ import { ImageLightbox } from '@/components/ui/image-lightbox';
 import { useConfirmTreatmentFeePayment } from '@/lib/hooks';
 import { resolveUploadUrl } from '@/lib/api/company-billing.service';
 import { cn } from '@/lib/utils';
+import { PaymentMethod } from '@/lib/types';
 
 /**
- * Admin-facing receipt viewer for a treatment-fee bank transfer.
+ * Admin-facing treatment-fee bank-transfer receipt confirmation.
  *
- * The modal is intentionally PORTRAIT-shaped (`max-w-md`) — most
- * receipts and bank screenshots are taken on a phone in portrait, so
- * a portrait viewport matches the source aspect ratio. Landscape PDFs
- * still get the full-bleed iframe, just constrained to the same
- * portrait frame.
+ * Desktop-first design:
  *
- * Click the image to open it in the global ImageLightbox — same UX
- * the clinical-order photos use, with solid black backdrop and a
- * click-outside-to-close affordance. The embedded "Confirm payment"
- * action lives in the footer so the admin verifies-then-approves
- * without leaving the modal.
+ *   ┌─────────────────────────────────────────────────────┐
+ *   │ Bank-transfer receipt   [Awaiting confirmation]  X │
+ *   │ Order ORD-1234                                       │
+ *   ├──────────────────────────┬──────────────────────────┤
+ *   │                          │  PATIENT                  │
+ *   │    [Receipt photo]       │  Ahlem r9i9              │
+ *   │    object-contain on     │                           │
+ *   │    a soft backdrop —     │  DOCTOR                   │
+ *   │    click → lightbox      │  Dr. Hajji Saker         │
+ *   │                          │                           │
+ *   │                          │  AMOUNT      350 TND     │
+ *   │                          │  METHOD      Bank transfer│
+ *   │                          │  SUBMITTED   Jun 7, 2026 │
+ *   ├──────────────────────────┴──────────────────────────┤
+ *   │                       [Cancel]  [✓ Confirm payment] │
+ *   └─────────────────────────────────────────────────────┘
  *
- * URLs are passed straight to <img>/<iframe>. The backend serves
- * /uploads/* with Cross-Origin-Resource-Policy: cross-origin which is
- * exactly what the embed tags need; we don't blob-fetch and we don't
- * fight CORS.
+ *   Below md: the two columns stack — receipt on top, details below,
+ *   footer still sticky. The image scales down with the viewport so
+ *   the dialog always fits without scrolling on phones.
+ *
+ * The image is rendered with `object-contain` on a light-muted
+ * backdrop so the full proof is visible without distortion. Clicking
+ * the image opens the global ImageLightbox for true edge-to-edge
+ * inspection. No CORS fetch — the URL is passed straight to <img>
+ * which works cross-origin thanks to the backend's CORP header.
  */
 export interface TreatmentFeeReceiptDialogProps {
   open: boolean;
@@ -51,13 +73,17 @@ export interface TreatmentFeeReceiptDialogProps {
   orderCode: string;
   /** Backend-stored relative path (e.g. "/uploads/treatment-fee-proofs/abc.pdf"). */
   proofPath: string | null | undefined;
-  /** Amount the doctor declared — surfaced in the header byline. */
+  /** Amount the doctor declared — surfaced in the details column. */
   amount: number | null | undefined;
   /** Currency code, defaults to TND if unset. */
   currency?: string;
-  /** Doctor / patient context for the header byline. */
+  /** Doctor / patient context for the details column. */
   doctorName?: string | null;
   patientName?: string | null;
+  /** Payment method — usually `bank_transfer`. Surfaces a labelled chip. */
+  method?: PaymentMethod | null;
+  /** ISO date string when the doctor uploaded the proof (or recorded intent). */
+  submittedAt?: string | null;
   /**
    * When true the modal renders the "Confirm payment" footer button.
    * Drives off the caller's authz check + the order's current status.
@@ -77,6 +103,8 @@ export function TreatmentFeeReceiptDialog({
   currency = 'TND',
   doctorName,
   patientName,
+  method,
+  submittedAt,
   canConfirm,
   onConfirmed,
 }: TreatmentFeeReceiptDialogProps) {
@@ -86,18 +114,11 @@ export function TreatmentFeeReceiptDialog({
 
   const confirm = useConfirmTreatmentFeePayment();
 
-  // Lightbox state — opening the click-to-zoom view from the image
-  // inside this modal. We don't close the modal underneath; the
-  // lightbox just stacks above it so dismissing the lightbox returns
-  // the admin to the same review surface.
+  // Click-to-zoom lightbox — same component the clinical photos use,
+  // so the admin gets a familiar full-screen viewer when they need to
+  // inspect a receipt at high resolution. Lives outside the modal so
+  // closing the lightbox returns to the review surface.
   const [lightboxOpen, setLightboxOpen] = useState(false);
-
-  const byline = [
-    doctorName ? `Dr. ${doctorName}` : null,
-    patientName ? `patient ${patientName}` : null,
-  ]
-    .filter(Boolean)
-    .join(' · ');
 
   return (
     <>
@@ -109,53 +130,134 @@ export function TreatmentFeeReceiptDialog({
         }}
       >
         {/*
-          Portrait-shaped surface. max-w-md (~28rem / 448 px) matches
-          the rough aspect of a phone-camera photo. The height is
-          fixed so the image viewport always has room to render the
-          proof full-bleed instead of collapsing to its intrinsic
-          height.
+          Desktop comfort: max-w-4xl (896 px) is wide enough for a
+          two-column split but still feels like a modal (not a page
+          takeover). max-h-[90vh] + flex column lets the body scroll
+          internally while the header / footer stay pinned.
          */}
-        <DialogContent className="flex h-[92vh] max-h-[92vh] w-full max-w-md flex-col gap-0 overflow-hidden border-0 p-0 shadow-2xl">
+        <DialogContent className="flex max-h-[90vh] w-full max-w-4xl flex-col gap-0 overflow-hidden rounded-2xl border-0 p-0 shadow-2xl sm:rounded-2xl">
           {/* ─── Header ─────────────────────────────────────────── */}
-          <DialogHeader className="space-y-1 border-b bg-card px-4 py-3 text-left">
-            <div className="flex items-center justify-between gap-2">
-              <DialogTitle className="truncate font-mono text-xs font-semibold tracking-tight">
-                {orderCode}
-              </DialogTitle>
+          <DialogHeader className="space-y-1 border-b bg-card px-6 py-4 text-left">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0">
+                <DialogTitle className="text-base font-semibold sm:text-lg">
+                  Bank-transfer receipt
+                </DialogTitle>
+                <DialogDescription className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
+                  Order {orderCode}
+                </DialogDescription>
+              </div>
               <Badge
                 variant="outline"
-                className="shrink-0 border-blue-200 bg-blue-50 text-[10px] font-medium uppercase tracking-wide text-blue-700"
+                className="shrink-0 gap-1.5 border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700"
               >
+                <Clock className="h-3 w-3" />
                 Awaiting confirmation
               </Badge>
             </div>
-            <DialogDescription className="flex flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground">
-              {byline ? <span className="truncate">{byline}</span> : null}
-              <span className="text-foreground">·</span>
-              <span className="font-semibold text-foreground tabular-nums">
-                {amount ?? 0} {currency}
-              </span>
-            </DialogDescription>
           </DialogHeader>
 
-          {/* ─── Viewport ───────────────────────────────────────── */}
-          <div className="relative flex min-h-0 flex-1 items-stretch overflow-hidden bg-black">
-            <ReceiptViewport
-              fileUrl={fileUrl}
-              kind={proofKind}
-              fileName={fileName}
-              onImageClick={() => setLightboxOpen(true)}
-            />
+          {/*
+            ─── Body: two-column on desktop, stacked on mobile ─────
+            The min-h-0 + flex-1 combo lets the body claim the
+            leftover vertical space and lets the columns scroll
+            independently when content overflows.
+           */}
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row">
+            {/* Image column — 3/5 of the width on desktop, full on mobile */}
+            <div className="relative flex min-h-[280px] items-center justify-center overflow-hidden border-b bg-muted/40 p-4 md:min-h-0 md:w-3/5 md:flex-1 md:border-b-0 md:border-r md:p-6">
+              <ReceiptViewport
+                fileUrl={fileUrl}
+                kind={proofKind}
+                fileName={fileName}
+                onImageClick={() => setLightboxOpen(true)}
+              />
+            </div>
+
+            {/* Details column — 2/5 of the width on desktop */}
+            <div className="flex flex-col overflow-y-auto bg-card p-5 md:w-2/5 md:flex-shrink-0">
+              <h3 className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Payment summary
+              </h3>
+              <dl className="space-y-3">
+                <DetailRow
+                  icon={<User className="h-3.5 w-3.5" />}
+                  label="Patient"
+                  value={patientName ?? '—'}
+                />
+                <DetailRow
+                  icon={<Stethoscope className="h-3.5 w-3.5" />}
+                  label="Doctor"
+                  value={doctorName ? `Dr. ${doctorName}` : '—'}
+                />
+                <Divider />
+                <DetailRow
+                  icon={<Banknote className="h-3.5 w-3.5" />}
+                  label="Amount"
+                  value={
+                    <span className="text-base font-bold tabular-nums">
+                      {amount ?? 0} {currency}
+                    </span>
+                  }
+                  highlight
+                />
+                <DetailRow
+                  icon={<MethodIcon method={method} />}
+                  label="Method"
+                  value={methodLabel(method)}
+                />
+                {submittedAt && (
+                  <DetailRow
+                    icon={<Calendar className="h-3.5 w-3.5" />}
+                    label="Submitted"
+                    value={format(new Date(submittedAt), 'MMM d, yyyy')}
+                  />
+                )}
+                <DetailRow
+                  icon={<FileText className="h-3.5 w-3.5" />}
+                  label="Receipt"
+                  value={
+                    <span
+                      className="block truncate font-mono text-[11px] text-muted-foreground"
+                      title={fileName}
+                    >
+                      {fileName}
+                    </span>
+                  }
+                />
+              </dl>
+
+              {/*
+                Verification hint — explains what Confirm will do in
+                plain language so the admin understands they're moving
+                the order forward, not just closing the dialog.
+               */}
+              <div className="mt-auto pt-5">
+                <p className="rounded-lg border border-blue-100 bg-blue-50/60 p-3 text-[11px] leading-relaxed text-blue-900/80">
+                  Confirming will mark the treatment fee as paid and
+                  unblock the treatment plan. This action is logged
+                  with your admin user id.
+                </p>
+              </div>
+            </div>
           </div>
 
           {/* ─── Footer ─────────────────────────────────────────── */}
-          <div className="flex flex-row items-center justify-end gap-2 border-t bg-card px-4 py-3">
+          <div className="flex flex-row flex-wrap items-center justify-end gap-2 border-t bg-card px-6 py-3">
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={confirm.isPending}
+              onClick={() => onOpenChange(false)}
+            >
+              Cancel
+            </Button>
             {canConfirm && (
               <Button
                 type="button"
                 className={cn(
-                  'h-10 w-full gap-1.5 bg-emerald-600 font-medium text-white hover:bg-emerald-700',
-                  'shadow-sm',
+                  'gap-1.5 bg-emerald-600 font-medium text-white shadow-sm hover:bg-emerald-700',
+                  'min-w-[180px]',
                 )}
                 disabled={confirm.isPending}
                 onClick={() => {
@@ -180,9 +282,9 @@ export function TreatmentFeeReceiptDialog({
       </Dialog>
 
       {/*
-        Click-to-zoom lightbox — only mounted when the receipt is an
-        image. PDFs already render at full size in the iframe; opening
-        them in the image lightbox would be wrong.
+        Click-to-zoom lightbox — only mounted for image proofs. PDFs
+        already render full-bleed in the iframe so opening them in the
+        image-lightbox would be wrong.
        */}
       {proofKind === 'image' && (
         <ImageLightbox
@@ -199,7 +301,84 @@ export function TreatmentFeeReceiptDialog({
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Internals
+// Sub-components
+// ─────────────────────────────────────────────────────────────────────
+
+function DetailRow({
+  icon,
+  label,
+  value,
+  highlight,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: React.ReactNode;
+  highlight?: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        'grid grid-cols-[16px_1fr] items-start gap-x-2.5 gap-y-0.5',
+        highlight && 'rounded-md bg-emerald-50/60 p-2 -mx-2',
+      )}
+    >
+      <div
+        className={cn(
+          'mt-0.5 text-muted-foreground',
+          highlight && 'text-emerald-700',
+        )}
+      >
+        {icon}
+      </div>
+      <div className="min-w-0">
+        <p
+          className={cn(
+            'text-[10px] font-semibold uppercase tracking-wide text-muted-foreground',
+            highlight && 'text-emerald-700',
+          )}
+        >
+          {label}
+        </p>
+        <div
+          className={cn(
+            'text-sm text-foreground',
+            highlight && 'text-emerald-900',
+          )}
+        >
+          {value}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Divider() {
+  return <div className="my-1 h-px bg-border" />;
+}
+
+function MethodIcon({ method }: { method?: PaymentMethod | null }) {
+  if (method === PaymentMethod.CARD)
+    return <CreditCard className="h-3.5 w-3.5" />;
+  if (method === PaymentMethod.CASH)
+    return <Banknote className="h-3.5 w-3.5" />;
+  return <Landmark className="h-3.5 w-3.5" />;
+}
+
+function methodLabel(method?: PaymentMethod | null): string {
+  switch (method) {
+    case PaymentMethod.CARD:
+      return 'Card';
+    case PaymentMethod.CASH:
+      return 'Cash';
+    case PaymentMethod.BANK_TRANSFER:
+      return 'Bank transfer';
+    default:
+      return 'Bank transfer';
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Receipt viewport
 // ─────────────────────────────────────────────────────────────────────
 
 type ProofKind = 'pdf' | 'image' | 'other' | 'missing';
@@ -218,13 +397,9 @@ function extractFilename(path: string | null | undefined): string | null {
 }
 
 /**
- * The actual receipt surface. Renders directly from the public URL —
- * no blob fetch, no auth dance. Native <img> / <iframe> cross-origin
- * embedding works because the backend serves /uploads/* with
- * Cross-Origin-Resource-Policy: cross-origin.
- *
- * Failed image loads (404 / dead link) fall through to a friendly
- * download tile instead of a broken-image glyph.
+ * Renders the receipt directly from the public URL — no blob fetch,
+ * no auth dance. Falls through to a friendly download tile when the
+ * proof is missing, fails to load, or is a non-previewable format.
  */
 function ReceiptViewport({
   fileUrl,
@@ -242,7 +417,7 @@ function ReceiptViewport({
   if (kind === 'missing' || !fileUrl) {
     return (
       <EmptyState
-        icon={<AlertTriangle className="h-8 w-8 text-amber-400" />}
+        icon={<AlertTriangle className="h-7 w-7 text-amber-500" />}
         title="No receipt attached"
         message="The doctor recorded a bank-transfer intent but did not upload a proof file."
       />
@@ -254,7 +429,7 @@ function ReceiptViewport({
       <iframe
         title={`Receipt — ${fileName}`}
         src={fileUrl}
-        className="h-full w-full border-0 bg-white"
+        className="h-full min-h-[420px] w-full rounded-lg border bg-white shadow-sm"
       />
     );
   }
@@ -264,10 +439,10 @@ function ReceiptViewport({
       <button
         type="button"
         onClick={onImageClick}
-        // Black backdrop + cursor-zoom-in advertises that the user
-        // can click to expand. The image fills the entire viewport
-        // while preserving aspect ratio.
-        className="group flex h-full w-full cursor-zoom-in items-center justify-center bg-black p-0"
+        // Light backdrop + cursor-zoom-in + maximize affordance
+        // advertises that clicking expands to the full lightbox.
+        // The image preserves its aspect ratio inside the container.
+        className="group relative flex h-full max-h-[60vh] w-full cursor-zoom-in items-center justify-center"
         aria-label="Open receipt in full view"
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -277,28 +452,33 @@ function ReceiptViewport({
           loading="eager"
           decoding="async"
           onError={() => setImgError(true)}
-          className="h-full w-full select-none object-contain transition-transform group-hover:scale-[1.01]"
+          className="max-h-full max-w-full select-none rounded-lg border bg-white object-contain shadow-sm transition-transform group-hover:scale-[1.01]"
           draggable={false}
         />
+        {/* Subtle "tap to zoom" affordance — only on hover so it
+            doesn't add visual noise to the default view. */}
+        <span className="pointer-events-none absolute right-3 top-3 grid h-7 w-7 place-items-center rounded-full bg-black/60 text-white opacity-0 backdrop-blur transition-opacity group-hover:opacity-100">
+          <Maximize2 className="h-3.5 w-3.5" />
+        </span>
       </button>
     );
   }
 
-  // Image failed to load or unknown file type — surface a download path.
+  // Image failed to load or unknown format — offer a download.
   return (
     <EmptyState
       icon={
         imgError ? (
-          <AlertTriangle className="h-8 w-8 text-red-400" />
+          <AlertTriangle className="h-7 w-7 text-red-500" />
         ) : (
-          <FileText className="h-8 w-8 text-white/70" />
+          <FileText className="h-7 w-7 text-muted-foreground" />
         )
       }
       title={imgError ? "Couldn't load the receipt" : 'Preview not available'}
       message={
         imgError
           ? "The image couldn't be loaded inline. Download to inspect the proof."
-          : `This file format (${fileName}) can't be previewed in the browser. Download to inspect it.`
+          : `This file format can't be previewed in the browser. Download to inspect it.`
       }
       action={
         <Button asChild size="sm" variant="outline" className="gap-1.5">
@@ -329,11 +509,11 @@ function EmptyState({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-black p-8 text-center text-white">
+    <div className="flex h-full w-full flex-col items-center justify-center gap-3 p-8 text-center">
       {icon}
       <div className="space-y-1">
         <p className="text-sm font-semibold">{title}</p>
-        <p className="max-w-md text-xs text-white/70">{message}</p>
+        <p className="max-w-md text-xs text-muted-foreground">{message}</p>
       </div>
       {action}
     </div>

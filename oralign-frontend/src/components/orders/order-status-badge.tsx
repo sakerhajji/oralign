@@ -2,12 +2,13 @@
 
 import { Badge } from '@/components/ui/badge';
 import { OrderStatus } from '@/lib/types';
+import { useT } from '@/lib/i18n/lang-context';
 
 /**
- * Human-readable label for every value of `OrderStatus`. The map covers
- * the modern lifecycle (draft → finished) PLUS the four legacy values
- * (`in_review`, `approved`, `rejected`, `cancelled`) so old rows in the
- * database still resolve to a sensible badge.
+ * English fallback labels. Used only as a last-resort backstop when
+ * the i18n dictionary doesn't carry an entry (e.g. a brand-new enum
+ * value lands before translations are committed). Real labels come
+ * from `dict.orders.statusLabel.*` via `t()`.
  */
 const STATUS_LABEL: Record<OrderStatus, string> = {
   // Submission
@@ -74,11 +75,15 @@ const STATUS_CLASSNAME: Record<OrderStatus, string> = {
 };
 
 export function OrderStatusBadge({ status }: { status: OrderStatus }) {
-  // Defensive fallback — if the backend ever returns a string we don't
-  // recognise (e.g. a new enum value we haven't shipped a label for
-  // yet), don't crash: show the raw value with a neutral pill so the
-  // page still renders.
-  const label = STATUS_LABEL[status] ?? String(status);
+  const { t } = useT();
+  // Try the i18n dictionary first; fall back to the English STATUS_LABEL
+  // map; fall back to the raw enum value as a last resort. The triple
+  // fallback means a backend-side enum addition never crashes the row —
+  // the badge degrades gracefully through three tiers.
+  const dictKey = `orders.statusLabel.${status}`;
+  const dictHit = t(dictKey);
+  const label =
+    dictHit !== dictKey ? dictHit : (STATUS_LABEL[status] ?? String(status));
   const className =
     STATUS_CLASSNAME[status] ?? 'bg-zinc-100 text-zinc-700';
   return (

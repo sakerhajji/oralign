@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n/lang-context';
 import {
   OrderStatus,
   PaymentRecordStatus,
@@ -41,29 +42,33 @@ import {
 
 type FeeState = 'paid' | 'pending' | 'rejected' | 'unpaid';
 
+// Visual metadata only — the label string is resolved from the i18n
+// dictionary at render time so each badge speaks the user's language.
+// The English fallback strings live next to the dictionary key in
+// `dict.orders.feeBadge.*`.
 const META: Record<
   FeeState,
-  { label: string; tone: string; Icon: typeof CheckCircle2 }
+  { tone: string; Icon: typeof CheckCircle2; dictKey: string }
 > = {
   paid: {
-    label: 'Fee paid',
     tone: 'bg-emerald-100 text-emerald-700 border-emerald-200',
     Icon: CheckCircle2,
+    dictKey: 'orders.feeBadge.paid',
   },
   pending: {
-    label: 'Fee pending',
     tone: 'bg-blue-100 text-blue-700 border-blue-200',
     Icon: Clock,
+    dictKey: 'orders.feeBadge.pending',
   },
   rejected: {
-    label: 'Fee rejected',
     tone: 'bg-red-100 text-red-700 border-red-200',
     Icon: XCircle,
+    dictKey: 'orders.feeBadge.rejected',
   },
   unpaid: {
-    label: 'Fee unpaid',
     tone: 'bg-amber-100 text-amber-800 border-amber-200',
     Icon: AlertCircle,
+    dictKey: 'orders.feeBadge.unpaid',
   },
 };
 
@@ -123,9 +128,11 @@ export function TreatmentFeeBadge({
   >;
   className?: string;
 }) {
+  const { t } = useT();
   const state = resolveTreatmentFeeState(order);
   if (!state) return null;
-  const { label, tone, Icon } = META[state];
+  const { tone, Icon, dictKey } = META[state];
+  const label = t(dictKey);
   return (
     <Badge
       variant="outline"

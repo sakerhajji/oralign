@@ -58,6 +58,7 @@ import {
 import { TreatmentFeePaymentDialog } from '@/components/orders/treatment-fee-payment-dialog';
 import { ClinicalConditionsField } from '@/components/patients/clinical-conditions-field';
 import { useAuth } from '@/lib/providers/auth-provider';
+import { useT } from '@/lib/i18n/lang-context';
 import { patientsService, usersService } from '@/lib/api';
 import {
   useCreateOrder,
@@ -85,50 +86,50 @@ const BRAND_ACTIVE_TEXT = 'text-primary';
 const BRAND_ACTIVE_BORDER = 'border-primary';
 const BRAND_ACTIVE_BG = 'bg-primary';
 
+/**
+ * Static step blueprint. Strings live in the i18n dictionary; this
+ * array only holds the dict KEYS so changing the active language flips
+ * the wizard copy without re-creating the array (icons + ordering are
+ * the only constants that need to live at module scope).
+ */
 const steps = [
   {
-    title: 'Patient',
-    heading: 'Patient Information: Add the necessary details for the patient',
-    description:
-      "Your patient file is more than a compilation of data. It's a portrait of personalized care waiting to be designed.",
+    titleKey: 'orderForm.steps.patient',
+    headingKey: 'orderForm.patient.sectionTitle',
+    descriptionKey: 'orderForm.patient.sectionHint',
     icon: UserRound,
   },
   {
-    title: 'Images',
-    heading: 'Patient images',
-    description:
-      'Add the facial and intraoral image set for a complete clinical package.',
+    titleKey: 'orderForm.steps.images',
+    headingKey: 'orderForm.files.images.title',
+    descriptionKey: 'orderForm.files.images.hint',
     icon: Camera,
   },
   {
-    title: 'Scans',
-    heading: 'Radiography images and STL files',
-    description:
-      'Upload radiography and 3D scan files so reviewers can inspect the case visually.',
+    titleKey: 'orderForm.steps.radiography',
+    headingKey: 'orderForm.files.radiography.title',
+    descriptionKey: 'orderForm.files.radiography.hint',
     icon: ScanLine,
   },
   {
-    title: 'Treatment',
-    heading: 'Treatment plan and clinical objective',
-    description:
-      'Capture the chief complaint, arch scope, and movement plan using the clinical options you provided.',
+    titleKey: 'orderForm.steps.treatment',
+    headingKey: 'orderForm.steps.treatment',
+    descriptionKey: 'orderForm.treatment.chiefComplaintPh',
     icon: Target,
   },
   {
     // Combined "Odontogram + Movement" step. Tooth-level instructions are
     // shown FIRST (primary clinical task), with the AP/elastics/bite/IPR
     // controls underneath. Manufacturing has been dropped from the wizard.
-    title: 'Movement',
-    heading: 'Tooth-level instructions & movement plan',
-    description:
-      'Mark teeth that need no attachments, no IPR, or should not be moved — then document AP relationship, elastics, open bite, midline, IPR, bite ramps, crossbite, spaces, and extractions.',
+    titleKey: 'orderForm.steps.advanced',
+    headingKey: 'orderForm.advanced.sectionTitle',
+    descriptionKey: 'orderForm.advanced.sectionHint',
     icon: ListChecks,
   },
   {
-    title: 'Review',
-    heading: 'Review and Submit: Confirm the order package',
-    description:
-      'Review the key order details before submitting the case for the next operational step.',
+    titleKey: 'orderForm.steps.review',
+    headingKey: 'orderForm.review.sectionTitle',
+    descriptionKey: 'orderForm.review.sectionHint',
     icon: ClipboardCheck,
   },
 ] as const;
@@ -195,6 +196,7 @@ interface NewPatientDraft {
 export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
   const router = useRouter();
   const { isAdmin, isDentist, user } = useAuth();
+  const { t } = useT();
   const [step, setStep] = useState(0);
   const [patientMode, setPatientMode] = useState<PatientMode>('existing');
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
@@ -537,10 +539,10 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
           <ActiveIcon className="h-5 w-5" />
         </div>
         <h1 className="text-balance text-xl font-bold tracking-tight text-foreground md:text-2xl">
-          {activeStep.heading}
+          {t(activeStep.headingKey)}
         </h1>
         <p className="mx-auto mt-3 max-w-5xl text-sm leading-6 text-muted-foreground">
-          {activeStep.description}
+          {t(activeStep.descriptionKey)}
         </p>
       </header>
 
@@ -645,7 +647,7 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
           disabled={step === 0}
         >
           <ChevronLeft className="mr-2 h-4 w-4" />
-          Back
+          {t('common.back')}
         </Button>
         <div className="flex flex-col gap-2 sm:flex-row">
           {canModify && (
@@ -657,10 +659,10 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
             >
               <Save className="mr-2 h-4 w-4" />
               {isSaving
-                ? 'Saving...'
+                ? t('common.loading')
                 : savedOrder
-                  ? 'Save Changes'
-                  : 'Save Draft'}
+                  ? t('orderForm.actions.saveChanges')
+                  : t('orderForm.actions.saveDraft')}
             </Button>
           )}
           {step < steps.length - 1 ? (
@@ -676,7 +678,7 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
                 setStep((current) => Math.min(steps.length - 1, current + 1));
               }}
             >
-              Continue
+              {t('common.continue')}
               <ChevronRight className="ml-2 h-4 w-4" />
             </Button>
           ) : (
@@ -701,7 +703,7 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
               }}
             >
               <Send className="mr-2 h-4 w-4" />
-              Submit Order
+              {t('orderForm.actions.submitOrder')}
             </Button>
           )}
         </div>
@@ -739,6 +741,7 @@ function OrderStepper({
   currentStep: number;
   onStepChange: (step: number) => void;
 }) {
+  const { t } = useT();
   const current = steps[currentStep];
   // Total = step count + N-1 progress bars. The progress bars take `flex-1`
   // so they expand to fill whatever width the container provides — the
@@ -750,10 +753,10 @@ function OrderStepper({
           circles below are too small for inline labels at phone widths. */}
       <div className="flex items-center justify-between gap-3 sm:hidden">
         <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-          Step {currentStep + 1} of {steps.length}
+          {t('orderForm.step')} {currentStep + 1} {t('orderForm.of')} {steps.length}
         </span>
         <span className="truncate text-sm font-semibold text-foreground">
-          {current.title}
+          {t(current.titleKey)}
         </span>
       </div>
 
@@ -766,7 +769,7 @@ function OrderStepper({
           const active = index === currentStep;
           const complete = index < currentStep;
           return (
-            <Fragment key={step.title}>
+            <Fragment key={step.titleKey}>
               <li className="relative flex shrink-0 flex-col items-center">
                 <button
                   type="button"
@@ -776,7 +779,7 @@ function OrderStepper({
                   // forward; this is just a quick-jump shortcut.
                   onClick={() => onStepChange(index)}
                   aria-current={active ? 'step' : undefined}
-                  aria-label={`Step ${index + 1}: ${step.title}`}
+                  aria-label={`${t('orderForm.step')} ${index + 1}: ${t(step.titleKey)}`}
                   className={cn(
                     'group relative grid h-8 w-8 cursor-pointer place-items-center rounded-full border-2 text-xs font-bold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 sm:h-9 sm:w-9 sm:text-sm',
                     active &&
@@ -803,7 +806,7 @@ function OrderStepper({
                     active ? 'text-foreground' : 'text-muted-foreground',
                   )}
                 >
-                  {step.title}
+                  {t(step.titleKey)}
                 </span>
               </li>
 

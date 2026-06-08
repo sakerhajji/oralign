@@ -56,6 +56,7 @@ import { useQuotationForOrder } from '@/lib/hooks/use-quotations';
 import { TreatmentFeePaymentDialog } from '@/components/orders/treatment-fee-payment-dialog';
 import { TreatmentFeeReceiptDialog } from '@/components/orders/treatment-fee-receipt-dialog';
 import { useAuth } from '@/lib/providers/auth-provider';
+import { useT } from '@/lib/i18n/lang-context';
 import {
   Gender,
   OrderStatus,
@@ -90,6 +91,7 @@ export default function OrderDetailPage() {
   const deleteOrder = useDeleteOrder();
   const permanentDeleteOrder = usePermanentDeleteOrder();
   const { isAdmin, isDentist, user } = useAuth();
+  const { t } = useT();
 
   // Pull the full patient record separately — the order endpoint only
   // returns a slim {id,fullName,email,phone} on purpose, but the detail
@@ -187,7 +189,7 @@ export default function OrderDetailPage() {
           <Button asChild variant="ghost" size="sm" className="mb-1 px-0">
             <Link href="/dashboard/orders">
               <ArrowLeft className="mr-2 h-4 w-4" />
-              All orders
+              {t('orderDetail.backToList')}
             </Link>
           </Button>
           <div className="flex flex-wrap items-center gap-3">
@@ -212,17 +214,17 @@ export default function OrderDetailPage() {
                     className="h-7 gap-1.5 text-xs"
                   >
                     <ShieldCheck className="h-3 w-3" />
-                    Change status
+                    {t('orderDetail.changeStatus')}
                   </Button>
                 }
               />
             )}
           </div>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            Created {format(new Date(order.createdAt), 'MMM d, yyyy')}
+            {t('orderDetail.createdOn')} {format(new Date(order.createdAt), 'MMM d, yyyy')}
             {order.submittedAt
-              ? ` · Submitted ${format(new Date(order.submittedAt), 'MMM d, yyyy')}`
-              : ' · Not yet submitted'}
+              ? ` · ${t('orderDetail.submittedOn')} ${format(new Date(order.submittedAt), 'MMM d, yyyy')}`
+              : ''}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -230,15 +232,15 @@ export default function OrderDetailPage() {
             <Button asChild>
               <Link href={`/dashboard/orders/${order.id}/edit`}>
                 <Edit className="mr-2 h-4 w-4" />
-                Edit
+                {t('common.edit')}
               </Link>
             </Button>
           )}
           {canManage && (
             <OrderDeleteAction
-              title="Delete order?"
+              title={t('orderDetail.delete') + '?'}
               description="This soft-deletes the order. Backend permissions still enforce dentist ownership."
-              actionLabel="Delete"
+              actionLabel={t('common.delete')}
               icon={<Trash2 className="mr-2 h-4 w-4" />}
               disabled={deleteOrder.isPending}
               onConfirm={() =>
@@ -250,9 +252,9 @@ export default function OrderDetailPage() {
           )}
           {isAdmin && (
             <OrderDeleteAction
-              title="Permanently delete order?"
+              title={t('orderDetail.deletePermanently') + '?'}
               description="This removes the order, tooth instructions, file records, and stored files. This cannot be undone."
-              actionLabel="Delete forever"
+              actionLabel={t('orderDetail.deletePermanently')}
               icon={<ShieldX className="mr-2 h-4 w-4" />}
               disabled={permanentDeleteOrder.isPending}
               destructive
@@ -308,14 +310,14 @@ export default function OrderDetailPage() {
         onValueChange={(value) => setActiveTab(value as OrderDetailTab)}
       >
         <TabsList className="w-full justify-start sm:w-auto">
-          <TabsTrigger value="order">Order details</TabsTrigger>
+          <TabsTrigger value="order">{t('orderDetail.tabs.details')}</TabsTrigger>
           {showTreatmentTab({
             isPlanner: isAdmin || user?.role === UserRole.DESIGNER,
             hasTreatmentPlans: (order.treatmentPlansCount ?? 0) > 0,
           }) && (
             <TabsTrigger value="treatment-plans" className="gap-1.5">
               <Sparkles className="h-3.5 w-3.5" />
-              Treatment plans
+              {t('orderDetail.tabs.treatmentPlan')}
               {(order.treatmentPlansCount ?? 0) > 0 && (
                 <span className="ml-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
                   {order.treatmentPlansCount}
@@ -333,7 +335,7 @@ export default function OrderDetailPage() {
           }) && (
             <TabsTrigger value="quote" className="gap-1.5">
               <FileText className="h-3.5 w-3.5" />
-              Quote
+              {t('orderDetail.tabs.quote')}
               {needsQuoteAttention({
                 role: user?.role,
                 status: quotationQuery.data?.status,
@@ -350,28 +352,28 @@ export default function OrderDetailPage() {
           {mountedTabs.has('order') && (
             <>
       {/* ─── 1 · Patient information ──────────────────────────────────── */}
-      <Section icon={UserRound} title="Patient information">
+      <Section icon={UserRound} title={t('orderDetail.patientCard.title')}>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Info label="Patient" value={order.patient?.fullName} />
-          <Info label="Dentist" value={order.doctor?.fullName} />
-          <Info label="Patient stage" value={order.patientStage} />
-          <Info label="Sex" value={genderLabel(patient?.gender)} />
-          <Info label="Date of birth" value={formatBirthDate(patient?.dateOfBirth)} />
-          <Info label="Age" value={ageFromDob(patient?.dateOfBirth)} />
-          <Info label="Patient email" value={order.patient?.email} />
-          <Info label="Patient phone" value={order.patient?.phone} />
-          <Info label="Arch treatment" value={order.archTreatment} />
+          <Info label={t('orderForm.patient.pickerLabel')} value={order.patient?.fullName} />
+          <Info label={t('orderDetail.patientCard.dentist')} value={order.doctor?.fullName} />
+          <Info label={t('orderDetail.patientCard.stage')} value={order.patientStage} />
+          <Info label={t('orderDetail.patientCard.sex')} value={genderLabel(patient?.gender)} />
+          <Info label={t('orderDetail.patientCard.dob')} value={formatBirthDate(patient?.dateOfBirth)} />
+          <Info label={t('orderForm.patient.age')} value={ageFromDob(patient?.dateOfBirth)} />
+          <Info label={t('orderDetail.patientCard.email')} value={order.patient?.email} />
+          <Info label={t('orderDetail.patientCard.phone')} value={order.patient?.phone} />
+          <Info label={t('orderDetail.patientCard.arch')} value={order.archTreatment} />
           {patient?.address && (
-            <Info label="Address" value={patient.address} wide />
+            <Info label={t('orderDetail.patientCard.address')} value={patient.address} wide />
           )}
           {patient?.notes && (
-            <Info label="Patient notes" value={patient.notes} wide />
+            <Info label={t('orderDetail.patientCard.notes')} value={patient.notes} wide />
           )}
         </div>
       </Section>
 
       {/* ─── 2 · Patient images ───────────────────────────────────────── */}
-      <Section icon={Camera} title="Patient images">
+      <Section icon={Camera} title={t('orderDetail.sections.patientImages')}>
         <ClinicalOrderFiles
           orderId={order.id}
           readOnly
@@ -380,7 +382,7 @@ export default function OrderDetailPage() {
       </Section>
 
       {/* ─── 3 · Radiography & STL scans ──────────────────────────────── */}
-      <Section icon={ScanLine} title="Radiography & STL scans">
+      <Section icon={ScanLine} title={t('orderDetail.sections.radiographyScans')}>
         <ClinicalOrderFiles
           orderId={order.id}
           readOnly
@@ -389,18 +391,18 @@ export default function OrderDetailPage() {
       </Section>
 
       {/* ─── 4 · Treatment plan ───────────────────────────────────────── */}
-      <Section icon={Target} title="Treatment plan & clinical objective">
+      <Section icon={Target} title={t('orderDetail.sections.clinicalObjective')}>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Info label="Chief complaint" value={order.chiefComplaint} wide />
-          <Info label="Treatment plan" value={order.treatmentPlan} wide />
-          <Info label="A-P relationship" value={order.apRelationship} />
+          <Info label={t('orderForm.treatment.chiefComplaint')} value={order.chiefComplaint} wide />
+          <Info label={t('orderForm.steps.treatment')} value={order.treatmentPlan} wide />
+          <Info label={t('orderForm.treatment.apRelationship')} value={order.apRelationship} />
         </div>
       </Section>
 
       {/* ─── 5 · Movement & tooth-level instructions ──────────────────── */}
       <Section
         icon={ListChecks}
-        title="Tooth-level instructions & movement plan"
+        title={t('orderDetail.sections.toothLevel')}
       >
         <div className="space-y-8">
           {/* Odontogram FIRST — same as in the wizard's step 5. We pass

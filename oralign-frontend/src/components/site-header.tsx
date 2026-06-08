@@ -1,6 +1,7 @@
 import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { NotificationBell } from "@/components/notifications/notification-bell"
+import { LanguageSwitcher } from "@/components/layout/language-switcher"
 
 /**
  * Dashboard header strap. Houses the sidebar toggle on the left and
@@ -18,11 +19,17 @@ export function SiteHeader() {
           className="mx-2 data-[orientation=vertical]:h-4"
         />
 
-        {/* Spacer — pushes the bell to the right edge regardless of
-            whether any centred content lands here later. */}
+        {/* Spacer — pushes the trailing actions to the right edge
+            regardless of whether any centred content lands here later. */}
         <div className="flex-1" />
 
-        <NotificationBell />
+        {/* Trailing action cluster — language switcher sits left of
+            the notification bell so the bell stays the rightmost
+            anchor users expect to click. */}
+        <div className="flex items-center gap-1">
+          <LanguageSwitcher />
+          <NotificationBell />
+        </div>
       </div>
     </header>
   )

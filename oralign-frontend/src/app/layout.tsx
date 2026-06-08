@@ -3,6 +3,7 @@ import "./globals.css";
 import { QueryProvider, AuthProvider } from "@/lib/providers";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { LangProvider } from "@/lib/i18n/lang-context";
 
 /**
  * Root metadata — feeds the browser tab title, Google search-result
@@ -94,14 +95,22 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="h-full antialiased">
+    // `lang` + `dir` are seeded as `en` / `ltr` so the SSR HTML stays
+    // identical for every request. LangProvider then hydrates the
+    // user's saved language on the client and flips both attributes
+    // via the `useLang` effect — see `lib/i18n/use-lang.ts`. The
+    // `suppressHydrationWarning` on `<html>` keeps React quiet about
+    // that attribute swap on the first client commit.
+    <html lang="en" dir="ltr" suppressHydrationWarning className="h-full antialiased">
       <body suppressHydrationWarning className="min-h-full flex flex-col">
         <QueryProvider>
           <AuthProvider>
-            <TooltipProvider>
-              {children}
-              <Toaster />
-            </TooltipProvider>
+            <LangProvider>
+              <TooltipProvider>
+                {children}
+                <Toaster />
+              </TooltipProvider>
+            </LangProvider>
           </AuthProvider>
         </QueryProvider>
       </body>

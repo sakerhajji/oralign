@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import {
   Banknote,
@@ -21,6 +22,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { PaymentMethod, PaymentRecordStatus, type Payment } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { TreatmentFeeReceiptDialog } from '@/components/orders/treatment-fee-receipt-dialog';
 
 /**
  * Shared payment-history table used by:
@@ -136,13 +138,14 @@ function statusBadge(status: PaymentRecordStatus): React.ReactNode {
   }
 }
 
-function proofHref(payment: PaymentRow): string | null {
-  if (!payment.proofUrl) return null;
-  if (payment.proofUrl.startsWith('http')) return payment.proofUrl;
-  const base =
-    process.env.NEXT_PUBLIC_API_URL?.replace(/\/api\/?$/, '') ||
-    'http://localhost:3000';
-  return `${base}${payment.proofUrl}`;
+/**
+ * Whether the row carries a viewable bank-transfer receipt. Only
+ * bank_transfer payments produce a proofUrl; card / cash rows skip
+ * the column entirely. Used to decide whether to render the "View"
+ * button or the dash placeholder.
+ */
+function hasProof(payment: PaymentRow): boolean {
+  return Boolean(payment.proofUrl);
 }
 
 export function PaymentHistoryTable({
@@ -160,6 +163,11 @@ export function PaymentHistoryTable({
   /** Per-row action buttons — Confirm/Reject on the pending queue. */
   renderActions?: (p: PaymentRow) => React.ReactNode;
 }) {
+  // Active row whose receipt is being inspected in the modal viewer.
+  // We hoist it to the table (not each row) so only ONE dialog is
+  // mounted at any time, no matter how many rows the page renders.
+  const [activeReceipt, setActiveReceipt] = useState<PaymentRow | null>(null);
+
   if (isLoading) {
     return (
       <div className="flex flex-col gap-2 p-4">
@@ -179,6 +187,7 @@ export function PaymentHistoryTable({
   }
 
   return (
+    <>
     <Table>
       <TableHeader>
         <TableRow>
@@ -196,7 +205,7 @@ export function PaymentHistoryTable({
       <TableBody>
         {payments.map((p) => {
           const orderId = p.order?.id ?? p.quotation?.orderId;
-          const proof = proofHref(p);
+          const proofAvailable = hasProof(p);
           return (
             <TableRow key={p.id}>
               <TableCell className="text-xs">
@@ -260,17 +269,24 @@ export function PaymentHistoryTable({
               </TableCell>
               <TableCell>{statusBadge(p.status)}</TableCell>
               <TableCell>
-                {proof ? (
-                  <a
-                    href={proof}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                {proofAvailable ? (
+                  // Opens the shared receipt viewer — same modal the
+                  // treatment-fee admin queue + order detail use. The
+                  // old <a href={proof}> link 404'd on the frontend
+                  // origin because proofUrl is a backend-relative path;
+                  // the dialog resolves it correctly via
+                  // resolveUploadUrl + renders inline.
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 gap-1 px-2 text-xs"
+                    onClick={() => setActiveReceipt(p)}
+                    title="View the doctor-uploaded receipt"
                   >
                     <FileText className="size-3" />
                     View
-                    <ExternalLink className="size-3" />
-                  </a>
+                  </Button>
                 ) : (
                   <span className="text-xs text-muted-foreground">—</span>
                 )}
@@ -285,6 +301,34 @@ export function PaymentHistoryTable({
         })}
       </TableBody>
     </Table>
+
+    {/*
+      Single dialog for ALL rows — mounted only while a row is active
+      so the dialog's internal hooks (lightbox, etc.) don't churn for
+      every row in the table. canConfirm is always false here because
+      this is a history view: the row is either already settled or
+      sitting in the pending queue (where the dedicated Confirm /
+      Reject buttons in `renderActions` handle the action).
+     */}
+    {activeReceipt && (
+      <TreatmentFeeReceiptDialog
+        open={!!activeReceipt}
+        onOpenChange={(next) => {
+          if (!next) setActiveReceipt(null);
+        }}
+        orderId={activeReceipt.order?.id ?? activeReceipt.quotation?.orderId ?? ''}
+        orderCode={activeReceipt.order?.orderCode ?? '—'}
+        proofPath={activeReceipt.proofUrl ?? null}
+        amount={Number(activeReceipt.amount ?? 0)}
+        currency={activeReceipt.currency ?? 'TND'}
+        doctorName={activeReceipt.order?.doctor?.fullName ?? null}
+        patientName={activeReceipt.order?.patient?.fullName ?? null}
+        method={activeReceipt.paymentMethod ?? activeReceipt.method ?? null}
+        submittedAt={activeReceipt.createdAt}
+        canConfirm={false}
+      />
+    )}
+    </>
   );
 }
 

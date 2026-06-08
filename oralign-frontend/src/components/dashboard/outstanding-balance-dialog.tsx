@@ -4,9 +4,10 @@ import Link from 'next/link';
 import { format } from 'date-fns';
 import {
   AlertTriangle,
-  ExternalLink,
+  ArrowRight,
+  CheckCircle2,
+  History,
   PackageIcon,
-  ReceiptText,
   RefreshCw,
   Wallet,
 } from 'lucide-react';
@@ -20,64 +21,45 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
+import { cn } from '@/lib/utils';
 import { useDoctorOutstandingOrders } from '@/lib/hooks';
+import type { DoctorOutstandingOrder } from '@/lib/api/dashboard.service';
 
+/**
+ * Outstanding-balance details popup — desktop table ↔ mobile cards.
+ *
+ * Senior UX choices baked in:
+ *
+ *   • Money strip up top reads at a glance — big red total, count
+ *     pill, and a one-line caption that tells the doctor what each
+ *     row represents and how to dive in.
+ *   • Each row has a payment-progress bar (visual % paid) so the
+ *     doctor sees "almost there" vs "barely touched" without doing
+ *     mental math.
+ *   • Patient initial in a soft tinted circle — gives every row a
+ *     scannable anchor instead of a flat code → patient string.
+ *   • Below `md` the table becomes a vertical card list. Each card
+ *     is one big tappable surface (the order code, the progress bar,
+ *     and the remaining amount are on the same chip-shaped button)
+ *     so a phone user gets a clean 44 px touch target, not a 16 px
+ *     "Open" icon.
+ *   • Footer CTAs are default-size with real labels — no more
+ *     icon-soup sm buttons on a "money the doctor owes" surface.
+ *   • Lazy fetch (only while open) + graceful degradation when the
+ *     dedicated endpoint is unreachable: the parent's KPI total +
+ *     count populate the summary so the popup is still informative.
+ */
 const TND = (n: number, currency = 'TND') =>
   new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(n) +
   ' ' +
   currency;
 
-/**
- * Outstanding-balance details popup.
- *
- * Visual chrome mirrors the TreatmentFeeReceiptDialog so every popup
- * in the dashboard family feels related:
- *   • 920 px / 90vh shell, rounded-2xl, shadow-2xl, border-0
- *   • Header strip: circular icon badge + title + description on the
- *     left, count pill on the right
- *   • Summary strip just under the title: TOTAL DUE in a bordered
- *     mini-card (same idea as the "Declared 350 TND · filename"
- *     strip in the receipt dialog)
- *   • Full-bleed body: table when there's data; empty / loading /
- *     error states centred otherwise
- *   • Sticky footer: Refresh on the left, "Open payment history" +
- *     Close on the right
- *
- * The query is lazy — only fires while `open === true`, so we don't
- * pay for the per-order fetch on every dashboard mount. Refetches
- * every 30s while open so a payment landing in another tab drops
- * its row from the list in near-real-time.
- *
- * Graceful degradation
- * --------------------
- * The dedicated `/outstanding-orders` endpoint is recent — older
- * backend containers return 404. To keep the dialog useful during
- * the deployment window, we always render the headline figures
- * (`fallbackTotal` + `fallbackCount`) that the parent KPI already
- * resolved. When the detailed breakdown fetch fails, we surface
- * those numbers in a polite "summary only" state instead of a hard
- * error. The dialog still works; it just can't show per-row data
- * until the new endpoint lands.
- */
 export interface OutstandingBalanceDialogProps {
   open: boolean;
   onOpenChange: (next: boolean) => void;
-  /**
-   * Headline outstanding amount the parent already knows from the
-   * doctor KPIs. Used to short-circuit the body to an empty-state
-   * when 0 (no need to round-trip for an empty list), and as a
-   * fallback display when the breakdown endpoint isn't reachable.
-   */
+  /** Total surfaced by the parent KPI — used to short-circuit the
+   *  query when 0 and to populate the summary-only fallback. */
   fallbackTotal?: number;
-  /** Same idea for the unpaid-order count from KPIs. */
   fallbackCount?: number;
   fallbackCurrency?: string;
 }
@@ -89,17 +71,9 @@ export function OutstandingBalanceDialog({
   fallbackCount = 0,
   fallbackCurrency = 'TND',
 }: OutstandingBalanceDialogProps) {
-  // Only fire the per-order breakdown fetch when the parent KPI says
-  // there's actually anything outstanding. A doctor with 0 TND due
-  // doesn't need a network round-trip to confirm an empty list — we
-  // know it'll be empty.
   const shouldFetch = open && fallbackTotal > 0;
   const { data, isLoading, isError, error, refetch, isFetching } =
     useDoctorOutstandingOrders(shouldFetch);
-
-  // Prefer fresh server data when available; otherwise the headline
-  // figures the parent dashboard already resolved keep the popup
-  // informative even when the breakdown endpoint is missing.
   const rows = data?.data ?? [];
   const total = data?.totalOutstanding ?? fallbackTotal;
   const currency = data?.currency ?? fallbackCurrency;
@@ -108,75 +82,87 @@ export function OutstandingBalanceDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {/*
-        Same shell as TreatmentFeeReceiptDialog:
-        - h-auto + max-h-[90vh] so short content stays compact
-        - max-w-[920px] on lg for desktop comfort
-        - sm:max-w-[680px] for the tablet sweet-spot (table needs a bit
-          more room than the 600 px the receipt summary uses)
+        Responsive shell:
+          • h-[100dvh] on phones so the modal fills the screen instead
+            of floating awkwardly mid-viewport
+          • rounded-2xl + shadow-2xl on lg+ for the centred desktop card
+          • max-w-[980px] on lg — wider than receipt dialog to fit the
+            7-column table comfortably without horizontal scroll
        */}
-      <DialogContent className="flex h-auto max-h-[90vh] w-full flex-col gap-0 overflow-hidden rounded-2xl border-0 p-0 shadow-2xl sm:max-w-[680px] lg:max-w-[920px]">
+      <DialogContent className="flex h-[100dvh] w-full flex-col gap-0 overflow-hidden border-0 p-0 shadow-2xl sm:h-auto sm:max-h-[92vh] sm:rounded-2xl sm:max-w-[680px] lg:max-w-[980px]">
         {/* ─── Header ─────────────────────────────────────────────── */}
-        <DialogHeader className="space-y-3 border-b bg-card px-6 py-5 text-left sm:px-8">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+        <DialogHeader className="space-y-4 border-b bg-card px-5 py-5 text-left sm:px-7 sm:py-6">
+          <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="flex min-w-0 items-start gap-3">
-              <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">
-                <Wallet className="h-4 w-4" />
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary sm:h-11 sm:w-11">
+                <Wallet className="h-5 w-5" />
               </div>
-              <div className="min-w-0">
-                <DialogTitle className="text-lg font-semibold sm:text-xl">
+              <div className="min-w-0 space-y-0.5">
+                <DialogTitle className="text-lg font-semibold leading-tight sm:text-xl">
                   Outstanding balance
                 </DialogTitle>
-                <DialogDescription className="mt-0.5 text-xs">
-                  Every order with a remaining amount due, newest update first.
+                <DialogDescription className="text-xs leading-relaxed sm:text-[13px]">
+                  Approved orders with a remaining amount due. Click any
+                  row to open the order.
                 </DialogDescription>
               </div>
             </div>
             <Badge
               variant="outline"
-              // Tone follows the headline. Zero outstanding ships as
-              // emerald (clear), >0 as red so the dialog header
-              // confirms the dashboard reading at a glance.
-              className={
+              className={cn(
+                'shrink-0 gap-1.5 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide',
                 total > 0
-                  ? 'shrink-0 gap-1.5 border-red-200 bg-red-50 px-2.5 py-1 text-[11px] font-semibold text-red-700'
-                  : 'shrink-0 gap-1.5 border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700'
-              }
+                  ? 'border-red-200 bg-red-50 text-red-700'
+                  : 'border-emerald-200 bg-emerald-50 text-emerald-700',
+              )}
             >
-              <ReceiptText className="h-3 w-3" />
-              {count} order{count === 1 ? '' : 's'}
+              <span className="tabular-nums">{count}</span>
+              order{count === 1 ? '' : 's'}
             </Badge>
           </div>
 
           {/*
-            Total strip — same visual as the "Declared · filename"
-            strip in the receipt dialog. Anchors the user's eye at
-            the single number they came to see before scanning rows.
+            Headline money strip — full-bleed inside the header so the
+            "Total due" number is the loudest visual on the screen.
+            Red gradient when there's a debt, neutral when clear.
            */}
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/40 px-3 py-2">
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              Total due
-            </span>
-            <span className="text-base font-bold tabular-nums">
-              {TND(total, currency)}
-            </span>
+          <div
+            className={cn(
+              'flex flex-wrap items-end justify-between gap-3 rounded-xl border p-4',
+              total > 0
+                ? 'border-red-200 bg-gradient-to-br from-red-50 to-card'
+                : 'border-emerald-200 bg-gradient-to-br from-emerald-50 to-card',
+            )}
+          >
+            <div className="space-y-0.5">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                Total due
+              </p>
+              <p
+                className={cn(
+                  'text-2xl font-bold tabular-nums leading-none sm:text-3xl',
+                  total > 0 ? 'text-destructive' : 'text-emerald-700',
+                )}
+              >
+                {TND(total, currency)}
+              </p>
+            </div>
+            {total > 0 ? (
+              <div className="flex items-center gap-1.5 text-[11px] font-medium text-red-700/80">
+                <AlertTriangle className="h-3.5 w-3.5" />
+                <span>Settle to unlock the next batch of steps.</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 text-[11px] font-medium text-emerald-700/80">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                <span>You&apos;re fully paid up.</span>
+              </div>
+            )}
           </div>
         </DialogHeader>
 
         {/* ─── Body ──────────────────────────────────────────────── */}
-        <div className="min-h-0 flex-1 overflow-auto bg-card">
-          {/*
-            Decision tree:
-              1. Nothing to fetch (parent says 0 outstanding) → empty state
-              2. Fetch is running → loading state
-              3. Fetch failed BUT we have a non-zero headline → degrade
-                 gracefully to the "summary only" state, not the hard
-                 error wall. This is the case during a deployment
-                 window where the new /outstanding-orders endpoint
-                 isn't live yet on the running backend.
-              4. Fetch failed AND nothing to show → hard error.
-              5. Fetch succeeded with empty list → empty state.
-              6. Fetch succeeded with rows → table.
-           */}
+        <div className="min-h-0 flex-1 overflow-auto bg-muted/20">
           {!shouldFetch ? (
             <EmptyState />
           ) : isLoading ? (
@@ -196,103 +182,45 @@ export function OutstandingBalanceDialog({
           ) : rows.length === 0 ? (
             <EmptyState />
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Order</TableHead>
-                  <TableHead>Patient</TableHead>
-                  <TableHead>Pack</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
-                  <TableHead className="text-right">Paid</TableHead>
-                  <TableHead className="text-right">Remaining</TableHead>
-                  <TableHead>Updated</TableHead>
-                  <TableHead className="text-right">Open</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rows.map((row) => (
-                  <TableRow key={row.orderId}>
-                    <TableCell className="font-medium">
-                      {row.orderCode}
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {row.patientName ?? (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {row.packName ? (
-                        <span className="inline-flex items-center gap-1 text-xs">
-                          <PackageIcon className="size-3 text-muted-foreground" />
-                          {row.packName}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right text-xs tabular-nums">
-                      {TND(row.totalPrice, row.currency)}
-                    </TableCell>
-                    <TableCell className="text-right text-xs tabular-nums text-emerald-700">
-                      {TND(row.paidAmount, row.currency)}
-                    </TableCell>
-                    <TableCell className="text-right font-semibold tabular-nums text-red-700">
-                      {TND(row.remaining, row.currency)}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {format(new Date(row.updatedAt), 'MMM d, yyyy')}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        asChild
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 gap-1 px-2 text-xs"
-                        onClick={() => onOpenChange(false)}
-                        title="Open order"
-                      >
-                        <Link
-                          href={`/dashboard/orders/${row.orderId}?tab=quote`}
-                        >
-                          <ExternalLink className="size-3" />
-                          Open
-                        </Link>
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <>
+              {/* Desktop table — md+ */}
+              <DesktopTable rows={rows} onRowOpen={() => onOpenChange(false)} />
+              {/* Mobile cards — < md */}
+              <MobileCardList rows={rows} onRowOpen={() => onOpenChange(false)} />
+            </>
           )}
         </div>
 
         {/* ─── Footer ────────────────────────────────────────────── */}
-        <div className="flex flex-row flex-wrap items-center justify-between gap-2 border-t bg-card px-6 py-3">
+        <div className="flex flex-col-reverse gap-2 border-t bg-card px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-7">
           <Button
-            size="sm"
             variant="ghost"
             onClick={() => refetch()}
             disabled={isFetching}
-            className="gap-1.5"
+            className="h-10 w-full gap-2 sm:w-auto"
           >
             <RefreshCw
-              className={isFetching ? 'size-3.5 animate-spin' : 'size-3.5'}
+              className={cn('h-4 w-4', isFetching && 'animate-spin')}
             />
             {isFetching ? 'Refreshing…' : 'Refresh'}
           </Button>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button asChild size="sm" variant="outline">
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
+            <Button
+              asChild
+              variant="outline"
+              className="h-10 w-full gap-2 sm:w-auto"
+            >
               <Link
                 href="/dashboard/payments/history"
                 onClick={() => onOpenChange(false)}
               >
-                Open payment history
+                <History className="h-4 w-4" />
+                Payment history
               </Link>
             </Button>
             <Button
-              size="sm"
-              variant="default"
               onClick={() => onOpenChange(false)}
+              className="h-10 w-full sm:w-auto sm:min-w-[120px]"
             >
               Close
             </Button>
@@ -304,15 +232,219 @@ export function OutstandingBalanceDialog({
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Sub-states — same visual rhythm as the EmptyState in the receipt
-// dialog (centred icon + title + muted hint + optional action).
+// Row primitives — small atoms shared by table + card layouts.
+// ────────────────────────────────────────────────────────────────────
+
+/** Single letter avatar circle for the patient — soft brand tint. */
+function PatientAvatar({ name }: { name: string | null }) {
+  const initial = (name ?? '?').trim().charAt(0).toUpperCase() || '?';
+  return (
+    <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
+      {initial}
+    </div>
+  );
+}
+
+/**
+ * Payment-progress bar showing % paid for a single quote. Soft
+ * gradient base + tinted fill so the doctor sees at a glance whether
+ * a row is barely started or almost settled.
+ */
+function PaymentProgress({
+  paid,
+  total,
+}: {
+  paid: number;
+  total: number;
+}) {
+  const pct = total > 0 ? Math.min(100, Math.max(0, (paid / total) * 100)) : 0;
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between text-[10px] font-medium tabular-nums text-muted-foreground">
+        <span>{pct.toFixed(0)}% paid</span>
+      </div>
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-emerald-500 transition-all"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Desktop table (md+)
+// ────────────────────────────────────────────────────────────────────
+
+function DesktopTable({
+  rows,
+  onRowOpen,
+}: {
+  rows: DoctorOutstandingOrder[];
+  onRowOpen: () => void;
+}) {
+  return (
+    <div className="hidden md:block">
+      <table className="w-full border-separate border-spacing-0 text-sm">
+        <thead className="sticky top-0 z-10 bg-muted/40 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground backdrop-blur">
+          <tr>
+            <th className="border-b px-5 py-3 text-left">Order</th>
+            <th className="border-b px-5 py-3 text-left">Patient</th>
+            <th className="border-b px-5 py-3 text-left">Pack</th>
+            <th className="border-b px-5 py-3 text-left w-48">Progress</th>
+            <th className="border-b px-5 py-3 text-right">Remaining</th>
+            <th className="border-b px-5 py-3 text-left">Updated</th>
+            <th className="border-b px-5 py-3"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr
+              key={row.orderId}
+              className="bg-card transition hover:bg-accent/40"
+            >
+              <td className="border-b border-border/60 px-5 py-3 font-medium tabular-nums">
+                {row.orderCode}
+              </td>
+              <td className="border-b border-border/60 px-5 py-3">
+                <div className="flex items-center gap-2.5">
+                  <PatientAvatar name={row.patientName} />
+                  <span className="text-sm">
+                    {row.patientName ?? (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </span>
+                </div>
+              </td>
+              <td className="border-b border-border/60 px-5 py-3 text-xs">
+                {row.packName ? (
+                  <span className="inline-flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-1 font-medium">
+                    <PackageIcon className="h-3 w-3 text-muted-foreground" />
+                    {row.packName}
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
+              </td>
+              <td className="border-b border-border/60 px-5 py-3">
+                <PaymentProgress paid={row.paidAmount} total={row.totalPrice} />
+              </td>
+              <td className="border-b border-border/60 px-5 py-3 text-right">
+                <div className="text-base font-semibold tabular-nums text-destructive">
+                  {TND(row.remaining, row.currency)}
+                </div>
+                <div className="text-[10px] tabular-nums text-muted-foreground">
+                  of {TND(row.totalPrice, row.currency)}
+                </div>
+              </td>
+              <td className="border-b border-border/60 px-5 py-3 text-xs text-muted-foreground">
+                {format(new Date(row.updatedAt), 'MMM d, yyyy')}
+              </td>
+              <td className="border-b border-border/60 px-5 py-3 text-right">
+                <Button
+                  asChild
+                  variant="ghost"
+                  size="sm"
+                  className="h-9 gap-1.5"
+                  onClick={onRowOpen}
+                >
+                  <Link href={`/dashboard/orders/${row.orderId}?tab=quote`}>
+                    Open
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </Link>
+                </Button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Mobile cards (< md)
+// ────────────────────────────────────────────────────────────────────
+
+function MobileCardList({
+  rows,
+  onRowOpen,
+}: {
+  rows: DoctorOutstandingOrder[];
+  onRowOpen: () => void;
+}) {
+  return (
+    <ul className="space-y-3 p-4 md:hidden">
+      {rows.map((row) => (
+        <li key={row.orderId}>
+          {/*
+            The whole card is a Link so the touch target is the whole
+            ~120 px tall surface — not a 16 px icon. Active state gives
+            the user clear feedback on tap.
+           */}
+          <Link
+            href={`/dashboard/orders/${row.orderId}?tab=quote`}
+            onClick={onRowOpen}
+            className="block rounded-xl border bg-card p-4 shadow-sm transition active:scale-[0.99] active:shadow-md"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex min-w-0 items-start gap-3">
+                <PatientAvatar name={row.patientName} />
+                <div className="min-w-0 space-y-0.5">
+                  <p className="truncate text-sm font-semibold">
+                    {row.patientName ?? 'Unknown patient'}
+                  </p>
+                  <p className="truncate font-mono text-[11px] text-muted-foreground">
+                    {row.orderCode}
+                  </p>
+                </div>
+              </div>
+              <div className="shrink-0 text-right">
+                <p className="text-base font-bold tabular-nums text-destructive">
+                  {TND(row.remaining, row.currency)}
+                </p>
+                <p className="text-[10px] tabular-nums text-muted-foreground">
+                  of {TND(row.totalPrice, row.currency)}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-3 space-y-2">
+              <PaymentProgress
+                paid={row.paidAmount}
+                total={row.totalPrice}
+              />
+              <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                {row.packName ? (
+                  <span className="inline-flex items-center gap-1">
+                    <PackageIcon className="h-3 w-3" />
+                    {row.packName}
+                  </span>
+                ) : (
+                  <span />
+                )}
+                <span>
+                  {format(new Date(row.updatedAt), 'MMM d, yyyy')}
+                </span>
+              </div>
+            </div>
+          </Link>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────
+// State surfaces — all share the same centred icon-badge anatomy.
 // ────────────────────────────────────────────────────────────────────
 
 function LoadingState() {
   return (
-    <div className="space-y-2 p-4">
-      {Array.from({ length: 4 }).map((_, i) => (
-        <Skeleton key={i} className="h-10 w-full" />
+    <div className="space-y-3 p-5">
+      {Array.from({ length: 3 }).map((_, i) => (
+        <Skeleton key={i} className="h-20 w-full rounded-xl" />
       ))}
     </div>
   );
@@ -320,27 +452,21 @@ function LoadingState() {
 
 function EmptyState() {
   return (
-    <div className="flex h-full min-h-[260px] w-full flex-col items-center justify-center gap-3 p-8 text-center">
-      <div className="grid h-12 w-12 place-items-center rounded-full bg-emerald-100 text-emerald-700">
-        <Wallet className="h-6 w-6" />
+    <div className="flex h-full min-h-[280px] w-full flex-col items-center justify-center gap-4 p-8 text-center">
+      <div className="grid h-14 w-14 place-items-center rounded-2xl bg-emerald-100 text-emerald-700">
+        <CheckCircle2 className="h-7 w-7" />
       </div>
-      <div className="space-y-1">
-        <p className="text-sm font-semibold">Nothing outstanding</p>
-        <p className="max-w-md text-xs text-muted-foreground">
-          All your orders are paid in full. Nothing for you to chase.
+      <div className="space-y-1.5">
+        <p className="text-base font-semibold">Nothing outstanding</p>
+        <p className="max-w-md text-sm text-muted-foreground">
+          All your approved orders are paid in full. Nothing for you
+          to chase right now.
         </p>
       </div>
     </div>
   );
 }
 
-/**
- * Graceful-degradation state: we couldn't load the per-order
- * breakdown, but the parent dashboard already knows the headline
- * total + count. Show those in a polite card with a Retry — the
- * dialog stays informative even when the new endpoint isn't
- * deployed yet on the running backend.
- */
 function SummaryOnlyState({
   total,
   currency,
@@ -353,36 +479,35 @@ function SummaryOnlyState({
   onRetry: () => void;
 }) {
   return (
-    <div className="flex h-full min-h-[260px] w-full flex-col items-center justify-center gap-4 p-8 text-center">
-      <div className="grid h-12 w-12 place-items-center rounded-full bg-amber-100 text-amber-700">
-        <Wallet className="h-6 w-6" />
+    <div className="flex h-full min-h-[280px] w-full flex-col items-center justify-center gap-4 p-8 text-center">
+      <div className="grid h-14 w-14 place-items-center rounded-2xl bg-amber-100 text-amber-700">
+        <Wallet className="h-7 w-7" />
       </div>
-      <div className="space-y-1">
-        <p className="text-sm font-semibold">Summary only</p>
-        <p className="max-w-md text-xs text-muted-foreground">
-          We couldn&apos;t load the per-order breakdown right now — the
-          detailed view will be available shortly. Here&apos;s what we
-          know from your dashboard:
+      <div className="space-y-1.5">
+        <p className="text-base font-semibold">Summary only</p>
+        <p className="max-w-md text-sm text-muted-foreground">
+          We couldn&apos;t load the per-order breakdown right now. The
+          headline figures from your dashboard are still accurate:
         </p>
       </div>
-      <div className="grid w-full max-w-xs grid-cols-2 gap-2 rounded-lg border bg-muted/30 p-3">
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+      <div className="grid w-full max-w-sm grid-cols-2 gap-3 rounded-xl border bg-card p-4">
+        <div className="space-y-1">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
             Total due
           </p>
-          <p className="text-base font-bold tabular-nums">
+          <p className="text-lg font-bold tabular-nums text-destructive">
             {TND(total, currency)}
           </p>
         </div>
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <div className="space-y-1">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
             Unpaid orders
           </p>
-          <p className="text-base font-bold tabular-nums">{count}</p>
+          <p className="text-lg font-bold tabular-nums">{count}</p>
         </div>
       </div>
-      <Button size="sm" variant="outline" onClick={onRetry} className="gap-1.5">
-        <RefreshCw className="size-3.5" />
+      <Button variant="outline" onClick={onRetry} className="h-10 gap-2">
+        <RefreshCw className="h-4 w-4" />
         Try again
       </Button>
     </div>
@@ -396,32 +521,27 @@ function ErrorState({
   message?: string;
   onRetry: () => void;
 }) {
-  // Detect the "endpoint not deployed yet" case so the doctor sees a
-  // useful hint instead of a raw axios string. A 404 here typically
-  // means the running backend container is the old build and doesn't
-  // yet have the outstanding-orders route — once it recreates with
-  // the new image the call succeeds without any frontend change.
   const looksLike404 = /404/.test(message ?? '');
   return (
-    <div className="flex h-full min-h-[260px] w-full flex-col items-center justify-center gap-3 p-8 text-center">
-      <div className="grid h-12 w-12 place-items-center rounded-full bg-red-100 text-red-700">
-        <AlertTriangle className="h-6 w-6" />
+    <div className="flex h-full min-h-[280px] w-full flex-col items-center justify-center gap-4 p-8 text-center">
+      <div className="grid h-14 w-14 place-items-center rounded-2xl bg-red-100 text-red-700">
+        <AlertTriangle className="h-7 w-7" />
       </div>
-      <div className="space-y-1">
-        <p className="text-sm font-semibold text-destructive">
-          Couldn&apos;t load your outstanding orders.
+      <div className="space-y-1.5">
+        <p className="text-base font-semibold text-destructive">
+          Couldn&apos;t load your outstanding orders
         </p>
         {message ? (
-          <p className="max-w-md text-xs text-muted-foreground">{message}</p>
+          <p className="max-w-md text-sm text-muted-foreground">{message}</p>
         ) : null}
         {looksLike404 ? (
-          <p className="max-w-md text-[11px] text-muted-foreground">
+          <p className="max-w-md text-xs text-muted-foreground">
             The server may be updating. Wait a moment and try again.
           </p>
         ) : null}
       </div>
-      <Button size="sm" variant="outline" onClick={onRetry} className="gap-1.5">
-        <RefreshCw className="size-3.5" />
+      <Button variant="outline" onClick={onRetry} className="h-10 gap-2">
+        <RefreshCw className="h-4 w-4" />
         Try again
       </Button>
     </div>

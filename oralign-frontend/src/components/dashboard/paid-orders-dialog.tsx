@@ -25,6 +25,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { useDoctorPaidOrders } from '@/lib/hooks';
 import type { DoctorOutstandingOrder } from '@/lib/api/dashboard.service';
+import { useT } from '@/lib/i18n/lang-context';
+import { fr as frLocale } from 'date-fns/locale';
+import type { Locale } from 'date-fns';
 
 /**
  * Paid-orders details popup — mirrors the OutstandingBalanceDialog
@@ -44,10 +47,18 @@ import type { DoctorOutstandingOrder } from '@/lib/api/dashboard.service';
  *   • Each row deep-links to the order detail with the quote tab
  *     pre-selected — the doctor can review what was paid for.
  */
-const TND = (n: number, currency = 'TND') =>
-  new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(n) +
+// Locale-aware money + date formatters. Same pattern as the
+// outstanding-balance dialog — accept the current Lang so leaf
+// components don't have to re-pull the context each render.
+const tnd = (n: number, currency = 'TND', lang: 'en' | 'fr' = 'en') =>
+  new Intl.NumberFormat(lang === 'fr' ? 'fr-FR' : 'en-US', {
+    maximumFractionDigits: 0,
+  }).format(n) +
   ' ' +
   currency;
+
+const dateLocale = (lang: 'en' | 'fr'): Locale | undefined =>
+  lang === 'fr' ? frLocale : undefined;
 
 export interface PaidOrdersDialogProps {
   open: boolean;
@@ -75,6 +86,7 @@ export function PaidOrdersDialog({
   const total = data?.totalCollected ?? fallbackTotal;
   const currency = data?.currency ?? fallbackCurrency;
   const count = data?.count ?? fallbackCount;
+  const { t, lang } = useT();
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -88,11 +100,10 @@ export function PaidOrdersDialog({
               </div>
               <div className="min-w-0 space-y-0.5">
                 <DialogTitle className="text-lg font-semibold leading-tight sm:text-xl">
-                  Paid orders
+                  {t('dashboard.paidDialog.title')}
                 </DialogTitle>
                 <DialogDescription className="text-xs leading-relaxed sm:text-[13px]">
-                  Approved orders settled in full. Click any row to
-                  open the order.
+                  {t('dashboard.paidDialog.description')}
                 </DialogDescription>
               </div>
             </div>
@@ -100,8 +111,7 @@ export function PaidOrdersDialog({
               variant="outline"
               className="shrink-0 gap-1.5 border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-700"
             >
-              <span className="tabular-nums">{count}</span>
-              order{count === 1 ? '' : 's'}
+              {t('dashboard.outstandingDialog.orderCount', { count })}
             </Badge>
           </div>
 
@@ -116,7 +126,7 @@ export function PaidOrdersDialog({
           >
             <div className="space-y-0.5">
               <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                Total collected
+                {t('dashboard.paidDialog.totalCollected')}
               </p>
               <p
                 className={cn(
@@ -124,18 +134,18 @@ export function PaidOrdersDialog({
                   count > 0 ? 'text-emerald-700' : 'text-muted-foreground',
                 )}
               >
-                {TND(total, currency)}
+                {tnd(total, currency, lang)}
               </p>
             </div>
             {count > 0 ? (
               <div className="flex items-center gap-1.5 text-[11px] font-medium text-emerald-700/80">
                 <TrendingUp className="h-3.5 w-3.5" />
-                <span>Revenue from fully settled orders.</span>
+                <span>{t('dashboard.paidDialog.revenueHint')}</span>
               </div>
             ) : (
               <div className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
                 <Sparkles className="h-3.5 w-3.5" />
-                <span>No orders settled yet — your first one is coming.</span>
+                <span>{t('dashboard.paidDialog.noneYetHint')}</span>
               </div>
             )}
           </div>
@@ -180,7 +190,9 @@ export function PaidOrdersDialog({
             <RefreshCw
               className={cn('h-4 w-4', isFetching && 'animate-spin')}
             />
-            {isFetching ? 'Refreshing…' : 'Refresh'}
+            {isFetching
+              ? t('dashboard.refreshing')
+              : t('dashboard.refresh')}
           </Button>
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
             <Button
@@ -193,14 +205,14 @@ export function PaidOrdersDialog({
                 onClick={() => onOpenChange(false)}
               >
                 <History className="h-4 w-4" />
-                Payment history
+                {t('dashboard.outstandingDialog.paymentHistory')}
               </Link>
             </Button>
             <Button
               onClick={() => onOpenChange(false)}
               className="h-10 w-full sm:w-auto sm:min-w-[120px]"
             >
-              Close
+              {t('dashboard.outstandingDialog.close')}
             </Button>
           </div>
         </div>
@@ -231,10 +243,11 @@ function PatientAvatar({ name }: { name: string | null }) {
  * full width with no gradient ambiguity.
  */
 function PaidProgress() {
+  const { t } = useT();
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between text-[10px] font-medium tabular-nums text-emerald-700">
-        <span>100% paid</span>
+        <span>{t('dashboard.paidDialog.progressPaid')}</span>
       </div>
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
         <div className="h-full w-full rounded-full bg-emerald-500" />
@@ -254,17 +267,19 @@ function DesktopTable({
   rows: DoctorOutstandingOrder[];
   onRowOpen: () => void;
 }) {
+  const { t, lang } = useT();
+  const dateFmt = lang === 'fr' ? 'd MMM yyyy' : 'MMM d, yyyy';
   return (
     <div className="hidden md:block">
       <table className="w-full border-separate border-spacing-0 text-sm">
         <thead className="sticky top-0 z-10 bg-muted/40 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground backdrop-blur">
           <tr>
-            <th className="border-b px-5 py-3 text-left">Order</th>
-            <th className="border-b px-5 py-3 text-left">Patient</th>
-            <th className="border-b px-5 py-3 text-left">Pack</th>
-            <th className="border-b px-5 py-3 text-left w-48">Status</th>
-            <th className="border-b px-5 py-3 text-right">Collected</th>
-            <th className="border-b px-5 py-3 text-left">Settled</th>
+            <th className="border-b px-5 py-3 text-left">{t('dashboard.outstandingDialog.colOrder')}</th>
+            <th className="border-b px-5 py-3 text-left">{t('dashboard.outstandingDialog.colPatient')}</th>
+            <th className="border-b px-5 py-3 text-left">{t('dashboard.outstandingDialog.colPack')}</th>
+            <th className="border-b px-5 py-3 text-left w-48">{t('dashboard.paidDialog.colStatus')}</th>
+            <th className="border-b px-5 py-3 text-right">{t('dashboard.paidDialog.colCollected')}</th>
+            <th className="border-b px-5 py-3 text-left">{t('dashboard.paidDialog.colSettled')}</th>
             <th className="border-b px-5 py-3"></th>
           </tr>
         </thead>
@@ -302,14 +317,18 @@ function DesktopTable({
               </td>
               <td className="border-b border-border/60 px-5 py-3 text-right">
                 <div className="text-base font-semibold tabular-nums text-emerald-700">
-                  {TND(row.paidAmount, row.currency)}
+                  {tnd(row.paidAmount, row.currency, lang)}
                 </div>
                 <div className="text-[10px] tabular-nums text-muted-foreground">
-                  of {TND(row.totalPrice, row.currency)}
+                  {t('dashboard.outstandingDialog.ofTotal', {
+                    total: tnd(row.totalPrice, row.currency, lang),
+                  })}
                 </div>
               </td>
               <td className="border-b border-border/60 px-5 py-3 text-xs text-muted-foreground">
-                {format(new Date(row.updatedAt), 'MMM d, yyyy')}
+                {format(new Date(row.updatedAt), dateFmt, {
+                  locale: dateLocale(lang),
+                })}
               </td>
               <td className="border-b border-border/60 px-5 py-3 text-right">
                 <Button
@@ -320,7 +339,7 @@ function DesktopTable({
                   onClick={onRowOpen}
                 >
                   <Link href={`/dashboard/orders/${row.orderId}?tab=quote`}>
-                    Open
+                    {t('dashboard.outstandingDialog.openAction')}
                     <ArrowRight className="h-3.5 w-3.5" />
                   </Link>
                 </Button>
@@ -344,6 +363,10 @@ function MobileCardList({
   rows: DoctorOutstandingOrder[];
   onRowOpen: () => void;
 }) {
+  const { t, lang } = useT();
+  const dateFmt = lang === 'fr' ? 'd MMM yyyy' : 'MMM d, yyyy';
+  const unknownPatient =
+    lang === 'fr' ? 'Patient inconnu' : 'Unknown patient';
   return (
     <ul className="space-y-3 p-4 md:hidden">
       {rows.map((row) => (
@@ -358,7 +381,7 @@ function MobileCardList({
                 <PatientAvatar name={row.patientName} />
                 <div className="min-w-0 space-y-0.5">
                   <p className="truncate text-sm font-semibold">
-                    {row.patientName ?? 'Unknown patient'}
+                    {row.patientName ?? unknownPatient}
                   </p>
                   <p className="truncate font-mono text-[11px] text-muted-foreground">
                     {row.orderCode}
@@ -367,10 +390,12 @@ function MobileCardList({
               </div>
               <div className="shrink-0 text-right">
                 <p className="text-base font-bold tabular-nums text-emerald-700">
-                  {TND(row.paidAmount, row.currency)}
+                  {tnd(row.paidAmount, row.currency, lang)}
                 </p>
                 <p className="text-[10px] tabular-nums text-muted-foreground">
-                  of {TND(row.totalPrice, row.currency)}
+                  {t('dashboard.outstandingDialog.ofTotal', {
+                    total: tnd(row.totalPrice, row.currency, lang),
+                  })}
                 </p>
               </div>
             </div>
@@ -387,7 +412,9 @@ function MobileCardList({
                   <span />
                 )}
                 <span>
-                  {format(new Date(row.updatedAt), 'MMM d, yyyy')}
+                  {format(new Date(row.updatedAt), dateFmt, {
+                    locale: dateLocale(lang),
+                  })}
                 </span>
               </div>
             </div>
@@ -414,16 +441,18 @@ function LoadingState() {
 }
 
 function EmptyState() {
+  const { t } = useT();
   return (
     <div className="flex h-full min-h-[280px] w-full flex-col items-center justify-center gap-4 p-8 text-center">
       <div className="grid h-14 w-14 place-items-center rounded-2xl bg-muted text-muted-foreground">
         <Sparkles className="h-7 w-7" />
       </div>
       <div className="space-y-1.5">
-        <p className="text-base font-semibold">No paid orders yet</p>
+        <p className="text-base font-semibold">
+          {t('dashboard.paidDialog.emptyTitle')}
+        </p>
         <p className="max-w-md text-sm text-muted-foreground">
-          Once an approved order is settled in full it will appear
-          here. Keep going — your first one is around the corner.
+          {t('dashboard.paidDialog.emptyBody')}
         </p>
       </div>
     </div>
@@ -441,37 +470,39 @@ function SummaryOnlyState({
   count: number;
   onRetry: () => void;
 }) {
+  const { t, lang } = useT();
   return (
     <div className="flex h-full min-h-[280px] w-full flex-col items-center justify-center gap-4 p-8 text-center">
       <div className="grid h-14 w-14 place-items-center rounded-2xl bg-amber-100 text-amber-700">
         <BadgeCheck className="h-7 w-7" />
       </div>
       <div className="space-y-1.5">
-        <p className="text-base font-semibold">Summary only</p>
+        <p className="text-base font-semibold">
+          {t('dashboard.outstandingDialog.summaryOnlyTitle')}
+        </p>
         <p className="max-w-md text-sm text-muted-foreground">
-          We couldn&apos;t load the per-order breakdown right now. The
-          headline figures from your dashboard are still accurate:
+          {t('dashboard.outstandingDialog.summaryOnlyBody')}
         </p>
       </div>
       <div className="grid w-full max-w-sm grid-cols-2 gap-3 rounded-xl border bg-card p-4">
         <div className="space-y-1">
           <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-            Total collected
+            {t('dashboard.paidDialog.totalCollected')}
           </p>
           <p className="text-lg font-bold tabular-nums text-emerald-700">
-            {TND(total, currency)}
+            {tnd(total, currency, lang)}
           </p>
         </div>
         <div className="space-y-1">
           <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-            Paid orders
+            {t('dashboard.paidDialog.summaryPaidCount')}
           </p>
           <p className="text-lg font-bold tabular-nums">{count}</p>
         </div>
       </div>
       <Button variant="outline" onClick={onRetry} className="h-10 gap-2">
         <RefreshCw className="h-4 w-4" />
-        Try again
+        {t('dashboard.tryAgain')}
       </Button>
     </div>
   );
@@ -484,6 +515,7 @@ function ErrorState({
   message?: string;
   onRetry: () => void;
 }) {
+  const { t } = useT();
   const looksLike404 = /404/.test(message ?? '');
   return (
     <div className="flex h-full min-h-[280px] w-full flex-col items-center justify-center gap-4 p-8 text-center">
@@ -492,20 +524,20 @@ function ErrorState({
       </div>
       <div className="space-y-1.5">
         <p className="text-base font-semibold text-destructive">
-          Couldn&apos;t load your paid orders
+          {t('dashboard.paidDialog.errorTitle')}
         </p>
         {message ? (
           <p className="max-w-md text-sm text-muted-foreground">{message}</p>
         ) : null}
         {looksLike404 ? (
           <p className="max-w-md text-xs text-muted-foreground">
-            The server may be updating. Wait a moment and try again.
+            {t('dashboard.outstandingDialog.error404Hint')}
           </p>
         ) : null}
       </div>
       <Button variant="outline" onClick={onRetry} className="h-10 gap-2">
         <RefreshCw className="h-4 w-4" />
-        Try again
+        {t('dashboard.tryAgain')}
       </Button>
     </div>
   );

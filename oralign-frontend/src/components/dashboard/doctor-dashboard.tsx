@@ -20,10 +20,21 @@ import { AvailablePacks } from './available-packs';
 import { OutstandingBalanceDialog } from './outstanding-balance-dialog';
 import { PaidOrdersDialog } from './paid-orders-dialog';
 import { useDashboardSocket, useDoctorDashboardKpis } from '@/lib/hooks';
+import { useT } from '@/lib/i18n/lang-context';
 
-const TND = (n: number) =>
-  new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(n) + ' TND';
-const N = (n: number) => new Intl.NumberFormat('en-US').format(n);
+// Number formatters keyed on the current language so French users see
+// `1 234` (FR locale uses NBSP as thousands separator) and English
+// users see `1,234`. TND symbol stays universal — Tunisia uses Dinar
+// in both languages.
+const useFormatters = () => {
+  const { lang } = useT();
+  const locale = lang === 'fr' ? 'fr-FR' : 'en-US';
+  const TND = (n: number) =>
+    new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(n) +
+    ' TND';
+  const N = (n: number) => new Intl.NumberFormat(locale).format(n);
+  return { TND, N };
+};
 
 /**
  * Doctor dashboard — re-spec'd to the layout the clinical team asked for.
@@ -52,6 +63,8 @@ export function DoctorDashboard() {
     useDoctorDashboardKpis();
   const d = data;
   const loading = isLoading;
+  const { t } = useT();
+  const { TND, N } = useFormatters();
 
   // Click on the Outstanding-balance KPI (and the Unpaid-orders KPI —
   // they show the same underlying data) opens a detailed breakdown
@@ -67,10 +80,10 @@ export function DoctorDashboard() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">
-            Your dashboard
+            {t('dashboard.title')}
           </h1>
           <p className="text-sm text-muted-foreground">
-            Your clinic&apos;s activity, balance, and pack usage at a glance.
+            {t('dashboard.subtitle')}
           </p>
         </div>
         <Button
@@ -82,7 +95,7 @@ export function DoctorDashboard() {
           <RefreshCwIcon
             className={isFetching ? 'mr-2 size-4 animate-spin' : 'mr-2 size-4'}
           />
-          Refresh
+          {t('dashboard.refresh')}
         </Button>
       </div>
 
@@ -91,12 +104,12 @@ export function DoctorDashboard() {
       {isError && (
         <Alert variant="destructive">
           <AlertTriangleIcon className="size-4" />
-          <AlertTitle>Could not load your dashboard</AlertTitle>
+          <AlertTitle>{t('dashboard.loadError.title')}</AlertTitle>
           <AlertDescription className="space-y-2">
             <p>
               {error instanceof Error
                 ? error.message
-                : 'The API did not respond. Please check your internet connection and try again.'}
+                : t('dashboard.loadError.generic')}
             </p>
             <Button
               size="sm"
@@ -104,7 +117,7 @@ export function DoctorDashboard() {
               onClick={() => refetch()}
               className="mt-2"
             >
-              Retry
+              {t('dashboard.retry')}
             </Button>
           </AlertDescription>
         </Alert>
@@ -137,19 +150,23 @@ export function DoctorDashboard() {
        */}
       <section className="grid w-full grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 *:data-[slot=card]:bg-gradient-to-t *:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card *:data-[slot=card]:shadow-xs dark:*:data-[slot=card]:bg-card">
         <KpiCard
-          label="Total orders"
+          label={t('dashboard.kpi.totalOrders')}
           value={N(d?.orders.total ?? 0)}
           icon={ClipboardListIcon}
           // Deep-link to the orders page so the count acts as a real
           // navigation entry — clicking the headline number takes the
           // doctor straight into the book of work it describes.
           href="/dashboard/orders"
-          footerLabel={`This month: ${N(d?.orders.thisMonth ?? 0)}`}
-          footerDetail={`Today: ${N(d?.orders.today ?? 0)}`}
+          footerLabel={t('dashboard.kpi.totalOrdersThisMonth', {
+            count: N(d?.orders.thisMonth ?? 0),
+          })}
+          footerDetail={t('dashboard.kpi.totalOrdersToday', {
+            count: N(d?.orders.today ?? 0),
+          })}
           loading={loading}
         />
         <KpiCard
-          label="Outstanding balance"
+          label={t('dashboard.kpi.outstandingBalance')}
           value={TND(d?.revenue.unpaidDebt ?? 0)}
           icon={WalletIcon}
           // Tint the value RED when the doctor actually owes money;
@@ -168,35 +185,41 @@ export function DoctorDashboard() {
           onClick={() => setOutstandingOpen(true)}
           footerLabel={
             (d?.revenue.unpaidDebt ?? 0) > 0
-              ? `Click for details — ${N(d?.orders.unpaid ?? 0)} unpaid`
-              : 'All clear — click for details.'
+              ? t('dashboard.kpi.outstandingClickForDetails', {
+                  count: N(d?.orders.unpaid ?? 0),
+                })
+              : t('dashboard.kpi.outstandingAllClear')
           }
           loading={loading}
         />
         <KpiCard
-          label="Total patients"
+          label={t('dashboard.kpi.totalPatients')}
           value={N(d?.patients.total ?? 0)}
           icon={UserRoundIcon}
           // Same idea as Total orders — clicking the count navigates
           // into the patients page so the doctor can browse the list
           // behind the number.
           href="/dashboard/patients"
-          footerLabel={`+${N(d?.patients.newThisMonth ?? 0)} new this month`}
+          footerLabel={t('dashboard.kpi.totalPatientsNew', {
+            count: N(d?.patients.newThisMonth ?? 0),
+          })}
           loading={loading}
         />
         <KpiCard
-          label="Pending payments"
+          label={t('dashboard.kpi.pendingPayments')}
           value={N(d?.payments.pending ?? 0)}
           icon={TimerIcon}
           // Deep-link straight into the payment-history page so the
           // doctor sees the list of rows behind the number. The page
           // is role-aware and shows only the doctor's own payments.
           href="/dashboard/payments/history"
-          footerLabel={`Awaiting confirmation: ${N(d?.payments.awaitingConfirmation ?? 0)}`}
+          footerLabel={t('dashboard.kpi.awaitingConfirmation', {
+            count: N(d?.payments.awaitingConfirmation ?? 0),
+          })}
           loading={loading}
         />
         <KpiCard
-          label="Unpaid orders"
+          label={t('dashboard.kpi.unpaidOrders')}
           value={N(d?.orders.unpaid ?? 0)}
           icon={BanIcon}
           // Unpaid orders surface the SAME per-order list as the
@@ -207,13 +230,13 @@ export function DoctorDashboard() {
           onClick={() => setOutstandingOpen(true)}
           footerLabel={
             (d?.orders.unpaid ?? 0) > 0
-              ? 'Click for the per-order breakdown.'
-              : 'Nothing unpaid — click for details.'
+              ? t('dashboard.kpi.unpaidOrdersHint')
+              : t('dashboard.kpi.unpaidOrdersEmpty')
           }
           loading={loading}
         />
         <KpiCard
-          label="Paid orders"
+          label={t('dashboard.kpi.paidOrders')}
           value={N(d?.orders.paid ?? 0)}
           icon={BadgeCheckIcon}
           // Mirror of the outstanding popup but tuned to collected
@@ -222,8 +245,10 @@ export function DoctorDashboard() {
           onClick={() => setPaidOpen(true)}
           footerLabel={
             (d?.orders.paid ?? 0) > 0
-              ? `Collected: ${TND(d?.revenue.collected ?? 0)}`
-              : 'No paid orders yet — click for details.'
+              ? t('dashboard.kpi.paidOrdersCollected', {
+                  amount: TND(d?.revenue.collected ?? 0),
+                })
+              : t('dashboard.kpi.paidOrdersEmpty')
           }
           loading={loading}
         />
@@ -239,10 +264,10 @@ export function DoctorDashboard() {
         <div className="flex items-baseline gap-2">
           <PackageIcon className="size-5 text-primary" />
           <h2 className="text-lg font-semibold tracking-tight">
-            Available packs
+            {t('dashboard.packs.sectionTitle')}
           </h2>
           <span className="text-sm text-muted-foreground">
-            · informational — choose your pack on the order form.
+            · {t('dashboard.packs.sectionHint')}
           </span>
         </div>
         <AvailablePacks recommendedId={d?.suggestedPack?.id} />

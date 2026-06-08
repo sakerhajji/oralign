@@ -18,9 +18,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useDoctorAvailablePacks } from '@/lib/hooks';
 import type { AvailablePack } from '@/lib/types';
-
-const TND = (n: number) =>
-  new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(n) + ' TND';
+import { useT } from '@/lib/i18n/lang-context';
 
 /**
  * Doctor-facing available packs grid. Mirrors the marketing pack
@@ -29,6 +27,7 @@ const TND = (n: number) =>
  */
 export function AvailablePacks({ recommendedId }: { recommendedId?: string }) {
   const { data, isLoading } = useDoctorAvailablePacks();
+  const { t } = useT();
 
   if (isLoading) {
     return (
@@ -44,7 +43,7 @@ export function AvailablePacks({ recommendedId }: { recommendedId?: string }) {
     return (
       <Card>
         <CardContent className="grid h-32 place-items-center text-sm text-muted-foreground">
-          No packs are currently available.
+          {t('dashboard.packs.none')}
         </CardContent>
       </Card>
     );
@@ -70,23 +69,33 @@ function PackCard({
   pack: AvailablePack;
   isRecommended: boolean;
 }) {
+  const { t, lang } = useT();
+  const locale = lang === 'fr' ? 'fr-FR' : 'en-US';
+  const TND = (n: number) =>
+    new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(n) +
+    ' TND';
+
   const features: { label: string; ok: boolean }[] = [
     {
       label: pack.isUnlimitedSteps
-        ? 'Unlimited treatment steps'
-        : `${pack.maxStepsPerArch ?? 0} steps per arch`,
+        ? t('dashboard.packs.featureUnlimitedSteps')
+        : t('dashboard.packs.featureStepsPerArch', {
+            count: pack.maxStepsPerArch ?? 0,
+          }),
       ok: true,
     },
     {
       label: pack.isUnlimitedCorrections
-        ? 'Unlimited corrections'
-        : `${pack.includedCorrections ?? 0} corrections included`,
+        ? t('dashboard.packs.featureUnlimitedCorrections')
+        : t('dashboard.packs.featureIncludedCorrections', {
+            count: pack.includedCorrections ?? 0,
+          }),
       ok: true,
     },
     {
       label: pack.isForOrthodontists
-        ? 'Tailored for orthodontists'
-        : 'General dentists welcome',
+        ? t('dashboard.packs.featureForOrthodontists')
+        : t('dashboard.packs.featureGeneralDentists'),
       ok: true,
     },
   ];
@@ -120,7 +129,7 @@ function PackCard({
           variant="outline"
           className="absolute right-4 top-4 gap-1 border-emerald-400 text-emerald-700 dark:text-emerald-300"
         >
-          <SparklesIcon className="size-3" /> Recommended
+          <SparklesIcon className="size-3" /> {t('dashboard.packs.recommended')}
         </Badge>
       ) : null}
       <CardHeader>
@@ -131,7 +140,7 @@ function PackCard({
           <CardTitle className="text-lg">{pack.name}</CardTitle>
         </div>
         <CardDescription className="line-clamp-2 min-h-[2.5rem]">
-          {pack.description ?? 'Customized aligner workflow tailored to your clinic.'}
+          {pack.description ?? t('dashboard.packs.defaultDescription')}
         </CardDescription>
         <div className="mt-2 flex items-baseline gap-1.5">
           <span className="text-3xl font-bold tabular-nums">
@@ -155,8 +164,8 @@ function PackCard({
           <InfoIcon className="mt-0.5 size-3 shrink-0" />
           <span>
             {pack.isCurrent
-              ? 'Your current pack. You can pick it again when you create a new order.'
-              : 'Choose this pack from the New Order form when you create a case.'}
+              ? t('dashboard.packs.hintCurrent')
+              : t('dashboard.packs.hintChoose')}
           </span>
         </p>
       </CardContent>

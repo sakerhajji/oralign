@@ -11,14 +11,14 @@ import { DEFAULT_LANG, LANGS, type Lang } from './dict';
  *   • Different storage key so a user signed in as admin can pick
  *     "French" on the dashboard without overriding the marketing
  *     site's per-visitor language.
- *   • Different default (EN for the working app, FR for the public
- *     showcase — that's where the marketing copy lives).
+ *   • Different default + supported-language set. The dashboard runs
+ *     EN / FR only — Arabic was dropped because the working app's
+ *     specialised orthodontic terminology lives natively in FR. The
+ *     marketing showcase still ships AR (it has a broader audience).
  *
- * The hook also mirrors the chosen language onto `<html lang>` and
- * flips `<html dir>` to "rtl" for Arabic so Tailwind's logical-prop
- * utilities (`ms-*`, `me-*`, `start-*`, `end-*`) and any
- * direction-aware browser features (scroll snap, text alignment,
- * caret position) Just Work.
+ * The hook mirrors the chosen language onto `<html lang>` so language-
+ * aware browser features (hyphenation, voice readers, spellcheck)
+ * pick the right rules without a refresh.
  */
 const STORAGE_KEY = 'oralign.dashboard.lang';
 // Custom event so multiple useSyncExternalStore subscribers across the
@@ -55,14 +55,17 @@ function subscribe(cb: () => void): () => void {
 export function useLang(): { lang: Lang; setLang: (l: Lang) => void } {
   const lang = useSyncExternalStore(subscribe, readLang, () => DEFAULT_LANG);
 
-  // Mirror onto the document so CSS direction selectors + browser-
-  // native features pick up the change. Runs ONCE on hydration and
-  // every time the user toggles. We do this in an effect (not at
-  // module scope) so SSR stays clean.
+  // Mirror onto the document so browser-native language features
+  // (spellcheck, hyphenation, screen-reader voice) pick the right
+  // rules. Runs ONCE on hydration and every time the user toggles.
+  // We do this in an effect (not at module scope) so SSR stays clean.
+  // `dir` is always "ltr" now that AR was dropped — keep the
+  // assignment explicit so a stray `<html dir="rtl">` left over from
+  // a previous build doesn't strand the layout in RTL.
   useEffect(() => {
     if (typeof document === 'undefined') return;
     document.documentElement.lang = lang;
-    document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
+    document.documentElement.dir = 'ltr';
   }, [lang]);
 
   const setLang = useCallback((l: Lang) => {

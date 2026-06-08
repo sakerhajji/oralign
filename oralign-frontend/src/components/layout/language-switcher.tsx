@@ -29,7 +29,6 @@ import { cn } from '@/lib/utils';
 const LABELS: Record<Lang, { code: string; endonym: string; flag: string }> = {
   en: { code: 'EN', endonym: 'English', flag: '🇬🇧' },
   fr: { code: 'FR', endonym: 'Français', flag: '🇫🇷' },
-  ar: { code: 'AR', endonym: 'العربية', flag: '🇹🇳' },
 };
 
 export function LanguageSwitcher({

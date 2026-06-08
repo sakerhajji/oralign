@@ -8,6 +8,7 @@ export { ordersService } from './orders.service';
 export { packsService } from './packs.service';
 export { quotationPaymentPlanService } from './quotation-payment-plan.service';
 export { paymentsService } from './payments.service';
+export { invoicesService } from './invoices.service';
 export { notificationsService } from './notifications.service';
 export { reportsService } from './reports.service';
 export { default as apiClient, getAccessToken, getRefreshToken, setTokens, clearTokens } from './client';

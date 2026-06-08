@@ -113,32 +113,87 @@ import { cn } from '@/lib/utils';
 const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
 type PageSize = (typeof PAGE_SIZE_OPTIONS)[number];
 
-// Status filter buckets surfaced as tabs above the table. The final
-// strip is 8 tabs (All + 7 phases) — the previous 10-tab strip
-// duplicated stages (PAID and FABRICATION mean the same thing from a
-// clinician's point of view; PLAN_READY and APPROVED were two clicks
-// for the same "treatment plan" phase). We picked the single status
-// per bucket that the backend actually transitions THROUGH so the
-// filter returns the rows users expect:
-//   • Treatment plan tab    → APPROVED (the actionable end of the
-//                              planning phase — READY is a fleeting
-//                              transitional state)
-//   • In Fabrication tab    → FABRICATION (PAID auto-transitions
-//                              there now; any legacy PAID rows still
-//                              show up under their own badge but the
-//                              tab routes through the canonical
-//                              status so admin clicks consistent).
-//   • Done tab              → FINISHED (label flips to "Done" /
-//                              "Terminée" via the status dict)
+// Status filter buckets surfaced as tabs above the table. Each tab
+// now carries a LIST of statuses so a single tab can cover an entire
+// lifecycle phase — the Treatment-plan tab returns every row in any
+// planning sub-state (planning + ready + revision-requested +
+// approved) instead of only the one we historically picked. The
+// backend's `statuses[]` filter handles the IN-set.
+//
+// Previously each tab filtered on ONE status: the "Treatment plan"
+// tab missed orders sitting in PLANNING / READY / REVISION; the
+// "In Fabrication" tab missed legacy PAID rows; users saw empty
+// pages and complained the filter was broken. The list-per-tab
+// model fixes all three issues without forcing the user to flip
+// between two near-identical tabs.
+//
+// Notes on the layout:
+//   • Submitted bucket also covers UNDER_REVIEW because admins who
+//     haven't started planning yet still keep the row in that
+//     "fresh inbox" mental box.
+//   • Quote-sent bucket spans the whole post-quote / pre-paid range
+//     (sent → plan selected → pending → review) so the doctor sees
+//     "this is where the money conversation lives".
+//   • In Fabrication bucket includes PAID for legacy rows (the
+//     backend now auto-transitions paid → fabrication, but older
+//     paid rows still need a home).
+//   • Done bucket is FINISHED only — when the last batch is
+//     delivered we now auto-transition there.
 const STATUS_TABS = [
-  { key: 'all' as const, labelKey: 'ordersPage.tabAll' },
-  { key: OrderStatus.DRAFT, labelKey: 'ordersPage.tabDraft' },
-  { key: OrderStatus.SUBMITTED, labelKey: 'ordersPage.tabSubmitted' },
-  { key: OrderStatus.TREATMENT_APPROVED, labelKey: 'ordersPage.tabTreatmentPlan' },
-  { key: OrderStatus.QUOTATION_SENT, labelKey: 'ordersPage.tabQuoteSent' },
-  { key: OrderStatus.FABRICATION, labelKey: 'ordersPage.tabInFabrication' },
-  { key: OrderStatus.SHIPPED, labelKey: 'ordersPage.tabShipped' },
-  { key: OrderStatus.FINISHED, labelKey: 'ordersPage.tabDone' },
+  {
+    key: 'all' as const,
+    labelKey: 'ordersPage.tabAll',
+    statuses: [] as OrderStatus[],
+  },
+  {
+    key: OrderStatus.DRAFT,
+    labelKey: 'ordersPage.tabDraft',
+    statuses: [OrderStatus.DRAFT],
+  },
+  {
+    key: OrderStatus.SUBMITTED,
+    labelKey: 'ordersPage.tabSubmitted',
+    statuses: [OrderStatus.SUBMITTED, OrderStatus.UNDER_REVIEW],
+  },
+  {
+    key: OrderStatus.TREATMENT_APPROVED,
+    labelKey: 'ordersPage.tabTreatmentPlan',
+    statuses: [
+      OrderStatus.TREATMENT_PLANNING,
+      OrderStatus.TREATMENT_PLAN_READY,
+      OrderStatus.REVISION_REQUESTED,
+      OrderStatus.TREATMENT_APPROVED,
+    ],
+  },
+  {
+    key: OrderStatus.QUOTATION_SENT,
+    labelKey: 'ordersPage.tabQuoteSent',
+    statuses: [
+      OrderStatus.QUOTATION_SENT,
+      OrderStatus.PAYMENT_PLAN_SELECTED,
+      OrderStatus.PAYMENT_PENDING,
+      OrderStatus.PAYMENT_REVIEW,
+    ],
+  },
+  {
+    key: OrderStatus.FABRICATION,
+    labelKey: 'ordersPage.tabInFabrication',
+    statuses: [
+      OrderStatus.PAID,
+      OrderStatus.FABRICATION,
+      OrderStatus.READY_TO_SHIP,
+    ],
+  },
+  {
+    key: OrderStatus.SHIPPED,
+    labelKey: 'ordersPage.tabShipped',
+    statuses: [OrderStatus.SHIPPED],
+  },
+  {
+    key: OrderStatus.FINISHED,
+    labelKey: 'ordersPage.tabDone',
+    statuses: [OrderStatus.FINISHED],
+  },
 ] as const;
 
 const LEGACY_STATUSES = new Set<OrderStatus>([
@@ -259,7 +314,18 @@ export default function OrdersPage() {
       page,
       limit: pageSize,
       ...(search ? { search } : {}),
-      ...(statusTab !== 'all' ? { status: statusTab as OrderStatus } : {}),
+      // Send the multi-status list when the active tab carries more
+      // than one OrderStatus (e.g. Treatment plan = 4 statuses). For
+      // the single-status tabs the list still works — the backend
+      // filter accepts both shapes. "All" sends nothing so every
+      // status passes through.
+      ...(() => {
+        if (statusTab === 'all') return {};
+        const tab = STATUS_TABS.find((t) => t.key === statusTab);
+        return tab && tab.statuses.length > 0
+          ? { statuses: [...tab.statuses] as OrderStatus[] }
+          : { status: statusTab as OrderStatus };
+      })(),
       ...(isAdmin && doctorFilter !== 'all' ? { doctorId: doctorFilter } : {}),
       ...(createdFrom ? { createdFrom } : {}),
       ...(createdTo ? { createdTo } : {}),
@@ -634,7 +700,18 @@ export default function OrdersPage() {
           {statusTab !== 'all' && (
             <FilterChip
               label={t('ordersPage.chipStatus', {
-                value: localisedStatusLabel(statusTab as OrderStatus, t),
+                // Resolve the active tab's friendly label (e.g.
+                // "Treatment plan") rather than the underlying
+                // single status (which would read "Treatment
+                // approved" and confuse users into thinking the
+                // filter is narrower than it actually is — the tab
+                // covers four planning sub-statuses).
+                value: (() => {
+                  const tab = STATUS_TABS.find((t) => t.key === statusTab);
+                  return tab
+                    ? t(tab.labelKey)
+                    : localisedStatusLabel(statusTab as OrderStatus, t);
+                })(),
               })}
               onRemove={() => setStatusTab('all')}
             />

@@ -24,11 +24,8 @@ import {
   InstallmentStatus,
   PaymentMethod,
   PaymentMode,
-  PaymentRecordStatus,
   QuotationStatus,
   UserRole,
-  type Pack,
-  type Payment,
   type Quotation,
   type QuoteInstallment,
   type QuoteStepBatch,
@@ -80,7 +77,6 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import {
-  Banknote,
   Calendar,
   CheckCircle2,
   Clock,
@@ -97,8 +93,10 @@ import {
   Trash2,
   Truck,
   Unlock,
+  Upload,
   User as UserIcon,
   Wallet,
+  X,
 } from 'lucide-react';
 
 interface Props {
@@ -201,15 +199,11 @@ function AttachPackCard({ quote }: { quote: Quotation }) {
   // backend). The admin doesn't pick arch here anymore; the
   // catalogue exposes one price per pack and that's what we
   // snapshot.
-  const activePrice = useMemo(() => {
-    if (!selectedPack) return null;
-    const active = (selectedPack.prices ?? []).filter((p) => p.isActive);
-    return (
-      active.find((p) => p.archType === ArchType.TWO_ARCHES) ??
-      active[0] ??
-      null
-    );
-  }, [selectedPack]);
+  const activePrices = (selectedPack?.prices ?? []).filter((p) => p.isActive);
+  const activePrice =
+    activePrices.find((p) => p.archType === ArchType.TWO_ARCHES) ??
+    activePrices[0] ??
+    null;
 
   const submit = () => {
     if (!packId) return;
@@ -789,6 +783,7 @@ function AdminPlanView({
       </Card>
 
       <RecordCashDialog
+        key={cashTarget?.id ?? 'closed'}
         target={cashTarget}
         quote={quote}
         onClose={() => setCashTarget(null)}
@@ -809,13 +804,6 @@ function RecordCashDialog({
   const record = useRecordCash();
   const [receiptNumber, setReceiptNumber] = useState('');
   const [notes, setNotes] = useState('');
-
-  useEffect(() => {
-    if (target) {
-      setReceiptNumber('');
-      setNotes('');
-    }
-  }, [target]);
 
   return (
     <Dialog open={!!target} onOpenChange={(o) => !o && onClose()}>
@@ -898,7 +886,14 @@ function DoctorPlanView({
   doctorName?: string | null;
   orderCode?: string | null;
 }) {
-  const isApproved = quote.status === QuotationStatus.APPROVED;
+  // Pay buttons used to be gated on `quote.status === APPROVED`, but
+  // the doctor's review now skips an explicit Approve step — paying
+  // the first installment IS the approval (backend auto-transitions
+  // sent → approved on first payment). So treat SENT quotes the same
+  // as APPROVED for Pay-button visibility on the doctor's side.
+  const isApproved =
+    quote.status === QuotationStatus.APPROVED ||
+    quote.status === QuotationStatus.SENT;
   const batchByInstallment = useMemo(() => {
     const m = new Map<string, QuoteStepBatch>();
     batches.forEach((b) => m.set(b.installmentId, b));
@@ -910,7 +905,7 @@ function DoctorPlanView({
   // button; the full list drives the "Pay all" affordance + the
   // dialog's scope toggle. The backend still enforces availableFrom
   // and the sequential-pay rule, so the UI just filters proactively.
-  const now = Date.now();
+  const [now] = useState(() => Date.now());
   const payable = useMemo(
     () =>
       installments.filter(
@@ -1114,17 +1109,19 @@ function PaymentMethodDialog({
   const [method, setMethod] = useState<PaymentMethod>(PaymentMethod.CARD);
   const [scope, setScope] = useState<PayScope>(defaultScope);
 
-  // Keep the dialog state in sync with the trigger button — when the
-  // doctor opens "Pay all" from the banner we want the toggle in
-  // "all" mode without them having to click again.
-  useEffect(() => {
-    if (open) setScope(defaultScope);
-  }, [open, defaultScope]);
-
   const payCard = usePayByCard();
   const declareBT = useDeclareBankTransfer();
   const [bankReference, setBankReference] = useState('');
   const [proofFile, setProofFile] = useState<File | null>(null);
+  const proofPreview = useMemo(
+    () => (proofFile ? URL.createObjectURL(proofFile) : null),
+    [proofFile],
+  );
+  useEffect(() => {
+    if (!proofPreview) return;
+    return () => URL.revokeObjectURL(proofPreview);
+  }, [proofPreview]);
+
   // The "all" path fires one request per installment — we surface
   // progress to the doctor so it doesn't look frozen on the 2nd of N.
   const [progress, setProgress] = useState<
@@ -1139,6 +1136,8 @@ function PaymentMethodDialog({
     setProgress(null);
     setBankReference('');
     setProofFile(null);
+    setMethod(PaymentMethod.CARD);
+    setScope(defaultScope);
     onClose();
   };
 
@@ -1163,7 +1162,7 @@ function PaymentMethodDialog({
           const idempotencyKey =
             typeof crypto !== 'undefined' && 'randomUUID' in crypto
               ? crypto.randomUUID()
-              : `${Date.now()}-${Math.random()}-${i}`;
+              : `${quote.id}-${t.id}-${i}`;
           await payCard.mutateAsync({
             quotationId: quote.id,
             installmentId: t.id,
@@ -1205,17 +1204,16 @@ function PaymentMethodDialog({
       : `Tranche #${installment.installmentNumber}`;
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && close()}>
-      {/*
-        Mirrors the treatment-fee receipt dialog dimensions for a
-        consistent feel across all payment surfaces. 920 px on lg,
-        600 px on sm, full-width on mobile. h-auto with max-h-90vh
-        keeps short content compact while long content scrolls
-        internally.
-       */}
-      <DialogContent className="flex h-auto max-h-[90vh] w-full flex-col gap-0 overflow-hidden rounded-2xl border-0 p-0 shadow-2xl sm:max-w-[600px] lg:h-[82vh] lg:max-w-[920px]">
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (isPending) return;
+        if (!next) close();
+      }}
+    >
+      <DialogContent className="flex h-[calc(100dvh-1rem)] max-h-[900px] w-full flex-col gap-0 overflow-hidden rounded-2xl border-0 p-0 shadow-2xl sm:h-[90dvh] sm:max-w-[600px] lg:h-[82dvh] lg:max-w-[920px]">
         {/* ─── Header ─────────────────────────────────────────────── */}
-        <DialogHeader className="space-y-1 border-b bg-card px-6 py-5 text-left sm:px-8">
+        <DialogHeader className="shrink-0 space-y-1 border-b bg-card py-4 pl-5 pr-14 text-left sm:py-5 sm:pl-8 sm:pr-14">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
               <DialogTitle className="text-lg font-semibold sm:text-xl">
@@ -1238,172 +1236,29 @@ function PaymentMethodDialog({
         </DialogHeader>
 
         {/*
-          ─── Body: two-column on lg+, stacked below ───────────────
-          The min-h-0 + flex-1 combo lets the body claim the leftover
-          vertical space and lets the columns scroll independently
-          when the form / summary overflows.
+          One natural body scroller below lg prevents nested-scroll
+          traps on phones. At desktop size the summary remains visible
+          while only the payment workspace scrolls.
          */}
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
-          {/* ── Method / form column (left, ~58% on lg) ── */}
-          <div className="flex-1 overflow-y-auto bg-muted/40 p-6 lg:p-8">
-            {/* Scope toggle — only when there's a real choice to make */}
-            {canPickAll ? (
-              <div className="mb-5 grid grid-cols-2 gap-2 rounded-lg border bg-card p-1 shadow-sm">
-                <button
-                  type="button"
-                  onClick={() => setScope('single')}
-                  disabled={isPending}
-                  className={cn(
-                    'rounded-md px-3 py-2 text-left text-xs transition',
-                    scope === 'single'
-                      ? 'bg-primary text-primary-foreground shadow-sm'
-                      : 'text-muted-foreground hover:bg-muted/60',
-                  )}
-                >
-                  <div className="font-semibold">This tranche</div>
-                  <div className="text-[11px] opacity-80">
-                    {money(installment.amount, quote.currency)} · #
-                    {installment.installmentNumber}
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setScope('all')}
-                  disabled={isPending}
-                  className={cn(
-                    'rounded-md px-3 py-2 text-left text-xs transition',
-                    scope === 'all'
-                      ? 'bg-primary text-primary-foreground shadow-sm'
-                      : 'text-muted-foreground hover:bg-muted/60',
-                  )}
-                >
-                  <div className="font-semibold">All remaining</div>
-                  <div className="text-[11px] opacity-80">
-                    {payable
-                      .reduce((acc, t) => acc + toDec(t.amount), 0)
-                      .toFixed(3)}{' '}
-                    {quote.currency} · {payable.length} tranches
-                  </div>
-                </button>
-              </div>
-            ) : null}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable] lg:grid lg:grid-cols-[38%_minmax(0,1fr)] lg:overflow-hidden">
+          {/* Amount and order context */}
+          <aside className="flex flex-col border-b bg-muted/30 p-5 sm:p-6 lg:min-h-0 lg:overflow-y-auto lg:border-b-0 lg:border-r lg:p-7">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Amount due
+            </p>
+            <p className="mt-1.5 text-3xl font-bold tabular-nums text-foreground sm:text-4xl">
+              {total.toFixed(3)} {quote.currency}
+            </p>
+            <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+              {scope === 'all'
+                ? `Complete all ${payable.length} remaining installments in this payment flow.`
+                : `Settle installment #${installment.installmentNumber} to keep the treatment plan moving.`}
+            </p>
 
-            {/* Method picker — three cards laid out horizontally */}
-            <h3 className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Choose payment method
-            </h3>
-            <div className="grid grid-cols-3 gap-2">
-              {METHODS.map((m) => {
-                const isSelected = method === m;
-                const Icon =
-                  m === PaymentMethod.CARD
-                    ? CreditCard
-                    : m === PaymentMethod.BANK_TRANSFER
-                      ? Landmark
-                      : Wallet;
-                return (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => setMethod(m)}
-                    disabled={isPending}
-                    className={cn(
-                      'group flex flex-col items-center gap-1.5 rounded-lg border-2 bg-card p-3 text-xs font-medium transition',
-                      isSelected
-                        ? 'border-primary text-primary shadow-sm ring-1 ring-primary/20'
-                        : 'border-transparent text-muted-foreground hover:border-muted-foreground/20 hover:bg-muted/40',
-                    )}
-                  >
-                    <Icon className="h-5 w-5" />
-                    <span className="capitalize">
-                      {m.replace('_', ' ')}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Method-specific form / info */}
-            <div className="mt-5 space-y-3">
-              {method === PaymentMethod.CARD ? (
-                <p className="rounded-lg border border-blue-100 bg-blue-50/60 p-3 text-xs leading-relaxed text-blue-900/85">
-                  Card payments settle immediately.{' '}
-                  {scope === 'all'
-                    ? 'Each tranche is processed in sequence — you can safely retry if one fails mid-way.'
-                    : 'Your installment is marked paid the moment the processor returns success.'}
-                </p>
-              ) : method === PaymentMethod.BANK_TRANSFER ? (
-                <>
-                  <div className="grid gap-1.5">
-                    <Label htmlFor="ref" className="text-xs font-medium">
-                      Bank reference{' '}
-                      <span className="text-muted-foreground">(optional)</span>
-                    </Label>
-                    <Input
-                      id="ref"
-                      value={bankReference}
-                      onChange={(e) => setBankReference(e.target.value)}
-                      placeholder="SWIFT / IBAN ref or memo"
-                      disabled={isPending}
-                    />
-                  </div>
-                  <div className="grid gap-1.5">
-                    <Label htmlFor="proof" className="text-xs font-medium">
-                      Proof of transfer{' '}
-                      <span className="text-muted-foreground">
-                        (PNG / JPG / PDF, ≤5 MB)
-                      </span>
-                    </Label>
-                    <Input
-                      id="proof"
-                      type="file"
-                      accept="image/png,image/jpeg,image/webp,image/heic,application/pdf"
-                      onChange={(e) =>
-                        setProofFile(e.target.files?.[0] ?? null)
-                      }
-                      disabled={isPending}
-                    />
-                  </div>
-                  <p className="rounded-lg border border-blue-100 bg-blue-50/60 p-3 text-xs leading-relaxed text-blue-900/85">
-                    {scope === 'all'
-                      ? `One declaration per tranche, sharing the same reference and proof — the admin can confirm all ${payable.length} together.`
-                      : 'The clinic admin reviews the transfer + proof before marking it confirmed.'}{' '}
-                    You&apos;ll see the status update here.
-                  </p>
-                </>
-              ) : (
-                <p className="rounded-lg border border-amber-100 bg-amber-50/60 p-3 text-xs leading-relaxed text-amber-900/85">
-                  Hand the cash to the clinic. They&apos;ll record the
-                  payment on their side and the installment
-                  {scope === 'all' ? 's' : ''} will be marked paid here.
-                </p>
-              )}
-
-              {progress ? (
-                <div className="flex items-center gap-2 rounded-lg border bg-card p-3 text-xs">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-                  Processing tranche {progress.done}/{progress.total}…
-                </div>
-              ) : null}
-            </div>
-          </div>
-
-          {/* ── Summary column (right, 42% on lg) ── */}
-          <div className="flex min-h-0 flex-col overflow-y-auto bg-card p-6 lg:w-[42%] lg:flex-shrink-0 lg:p-7">
-            <h3 className="mb-4 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <h3 className="mb-4 mt-7 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               Payment summary
             </h3>
             <dl className="space-y-4">
-              <DetailRow
-                icon={<Banknote className="h-3.5 w-3.5" />}
-                label="Amount"
-                value={
-                  <span className="text-base font-bold tabular-nums">
-                    {total.toFixed(3)} {quote.currency}
-                  </span>
-                }
-                highlight
-              />
               <DetailRow
                 icon={<Hash className="h-3.5 w-3.5" />}
                 label="Scope"
@@ -1453,33 +1308,313 @@ function PaymentMethodDialog({
               ) : null}
             </dl>
 
-            {/*
-              Verification hint pinned to the bottom of the column —
-              same pattern as the treatment-fee receipt dialog. Tells
-              the doctor what happens after they hit the CTA without
-              forcing them to re-read every paragraph in the form.
-             */}
             <div className="mt-auto pt-6">
-              <p className="rounded-lg border border-blue-100 bg-blue-50/60 p-3 text-[11px] leading-relaxed text-blue-900/85">
+              <p className="rounded-lg border bg-card p-3 text-xs leading-relaxed text-muted-foreground">
                 {method === PaymentMethod.CARD
                   ? 'Card payments are processed immediately. The next batch of treatment steps unlocks once the payment is confirmed.'
                   : method === PaymentMethod.BANK_TRANSFER
                     ? 'After you submit, the clinic admin verifies the wire and confirms the payment. You will be notified once it lands.'
-                    : 'Cash payments are recorded by the clinic admin when they physically receive the funds.'}
+                  : 'Cash payments are recorded by the clinic admin when they physically receive the funds.'}
               </p>
             </div>
-          </div>
+          </aside>
+
+          {/* Payment workspace */}
+          <section
+            aria-label="Installment payment details"
+            tabIndex={0}
+            className="min-w-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:[scrollbar-gutter:stable]"
+          >
+            <div className="space-y-5 p-5 sm:p-6 lg:p-7">
+              {canPickAll ? (
+                <div>
+                  <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Payment scope
+                  </h3>
+                  <div className="grid grid-cols-2 gap-1 rounded-lg border bg-muted/30 p-1">
+                    <button
+                      type="button"
+                      aria-pressed={scope === 'single'}
+                      onClick={() => setScope('single')}
+                      disabled={isPending}
+                      className={cn(
+                        'min-w-0 rounded-md px-3 py-2.5 text-left text-xs transition',
+                        scope === 'single'
+                          ? 'bg-card text-foreground shadow-sm ring-1 ring-border'
+                          : 'text-muted-foreground hover:bg-card/60',
+                      )}
+                    >
+                      <span className="block font-semibold">This installment</span>
+                      <span className="mt-0.5 block truncate text-[11px] opacity-80">
+                        #{installment.installmentNumber} ·{' '}
+                        {money(installment.amount, quote.currency)}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={scope === 'all'}
+                      onClick={() => setScope('all')}
+                      disabled={isPending}
+                      className={cn(
+                        'min-w-0 rounded-md px-3 py-2.5 text-left text-xs transition',
+                        scope === 'all'
+                          ? 'bg-card text-foreground shadow-sm ring-1 ring-border'
+                          : 'text-muted-foreground hover:bg-card/60',
+                      )}
+                    >
+                      <span className="block font-semibold">All remaining</span>
+                      <span className="mt-0.5 block truncate text-[11px] opacity-80">
+                        {payable.length} installments ·{' '}
+                        {payable
+                          .reduce((acc, t) => acc + toDec(t.amount), 0)
+                          .toFixed(3)}{' '}
+                        {quote.currency}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              <div>
+                <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Payment method
+                </h3>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {METHODS.map((m) => {
+                    const isSelected = method === m;
+                    const Icon =
+                      m === PaymentMethod.CARD
+                        ? CreditCard
+                        : m === PaymentMethod.BANK_TRANSFER
+                          ? Landmark
+                          : Wallet;
+                    const description =
+                      m === PaymentMethod.CARD
+                        ? 'Instant confirmation'
+                        : m === PaymentMethod.BANK_TRANSFER
+                          ? 'Upload your receipt'
+                          : 'Recorded by the clinic';
+                    return (
+                      <button
+                        key={m}
+                        type="button"
+                        aria-pressed={isSelected}
+                        onClick={() => setMethod(m)}
+                        disabled={isPending}
+                        className={cn(
+                          'flex min-h-16 items-center gap-3 rounded-lg border bg-card p-3 text-left transition',
+                          isSelected
+                            ? 'border-primary shadow-sm ring-2 ring-primary/10'
+                            : 'hover:border-primary/40 hover:bg-muted/20',
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            'grid h-9 w-9 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground',
+                            isSelected && 'bg-primary text-primary-foreground',
+                          )}
+                        >
+                          <Icon className="h-4 w-4" />
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-xs font-semibold capitalize">
+                            {m.replace('_', ' ')}
+                          </span>
+                          <span className="mt-0.5 block text-[10px] leading-snug text-muted-foreground">
+                            {description}
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {method === PaymentMethod.CARD ? (
+                <div className="rounded-lg border border-blue-100 bg-blue-50/60 p-4">
+                  <div className="flex items-start gap-3">
+                    <CreditCard className="mt-0.5 h-4 w-4 shrink-0 text-blue-700" />
+                    <div>
+                      <p className="text-sm font-semibold text-blue-950">
+                        Secure card payment
+                      </p>
+                      <p className="mt-1 text-xs leading-relaxed text-blue-900/80">
+                        {scope === 'all'
+                          ? 'The remaining installments are processed securely in sequence. If one fails, completed payments remain recorded.'
+                          : 'This installment is confirmed immediately after the payment succeeds.'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : method === PaymentMethod.BANK_TRANSFER ? (
+                <Card id="installment-bank-transfer" className="scroll-mt-4">
+                  <CardContent className="space-y-4 pt-5">
+                    <div className="flex items-start gap-3">
+                      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground">
+                        <Landmark className="h-4 w-4" />
+                      </span>
+                      <div>
+                        <p className="text-sm font-semibold">
+                          Bank-transfer declaration
+                        </p>
+                        <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                          Add the bank reference and receipt so the clinic can
+                          identify and confirm your transfer.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-1.5">
+                      <Label
+                        htmlFor="installment-bank-reference"
+                        className="text-xs font-medium"
+                      >
+                        Bank reference{' '}
+                        <span className="font-normal text-muted-foreground">
+                          (optional)
+                        </span>
+                      </Label>
+                      <Input
+                        id="installment-bank-reference"
+                        value={bankReference}
+                        onChange={(e) => setBankReference(e.target.value)}
+                        placeholder="SWIFT, transfer reference, or memo"
+                        disabled={isPending}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <div>
+                        <p className="text-xs font-medium">
+                          Upload bank-transfer receipt
+                        </p>
+                        <p className="text-[11px] text-muted-foreground">
+                          PDF, PNG, JPG, WEBP or HEIC · maximum 5 MB
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 rounded-lg border border-dashed bg-muted/30 p-2">
+                        <label
+                          htmlFor="installment-proof"
+                          className={cn(
+                            'flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-md p-1',
+                            isPending && 'cursor-not-allowed opacity-60',
+                          )}
+                        >
+                          <Upload className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          <span className="truncate text-sm">
+                            {proofFile
+                              ? proofFile.name
+                              : 'Click to choose a receipt'}
+                          </span>
+                        </label>
+                        {proofFile ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            aria-label="Remove receipt"
+                            disabled={isPending}
+                            onClick={() => setProofFile(null)}
+                            className="h-8 w-8 shrink-0"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        ) : null}
+                        <input
+                          id="installment-proof"
+                          type="file"
+                          className="sr-only"
+                          accept="image/png,image/jpeg,image/webp,image/heic,application/pdf"
+                          onChange={(e) =>
+                            setProofFile(e.target.files?.[0] ?? null)
+                          }
+                          disabled={isPending}
+                        />
+                      </div>
+                    </div>
+
+                    {proofFile ? (
+                      <div className="space-y-2">
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                          Receipt preview
+                        </p>
+                        {proofPreview &&
+                        ['image/png', 'image/jpeg', 'image/webp'].includes(
+                          proofFile.type,
+                        ) ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={proofPreview}
+                            alt="Selected bank-transfer receipt"
+                            className="max-h-[280px] w-full rounded-lg border bg-muted/30 object-contain"
+                          />
+                        ) : proofPreview &&
+                          proofFile.type === 'application/pdf' ? (
+                          <iframe
+                            title="Selected bank-transfer receipt"
+                            src={proofPreview}
+                            className="h-[320px] w-full rounded-lg border bg-white"
+                          />
+                        ) : (
+                          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+                            <FileText className="h-4 w-4 shrink-0" />
+                            <span className="truncate">{proofFile.name}</span>
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+
+                    <p className="rounded-lg border border-blue-100 bg-blue-50/60 p-3 text-xs leading-relaxed text-blue-900/85">
+                      {scope === 'all'
+                        ? `The same reference and receipt will be attached to all ${payable.length} installment declarations.`
+                        : 'The clinic admin will review the receipt before confirming this installment.'}
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="rounded-lg border border-amber-100 bg-amber-50/60 p-4">
+                  <div className="flex items-start gap-3">
+                    <Wallet className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+                    <div>
+                      <p className="text-sm font-semibold text-amber-950">
+                        Pay at the clinic
+                      </p>
+                      <p className="mt-1 text-xs leading-relaxed text-amber-900/80">
+                        Give the payment directly to the clinic. An admin will
+                        record it and unlock the related treatment steps.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {progress ? (
+                <div
+                  role="status"
+                  className="flex items-center gap-2 rounded-lg border bg-card p-3 text-xs"
+                >
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                  Processing installment {progress.done}/{progress.total}…
+                </div>
+              ) : null}
+            </div>
+          </section>
         </div>
 
         {/* ─── Footer ─────────────────────────────────────────────── */}
-        <div className="flex flex-row flex-wrap items-center justify-end gap-2.5 border-t bg-card px-6 py-4">
-          <Button variant="ghost" onClick={close} disabled={isPending}>
+        <div className="flex shrink-0 flex-col-reverse gap-2 border-t bg-card px-5 py-3 sm:flex-row sm:items-center sm:justify-end sm:px-8 sm:py-4">
+          <Button
+            variant="outline"
+            onClick={close}
+            disabled={isPending}
+            className="w-full sm:w-auto"
+          >
             Cancel
           </Button>
           <Button
             onClick={submit}
             disabled={isPending}
-            className="min-w-[180px] gap-1.5 bg-emerald-600 font-medium text-white shadow-sm hover:bg-emerald-700"
+            className="w-full gap-1.5 font-medium shadow-sm sm:min-w-[180px] sm:w-auto"
           >
             {isPending ? (
               <Loader2 className="h-4 w-4 animate-spin" />

@@ -35,13 +35,16 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { quotationsService } from '@/lib/api/quotations.service';
+// Approve / Reject hooks were removed alongside the doctor's Approve
+// / Reject card — paying the first installment now implicitly
+// approves the quote on the backend. The admin's quote view in this
+// file uses Cancel + Revert-to-draft for the equivalent "no longer
+// valid" affordance, so those stay imported.
 import {
-  useApproveQuotation,
   useCancelQuotation,
   useCreateQuotation,
   useGenerateQuotationPdf,
   useQuotationForOrder,
-  useRejectQuotation,
   useRevertQuotationToDraft,
   useSendQuotation,
   useUpdateQuotation,
@@ -765,11 +768,13 @@ function DoctorLayout({
   patientName: string;
   orderCode: string;
 }) {
-  const approve = useApproveQuotation();
-  const reject = useRejectQuotation();
+  // `useApproveQuotation` / `useRejectQuotation` used to power the
+  // doctor's Approve / Reject card here. That card is gone — the
+  // backend auto-approves a SENT quote on first payment and there's
+  // no manual reject affordance — so the hooks aren't called from
+  // this component anymore. Imports remain so the admin's quote view
+  // (in this same file) can keep using them.
   const generate = useGenerateQuotationPdf();
-  const [showReject, setShowReject] = useState(false);
-  const [rejectReason, setRejectReason] = useState('');
   // Doctor-side language override — defaults to whatever the admin
   // sent the quote in. The doctor can flip this and hit "Regenerate"
   // to receive a translated copy of the same quote. Keeps the PDF on
@@ -945,73 +950,23 @@ function DoctorLayout({
         </Card>
       ) : null}
 
-      {/* Approve / reject — only when awaiting doctor */}
-      {isActionable ? (
-        <Card className="border-2 border-amber-300 bg-gradient-to-br from-amber-50 via-white to-amber-50 shadow-md">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base text-amber-900">
-              <span className="grid h-8 w-8 place-items-center rounded-full bg-amber-100 text-amber-700">
-                <AlertTriangle className="h-4 w-4" />
-              </span>
-              Action required — review this quotation
-            </CardTitle>
-            <p className="ml-10 text-sm text-amber-900/80">
-              Approve to start the payment plan, or reject if anything is
-              off.
-            </p>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {showReject ? (
-              <Textarea
-                rows={2}
-                value={rejectReason}
-                onChange={(e) => setRejectReason(e.target.value)}
-                placeholder="Optional: explain why you're rejecting…"
-              />
-            ) : null}
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="lg"
-                onClick={() => {
-                  if (showReject) {
-                    reject.mutate({
-                      id: quote.id,
-                      rejectionReason: rejectReason.trim() || undefined,
-                    });
-                  } else {
-                    setShowReject(true);
-                  }
-                }}
-                disabled={reject.isPending || approve.isPending}
-                className="h-12 gap-2 border-red-300 bg-white text-red-700 hover:bg-red-50 hover:text-red-700"
-              >
-                {reject.isPending ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                ) : (
-                  <X className="h-5 w-5" />
-                )}
-                {showReject ? 'Confirm reject' : 'Reject'}
-              </Button>
-              <Button
-                type="button"
-                size="lg"
-                onClick={() => approve.mutate(quote.id)}
-                disabled={approve.isPending || reject.isPending}
-                className="h-12 gap-2 bg-emerald-600 text-white hover:bg-emerald-700"
-              >
-                {approve.isPending ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                ) : (
-                  <Check className="h-5 w-5" />
-                )}
-                Approve
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
+      {/*
+        Approve / Reject card was here.
+        The doctor's quote flow no longer asks for an explicit Approve
+        / Reject decision — sending the quote IS the offer, and the
+        doctor paying the first installment IS the acceptance. The
+        QuotePackPanel above already surfaces the payment timeline
+        with per-row Pay buttons; rendering an "Action required —
+        approve to start the payment plan" gate underneath made the
+        page read like a two-step process when it's really one. The
+        backend auto-flips the quote to `approved` the moment the
+        first payment lands (see PaymentsService.approveQuoteIfSent)
+        so the audit trail stays intact.
+
+        `isActionable` is still computed because the admin-facing
+        path uses it elsewhere — we just don't render the doctor
+        review card here anymore.
+       */}
 
       {quote.status === QuotationStatus.REJECTED && quote.rejectionReason ? (
         <Card className="border-red-200 bg-red-50/40">

@@ -314,6 +314,20 @@ export class OrderFilterDto {
   @IsEnum(OrderStatus)
   status?: OrderStatus;
 
+  // Multi-status filter — the Orders page tab strip groups several
+  // raw statuses under one tab (e.g. the "Treatment plan" tab covers
+  // PLANNING + READY + REVISION_REQUESTED + APPROVED so a row
+  // anywhere in that phase shows up). Repeated query params:
+  //   ?statuses=treatment_planning&statuses=treatment_plan_ready
+  // class-validator's `each: true` validates every entry.
+  @ApiProperty({ enum: OrderStatus, isArray: true, required: false })
+  @IsOptional()
+  // Express normalises a single `statuses=foo` to a string; wrap as
+  // an array so the filter logic only has to handle one shape.
+  @Transform(({ value }) => (Array.isArray(value) ? value : value ? [value] : undefined))
+  @IsEnum(OrderStatus, { each: true })
+  statuses?: OrderStatus[];
+
   @ApiProperty({ required: false })
   @IsOptional()
   @IsString()

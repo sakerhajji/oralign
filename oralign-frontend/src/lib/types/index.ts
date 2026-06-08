@@ -1220,6 +1220,17 @@ export interface OrderFilterParams extends PaginationParams {
   doctorId?: string;
   patientId?: string;
   status?: OrderStatus;
+  /**
+   * Multi-status filter — the Orders page tab strip uses this so the
+   * "Treatment plan" tab can cover the whole planning phase
+   * (TREATMENT_PLANNING + TREATMENT_PLAN_READY + REVISION_REQUESTED
+   * + TREATMENT_APPROVED) in a single request. The axios client
+   * serialises `statuses: ['draft', 'submitted']` as repeated query
+   * params `?statuses=draft&statuses=submitted` which the backend
+   * DTO unwraps. When both `status` and `statuses` are sent,
+   * `statuses` wins.
+   */
+  statuses?: OrderStatus[];
   orderCode?: string;
   sortBy?: OrderSortField;
   sortOrder?: SortOrder;

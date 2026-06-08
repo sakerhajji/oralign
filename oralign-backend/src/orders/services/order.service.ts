@@ -1269,7 +1269,16 @@ export class OrderService {
     }
 
     if (filters.patientId) where.patientId = filters.patientId;
-    if (filters.status) where.status = filters.status;
+    // Status filter — `statuses[]` (multi) wins over `status` (single)
+    // when both are sent. The list path is what the Orders page tab
+    // strip uses so the "Treatment plan" tab can cover the whole
+    // planning phase in one request; legacy single-status callers
+    // still work unchanged.
+    if (filters.statuses && filters.statuses.length > 0) {
+      where.status = { in: filters.statuses };
+    } else if (filters.status) {
+      where.status = filters.status;
+    }
     if (filters.orderCode) {
       where.orderCode = { contains: filters.orderCode, mode: 'insensitive' };
     }

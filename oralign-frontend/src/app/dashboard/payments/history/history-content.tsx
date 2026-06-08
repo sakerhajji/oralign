@@ -11,6 +11,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CreditCardIcon,
+  FileDown,
   Filter,
   Loader2,
   RefreshCw,
@@ -49,6 +50,8 @@ import { cn } from '@/lib/utils';
 import { useAllPayments, useMyPayments } from '@/lib/hooks';
 import { useAuth } from '@/lib/providers/auth-provider';
 import { usersService } from '@/lib/api';
+import { invoicesService } from '@/lib/api/invoices.service';
+import { useT } from '@/lib/i18n/lang-context';
 import {
   PaymentMethod,
   PaymentRecordStatus,
@@ -601,6 +604,12 @@ export function PaymentHistoryContent() {
                     ? 'No payments recorded yet.'
                     : 'You have not made any payments yet.'
               }
+              // Per-row Invoice download — fetches the bilingual
+              // receipt PDF (EN / FR based on the dashboard's current
+              // language). Doctors get only their own invoices; the
+              // backend RBAC enforces the scope, so the same button
+              // is safe to show in both admin + doctor views.
+              renderActions={(row) => <InvoiceDownloadButton paymentId={row.id} />}
             />
           )}
         </CardContent>
@@ -987,5 +996,71 @@ function DoctorSearchPicker({
         </div>
       ) : null}
     </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Per-row invoice download. Fetches the bilingual receipt PDF for a
+// single Payment, opens it as a blob URL so the browser presents the
+// native save dialog (filename comes from the server's
+// Content-Disposition). The language is read from the dashboard's
+// i18n context so a doctor on FR gets the FR template, and EN users
+// the EN template — same Puppeteer template, two label dictionaries.
+//
+// Why a tiny inline component instead of inlining the click handler:
+//   • Each row owns its own pending state so a click on one row
+//     doesn't spin the spinner on every row.
+//   • Keeps the parent's render tree tidy — `renderActions` stays a
+//     one-liner.
+// ──────────────────────────────────────────────────────────────────
+function InvoiceDownloadButton({ paymentId }: { paymentId: string }) {
+  const { lang } = useT();
+  const [busy, setBusy] = useState(false);
+
+  const download = async () => {
+    setBusy(true);
+    try {
+      const blob = await invoicesService.downloadInvoice(paymentId, lang);
+      const url = URL.createObjectURL(blob);
+      // Synthesise the filename here so the user gets a meaningful
+      // name even when the response is opened in a new tab instead
+      // of saved (browsers ignore Content-Disposition on iframe
+      // previews). Server-side filename still wins when Save-As is
+      // used directly on the link.
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `invoice-${paymentId.slice(0, 8)}-${lang}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // Revoke after the browser has had a tick to start the download.
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch {
+      // Service layer already surfaces a toast; we just unwind the
+      // spinner state here. Swallowing the error keeps the row UX
+      // tidy — no double-error chrome.
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Button
+      size="sm"
+      variant="ghost"
+      onClick={download}
+      disabled={busy}
+      aria-label="Download invoice"
+      className="h-8 gap-1.5 text-xs"
+    >
+      {busy ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      ) : (
+        <FileDown className="h-3.5 w-3.5" />
+      )}
+      <span className="hidden sm:inline">
+        {lang === 'fr' ? 'Facture' : 'Invoice'}
+      </span>
+    </Button>
   );
 }

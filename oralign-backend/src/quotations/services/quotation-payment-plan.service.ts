@@ -424,7 +424,7 @@ export class QuotationPaymentPlanService {
       if (batch.status === BatchStatus.delivered) {
         // Idempotent — return the row as-is and skip the notification
         // so re-clicking "Deliver" doesn't double-ping the doctor.
-        return { batch, justDelivered: false };
+        return { batch, justDelivered: false, orderJustFinished: false };
       }
       const updated = await tx.quoteStepBatch.update({
         where: { id: batchId },
@@ -434,9 +434,49 @@ export class QuotationPaymentPlanService {
           deliveredById: caller.userId,
         },
       });
+
+      // ── Auto-finish the order when EVERY batch is delivered.
+      //
+      // Once the lab has shipped the last set of aligners and the
+      // admin has flipped its batch to `delivered`, the order is by
+      // definition complete — there's nothing else to manufacture or
+      // ship. Surface that by transitioning the order itself to
+      // `finished` (rendered as "Done" / "Terminée" in the UI) so
+      // the doctor's dashboard moves the row out of "In Fabrication"
+      // / "Shipped" and into the closed bucket without an admin
+      // having to chase a manual status change.
+      //
+      // We check inside the same transaction so the read-after-write
+      // sees the row we just updated. The count is scoped to the
+      // current quotation (one quote = one order, by schema).
+      const remainingUnDelivered = await tx.quoteStepBatch.count({
+        where: {
+          quotationId: batch.quotationId,
+          status: { not: BatchStatus.delivered },
+        },
+      });
+      let orderJustFinished = false;
+      if (remainingUnDelivered === 0) {
+        // Only nudge the status when it hasn't already landed here —
+        // saves a redundant write + a noisy update event when an
+        // admin re-marks an already-delivered batch.
+        const order = await tx.dentalOrder.findUnique({
+          where: { id: batch.quotation.orderId },
+          select: { status: true },
+        });
+        if (order && order.status !== OrderStatus.finished) {
+          await tx.dentalOrder.update({
+            where: { id: batch.quotation.orderId },
+            data: { status: OrderStatus.finished },
+          });
+          orderJustFinished = true;
+        }
+      }
+
       return {
         batch: { ...updated, quotation: batch.quotation },
         justDelivered: true,
+        orderJustFinished,
       };
     });
 

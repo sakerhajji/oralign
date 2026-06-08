@@ -179,6 +179,7 @@ export class PaymentsService {
 
     const row = await this.loadInstallmentForCaller(installmentId, caller);
     this.assertPayable(row);
+    await this.approveQuoteIfSent(row.quotationId, caller.userId);
 
     // Create the pending row OUTSIDE the gateway call so the row
     // exists even if the gateway throws — the user can retry against
@@ -265,6 +266,7 @@ export class PaymentsService {
       args.caller,
     );
     this.assertPayable(row);
+    await this.approveQuoteIfSent(row.quotationId, args.caller.userId);
 
     return this.prisma.$transaction(async (tx) => {
       // Cancel any stale `awaiting_confirmation` declarations on the
@@ -429,6 +431,7 @@ export class PaymentsService {
       { adminOnly: true },
     );
     this.assertPayable(row);
+    await this.approveQuoteIfSent(row.quotationId, args.caller.userId);
     const payment = await this.prisma.payment.create({
       data: {
         orderId: row.quotation.orderId,
@@ -1001,9 +1004,18 @@ export class PaymentsService {
     availableFrom: Date;
     quotation: { status: QuotationStatus };
   }): void {
-    if (row.quotation.status !== QuotationStatus.approved) {
+    // The doctor's quote view no longer ships explicit Approve /
+    // Reject buttons — clicking Pay on an installment is the doctor's
+    // implicit acceptance of the quote terms. So the quote must be
+    // EITHER `sent` (awaiting doctor action) OR `approved` (already
+    // implicitly approved on a prior payment). Any other status —
+    // draft, rejected, canceled — still blocks payment.
+    if (
+      row.quotation.status !== QuotationStatus.sent &&
+      row.quotation.status !== QuotationStatus.approved
+    ) {
       throw new BadRequestException(
-        'Quote must be approved by the doctor before any payment.',
+        'Quote is not in a payable state — admin must (re)send it first.',
       );
     }
     if (row.status === InstallmentStatus.paid) {
@@ -1017,6 +1029,54 @@ export class PaymentsService {
     if (row.availableFrom.getTime() > Date.now()) {
       throw new BadRequestException(
         `Available from ${row.availableFrom.toISOString()} — payments cannot be initiated earlier.`,
+      );
+    }
+  }
+
+  /**
+   * Implicit acceptance: when a doctor initiates the first payment on
+   * a `sent` quotation, flip its status to `approved` so the audit
+   * trail records the moment of acceptance — paying the quote IS
+   * approving the quote in the new flow. No-op when the row is
+   * already approved (every subsequent payment skips the write).
+   *
+   * Used by every payment entry point right after `assertPayable`
+   * lets the row through. Wrapped in a defensive try/catch because
+   * losing the approval signal should not block the payment itself —
+   * the admin can still see the quote was paid even if this update
+   * fails for some reason.
+   */
+  private async approveQuoteIfSent(
+    quotationId: string,
+    callerUserId: string,
+  ): Promise<void> {
+    try {
+      const updated = await this.prisma.quotation.updateMany({
+        where: { id: quotationId, status: QuotationStatus.sent },
+        data: {
+          status: QuotationStatus.approved,
+          approvedAt: new Date(),
+          approvedById: callerUserId,
+        },
+      });
+      if (updated.count > 0) {
+        // Move the order off "Quote sent" so the doctor's KPI counts
+        // settle into the right bucket immediately. Mirrors the
+        // explicit approve action that previously did this transition.
+        const quote = await this.prisma.quotation.findUnique({
+          where: { id: quotationId },
+          select: { orderId: true },
+        });
+        if (quote?.orderId) {
+          await this.prisma.dentalOrder.update({
+            where: { id: quote.orderId },
+            data: { status: OrderStatus.fabrication },
+          });
+        }
+      }
+    } catch (err) {
+      this.logger.error(
+        `approveQuoteIfSent failed for quotation ${quotationId}: ${(err as Error).message}`,
       );
     }
   }

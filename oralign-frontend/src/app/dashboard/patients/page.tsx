@@ -4,6 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useDebouncedCallback } from 'use-debounce';
 import { format } from 'date-fns';
+import { fr as frLocale } from 'date-fns/locale';
+import type { Locale } from 'date-fns';
+import { useT } from '@/lib/i18n/lang-context';
+import type { Lang } from '@/lib/i18n/dict';
 import {
   AlertTriangle,
   ArrowDown,
@@ -92,22 +96,31 @@ import { cn } from '@/lib/utils';
 const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
 type PageSize = (typeof PAGE_SIZE_OPTIONS)[number];
 
+// Sort options carry a `labelKey` instead of a hard-coded English
+// label so the dropdown re-renders the menu in the current language.
 const SORT_OPTIONS: Array<{
   key: string;
-  label: string;
+  labelKey: string;
   field: PatientSortField;
   order: SortOrder;
 }> = [
-  { key: 'created-desc', label: 'Newest first', field: 'createdAt', order: 'desc' },
-  { key: 'created-asc', label: 'Oldest first', field: 'createdAt', order: 'asc' },
-  { key: 'name-asc', label: 'Name (A–Z)', field: 'fullName', order: 'asc' },
-  { key: 'name-desc', label: 'Name (Z–A)', field: 'fullName', order: 'desc' },
-  { key: 'updated-desc', label: 'Recently updated', field: 'updatedAt', order: 'desc' },
+  { key: 'created-desc', labelKey: 'patients.sortNewest', field: 'createdAt', order: 'desc' },
+  { key: 'created-asc', labelKey: 'patients.sortOldest', field: 'createdAt', order: 'asc' },
+  { key: 'name-asc', labelKey: 'patients.sortNameAsc', field: 'fullName', order: 'asc' },
+  { key: 'name-desc', labelKey: 'patients.sortNameDesc', field: 'fullName', order: 'desc' },
+  { key: 'updated-desc', labelKey: 'patients.sortUpdated', field: 'updatedAt', order: 'desc' },
 ];
+
+// Localised date-fns wrapper used by row/card formatters below.
+const dateLocale = (lang: Lang): Locale | undefined =>
+  lang === 'fr' ? frLocale : undefined;
+const dateFormat = (lang: Lang) =>
+  lang === 'fr' ? 'd MMM yyyy' : 'MMM d, yyyy';
 
 export default function PatientsPage() {
   const { isAdmin, isDentist, user } = useAuth();
   const prefetchPatient = usePatientPrefetch();
+  const { t, lang } = useT();
 
   // ── Query state ─────────────────────────────────────────────────
   const [page, setPage] = useState(1);
@@ -298,10 +311,8 @@ export default function PatientsPage() {
         <Card>
           <CardContent className="flex min-h-[320px] flex-col items-center justify-center gap-2 text-center">
             <Users className="h-10 w-10 text-muted-foreground" />
-            <h1 className="text-2xl font-semibold">Patients</h1>
-            <p className="text-muted-foreground">
-              Your role does not manage patients directly.
-            </p>
+            <h1 className="text-2xl font-semibold">{t('patients.title')}</h1>
+            <p className="text-muted-foreground">{t('patients.noRole')}</p>
           </CardContent>
         </Card>
       </div>
@@ -316,20 +327,20 @@ export default function PatientsPage() {
           <div className="min-w-0">
             <div className="mb-2 flex items-center gap-2 text-sm font-medium text-muted-foreground">
               <Users className="h-4 w-4" />
-              Clinical patient registry
+              {t('patients.eyebrow')}
             </div>
             <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-              Patients
+              {t('patients.title')}
             </h1>
             <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
               {isAdmin
-                ? 'Browse patients across every dentist on the platform, filter by demographics, and manage records.'
-                : 'Browse your patient list, capture demographics, and prepare them for new aligner cases.'}
+                ? t('patients.subtitleAdmin')
+                : t('patients.subtitleDentist')}
             </p>
           </div>
           <Button size="lg" onClick={openCreate} className="w-full sm:w-auto">
             <Plus className="mr-2 h-4 w-4" />
-            Add Patient
+            {t('patients.addPatient')}
           </Button>
         </div>
       </section>
@@ -342,7 +353,7 @@ export default function PatientsPage() {
             <Input
               key={searchInputKey}
               className="h-10 pl-10"
-              placeholder="Search by name, email, or phone…"
+              placeholder={t('patients.searchPh')}
               defaultValue={search}
               onChange={(event) => debouncedSearch(event.target.value)}
             />
@@ -355,7 +366,7 @@ export default function PatientsPage() {
               onClick={() => setShowFilters((current) => !current)}
             >
               <Filter className="h-4 w-4" />
-              Filters
+              {t('patients.filters')}
               {activeFilterCount > 0 && (
                 <Badge
                   variant="secondary"
@@ -374,7 +385,7 @@ export default function PatientsPage() {
               className="h-10 w-10"
               onClick={() => patientsQuery.refetch()}
               disabled={patientsQuery.isFetching}
-              aria-label="Refresh"
+              aria-label={t('patients.refresh')}
             >
               <RefreshCw
                 className={cn(
@@ -390,7 +401,7 @@ export default function PatientsPage() {
               {isAdmin && (
                 <div className="space-y-1.5">
                   <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Dentist
+                    {t('patients.dentistLabel')}
                   </Label>
                   <Select
                     value={doctorFilter}
@@ -400,10 +411,10 @@ export default function PatientsPage() {
                     }}
                   >
                     <SelectTrigger className="h-10">
-                      <SelectValue placeholder="All dentists" />
+                      <SelectValue placeholder={t('patients.allDentists')} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All dentists</SelectItem>
+                      <SelectItem value="all">{t('patients.allDentists')}</SelectItem>
                       {(dentistsQuery.data?.data ?? []).map((doctor) => (
                         <SelectItem key={doctor.id} value={doctor.id}>
                           {doctor.fullName}
@@ -415,7 +426,7 @@ export default function PatientsPage() {
               )}
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Gender
+                  {t('patients.genderLabel')}
                 </Label>
                 <Select
                   value={genderFilter}
@@ -428,16 +439,16 @@ export default function PatientsPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All</SelectItem>
-                    <SelectItem value={Gender.FEMALE}>Female</SelectItem>
-                    <SelectItem value={Gender.MALE}>Male</SelectItem>
-                    <SelectItem value={Gender.OTHER}>Other</SelectItem>
+                    <SelectItem value="all">{t('patients.genderAll')}</SelectItem>
+                    <SelectItem value={Gender.FEMALE}>{t('patients.genderFemale')}</SelectItem>
+                    <SelectItem value={Gender.MALE}>{t('patients.genderMale')}</SelectItem>
+                    <SelectItem value={Gender.OTHER}>{t('patients.genderOther')}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Created from
+                  {t('patients.createdFrom')}
                 </Label>
                 <Input
                   type="date"
@@ -451,7 +462,7 @@ export default function PatientsPage() {
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Created to
+                  {t('patients.createdTo')}
                 </Label>
                 <Input
                   type="date"
@@ -472,7 +483,7 @@ export default function PatientsPage() {
                   disabled={activeFilterCount === 0}
                 >
                   <X className="h-4 w-4" />
-                  Clear filters
+                  {t('patients.clearFilters')}
                 </Button>
               </div>
             </div>
@@ -483,34 +494,40 @@ export default function PatientsPage() {
       {/* ─── Active filter chips ──────────────────────────────────── */}
       {activeFilterCount > 0 && (
         <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="text-muted-foreground">Active:</span>
+          <span className="text-muted-foreground">{t('patients.activeLabel')}</span>
           {search && (
-            <FilterChip label={`Search: "${search}"`} onRemove={clearSearch} />
+            <FilterChip
+              label={t('patients.chipSearch', { value: search })}
+              onRemove={clearSearch}
+            />
           )}
           {isAdmin && doctorFilter !== 'all' && (
             <FilterChip
-              label={`Dentist: ${
-                (dentistsQuery.data?.data ?? []).find((d) => d.id === doctorFilter)
-                  ?.fullName ?? 'Unknown'
-              }`}
+              label={t('patients.chipDentist', {
+                value:
+                  (dentistsQuery.data?.data ?? []).find((d) => d.id === doctorFilter)
+                    ?.fullName ?? t('patients.chipUnknown'),
+              })}
               onRemove={() => setDoctorFilter('all')}
             />
           )}
           {genderFilter !== 'all' && (
             <FilterChip
-              label={`Gender: ${genderLabel(genderFilter)}`}
+              label={t('patients.chipGender', {
+                value: genderLabel(genderFilter, t) ?? '',
+              })}
               onRemove={() => setGenderFilter('all')}
             />
           )}
           {createdFrom && (
             <FilterChip
-              label={`From ${createdFrom}`}
+              label={t('patients.chipFrom', { value: createdFrom })}
               onRemove={() => setCreatedFrom('')}
             />
           )}
           {createdTo && (
             <FilterChip
-              label={`To ${createdTo}`}
+              label={t('patients.chipTo', { value: createdTo })}
               onRemove={() => setCreatedTo('')}
             />
           )}
@@ -533,33 +550,33 @@ export default function PatientsPage() {
       ) : patientsQuery.error ? (
         <EmptyState
           icon={<UserRound className="h-10 w-10" />}
-          title="Failed to load patients"
+          title={t('patients.loadingFailedTitle')}
           description={patientsQuery.error.message}
           action={
             <Button variant="outline" onClick={() => patientsQuery.refetch()}>
-              Retry
+              {t('patients.retry')}
             </Button>
           }
         />
       ) : patients.length === 0 ? (
         <EmptyState
           icon={<UserRound className="h-10 w-10" />}
-          title="No patients found"
+          title={t('patients.emptyTitle')}
           description={
             activeFilterCount > 0
-              ? 'No patients match the current filters. Try widening the search or clearing filters.'
-              : 'Add your first patient to start creating orders.'
+              ? t('patients.emptyBodyFiltered')
+              : t('patients.emptyBodyNone')
           }
           action={
             <div className="flex flex-wrap justify-center gap-2">
               {activeFilterCount > 0 && (
                 <Button variant="outline" onClick={clearAllFilters}>
-                  Clear filters
+                  {t('patients.clearFilters')}
                 </Button>
               )}
               <Button onClick={openCreate}>
                 <Plus className="mr-2 h-4 w-4" />
-                Add Patient
+                {t('patients.addPatient')}
               </Button>
             </div>
           }
@@ -576,17 +593,17 @@ export default function PatientsPage() {
                       checked={allOnPageSelected}
                       data-state={someOnPageSelected ? 'indeterminate' : undefined}
                       onCheckedChange={toggleAll}
-                      aria-label="Select all patients on this page"
+                      aria-label={t('patients.selectAllAria')}
                       onClick={(e) => e.stopPropagation()}
                     />
                   </TableHead>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Phone</TableHead>
-                  <TableHead>Gender</TableHead>
-                  {isAdmin && <TableHead>Dentist</TableHead>}
-                  <TableHead>Created</TableHead>
-                  <TableHead className="w-12 text-right">Actions</TableHead>
+                  <TableHead>{t('patients.colName')}</TableHead>
+                  <TableHead>{t('patients.colEmail')}</TableHead>
+                  <TableHead>{t('patients.colPhone')}</TableHead>
+                  <TableHead>{t('patients.colGender')}</TableHead>
+                  {isAdmin && <TableHead>{t('patients.colDentist')}</TableHead>}
+                  <TableHead>{t('patients.colCreated')}</TableHead>
+                  <TableHead className="w-12 text-right">{t('patients.colActions')}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -665,13 +682,14 @@ function BulkActionBar({
   onClear: () => void;
   onBulkDelete: () => void;
 }) {
+  const { t } = useT();
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   return (
     <>
       <div className="flex items-center gap-3 rounded-lg border border-primary/20 bg-primary/5 px-4 py-2.5">
         <span className="text-sm font-medium">
-          {count} patient{count !== 1 ? 's' : ''} selected
+          {t('patients.bulkSelected', { count })}
         </span>
         <Button
           variant="ghost"
@@ -681,7 +699,7 @@ function BulkActionBar({
           disabled={isDeleting}
         >
           <X className="h-3.5 w-3.5" />
-          Deselect all
+          {t('patients.bulkDeselect')}
         </Button>
         <div className="flex-1" />
         <Button
@@ -696,7 +714,7 @@ function BulkActionBar({
           ) : (
             <Trash2 className="h-4 w-4" />
           )}
-          Delete {count} patient{count !== 1 ? 's' : ''}
+          {t('patients.bulkDelete', { count })}
         </Button>
       </div>
 
@@ -707,15 +725,14 @@ function BulkActionBar({
               <span className="grid h-9 w-9 place-items-center rounded-full bg-destructive/10 text-destructive">
                 <AlertTriangle className="h-4 w-4" />
               </span>
-              Delete {count} patient{count !== 1 ? 's' : ''}?
+              {t('patients.bulkConfirmTitle', { count })}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              This will soft-delete {count} patient record{count !== 1 ? 's' : ''}. The
-              records will disappear from active lists but existing orders are preserved.
+              {t('patients.bulkConfirmBody', { count })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t('patients.cancel')}</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
               onClick={() => {
@@ -723,7 +740,7 @@ function BulkActionBar({
                 setConfirmOpen(false);
               }}
             >
-              Delete {count} patient{count !== 1 ? 's' : ''}
+              {t('patients.bulkDelete', { count })}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -741,6 +758,7 @@ function SortMenu({
   sortKey: string;
   onChange: (next: string) => void;
 }) {
+  const { t } = useT();
   const active = SORT_OPTIONS.find((option) => option.key === sortKey);
   return (
     <DropdownMenu>
@@ -753,13 +771,15 @@ function SortMenu({
           ) : (
             <ArrowUpDown className="h-4 w-4" />
           )}
-          <span className="hidden sm:inline">{active?.label ?? 'Sort'}</span>
-          <span className="sm:hidden">Sort</span>
+          <span className="hidden sm:inline">
+            {active ? t(active.labelKey) : t('patients.sort')}
+          </span>
+          <span className="sm:hidden">{t('patients.sort')}</span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel className="text-xs uppercase tracking-wide text-muted-foreground">
-          Sort by
+          {t('patients.sortBy')}
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         {SORT_OPTIONS.map((option) => (
@@ -771,7 +791,7 @@ function SortMenu({
               option.key === sortKey && 'bg-accent text-accent-foreground',
             )}
           >
-            <span>{option.label}</span>
+            <span>{t(option.labelKey)}</span>
             {option.key === sortKey && <CheckCircle2 className="h-3.5 w-3.5" />}
           </DropdownMenuItem>
         ))}
@@ -818,6 +838,7 @@ const PatientRow = function PatientRow({
   onDelete: (patient: Patient) => void;
   onPrefetch: (id: string) => void;
 }) {
+  const { t, lang } = useT();
   return (
     <TableRow
       tabIndex={0}
@@ -846,7 +867,7 @@ const PatientRow = function PatientRow({
         <Checkbox
           checked={checked}
           onCheckedChange={() => onToggle(patient.id)}
-          aria-label={`Select ${patient.fullName}`}
+          aria-label={t('patients.selectAria', { name: patient.fullName })}
         />
       </TableCell>
       <TableCell className="font-medium">
@@ -858,7 +879,10 @@ const PatientRow = function PatientRow({
             <p className="truncate font-semibold">{patient.fullName}</p>
             {patient.dateOfBirth && (
               <p className="text-xs text-muted-foreground">
-                DOB {format(new Date(patient.dateOfBirth), 'MMM d, yyyy')}
+                {t('patients.dobPrefix')}{' '}
+                {format(new Date(patient.dateOfBirth), dateFormat(lang), {
+                  locale: dateLocale(lang),
+                })}
               </p>
             )}
           </div>
@@ -870,12 +894,14 @@ const PatientRow = function PatientRow({
       <TableCell className="text-sm">
         {patient.phone ?? <span className="text-muted-foreground">—</span>}
       </TableCell>
-      <TableCell className="text-sm">{genderLabel(patient.gender) ?? '—'}</TableCell>
+      <TableCell className="text-sm">{genderLabel(patient.gender, t) ?? '—'}</TableCell>
       {isAdmin && (
         <TableCell className="text-sm">{patient.doctor?.fullName ?? '—'}</TableCell>
       )}
       <TableCell className="text-sm text-muted-foreground">
-        {format(new Date(patient.createdAt), 'MMM d, yyyy')}
+        {format(new Date(patient.createdAt), dateFormat(lang), {
+          locale: dateLocale(lang),
+        })}
       </TableCell>
       <TableCell className="text-right">
         <PatientRowActions patient={patient} onOpen={onOpen} onDelete={onDelete} />
@@ -893,6 +919,7 @@ function PatientRowActions({
   onOpen: (patient: Patient) => void;
   onDelete: (patient: Patient) => void;
 }) {
+  const { t } = useT();
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   return (
@@ -903,7 +930,7 @@ function PatientRowActions({
             variant="ghost"
             size="icon"
             className="h-8 w-8"
-            aria-label={`Actions for ${patient.fullName}`}
+            aria-label={t('patients.actionsAria', { name: patient.fullName })}
             onClick={(event) => event.stopPropagation()}
           >
             <MoreVertical className="h-4 w-4" />
@@ -919,7 +946,7 @@ function PatientRowActions({
             className="gap-2"
           >
             <Edit className="h-4 w-4" />
-            Open / edit
+            {t('patients.openEdit')}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
@@ -927,7 +954,7 @@ function PatientRowActions({
             className="gap-2 text-destructive focus:text-destructive"
           >
             <Trash2 className="h-4 w-4" />
-            Delete patient
+            {t('patients.deletePatient')}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -940,17 +967,14 @@ function PatientRowActions({
               <span className="grid h-9 w-9 place-items-center rounded-full bg-destructive/10 text-destructive">
                 <AlertTriangle className="h-4 w-4" />
               </span>
-              Delete patient?
+              {t('patients.deletePatientConfirmTitle')}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              This soft-deletes{' '}
-              <span className="font-semibold">{patient.fullName}</span>.
-              The record stays in the database but disappears from active patient
-              lists. Existing orders remain visible.
+              {t('patients.deletePatientConfirmBody', { name: patient.fullName })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t('patients.cancel')}</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
               onClick={() => {
@@ -958,7 +982,7 @@ function PatientRowActions({
                 setConfirmOpen(false);
               }}
             >
-              Delete patient
+              {t('patients.deletePatient')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -984,6 +1008,7 @@ function PatientMobileCard({
   onOpen: (patient: Patient) => void;
   onDelete: (patient: Patient) => void;
 }) {
+  const { t, lang } = useT();
   return (
     <Card
       data-state={checked ? 'selected' : undefined}
@@ -1002,7 +1027,7 @@ function PatientMobileCard({
             <Checkbox
               checked={checked}
               onCheckedChange={() => onToggle(patient.id)}
-              aria-label={`Select ${patient.fullName}`}
+              aria-label={t('patients.selectAria', { name: patient.fullName })}
               onClick={(e) => e.stopPropagation()}
               className="mt-1"
             />
@@ -1010,7 +1035,7 @@ function PatientMobileCard({
               <h3 className="truncate text-lg font-semibold">{patient.fullName}</h3>
               {isAdmin && (
                 <p className="text-sm text-muted-foreground">
-                  {patient.doctor?.fullName ?? 'No dentist'}
+                  {patient.doctor?.fullName ?? t('patients.noDentist')}
                 </p>
               )}
             </div>
@@ -1020,17 +1045,19 @@ function PatientMobileCard({
         <div className="mt-4 grid gap-2 text-sm text-muted-foreground">
           <span className="flex items-center gap-2">
             <Mail className="h-4 w-4" />
-            {patient.email ?? 'No email'}
+            {patient.email ?? t('patients.noEmail')}
           </span>
           <span className="flex items-center gap-2">
             <Phone className="h-4 w-4" />
-            {patient.phone ?? 'No phone'}
+            {patient.phone ?? t('patients.noPhone')}
           </span>
           <span className="flex items-center gap-2">
             <Calendar className="h-4 w-4" />
             {patient.dateOfBirth
-              ? format(new Date(patient.dateOfBirth), 'MMM d, yyyy')
-              : 'No birth date'}
+              ? format(new Date(patient.dateOfBirth), dateFormat(lang), {
+                  locale: dateLocale(lang),
+                })
+              : t('patients.noBirthDate')}
           </span>
         </div>
       </CardContent>
@@ -1040,14 +1067,18 @@ function PatientMobileCard({
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
-function genderLabel(gender?: string | null): string | undefined {
+// genderLabel takes the translator so chips + table cells share one
+// localised source of truth. The fallback `?? ''` keeps the callers
+// terse when the value is null.
+type T = (path: string, vars?: Record<string, string | number>) => string;
+function genderLabel(gender: string | null | undefined, t: T): string | undefined {
   switch (gender) {
     case Gender.MALE:
-      return 'Male';
+      return t('patients.genderMale');
     case Gender.FEMALE:
-      return 'Female';
+      return t('patients.genderFemale');
     case Gender.OTHER:
-      return 'Other';
+      return t('patients.genderOther');
     default:
       return undefined;
   }
@@ -1115,18 +1146,17 @@ function PatientsPagination({
   onPageChange: (page: number) => void;
   onPageSizeChange: (size: PageSize) => void;
 }) {
+  const { t } = useT();
   const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const to = Math.min(page * pageSize, total);
   return (
     <div className="flex flex-col gap-3 rounded-lg border bg-card p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4">
       <div className="flex flex-col gap-1 text-sm text-muted-foreground sm:flex-row sm:items-center sm:gap-3">
-        <span>
-          {from}–{to} of {total} patients
-        </span>
+        <span>{t('patients.pagSummary', { from, to, total })}</span>
         <Separator orientation="vertical" className="hidden h-4 sm:block" />
         <div className="flex items-center gap-2">
           <Label htmlFor="patients-page-size" className="text-xs">
-            Rows per page
+            {t('patients.pagRowsPerPage')}
           </Label>
           <Select
             value={String(pageSize)}
@@ -1153,10 +1183,10 @@ function PatientsPagination({
           disabled={page === 1}
         >
           <ChevronLeft className="mr-1 h-4 w-4" />
-          Previous
+          {t('patients.pagPrevious')}
         </Button>
         <span className="text-sm text-muted-foreground">
-          Page {page} of {totalPages}
+          {t('patients.pagPageOf', { page, total: totalPages })}
         </span>
         <Button
           variant="outline"
@@ -1164,7 +1194,7 @@ function PatientsPagination({
           onClick={() => onPageChange(Math.min(totalPages, page + 1))}
           disabled={page === totalPages}
         >
-          Next
+          {t('patients.pagNext')}
           <ChevronRight className="ml-1 h-4 w-4" />
         </Button>
       </div>

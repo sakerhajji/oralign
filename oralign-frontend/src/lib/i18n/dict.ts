@@ -850,6 +850,214 @@ export const dict = {
       } as T,
     },
   },
+
+  // ─── Patients page (/dashboard/patients) ────────────────────────
+  // FR copy uses Tunisian clinical-records vocabulary — "registre",
+  // "Nom complet", "Date de naissance", etc. — so a French-speaking
+  // clinic recognises every field without an English crutch.
+  patients: {
+    // Header strap
+    eyebrow: { en: 'Clinical patient registry', fr: 'Registre clinique des patients' } as T,
+    title: { en: 'Patients', fr: 'Patients' } as T,
+    subtitleAdmin: {
+      en: 'Browse patients across every dentist on the platform, filter by demographics, and manage records.',
+      fr: 'Parcourez les patients de tous les praticiens, filtrez par données démographiques et gérez les dossiers.',
+    } as T,
+    subtitleDentist: {
+      en: 'Browse your patient list, capture demographics, and prepare them for new aligner cases.',
+      fr: 'Consultez votre liste de patients, enregistrez leurs données démographiques et préparez-les pour de nouveaux cas d’aligneurs.',
+    } as T,
+    addPatient: { en: 'Add Patient', fr: 'Ajouter un patient' } as T,
+    noRole: {
+      en: 'Your role does not manage patients directly.',
+      fr: 'Votre rôle ne gère pas directement les patients.',
+    } as T,
+
+    // Toolbar
+    searchPh: {
+      en: 'Search by name, email, or phone…',
+      fr: 'Rechercher par nom, e-mail ou téléphone…',
+    } as T,
+    filters: { en: 'Filters', fr: 'Filtres' } as T,
+    sort: { en: 'Sort', fr: 'Trier' } as T,
+    sortBy: { en: 'Sort by', fr: 'Trier par' } as T,
+    refresh: { en: 'Refresh', fr: 'Actualiser' } as T,
+
+    // Sort options
+    sortNewest: { en: 'Newest first', fr: 'Du plus récent' } as T,
+    sortOldest: { en: 'Oldest first', fr: 'Du plus ancien' } as T,
+    sortNameAsc: { en: 'Name (A–Z)', fr: 'Nom (A–Z)' } as T,
+    sortNameDesc: { en: 'Name (Z–A)', fr: 'Nom (Z–A)' } as T,
+    sortUpdated: { en: 'Recently updated', fr: 'Récemment mis à jour' } as T,
+
+    // Filter panel
+    dentistLabel: { en: 'Dentist', fr: 'Praticien' } as T,
+    allDentists: { en: 'All dentists', fr: 'Tous les praticiens' } as T,
+    genderLabel: { en: 'Gender', fr: 'Sexe' } as T,
+    genderAll: { en: 'All', fr: 'Tous' } as T,
+    genderFemale: { en: 'Female', fr: 'Femme' } as T,
+    genderMale: { en: 'Male', fr: 'Homme' } as T,
+    genderOther: { en: 'Other', fr: 'Autre' } as T,
+    createdFrom: { en: 'Created from', fr: 'Créé du' } as T,
+    createdTo: { en: 'Created to', fr: 'Créé au' } as T,
+    clearFilters: { en: 'Clear filters', fr: 'Effacer les filtres' } as T,
+
+    // Filter chips
+    activeLabel: { en: 'Active:', fr: 'Actifs :' } as T,
+    chipSearch: { en: 'Search: "{value}"', fr: 'Recherche : « {value} »' } as T,
+    chipDentist: { en: 'Dentist: {value}', fr: 'Praticien : {value}' } as T,
+    chipGender: { en: 'Gender: {value}', fr: 'Sexe : {value}' } as T,
+    chipFrom: { en: 'From {value}', fr: 'À partir du {value}' } as T,
+    chipTo: { en: 'To {value}', fr: 'Jusqu’au {value}' } as T,
+    chipUnknown: { en: 'Unknown', fr: 'Inconnu' } as T,
+
+    // Bulk action bar
+    bulkSelected: {
+      en: '{count} patient{s} selected',
+      fr: '{count} patient(s) sélectionné(s)',
+    } as T,
+    bulkDeselect: { en: 'Deselect all', fr: 'Tout désélectionner' } as T,
+    bulkDelete: {
+      en: 'Delete {count} patient{s}',
+      fr: 'Supprimer {count} patient(s)',
+    } as T,
+    bulkConfirmTitle: {
+      en: 'Delete {count} patient{s}?',
+      fr: 'Supprimer {count} patient(s) ?',
+    } as T,
+    bulkConfirmBody: {
+      en: 'This will soft-delete {count} patient record{s}. The records will disappear from active lists but existing orders are preserved.',
+      fr: 'Cela supprimera {count} dossier(s) patient (suppression douce). Les fiches disparaîtront des listes actives, mais les commandes existantes sont conservées.',
+    } as T,
+    cancel: { en: 'Cancel', fr: 'Annuler' } as T,
+
+    // Table headers
+    colName: { en: 'Name', fr: 'Nom' } as T,
+    colEmail: { en: 'Email', fr: 'E-mail' } as T,
+    colPhone: { en: 'Phone', fr: 'Téléphone' } as T,
+    colGender: { en: 'Gender', fr: 'Sexe' } as T,
+    colDentist: { en: 'Dentist', fr: 'Praticien' } as T,
+    colCreated: { en: 'Created', fr: 'Créé le' } as T,
+    colActions: { en: 'Actions', fr: 'Actions' } as T,
+
+    // Row bits
+    dobPrefix: { en: 'DOB', fr: 'Né(e) le' } as T,
+    selectAllAria: {
+      en: 'Select all patients on this page',
+      fr: 'Sélectionner tous les patients de cette page',
+    } as T,
+    selectAria: { en: 'Select {name}', fr: 'Sélectionner {name}' } as T,
+    actionsAria: { en: 'Actions for {name}', fr: 'Actions pour {name}' } as T,
+    openEdit: { en: 'Open / edit', fr: 'Ouvrir / modifier' } as T,
+    deletePatient: { en: 'Delete patient', fr: 'Supprimer le patient' } as T,
+    deletePatientConfirmTitle: {
+      en: 'Delete patient?',
+      fr: 'Supprimer le patient ?',
+    } as T,
+    deletePatientConfirmBody: {
+      en: 'This soft-deletes {name}. The record stays in the database but disappears from active patient lists. Existing orders remain visible.',
+      fr: 'Cela supprime {name} en mode douce. La fiche reste en base mais disparaît des listes actives. Les commandes existantes restent visibles.',
+    } as T,
+
+    // Mobile card fallback strings
+    noEmail: { en: 'No email', fr: 'Aucun e-mail' } as T,
+    noPhone: { en: 'No phone', fr: 'Aucun téléphone' } as T,
+    noBirthDate: { en: 'No birth date', fr: 'Aucune date de naissance' } as T,
+    noDentist: { en: 'No dentist', fr: 'Aucun praticien' } as T,
+
+    // States
+    loadingFailedTitle: {
+      en: 'Failed to load patients',
+      fr: 'Échec du chargement des patients',
+    } as T,
+    retry: { en: 'Retry', fr: 'Réessayer' } as T,
+    emptyTitle: { en: 'No patients found', fr: 'Aucun patient trouvé' } as T,
+    emptyBodyFiltered: {
+      en: 'No patients match the current filters. Try widening the search or clearing filters.',
+      fr: 'Aucun patient ne correspond aux filtres actuels. Essayez d’élargir la recherche ou d’effacer les filtres.',
+    } as T,
+    emptyBodyNone: {
+      en: 'Add your first patient to start creating orders.',
+      fr: 'Ajoutez votre premier patient pour commencer à créer des commandes.',
+    } as T,
+
+    // Pagination
+    pagSummary: {
+      en: '{from}–{to} of {total} patients',
+      fr: '{from}–{to} sur {total} patients',
+    } as T,
+    pagRowsPerPage: { en: 'Rows per page', fr: 'Lignes par page' } as T,
+    pagPrevious: { en: 'Previous', fr: 'Précédent' } as T,
+    pagNext: { en: 'Next', fr: 'Suivant' } as T,
+    pagPageOf: {
+      en: 'Page {page} of {total}',
+      fr: 'Page {page} sur {total}',
+    } as T,
+
+    // ── Detail sheet (add + edit) ────────────────────────────────
+    sheet: {
+      titleEdit: { en: 'Edit patient', fr: 'Modifier le patient' } as T,
+      titleCreate: { en: 'New patient', fr: 'Nouveau patient' } as T,
+      descEdit: {
+        en: 'Edit demographics, clinical conditions and dentist assignment for this patient.',
+        fr: 'Modifier les données démographiques, les conditions cliniques et l’affectation du praticien.',
+      } as T,
+      descCreate: {
+        en: 'Capture identity and clinical context for a new patient record.',
+        fr: 'Saisissez l’identité et le contexte clinique d’un nouveau dossier patient.',
+      } as T,
+      unnamed: { en: 'Unnamed patient', fr: 'Patient sans nom' } as T,
+      draftBadge: { en: 'Draft — not saved yet', fr: 'Brouillon — non enregistré' } as T,
+
+      // Tabs
+      tabIdentity: { en: 'Identity', fr: 'Identité' } as T,
+      tabContact: { en: 'Contact', fr: 'Coordonnées' } as T,
+      tabClinical: { en: 'Clinical', fr: 'Clinique' } as T,
+      tabNotes: { en: 'Notes', fr: 'Notes' } as T,
+
+      // Identity tab
+      fieldName: { en: 'Patient name', fr: 'Nom du patient' } as T,
+      fieldNamePh: { en: 'Full legal name', fr: 'Nom complet officiel' } as T,
+      fieldDob: { en: 'Date of birth', fr: 'Date de naissance' } as T,
+      fieldGender: { en: 'Gender', fr: 'Sexe' } as T,
+      fieldGenderPh: { en: 'Select gender', fr: 'Choisir le sexe' } as T,
+      fieldDentist: { en: 'Assigned dentist', fr: 'Praticien attribué' } as T,
+      fieldDentistPh: { en: 'Select dentist', fr: 'Choisir un praticien' } as T,
+
+      // Contact tab
+      fieldEmail: { en: 'Email', fr: 'E-mail' } as T,
+      fieldEmailPh: { en: 'patient@example.com', fr: 'patient@example.com' } as T,
+      fieldPhone: { en: 'Phone', fr: 'Téléphone' } as T,
+      fieldPhonePh: { en: '+21612345678', fr: '+21612345678' } as T,
+      fieldAddress: { en: 'Address', fr: 'Adresse' } as T,
+      fieldAddressPh: {
+        en: 'Street, city, postal code',
+        fr: 'Rue, ville, code postal',
+      } as T,
+
+      // Notes tab
+      fieldNotes: { en: 'Internal notes', fr: 'Notes internes' } as T,
+      fieldNotesDesc: {
+        en: 'Allergies, relevant medical history, anything the planner should know. Visible to the dentist and the planner only.',
+        fr: 'Allergies, antécédents médicaux pertinents, toute information utile au planificateur. Visible uniquement par le praticien et le planificateur.',
+      } as T,
+      fieldNotesPh: { en: 'Notes…', fr: 'Notes…' } as T,
+
+      // Footer
+      cancel: { en: 'Cancel', fr: 'Annuler' } as T,
+      saveChanges: { en: 'Save changes', fr: 'Enregistrer les modifications' } as T,
+      createPatient: { en: 'Create patient', fr: 'Créer le patient' } as T,
+
+      // Inline delete
+      deleteBtn: { en: 'Delete patient', fr: 'Supprimer le patient' } as T,
+      deleteTitle: { en: 'Delete patient?', fr: 'Supprimer le patient ?' } as T,
+      deleteBodyNamed: {
+        en: 'This soft-deletes {name}. The record stays in the database but disappears from active patient lists. Existing orders for this patient remain visible.',
+        fr: 'Cela supprime {name} en mode douce. La fiche reste en base mais disparaît des listes actives. Les commandes existantes pour ce patient restent visibles.',
+      } as T,
+      deleteThis: { en: 'this patient', fr: 'ce patient' } as T,
+    },
+  },
 } as const;
 
 // ────────────────────────────────────────────────────────────────────

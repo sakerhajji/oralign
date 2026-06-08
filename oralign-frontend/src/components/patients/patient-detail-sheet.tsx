@@ -53,6 +53,7 @@ import {
   type Patient,
 } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n/lang-context';
 
 /**
  * Convert the patient form's surface shape into the API payload shape:
@@ -138,6 +139,7 @@ export function PatientDetailSheet({
   onDelete,
 }: PatientDetailSheetProps) {
   const mode: PatientDetailMode = patient ? 'edit' : 'create';
+  const { t } = useT();
 
   const {
     register,
@@ -194,12 +196,14 @@ export function PatientDetailSheet({
         {/* ─── Header strap (avatar + identity badges) ────────────── */}
         <header className="shrink-0 border-b bg-card px-6 py-4">
           <SheetTitle className="sr-only">
-            {mode === 'edit' ? 'Edit patient' : 'New patient'}
+            {mode === 'edit'
+              ? t('patients.sheet.titleEdit')
+              : t('patients.sheet.titleCreate')}
           </SheetTitle>
           <SheetDescription className="sr-only">
             {mode === 'edit'
-              ? 'Edit demographics, clinical conditions and dentist assignment for this patient.'
-              : 'Capture identity and clinical context for a new patient record.'}
+              ? t('patients.sheet.descEdit')
+              : t('patients.sheet.descCreate')}
           </SheetDescription>
           <div className="flex items-start gap-3">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary/10 text-base font-semibold text-primary">
@@ -208,12 +212,14 @@ export function PatientDetailSheet({
             <div className="min-w-0 flex-1">
               <h2 className="truncate text-lg font-semibold">
                 {fullName.trim() ||
-                  (mode === 'edit' ? 'Unnamed patient' : 'New patient')}
+                  (mode === 'edit'
+                    ? t('patients.sheet.unnamed')
+                    : t('patients.sheet.titleCreate'))}
               </h2>
               <div className="mt-1 flex flex-wrap items-center gap-1.5">
                 {patient?.gender && (
                   <Badge variant="secondary" className="text-[10px]">
-                    {genderLabel(patient.gender)}
+                    {genderLabel(patient.gender, t)}
                   </Badge>
                 )}
                 {patient?.doctor?.fullName && (
@@ -227,7 +233,7 @@ export function PatientDetailSheet({
                     variant="outline"
                     className="border-amber-400 bg-amber-50 text-[10px] text-amber-800"
                   >
-                    Draft — not saved yet
+                    {t('patients.sheet.draftBadge')}
                   </Badge>
                 )}
               </div>
@@ -247,25 +253,25 @@ export function PatientDetailSheet({
                   value="identity"
                   className="rounded-none border-b-2 border-transparent px-3 text-sm data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
                 >
-                  Identity
+                  {t('patients.sheet.tabIdentity')}
                 </TabsTrigger>
                 <TabsTrigger
                   value="contact"
                   className="rounded-none border-b-2 border-transparent px-3 text-sm data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
                 >
-                  Contact
+                  {t('patients.sheet.tabContact')}
                 </TabsTrigger>
                 <TabsTrigger
                   value="clinical"
                   className="rounded-none border-b-2 border-transparent px-3 text-sm data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
                 >
-                  Clinical
+                  {t('patients.sheet.tabClinical')}
                 </TabsTrigger>
                 <TabsTrigger
                   value="notes"
                   className="rounded-none border-b-2 border-transparent px-3 text-sm data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
                 >
-                  Notes
+                  {t('patients.sheet.tabNotes')}
                 </TabsTrigger>
               </TabsList>
             </div>
@@ -274,20 +280,20 @@ export function PatientDetailSheet({
               {/* ─── Identity tab ─────────────────────────────────── */}
               <TabsContent value="identity" className="m-0 space-y-4">
                 <FieldGroup
-                  label="Patient name"
+                  label={t('patients.sheet.fieldName')}
                   required
                   error={errors.fullName?.message}
                 >
                   <Input
-                    placeholder="Full legal name"
+                    placeholder={t('patients.sheet.fieldNamePh')}
                     {...register('fullName')}
                   />
                 </FieldGroup>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <FieldGroup label="Date of birth">
+                  <FieldGroup label={t('patients.sheet.fieldDob')}>
                     <Input type="date" {...register('dateOfBirth')} />
                   </FieldGroup>
-                  <FieldGroup label="Gender">
+                  <FieldGroup label={t('patients.sheet.fieldGender')}>
                     <Select
                       value={gender}
                       onValueChange={(value) =>
@@ -295,18 +301,18 @@ export function PatientDetailSheet({
                       }
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Select gender" />
+                        <SelectValue placeholder={t('patients.sheet.fieldGenderPh')} />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value={Gender.FEMALE}>Female</SelectItem>
-                        <SelectItem value={Gender.MALE}>Male</SelectItem>
-                        <SelectItem value={Gender.OTHER}>Other</SelectItem>
+                        <SelectItem value={Gender.FEMALE}>{t('patients.genderFemale')}</SelectItem>
+                        <SelectItem value={Gender.MALE}>{t('patients.genderMale')}</SelectItem>
+                        <SelectItem value={Gender.OTHER}>{t('patients.genderOther')}</SelectItem>
                       </SelectContent>
                     </Select>
                   </FieldGroup>
                 </div>
                 {isAdmin && (
-                  <FieldGroup label="Assigned dentist" required>
+                  <FieldGroup label={t('patients.sheet.fieldDentist')} required>
                     <Select
                       value={doctorId}
                       onValueChange={(value) =>
@@ -314,7 +320,7 @@ export function PatientDetailSheet({
                       }
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Select dentist" />
+                        <SelectValue placeholder={t('patients.sheet.fieldDentistPh')} />
                       </SelectTrigger>
                       <SelectContent>
                         {dentists.map((doctor) => (
@@ -331,31 +337,31 @@ export function PatientDetailSheet({
               {/* ─── Contact tab ─────────────────────────────────── */}
               <TabsContent value="contact" className="m-0 space-y-4">
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <FieldGroup label="Email" error={errors.email?.message}>
+                  <FieldGroup label={t('patients.sheet.fieldEmail')} error={errors.email?.message}>
                     <div className="relative">
                       <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                       <Input
                         type="email"
-                        placeholder="patient@example.com"
+                        placeholder={t('patients.sheet.fieldEmailPh')}
                         className="pl-9"
                         {...register('email')}
                       />
                     </div>
                   </FieldGroup>
-                  <FieldGroup label="Phone" error={errors.phone?.message}>
+                  <FieldGroup label={t('patients.sheet.fieldPhone')} error={errors.phone?.message}>
                     <div className="relative">
                       <Phone className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                       <Input
-                        placeholder="+21612345678"
+                        placeholder={t('patients.sheet.fieldPhonePh')}
                         className="pl-9"
                         {...register('phone')}
                       />
                     </div>
                   </FieldGroup>
                 </div>
-                <FieldGroup label="Address">
+                <FieldGroup label={t('patients.sheet.fieldAddress')}>
                   <Input
-                    placeholder="Street, city, postal code"
+                    placeholder={t('patients.sheet.fieldAddressPh')}
                     {...register('address')}
                   />
                 </FieldGroup>
@@ -382,12 +388,12 @@ export function PatientDetailSheet({
               {/* ─── Notes tab ─────────────────────────────────── */}
               <TabsContent value="notes" className="m-0 space-y-4">
                 <FieldGroup
-                  label="Internal notes"
-                  description="Allergies, relevant medical history, anything the planner should know. Visible to the dentist and the planner only."
+                  label={t('patients.sheet.fieldNotes')}
+                  description={t('patients.sheet.fieldNotesDesc')}
                 >
                   <textarea
                     {...register('notes')}
-                    placeholder="Notes…"
+                    placeholder={t('patients.sheet.fieldNotesPh')}
                     className="min-h-40 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                   />
                 </FieldGroup>
@@ -399,7 +405,7 @@ export function PatientDetailSheet({
               <div>
                 {mode === 'edit' && onDelete && (
                   <DeletePatientButton
-                    patientName={patient?.fullName ?? 'this patient'}
+                    patientName={patient?.fullName ?? t('patients.sheet.deleteThis')}
                     onConfirm={onDelete}
                     disabled={isSaving || !!isDeleting}
                     loading={!!isDeleting}
@@ -413,7 +419,7 @@ export function PatientDetailSheet({
                   onClick={() => onOpenChange(false)}
                   disabled={isSaving || !!isDeleting}
                 >
-                  Cancel
+                  {t('patients.sheet.cancel')}
                 </Button>
                 <Button
                   type="submit"
@@ -421,7 +427,9 @@ export function PatientDetailSheet({
                   className="gap-2"
                 >
                   {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {mode === 'edit' ? 'Save changes' : 'Create patient'}
+                  {mode === 'edit'
+                    ? t('patients.sheet.saveChanges')
+                    : t('patients.sheet.createPatient')}
                 </Button>
               </div>
             </footer>
@@ -475,6 +483,7 @@ function DeletePatientButton({
   disabled?: boolean;
   loading?: boolean;
 }) {
+  const { t } = useT();
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -493,7 +502,7 @@ function DeletePatientButton({
         ) : (
           <Trash2 className="h-4 w-4" />
         )}
-        Delete patient
+        {t('patients.sheet.deleteBtn')}
       </Button>
       <AlertDialog open={open} onOpenChange={setOpen}>
         <AlertDialogContent>
@@ -502,16 +511,14 @@ function DeletePatientButton({
               <span className="grid h-9 w-9 place-items-center rounded-full bg-destructive/10 text-destructive">
                 <AlertTriangle className="h-4 w-4" />
               </span>
-              Delete patient?
+              {t('patients.sheet.deleteTitle')}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              This soft-deletes <span className="font-semibold">{patientName}</span>.
-              The record stays in the database but disappears from active patient
-              lists. Existing orders for this patient remain visible.
+              {t('patients.sheet.deleteBodyNamed', { name: patientName })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t('patients.sheet.cancel')}</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
               onClick={() => {
@@ -519,7 +526,7 @@ function DeletePatientButton({
                 setOpen(false);
               }}
             >
-              Delete patient
+              {t('patients.sheet.deleteBtn')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -540,14 +547,17 @@ function buildInitials(name: string): string {
   return `${parts[0]![0] ?? ''}${parts[parts.length - 1]![0] ?? ''}`.toUpperCase();
 }
 
-function genderLabel(gender?: string | null): string | undefined {
+// Takes the translator function so the badge in the header strap and
+// the page-level table share one localised source of truth.
+type TFn = (path: string, vars?: Record<string, string | number>) => string;
+function genderLabel(gender: string | null | undefined, t: TFn): string | undefined {
   switch (gender) {
     case Gender.MALE:
-      return 'Male';
+      return t('patients.genderMale');
     case Gender.FEMALE:
-      return 'Female';
+      return t('patients.genderFemale');
     case Gender.OTHER:
-      return 'Other';
+      return t('patients.genderOther');
     default:
       return undefined;
   }

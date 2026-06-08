@@ -130,17 +130,19 @@ export function TreatmentFeeReceiptDialog({
         }}
       >
         {/*
-          Desktop comfort: max-w-4xl (896 px) is wide enough for a
-          two-column split but still feels like a modal (not a page
-          takeover). max-h-[90vh] + flex column lets the body scroll
+          Desktop comfort: an explicit ~920 px / 82vh shell gives the
+          two-column split real room. The shared DialogContent caps
+          width at `sm:max-w-sm`, so we override the sm/lg max-width
+          here — otherwise the modal renders as a ~384 px card on
+          desktop. Below lg the columns stack and the body scrolls
           internally while the header / footer stay pinned.
          */}
-        <DialogContent className="flex max-h-[90vh] w-full max-w-4xl flex-col gap-0 overflow-hidden rounded-2xl border-0 p-0 shadow-2xl sm:rounded-2xl">
+        <DialogContent className="flex h-auto max-h-[90vh] w-full flex-col gap-0 overflow-hidden rounded-2xl border-0 p-0 shadow-2xl sm:max-w-[600px] lg:h-[82vh] lg:max-w-[920px]">
           {/* ─── Header ─────────────────────────────────────────── */}
-          <DialogHeader className="space-y-1 border-b bg-card px-6 py-4 text-left">
+          <DialogHeader className="space-y-1 border-b bg-card px-6 py-5 text-left sm:px-8">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="min-w-0">
-                <DialogTitle className="text-base font-semibold sm:text-lg">
+                <DialogTitle className="text-lg font-semibold sm:text-xl">
                   Bank-transfer receipt
                 </DialogTitle>
                 <DialogDescription className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
@@ -158,14 +160,14 @@ export function TreatmentFeeReceiptDialog({
           </DialogHeader>
 
           {/*
-            ─── Body: two-column on desktop, stacked on mobile ─────
+            ─── Body: two-column on desktop (lg+), stacked below ───
             The min-h-0 + flex-1 combo lets the body claim the
             leftover vertical space and lets the columns scroll
             independently when content overflows.
            */}
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row">
-            {/* Image column — 3/5 of the width on desktop, full on mobile */}
-            <div className="relative flex min-h-[280px] items-center justify-center overflow-hidden border-b bg-muted/40 p-4 md:min-h-0 md:w-3/5 md:flex-1 md:border-b-0 md:border-r md:p-6">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
+            {/* Receipt column — grows to ~58% on desktop, full-width below lg */}
+            <div className="relative flex min-h-[300px] items-center justify-center overflow-hidden border-b bg-muted/40 p-4 lg:min-h-0 lg:flex-1 lg:border-b-0 lg:border-r lg:p-8">
               <ReceiptViewport
                 fileUrl={fileUrl}
                 kind={proofKind}
@@ -174,12 +176,12 @@ export function TreatmentFeeReceiptDialog({
               />
             </div>
 
-            {/* Details column — 2/5 of the width on desktop */}
-            <div className="flex flex-col overflow-y-auto bg-card p-5 md:w-2/5 md:flex-shrink-0">
-              <h3 className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            {/* Summary column — fixed 42% on desktop */}
+            <div className="flex min-h-0 flex-col overflow-y-auto bg-card p-6 lg:w-[42%] lg:flex-shrink-0 lg:p-7">
+              <h3 className="mb-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Payment summary
               </h3>
-              <dl className="space-y-3">
+              <dl className="space-y-4">
                 <DetailRow
                   icon={<User className="h-3.5 w-3.5" />}
                   label="Patient"
@@ -195,7 +197,7 @@ export function TreatmentFeeReceiptDialog({
                   icon={<Banknote className="h-3.5 w-3.5" />}
                   label="Amount"
                   value={
-                    <span className="text-base font-bold tabular-nums">
+                    <span className="text-lg font-bold tabular-nums">
                       {amount ?? 0} {currency}
                     </span>
                   }
@@ -232,8 +234,8 @@ export function TreatmentFeeReceiptDialog({
                 plain language so the admin understands they're moving
                 the order forward, not just closing the dialog.
                */}
-              <div className="mt-auto pt-5">
-                <p className="rounded-lg border border-blue-100 bg-blue-50/60 p-3 text-[11px] leading-relaxed text-blue-900/80">
+              <div className="mt-auto pt-6">
+                <p className="rounded-lg border border-blue-100 bg-blue-50/60 p-4 text-xs leading-relaxed text-blue-900/80">
                   Confirming will mark the treatment fee as paid and
                   unblock the treatment plan. This action is logged
                   with your admin user id.
@@ -243,7 +245,7 @@ export function TreatmentFeeReceiptDialog({
           </div>
 
           {/* ─── Footer ─────────────────────────────────────────── */}
-          <div className="flex flex-row flex-wrap items-center justify-end gap-2 border-t bg-card px-6 py-3">
+          <div className="flex flex-row flex-wrap items-center justify-end gap-2.5 border-t bg-card px-6 py-4 sm:px-8">
             <Button
               type="button"
               variant="ghost"
@@ -333,7 +335,7 @@ function DetailRow({
       <div className="min-w-0">
         <p
           className={cn(
-            'text-[10px] font-semibold uppercase tracking-wide text-muted-foreground',
+            'text-[11px] font-semibold uppercase tracking-wide text-muted-foreground',
             highlight && 'text-emerald-700',
           )}
         >
@@ -442,7 +444,7 @@ function ReceiptViewport({
         // Light backdrop + cursor-zoom-in + maximize affordance
         // advertises that clicking expands to the full lightbox.
         // The image preserves its aspect ratio inside the container.
-        className="group relative flex h-full max-h-[60vh] w-full cursor-zoom-in items-center justify-center"
+        className="group relative flex h-full w-full cursor-zoom-in items-center justify-center"
         aria-label="Open receipt in full view"
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}

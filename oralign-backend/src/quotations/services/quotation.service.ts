@@ -485,6 +485,24 @@ export class QuotationService {
       );
     }
 
+    // Pack-based quotes MUST have a configured payment plan before
+    // they go out. Otherwise the doctor receives the quote, hits
+    // Approve, and gets a 400 from tryApprovePackQuote() saying the
+    // plan is missing — a dead-end since only an admin can fix it.
+    // This guard catches the bad state at the admin layer where it
+    // CAN be acted on (admin opens the plan builder, configures it,
+    // hits Send again).
+    if (quote.packId) {
+      const planRowCount = await this.prisma.quoteInstallment.count({
+        where: { quotationId: quote.id },
+      });
+      if (planRowCount === 0) {
+        throw new BadRequestException(
+          'Configure the payment plan (installments + step ranges) before sending this pack-based quote. The doctor will not be able to approve it otherwise.',
+        );
+      }
+    }
+
     quote = await this.ensureSnapshotAndNumber(quote);
 
     const updated = await this.prisma.$transaction(async (tx) => {

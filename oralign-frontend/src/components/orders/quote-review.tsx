@@ -616,7 +616,12 @@ function AdminLayout({
       </Card>
 
       {/* Pack + plan + tranches — the real workhorse. */}
-      <QuotePackPanel quote={quote} role={UserRole.ADMIN} />
+      <QuotePackPanel
+        quote={quote}
+        role={UserRole.ADMIN}
+        patientName={patientName}
+        orderCode={orderCode}
+      />
 
       {/* Sticky-ish action bar at the bottom. */}
       <Card>
@@ -705,22 +710,41 @@ function AdminLayout({
               )}
               {hasPdf ? 'Regenerate PDF' : 'Generate PDF'}
             </Button>
-            {quote.status === QuotationStatus.DRAFT ? (
-              <Button
-                type="button"
-                size="sm"
-                onClick={handleSendToDoctor}
-                disabled={send.isPending || update.isPending}
-                className="gap-2 bg-emerald-600 hover:bg-emerald-700"
-              >
-                {send.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Send className="h-4 w-4" />
-                )}
-                Send to doctor
-              </Button>
-            ) : null}
+            {quote.status === QuotationStatus.DRAFT ? (() => {
+              // Pack-based quotes can only ship after the admin has
+              // configured the payment plan — otherwise the doctor's
+              // Approve action would fail with a 400 from the backend
+              // (no QuoteInstallment rows). paymentMode is set as part
+              // of configurePaymentPlan, so it's the source of truth
+              // for "plan exists".
+              const needsPlanConfig =
+                !!quote.packId && !quote.paymentMode;
+              return (
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleSendToDoctor}
+                  disabled={
+                    send.isPending || update.isPending || needsPlanConfig
+                  }
+                  className="gap-2 bg-emerald-600 hover:bg-emerald-700"
+                  title={
+                    needsPlanConfig
+                      ? 'Configure the payment plan (installments + step ranges) before sending. Open the pack panel below to set it up.'
+                      : undefined
+                  }
+                >
+                  {send.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
+                  {needsPlanConfig
+                    ? 'Configure plan first'
+                    : 'Send to doctor'}
+                </Button>
+              );
+            })() : null}
           </div>
         </CardContent>
       </Card>
@@ -903,7 +927,12 @@ function DoctorLayout({
         </Card>
       ) : null}
 
-      <QuotePackPanel quote={quote} role={UserRole.DENTIST} />
+      <QuotePackPanel
+        quote={quote}
+        role={UserRole.DENTIST}
+        patientName={patientName}
+        orderCode={orderCode}
+      />
 
       {quote.notes ? (
         <Card>

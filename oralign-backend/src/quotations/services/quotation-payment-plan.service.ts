@@ -317,12 +317,17 @@ export class QuotationPaymentPlanService {
     if (!quote.packId) return false;
 
     // Quote MUST have a fully configured plan or doctor cannot approve.
+    // This should normally be caught earlier (QuotationService.send
+    // refuses to dispatch pack quotes without a plan), but we keep the
+    // guard here for legacy data and race-condition safety. The error
+    // copy targets BOTH audiences — doctors get a clear "talk to the
+    // clinic" path, admins get a clear next step.
     const planRowCount = await this.prisma.quoteInstallment.count({
       where: { quotationId: quote.id },
     });
     if (planRowCount === 0) {
       throw new BadRequestException(
-        'Configure the payment plan before approving this pack-based quote.',
+        'The payment plan for this quote is not configured yet. Please ask the clinic admin to finalise the installments before you approve.',
       );
     }
 

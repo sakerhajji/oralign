@@ -15,6 +15,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
+import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import {
@@ -79,22 +80,38 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import {
+  Banknote,
+  Calendar,
   CheckCircle2,
+  Clock,
   CreditCard,
+  FileText,
+  Hash,
   Landmark,
+  Loader2,
   Lock,
   Package,
   Plus,
   Send,
+  Stethoscope,
   Trash2,
   Truck,
   Unlock,
+  User as UserIcon,
   Wallet,
 } from 'lucide-react';
 
 interface Props {
   quote: Quotation;
   role: UserRole;
+  /**
+   * Optional context surfaced inside the doctor's installment-pay
+   * dialog. The component still works without these — the right-hand
+   * summary just degrades to the data carried on the quote itself.
+   */
+  patientName?: string | null;
+  doctorName?: string | null;
+  orderCode?: string | null;
 }
 
 // ─── Money helpers ────────────────────────────────────────────────────
@@ -112,7 +129,13 @@ const money = (s: string | number | null | undefined, ccy = 'TND'): string =>
 
 // ─────────────────────────────────────────────────────────────────────
 
-export function QuotePackPanel({ quote, role }: Props) {
+export function QuotePackPanel({
+  quote,
+  role,
+  patientName,
+  doctorName,
+  orderCode,
+}: Props) {
   const isAdmin = role === UserRole.ADMIN || role === UserRole.SUPER_ADMIN;
   const isDoctor = role === UserRole.DENTIST;
 
@@ -151,6 +174,9 @@ export function QuotePackPanel({ quote, role }: Props) {
             quote={quote}
             installments={installmentsQ.data ?? []}
             batches={batchesQ.data ?? []}
+            patientName={patientName}
+            doctorName={doctorName}
+            orderCode={orderCode}
           />
         )
       )}
@@ -860,10 +886,17 @@ function DoctorPlanView({
   quote,
   installments,
   batches,
+  patientName,
+  doctorName,
+  orderCode,
 }: {
   quote: Quotation;
   installments: QuoteInstallment[];
   batches: QuoteStepBatch[];
+  /** Optional context forwarded to the inner pay dialog summary. */
+  patientName?: string | null;
+  doctorName?: string | null;
+  orderCode?: string | null;
 }) {
   const isApproved = quote.status === QuotationStatus.APPROVED;
   const batchByInstallment = useMemo(() => {
@@ -920,6 +953,9 @@ function DoctorPlanView({
               payable={payable}
               defaultScope="all"
               label="Pay all now"
+              patientName={patientName}
+              doctorName={doctorName}
+              orderCode={orderCode}
             />
           </CardContent>
         </Card>
@@ -983,6 +1019,9 @@ function DoctorPlanView({
                           quote={quote}
                           installment={inst}
                           payable={payable}
+                          patientName={patientName}
+                          doctorName={doctorName}
+                          orderCode={orderCode}
                         />
                       ) : null}
                     </TableCell>
@@ -1003,6 +1042,9 @@ function DoctorPayActions({
   payable,
   defaultScope = 'single',
   label = 'Pay now',
+  patientName,
+  doctorName,
+  orderCode,
 }: {
   quote: Quotation;
   installment: QuoteInstallment;
@@ -1011,6 +1053,10 @@ function DoctorPayActions({
   /** Which mode the dialog opens in. */
   defaultScope?: 'single' | 'all';
   label?: string;
+  /** Optional context surfaced in the dialog's right-hand summary. */
+  patientName?: string | null;
+  doctorName?: string | null;
+  orderCode?: string | null;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -1026,6 +1072,9 @@ function DoctorPayActions({
         installment={installment}
         payable={payable}
         defaultScope={defaultScope}
+        patientName={patientName}
+        doctorName={doctorName}
+        orderCode={orderCode}
       />
     </>
   );
@@ -1040,6 +1089,9 @@ function PaymentMethodDialog({
   installment,
   payable,
   defaultScope,
+  patientName,
+  doctorName,
+  orderCode,
 }: {
   open: boolean;
   onClose: () => void;
@@ -1047,6 +1099,9 @@ function PaymentMethodDialog({
   installment: QuoteInstallment;
   payable: QuoteInstallment[];
   defaultScope: PayScope;
+  patientName?: string | null;
+  doctorName?: string | null;
+  orderCode?: string | null;
 }) {
   // Backend currently allows all three methods. If the project later
   // adds `allowedPaymentMethods` on the quote, swap this constant for
@@ -1072,9 +1127,9 @@ function PaymentMethodDialog({
   const [proofFile, setProofFile] = useState<File | null>(null);
   // The "all" path fires one request per installment — we surface
   // progress to the doctor so it doesn't look frozen on the 2nd of N.
-  const [progress, setProgress] = useState<{ done: number; total: number } | null>(
-    null,
-  );
+  const [progress, setProgress] = useState<
+    { done: number; total: number } | null
+  >(null);
 
   const canPickAll = payable.length > 1;
   const targets = scope === 'all' ? payable : [installment];
@@ -1140,167 +1195,366 @@ function PaymentMethodDialog({
 
   const isPending = payCard.isPending || declareBT.isPending;
 
+  // Right-column status pill: changes tone with the chosen scope —
+  // single tranche reads as a focused action; "all remaining" reads as
+  // a heavier multi-payment commitment. Both hint at the scope without
+  // forcing the doctor to re-read the header.
+  const scopeLabel =
+    scope === 'all'
+      ? `${payable.length} remaining tranches`
+      : `Tranche #${installment.installmentNumber}`;
+
   return (
     <Dialog open={open} onOpenChange={(o) => !o && close()}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>
-            Pay {total.toFixed(3)} {quote.currency}
-          </DialogTitle>
-          <DialogDescription>
-            {scope === 'all'
-              ? `Covers ${payable.length} tranches in one go.`
-              : `Installment #${installment.installmentNumber}.`}{' '}
-            Pick how you want to pay.
-          </DialogDescription>
+      {/*
+        Mirrors the treatment-fee receipt dialog dimensions for a
+        consistent feel across all payment surfaces. 920 px on lg,
+        600 px on sm, full-width on mobile. h-auto with max-h-90vh
+        keeps short content compact while long content scrolls
+        internally.
+       */}
+      <DialogContent className="flex h-auto max-h-[90vh] w-full flex-col gap-0 overflow-hidden rounded-2xl border-0 p-0 shadow-2xl sm:max-w-[600px] lg:h-[82vh] lg:max-w-[920px]">
+        {/* ─── Header ─────────────────────────────────────────────── */}
+        <DialogHeader className="space-y-1 border-b bg-card px-6 py-5 text-left sm:px-8">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <DialogTitle className="text-lg font-semibold sm:text-xl">
+                Pay {total.toFixed(3)} {quote.currency}
+              </DialogTitle>
+              <DialogDescription>
+                {scope === 'all'
+                  ? `Settle all ${payable.length} remaining tranches in one flow.`
+                  : `Settle installment #${installment.installmentNumber} of your treatment plan.`}
+              </DialogDescription>
+            </div>
+            <Badge
+              variant="outline"
+              className="shrink-0 gap-1.5 border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700"
+            >
+              <Clock className="h-3 w-3" />
+              Payment due
+            </Badge>
+          </div>
         </DialogHeader>
 
-        <div className="grid gap-3">
-          {/* Scope toggle — only when there's a real choice to make. */}
-          {canPickAll ? (
-            <div className="grid grid-cols-2 gap-2 rounded-md border bg-muted/20 p-1">
-              <button
-                type="button"
-                onClick={() => setScope('single')}
-                disabled={isPending}
-                className={cn(
-                  'rounded-md px-3 py-2 text-left text-xs transition',
-                  scope === 'single'
-                    ? 'bg-background shadow'
-                    : 'opacity-70 hover:opacity-100',
-                )}
-              >
-                <div className="font-medium">This tranche</div>
-                <div className="text-muted-foreground">
-                  {money(installment.amount, quote.currency)} · #
-                  {installment.installmentNumber}
-                </div>
-              </button>
-              <button
-                type="button"
-                onClick={() => setScope('all')}
-                disabled={isPending}
-                className={cn(
-                  'rounded-md px-3 py-2 text-left text-xs transition',
-                  scope === 'all'
-                    ? 'bg-background shadow'
-                    : 'opacity-70 hover:opacity-100',
-                )}
-              >
-                <div className="font-medium">All remaining</div>
-                <div className="text-muted-foreground">
-                  {payable
-                    .reduce((acc, t) => acc + toDec(t.amount), 0)
-                    .toFixed(3)}{' '}
-                  {quote.currency} · {payable.length} tranches
-                </div>
-              </button>
-            </div>
-          ) : null}
+        {/*
+          ─── Body: two-column on lg+, stacked below ───────────────
+          The min-h-0 + flex-1 combo lets the body claim the leftover
+          vertical space and lets the columns scroll independently
+          when the form / summary overflows.
+         */}
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
+          {/* ── Method / form column (left, ~58% on lg) ── */}
+          <div className="flex-1 overflow-y-auto bg-muted/40 p-6 lg:p-8">
+            {/* Scope toggle — only when there's a real choice to make */}
+            {canPickAll ? (
+              <div className="mb-5 grid grid-cols-2 gap-2 rounded-lg border bg-card p-1 shadow-sm">
+                <button
+                  type="button"
+                  onClick={() => setScope('single')}
+                  disabled={isPending}
+                  className={cn(
+                    'rounded-md px-3 py-2 text-left text-xs transition',
+                    scope === 'single'
+                      ? 'bg-primary text-primary-foreground shadow-sm'
+                      : 'text-muted-foreground hover:bg-muted/60',
+                  )}
+                >
+                  <div className="font-semibold">This tranche</div>
+                  <div className="text-[11px] opacity-80">
+                    {money(installment.amount, quote.currency)} · #
+                    {installment.installmentNumber}
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScope('all')}
+                  disabled={isPending}
+                  className={cn(
+                    'rounded-md px-3 py-2 text-left text-xs transition',
+                    scope === 'all'
+                      ? 'bg-primary text-primary-foreground shadow-sm'
+                      : 'text-muted-foreground hover:bg-muted/60',
+                  )}
+                >
+                  <div className="font-semibold">All remaining</div>
+                  <div className="text-[11px] opacity-80">
+                    {payable
+                      .reduce((acc, t) => acc + toDec(t.amount), 0)
+                      .toFixed(3)}{' '}
+                    {quote.currency} · {payable.length} tranches
+                  </div>
+                </button>
+              </div>
+            ) : null}
 
-          <div className="grid grid-cols-3 gap-2">
-            {METHODS.map((m) => (
-              <Button
-                key={m}
-                type="button"
-                variant={method === m ? 'default' : 'outline'}
-                className="h-auto flex-col items-center gap-1 py-3"
-                onClick={() => setMethod(m)}
-                disabled={isPending}
-              >
-                {m === PaymentMethod.CARD ? (
-                  <CreditCard className="h-4 w-4" />
-                ) : m === PaymentMethod.BANK_TRANSFER ? (
-                  <Landmark className="h-4 w-4" />
-                ) : (
-                  <Wallet className="h-4 w-4" />
-                )}
-                <span className="text-xs capitalize">
-                  {m.replace('_', ' ')}
-                </span>
-              </Button>
-            ))}
+            {/* Method picker — three cards laid out horizontally */}
+            <h3 className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Choose payment method
+            </h3>
+            <div className="grid grid-cols-3 gap-2">
+              {METHODS.map((m) => {
+                const isSelected = method === m;
+                const Icon =
+                  m === PaymentMethod.CARD
+                    ? CreditCard
+                    : m === PaymentMethod.BANK_TRANSFER
+                      ? Landmark
+                      : Wallet;
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setMethod(m)}
+                    disabled={isPending}
+                    className={cn(
+                      'group flex flex-col items-center gap-1.5 rounded-lg border-2 bg-card p-3 text-xs font-medium transition',
+                      isSelected
+                        ? 'border-primary text-primary shadow-sm ring-1 ring-primary/20'
+                        : 'border-transparent text-muted-foreground hover:border-muted-foreground/20 hover:bg-muted/40',
+                    )}
+                  >
+                    <Icon className="h-5 w-5" />
+                    <span className="capitalize">
+                      {m.replace('_', ' ')}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Method-specific form / info */}
+            <div className="mt-5 space-y-3">
+              {method === PaymentMethod.CARD ? (
+                <p className="rounded-lg border border-blue-100 bg-blue-50/60 p-3 text-xs leading-relaxed text-blue-900/85">
+                  Card payments settle immediately.{' '}
+                  {scope === 'all'
+                    ? 'Each tranche is processed in sequence — you can safely retry if one fails mid-way.'
+                    : 'Your installment is marked paid the moment the processor returns success.'}
+                </p>
+              ) : method === PaymentMethod.BANK_TRANSFER ? (
+                <>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="ref" className="text-xs font-medium">
+                      Bank reference{' '}
+                      <span className="text-muted-foreground">(optional)</span>
+                    </Label>
+                    <Input
+                      id="ref"
+                      value={bankReference}
+                      onChange={(e) => setBankReference(e.target.value)}
+                      placeholder="SWIFT / IBAN ref or memo"
+                      disabled={isPending}
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="proof" className="text-xs font-medium">
+                      Proof of transfer{' '}
+                      <span className="text-muted-foreground">
+                        (PNG / JPG / PDF, ≤5 MB)
+                      </span>
+                    </Label>
+                    <Input
+                      id="proof"
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/heic,application/pdf"
+                      onChange={(e) =>
+                        setProofFile(e.target.files?.[0] ?? null)
+                      }
+                      disabled={isPending}
+                    />
+                  </div>
+                  <p className="rounded-lg border border-blue-100 bg-blue-50/60 p-3 text-xs leading-relaxed text-blue-900/85">
+                    {scope === 'all'
+                      ? `One declaration per tranche, sharing the same reference and proof — the admin can confirm all ${payable.length} together.`
+                      : 'The clinic admin reviews the transfer + proof before marking it confirmed.'}{' '}
+                    You&apos;ll see the status update here.
+                  </p>
+                </>
+              ) : (
+                <p className="rounded-lg border border-amber-100 bg-amber-50/60 p-3 text-xs leading-relaxed text-amber-900/85">
+                  Hand the cash to the clinic. They&apos;ll record the
+                  payment on their side and the installment
+                  {scope === 'all' ? 's' : ''} will be marked paid here.
+                </p>
+              )}
+
+              {progress ? (
+                <div className="flex items-center gap-2 rounded-lg border bg-card p-3 text-xs">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                  Processing tranche {progress.done}/{progress.total}…
+                </div>
+              ) : null}
+            </div>
           </div>
 
-          {method === PaymentMethod.CARD ? (
-            <p className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
-              The real card processor isn&apos;t connected yet — for now
-              we run a deterministic mock that returns SUCCESS.{' '}
-              {scope === 'all'
-                ? 'Each tranche is paid in sequence; you can retry safely if one fails.'
-                : 'Your installment will be marked paid immediately.'}
-            </p>
-          ) : method === PaymentMethod.BANK_TRANSFER ? (
-            <div className="grid gap-3">
-              <div className="grid gap-1.5">
-                <Label htmlFor="ref">Bank reference</Label>
-                <Input
-                  id="ref"
-                  value={bankReference}
-                  onChange={(e) => setBankReference(e.target.value)}
-                  placeholder="e.g. SWIFT/IBAN ref or memo"
-                  disabled={isPending}
+          {/* ── Summary column (right, 42% on lg) ── */}
+          <div className="flex min-h-0 flex-col overflow-y-auto bg-card p-6 lg:w-[42%] lg:flex-shrink-0 lg:p-7">
+            <h3 className="mb-4 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Payment summary
+            </h3>
+            <dl className="space-y-4">
+              <DetailRow
+                icon={<Banknote className="h-3.5 w-3.5" />}
+                label="Amount"
+                value={
+                  <span className="text-base font-bold tabular-nums">
+                    {total.toFixed(3)} {quote.currency}
+                  </span>
+                }
+                highlight
+              />
+              <DetailRow
+                icon={<Hash className="h-3.5 w-3.5" />}
+                label="Scope"
+                value={scopeLabel}
+              />
+              {scope === 'single' && installment.dueDate ? (
+                <DetailRow
+                  icon={<Calendar className="h-3.5 w-3.5" />}
+                  label="Due date"
+                  value={format(new Date(installment.dueDate), 'MMM d, yyyy')}
                 />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="proof">
-                  Proof (PNG/JPG/WebP/HEIC/PDF, ≤5 MB)
-                </Label>
-                <Input
-                  id="proof"
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp,image/heic,application/pdf"
-                  onChange={(e) => setProofFile(e.target.files?.[0] ?? null)}
-                  disabled={isPending}
+              ) : null}
+              {quote.packName ? (
+                <DetailRow
+                  icon={<Package className="h-3.5 w-3.5" />}
+                  label="Pack"
+                  value={quote.packName}
                 />
-              </div>
-              <p className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
-                {scope === 'all'
-                  ? `One declaration per tranche, sharing the same reference and proof — the admin can confirm all ${payable.length} together.`
-                  : 'The clinic admin reviews the transfer + proof before marking it confirmed.'}{' '}
-                You&apos;ll see the status update here.
+              ) : null}
+              {patientName ? (
+                <DetailRow
+                  icon={<UserIcon className="h-3.5 w-3.5" />}
+                  label="Patient"
+                  value={patientName}
+                />
+              ) : null}
+              {doctorName ? (
+                <DetailRow
+                  icon={<Stethoscope className="h-3.5 w-3.5" />}
+                  label="Doctor"
+                  value={`Dr. ${doctorName}`}
+                />
+              ) : null}
+              {orderCode ? (
+                <DetailRow
+                  icon={<FileText className="h-3.5 w-3.5" />}
+                  label="Order"
+                  value={
+                    <span
+                      className="block truncate font-mono text-[11px]"
+                      title={orderCode}
+                    >
+                      {orderCode}
+                    </span>
+                  }
+                />
+              ) : null}
+            </dl>
+
+            {/*
+              Verification hint pinned to the bottom of the column —
+              same pattern as the treatment-fee receipt dialog. Tells
+              the doctor what happens after they hit the CTA without
+              forcing them to re-read every paragraph in the form.
+             */}
+            <div className="mt-auto pt-6">
+              <p className="rounded-lg border border-blue-100 bg-blue-50/60 p-3 text-[11px] leading-relaxed text-blue-900/85">
+                {method === PaymentMethod.CARD
+                  ? 'Card payments are processed immediately. The next batch of treatment steps unlocks once the payment is confirmed.'
+                  : method === PaymentMethod.BANK_TRANSFER
+                    ? 'After you submit, the clinic admin verifies the wire and confirms the payment. You will be notified once it lands.'
+                    : 'Cash payments are recorded by the clinic admin when they physically receive the funds.'}
               </p>
             </div>
-          ) : (
-            <p className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
-              Hand the cash to the clinic. They&apos;ll record the
-              payment on their side and the installment{scope === 'all' ? 's' : ''}{' '}
-              will be marked paid here.
-            </p>
-          )}
-
-          {progress ? (
-            <div className="rounded-md border bg-muted/30 p-2 text-xs">
-              Processing tranche {progress.done}/{progress.total}…
-            </div>
-          ) : null}
+          </div>
         </div>
 
-        <DialogFooter>
+        {/* ─── Footer ─────────────────────────────────────────────── */}
+        <div className="flex flex-row flex-wrap items-center justify-end gap-2.5 border-t bg-card px-6 py-4">
           <Button variant="ghost" onClick={close} disabled={isPending}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={isPending}>
-            {method === PaymentMethod.CARD ? (
-              <>
-                <CreditCard className="mr-1 h-3 w-3" />
-                {scope === 'all'
-                  ? `Pay ${payable.length} tranches`
-                  : 'Pay by card'}
-              </>
+          <Button
+            onClick={submit}
+            disabled={isPending}
+            className="min-w-[180px] gap-1.5 bg-emerald-600 font-medium text-white shadow-sm hover:bg-emerald-700"
+          >
+            {isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : method === PaymentMethod.CARD ? (
+              <CreditCard className="h-4 w-4" />
             ) : method === PaymentMethod.BANK_TRANSFER ? (
-              <>
-                <Send className="mr-1 h-3 w-3" />
-                {scope === 'all'
-                  ? `Submit ${payable.length} declarations`
-                  : 'Submit declaration'}
-              </>
+              <Send className="h-4 w-4" />
             ) : (
-              'Got it'
+              <CheckCircle2 className="h-4 w-4" />
             )}
+            {method === PaymentMethod.CARD
+              ? scope === 'all'
+                ? `Pay ${payable.length} tranches`
+                : 'Pay by card'
+              : method === PaymentMethod.BANK_TRANSFER
+                ? scope === 'all'
+                  ? `Submit ${payable.length} declarations`
+                  : 'Submit declaration'
+                : 'Got it'}
           </Button>
-        </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * Compact label / value row used in the dialog's right-hand summary.
+ * Mirrors the DetailRow in TreatmentFeeReceiptDialog so the two
+ * dialogs feel visually identical.
+ */
+function DetailRow({
+  icon,
+  label,
+  value,
+  highlight,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: React.ReactNode;
+  highlight?: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        'grid grid-cols-[16px_1fr] items-start gap-x-2.5 gap-y-0.5',
+        highlight && '-mx-2 rounded-md bg-emerald-50/60 p-2',
+      )}
+    >
+      <div
+        className={cn(
+          'mt-0.5 text-muted-foreground',
+          highlight && 'text-emerald-700',
+        )}
+      >
+        {icon}
+      </div>
+      <div className="min-w-0">
+        <p
+          className={cn(
+            'text-[10px] font-semibold uppercase tracking-wide text-muted-foreground',
+            highlight && 'text-emerald-700',
+          )}
+        >
+          {label}
+        </p>
+        <div
+          className={cn(
+            'text-sm text-foreground',
+            highlight && 'text-emerald-900',
+          )}
+        >
+          {value}
+        </div>
+      </div>
+    </div>
   );
 }

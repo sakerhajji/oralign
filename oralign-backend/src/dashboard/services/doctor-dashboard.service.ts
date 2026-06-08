@@ -101,17 +101,76 @@ export class DoctorDashboardService {
       }),
     ]);
 
-    // Quotation aggregates — paid/unpaid + revenue scoped to this
-    // doctor (via order.doctorId).
+    // ── Order breakdown ─────────────────────────────────────────────
     //
-    // CRITICAL: the order relation MUST filter `deletedAt: null` too,
-    // otherwise soft-deleted orders' quotations still count toward
-    // paid / unpaid / outstanding. That made the dashboard show
-    // nonsensical totals like "7 orders · 5 unpaid · 8 paid" because
-    // the order-count query honoured the soft-delete (line 84) but
-    // the aggregates below didn't. Test orders that were soft-deleted
-    // continued to inflate the breakdown.
+    // We count ORDERS (not quotations) by their active quotation's
+    // payment status. This makes the breakdown invariant by
+    // construction:
+    //
+    //   paid + unpaid + noActiveQuote === total
+    //
+    // Counting quotations instead would let `Quotation.orderId @unique`
+    // semantics drift away from the order-count denominator whenever
+    // a quotation referenced a soft-deleted order — which is what
+    // caused the original "5 unpaid + 8 paid > 7 total" report.
+    //
+    // Every counter uses the same `orderFilter` so cancelled/deleted
+    // orders are excluded consistently across all cards.
     const orderFilter = { doctorId, deletedAt: null };
+    const [ordersPaid, ordersUnpaid, ordersWithoutActiveQuote] =
+      await this.prisma.$transaction([
+        this.prisma.dentalOrder.count({
+          where: {
+            ...orderFilter,
+            quotation: {
+              deletedAt: null,
+              paymentStatus: QuotationPaymentStatus.paid,
+            },
+          },
+        }),
+        this.prisma.dentalOrder.count({
+          where: {
+            ...orderFilter,
+            quotation: {
+              deletedAt: null,
+              paymentStatus: {
+                in: [
+                  QuotationPaymentStatus.pending,
+                  QuotationPaymentStatus.partially_paid,
+                ],
+              },
+            },
+          },
+        }),
+        this.prisma.dentalOrder.count({
+          where: {
+            ...orderFilter,
+            // "No active quotation" = either no quotation row at all,
+            // or one that has been soft-deleted. Orders in DRAFT /
+            // UNDER_REVIEW typically sit here until the admin sends
+            // the quote.
+            OR: [
+              { quotation: null },
+              { quotation: { deletedAt: { not: null } } },
+            ],
+          },
+        }),
+      ]);
+
+    // Sanity check — should always pass after this refactor, but log
+    // loud if it ever drifts so we catch the regression instantly
+    // instead of relying on a doctor noticing weird numbers on a card.
+    if (ordersPaid + ordersUnpaid + ordersWithoutActiveQuote !== ordersTotal) {
+      this.logger.warn(
+        `KPI breakdown drift for doctor ${doctorId}: ` +
+          `paid(${ordersPaid}) + unpaid(${ordersUnpaid}) + noQuote(${ordersWithoutActiveQuote}) ` +
+          `!== total(${ordersTotal}). Sum=${ordersPaid + ordersUnpaid + ordersWithoutActiveQuote}.`,
+      );
+    }
+
+    // Revenue + outstanding still come from quotation aggregates
+    // because they need the price/paid columns. Same `orderFilter`
+    // keeps them in lockstep with the counts above.
     const [paidAgg, unpaidAgg, allAgg] = await this.prisma.$transaction([
       this.prisma.quotation.aggregate({
         _count: { _all: true },
@@ -264,8 +323,18 @@ export class DoctorDashboardService {
         today: ordersToday,
         thisMonth: ordersThisMonth,
         prevMonth: ordersPrevMonth,
-        paid: paidAgg._count._all,
-        unpaid: unpaidAgg._count._all,
+        // ORDER counts (not quotation counts) — see the comment block
+        // above the breakdown query. paid + unpaid + noActiveQuote
+        // === total, guaranteed.
+        paid: ordersPaid,
+        unpaid: ordersUnpaid,
+        /**
+         * Orders that don't yet have a sent quotation (DRAFT /
+         * UNDER_REVIEW / etc.). Exposed so the UI can reconcile
+         * total = paid + unpaid + noActiveQuote and surface a
+         * "waiting for quote" segment if useful.
+         */
+        noActiveQuote: ordersWithoutActiveQuote,
       },
       patients: {
         total: patientsTotal,

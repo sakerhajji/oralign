@@ -1413,8 +1413,17 @@ export interface DoctorDashboardKpis {
     today: number;
     thisMonth: number;
     prevMonth: number;
+    /** Orders whose active quotation is paid in full. */
     paid: number;
+    /** Orders whose active quotation is pending / partially paid. */
     unpaid: number;
+    /**
+     * Orders that don't yet have an active (non-deleted) quotation.
+     * Optional for backward-compat — older backend builds don't
+     * return this field. Falls back to undefined and the UI uses
+     * `total - paid - unpaid` as a derived value where it matters.
+     */
+    noActiveQuote?: number;
   };
   patients: { total: number; newThisMonth: number };
   revenue: { totalGenerated: number; collected: number; unpaidDebt: number };

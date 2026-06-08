@@ -54,6 +54,7 @@ import {
 } from '@/lib/hooks';
 import { useQuotationForOrder } from '@/lib/hooks/use-quotations';
 import { TreatmentFeePaymentDialog } from '@/components/orders/treatment-fee-payment-dialog';
+import { TreatmentFeeReceiptDialog } from '@/components/orders/treatment-fee-receipt-dialog';
 import { useAuth } from '@/lib/providers/auth-provider';
 import {
   Gender,
@@ -915,6 +916,10 @@ function TreatmentFeeGateBanner({
   const { data: defaults } = useBillingPublicDefaults();
   const confirmBT = useConfirmTreatmentFeePayment();
   const [payOpen, setPayOpen] = useState(false);
+  // The receipt-viewer modal — opened from the awaiting-confirmation
+  // banner. Replaces the previous "click Confirm and hope" flow with
+  // "view the proof → click Confirm in the same modal".
+  const [receiptOpen, setReceiptOpen] = useState(false);
 
   const fee = defaults?.defaultTreatmentFee ?? 0;
   const currency = defaults?.defaultCurrency ?? 'TND';
@@ -954,32 +959,68 @@ function TreatmentFeeGateBanner({
 
   if (awaitingConfirm) {
     return (
-      <Card className="border-blue-200 bg-blue-50">
-        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-sm font-semibold text-blue-900">
-              Bank transfer awaiting confirmation — {order.treatmentFeeAmount ?? fee}{' '}
-              {currency}
-            </p>
-            <p className="text-xs text-blue-800/80">
-              {canActAsAdmin
-                ? 'A receipt was uploaded by the doctor. Confirm once the funds land in the account.'
-                : 'Your receipt has been received. An admin will confirm the payment shortly.'}
-            </p>
-          </div>
-          {canActAsAdmin && (
-            <Button
-              type="button"
-              size="sm"
-              className="bg-blue-600 hover:bg-blue-700"
-              disabled={confirmBT.isPending}
-              onClick={() => confirmBT.mutate(order.id)}
-            >
-              {confirmBT.isPending ? 'Confirming…' : 'Confirm payment'}
-            </Button>
-          )}
-        </CardContent>
-      </Card>
+      <>
+        <Card className="border-blue-200 bg-blue-50">
+          <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-blue-900">
+                Bank transfer awaiting confirmation — {order.treatmentFeeAmount ?? fee}{' '}
+                {currency}
+              </p>
+              <p className="text-xs text-blue-800/80">
+                {canActAsAdmin
+                  ? 'A receipt was uploaded by the doctor. Review the proof and confirm once the funds land in the account.'
+                  : 'Your receipt has been received. An admin will review the proof and confirm the payment shortly.'}
+              </p>
+            </div>
+            {/*
+              Two-button strip — admins get "View receipt & confirm"
+              which opens the proof in a modal with the Confirm action
+              embedded; doctors get a read-only "View receipt" so they
+              can verify what they uploaded.
+             */}
+            <div className="flex flex-wrap items-center gap-2">
+              {order.treatmentFeeProofPath && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={canActAsAdmin ? 'outline' : 'default'}
+                  className={
+                    canActAsAdmin
+                      ? 'border-blue-300 bg-white text-blue-900 hover:bg-blue-100'
+                      : 'bg-blue-600 hover:bg-blue-700'
+                  }
+                  onClick={() => setReceiptOpen(true)}
+                >
+                  View receipt
+                </Button>
+              )}
+              {canActAsAdmin && (
+                <Button
+                  type="button"
+                  size="sm"
+                  className="bg-blue-600 hover:bg-blue-700"
+                  onClick={() => setReceiptOpen(true)}
+                >
+                  Review &amp; confirm
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+        <TreatmentFeeReceiptDialog
+          open={receiptOpen}
+          onOpenChange={setReceiptOpen}
+          orderId={order.id}
+          orderCode={order.orderCode}
+          proofPath={order.treatmentFeeProofPath ?? null}
+          amount={Number(order.treatmentFeeAmount ?? fee)}
+          currency={currency}
+          doctorName={order.doctor?.fullName ?? null}
+          patientName={order.patient?.fullName ?? null}
+          canConfirm={canActAsAdmin}
+        />
+      </>
     );
   }
 

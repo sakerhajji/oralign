@@ -1,10 +1,10 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { format } from 'date-fns';
 import {
   Banknote,
-  CheckCircle2,
   CreditCard,
   ExternalLink,
   Landmark,
@@ -29,12 +29,12 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import {
-  useConfirmTreatmentFeePayment,
   usePendingTreatmentFees,
   useTreatmentFeesHistory,
 } from '@/lib/hooks';
 import type { TreatmentFeeRow } from '@/lib/api/orders.service';
 import { PaymentMethod, PaymentRecordStatus } from '@/lib/types';
+import { TreatmentFeeReceiptDialog } from '@/components/orders/treatment-fee-receipt-dialog';
 
 /**
  * Maps `PaymentMethod` → method label + icon + Tailwind color set.
@@ -206,69 +206,78 @@ function TreatmentFeeTable({
  */
 export function PendingTreatmentFeesSection() {
   const { data, isLoading } = usePendingTreatmentFees({ page: 1, limit: 20 });
-  const confirmFee = useConfirmTreatmentFeePayment();
   const rows = data?.data ?? [];
+  // The currently-opened row drives the viewer modal. Holding the
+  // full row lets us pass amount + doctor / patient context for the
+  // dialog header without re-fetching.
+  const [active, setActive] = useState<TreatmentFeeRow | null>(null);
 
   if (!isLoading && rows.length === 0) return null;
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <ReceiptText className="size-5 text-primary" />
-              Treatment fees awaiting confirmation
-            </CardTitle>
-            <CardDescription>
-              Doctor-uploaded bank-transfer receipts for the order's
-              professional fee. Confirming unblocks the treatment plan.
-            </CardDescription>
+    <>
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <ReceiptText className="size-5 text-primary" />
+                Treatment fees awaiting confirmation
+              </CardTitle>
+              <CardDescription>
+                Doctor-uploaded bank-transfer receipts for the order&apos;s
+                professional fee. Open the receipt to review the proof
+                and confirm in one place.
+              </CardDescription>
+            </div>
+            {data?.total ? (
+              <Badge variant="secondary">{data.total} pending</Badge>
+            ) : null}
           </div>
-          {data?.total ? (
-            <Badge variant="secondary">{data.total} pending</Badge>
-          ) : null}
-        </div>
-      </CardHeader>
-      <CardContent className="p-0">
-        <TreatmentFeeTable
-          rows={rows}
-          isLoading={isLoading}
-          emptyMessage="No treatment fees waiting for confirmation."
-          renderActions={(row) => (
-            <>
-              {row.proofPath && (
-                <Button
-                  asChild
-                  size="sm"
-                  variant="ghost"
-                  className="gap-1"
-                  title="Open the doctor-uploaded receipt"
-                >
-                  <a
-                    href={row.proofPath}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <ExternalLink className="size-3.5" />
-                    Receipt
-                  </a>
-                </Button>
-              )}
+        </CardHeader>
+        <CardContent className="p-0">
+          <TreatmentFeeTable
+            rows={rows}
+            isLoading={isLoading}
+            emptyMessage="No treatment fees waiting for confirmation."
+            renderActions={(row) => (
               <Button
                 size="sm"
-                variant="outline"
-                disabled={confirmFee.isPending}
-                onClick={() => confirmFee.mutate(row.orderId)}
+                variant="default"
+                className="gap-1.5"
+                onClick={() => setActive(row)}
               >
-                <CheckCircle2 className="mr-1 size-4" />
-                Confirm
+                <ReceiptText className="size-4" />
+                Review &amp; confirm
               </Button>
-            </>
-          )}
+            )}
+          />
+        </CardContent>
+      </Card>
+
+      {/*
+        Single shared dialog instance — mounted only while a row is
+        active so the blob-fetch hook doesn't churn on every render.
+        Closes itself on confirm, which invalidates the queries so
+        the row hops from pending → history.
+       */}
+      {active && (
+        <TreatmentFeeReceiptDialog
+          open={!!active}
+          onOpenChange={(next) => {
+            if (!next) setActive(null);
+          }}
+          orderId={active.orderId}
+          orderCode={active.orderCode}
+          proofPath={active.proofPath}
+          amount={active.amount}
+          currency="TND"
+          doctorName={active.doctor?.fullName ?? null}
+          patientName={active.patient?.fullName ?? null}
+          canConfirm
         />
-      </CardContent>
-    </Card>
+      )}
+    </>
   );
 }
 

@@ -22,7 +22,10 @@ import { OrderNotificationService } from '../../mail/order-notification.service'
 import { PrismaService } from '../../prisma/prisma.service';
 import { formatDateStamp, slugifyForCode } from '../../common/utils/code-naming.util';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { NotificationEvents } from '../../notifications/events/notification-events';
+import {
+  NotificationEvents,
+  type TreatmentFeeEvent,
+} from '../../notifications/events/notification-events';
 import {
   CreateOrderDto,
   OrderFileResponseDto,
@@ -445,6 +448,15 @@ export class OrderService {
       this.logger.log(
         `Treatment fee bank-transfer recorded (awaiting admin confirmation) for order ${id} by user ${caller.userId}`,
       );
+      // Fire-and-forget admin ping — doctor declared a wire intent.
+      // The receipt is uploaded via uploadTreatmentFeeProof which
+      // emits its own ping with the proof attached.
+      this.emitTreatmentFeeEvent(
+        NotificationEvents.TreatmentFeeDeclared,
+        order,
+        amount,
+        method,
+      );
       return this.mapToDto(order);
     }
 
@@ -461,6 +473,14 @@ export class OrderService {
     });
     this.logger.log(
       `Treatment fee paid (${method}) for order ${id} by user ${caller.userId} — amount ${amount}`,
+    );
+    // Admin audit ping — money is in. The doctor doesn't get a ping
+    // because they saw the dialog's success state themselves.
+    this.emitTreatmentFeeEvent(
+      NotificationEvents.TreatmentFeePaid,
+      order,
+      amount,
+      method,
     );
     return this.mapToDto(order);
   }
@@ -495,6 +515,15 @@ export class OrderService {
     });
     this.logger.log(
       `Treatment fee bank-transfer proof uploaded for order ${id} by user ${caller.userId}`,
+    );
+    // Fire-and-forget admin ping — the receipt is now attached and
+    // the order needs confirmation. Admins see this in the bell +
+    // /payments/pending list.
+    this.emitTreatmentFeeEvent(
+      NotificationEvents.TreatmentFeeDeclared,
+      order,
+      amount,
+      PaymentMethod.bank_transfer,
     );
     return this.mapToDto(order);
   }
@@ -683,7 +712,52 @@ export class OrderService {
     this.logger.log(
       `Treatment fee bank-transfer CONFIRMED for order ${id} by admin ${caller.userId}`,
     );
+    // Doctor ping — their payment was verified, treatment plan can
+    // proceed. Use the recorded amount (admin can't override it
+    // here, so what the doctor declared is what's confirmed).
+    this.emitTreatmentFeeEvent(
+      NotificationEvents.TreatmentFeeConfirmed,
+      order,
+      Number(order.treatmentFeeAmount ?? 0),
+      order.treatmentFeePaymentMethod ?? PaymentMethod.bank_transfer,
+    );
     return this.mapToDto(order);
+  }
+
+  /**
+   * Compose + emit a TreatmentFeeEvent. Centralised here so:
+   *   • The payload shape stays in lockstep with the event interface
+   *   • Failures in event emission never bubble up to the caller
+   *     (the business write is already committed)
+   *   • Currency falls back to 'TND' consistent with the rest of the
+   *     system (the treatment-fee record has no currency field —
+   *     it inherits the global default).
+   */
+  private emitTreatmentFeeEvent(
+    eventName: (typeof NotificationEvents)[
+      | 'TreatmentFeeDeclared'
+      | 'TreatmentFeePaid'
+      | 'TreatmentFeeConfirmed'],
+    order: Prisma.DentalOrderGetPayload<{ include: typeof orderInclude }>,
+    amount: number,
+    method: PaymentMethod,
+  ): void {
+    try {
+      this.events.emit(eventName, {
+        orderId: order.id,
+        orderCode: order.orderCode,
+        doctorId: order.doctorId,
+        doctorName: order.doctor?.fullName ?? null,
+        patientName: order.patient?.fullName ?? null,
+        amount: String(amount),
+        currency: 'TND',
+        method,
+      } satisfies TreatmentFeeEvent);
+    } catch (err) {
+      this.logger.warn(
+        `Failed to emit ${eventName} for order ${order.id}: ${(err as Error).message}`,
+      );
+    }
   }
 
   /**

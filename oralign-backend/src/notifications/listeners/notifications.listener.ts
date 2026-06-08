@@ -9,6 +9,7 @@ import {
   OrderStatusChangedEvent,
   PaymentEvent,
   QuotationEvent,
+  TreatmentFeeEvent,
   TreatmentPlanDecisionEvent,
   TreatmentPlanEvent,
   UserRegisteredEvent,
@@ -561,6 +562,105 @@ export class NotificationsListener {
           },
         }),
       ]);
+    });
+  }
+
+  // ─── Treatment fee (order-level professional fee) ───────────────────
+
+  @OnEvent(NotificationEvents.TreatmentFeeDeclared, { async: true })
+  async onTreatmentFeeDeclared(
+    payload: TreatmentFeeEvent,
+  ): Promise<void> {
+    await this.safe('treatmentFee.declared', async () => {
+      const byline = adminByline({
+        doctorName: payload.doctorName,
+        patientName: payload.patientName,
+        orderCode: payload.orderCode,
+      });
+      await this.notifications.broadcastToAdmins({
+        type: NotificationType.treatment_fee_declared,
+        title: 'Treatment-fee bank transfer awaiting confirmation',
+        message: byline
+          ? `${byline} — ${payload.amount} ${payload.currency} treatment-fee receipt uploaded. Verify and confirm.`
+          : `${payload.amount} ${payload.currency} treatment-fee receipt uploaded by the doctor — please verify the proof.`,
+        link: `/dashboard/payments/pending`,
+        metadata: {
+          orderId: payload.orderId,
+          orderCode: payload.orderCode ?? null,
+          doctorId: payload.doctorId,
+          doctorName: payload.doctorName ?? null,
+          patientName: payload.patientName ?? null,
+          amount: payload.amount,
+          currency: payload.currency,
+          method: payload.method,
+        },
+      });
+    });
+  }
+
+  @OnEvent(NotificationEvents.TreatmentFeePaid, { async: true })
+  async onTreatmentFeePaid(payload: TreatmentFeeEvent): Promise<void> {
+    await this.safe('treatmentFee.paid', async () => {
+      // Card / cash → instant success. Admin team gets the audit ping
+      // so it shows up in the bell + history. We DO NOT ping the
+      // doctor here — they performed the action themselves and saw
+      // the success state in the dialog.
+      const byline = adminByline({
+        doctorName: payload.doctorName,
+        patientName: payload.patientName,
+        orderCode: payload.orderCode,
+      });
+      const methodLabel =
+        payload.method === 'card'
+          ? 'card'
+          : payload.method === 'cash'
+            ? 'cash'
+            : 'bank transfer';
+      await this.notifications.broadcastToAdmins({
+        type: NotificationType.treatment_fee_paid,
+        title: 'Treatment fee paid',
+        message: byline
+          ? `${byline} — ${payload.amount} ${payload.currency} treatment fee paid by ${methodLabel}.`
+          : `${payload.amount} ${payload.currency} treatment fee paid by ${methodLabel}.`,
+        link: `/dashboard/orders/${payload.orderId}`,
+        metadata: {
+          orderId: payload.orderId,
+          orderCode: payload.orderCode ?? null,
+          doctorId: payload.doctorId,
+          doctorName: payload.doctorName ?? null,
+          patientName: payload.patientName ?? null,
+          amount: payload.amount,
+          currency: payload.currency,
+          method: payload.method,
+        },
+      });
+    });
+  }
+
+  @OnEvent(NotificationEvents.TreatmentFeeConfirmed, { async: true })
+  async onTreatmentFeeConfirmed(
+    payload: TreatmentFeeEvent,
+  ): Promise<void> {
+    await this.safe('treatmentFee.confirmed', async () => {
+      const subject = payload.patientName
+        ? ` for patient ${payload.patientName}`
+        : '';
+      const code = payload.orderCode ? ` (${payload.orderCode})` : '';
+      await this.notifications.create({
+        recipientId: payload.doctorId,
+        type: NotificationType.treatment_fee_confirmed,
+        title: 'Treatment fee confirmed',
+        message: `Your ${payload.amount} ${payload.currency} treatment fee${subject}${code} has been confirmed — the treatment plan can now be prepared.`,
+        link: `/dashboard/orders/${payload.orderId}`,
+        metadata: {
+          orderId: payload.orderId,
+          orderCode: payload.orderCode ?? null,
+          patientName: payload.patientName ?? null,
+          amount: payload.amount,
+          currency: payload.currency,
+          method: payload.method,
+        },
+      });
     });
   }
 

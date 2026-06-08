@@ -97,3 +97,32 @@ export const companyBillingService = {
     return `${origin}/uploads/${cleaned}`;
   },
 };
+
+/**
+ * Resolve any stored upload path to its public absolute URL, no matter
+ * how it was stored:
+ *
+ *   "/uploads/treatment-fee-proofs/abc.pdf" → http://api/.../uploads/treatment-fee-proofs/abc.pdf
+ *   "treatment-fee-proofs/abc.pdf"          → http://api/.../uploads/treatment-fee-proofs/abc.pdf
+ *   "http://example.com/x.pdf"              → http://example.com/x.pdf  (already absolute, returned verbatim)
+ *
+ * Different controllers historically stored paths in different shapes
+ * (some with the `/uploads` prefix baked in, others without) — this
+ * helper canonicalises all of them so the caller never has to think
+ * about it. Returns null when the input is null/empty.
+ */
+export function resolveUploadUrl(
+  relativePath: string | null | undefined,
+): string | null {
+  if (!relativePath) return null;
+  // Already absolute? Pass it through (covers S3 / CDN migrations later).
+  if (/^https?:\/\//i.test(relativePath)) return relativePath;
+  const base =
+    process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
+  const origin = base.replace(/\/api\/?$/, '');
+  // Normalise to "uploads/<rest>" so we can always prefix `${origin}/`.
+  const cleaned = relativePath
+    .replace(/^\/+/, '')
+    .replace(/^uploads\//, '');
+  return `${origin}/uploads/${cleaned}`;
+}

@@ -1121,6 +1121,8 @@ enum NotificationType {
   payment_received         // a doctor card-paid an installment
   payment_declared         // a doctor declared a bank transfer
   cash_payment_recorded    // admin colleague recorded a cash payment
+  treatment_fee_declared   // doctor uploaded a bank-transfer receipt for the treatment fee → admin needs to confirm
+  treatment_fee_paid       // doctor settled the treatment fee instantly (card) OR an admin recorded cash
   // ── Doctor-facing ────────────────────────────────────────────
   order_status_changed     // admin moved the order along the lifecycle
   treatment_plan_ready     // planner marked the treatment plan ready
@@ -1130,6 +1132,7 @@ enum NotificationType {
   quotation_recalled       // admin pulled a sent quote back to draft for correction
   payment_confirmed        // admin confirmed a bank/cash payment
   payment_rejected         // admin rejected a bank transfer proof
+  treatment_fee_confirmed  // admin confirmed the doctor's treatment-fee bank transfer → treatment plan can now start
   batch_unlocked           // a step batch moved from locked → unlocked
   batch_delivered          // admin marked a step batch as delivered
   installment_overdue      // an installment passed its due date unpaid

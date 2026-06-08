@@ -41,6 +41,23 @@ export const NotificationEvents = {
   PaymentConfirmed: 'payment.confirmed',
   PaymentRejected: 'payment.rejected',
   CashPaymentRecorded: 'payment.cashRecorded',
+  /**
+   * Doctor uploaded a bank-transfer receipt for the treatment fee.
+   * Fans out to admins so they can review the proof and confirm the
+   * wire once funds land.
+   */
+  TreatmentFeeDeclared: 'treatmentFee.declared',
+  /**
+   * Treatment fee paid instantly — doctor paid by card OR an admin
+   * recorded cash. Fans out to admins as an audit ping.
+   */
+  TreatmentFeePaid: 'treatmentFee.paid',
+  /**
+   * Admin confirmed a previously-declared bank transfer for the
+   * treatment fee. Notifies the doctor that the treatment plan can
+   * now be prepared.
+   */
+  TreatmentFeeConfirmed: 'treatmentFee.confirmed',
   BatchUnlocked: 'batch.unlocked',
   BatchDelivered: 'batch.delivered',
 } as const;
@@ -113,6 +130,24 @@ export interface PaymentEvent {
   currency: string;
   method: PaymentMethod;
   installmentNumber?: number;
+}
+
+/**
+ * Treatment-fee lifecycle event. Lives at the ORDER level (not the
+ * installment Payment level), so we intentionally don't share the
+ * PaymentEvent shape — no quotationId, no installmentNumber, no
+ * paymentId. The amount + method are the doctor's stated values,
+ * verified by the admin at confirm time.
+ */
+export interface TreatmentFeeEvent {
+  orderId: string;
+  orderCode?: string | null;
+  doctorId: string;
+  doctorName?: string | null;
+  patientName?: string | null;
+  amount: string;     // Decimal-as-string at event time
+  currency: string;
+  method: PaymentMethod;
 }
 
 export interface BatchEvent {

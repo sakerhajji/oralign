@@ -26,7 +26,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { useOverrideOrderStatus } from '@/lib/hooks/use-orders';
 import { OrderStatus } from '@/lib/types';
-import { orderStatusLabel } from '@/components/orders/order-status-badge';
+import { useT } from '@/lib/i18n/lang-context';
 
 /**
  * Admin-only dialog for manually changing an order's lifecycle status.
@@ -41,18 +41,21 @@ import { orderStatusLabel } from '@/components/orders/order-status-badge';
  * they exist on the model for back-compat but should never be chosen
  * for new transitions.
  */
+// PhaseGroup carries a `labelKey` instead of a hard-coded English
+// label so the grouped <Select> re-renders the section headers in the
+// current language.
 interface PhaseGroup {
-  label: string;
+  labelKey: string;
   options: OrderStatus[];
 }
 
 const PHASES: PhaseGroup[] = [
   {
-    label: 'Submission',
+    labelKey: 'ordersPage.phaseSubmission',
     options: [OrderStatus.DRAFT, OrderStatus.SUBMITTED, OrderStatus.UNDER_REVIEW],
   },
   {
-    label: 'Treatment planning',
+    labelKey: 'ordersPage.phasePlanning',
     options: [
       OrderStatus.TREATMENT_PLANNING,
       OrderStatus.TREATMENT_PLAN_READY,
@@ -61,7 +64,7 @@ const PHASES: PhaseGroup[] = [
     ],
   },
   {
-    label: 'Quote & payment',
+    labelKey: 'ordersPage.phaseBilling',
     options: [
       OrderStatus.QUOTATION_SENT,
       OrderStatus.PAYMENT_PLAN_SELECTED,
@@ -71,7 +74,7 @@ const PHASES: PhaseGroup[] = [
     ],
   },
   {
-    label: 'Production',
+    labelKey: 'ordersPage.phaseProduction',
     options: [
       OrderStatus.FABRICATION,
       OrderStatus.READY_TO_SHIP,
@@ -80,10 +83,21 @@ const PHASES: PhaseGroup[] = [
     ],
   },
   {
-    label: 'Terminal',
+    labelKey: 'ordersPage.phaseTerminal',
     options: [OrderStatus.CANCELED],
   },
 ];
+
+// Resolve an OrderStatus to its localised label via the existing
+// `orders.statusLabel.*` dict block — same lookup the badge uses.
+function statusLabel(
+  status: OrderStatus,
+  t: (path: string) => string,
+): string {
+  const key = `orders.statusLabel.${status}`;
+  const hit = t(key);
+  return hit !== key ? hit : String(status);
+}
 
 export function OrderStatusChangeDialog({
   orderId,
@@ -97,6 +111,7 @@ export function OrderStatusChangeDialog({
   trigger: React.ReactNode;
 }) {
   const override = useOverrideOrderStatus();
+  const { t } = useT();
   const [open, setOpen] = useState(false);
   const [target, setTarget] = useState<OrderStatus>(currentStatus);
   const [reason, setReason] = useState('');
@@ -134,13 +149,10 @@ export function OrderStatusChangeDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ShieldCheck className="h-4 w-4 text-primary" />
-            Change order status
+            {t('ordersPage.overrideDialogTitle')}
           </DialogTitle>
           <DialogDescription className="text-xs">
-            Admin override for <span className="font-medium">{orderCode}</span>.
-            Use this to roll the order forward past a stuck step or roll
-            backward to fix a mistake. Treatment plan and quotation
-            artefacts are kept — only the status changes.
+            {t('ordersPage.overrideDialogBody', { code: orderCode })}
           </DialogDescription>
         </DialogHeader>
 
@@ -148,29 +160,29 @@ export function OrderStatusChangeDialog({
         <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 p-3 text-sm">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              Currently
+              {t('ordersPage.currently')}
             </p>
             <Badge variant="outline" className="mt-1 text-xs">
-              {orderStatusLabel[currentStatus] ?? currentStatus}
+              {statusLabel(currentStatus, t)}
             </Badge>
           </div>
           <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground" />
           <div className="text-right">
             <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              Will become
+              {t('ordersPage.willBecome')}
             </p>
             <Badge
               variant="outline"
               className="mt-1 border-primary/40 bg-primary/5 text-xs text-primary"
             >
-              {orderStatusLabel[target] ?? target}
+              {statusLabel(target, t)}
             </Badge>
           </div>
         </div>
 
         {/* Phase-grouped select */}
         <div className="grid gap-2">
-          <Label>New status</Label>
+          <Label>{t('ordersPage.newStatus')}</Label>
           <Select
             value={target}
             onValueChange={(v) => setTarget(v as OrderStatus)}
@@ -180,11 +192,11 @@ export function OrderStatusChangeDialog({
             </SelectTrigger>
             <SelectContent>
               {PHASES.map((phase) => (
-                <SelectGroup key={phase.label}>
-                  <SelectLabel>{phase.label}</SelectLabel>
+                <SelectGroup key={phase.labelKey}>
+                  <SelectLabel>{t(phase.labelKey)}</SelectLabel>
                   {phase.options.map((opt) => (
                     <SelectItem key={opt} value={opt}>
-                      {orderStatusLabel[opt] ?? opt}
+                      {statusLabel(opt, t)}
                     </SelectItem>
                   ))}
                 </SelectGroup>
@@ -196,15 +208,17 @@ export function OrderStatusChangeDialog({
         {/* Reason — optional but encouraged */}
         <div className="grid gap-2">
           <Label htmlFor="status-reason">
-            Reason{' '}
-            <span className="text-muted-foreground">(optional, logged)</span>
+            {t('ordersPage.reasonLabel')}{' '}
+            <span className="text-muted-foreground">
+              {t('ordersPage.reasonOptional')}
+            </span>
           </Label>
           <Textarea
             id="status-reason"
             rows={2}
             value={reason}
             onChange={(e) => setReason(e.target.value)}
-            placeholder="e.g. doctor confirmed payment over the phone — rolling to paid"
+            placeholder={t('ordersPage.reasonPh')}
           />
         </div>
 
@@ -214,7 +228,7 @@ export function OrderStatusChangeDialog({
             variant="outline"
             onClick={() => setOpen(false)}
           >
-            Cancel
+            {t('ordersPage.cancel')}
           </Button>
           <Button
             type="button"
@@ -227,7 +241,7 @@ export function OrderStatusChangeDialog({
             ) : (
               <ArrowRight className="h-4 w-4" />
             )}
-            Apply change
+            {t('ordersPage.applyChange')}
           </Button>
         </DialogFooter>
       </DialogContent>

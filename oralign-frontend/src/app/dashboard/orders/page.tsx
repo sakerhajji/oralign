@@ -5,6 +5,10 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
+import { fr as frLocale } from 'date-fns/locale';
+import type { Locale } from 'date-fns';
+import { useT } from '@/lib/i18n/lang-context';
+import type { Lang } from '@/lib/i18n/dict';
 import {
   AlertTriangle,
   ArchiveRestore,
@@ -79,10 +83,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { useQuery } from '@tanstack/react-query';
-import {
-  OrderStatusBadge,
-  orderStatusLabel,
-} from '@/components/orders/order-status-badge';
+import { OrderStatusBadge } from '@/components/orders/order-status-badge';
 import { TreatmentFeeBadge } from '@/components/orders/treatment-fee-badge';
 import { usersService } from '@/lib/api';
 import { useAuth } from '@/lib/providers/auth-provider';
@@ -112,21 +113,22 @@ import { cn } from '@/lib/utils';
 const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
 type PageSize = (typeof PAGE_SIZE_OPTIONS)[number];
 
-// Status filter buckets surfaced as tabs above the table. "All" sits
-// first so the page reads as "everything → narrow down". Other entries
-// map 1:1 onto OrderStatus values; the legacy 4-status set is
-// suppressed because the modern lifecycle is what planners think in.
+// Status filter buckets surfaced as tabs above the table. Labels go
+// through the dict so the strip flips to FR on the language toggle —
+// every tab carries a `labelKey` instead of a hard-coded English
+// label. "All" sits first so the page reads as "everything → narrow
+// down". Modern lifecycle only; legacy enum values are suppressed.
 const STATUS_TABS = [
-  { key: 'all' as const, label: 'All' },
-  { key: OrderStatus.DRAFT, label: 'Draft' },
-  { key: OrderStatus.SUBMITTED, label: 'Submitted' },
-  { key: OrderStatus.TREATMENT_PLAN_READY, label: 'Treatment ready' },
-  { key: OrderStatus.TREATMENT_APPROVED, label: 'Treatment approved' },
-  { key: OrderStatus.QUOTATION_SENT, label: 'Quote sent' },
-  { key: OrderStatus.PAID, label: 'Paid' },
-  { key: OrderStatus.FABRICATION, label: 'Fabrication' },
-  { key: OrderStatus.SHIPPED, label: 'Shipped' },
-  { key: OrderStatus.FINISHED, label: 'Finished' },
+  { key: 'all' as const, labelKey: 'ordersPage.tabAll' },
+  { key: OrderStatus.DRAFT, labelKey: 'ordersPage.tabDraft' },
+  { key: OrderStatus.SUBMITTED, labelKey: 'ordersPage.tabSubmitted' },
+  { key: OrderStatus.TREATMENT_PLAN_READY, labelKey: 'ordersPage.tabTreatmentReady' },
+  { key: OrderStatus.TREATMENT_APPROVED, labelKey: 'ordersPage.tabTreatmentApproved' },
+  { key: OrderStatus.QUOTATION_SENT, labelKey: 'ordersPage.tabQuoteSent' },
+  { key: OrderStatus.PAID, labelKey: 'ordersPage.tabPaid' },
+  { key: OrderStatus.FABRICATION, labelKey: 'ordersPage.tabFabrication' },
+  { key: OrderStatus.SHIPPED, labelKey: 'ordersPage.tabShipped' },
+  { key: OrderStatus.FINISHED, labelKey: 'ordersPage.tabFinished' },
 ] as const;
 
 const LEGACY_STATUSES = new Set<OrderStatus>([
@@ -137,24 +139,49 @@ const LEGACY_STATUSES = new Set<OrderStatus>([
 ]);
 
 // Default sort: newest first. The dropdown lets the planner flip to
-// other fields without leaving the page.
+// other fields without leaving the page. Each option carries a
+// `labelKey` so the dropdown re-renders the menu in the current
+// language.
 const SORT_OPTIONS: Array<{
   key: string;
-  label: string;
+  labelKey: string;
   field: OrderSortField;
   order: SortOrder;
 }> = [
-  { key: 'created-desc', label: 'Newest first', field: 'createdAt', order: 'desc' },
-  { key: 'created-asc', label: 'Oldest first', field: 'createdAt', order: 'asc' },
-  { key: 'updated-desc', label: 'Recently updated', field: 'updatedAt', order: 'desc' },
-  { key: 'code-asc', label: 'Order code (A–Z)', field: 'orderCode', order: 'asc' },
-  { key: 'code-desc', label: 'Order code (Z–A)', field: 'orderCode', order: 'desc' },
-  { key: 'status-asc', label: 'Status (A–Z)', field: 'status', order: 'asc' },
+  { key: 'created-desc', labelKey: 'ordersPage.sortNewest', field: 'createdAt', order: 'desc' },
+  { key: 'created-asc', labelKey: 'ordersPage.sortOldest', field: 'createdAt', order: 'asc' },
+  { key: 'updated-desc', labelKey: 'ordersPage.sortUpdated', field: 'updatedAt', order: 'desc' },
+  { key: 'code-asc', labelKey: 'ordersPage.sortCodeAsc', field: 'orderCode', order: 'asc' },
+  { key: 'code-desc', labelKey: 'ordersPage.sortCodeDesc', field: 'orderCode', order: 'desc' },
+  { key: 'status-asc', labelKey: 'ordersPage.sortStatus', field: 'status', order: 'asc' },
 ];
+
+// Locale-aware date helpers shared by row + mobile-card formatters.
+const dateLocale = (lang: Lang): Locale | undefined =>
+  lang === 'fr' ? frLocale : undefined;
+const dateFormat = (lang: Lang) =>
+  lang === 'fr' ? 'd MMM yyyy' : 'MMM d, yyyy';
+
+// Translator type — surfaced so leaf helpers can accept `t` without
+// pulling the context in places that already have it in scope.
+type TFn = (path: string, vars?: Record<string, string | number>) => string;
+
+/**
+ * Resolve an OrderStatus to its localised label by piggy-backing on
+ * the existing `orders.statusLabel.*` dict block (it predates this
+ * page's translation work). Falls back to the raw enum value when a
+ * brand-new status lands before its translations do.
+ */
+function localisedStatusLabel(status: OrderStatus, t: TFn): string {
+  const key = `orders.statusLabel.${status}`;
+  const hit = t(key);
+  return hit !== key ? hit : String(status);
+}
 
 export default function OrdersPage() {
   const router = useRouter();
   const { isAdmin, isDentist, user } = useAuth();
+  const { t, lang } = useT();
   const deleteOrder = useDeleteOrder();
   const permanentDeleteOrder = usePermanentDeleteOrder();
   const restoreOrder = useRestoreOrder();
@@ -379,24 +406,24 @@ export default function OrdersPage() {
           <div className="min-w-0">
             <div className="mb-2 flex items-center gap-2 text-sm font-medium text-muted-foreground">
               <ClipboardList className="h-4 w-4" />
-              Aligner order operations
+              {t('ordersPage.eyebrow')}
             </div>
             <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-              Orders
+              {t('ordersPage.title')}
             </h1>
             <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
               {isAdmin
-                ? 'Review clinical submissions, dentist ownership, patient records, and uploaded case files from one workspace.'
+                ? t('ordersPage.subtitleAdmin')
                 : user?.role === UserRole.DESIGNER
-                  ? 'Review assigned order cases and attached clinical assets.'
-                  : 'Create treatment drafts, attach scan files, and submit aligner cases for production review.'}
+                  ? t('ordersPage.subtitleDesigner')
+                  : t('ordersPage.subtitleDentist')}
             </p>
           </div>
           {canCreate && (
             <Button asChild size="lg" className="w-full sm:w-auto">
               <Link href="/dashboard/orders/new">
                 <Plus className="mr-2 h-4 w-4" />
-                New Order
+                {t('ordersPage.newOrder')}
               </Link>
             </Button>
           )}
@@ -426,7 +453,7 @@ export default function OrdersPage() {
                     : 'text-muted-foreground hover:bg-muted hover:text-foreground',
                 )}
               >
-                {tab.label}
+                {t(tab.labelKey)}
               </button>
             );
           })}
@@ -441,7 +468,7 @@ export default function OrdersPage() {
             <Input
               key={searchInputKey}
               className="h-10 pl-10"
-              placeholder="Search order code, patient, or dentist…"
+              placeholder={t('ordersPage.searchPh')}
               defaultValue={search}
               onChange={(event) => debouncedSearch(event.target.value)}
             />
@@ -454,7 +481,7 @@ export default function OrdersPage() {
               onClick={() => setShowFilters((current) => !current)}
             >
               <Filter className="h-4 w-4" />
-              Filters
+              {t('ordersPage.filters')}
               {activeFilterCount > 0 && (
                 <Badge
                   variant="secondary"
@@ -483,10 +510,14 @@ export default function OrdersPage() {
                   clearSelection();
                 }}
                 aria-pressed={showDeleted}
-                title={showDeleted ? 'Back to active orders' : 'Show deleted orders'}
+                title={
+                  showDeleted
+                    ? t('ordersPage.backToActiveTitle')
+                    : t('ordersPage.showDeletedTitle')
+                }
               >
                 <Trash className="h-4 w-4" />
-                {showDeleted ? 'Active orders' : 'Trash'}
+                {showDeleted ? t('ordersPage.activeOrders') : t('ordersPage.trash')}
               </Button>
             )}
 
@@ -496,7 +527,7 @@ export default function OrdersPage() {
               className="h-10 w-10"
               onClick={() => ordersQuery.refetch()}
               disabled={ordersQuery.isFetching}
-              aria-label="Refresh"
+              aria-label={t('ordersPage.refresh')}
             >
               <RefreshCw
                 className={cn(
@@ -515,7 +546,7 @@ export default function OrdersPage() {
               {isAdmin && (
                 <div className="space-y-1.5">
                   <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Dentist
+                    {t('ordersPage.dentistLabel')}
                   </Label>
                   <Select
                     value={doctorFilter}
@@ -525,10 +556,10 @@ export default function OrdersPage() {
                     }}
                   >
                     <SelectTrigger className="h-10">
-                      <SelectValue placeholder="All dentists" />
+                      <SelectValue placeholder={t('ordersPage.allDentists')} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All dentists</SelectItem>
+                      <SelectItem value="all">{t('ordersPage.allDentists')}</SelectItem>
                       {(dentistsQuery.data?.data ?? []).map((doctor) => (
                         <SelectItem key={doctor.id} value={doctor.id}>
                           {doctor.fullName}
@@ -540,7 +571,7 @@ export default function OrdersPage() {
               )}
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Created from
+                  {t('ordersPage.createdFrom')}
                 </Label>
                 <Input
                   type="date"
@@ -554,7 +585,7 @@ export default function OrdersPage() {
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Created to
+                  {t('ordersPage.createdTo')}
                 </Label>
                 <Input
                   type="date"
@@ -575,7 +606,7 @@ export default function OrdersPage() {
                   disabled={activeFilterCount === 0}
                 >
                   <X className="h-4 w-4" />
-                  Clear filters
+                  {t('ordersPage.clearFilters')}
                 </Button>
               </div>
             </div>
@@ -589,37 +620,40 @@ export default function OrdersPage() {
           without opening the filter panel. */}
       {activeFilterCount > 0 && (
         <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="text-muted-foreground">Active:</span>
+          <span className="text-muted-foreground">{t('ordersPage.activeLabel')}</span>
           {statusTab !== 'all' && (
             <FilterChip
-              label={`Status: ${orderStatusLabel[statusTab as OrderStatus] ?? statusTab}`}
+              label={t('ordersPage.chipStatus', {
+                value: localisedStatusLabel(statusTab as OrderStatus, t),
+              })}
               onRemove={() => setStatusTab('all')}
             />
           )}
           {search && (
             <FilterChip
-              label={`Search: "${search}"`}
+              label={t('ordersPage.chipSearch', { value: search })}
               onRemove={clearSearch}
             />
           )}
           {isAdmin && doctorFilter !== 'all' && (
             <FilterChip
-              label={`Dentist: ${
-                (dentistsQuery.data?.data ?? []).find((d) => d.id === doctorFilter)
-                  ?.fullName ?? 'Unknown'
-              }`}
+              label={t('ordersPage.chipDentist', {
+                value:
+                  (dentistsQuery.data?.data ?? []).find((d) => d.id === doctorFilter)
+                    ?.fullName ?? t('ordersPage.chipUnknown'),
+              })}
               onRemove={() => setDoctorFilter('all')}
             />
           )}
           {createdFrom && (
             <FilterChip
-              label={`From ${createdFrom}`}
+              label={t('ordersPage.chipFrom', { value: createdFrom })}
               onRemove={() => setCreatedFrom('')}
             />
           )}
           {createdTo && (
             <FilterChip
-              label={`To ${createdTo}`}
+              label={t('ordersPage.chipTo', { value: createdTo })}
               onRemove={() => setCreatedTo('')}
             />
           )}
@@ -636,11 +670,7 @@ export default function OrdersPage() {
           <CardContent className="flex flex-col gap-2 p-3 text-sm text-amber-900 sm:flex-row sm:items-center sm:justify-between sm:p-4">
             <div className="flex items-center gap-2">
               <Trash className="h-4 w-4" />
-              <span>
-                Viewing <strong>deleted orders</strong>. Restore brings
-                them back into the catalogue; <em>Delete forever</em>{' '}
-                wipes them and their files from disk — irreversible.
-              </span>
+              <span>{t('ordersPage.trashBannerBody')}</span>
             </div>
             <Button
               size="sm"
@@ -652,7 +682,7 @@ export default function OrdersPage() {
                 clearSelection();
               }}
             >
-              Back to active
+              {t('ordersPage.backToActive')}
             </Button>
           </CardContent>
         </Card>
@@ -688,11 +718,11 @@ export default function OrdersPage() {
       ) : ordersQuery.error ? (
         <EmptyState
           icon={<FileText className="h-10 w-10" />}
-          title="Orders could not load"
+          title={t('ordersPage.loadingFailedTitle')}
           description={ordersQuery.error.message}
           action={
             <Button variant="outline" onClick={() => ordersQuery.refetch()}>
-              Try again
+              {t('ordersPage.tryAgain')}
             </Button>
           }
         />
@@ -705,13 +735,17 @@ export default function OrdersPage() {
               <ClipboardList className="h-10 w-10" />
             )
           }
-          title={showDeleted ? 'Trash is empty' : 'No orders found'}
+          title={
+            showDeleted
+              ? t('ordersPage.emptyTrashTitle')
+              : t('ordersPage.emptyOrdersTitle')
+          }
           description={
             showDeleted
-              ? 'There are no soft-deleted orders to review. Newly deleted orders will show up here.'
+              ? t('ordersPage.emptyTrashBody')
               : activeFilterCount > 0
-                ? 'No orders match the current filters. Try widening the search or clearing filters.'
-                : 'Create a new order to get started.'
+                ? t('ordersPage.emptyFilteredBody')
+                : t('ordersPage.emptyNoneBody')
           }
           action={
             <div className="flex flex-wrap justify-center gap-2">
@@ -723,20 +757,20 @@ export default function OrdersPage() {
                     setPage(1);
                   }}
                 >
-                  Back to active orders
+                  {t('ordersPage.backToActiveTitle')}
                 </Button>
               ) : (
                 <>
                   {activeFilterCount > 0 && (
                     <Button variant="outline" onClick={clearAllFilters}>
-                      Clear filters
+                      {t('ordersPage.clearFilters')}
                     </Button>
                   )}
                   {canCreate && (
                     <Button asChild>
                       <Link href="/dashboard/orders/new">
                         <Plus className="mr-2 h-4 w-4" />
-                        New Order
+                        {t('ordersPage.newOrder')}
                       </Link>
                     </Button>
                   )}
@@ -763,13 +797,13 @@ export default function OrdersPage() {
                       />
                     </TableHead>
                   )}
-                  <TableHead className="w-[200px]">Order</TableHead>
-                  <TableHead>Patient</TableHead>
-                  {isAdmin && <TableHead>Dentist</TableHead>}
-                  <TableHead>Clinical</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead className="w-12 text-right">Actions</TableHead>
+                  <TableHead className="w-[200px]">{t('ordersPage.colOrder')}</TableHead>
+                  <TableHead>{t('ordersPage.colPatient')}</TableHead>
+                  {isAdmin && <TableHead>{t('ordersPage.colDentistCol')}</TableHead>}
+                  <TableHead>{t('ordersPage.colClinical')}</TableHead>
+                  <TableHead>{t('ordersPage.colStatus')}</TableHead>
+                  <TableHead>{t('ordersPage.colCreated')}</TableHead>
+                  <TableHead className="w-12 text-right">{t('ordersPage.colActions')}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -778,7 +812,7 @@ export default function OrdersPage() {
                     key={order.id}
                     role="link"
                     tabIndex={0}
-                    aria-label={`Open order ${order.orderCode}`}
+                    aria-label={t('ordersPage.openOrderAria', { code: order.orderCode })}
                     onMouseEnter={() => prefetchOrder(order.id)}
                     onFocus={() => prefetchOrder(order.id)}
                     onClick={(event) => {
@@ -821,7 +855,7 @@ export default function OrdersPage() {
                         <Checkbox
                           checked={selectedIds.has(order.id)}
                           onCheckedChange={() => toggleRow(order.id)}
-                          aria-label={`Select ${order.orderCode}`}
+                          aria-label={t('ordersPage.selectOrderAria', { code: order.orderCode })}
                         />
                       </TableCell>
                     )}
@@ -835,8 +869,7 @@ export default function OrdersPage() {
                             {order.orderCode}
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            {order.files?.length ?? 0} file
-                            {(order.files?.length ?? 0) === 1 ? '' : 's'}
+                            {t('ordersPage.files', { count: order.files?.length ?? 0 })}
                           </p>
                         </div>
                       </div>
@@ -844,7 +877,7 @@ export default function OrdersPage() {
                     <TableCell>
                       <PersonLine
                         icon={<UserRound className="h-4 w-4" />}
-                        name={order.patient?.fullName ?? 'No patient'}
+                        name={order.patient?.fullName ?? t('ordersPage.noPatient')}
                         sub={order.patient?.phone ?? order.patient?.email}
                       />
                     </TableCell>
@@ -852,7 +885,7 @@ export default function OrdersPage() {
                       <TableCell>
                         <PersonLine
                           icon={<Stethoscope className="h-4 w-4" />}
-                          name={order.doctor?.fullName ?? 'No dentist'}
+                          name={order.doctor?.fullName ?? t('ordersPage.noDentist')}
                           sub={order.doctor?.email}
                         />
                       </TableCell>
@@ -860,10 +893,10 @@ export default function OrdersPage() {
                     <TableCell>
                       <div className="text-sm">
                         <p className="font-medium">
-                          {order.archTreatment ?? 'Arch not set'}
+                          {order.archTreatment ?? t('ordersPage.archNotSet')}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {order.patientStage ?? 'Stage not set'}
+                          {order.patientStage ?? t('ordersPage.stageNotSet')}
                         </p>
                       </div>
                     </TableCell>
@@ -887,7 +920,9 @@ export default function OrdersPage() {
                       </div>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {format(new Date(order.createdAt), 'MMM d, yyyy')}
+                      {format(new Date(order.createdAt), dateFormat(lang), {
+                        locale: dateLocale(lang),
+                      })}
                     </TableCell>
                     <TableCell className="text-right">
                       <OrderRowActions
@@ -963,6 +998,7 @@ function SortMenu({
   sortKey: string;
   onChange: (next: string) => void;
 }) {
+  const { t } = useT();
   const active = SORT_OPTIONS.find((option) => option.key === sortKey);
   return (
     <DropdownMenu>
@@ -975,13 +1011,15 @@ function SortMenu({
           ) : (
             <ArrowUpDown className="h-4 w-4" />
           )}
-          <span className="hidden sm:inline">{active?.label ?? 'Sort'}</span>
-          <span className="sm:hidden">Sort</span>
+          <span className="hidden sm:inline">
+            {active ? t(active.labelKey) : t('ordersPage.sort')}
+          </span>
+          <span className="sm:hidden">{t('ordersPage.sort')}</span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel className="text-xs uppercase tracking-wide text-muted-foreground">
-          Sort by
+          {t('ordersPage.sortBy')}
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         {SORT_OPTIONS.map((option) => (
@@ -993,7 +1031,7 @@ function SortMenu({
               option.key === sortKey && 'bg-accent text-accent-foreground',
             )}
           >
-            <span>{option.label}</span>
+            <span>{t(option.labelKey)}</span>
             {option.key === sortKey && <CheckCircle2 className="h-3.5 w-3.5" />}
           </DropdownMenuItem>
         ))}
@@ -1073,6 +1111,7 @@ function OrderRowActions({
   onRestore?: () => void;
   onChangeStatus?: (id: string, status: OrderStatus) => void;
 }) {
+  const { t } = useT();
   const [softOpen, setSoftOpen] = useState(false);
   const [hardOpen, setHardOpen] = useState(false);
   const [statusPickerOpen, setStatusPickerOpen] = useState(false);
@@ -1085,7 +1124,7 @@ function OrderRowActions({
             size="icon"
             variant="ghost"
             className="h-8 w-8"
-            aria-label={`Actions for ${order.orderCode}`}
+            aria-label={t('ordersPage.actionsForAria', { code: order.orderCode })}
             onClick={(event) => event.stopPropagation()}
           >
             <MoreHorizontal className="h-4 w-4" />
@@ -1095,20 +1134,16 @@ function OrderRowActions({
           <DropdownMenuLabel className="text-xs uppercase tracking-wide text-muted-foreground">
             {order.orderCode}
             {isDeletedView ? (
-              <span className="ml-1 text-amber-700">· deleted</span>
+              <span className="ml-1 text-amber-700">{t('ordersPage.deletedSuffix')}</span>
             ) : null}
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem asChild>
             <Link href={`/dashboard/orders/${order.id}`} className="gap-2">
               <Eye className="h-4 w-4" />
-              View order
+              {t('ordersPage.viewOrder')}
             </Link>
           </DropdownMenuItem>
-          {/* Trash-view branch — Restore + Delete forever ONLY.
-              Everything else (edit, soft-delete, status change) is
-              hidden because the order is not in the live catalogue
-              and those operations don't make sense yet. */}
           {isDeletedView && canPermanentDelete ? (
             <>
               <DropdownMenuSeparator />
@@ -1122,7 +1157,7 @@ function OrderRowActions({
                   className="gap-2 text-emerald-700 focus:text-emerald-800"
                 >
                   <ArchiveRestore className="h-4 w-4" />
-                  Restore
+                  {t('ordersPage.restore')}
                 </DropdownMenuItem>
               ) : null}
               <DropdownMenuItem
@@ -1134,7 +1169,7 @@ function OrderRowActions({
                 className="gap-2 text-destructive focus:text-destructive"
               >
                 <ShieldX className="h-4 w-4" />
-                Delete forever
+                {t('ordersPage.deleteForever')}
               </DropdownMenuItem>
             </>
           ) : (
@@ -1146,7 +1181,7 @@ function OrderRowActions({
                     className="gap-2"
                   >
                     <Edit className="h-4 w-4" />
-                    Edit order
+                    {t('ordersPage.editOrder')}
                   </Link>
                 </DropdownMenuItem>
               )}
@@ -1161,7 +1196,7 @@ function OrderRowActions({
                     className="gap-2"
                   >
                     <Wrench className="h-4 w-4" />
-                    Change status…
+                    {t('ordersPage.changeStatusDots')}
                   </DropdownMenuItem>
                 </>
               )}
@@ -1176,7 +1211,7 @@ function OrderRowActions({
                   className="gap-2 text-destructive focus:text-destructive"
                 >
                   <Trash2 className="h-4 w-4" />
-                  Delete order
+                  {t('ordersPage.deleteOrder')}
                 </DropdownMenuItem>
               )}
               {canPermanentDelete && (
@@ -1189,7 +1224,7 @@ function OrderRowActions({
                   className="gap-2 text-destructive focus:text-destructive"
                 >
                   <ShieldX className="h-4 w-4" />
-                  Delete forever
+                  {t('ordersPage.deleteForever')}
                 </DropdownMenuItem>
               )}
             </>
@@ -1197,14 +1232,10 @@ function OrderRowActions({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      {/* Single-order status picker dialog — admins only.
-          Uses the existing `PUT /orders/:id/status` route under the
-          hood (no submitted-at gymnastics needed; the service handles
-          the back-and-forth fix-up). */}
       <StatusPickerDialog
         open={statusPickerOpen}
         onOpenChange={setStatusPickerOpen}
-        title={`Change status of ${order.orderCode}`}
+        title={t('ordersPage.statusPickerTitle', { code: order.orderCode })}
         currentStatus={order.status}
         onConfirm={(status) => {
           if (onChangeStatus) onChangeStatus(order.id, status);
@@ -1215,9 +1246,9 @@ function OrderRowActions({
       <ConfirmDeleteDialog
         open={softOpen}
         onOpenChange={setSoftOpen}
-        title="Delete order?"
-        description={`This will hide ${order.orderCode} from active order lists. The order can still be recovered from the database by an admin.`}
-        confirmLabel="Delete"
+        title={t('ordersPage.deleteOrderTitle')}
+        description={t('ordersPage.deleteOrderBody', { code: order.orderCode })}
+        confirmLabel={t('ordersPage.deleteOrderConfirm')}
         disabled={isDeleting}
         onConfirm={() => {
           onDelete();
@@ -1228,9 +1259,9 @@ function OrderRowActions({
       <ConfirmDeleteDialog
         open={hardOpen}
         onOpenChange={setHardOpen}
-        title="Permanently delete order?"
-        description={`This permanently removes ${order.orderCode}, its tooth instructions, file records, and stored files. This cannot be undone.`}
-        confirmLabel="Delete forever"
+        title={t('ordersPage.hardDeleteTitle')}
+        description={t('ordersPage.hardDeleteBody', { code: order.orderCode })}
+        confirmLabel={t('ordersPage.deleteForever')}
         disabled={isPermanentDeleting}
         destructive
         onConfirm={() => {
@@ -1261,6 +1292,7 @@ function ConfirmDeleteDialog({
   disabled?: boolean;
   onConfirm: () => void;
 }) {
+  const { t } = useT();
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
@@ -1274,7 +1306,7 @@ function ConfirmDeleteDialog({
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogCancel>{t('ordersPage.cancel')}</AlertDialogCancel>
           <AlertDialogAction
             variant={destructive ? 'destructive' : 'default'}
             onClick={onConfirm}
@@ -1320,6 +1352,7 @@ function OrderMobileCard({
   onChangeStatus?: (id: string, status: OrderStatus) => void;
 }) {
   const router = useRouter();
+  const { t, lang } = useT();
   return (
     <Card
       onMouseEnter={onPrefetch}
@@ -1331,8 +1364,6 @@ function OrderMobileCard({
       }}
       className={cn(
         'cursor-pointer transition active:scale-[0.99]',
-        // Match the desktop trash tint so the deleted-card chrome
-        // is unmistakable on mobile too.
         isDeletedView && 'border-amber-200 bg-amber-50/40 text-muted-foreground',
       )}
     >
@@ -1341,16 +1372,18 @@ function OrderMobileCard({
           <div className="min-w-0">
             <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
               <ClipboardList className="h-3.5 w-3.5" />
-              {format(new Date(order.createdAt), 'MMM d, yyyy')}
+              {format(new Date(order.createdAt), dateFormat(lang), {
+                locale: dateLocale(lang),
+              })}
               {isDeletedView ? (
                 <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-900">
-                  Deleted
+                  {t('ordersPage.deletedPill')}
                 </span>
               ) : null}
             </div>
             <h3 className="truncate text-lg font-semibold">{order.orderCode}</h3>
             <p className="truncate text-sm text-muted-foreground">
-              {order.patient?.fullName ?? 'No patient selected'}
+              {order.patient?.fullName ?? t('ordersPage.noPatientSelected')}
             </p>
           </div>
           <OrderRowActions
@@ -1374,13 +1407,19 @@ function OrderMobileCard({
           <TreatmentFeeBadge order={order} />
         </div>
         <div className="grid grid-cols-2 gap-2 text-sm">
-          <MobileMeta label="Stage" value={order.patientStage ?? 'Not set'} />
-          <MobileMeta label="Arch" value={order.archTreatment ?? 'Not set'} />
+          <MobileMeta
+            label={t('ordersPage.mobileStage')}
+            value={order.patientStage ?? t('ordersPage.notSet')}
+          />
+          <MobileMeta
+            label={t('ordersPage.mobileArch')}
+            value={order.archTreatment ?? t('ordersPage.notSet')}
+          />
           {isAdmin && (
             <div className="col-span-2">
               <MobileMeta
-                label="Dentist"
-                value={order.doctor?.fullName ?? 'No dentist'}
+                label={t('ordersPage.mobileDentist')}
+                value={order.doctor?.fullName ?? t('ordersPage.noDentist')}
               />
             </div>
           )}
@@ -1426,6 +1465,7 @@ function BulkActionBar({
   onSetStatus: (status: OrderStatus) => void;
   onDelete: () => void;
 }) {
+  const { t } = useT();
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [statusPickerOpen, setStatusPickerOpen] = useState(false);
   return (
@@ -1438,18 +1478,14 @@ function BulkActionBar({
             </span>
             <div>
               <p className="text-sm font-semibold">
-                {count} order{count === 1 ? '' : 's'} selected
+                {t('ordersPage.bulkSelected', { count })}
               </p>
               <p className="text-xs text-muted-foreground">
-                Bulk actions are admin-only — every row in the batch is updated
-                inside a single transaction.
+                {t('ordersPage.bulkSubtext')}
               </p>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {/* Quick "Mark as Finished" — the most common bulk move
-                at the end of the lifecycle. Other statuses are
-                reachable through the picker dialog. */}
             <Button
               size="sm"
               variant="default"
@@ -1462,7 +1498,7 @@ function BulkActionBar({
               ) : (
                 <CheckCircle2 className="h-4 w-4" />
               )}
-              Mark as Finished
+              {t('ordersPage.bulkMarkFinished')}
             </Button>
             <Button
               size="sm"
@@ -1472,7 +1508,7 @@ function BulkActionBar({
               onClick={() => setStatusPickerOpen(true)}
             >
               <Wrench className="h-4 w-4" />
-              Change status…
+              {t('ordersPage.bulkChangeStatus')}
             </Button>
             <Button
               size="sm"
@@ -1482,7 +1518,7 @@ function BulkActionBar({
               onClick={() => setConfirmDeleteOpen(true)}
             >
               <Trash2 className="h-4 w-4" />
-              Delete selected
+              {t('ordersPage.bulkDeleteSelected')}
             </Button>
             <Button
               size="sm"
@@ -1490,7 +1526,7 @@ function BulkActionBar({
               disabled={pending}
               onClick={onCancel}
             >
-              Cancel
+              {t('ordersPage.cancel')}
             </Button>
           </div>
         </CardContent>
@@ -1499,7 +1535,7 @@ function BulkActionBar({
       <StatusPickerDialog
         open={statusPickerOpen}
         onOpenChange={setStatusPickerOpen}
-        title={`Change status of ${count} order${count === 1 ? '' : 's'}`}
+        title={t('ordersPage.bulkChangeStatusTitle', { count })}
         onConfirm={(status) => {
           setStatusPickerOpen(false);
           onSetStatus(status);
@@ -1509,11 +1545,9 @@ function BulkActionBar({
       <ConfirmDeleteDialog
         open={confirmDeleteOpen}
         onOpenChange={setConfirmDeleteOpen}
-        title={`Delete ${count} order${count === 1 ? '' : 's'}?`}
-        description={`This soft-deletes ${count} order${
-          count === 1 ? '' : 's'
-        }. The records stay in the database but disappear from active order lists. Hard-delete remains per-order from the row menu.`}
-        confirmLabel={`Delete ${count} order${count === 1 ? '' : 's'}`}
+        title={t('ordersPage.bulkDeleteTitle', { count })}
+        description={t('ordersPage.bulkDeleteBody', { count })}
+        confirmLabel={t('ordersPage.bulkDeleteConfirm', { count })}
         disabled={pending}
         onConfirm={() => {
           setConfirmDeleteOpen(false);
@@ -1543,6 +1577,7 @@ function TrashBulkActionBar({
   onRestore: () => void;
   onPermanentDelete: () => void;
 }) {
+  const { t } = useT();
   const [confirmRestoreOpen, setConfirmRestoreOpen] = useState(false);
   const [confirmHardOpen, setConfirmHardOpen] = useState(false);
   return (
@@ -1555,11 +1590,10 @@ function TrashBulkActionBar({
             </span>
             <div>
               <p className="text-sm font-semibold text-amber-900">
-                {count} deleted order{count === 1 ? '' : 's'} selected
+                {t('ordersPage.trashBulkSelected', { count })}
               </p>
               <p className="text-xs text-amber-900/80">
-                Restore brings rows back into the catalogue. Delete forever
-                wipes them and their files from disk — irreversible.
+                {t('ordersPage.trashBulkSubtext')}
               </p>
             </div>
           </div>
@@ -1576,7 +1610,7 @@ function TrashBulkActionBar({
               ) : (
                 <ArchiveRestore className="h-4 w-4" />
               )}
-              Restore selected
+              {t('ordersPage.bulkRestoreSelected')}
             </Button>
             <Button
               size="sm"
@@ -1586,7 +1620,7 @@ function TrashBulkActionBar({
               onClick={() => setConfirmHardOpen(true)}
             >
               <Trash2 className="h-4 w-4" />
-              Delete forever
+              {t('ordersPage.bulkDeleteForever')}
             </Button>
             <Button
               size="sm"
@@ -1594,7 +1628,7 @@ function TrashBulkActionBar({
               disabled={pending}
               onClick={onCancel}
             >
-              Cancel
+              {t('ordersPage.cancel')}
             </Button>
           </div>
         </CardContent>
@@ -1603,9 +1637,9 @@ function TrashBulkActionBar({
       <ConfirmDeleteDialog
         open={confirmRestoreOpen}
         onOpenChange={setConfirmRestoreOpen}
-        title={`Restore ${count} order${count === 1 ? '' : 's'}?`}
-        description={`The ${count === 1 ? 'order' : 'orders'} will reappear in the active orders list. You can soft-delete ${count === 1 ? 'it' : 'them'} again later if needed.`}
-        confirmLabel={`Restore ${count} order${count === 1 ? '' : 's'}`}
+        title={t('ordersPage.bulkRestoreTitle', { count })}
+        description={t('ordersPage.bulkRestoreBody', { count })}
+        confirmLabel={t('ordersPage.bulkRestoreConfirm', { count })}
         disabled={pending}
         onConfirm={() => {
           setConfirmRestoreOpen(false);
@@ -1616,13 +1650,9 @@ function TrashBulkActionBar({
       <ConfirmDeleteDialog
         open={confirmHardOpen}
         onOpenChange={setConfirmHardOpen}
-        title={`Delete ${count} order${count === 1 ? '' : 's'} forever?`}
-        description={`This permanently wipes ${count} order${
-          count === 1 ? '' : 's'
-        } and ${
-          count === 1 ? 'its' : 'their'
-        } attached files from disk. The database rows go too — there is no undo.`}
-        confirmLabel="Delete forever"
+        title={t('ordersPage.bulkHardTitle', { count })}
+        description={t('ordersPage.bulkHardBody', { count })}
+        confirmLabel={t('ordersPage.bulkDeleteForever')}
         disabled={pending}
         onConfirm={() => {
           setConfirmHardOpen(false);
@@ -1647,11 +1677,14 @@ function SelectAllCheckbox({
   indeterminate: boolean;
   onChange: () => void;
 }) {
+  const { t } = useT();
   return (
     <Checkbox
       checked={checked || (indeterminate ? 'indeterminate' : false)}
       onCheckedChange={onChange}
-      aria-label={checked ? 'Deselect all on page' : 'Select all on page'}
+      aria-label={
+        checked ? t('ordersPage.deselectAllAria') : t('ordersPage.selectAllAria')
+      }
     />
   );
 }
@@ -1676,6 +1709,7 @@ function StatusPickerDialog({
   currentStatus?: OrderStatus;
   onConfirm: (status: OrderStatus) => void;
 }) {
+  const { t } = useT();
   const [picked, setPicked] = useState<OrderStatus | undefined>(currentStatus);
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -1688,42 +1722,40 @@ function StatusPickerDialog({
             {title}
           </AlertDialogTitle>
           <AlertDialogDescription>
-            Admins can move orders to any lifecycle status. Choose the target
-            phase below — related side-tables (treatment plan, quotation) are
-            NOT modified.
+            {t('ordersPage.statusPickerBody')}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <div className="space-y-2 py-2">
           <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Target status
+            {t('ordersPage.targetStatus')}
           </Label>
           <Select
             value={picked}
             onValueChange={(value) => setPicked(value as OrderStatus)}
           >
             <SelectTrigger className="h-10">
-              <SelectValue placeholder="Select status" />
+              <SelectValue placeholder={t('ordersPage.selectStatus')} />
             </SelectTrigger>
             <SelectContent>
               {Object.values(OrderStatus)
                 .filter((value) => !LEGACY_STATUSES.has(value))
                 .map((value) => (
                   <SelectItem key={value} value={value}>
-                    {orderStatusLabel[value] ?? value}
+                    {localisedStatusLabel(value, t)}
                   </SelectItem>
                 ))}
             </SelectContent>
           </Select>
         </div>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogCancel>{t('ordersPage.cancel')}</AlertDialogCancel>
           <AlertDialogAction
             disabled={!picked || picked === currentStatus}
             onClick={() => {
               if (picked) onConfirm(picked);
             }}
           >
-            Apply status
+            {t('ordersPage.applyStatus')}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -1740,6 +1772,7 @@ function PlanBadge({
   isDoctor: boolean;
   isAdmin: boolean;
 }) {
+  const { t } = useT();
   const status = order.latestPlanStatus;
   if (!status) return null;
 
@@ -1749,22 +1782,24 @@ function PlanBadge({
     { label: string; tone: string; icon: ReactNode } | null
   > = {
     [TreatmentPlanStatus.PENDING]: {
-      label: 'Plan being prepared',
+      label: t('ordersPage.planPending'),
       tone: 'border-slate-200 bg-slate-50 text-slate-700',
       icon: <Hourglass className="h-3 w-3" />,
     },
     [TreatmentPlanStatus.READY]: {
-      label: audienceIsApprover ? 'Awaiting your review' : 'Awaiting doctor',
+      label: audienceIsApprover
+        ? t('ordersPage.planAwaitingYours')
+        : t('ordersPage.planAwaitingDoctor'),
       tone: 'border-amber-300 bg-amber-50 text-amber-900',
       icon: <AlertTriangle className="h-3 w-3" />,
     },
     [TreatmentPlanStatus.APPROVED]: {
-      label: 'Plan approved',
+      label: t('ordersPage.planApproved'),
       tone: 'border-emerald-300 bg-emerald-50 text-emerald-900',
       icon: <CheckCircle2 className="h-3 w-3" />,
     },
     [TreatmentPlanStatus.REJECTED]: {
-      label: 'Replanning requested',
+      label: t('ordersPage.planReplanning'),
       tone: 'border-red-300 bg-red-50 text-red-900',
       icon: <RefreshCcw className="h-3 w-3" />,
     },
@@ -1852,18 +1887,17 @@ function OrdersPagination({
   onPageChange: (page: number) => void;
   onPageSizeChange: (size: PageSize) => void;
 }) {
+  const { t } = useT();
   const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const to = Math.min(page * pageSize, total);
   return (
     <div className="flex flex-col gap-3 rounded-lg border bg-card p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4">
       <div className="flex flex-col gap-1 text-sm text-muted-foreground sm:flex-row sm:items-center sm:gap-3">
-        <span>
-          {from}–{to} of {total} orders
-        </span>
+        <span>{t('ordersPage.pagSummary', { from, to, total })}</span>
         <Separator orientation="vertical" className="hidden h-4 sm:block" />
         <div className="flex items-center gap-2">
           <Label htmlFor="orders-page-size" className="text-xs">
-            Rows per page
+            {t('ordersPage.pagRowsPerPage')}
           </Label>
           <Select
             value={String(pageSize)}
@@ -1890,10 +1924,10 @@ function OrdersPagination({
           disabled={page === 1}
         >
           <ChevronLeft className="mr-1 h-4 w-4" />
-          Previous
+          {t('ordersPage.pagPrevious')}
         </Button>
         <span className="text-sm text-muted-foreground">
-          Page {page} of {totalPages}
+          {t('ordersPage.pagPageOf', { page, total: totalPages })}
         </span>
         <Button
           variant="outline"
@@ -1901,7 +1935,7 @@ function OrdersPagination({
           onClick={() => onPageChange(Math.min(totalPages, page + 1))}
           disabled={page === totalPages}
         >
-          Next
+          {t('ordersPage.pagNext')}
           <ChevronRight className="ml-1 h-4 w-4" />
         </Button>
       </div>

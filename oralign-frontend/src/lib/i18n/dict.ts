@@ -1058,6 +1058,276 @@ export const dict = {
       deleteThis: { en: 'this patient', fr: 'ce patient' } as T,
     },
   },
+
+  // ─── Orders page (/dashboard/orders) ────────────────────────────
+  // Lives under `ordersPage` (not `orders`) because the `orders` block
+  // is already taken by the status-badge labels and the new-order
+  // wizard copy — keeping them separate avoids deep namespace clashes.
+  ordersPage: {
+    // Header strap
+    eyebrow: { en: 'Aligner order operations', fr: 'Gestion des commandes d’aligneurs' } as T,
+    title: { en: 'Orders', fr: 'Commandes' } as T,
+    subtitleAdmin: {
+      en: 'Review clinical submissions, dentist ownership, patient records, and uploaded case files from one workspace.',
+      fr: 'Examinez les soumissions cliniques, les praticiens responsables, les fiches patient et les fichiers téléversés depuis un seul espace.',
+    } as T,
+    subtitleDesigner: {
+      en: 'Review assigned order cases and attached clinical assets.',
+      fr: 'Consultez les commandes qui vous sont attribuées et les pièces cliniques associées.',
+    } as T,
+    subtitleDentist: {
+      en: 'Create treatment drafts, attach scan files, and submit aligner cases for production review.',
+      fr: 'Créez des brouillons de traitement, joignez les empreintes et soumettez vos cas d’aligneurs pour validation.',
+    } as T,
+    newOrder: { en: 'New Order', fr: 'Nouvelle commande' } as T,
+
+    // Status tabs
+    tabAll: { en: 'All', fr: 'Toutes' } as T,
+    tabDraft: { en: 'Draft', fr: 'Brouillon' } as T,
+    tabSubmitted: { en: 'Submitted', fr: 'Soumises' } as T,
+    tabTreatmentReady: { en: 'Treatment ready', fr: 'Plan prêt' } as T,
+    tabTreatmentApproved: { en: 'Treatment approved', fr: 'Plan approuvé' } as T,
+    tabQuoteSent: { en: 'Quote sent', fr: 'Devis envoyé' } as T,
+    tabPaid: { en: 'Paid', fr: 'Payée' } as T,
+    tabFabrication: { en: 'Fabrication', fr: 'Fabrication' } as T,
+    tabShipped: { en: 'Shipped', fr: 'Expédiée' } as T,
+    tabFinished: { en: 'Finished', fr: 'Terminée' } as T,
+
+    // Toolbar
+    searchPh: {
+      en: 'Search order code, patient, or dentist…',
+      fr: 'Rechercher par code, patient ou praticien…',
+    } as T,
+    filters: { en: 'Filters', fr: 'Filtres' } as T,
+    sort: { en: 'Sort', fr: 'Trier' } as T,
+    sortBy: { en: 'Sort by', fr: 'Trier par' } as T,
+    refresh: { en: 'Refresh', fr: 'Actualiser' } as T,
+    trash: { en: 'Trash', fr: 'Corbeille' } as T,
+    activeOrders: { en: 'Active orders', fr: 'Commandes actives' } as T,
+    showDeletedTitle: { en: 'Show deleted orders', fr: 'Afficher les commandes supprimées' } as T,
+    backToActiveTitle: { en: 'Back to active orders', fr: 'Retour aux commandes actives' } as T,
+
+    // Sort options
+    sortNewest: { en: 'Newest first', fr: 'Du plus récent' } as T,
+    sortOldest: { en: 'Oldest first', fr: 'Du plus ancien' } as T,
+    sortUpdated: { en: 'Recently updated', fr: 'Récemment mis à jour' } as T,
+    sortCodeAsc: { en: 'Order code (A–Z)', fr: 'Code commande (A–Z)' } as T,
+    sortCodeDesc: { en: 'Order code (Z–A)', fr: 'Code commande (Z–A)' } as T,
+    sortStatus: { en: 'Status (A–Z)', fr: 'Statut (A–Z)' } as T,
+
+    // Filter panel
+    dentistLabel: { en: 'Dentist', fr: 'Praticien' } as T,
+    allDentists: { en: 'All dentists', fr: 'Tous les praticiens' } as T,
+    createdFrom: { en: 'Created from', fr: 'Créée du' } as T,
+    createdTo: { en: 'Created to', fr: 'Créée au' } as T,
+    clearFilters: { en: 'Clear filters', fr: 'Effacer les filtres' } as T,
+
+    // Filter chips
+    activeLabel: { en: 'Active:', fr: 'Actifs :' } as T,
+    chipStatus: { en: 'Status: {value}', fr: 'Statut : {value}' } as T,
+    chipSearch: { en: 'Search: "{value}"', fr: 'Recherche : « {value} »' } as T,
+    chipDentist: { en: 'Dentist: {value}', fr: 'Praticien : {value}' } as T,
+    chipFrom: { en: 'From {value}', fr: 'À partir du {value}' } as T,
+    chipTo: { en: 'To {value}', fr: 'Jusqu’au {value}' } as T,
+    chipUnknown: { en: 'Unknown', fr: 'Inconnu' } as T,
+
+    // Trash banner
+    trashBannerBody: {
+      en: 'Viewing deleted orders. Restore brings them back into the catalogue; Delete forever wipes them and their files from disk — irreversible.',
+      fr: 'Affichage des commandes supprimées. La restauration les remet dans le catalogue ; la suppression définitive efface aussi les fichiers du disque — irréversible.',
+    } as T,
+    backToActive: { en: 'Back to active', fr: 'Retour aux actives' } as T,
+
+    // Bulk action bars
+    bulkSelected: {
+      en: '{count} order{s} selected',
+      fr: '{count} commande(s) sélectionnée(s)',
+    } as T,
+    bulkSubtext: {
+      en: 'Bulk actions are admin-only — every row in the batch is updated inside a single transaction.',
+      fr: 'Les actions groupées sont réservées aux administrateurs — chaque ligne du lot est mise à jour dans une seule transaction.',
+    } as T,
+    bulkMarkFinished: { en: 'Mark as Finished', fr: 'Marquer comme terminée' } as T,
+    bulkChangeStatus: { en: 'Change status…', fr: 'Changer le statut…' } as T,
+    bulkDeleteSelected: { en: 'Delete selected', fr: 'Supprimer la sélection' } as T,
+    cancel: { en: 'Cancel', fr: 'Annuler' } as T,
+
+    // Trash bulk
+    trashBulkSelected: {
+      en: '{count} deleted order{s} selected',
+      fr: '{count} commande(s) supprimée(s) sélectionnée(s)',
+    } as T,
+    trashBulkSubtext: {
+      en: 'Restore brings rows back into the catalogue. Delete forever wipes them and their files from disk — irreversible.',
+      fr: 'La restauration remet les lignes dans le catalogue. La suppression définitive efface aussi les fichiers du disque — irréversible.',
+    } as T,
+    bulkRestoreSelected: { en: 'Restore selected', fr: 'Restaurer la sélection' } as T,
+    bulkDeleteForever: { en: 'Delete forever', fr: 'Supprimer définitivement' } as T,
+
+    // Bulk confirm dialogs
+    bulkChangeStatusTitle: {
+      en: 'Change status of {count} order{s}',
+      fr: 'Changer le statut de {count} commande(s)',
+    } as T,
+    bulkDeleteTitle: {
+      en: 'Delete {count} order{s}?',
+      fr: 'Supprimer {count} commande(s) ?',
+    } as T,
+    bulkDeleteBody: {
+      en: 'This soft-deletes {count} order{s}. The records stay in the database but disappear from active order lists. Hard-delete remains per-order from the row menu.',
+      fr: 'Cela supprime {count} commande(s) en mode douce. Les fiches restent en base mais disparaissent des listes actives. La suppression définitive reste accessible par ligne via le menu.',
+    } as T,
+    bulkDeleteConfirm: {
+      en: 'Delete {count} order{s}',
+      fr: 'Supprimer {count} commande(s)',
+    } as T,
+    bulkRestoreTitle: {
+      en: 'Restore {count} order{s}?',
+      fr: 'Restaurer {count} commande(s) ?',
+    } as T,
+    bulkRestoreBody: {
+      en: 'The order{s} will reappear in the active orders list. You can soft-delete {them} again later if needed.',
+      fr: 'La/Les commande(s) réapparaîtront dans la liste active. Vous pourrez les supprimer à nouveau plus tard si besoin.',
+    } as T,
+    bulkRestoreConfirm: {
+      en: 'Restore {count} order{s}',
+      fr: 'Restaurer {count} commande(s)',
+    } as T,
+    bulkHardTitle: {
+      en: 'Delete {count} order{s} forever?',
+      fr: 'Supprimer {count} commande(s) définitivement ?',
+    } as T,
+    bulkHardBody: {
+      en: 'This permanently wipes {count} order{s} and {their} attached files from disk. The database rows go too — there is no undo.',
+      fr: 'Cela efface définitivement {count} commande(s) et leurs fichiers attachés du disque. Les lignes en base disparaissent aussi — pas de retour en arrière.',
+    } as T,
+
+    // Table headers
+    colOrder: { en: 'Order', fr: 'Commande' } as T,
+    colPatient: { en: 'Patient', fr: 'Patient' } as T,
+    colDentistCol: { en: 'Dentist', fr: 'Praticien' } as T,
+    colClinical: { en: 'Clinical', fr: 'Clinique' } as T,
+    colStatus: { en: 'Status', fr: 'Statut' } as T,
+    colCreated: { en: 'Created', fr: 'Créée le' } as T,
+    colActions: { en: 'Actions', fr: 'Actions' } as T,
+
+    // Row details
+    files: { en: '{count} file{s}', fr: '{count} fichier(s)' } as T,
+    noPatient: { en: 'No patient', fr: 'Aucun patient' } as T,
+    noPatientSelected: { en: 'No patient selected', fr: 'Aucun patient sélectionné' } as T,
+    noDentist: { en: 'No dentist', fr: 'Aucun praticien' } as T,
+    archNotSet: { en: 'Arch not set', fr: 'Arcade non définie' } as T,
+    stageNotSet: { en: 'Stage not set', fr: 'Phase non définie' } as T,
+    deletedPill: { en: 'Deleted', fr: 'Supprimée' } as T,
+
+    // ARIA labels
+    openOrderAria: { en: 'Open order {code}', fr: 'Ouvrir la commande {code}' } as T,
+    selectOrderAria: { en: 'Select {code}', fr: 'Sélectionner {code}' } as T,
+    selectAllAria: { en: 'Select all on page', fr: 'Tout sélectionner sur la page' } as T,
+    deselectAllAria: { en: 'Deselect all on page', fr: 'Tout désélectionner sur la page' } as T,
+    actionsForAria: { en: 'Actions for {code}', fr: 'Actions pour {code}' } as T,
+
+    // Row actions menu
+    deletedSuffix: { en: '· deleted', fr: '· supprimée' } as T,
+    viewOrder: { en: 'View order', fr: 'Voir la commande' } as T,
+    editOrder: { en: 'Edit order', fr: 'Modifier la commande' } as T,
+    deleteOrder: { en: 'Delete order', fr: 'Supprimer la commande' } as T,
+    restore: { en: 'Restore', fr: 'Restaurer' } as T,
+    deleteForever: { en: 'Delete forever', fr: 'Supprimer définitivement' } as T,
+    changeStatusDots: { en: 'Change status…', fr: 'Changer le statut…' } as T,
+
+    // Row confirm dialogs
+    deleteOrderTitle: { en: 'Delete order?', fr: 'Supprimer la commande ?' } as T,
+    deleteOrderBody: {
+      en: 'This will hide {code} from active order lists. The order can still be recovered from the database by an admin.',
+      fr: 'Cela masquera {code} des listes actives. La commande peut encore être restaurée par un administrateur depuis la base de données.',
+    } as T,
+    deleteOrderConfirm: { en: 'Delete', fr: 'Supprimer' } as T,
+    hardDeleteTitle: { en: 'Permanently delete order?', fr: 'Supprimer définitivement la commande ?' } as T,
+    hardDeleteBody: {
+      en: 'This permanently removes {code}, its tooth instructions, file records, and stored files. This cannot be undone.',
+      fr: 'Cela supprime définitivement {code}, ses instructions par dent, les enregistrements de fichiers et les fichiers stockés. Cette action est irréversible.',
+    } as T,
+
+    // Mobile card
+    mobileStage: { en: 'Stage', fr: 'Phase' } as T,
+    mobileArch: { en: 'Arch', fr: 'Arcade' } as T,
+    mobileDentist: { en: 'Dentist', fr: 'Praticien' } as T,
+    notSet: { en: 'Not set', fr: 'Non défini' } as T,
+
+    // Plan badge
+    planPending: { en: 'Plan being prepared', fr: 'Plan en préparation' } as T,
+    planAwaitingYours: { en: 'Awaiting your review', fr: 'En attente de votre validation' } as T,
+    planAwaitingDoctor: { en: 'Awaiting doctor', fr: 'En attente du praticien' } as T,
+    planApproved: { en: 'Plan approved', fr: 'Plan approuvé' } as T,
+    planReplanning: { en: 'Replanning requested', fr: 'Replanification demandée' } as T,
+
+    // Empty / error / loading
+    loadingFailedTitle: { en: 'Orders could not load', fr: 'Impossible de charger les commandes' } as T,
+    tryAgain: { en: 'Try again', fr: 'Réessayer' } as T,
+    emptyTrashTitle: { en: 'Trash is empty', fr: 'La corbeille est vide' } as T,
+    emptyOrdersTitle: { en: 'No orders found', fr: 'Aucune commande trouvée' } as T,
+    emptyTrashBody: {
+      en: 'There are no soft-deleted orders to review. Newly deleted orders will show up here.',
+      fr: 'Aucune commande supprimée à afficher. Les commandes nouvellement supprimées apparaîtront ici.',
+    } as T,
+    emptyFilteredBody: {
+      en: 'No orders match the current filters. Try widening the search or clearing filters.',
+      fr: 'Aucune commande ne correspond aux filtres actuels. Essayez d’élargir la recherche ou d’effacer les filtres.',
+    } as T,
+    emptyNoneBody: {
+      en: 'Create a new order to get started.',
+      fr: 'Créez une nouvelle commande pour commencer.',
+    } as T,
+
+    // Pagination
+    pagSummary: {
+      en: '{from}–{to} of {total} orders',
+      fr: '{from}–{to} sur {total} commandes',
+    } as T,
+    pagRowsPerPage: { en: 'Rows per page', fr: 'Lignes par page' } as T,
+    pagPrevious: { en: 'Previous', fr: 'Précédent' } as T,
+    pagNext: { en: 'Next', fr: 'Suivant' } as T,
+    pagPageOf: {
+      en: 'Page {page} of {total}',
+      fr: 'Page {page} sur {total}',
+    } as T,
+
+    // Status picker (single + bulk, used inline + via dialog)
+    statusPickerTitle: {
+      en: 'Change status of {code}',
+      fr: 'Changer le statut de {code}',
+    } as T,
+    statusPickerBody: {
+      en: 'Admins can move orders to any lifecycle status. Choose the target phase below — related side-tables (treatment plan, quotation) are NOT modified.',
+      fr: 'Les administrateurs peuvent placer la commande à n’importe quelle étape du cycle. Choisissez la phase cible ci-dessous — les tables liées (plan de traitement, devis) ne sont PAS modifiées.',
+    } as T,
+    targetStatus: { en: 'Target status', fr: 'Statut cible' } as T,
+    selectStatus: { en: 'Select status', fr: 'Choisir un statut' } as T,
+    applyStatus: { en: 'Apply status', fr: 'Appliquer le statut' } as T,
+
+    // OrderStatusChangeDialog (admin override w/ reason)
+    overrideDialogTitle: { en: 'Change order status', fr: 'Changer le statut de la commande' } as T,
+    overrideDialogBody: {
+      en: 'Admin override for {code}. Use this to roll the order forward past a stuck step or roll backward to fix a mistake. Treatment plan and quotation artefacts are kept — only the status changes.',
+      fr: 'Modification administrateur pour {code}. Utilisez-la pour faire avancer la commande au-delà d’une étape bloquée ou pour revenir en arrière en cas d’erreur. Le plan de traitement et le devis sont conservés — seul le statut change.',
+    } as T,
+    currently: { en: 'Currently', fr: 'Actuellement' } as T,
+    willBecome: { en: 'Will become', fr: 'Deviendra' } as T,
+    newStatus: { en: 'New status', fr: 'Nouveau statut' } as T,
+    reasonLabel: { en: 'Reason', fr: 'Raison' } as T,
+    reasonOptional: { en: '(optional, logged)', fr: '(facultatif, consigné)' } as T,
+    reasonPh: {
+      en: 'e.g. doctor confirmed payment over the phone — rolling to paid',
+      fr: 'p. ex. le praticien a confirmé le paiement par téléphone — passage à payée',
+    } as T,
+    applyChange: { en: 'Apply change', fr: 'Appliquer le changement' } as T,
+    phaseSubmission: { en: 'Submission', fr: 'Soumission' } as T,
+    phasePlanning: { en: 'Treatment planning', fr: 'Planification' } as T,
+    phaseBilling: { en: 'Quote & payment', fr: 'Devis & paiement' } as T,
+    phaseProduction: { en: 'Production', fr: 'Production' } as T,
+    phaseTerminal: { en: 'Terminal', fr: 'Final' } as T,
+  },
 } as const;
 
 // ────────────────────────────────────────────────────────────────────

@@ -317,14 +317,39 @@ export class OrderFilterDto {
   // Multi-status filter — the Orders page tab strip groups several
   // raw statuses under one tab (e.g. the "Treatment plan" tab covers
   // PLANNING + READY + REVISION_REQUESTED + APPROVED so a row
-  // anywhere in that phase shows up). Repeated query params:
-  //   ?statuses=treatment_planning&statuses=treatment_plan_ready
-  // class-validator's `each: true` validates every entry.
+  // anywhere in that phase shows up).
+  //
+  // Frontend serialisation shapes we normalise here:
+  //   1. ?statuses=finished                → string  → ['finished']
+  //   2. ?statuses=a&statuses=b            → string[] → ['a','b']
+  //   3. ?statuses[]=finished              → string[] (qs unwraps brackets)
+  //   4. ?statuses[0]=a&statuses[1]=b      → { '0':'a','1':'b' } (qs's
+  //                                          indexed-bracket shape — used
+  //                                          when the axios serializer
+  //                                          emits indices). We pull the
+  //                                          values back out so the
+  //                                          downstream filter sees an
+  //                                          array no matter what hit
+  //                                          the wire.
+  //   5. ?statuses=                        → empty string → undefined
   @ApiProperty({ enum: OrderStatus, isArray: true, required: false })
   @IsOptional()
-  // Express normalises a single `statuses=foo` to a string; wrap as
-  // an array so the filter logic only has to handle one shape.
-  @Transform(({ value }) => (Array.isArray(value) ? value : value ? [value] : undefined))
+  @Transform(({ value }) => {
+    if (value === undefined || value === null || value === '') return undefined;
+    if (Array.isArray(value)) {
+      const cleaned = value.filter((v) => v !== undefined && v !== null && v !== '');
+      return cleaned.length > 0 ? cleaned : undefined;
+    }
+    if (typeof value === 'object') {
+      // qs's indexed-bracket shape comes through as a plain object —
+      // `Object.values()` gives back the array we expected to receive.
+      const values = Object.values(value as Record<string, unknown>).filter(
+        (v) => v !== undefined && v !== null && v !== '',
+      );
+      return values.length > 0 ? values : undefined;
+    }
+    return [value];
+  })
   @IsEnum(OrderStatus, { each: true })
   statuses?: OrderStatus[];
 

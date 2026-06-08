@@ -40,7 +40,19 @@ export const ordersService = {
   ): Promise<PaginatedResponse<DentalOrder>> => {
     const response = await apiClient.get<PaginatedResponse<DentalOrder>>(
       '/orders',
-      { params },
+      {
+        params,
+        // Force the array values (`statuses[]`) into repeated query
+        // params WITHOUT bracket or index suffixes, e.g.
+        //   ?statuses=draft&statuses=submitted
+        // Axios's default serializer emits `statuses[]=…` which most
+        // querystring parsers handle, but a couple of edge versions
+        // produce the indexed-bracket shape (`statuses[0]=…`) that
+        // qs treats as an OBJECT rather than an array — pinning the
+        // serializer here avoids that whole class of "tab returns
+        // 400" bugs at the source.
+        paramsSerializer: { indexes: null },
+      },
     );
     return response.data;
   },

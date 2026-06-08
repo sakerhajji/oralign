@@ -182,12 +182,14 @@ const STATUS_TABS = [
       OrderStatus.PAID,
       OrderStatus.FABRICATION,
       OrderStatus.READY_TO_SHIP,
+      // SHIPPED used to live in its own tab. The clinical team
+      // decided the in-transit window is too short to deserve a
+      // dedicated bucket — most rows pass through SHIPPED for hours,
+      // not days, before the admin flips the last batch to delivered
+      // and the order auto-finishes. Fold it back into "In
+      // Fabrication" so the workflow strip stays clean.
+      OrderStatus.SHIPPED,
     ],
-  },
-  {
-    key: OrderStatus.SHIPPED,
-    labelKey: 'ordersPage.tabShipped',
-    statuses: [OrderStatus.SHIPPED],
   },
   {
     key: OrderStatus.FINISHED,

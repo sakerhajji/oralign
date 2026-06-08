@@ -5,6 +5,7 @@ import {
   PaymentRecordStatus,
   Prisma,
   QuotationPaymentStatus,
+  QuotationStatus,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -114,19 +115,26 @@ export class DoctorDashboardService {
     // a quotation referenced a soft-deleted order — which is what
     // caused the original "5 unpaid + 8 paid > 7 total" report.
     //
-    // PACK GUARD: a quotation MUST carry a packId to qualify as
-    // paid / unpaid. Pre-pack legacy quotations (and quotations the
-    // admin started but never attached a pack to) have no canonical
-    // price, so counting them as outstanding inflates the figure.
-    // They roll into `noActiveQuote` — semantically "admin still
-    // needs to finalise this order".
+    // QUALIFYING-QUOTE rule for paid / unpaid / outstanding:
+    //
+    //   • deletedAt: null         — quote is live
+    //   • packId: { not: null }   — admin has finalised the price
+    //   • status: approved        — DOCTOR HAS COMMITTED to the quote
+    //
+    // The status guard is the one that fixes the previous bug. A
+    // quotation with `paymentStatus = pending` is just the default —
+    // it does NOT mean "the doctor owes money". The debt only exists
+    // once the doctor has APPROVED the quote (status = approved).
+    // Draft / sent / rejected / canceled quotes have no committed
+    // price → they must NOT appear in unpaid or outstanding.
     //
     // Every counter uses the same `orderFilter` so cancelled/deleted
     // orders are excluded consistently across all cards.
     const orderFilter = { doctorId, deletedAt: null };
-    const PRICED_QUOTE = {
+    const QUALIFYING_QUOTE = {
       deletedAt: null,
       packId: { not: null },
+      status: QuotationStatus.approved,
     } as const;
     const [ordersPaid, ordersUnpaid, ordersWithoutActiveQuote] =
       await this.prisma.$transaction([
@@ -134,7 +142,7 @@ export class DoctorDashboardService {
           where: {
             ...orderFilter,
             quotation: {
-              ...PRICED_QUOTE,
+              ...QUALIFYING_QUOTE,
               paymentStatus: QuotationPaymentStatus.paid,
             },
           },
@@ -143,7 +151,7 @@ export class DoctorDashboardService {
           where: {
             ...orderFilter,
             quotation: {
-              ...PRICED_QUOTE,
+              ...QUALIFYING_QUOTE,
               paymentStatus: {
                 in: [
                   QuotationPaymentStatus.pending,
@@ -156,17 +164,27 @@ export class DoctorDashboardService {
         this.prisma.dentalOrder.count({
           where: {
             ...orderFilter,
-            // "No active priced quotation" = the order isn't ready
-            // for the paid/unpaid buckets yet. Three sub-cases all
-            // funnel here:
-            //   • No quotation row at all (DRAFT / UNDER_REVIEW)
-            //   • Quotation exists but soft-deleted
-            //   • Quotation exists but `packId IS NULL` (legacy /
-            //     incomplete — admin hasn't picked a pack yet)
+            // "Order isn't a committed debt yet" — funnels everything
+            // that doesn't qualify as paid OR unpaid:
+            //   • No quotation row at all (DRAFT order)
+            //   • Soft-deleted quotation
+            //   • Quotation exists but `packId IS NULL` (admin hasn't
+            //     finalised the price)
+            //   • Quotation exists + priced BUT not yet approved by
+            //     the doctor (status in draft / sent / rejected /
+            //     canceled). This is the case that was wrongly being
+            //     counted as outstanding before.
             OR: [
               { quotation: null },
               { quotation: { deletedAt: { not: null } } },
               { quotation: { deletedAt: null, packId: null } },
+              {
+                quotation: {
+                  deletedAt: null,
+                  packId: { not: null },
+                  status: { not: QuotationStatus.approved },
+                },
+              },
             ],
           },
         }),
@@ -185,16 +203,16 @@ export class DoctorDashboardService {
 
     // Revenue + outstanding still come from quotation aggregates
     // because they need the price/paid columns. Same `orderFilter`
-    // + same `packId: { not: null }` guard so the breakdown counts
-    // and the money sums stay in lockstep — a quotation that
-    // doesn't count as paid/unpaid above cannot inflate revenue
-    // or outstanding here either.
+    // + same QUALIFYING_QUOTE filter so the money sums and the
+    // counts above stay in lockstep — a quotation that doesn't
+    // qualify as paid/unpaid above cannot inflate revenue or
+    // outstanding here either.
     const [paidAgg, unpaidAgg, allAgg] = await this.prisma.$transaction([
       this.prisma.quotation.aggregate({
         _count: { _all: true },
         _sum: { totalPrice: true, paidAmount: true },
         where: {
-          ...PRICED_QUOTE,
+          ...QUALIFYING_QUOTE,
           paymentStatus: QuotationPaymentStatus.paid,
           order: orderFilter,
         },
@@ -203,7 +221,7 @@ export class DoctorDashboardService {
         _count: { _all: true },
         _sum: { totalPrice: true, paidAmount: true },
         where: {
-          ...PRICED_QUOTE,
+          ...QUALIFYING_QUOTE,
           paymentStatus: {
             in: [QuotationPaymentStatus.pending, QuotationPaymentStatus.partially_paid],
           },
@@ -213,7 +231,7 @@ export class DoctorDashboardService {
       this.prisma.quotation.aggregate({
         _count: { _all: true },
         _sum: { totalPrice: true, paidAmount: true },
-        where: { ...PRICED_QUOTE, order: orderFilter },
+        where: { ...QUALIFYING_QUOTE, order: orderFilter },
       }),
     ]);
 
@@ -414,11 +432,14 @@ export class DoctorDashboardService {
     const rows = await this.prisma.quotation.findMany({
       where: {
         deletedAt: null,
-        // Same `packId: { not: null }` guard the KPI uses — an order
-        // without an assigned pack has no canonical price and shouldn't
-        // show up in the outstanding-balance dialog. Keeps the dialog's
-        // row count consistent with the headline number on the card.
+        // Same QUALIFYING_QUOTE rule the KPI uses:
+        //   • packId set (price finalised by admin)
+        //   • status = approved (doctor committed)
+        //   • paymentStatus = pending | partially_paid (not yet paid)
+        // A pending payment status on a draft/sent/rejected quote is
+        // NOT outstanding — there's no commitment, no debt.
         packId: { not: null },
+        status: QuotationStatus.approved,
         order: { doctorId, deletedAt: null },
         paymentStatus: {
           in: [

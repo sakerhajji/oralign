@@ -157,15 +157,22 @@ export class AdminDashboardService {
 
     // Paid vs unpaid (by quotation status — the cleanest signal).
     //
-    // PACK GUARD: only quotations with an assigned pack count toward
-    // paid / unpaid / revenue / outstanding. A pre-pack legacy quote
-    // (or one the admin started but never finished) has no canonical
-    // price, so counting it would inflate the figure. Applied to every
-    // aggregate below so monthly growth / today's revenue stay
-    // consistent with the headline totals.
-    const PRICED_QUOTE = {
+    // QUALIFYING-QUOTE rule:
+    //
+    //   • deletedAt: null         — quote is live
+    //   • packId: { not: null }   — admin has finalised the price
+    //   • status: approved        — DOCTOR has committed to the quote
+    //
+    // The status guard is critical: `paymentStatus: pending` on a
+    // draft/sent quote does NOT mean there's an outstanding debt —
+    // that's just the default. The debt only exists once the doctor
+    // has approved the quote. Applied to every aggregate so monthly
+    // growth / today's revenue stay consistent with the headline
+    // totals and never double-count proposals as debt.
+    const QUALIFYING_QUOTE = {
       deletedAt: null,
       packId: { not: null },
+      status: QuotationStatus.approved,
     } as const;
     const [paidQuoteAgg, unpaidQuoteAgg, allQuoteAgg, monthQuoteAgg, prevMonthQuoteAgg, todayQuoteAgg] =
       await this.prisma.$transaction([
@@ -173,7 +180,7 @@ export class AdminDashboardService {
           _count: { _all: true },
           _sum: { totalPrice: true, paidAmount: true },
           where: {
-            ...PRICED_QUOTE,
+            ...QUALIFYING_QUOTE,
             paymentStatus: QuotationPaymentStatus.paid,
             sentAt: { gte: range.from, lte: range.to },
           },
@@ -182,7 +189,7 @@ export class AdminDashboardService {
           _count: { _all: true },
           _sum: { totalPrice: true, paidAmount: true },
           where: {
-            ...PRICED_QUOTE,
+            ...QUALIFYING_QUOTE,
             paymentStatus: {
               in: [
                 QuotationPaymentStatus.pending,
@@ -195,22 +202,22 @@ export class AdminDashboardService {
         this.prisma.quotation.aggregate({
           _count: { _all: true },
           _sum: { totalPrice: true, paidAmount: true },
-          where: { ...PRICED_QUOTE, sentAt: { gte: range.from, lte: range.to } },
+          where: { ...QUALIFYING_QUOTE, sentAt: { gte: range.from, lte: range.to } },
         }),
         this.prisma.quotation.aggregate({
           _sum: { paidAmount: true },
-          where: { ...PRICED_QUOTE, sentAt: { gte: monthStart } },
+          where: { ...QUALIFYING_QUOTE, sentAt: { gte: monthStart } },
         }),
         this.prisma.quotation.aggregate({
           _sum: { paidAmount: true },
           where: {
-            ...PRICED_QUOTE,
+            ...QUALIFYING_QUOTE,
             sentAt: { gte: prevMonthStart, lt: monthStart },
           },
         }),
         this.prisma.quotation.aggregate({
           _sum: { paidAmount: true },
-          where: { ...PRICED_QUOTE, sentAt: { gte: dayStart } },
+          where: { ...QUALIFYING_QUOTE, sentAt: { gte: dayStart } },
         }),
       ]);
 
@@ -360,6 +367,7 @@ export class AdminDashboardService {
         quotation: {
           select: {
             packId: true,
+            status: true,
             totalPrice: true,
             paidAmount: true,
             paymentStatus: true,
@@ -380,13 +388,17 @@ export class AdminDashboardService {
         outstanding: 0,
       };
       cur.orders += 1;
-      // PACK GUARD: skip pack-less quotations from the paid /
-      // outstanding accounting. A quotation without a packId has no
-      // canonical price; the doctor's "outstanding" leaderboard
-      // shouldn't be inflated by orders the admin hasn't finished
-      // pricing yet. They still count toward the doctor's total
-      // orders so the row's "orders" column stays truthful.
-      if (!o.quotation || !o.quotation.packId) {
+      // QUALIFYING-QUOTE rule for paid / outstanding accounting:
+      //   • packId set (admin priced the order)
+      //   • status = approved (doctor committed to the quote)
+      // An order missing either is NOT a real debt yet, so it stays
+      // out of paidOrders + outstanding. It still counts in `orders`
+      // so the row's order count is truthful.
+      if (
+        !o.quotation ||
+        !o.quotation.packId ||
+        o.quotation.status !== QuotationStatus.approved
+      ) {
         byDoctor.set(o.doctorId, cur);
         continue;
       }

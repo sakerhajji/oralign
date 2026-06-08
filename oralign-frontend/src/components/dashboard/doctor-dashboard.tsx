@@ -142,11 +142,18 @@ export function DoctorDashboard() {
         />
         <KpiCard
           label="Outstanding balance"
-          // Value rendered with the default neutral tone — the
-          // red/green hint moved into the dialog so the dashboard
-          // card stays visually uniform with the rest of the grid.
           value={TND(d?.revenue.unpaidDebt ?? 0)}
           icon={WalletIcon}
+          // Tint the value RED when the doctor actually owes money;
+          // otherwise leave the neutral default. We deliberately do
+          // NOT tint emerald on zero — green on every healthy dashboard
+          // would be visual noise. The red only shows when there's
+          // something to do.
+          valueClassName={
+            (d?.revenue.unpaidDebt ?? 0) > 0
+              ? 'text-destructive'
+              : undefined
+          }
           // Click → opens the per-order breakdown popup. The KpiCard
           // wraps itself in a semantic <button> so keyboard
           // activation + screen-reader role come for free.

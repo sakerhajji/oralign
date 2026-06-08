@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import {
   ArchType,
   BatchStatus,
@@ -45,7 +45,7 @@ const MONEY_EPSILON = new Prisma.Decimal('0.001');
  * through QuotationService alone.
  */
 @Injectable()
-export class QuotationPaymentPlanService {
+export class QuotationPaymentPlanService implements OnApplicationBootstrap {
   private readonly logger = new Logger(QuotationPaymentPlanService.name);
 
   constructor(
@@ -53,6 +53,75 @@ export class QuotationPaymentPlanService {
     private readonly packs: PackService,
     private readonly events: EventEmitter2,
   ) {}
+
+  /**
+   * One-shot reconciliation at boot.
+   *
+   * The auto-finish hook inside `deliverBatch` only fires when an
+   * admin actually clicks "Mark as delivered". Any order whose
+   * batches were ALL marked delivered BEFORE the auto-finish code
+   * shipped is stuck in its previous status (typically
+   * `fabrication`) even though every aligner has reached the
+   * patient. This pass heals those rows once per backend boot:
+   * find every non-finished order whose linked quotation has at
+   * least one batch and all batches are at status `delivered`,
+   * then flip the order to `finished`. Idempotent — re-running
+   * touches nothing because the WHERE clause excludes already-
+   * finished rows.
+   *
+   * Skipped if the table is empty (very common in fresh dev
+   * databases) — the count short-circuit avoids logging noise.
+   */
+  async onApplicationBootstrap(): Promise<void> {
+    try {
+      const candidates = await this.prisma.dentalOrder.findMany({
+        where: {
+          status: { not: OrderStatus.finished },
+          deletedAt: null,
+          quotation: {
+            deletedAt: null,
+            stepBatches: { some: {} },
+          },
+        },
+        select: { id: true },
+      });
+      if (candidates.length === 0) return;
+
+      let fixed = 0;
+      for (const order of candidates) {
+        const totals = await this.prisma.quoteStepBatch.groupBy({
+          by: ['status'],
+          where: {
+            quotation: { orderId: order.id, deletedAt: null },
+          },
+          _count: { status: true },
+        });
+        const total = totals.reduce((s, r) => s + r._count.status, 0);
+        const delivered = totals
+          .filter((r) => r.status === BatchStatus.delivered)
+          .reduce((s, r) => s + r._count.status, 0);
+        if (total > 0 && delivered === total) {
+          await this.prisma.dentalOrder.update({
+            where: { id: order.id },
+            data: { status: OrderStatus.finished },
+          });
+          fixed++;
+        }
+      }
+      if (fixed > 0) {
+        this.logger.log(
+          `Reconciled ${fixed} order(s) to FINISHED on boot — all batches were already delivered.`,
+        );
+      }
+    } catch (err) {
+      // Swallow boot-time errors so the rest of the app still starts.
+      // The next batch delivery (or the next boot) will retry the
+      // reconciliation for the same rows.
+      this.logger.error(
+        `Boot-time order reconciliation failed: ${(err as Error).message}`,
+      );
+    }
+  }
 
   /**
    * Snapshot a pack + active price onto a quote. Refuses to mutate

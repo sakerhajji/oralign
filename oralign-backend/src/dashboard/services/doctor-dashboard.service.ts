@@ -103,6 +103,15 @@ export class DoctorDashboardService {
 
     // Quotation aggregates — paid/unpaid + revenue scoped to this
     // doctor (via order.doctorId).
+    //
+    // CRITICAL: the order relation MUST filter `deletedAt: null` too,
+    // otherwise soft-deleted orders' quotations still count toward
+    // paid / unpaid / outstanding. That made the dashboard show
+    // nonsensical totals like "7 orders · 5 unpaid · 8 paid" because
+    // the order-count query honoured the soft-delete (line 84) but
+    // the aggregates below didn't. Test orders that were soft-deleted
+    // continued to inflate the breakdown.
+    const orderFilter = { doctorId, deletedAt: null };
     const [paidAgg, unpaidAgg, allAgg] = await this.prisma.$transaction([
       this.prisma.quotation.aggregate({
         _count: { _all: true },
@@ -110,7 +119,7 @@ export class DoctorDashboardService {
         where: {
           deletedAt: null,
           paymentStatus: QuotationPaymentStatus.paid,
-          order: { doctorId },
+          order: orderFilter,
         },
       }),
       this.prisma.quotation.aggregate({
@@ -121,34 +130,36 @@ export class DoctorDashboardService {
           paymentStatus: {
             in: [QuotationPaymentStatus.pending, QuotationPaymentStatus.partially_paid],
           },
-          order: { doctorId },
+          order: orderFilter,
         },
       }),
       this.prisma.quotation.aggregate({
         _count: { _all: true },
         _sum: { totalPrice: true, paidAmount: true },
-        where: { deletedAt: null, order: { doctorId } },
+        where: { deletedAt: null, order: orderFilter },
       }),
     ]);
 
+    // Same soft-delete filter on the order relation — payments tied
+    // to deleted orders shouldn't show up in the dashboard counters.
     const [paymentsPending, paymentsCompleted, paymentsFailed, paymentsAwaiting] =
       await this.prisma.$transaction([
         this.prisma.payment.count({
-          where: { status: PaymentRecordStatus.pending, order: { doctorId } },
+          where: { status: PaymentRecordStatus.pending, order: orderFilter },
         }),
         this.prisma.payment.count({
-          where: { status: PaymentRecordStatus.success, order: { doctorId } },
+          where: { status: PaymentRecordStatus.success, order: orderFilter },
         }),
         this.prisma.payment.count({
           where: {
             status: { in: [PaymentRecordStatus.failed, PaymentRecordStatus.rejected] },
-            order: { doctorId },
+            order: orderFilter,
           },
         }),
         this.prisma.payment.count({
           where: {
             status: PaymentRecordStatus.awaiting_confirmation,
-            order: { doctorId },
+            order: orderFilter,
           },
         }),
       ]);

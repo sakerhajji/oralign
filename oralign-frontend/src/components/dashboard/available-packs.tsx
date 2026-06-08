@@ -100,7 +100,12 @@ function PackCard({
     <Card
       className={cn(
         'relative flex h-full flex-col',
-        pack.isCurrent && 'ring-2 ring-primary',
+        // The "Current" pack used to ship with a `ring-2 ring-primary`
+        // halo, but the team asked to drop it — the badge on the top-
+        // right already tells the doctor which pack is theirs and the
+        // ring made the catalogue feel cluttered. Recommended packs
+        // still get a soft tinted border so the suggestion reads
+        // distinctly from the default cards.
         isRecommended && 'border-emerald-300/60',
       )}
     >

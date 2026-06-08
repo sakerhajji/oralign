@@ -115,21 +115,23 @@ export function DoctorDashboard() {
 
       {/* ─── 2. KPI grid ──────────────────────────────────────────── */}
       {/*
-        Six tiles, two rows × three columns on desktop, centred with a
-        max-width so the grid doesn't stretch edge-to-edge on a wide
-        screen. The KpiGrid wrapper used elsewhere caps at 4 columns —
-        we roll our own here for the specific 6-tile layout the doctor
-        spec calls for.
+        Six tiles laid out 1 / 2 / 3 columns by breakpoint — matches
+        the AvailablePacks grid right below, so KPI cards and pack
+        cards align vertically on any viewport (no awkward centred
+        narrow band on wide screens). The KpiGrid wrapper used
+        elsewhere caps at 4 columns; we roll our own here for the
+        specific 6-tile + full-width-as-packs layout the doctor spec
+        calls for.
 
         Order of tiles (top-left → bottom-right):
           • Total orders               (book of work)
-          • Outstanding balance        (red / green — most actionable)
+          • Outstanding balance        (click for breakdown popup)
           • Total patients             (clinic size)
           • Pending payments           (clickable → /payments/history)
           • Unpaid orders              (count, secondary signal)
           • Paid orders                (count, healthy signal)
        */}
-      <section className="mx-auto grid w-full max-w-5xl grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 *:data-[slot=card]:bg-gradient-to-t *:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card *:data-[slot=card]:shadow-xs dark:*:data-[slot=card]:bg-card">
+      <section className="grid w-full grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 *:data-[slot=card]:bg-gradient-to-t *:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card *:data-[slot=card]:shadow-xs dark:*:data-[slot=card]:bg-card">
         <KpiCard
           label="Total orders"
           value={N(d?.orders.total ?? 0)}

@@ -55,22 +55,55 @@ const TND = (n: number, currency = 'TND') =>
  * pay for the per-order fetch on every dashboard mount. Refetches
  * every 30s while open so a payment landing in another tab drops
  * its row from the list in near-real-time.
+ *
+ * Graceful degradation
+ * --------------------
+ * The dedicated `/outstanding-orders` endpoint is recent — older
+ * backend containers return 404. To keep the dialog useful during
+ * the deployment window, we always render the headline figures
+ * (`fallbackTotal` + `fallbackCount`) that the parent KPI already
+ * resolved. When the detailed breakdown fetch fails, we surface
+ * those numbers in a polite "summary only" state instead of a hard
+ * error. The dialog still works; it just can't show per-row data
+ * until the new endpoint lands.
  */
 export interface OutstandingBalanceDialogProps {
   open: boolean;
   onOpenChange: (next: boolean) => void;
+  /**
+   * Headline outstanding amount the parent already knows from the
+   * doctor KPIs. Used to short-circuit the body to an empty-state
+   * when 0 (no need to round-trip for an empty list), and as a
+   * fallback display when the breakdown endpoint isn't reachable.
+   */
+  fallbackTotal?: number;
+  /** Same idea for the unpaid-order count from KPIs. */
+  fallbackCount?: number;
+  fallbackCurrency?: string;
 }
 
 export function OutstandingBalanceDialog({
   open,
   onOpenChange,
+  fallbackTotal = 0,
+  fallbackCount = 0,
+  fallbackCurrency = 'TND',
 }: OutstandingBalanceDialogProps) {
+  // Only fire the per-order breakdown fetch when the parent KPI says
+  // there's actually anything outstanding. A doctor with 0 TND due
+  // doesn't need a network round-trip to confirm an empty list — we
+  // know it'll be empty.
+  const shouldFetch = open && fallbackTotal > 0;
   const { data, isLoading, isError, error, refetch, isFetching } =
-    useDoctorOutstandingOrders(open);
+    useDoctorOutstandingOrders(shouldFetch);
+
+  // Prefer fresh server data when available; otherwise the headline
+  // figures the parent dashboard already resolved keep the popup
+  // informative even when the breakdown endpoint is missing.
   const rows = data?.data ?? [];
-  const total = data?.totalOutstanding ?? 0;
-  const currency = data?.currency ?? 'TND';
-  const count = data?.count ?? 0;
+  const total = data?.totalOutstanding ?? fallbackTotal;
+  const currency = data?.currency ?? fallbackCurrency;
+  const count = data?.count ?? fallbackCount;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -131,13 +164,35 @@ export function OutstandingBalanceDialog({
 
         {/* ─── Body ──────────────────────────────────────────────── */}
         <div className="min-h-0 flex-1 overflow-auto bg-card">
-          {isError ? (
+          {/*
+            Decision tree:
+              1. Nothing to fetch (parent says 0 outstanding) → empty state
+              2. Fetch is running → loading state
+              3. Fetch failed BUT we have a non-zero headline → degrade
+                 gracefully to the "summary only" state, not the hard
+                 error wall. This is the case during a deployment
+                 window where the new /outstanding-orders endpoint
+                 isn't live yet on the running backend.
+              4. Fetch failed AND nothing to show → hard error.
+              5. Fetch succeeded with empty list → empty state.
+              6. Fetch succeeded with rows → table.
+           */}
+          {!shouldFetch ? (
+            <EmptyState />
+          ) : isLoading ? (
+            <LoadingState />
+          ) : isError && total > 0 ? (
+            <SummaryOnlyState
+              total={total}
+              currency={currency}
+              count={count}
+              onRetry={refetch}
+            />
+          ) : isError ? (
             <ErrorState
               message={(error as Error)?.message}
               onRetry={refetch}
             />
-          ) : isLoading ? (
-            <LoadingState />
           ) : rows.length === 0 ? (
             <EmptyState />
           ) : (
@@ -275,6 +330,61 @@ function EmptyState() {
           All your orders are paid in full. Nothing for you to chase.
         </p>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Graceful-degradation state: we couldn't load the per-order
+ * breakdown, but the parent dashboard already knows the headline
+ * total + count. Show those in a polite card with a Retry — the
+ * dialog stays informative even when the new endpoint isn't
+ * deployed yet on the running backend.
+ */
+function SummaryOnlyState({
+  total,
+  currency,
+  count,
+  onRetry,
+}: {
+  total: number;
+  currency: string;
+  count: number;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="flex h-full min-h-[260px] w-full flex-col items-center justify-center gap-4 p-8 text-center">
+      <div className="grid h-12 w-12 place-items-center rounded-full bg-amber-100 text-amber-700">
+        <Wallet className="h-6 w-6" />
+      </div>
+      <div className="space-y-1">
+        <p className="text-sm font-semibold">Summary only</p>
+        <p className="max-w-md text-xs text-muted-foreground">
+          We couldn&apos;t load the per-order breakdown right now — the
+          detailed view will be available shortly. Here&apos;s what we
+          know from your dashboard:
+        </p>
+      </div>
+      <div className="grid w-full max-w-xs grid-cols-2 gap-2 rounded-lg border bg-muted/30 p-3">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Total due
+          </p>
+          <p className="text-base font-bold tabular-nums">
+            {TND(total, currency)}
+          </p>
+        </div>
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Unpaid orders
+          </p>
+          <p className="text-base font-bold tabular-nums">{count}</p>
+        </div>
+      </div>
+      <Button size="sm" variant="outline" onClick={onRetry} className="gap-1.5">
+        <RefreshCw className="size-3.5" />
+        Try again
+      </Button>
     </div>
   );
 }

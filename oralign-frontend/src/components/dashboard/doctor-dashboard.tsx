@@ -215,10 +215,21 @@ export function DoctorDashboard() {
         underlying query stays disabled until `open === true` so we
         don't fetch the per-order breakdown until the doctor actually
         opens it.
+
+        We pass the headline figures the KPI already resolved so the
+        dialog can:
+          • Short-circuit to an empty state when nothing is due (no
+            network round-trip for an empty list).
+          • Degrade to a "summary only" view if the per-order endpoint
+            isn't reachable — keeps the popup useful during deploy
+            windows where the new route isn't live yet on the running
+            backend.
        */}
       <OutstandingBalanceDialog
         open={outstandingOpen}
         onOpenChange={setOutstandingOpen}
+        fallbackTotal={d?.revenue.unpaidDebt ?? 0}
+        fallbackCount={d?.orders.unpaid ?? 0}
       />
     </div>
   );

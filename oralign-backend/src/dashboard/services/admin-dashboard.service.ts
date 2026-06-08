@@ -156,13 +156,24 @@ export class AdminDashboardService {
     ]);
 
     // Paid vs unpaid (by quotation status — the cleanest signal).
+    //
+    // PACK GUARD: only quotations with an assigned pack count toward
+    // paid / unpaid / revenue / outstanding. A pre-pack legacy quote
+    // (or one the admin started but never finished) has no canonical
+    // price, so counting it would inflate the figure. Applied to every
+    // aggregate below so monthly growth / today's revenue stay
+    // consistent with the headline totals.
+    const PRICED_QUOTE = {
+      deletedAt: null,
+      packId: { not: null },
+    } as const;
     const [paidQuoteAgg, unpaidQuoteAgg, allQuoteAgg, monthQuoteAgg, prevMonthQuoteAgg, todayQuoteAgg] =
       await this.prisma.$transaction([
         this.prisma.quotation.aggregate({
           _count: { _all: true },
           _sum: { totalPrice: true, paidAmount: true },
           where: {
-            deletedAt: null,
+            ...PRICED_QUOTE,
             paymentStatus: QuotationPaymentStatus.paid,
             sentAt: { gte: range.from, lte: range.to },
           },
@@ -171,7 +182,7 @@ export class AdminDashboardService {
           _count: { _all: true },
           _sum: { totalPrice: true, paidAmount: true },
           where: {
-            deletedAt: null,
+            ...PRICED_QUOTE,
             paymentStatus: {
               in: [
                 QuotationPaymentStatus.pending,
@@ -184,22 +195,22 @@ export class AdminDashboardService {
         this.prisma.quotation.aggregate({
           _count: { _all: true },
           _sum: { totalPrice: true, paidAmount: true },
-          where: { deletedAt: null, sentAt: { gte: range.from, lte: range.to } },
+          where: { ...PRICED_QUOTE, sentAt: { gte: range.from, lte: range.to } },
         }),
         this.prisma.quotation.aggregate({
           _sum: { paidAmount: true },
-          where: { deletedAt: null, sentAt: { gte: monthStart } },
+          where: { ...PRICED_QUOTE, sentAt: { gte: monthStart } },
         }),
         this.prisma.quotation.aggregate({
           _sum: { paidAmount: true },
           where: {
-            deletedAt: null,
+            ...PRICED_QUOTE,
             sentAt: { gte: prevMonthStart, lt: monthStart },
           },
         }),
         this.prisma.quotation.aggregate({
           _sum: { paidAmount: true },
-          where: { deletedAt: null, sentAt: { gte: dayStart } },
+          where: { ...PRICED_QUOTE, sentAt: { gte: dayStart } },
         }),
       ]);
 
@@ -348,6 +359,7 @@ export class AdminDashboardService {
         doctorId: true,
         quotation: {
           select: {
+            packId: true,
             totalPrice: true,
             paidAmount: true,
             paymentStatus: true,
@@ -368,9 +380,19 @@ export class AdminDashboardService {
         outstanding: 0,
       };
       cur.orders += 1;
-      const total = toNumber(o.quotation?.totalPrice ?? 0);
-      const paid = toNumber(o.quotation?.paidAmount ?? 0);
-      if (o.quotation?.paymentStatus === QuotationPaymentStatus.paid) {
+      // PACK GUARD: skip pack-less quotations from the paid /
+      // outstanding accounting. A quotation without a packId has no
+      // canonical price; the doctor's "outstanding" leaderboard
+      // shouldn't be inflated by orders the admin hasn't finished
+      // pricing yet. They still count toward the doctor's total
+      // orders so the row's "orders" column stays truthful.
+      if (!o.quotation || !o.quotation.packId) {
+        byDoctor.set(o.doctorId, cur);
+        continue;
+      }
+      const total = toNumber(o.quotation.totalPrice ?? 0);
+      const paid = toNumber(o.quotation.paidAmount ?? 0);
+      if (o.quotation.paymentStatus === QuotationPaymentStatus.paid) {
         cur.paidOrders += 1;
         cur.revenue += total;
       } else {

@@ -14,12 +14,15 @@ import {
   Factory,
   Info,
   ListChecks,
+  Phone,
   Save,
   ScanLine,
+  Search,
   Send,
   ShieldCheck,
   Target,
   UserRound,
+  X,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
@@ -830,6 +833,235 @@ function OrderStepper({
   );
 }
 
+// ──────────────────────────────────────────────────────────────────
+// Patient search picker — inline, no popover, no extra dependency.
+//
+// Replaces a flat <Select> dropdown that previously listed every
+// patient by name with no filtering. The picker now searches across
+// FULL NAME, PHONE NUMBER and EMAIL so a doctor with hundreds of
+// patients can find Mrs. Hajji by typing "haj", "+216 12", or even
+// her last 4 digits. Match is case-insensitive and substring-based
+// (not fuzzy — most users want predictable prefix-y matching).
+//
+// UX notes:
+//   • If a patient is already selected, render a tidy "selected
+//     patient" chip with a Change button — the user gets clear
+//     feedback that the picker is "in selected mode" rather than
+//     dropping back to the empty search every time.
+//   • When the user hits Change, the chip swaps for the search input
+//     and a scrollable list of matches with a max height so long
+//     lists don't push the form out of view.
+//   • Empty state copy when filter returns nothing tells the user
+//     the search came up dry rather than implying no patients exist.
+// ──────────────────────────────────────────────────────────────────
+function PatientSearchPicker({
+  patients,
+  loading,
+  selectedId,
+  errorMessage,
+  disabled,
+  onSelect,
+}: {
+  patients: {
+    id: string;
+    fullName: string;
+    phone?: string | null;
+    email?: string | null;
+  }[];
+  loading: boolean;
+  selectedId: string | undefined;
+  errorMessage?: string;
+  disabled?: boolean;
+  onSelect: (id: string) => void;
+}) {
+  const { t } = useT();
+  const [query, setQuery] = useState('');
+  // When a patient is already selected we collapse the picker into a
+  // chip — `expanded` flips back when the user clicks Change.
+  const [expanded, setExpanded] = useState(false);
+
+  const selected = useMemo(
+    () => patients.find((p) => p.id === selectedId),
+    [patients, selectedId],
+  );
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return patients;
+    // Strip non-digit chars from query when the user is searching by
+    // phone so "+216 12 345 678" matches "+21612345678" (no spaces
+    // stored). We still compare against the raw name/email — only
+    // the phone matcher uses the digit-only form.
+    const qDigits = q.replace(/\D/g, '');
+    return patients.filter((p) => {
+      const name = p.fullName.toLowerCase();
+      const phone = (p.phone ?? '').toLowerCase();
+      const phoneDigits = phone.replace(/\D/g, '');
+      const email = (p.email ?? '').toLowerCase();
+      return (
+        name.includes(q) ||
+        email.includes(q) ||
+        (qDigits.length >= 2 && phoneDigits.includes(qDigits))
+      );
+    });
+  }, [patients, query]);
+
+  // Selected-mode: tidy chip + Change button.
+  if (selected && !expanded) {
+    return (
+      <div className="space-y-2">
+        <div
+          className={cn(
+            'flex items-center justify-between gap-3 rounded-md border bg-card px-3 py-2.5 shadow-sm transition',
+            errorMessage && 'border-red-500',
+          )}
+        >
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">
+              <UserRound className="h-4 w-4" />
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium">
+                {selected.fullName}
+              </p>
+              <p className="truncate text-xs text-muted-foreground">
+                {selected.phone || selected.email || (
+                  <span className="italic">
+                    {t('orderForm.patient.pickerSelected')}
+                  </span>
+                )}
+              </p>
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 shrink-0"
+            disabled={disabled}
+            onClick={() => {
+              setExpanded(true);
+              setQuery('');
+            }}
+          >
+            {t('orderForm.patient.pickerChange')}
+          </Button>
+        </div>
+        {errorMessage ? (
+          <FieldError message={errorMessage} />
+        ) : null}
+      </div>
+    );
+  }
+
+  // Search-mode: input + scrollable list.
+  return (
+    <div className="space-y-2">
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          autoFocus={expanded}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={t('orderForm.patient.pickerPlaceholder')}
+          disabled={disabled || loading}
+          className={cn('h-11 pl-10 pr-9', errorMessage && 'border-red-500')}
+        />
+        {query ? (
+          <button
+            type="button"
+            onClick={() => setQuery('')}
+            aria-label="Clear search"
+            className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-muted-foreground hover:bg-muted"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        ) : null}
+      </div>
+
+      {/* Results list. Capped height so it doesn't grow off-screen
+          when the doctor has hundreds of patients; the inner div
+          scrolls. Tabular-num font on the phone keeps numbers easy
+          to scan. */}
+      <div className="overflow-hidden rounded-md border bg-card">
+        {loading ? (
+          <p className="px-3 py-4 text-sm text-muted-foreground">
+            {t('orderForm.patient.pickerLoading')}
+          </p>
+        ) : filtered.length === 0 ? (
+          <p className="px-3 py-4 text-sm text-muted-foreground">
+            {t('orderForm.patient.pickerEmpty')}
+          </p>
+        ) : (
+          <ul
+            role="listbox"
+            aria-label={t('orderForm.patient.pickerLabel')}
+            className="max-h-64 overflow-y-auto"
+          >
+            {filtered.map((p) => {
+              const isActive = p.id === selectedId;
+              return (
+                <li key={p.id}>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={isActive}
+                    disabled={disabled}
+                    onClick={() => {
+                      onSelect(p.id);
+                      setExpanded(false);
+                      setQuery('');
+                    }}
+                    className={cn(
+                      'flex w-full items-center justify-between gap-3 border-b px-3 py-2.5 text-left transition last:border-0 hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-none',
+                      isActive && 'bg-primary/5',
+                    )}
+                  >
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
+                        {(p.fullName.trim().charAt(0) || '?').toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">
+                          {p.fullName}
+                        </p>
+                        {p.phone ? (
+                          <p className="truncate font-mono text-xs tabular-nums text-muted-foreground">
+                            <Phone className="me-1 inline h-3 w-3" />
+                            {p.phone}
+                          </p>
+                        ) : p.email ? (
+                          <p className="truncate text-xs text-muted-foreground">
+                            {p.email}
+                          </p>
+                        ) : null}
+                      </div>
+                    </div>
+                    {isActive ? (
+                      <Check className="h-4 w-4 shrink-0 text-primary" />
+                    ) : null}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
+      {/* Result count — small caption beneath the list so the user
+          knows whether they've narrowed the search enough. Hidden
+          when nothing's been typed (the whole list is shown). */}
+      {!loading && query && filtered.length > 0 ? (
+        <p className="text-[11px] text-muted-foreground">
+          {t('orderForm.patient.pickerResults', { count: filtered.length })}
+        </p>
+      ) : null}
+
+      {errorMessage ? <FieldError message={errorMessage} /> : null}
+    </div>
+  );
+}
+
 function PatientStep({
   isAdmin,
   canModify,
@@ -853,7 +1085,16 @@ function PatientStep({
   newPatient: NewPatientDraft;
   selectedPatientName?: string;
   dentists: { id: string; fullName: string }[];
-  patients: { id: string; fullName: string }[];
+  // Picker needs `phone` (and optionally `email`) so the user can
+  // search by anything they remember about the patient — most of our
+  // doctors store phone numbers more reliably than email, so phone is
+  // the primary secondary identifier.
+  patients: {
+    id: string;
+    fullName: string;
+    phone?: string | null;
+    email?: string | null;
+  }[];
   patientsLoading: boolean;
   errors: FieldErrors;
   updateField: <K extends keyof CreateOrderDto>(key: K, value: CreateOrderDto[K]) => void;
@@ -906,23 +1147,14 @@ function PatientStep({
       {patientMode === 'existing' ? (
         <div className="grid gap-2">
           <Label>{t('orderForm.patient.patientLabel')}</Label>
-          <Select
-            value={form.patientId}
-            onValueChange={(patientId) => updateField('patientId', patientId)}
-            disabled={!canModify || patientsLoading}
-          >
-            <SelectTrigger className={cn('h-11', errors.patientId && 'border-red-500')}>
-              <SelectValue placeholder={t('orderForm.patient.selectPatientFromListPh')} />
-            </SelectTrigger>
-            <SelectContent>
-              {patients.map((patient) => (
-                <SelectItem key={patient.id} value={patient.id}>
-                  {patient.fullName}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <FieldError message={errors.patientId} />
+          <PatientSearchPicker
+            patients={patients}
+            loading={patientsLoading}
+            selectedId={form.patientId}
+            errorMessage={errors.patientId}
+            disabled={!canModify}
+            onSelect={(patientId) => updateField('patientId', patientId)}
+          />
         </div>
       ) : (
         // ──────────────────────────────────────────────────────────────

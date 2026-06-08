@@ -207,7 +207,24 @@ export const dict = {
       pickExisting: { en: 'Existing patient', fr: 'Patient existant' } as T,
       createNew: { en: 'New patient', fr: 'Nouveau patient' } as T,
       pickerLabel: { en: 'Pick a patient', fr: 'Choisir un patient' } as T,
-      pickerPlaceholder: { en: 'Search by name…', fr: 'Rechercher par nom…' } as T,
+      pickerPlaceholder: {
+        en: 'Search by name or phone…',
+        fr: 'Rechercher par nom ou téléphone…',
+      } as T,
+      pickerEmpty: {
+        en: 'No patient matches your search.',
+        fr: 'Aucun patient ne correspond à votre recherche.',
+      } as T,
+      pickerLoading: {
+        en: 'Loading patients…',
+        fr: 'Chargement des patients…',
+      } as T,
+      pickerChange: { en: 'Change', fr: 'Changer' } as T,
+      pickerSelected: { en: 'Selected patient', fr: 'Patient sélectionné' } as T,
+      pickerResults: {
+        en: '{count} result{s}',
+        fr: '{count} résultat(s)',
+      } as T,
 
       // Fields
       fullName: { en: 'Full name', fr: 'Nom complet' } as T,

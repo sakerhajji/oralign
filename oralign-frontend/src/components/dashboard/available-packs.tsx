@@ -4,23 +4,20 @@ import {
   Card,
   CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   CheckCircle2Icon,
-  InfinityIcon,
+  InfoIcon,
   PackageIcon,
   SparklesIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useDoctorAvailablePacks } from '@/lib/hooks';
 import type { AvailablePack } from '@/lib/types';
-import Link from 'next/link';
 
 const TND = (n: number) =>
   new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(n) + ' TND';
@@ -95,9 +92,14 @@ function PackCard({
   ];
 
   return (
+    // Read-only catalogue card. Subscription happens on the order
+    // wizard (the doctor picks a pack as part of the New Order flow),
+    // NOT here — keeping a CTA on this card would lead doctors into
+    // a half-flow that needs an order to complete. Better to surface
+    // it as informational and let the order form be the single entry.
     <Card
       className={cn(
-        'relative flex h-full flex-col transition-all hover:shadow-md',
+        'relative flex h-full flex-col',
         pack.isCurrent && 'ring-2 ring-primary',
         isRecommended && 'border-emerald-300/60',
       )}
@@ -133,31 +135,27 @@ function PackCard({
           </span>
         </div>
       </CardHeader>
-      <CardContent className="flex-1">
+      <CardContent className="flex-1 space-y-3">
         <ul className="space-y-2 text-sm">
           {features.map((f, i) => (
             <li key={i} className="flex items-start gap-2">
-              {f.ok ? (
-                <CheckCircle2Icon className="mt-0.5 size-4 text-emerald-600" />
-              ) : (
-                <InfinityIcon className="mt-0.5 size-4 text-muted-foreground" />
-              )}
+              <CheckCircle2Icon className="mt-0.5 size-4 text-emerald-600" />
               <span>{f.label}</span>
             </li>
           ))}
         </ul>
+        {/* Inline hint replacing the old "Subscribe" CTA. Surfaces
+            where to actually pick the pack so doctors don't hunt
+            for a button that's no longer here. */}
+        <p className="flex items-start gap-1.5 rounded-md border bg-muted/30 p-2 text-[11px] leading-snug text-muted-foreground">
+          <InfoIcon className="mt-0.5 size-3 shrink-0" />
+          <span>
+            {pack.isCurrent
+              ? 'Your current pack. You can pick it again when you create a new order.'
+              : 'Choose this pack from the New Order form when you create a case.'}
+          </span>
+        </p>
       </CardContent>
-      <CardFooter>
-        <Button
-          asChild
-          variant={pack.isCurrent ? 'outline' : 'default'}
-          className="w-full"
-        >
-          <Link href={`/dashboard/orders/new?packId=${pack.id}`}>
-            {pack.isCurrent ? 'Use this pack again' : 'Subscribe / Upgrade'}
-          </Link>
-        </Button>
-      </CardFooter>
     </Card>
   );
 }

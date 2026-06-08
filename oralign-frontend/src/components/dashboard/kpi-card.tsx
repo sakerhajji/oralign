@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
 import {
   Card,
@@ -37,6 +38,19 @@ export interface KpiCardProps {
   className?: string;
   /** Tweaks the title size so cramped grids stay readable. */
   compact?: boolean;
+  /**
+   * Extra Tailwind classes applied to the value (CardTitle). Used by
+   * the doctor dashboard to tone Outstanding balance red (>0) or
+   * green (=0). Merged with the default sizing classes via cn().
+   */
+  valueClassName?: string;
+  /**
+   * When set, the entire card becomes a Next.js Link to that route.
+   * The card gets a subtle hover affordance so the user knows it's
+   * clickable. Used for the doctor "Pending payments" KPI to deep-
+   * link into the payment history filtered view.
+   */
+  href?: string;
 }
 
 export function KpiCard({
@@ -49,6 +63,8 @@ export function KpiCard({
   loading,
   className,
   compact,
+  valueClassName,
+  href,
 }: KpiCardProps) {
   if (loading) {
     return (
@@ -74,8 +90,17 @@ export function KpiCard({
   const DeltaIcon =
     delta?.direction === 'down' ? TrendingDownIcon : TrendingUpIcon;
 
-  return (
-    <Card className={cn('@container/card', className)}>
+  const cardBody = (
+    <Card
+      className={cn(
+        '@container/card',
+        // When the card is a link, add hover / focus affordance so the
+        // user gets the standard "I can click this" cue.
+        href &&
+          'transition cursor-pointer hover:border-primary/50 hover:shadow-md focus-visible:ring-2 focus-visible:ring-primary/40',
+        className,
+      )}
+    >
       <CardHeader>
         <CardDescription className="flex items-center gap-2">
           {Icon ? <Icon className="size-4 text-muted-foreground" /> : null}
@@ -85,6 +110,7 @@ export function KpiCard({
           className={cn(
             'font-semibold tabular-nums',
             compact ? 'text-xl @[250px]/card:text-2xl' : 'text-2xl @[250px]/card:text-3xl',
+            valueClassName,
           )}
         >
           {value}
@@ -113,6 +139,18 @@ export function KpiCard({
       ) : null}
     </Card>
   );
+
+  if (href) {
+    // `block` lets the Link expand to the card's full size so the
+    // entire surface is clickable. `aria-label` mirrors the visible
+    // label so screen-reader users get the same context.
+    return (
+      <Link href={href} aria-label={label} className="block focus:outline-none">
+        {cardBody}
+      </Link>
+    );
+  }
+  return cardBody;
 }
 
 /**

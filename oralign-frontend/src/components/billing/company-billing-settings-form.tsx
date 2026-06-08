@@ -303,7 +303,13 @@ export function CompanyBillingSettingsForm() {
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
           <Field
-            label="Default VAT (%)"
+            // Tunisian / Maghreb billing convention is "TVA"
+            // (Taxe sur la Valeur Ajoutée) — the field maps onto
+            // the existing `defaultTvaRate` column so the label is
+            // the only thing that flips here. Keeps the form
+            // vocabulary aligned with what doctors actually see on
+            // their tax filings.
+            label="Default TVA (%)"
             value={String(form.defaultTvaRate)}
             type="number"
             onChange={(v) => updateField('defaultTvaRate', Number(v) || 0)}

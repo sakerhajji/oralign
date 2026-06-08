@@ -148,6 +148,44 @@ export const dict = {
         fr: 'Choisir un patient dans votre liste',
         ar: 'اختر مريضًا من قائمتك',
       } as T,
+      // Clinical conditions / "Reason for consultation"
+      reasonLegend: { en: 'Reason for consultation', fr: 'Motif de consultation', ar: 'سبب الاستشارة' } as T,
+      reasonDescription: {
+        en: 'Select every condition that applies — multiple are allowed. Tick “Other” to describe a reason not on the list.',
+        fr: 'Cochez chaque condition qui s’applique — plusieurs choix sont possibles. Cochez « Autre » pour décrire un motif absent de la liste.',
+        ar: 'حدّد كل الحالات المنطبقة — الاختيارات المتعدّدة مسموح بها. اختر «أخرى» لوصف سبب غير مدرَج في القائمة.',
+      } as T,
+      // Free-text "Other" detail field
+      reasonOtherLabel: {
+        en: 'Other — please describe',
+        fr: 'Autre — précisez',
+        ar: 'أخرى — يُرجى التفصيل',
+      } as T,
+      reasonOtherPh: {
+        en: 'Describe the additional clinical detail (max 500 characters)',
+        fr: 'Décrivez le détail clinique supplémentaire (500 caractères max.)',
+        ar: 'صف التفاصيل السريرية الإضافية (500 حرفًا كحدّ أقصى)',
+      } as T,
+      // Individual condition labels — the canonical English value stays
+      // the storage key; only the UI label flips. Translations follow
+      // standard Tunisian-French orthodontic terminology so the planner
+      // reading a French chart recognises every term at a glance.
+      condCrowding: { en: 'Crowding', fr: 'Encombrement', ar: 'ازدحام' } as T,
+      condSpacing: { en: 'Spacing', fr: 'Espacement', ar: 'فراغات' } as T,
+      condClassII1: { en: 'Class II Division 1', fr: 'Classe II Division 1', ar: 'الفئة الثانية – القسم الأول' } as T,
+      condClassII2: { en: 'Class II Division 2', fr: 'Classe II Division 2', ar: 'الفئة الثانية – القسم الثاني' } as T,
+      condClassIII: { en: 'Class III', fr: 'Classe III', ar: 'الفئة الثالثة' } as T,
+      condOpenBite: { en: 'Open bite', fr: 'Béance', ar: 'عضّة مفتوحة' } as T,
+      condAnteriorCrossbite: { en: 'Anterior crossbite', fr: 'Articulé inversé antérieur', ar: 'عضّة معكوسة أمامية' } as T,
+      condPosteriorCrossbite: { en: 'Posterior crossbite', fr: 'Articulé inversé postérieur', ar: 'عضّة معكوسة خلفية' } as T,
+      condDeepBite: { en: 'Deep bite', fr: 'Supraclusion', ar: 'عضّة عميقة' } as T,
+      condNarrowArch: { en: 'Narrow arch', fr: 'Arcade étroite', ar: 'قوس ضيّق' } as T,
+      condProclination: { en: 'Proclination', fr: 'Vestibulo-version', ar: 'إمالة الأسنان للأمام' } as T,
+      condIncreasedOverjet: { en: 'Increased overjet', fr: 'Surplomb augmenté', ar: 'تباعد أفقي زائد' } as T,
+      condUnestheticSmile: { en: 'Unesthetic smile', fr: 'Sourire inesthétique', ar: 'ابتسامة غير جميلة' } as T,
+      condDentalShapeAnomaly: { en: 'Dental shape anomaly', fr: 'Anomalie de forme dentaire', ar: 'شذوذ في شكل الأسنان' } as T,
+      condOther: { en: 'Other', fr: 'Autre', ar: 'أخرى' } as T,
+
       // Form fields (inline new-patient form)
       patientNameLabel: { en: 'Patient name', fr: 'Nom du patient', ar: 'اسم المريض' } as T,
       fullNameInputPh: { en: 'Full name', fr: 'Nom complet', ar: 'الاسم الكامل' } as T,

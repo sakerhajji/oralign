@@ -2,11 +2,38 @@
 
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n/lang-context';
 import {
   CLINICAL_CONDITION_OPTIONS,
   CLINICAL_CONDITION_OTHER,
   type ClinicalCondition,
 } from '@/lib/types';
+
+/**
+ * Map every canonical (English) clinical-condition value to its dict
+ * key. The storage value sent to the backend stays English so existing
+ * filters / search / analytics keep working — only the visible label
+ * is translated. Each entry mirrors the order in
+ * `CLINICAL_CONDITION_OPTIONS` so a translator can scan the two
+ * side-by-side and spot drift.
+ */
+const CONDITION_DICT_KEY: Record<string, string> = {
+  Crowding: 'orderForm.patient.condCrowding',
+  Spacing: 'orderForm.patient.condSpacing',
+  'Class II Division 1': 'orderForm.patient.condClassII1',
+  'Class II Division 2': 'orderForm.patient.condClassII2',
+  'Class III': 'orderForm.patient.condClassIII',
+  'Open bite': 'orderForm.patient.condOpenBite',
+  'Anterior crossbite': 'orderForm.patient.condAnteriorCrossbite',
+  'Posterior crossbite': 'orderForm.patient.condPosteriorCrossbite',
+  'Deep bite': 'orderForm.patient.condDeepBite',
+  'Narrow arch': 'orderForm.patient.condNarrowArch',
+  Proclination: 'orderForm.patient.condProclination',
+  'Increased overjet': 'orderForm.patient.condIncreasedOverjet',
+  'Unesthetic smile': 'orderForm.patient.condUnestheticSmile',
+  'Dental shape anomaly': 'orderForm.patient.condDentalShapeAnomaly',
+  Other: 'orderForm.patient.condOther',
+};
 
 /**
  * Multi-select checkbox grid for the patient's clinical conditions
@@ -56,12 +83,19 @@ export function ClinicalConditionsField({
   otherDetail,
   disabled,
   idPrefix = 'clinical-conditions',
-  legendLabel = 'Reason for consultation',
-  descriptionText = 'Select every condition that applies — multiple are allowed. Tick "Other" to describe a reason not on the list.',
+  // When the caller passes nothing, fall back to the i18n dictionary
+  // so the legend + description flip with the language toggle. A caller
+  // that needs a custom label still wins — the override path is kept.
+  legendLabel,
+  descriptionText,
   onConditionsChange,
   onOtherDetailChange,
   otherDetailError,
 }: ClinicalConditionsFieldProps) {
+  const { t } = useT();
+  const resolvedLegend = legendLabel ?? t('orderForm.patient.reasonLegend');
+  const resolvedDescription =
+    descriptionText ?? t('orderForm.patient.reasonDescription');
   const isOtherSelected = conditions.includes(CLINICAL_CONDITION_OTHER);
 
   const toggle = (condition: ClinicalCondition) => {
@@ -87,16 +121,20 @@ export function ClinicalConditionsField({
 
   return (
     <fieldset className="space-y-3 rounded-lg border bg-card p-4">
-      <legend className="px-1 text-sm font-semibold">{legendLabel}</legend>
-      <p className="text-xs text-muted-foreground">{descriptionText}</p>
+      <legend className="px-1 text-sm font-semibold">{resolvedLegend}</legend>
+      <p className="text-xs text-muted-foreground">{resolvedDescription}</p>
       <div
         role="group"
-        aria-label="Clinical conditions"
+        aria-label={resolvedLegend}
         className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3"
       >
         {CLINICAL_CONDITION_OPTIONS.map((opt) => {
           const checked = conditions.includes(opt);
           const id = `${idPrefix}-${opt.toLowerCase().replace(/\s+/g, '-')}`;
+          // Storage stays English; only the displayed label flips. If
+          // the option ever drifts away from the dict map we fall back
+          // to the raw English label so the row still renders.
+          const label = CONDITION_DICT_KEY[opt] ? t(CONDITION_DICT_KEY[opt]) : opt;
           return (
             <label
               key={opt}
@@ -117,7 +155,7 @@ export function ClinicalConditionsField({
                 disabled={disabled}
                 onChange={() => toggle(opt)}
               />
-              <span>{opt}</span>
+              <span>{label}</span>
             </label>
           );
         })}
@@ -126,14 +164,14 @@ export function ClinicalConditionsField({
       {isOtherSelected && (
         <div className="space-y-2 pt-1">
           <Label htmlFor={`${idPrefix}-other-detail`} className="text-sm">
-            Other — please describe
+            {t('orderForm.patient.reasonOtherLabel')}
           </Label>
           <textarea
             id={`${idPrefix}-other-detail`}
             value={otherDetail}
             onChange={(e) => onOtherDetailChange(e.target.value)}
             disabled={disabled}
-            placeholder="Describe the additional clinical detail (max 500 characters)"
+            placeholder={t('orderForm.patient.reasonOtherPh')}
             maxLength={500}
             className={cn(
               'border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring min-h-20 w-full rounded-md border px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2',

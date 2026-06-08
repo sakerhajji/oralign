@@ -1,9 +1,10 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
+  Clock,
   Download,
   ExternalLink,
   FileText,
@@ -16,32 +17,34 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Skeleton } from '@/components/ui/skeleton';
-import { useAuthedImage, useConfirmTreatmentFeePayment } from '@/lib/hooks';
+import { useConfirmTreatmentFeePayment } from '@/lib/hooks';
 import { resolveUploadUrl } from '@/lib/api/company-billing.service';
 
 /**
  * Admin-facing receipt viewer for a treatment-fee bank transfer.
  *
- * Replaces the previous "open in new tab" link, which 404'd because
- * `treatmentFeeProofPath` is stored as `/uploads/...` relative to the
- * BACKEND origin, but the link was rendered against the FRONTEND origin.
+ * Why direct <img>/<iframe> instead of blob-fetching the proof:
+ * the backend serves /uploads/* publicly with
+ * Cross-Origin-Resource-Policy: cross-origin set, which is exactly
+ * what <img>/<iframe> need to embed cross-origin assets. The native
+ * tags don't require Access-Control-Allow-Origin (that header is only
+ * checked for `fetch`/XHR). Going through axios + blob would force us
+ * to add CORS to the static file route — extra surface area for zero
+ * benefit, since the URL is already public anyway.
  *
- * Behaviour:
- *   • Loads the proof via authed axios → blob URL (works for both PDFs
- *     and images; CDN migration later still flows through this hook).
- *   • Renders images in an <img>, PDFs in an <iframe>; non-renderable
- *     formats fall back to a download tile.
- *   • Embeds the "Confirm payment" action inside the modal when the
- *     viewer is admin-facing AND there's something to confirm, so the
- *     admin can verify → approve in one flow.
- *   • An "Open in new tab" fallback stays available — the file path is
- *     a public URL (no auth on /uploads), so the new tab works for
- *     printing / saving without re-uploading.
+ * UX:
+ *   1. The header carries the order code + doctor / patient byline,
+ *      declared amount, and the status badge — admin reads the
+ *      context once and dives into the proof.
+ *   2. The viewport renders images inline OR PDFs in an iframe; non-
+ *      previewable formats degrade to a download tile so the admin
+ *      can still inspect the file out-of-band.
+ *   3. The footer pins three actions: open in new tab (full-screen
+ *      review), close, and the embedded Confirm payment button —
+ *      admin reviews and approves in one place.
  */
 export interface TreatmentFeeReceiptDialogProps {
   open: boolean;
@@ -81,19 +84,13 @@ export function TreatmentFeeReceiptDialog({
   canConfirm,
   onConfirmed,
 }: TreatmentFeeReceiptDialogProps) {
-  // Absolute URL the browser can fetch. Memoised so the blob hook's
-  // cache key stays stable across re-renders of the parent.
-  const absoluteUrl = useMemo(
-    () => resolveUploadUrl(proofPath),
-    [proofPath],
-  );
-  const { src: blobUrl, loading, error } = useAuthedImage(absoluteUrl);
+  // Resolve once per (re-)mount of the dialog. resolveUploadUrl
+  // canonicalises any stored path shape into the absolute backend URL.
+  const fileUrl = useMemo(() => resolveUploadUrl(proofPath), [proofPath]);
+  const fileName = extractFilename(proofPath) ?? `receipt-${orderCode}`;
+  const proofKind = classifyProof(proofPath);
 
   const confirm = useConfirmTreatmentFeePayment();
-
-  // Classify the proof by extension. PDFs render in an iframe; images
-  // in an <img>; everything else falls back to a download tile.
-  const proofKind = classifyProof(proofPath);
 
   const byline = [
     doctorName ? `Dr. ${doctorName}` : null,
@@ -110,48 +107,68 @@ export function TreatmentFeeReceiptDialog({
         onOpenChange(next);
       }}
     >
-      <DialogContent className="flex max-h-[92vh] w-full max-w-3xl flex-col gap-3 p-0">
-        <DialogHeader className="border-b px-5 pt-5">
-          <DialogTitle className="flex items-center gap-2">
-            <ReceiptText className="h-5 w-5 text-primary" />
-            Bank-transfer receipt
-          </DialogTitle>
-          <DialogDescription className="text-xs">
-            Order <span className="font-medium">{orderCode}</span>
-            {byline ? <> · {byline}</> : null}
-          </DialogDescription>
-          {/* Amount strip + status badge */}
-          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 pb-3">
-            <div className="flex items-center gap-2 text-sm">
-              <span className="text-muted-foreground">Declared:</span>
-              <span className="text-base font-semibold tabular-nums">
-                {amount ?? 0} {currency}
-              </span>
+      <DialogContent className="flex h-[92vh] max-h-[92vh] w-full max-w-3xl flex-col gap-0 overflow-hidden p-0 sm:h-auto">
+        {/* ─── Header ─────────────────────────────────────────────── */}
+        <DialogHeader className="space-y-3 border-b bg-card px-5 py-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-2.5">
+              <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">
+                <ReceiptText className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <DialogTitle className="text-base">
+                  Bank-transfer receipt
+                </DialogTitle>
+                <DialogDescription className="mt-0.5 text-xs">
+                  Order{' '}
+                  <span className="font-medium text-foreground">
+                    {orderCode}
+                  </span>
+                  {byline ? <> · {byline}</> : null}
+                </DialogDescription>
+              </div>
             </div>
             <Badge
               variant="outline"
-              className="border-blue-200 bg-blue-50 text-blue-700"
+              className="shrink-0 gap-1 border-blue-200 bg-blue-50 text-blue-700"
             >
+              <Clock className="h-3 w-3" />
               Awaiting confirmation
             </Badge>
           </div>
+
+          {/* Amount + file strip — separates context from preview */}
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/40 px-3 py-2">
+            <div className="flex items-baseline gap-2">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Declared
+              </span>
+              <span className="text-base font-bold tabular-nums">
+                {amount ?? 0} {currency}
+              </span>
+            </div>
+            <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+              <FileText className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate font-mono" title={fileName}>
+                {fileName}
+              </span>
+            </div>
+          </div>
         </DialogHeader>
 
-        {/* Receipt viewport — image / PDF / fallback */}
-        <div className="min-h-[300px] flex-1 overflow-auto bg-muted/30 p-4">
+        {/* ─── Viewport ───────────────────────────────────────────── */}
+        <div className="flex min-h-0 flex-1 items-stretch overflow-auto bg-muted/30">
           <ReceiptViewport
-            blobUrl={blobUrl}
-            absoluteUrl={absoluteUrl}
-            loading={loading}
-            error={error}
+            fileUrl={fileUrl}
             kind={proofKind}
-            fileName={extractFilename(proofPath) ?? `receipt-${orderCode}`}
+            fileName={fileName}
           />
         </div>
 
-        <DialogFooter className="flex flex-row items-center justify-between gap-2 border-t bg-card px-5 py-3">
+        {/* ─── Footer ─────────────────────────────────────────────── */}
+        <div className="flex flex-row flex-wrap items-center justify-between gap-2 border-t bg-card px-5 py-3">
           <div className="flex flex-wrap items-center gap-2">
-            {absoluteUrl && (
+            {fileUrl && (
               <Button
                 asChild
                 type="button"
@@ -160,10 +177,10 @@ export function TreatmentFeeReceiptDialog({
                 className="gap-1.5"
               >
                 <a
-                  href={absoluteUrl}
+                  href={fileUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  download={extractFilename(proofPath) ?? undefined}
+                  download={fileName}
                 >
                   <ExternalLink className="h-3.5 w-3.5" />
                   Open in new tab
@@ -185,7 +202,7 @@ export function TreatmentFeeReceiptDialog({
               <Button
                 type="button"
                 size="sm"
-                className="gap-1.5 bg-emerald-600 hover:bg-emerald-700"
+                className="gap-1.5 bg-emerald-600 text-white hover:bg-emerald-700"
                 disabled={confirm.isPending}
                 onClick={() => {
                   confirm.mutate(orderId, {
@@ -205,7 +222,7 @@ export function TreatmentFeeReceiptDialog({
               </Button>
             )}
           </div>
-        </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );
@@ -230,119 +247,92 @@ function extractFilename(path: string | null | undefined): string | null {
   return tail && tail.length > 0 ? tail : null;
 }
 
+/**
+ * The actual receipt surface. Renders directly from the public URL —
+ * no blob fetch, no auth dance. Native `<img>` / `<iframe>` cross-
+ * origin embedding works because the backend serves /uploads/* with
+ * Cross-Origin-Resource-Policy: cross-origin.
+ *
+ * Tracks an internal `imgError` state so a failed image load (e.g.
+ * the file was deleted on the server) falls through to the friendly
+ * download fallback instead of leaving a broken icon.
+ */
 function ReceiptViewport({
-  blobUrl,
-  absoluteUrl,
-  loading,
-  error,
+  fileUrl,
   kind,
   fileName,
 }: {
-  blobUrl: string | null;
-  absoluteUrl: string | null;
-  loading: boolean;
-  error: Error | null;
+  fileUrl: string | null;
   kind: ProofKind;
   fileName: string;
 }) {
-  if (kind === 'missing') {
+  const [imgError, setImgError] = useState(false);
+
+  if (kind === 'missing' || !fileUrl) {
     return (
       <EmptyState
-        icon={<AlertTriangle className="h-6 w-6 text-amber-500" />}
+        icon={<AlertTriangle className="h-7 w-7 text-amber-500" />}
         title="No receipt attached"
         message="The doctor recorded a bank-transfer intent but did not upload a proof file."
       />
     );
   }
 
-  if (loading && !blobUrl) {
-    return (
-      <div className="flex h-full min-h-[300px] items-center justify-center">
-        <div className="space-y-2">
-          <Skeleton className="h-[300px] w-[420px] max-w-full" />
-          <p className="text-center text-xs text-muted-foreground">
-            Loading receipt…
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  if (error || !blobUrl) {
-    // Fall back to the public direct URL so the admin can still see
-    // the receipt even if the in-page fetch had a CORS hiccup.
-    return (
-      <EmptyState
-        icon={<AlertTriangle className="h-6 w-6 text-red-500" />}
-        title="Couldn't load the receipt in the dialog"
-        message={
-          error?.message ??
-          "We couldn't render the file inline. Open it in a new tab to view or download."
-        }
-        action={
-          absoluteUrl ? (
-            <Button asChild size="sm" variant="outline" className="gap-1.5">
-              <a
-                href={absoluteUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                download={fileName}
-              >
-                <Download className="h-3.5 w-3.5" />
-                Download receipt
-              </a>
-            </Button>
-          ) : null
-        }
-      />
-    );
-  }
-
   if (kind === 'pdf') {
-    // Native browser PDF viewer in an iframe. Works without pdfjs and
-    // keeps the page weight small. `title` is required for a11y.
     return (
       <iframe
         title={`Receipt — ${fileName}`}
-        src={blobUrl}
-        className="h-[60vh] w-full rounded-md border bg-white"
+        src={fileUrl}
+        className="h-full min-h-[420px] w-full border-0 bg-white"
       />
     );
   }
 
-  if (kind === 'image') {
+  if (kind === 'image' && !imgError) {
     return (
-      <div className="flex h-full items-center justify-center">
+      <div className="flex h-full w-full items-center justify-center p-4">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={blobUrl}
+          src={fileUrl}
           alt={`Bank-transfer receipt ${fileName}`}
-          className="max-h-[60vh] max-w-full rounded-md border bg-white object-contain shadow-sm"
+          loading="eager"
+          decoding="async"
+          onError={() => setImgError(true)}
+          className="max-h-[70vh] max-w-full rounded-md border bg-white object-contain shadow-sm"
         />
       </div>
     );
   }
 
-  // 'other' — the doctor uploaded e.g. a .docx. Offer download.
+  // Image failed to load (404, dead link, etc.) or unknown file type
+  // (e.g. .docx). Either way, give the admin a clear download path.
   return (
     <EmptyState
-      icon={<FileText className="h-6 w-6 text-muted-foreground" />}
-      title="Preview not available"
-      message={`This file format (${fileName}) can't be previewed inline. Download to inspect it.`}
+      icon={
+        imgError ? (
+          <AlertTriangle className="h-7 w-7 text-red-500" />
+        ) : (
+          <FileText className="h-7 w-7 text-muted-foreground" />
+        )
+      }
+      title={imgError ? "Couldn't load the receipt" : 'Preview not available'}
+      message={
+        imgError
+          ? "The image couldn't be loaded inline. Open it in a new tab or download it to inspect the proof."
+          : `This file format (${fileName}) can't be previewed in the browser. Download to inspect it.`
+      }
       action={
-        absoluteUrl ? (
-          <Button asChild size="sm" variant="outline" className="gap-1.5">
-            <a
-              href={absoluteUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              download={fileName}
-            >
-              <Download className="h-3.5 w-3.5" />
-              Download receipt
-            </a>
-          </Button>
-        ) : null
+        <Button asChild size="sm" variant="outline" className="gap-1.5">
+          <a
+            href={fileUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            download={fileName}
+          >
+            <Download className="h-3.5 w-3.5" />
+            Download receipt
+          </a>
+        </Button>
       }
     />
   );
@@ -360,7 +350,7 @@ function EmptyState({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="flex h-full min-h-[300px] flex-col items-center justify-center gap-3 text-center">
+    <div className="flex h-full min-h-[300px] w-full flex-col items-center justify-center gap-3 p-8 text-center">
       {icon}
       <div className="space-y-1">
         <p className="text-sm font-semibold">{title}</p>

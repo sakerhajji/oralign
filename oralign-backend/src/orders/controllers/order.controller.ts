@@ -352,11 +352,16 @@ export class OrderController {
   }
 
   @Get('admin/treatment-fees')
-  @Roles(UserRole.admin, UserRole.super_admin)
+  // Path is named `admin/...` for historical reasons but the resource is
+  // role-scoped at the service layer: admins see every order's treatment
+  // fees; dentists see only their own. Both roles need the same shape
+  // (it's the canonical "my payments" surface for treatment fees) so
+  // we share one endpoint rather than duplicate it.
+  @Roles(UserRole.admin, UserRole.super_admin, UserRole.dentist)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Admin: every treatment-fee payment (history). Sorted by paid date desc.',
+      'Treatment-fee payments (history). Admins see every order; dentists see only their own. Sorted by paid date desc.',
   })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })

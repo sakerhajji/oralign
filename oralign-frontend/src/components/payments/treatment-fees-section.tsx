@@ -33,6 +33,7 @@ import {
   usePendingTreatmentFees,
   useTreatmentFeesHistory,
 } from '@/lib/hooks';
+import { useAuth } from '@/lib/providers/auth-provider';
 import type { TreatmentFeeRow } from '@/lib/api/orders.service';
 import { PaymentMethod, PaymentRecordStatus } from '@/lib/types';
 import { TreatmentFeeReceiptDialog } from '@/components/orders/treatment-fee-receipt-dialog';
@@ -325,6 +326,7 @@ export function PendingTreatmentFeesSection() {
  * card to fresh installations.
  */
 export function TreatmentFeesHistorySection() {
+  const { isAdmin } = useAuth();
   const { data, isLoading } = useTreatmentFeesHistory({ page: 1, limit: 20 });
   const rows = data?.data ?? [];
   // Active row whose receipt is being inspected in the modal viewer.
@@ -344,12 +346,14 @@ export function TreatmentFeesHistorySection() {
             <div>
               <CardTitle className="flex items-center gap-2">
                 <ReceiptText className="size-5 text-primary" />
-                Treatment fee payments
+                {isAdmin
+                  ? 'Treatment fee payments'
+                  : 'My treatment fee payments'}
               </CardTitle>
               <CardDescription>
-                Every treatment-fee payment across the system — card, bank
-                transfer, and cash. Separate from installment payments
-                below.
+                {isAdmin
+                  ? 'Every treatment-fee payment across the system — card, bank transfer, and cash. Separate from installment payments below.'
+                  : 'Treatment fees you have paid on your orders — card, bank transfer, and cash. Separate from installment payments below.'}
               </CardDescription>
             </div>
             {data?.total ? (

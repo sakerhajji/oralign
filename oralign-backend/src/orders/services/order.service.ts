@@ -586,9 +586,13 @@ export class OrderService {
     limit?: number;
     caller: Caller;
   }) {
-    if (!ADMIN_ROLES.includes(args.caller.role)) {
+    const isAdmin = ADMIN_ROLES.includes(args.caller.role);
+    const isDentist = args.caller.role === UserRole.dentist;
+    if (!isAdmin && !isDentist) {
+      // Only admins and dentists ever ask for the treatment-fee
+      // history. Any other role (designer, etc.) gets a 403.
       throw new ForbiddenException(
-        'Only admins can view the treatment-fee history.',
+        'You are not allowed to view the treatment-fee history.',
       );
     }
     const page = Math.max(1, args.page ?? 1);
@@ -598,6 +602,12 @@ export class OrderService {
     const where: Prisma.DentalOrderWhereInput = {
       deletedAt: null,
       treatmentFeePaymentMethod: { not: null },
+      // Doctors only ever see THEIR OWN orders. Admins see every
+      // doctor's. The doctorId filter is added at the DB layer so a
+      // pagination scan stays O(matching rows) for the doctor case
+      // instead of paging through the full system list and filtering
+      // in-memory.
+      ...(isDentist ? { doctorId: args.caller.userId } : {}),
     };
 
     const [rows, total] = await Promise.all([

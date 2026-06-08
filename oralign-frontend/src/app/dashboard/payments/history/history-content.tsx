@@ -547,14 +547,22 @@ export function PaymentHistoryContent() {
       ) : null}
 
       {/*
-        ─── Admin-only: treatment-fee payments ─────────────────────
+        ─── Treatment-fee payments — shared admin + doctor view ────
         These are denormalised onto DentalOrder (treatmentFeePaid*
         fields) and are NOT in the Payment table, so the installment
         filter UI below can't reach them. Surface them as a separate
-        admin card up here so they're discoverable. The section returns
-        null when empty so we don't ship a blank card on first install.
+        card up here so they're discoverable.
+
+        Visible to both roles:
+          • Admin sees every doctor's treatment-fee payments
+          • Doctor sees only their own (scoped server-side by
+            doctorId = caller.userId in OrderService.listTreatmentFees)
+
+        The section returns null when empty so we don't ship a blank
+        card on first install or for a doctor who hasn't paid any
+        treatment fees yet.
       */}
-      {isAdmin ? <TreatmentFeesHistorySection /> : null}
+      <TreatmentFeesHistorySection />
 
       {/* ─── Results ───────────────────────────────────────────────── */}
       <Card>

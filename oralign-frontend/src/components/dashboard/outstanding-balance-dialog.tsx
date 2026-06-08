@@ -3,9 +3,11 @@
 import Link from 'next/link';
 import { format } from 'date-fns';
 import {
+  AlertTriangle,
   ExternalLink,
-  FileText,
   PackageIcon,
+  ReceiptText,
+  RefreshCw,
   Wallet,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -14,7 +16,6 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
@@ -35,18 +36,25 @@ const TND = (n: number, currency = 'TND') =>
   currency;
 
 /**
- * Popup the doctor dashboard opens when the "Outstanding balance" KPI
- * is clicked. Shows the per-order breakdown that adds up to the headline
- * number on the card.
+ * Outstanding-balance details popup.
  *
- * Why a dialog instead of a route: the doctor is in a "spot-check"
- * intent — they want to know *what* the balance is made of without
- * losing their dashboard context. A modal keeps them anchored; a deep
- * link can still happen from each row (the order code is a Link).
+ * Visual chrome mirrors the TreatmentFeeReceiptDialog so every popup
+ * in the dashboard family feels related:
+ *   • 920 px / 90vh shell, rounded-2xl, shadow-2xl, border-0
+ *   • Header strip: circular icon badge + title + description on the
+ *     left, count pill on the right
+ *   • Summary strip just under the title: TOTAL DUE in a bordered
+ *     mini-card (same idea as the "Declared 350 TND · filename"
+ *     strip in the receipt dialog)
+ *   • Full-bleed body: table when there's data; empty / loading /
+ *     error states centred otherwise
+ *   • Sticky footer: Refresh on the left, "Open payment history" +
+ *     Close on the right
  *
- * The query inside is lazy — it only fires while the dialog is open
- * (`enabled` flag is tied to `open`), so we don't pay for the per-order
- * fetch on every dashboard mount.
+ * The query is lazy — only fires while `open === true`, so we don't
+ * pay for the per-order fetch on every dashboard mount. Refetches
+ * every 30s while open so a payment landing in another tab drops
+ * its row from the list in near-real-time.
  */
 export interface OutstandingBalanceDialogProps {
   open: boolean;
@@ -57,53 +65,61 @@ export function OutstandingBalanceDialog({
   open,
   onOpenChange,
 }: OutstandingBalanceDialogProps) {
-  // `enabled: open` — fires the query the moment the user clicks the
-  // KPI card, refreshes every 30s while the dialog stays open, stops
-  // entirely when they close it. No wasted polling on a closed modal.
   const { data, isLoading, isError, error, refetch, isFetching } =
     useDoctorOutstandingOrders(open);
   const rows = data?.data ?? [];
   const total = data?.totalOutstanding ?? 0;
   const currency = data?.currency ?? 'TND';
+  const count = data?.count ?? 0;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {/*
-        Same modal dimensions as the treatment-fee receipt dialog so
-        every popup in the dashboard family feels related — wide enough
-        for a clean table, capped at 90vh with internal scroll for long
-        lists. The summary header anchors the "what total" question
-        at the top so the doctor reads the takeaway before scanning
-        the rows.
+        Same shell as TreatmentFeeReceiptDialog:
+        - h-auto + max-h-[90vh] so short content stays compact
+        - max-w-[920px] on lg for desktop comfort
+        - sm:max-w-[680px] for the tablet sweet-spot (table needs a bit
+          more room than the 600 px the receipt summary uses)
        */}
-      <DialogContent className="flex max-h-[90vh] w-full max-w-3xl flex-col gap-0 overflow-hidden rounded-2xl border-0 p-0 shadow-2xl">
-        <DialogHeader className="space-y-3 border-b bg-card px-6 py-5 text-left">
+      <DialogContent className="flex h-auto max-h-[90vh] w-full flex-col gap-0 overflow-hidden rounded-2xl border-0 p-0 shadow-2xl sm:max-w-[680px] lg:max-w-[920px]">
+        {/* ─── Header ─────────────────────────────────────────────── */}
+        <DialogHeader className="space-y-3 border-b bg-card px-6 py-5 text-left sm:px-8">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="min-w-0">
-              <DialogTitle className="flex items-center gap-2 text-base font-semibold sm:text-lg">
-                <Wallet className="size-5 text-primary" />
-                Outstanding balance
-              </DialogTitle>
-              <DialogDescription className="mt-0.5 text-xs">
-                Every order with a remaining amount due, newest update first.
-              </DialogDescription>
+            <div className="flex min-w-0 items-start gap-3">
+              <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">
+                <Wallet className="h-4 w-4" />
+              </div>
+              <div className="min-w-0">
+                <DialogTitle className="text-lg font-semibold sm:text-xl">
+                  Outstanding balance
+                </DialogTitle>
+                <DialogDescription className="mt-0.5 text-xs">
+                  Every order with a remaining amount due, newest update first.
+                </DialogDescription>
+              </div>
             </div>
             <Badge
               variant="outline"
-              // Tone follows the headline tile on the dashboard. Zero
-              // outstanding ships as emerald (clear), >0 as red so the
-              // dialog header confirms the dashboard reading at a glance.
+              // Tone follows the headline. Zero outstanding ships as
+              // emerald (clear), >0 as red so the dialog header
+              // confirms the dashboard reading at a glance.
               className={
                 total > 0
-                  ? 'gap-1.5 border-red-200 bg-red-50 text-red-700'
-                  : 'gap-1.5 border-emerald-200 bg-emerald-50 text-emerald-700'
+                  ? 'shrink-0 gap-1.5 border-red-200 bg-red-50 px-2.5 py-1 text-[11px] font-semibold text-red-700'
+                  : 'shrink-0 gap-1.5 border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700'
               }
             >
-              {data?.count ?? 0} order{(data?.count ?? 0) === 1 ? '' : 's'}
+              <ReceiptText className="h-3 w-3" />
+              {count} order{count === 1 ? '' : 's'}
             </Badge>
           </div>
-          {/* Total strip — the single number the user came to see. */}
-          <div className="flex flex-wrap items-baseline justify-between gap-2 rounded-lg border bg-muted/40 px-3 py-2">
+
+          {/*
+            Total strip — same visual as the "Declared · filename"
+            strip in the receipt dialog. Anchors the user's eye at
+            the single number they came to see before scanning rows.
+           */}
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/40 px-3 py-2">
             <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
               Total due
             </span>
@@ -114,9 +130,12 @@ export function OutstandingBalanceDialog({
         </DialogHeader>
 
         {/* ─── Body ──────────────────────────────────────────────── */}
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div className="min-h-0 flex-1 overflow-auto bg-card">
           {isError ? (
-            <ErrorState message={(error as Error)?.message} onRetry={refetch} />
+            <ErrorState
+              message={(error as Error)?.message}
+              onRetry={refetch}
+            />
           ) : isLoading ? (
             <LoadingState />
           ) : rows.length === 0 ? (
@@ -193,7 +212,7 @@ export function OutstandingBalanceDialog({
         </div>
 
         {/* ─── Footer ────────────────────────────────────────────── */}
-        <DialogFooter className="flex flex-row flex-wrap items-center justify-between gap-2 border-t bg-card px-6 py-3">
+        <div className="flex flex-row flex-wrap items-center justify-between gap-2 border-t bg-card px-6 py-3">
           <Button
             size="sm"
             variant="ghost"
@@ -201,17 +220,17 @@ export function OutstandingBalanceDialog({
             disabled={isFetching}
             className="gap-1.5"
           >
-            <FileText className="size-3.5" />
+            <RefreshCw
+              className={isFetching ? 'size-3.5 animate-spin' : 'size-3.5'}
+            />
             {isFetching ? 'Refreshing…' : 'Refresh'}
           </Button>
-          <div className="flex items-center gap-2">
-            <Button
-              asChild
-              size="sm"
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-            >
-              <Link href="/dashboard/payments/history">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button asChild size="sm" variant="outline">
+              <Link
+                href="/dashboard/payments/history"
+                onClick={() => onOpenChange(false)}
+              >
                 Open payment history
               </Link>
             </Button>
@@ -223,14 +242,15 @@ export function OutstandingBalanceDialog({
               Close
             </Button>
           </div>
-        </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Sub-states
+// Sub-states — same visual rhythm as the EmptyState in the receipt
+// dialog (centred icon + title + muted hint + optional action).
 // ────────────────────────────────────────────────────────────────────
 
 function LoadingState() {
@@ -245,8 +265,10 @@ function LoadingState() {
 
 function EmptyState() {
   return (
-    <div className="flex h-full min-h-[200px] flex-col items-center justify-center gap-3 p-8 text-center">
-      <Wallet className="size-8 text-emerald-500" />
+    <div className="flex h-full min-h-[260px] w-full flex-col items-center justify-center gap-3 p-8 text-center">
+      <div className="grid h-12 w-12 place-items-center rounded-full bg-emerald-100 text-emerald-700">
+        <Wallet className="h-6 w-6" />
+      </div>
       <div className="space-y-1">
         <p className="text-sm font-semibold">Nothing outstanding</p>
         <p className="max-w-md text-xs text-muted-foreground">
@@ -264,15 +286,32 @@ function ErrorState({
   message?: string;
   onRetry: () => void;
 }) {
+  // Detect the "endpoint not deployed yet" case so the doctor sees a
+  // useful hint instead of a raw axios string. A 404 here typically
+  // means the running backend container is the old build and doesn't
+  // yet have the outstanding-orders route — once it recreates with
+  // the new image the call succeeds without any frontend change.
+  const looksLike404 = /404/.test(message ?? '');
   return (
-    <div className="flex h-full min-h-[200px] flex-col items-center justify-center gap-3 p-8 text-center">
-      <p className="text-sm font-semibold text-destructive">
-        Couldn&apos;t load your outstanding orders.
-      </p>
-      {message ? (
-        <p className="max-w-md text-xs text-muted-foreground">{message}</p>
-      ) : null}
-      <Button size="sm" variant="outline" onClick={onRetry}>
+    <div className="flex h-full min-h-[260px] w-full flex-col items-center justify-center gap-3 p-8 text-center">
+      <div className="grid h-12 w-12 place-items-center rounded-full bg-red-100 text-red-700">
+        <AlertTriangle className="h-6 w-6" />
+      </div>
+      <div className="space-y-1">
+        <p className="text-sm font-semibold text-destructive">
+          Couldn&apos;t load your outstanding orders.
+        </p>
+        {message ? (
+          <p className="max-w-md text-xs text-muted-foreground">{message}</p>
+        ) : null}
+        {looksLike404 ? (
+          <p className="max-w-md text-[11px] text-muted-foreground">
+            The server may be updating. Wait a moment and try again.
+          </p>
+        ) : null}
+      </div>
+      <Button size="sm" variant="outline" onClick={onRetry} className="gap-1.5">
+        <RefreshCw className="size-3.5" />
         Try again
       </Button>
     </div>

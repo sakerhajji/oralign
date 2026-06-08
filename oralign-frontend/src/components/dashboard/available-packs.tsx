@@ -109,14 +109,13 @@ function PackCard({
         isRecommended && 'border-emerald-300/60',
       )}
     >
-      {pack.isCurrent ? (
-        <Badge
-          variant="default"
-          className="absolute right-4 top-4 gap-1"
-        >
-          <CheckCircle2Icon className="size-3" /> Current
-        </Badge>
-      ) : isRecommended ? (
+      {/*
+        The "Current" badge used to sit here for the doctor's
+        active pack. Removed at product's request — the catalogue
+        is purely informational and the badge was redundant with
+        the inline hint in the card body.
+       */}
+      {isRecommended ? (
         <Badge
           variant="outline"
           className="absolute right-4 top-4 gap-1 border-emerald-400 text-emerald-700 dark:text-emerald-300"

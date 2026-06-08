@@ -81,11 +81,18 @@ export const dict = {
       payment_plan_selected: { en: 'Payment plan selected', fr: 'Plan de paiement choisi' } as T,
       payment_pending: { en: 'Payment pending', fr: 'Paiement en attente' } as T,
       payment_review: { en: 'Payment review', fr: 'Paiement en révision' } as T,
-      paid: { en: 'Paid', fr: 'Payé' } as T,
-      fabrication: { en: 'Fabrication', fr: 'Fabrication' } as T,
+      // `paid` is treated as the start of production now — the
+      // backend auto-transitions paid → fabrication, but historical
+      // rows may still carry the literal `paid` enum so we render
+      // them as "In Fabrication" so the workflow reads consistently.
+      paid: { en: 'In Fabrication', fr: 'En fabrication' } as T,
+      fabrication: { en: 'In Fabrication', fr: 'En fabrication' } as T,
       ready_to_ship: { en: 'Ready to ship', fr: 'Prêt à expédier' } as T,
-      shipped: { en: 'Shipped', fr: 'Expédié' } as T,
-      finished: { en: 'Finished', fr: 'Terminé' } as T,
+      shipped: { en: 'Shipped', fr: 'Expédiée' } as T,
+      // `finished` means the patient has received the aligners — the
+      // user-facing label reads as "Done" everywhere so the lifecycle
+      // ends on a positive note rather than a vague "Finished".
+      finished: { en: 'Done', fr: 'Terminée' } as T,
       canceled: { en: 'Canceled', fr: 'Annulé' } as T,
       // Legacy enum values still present in the DB.
       in_review: { en: 'In review', fr: 'En révision' } as T,
@@ -601,6 +608,98 @@ export const dict = {
       radiographyScans: { en: 'Radiography & STL scans', fr: 'Radiographies & STL' } as T,
       clinicalObjective: { en: 'Treatment plan & clinical objective', fr: 'Plan de traitement & objectif clinique' } as T,
       toothLevel: { en: 'Tooth-level instructions & movement plan', fr: 'Instructions par dent & plan de mouvement' } as T,
+      orderMetadata: { en: 'Order metadata', fr: 'Informations de commande' } as T,
+    },
+
+    // Generic error / empty states on this page
+    orderNotFound: {
+      en: 'Order not found or access is blocked',
+      fr: 'Commande introuvable ou accès refusé',
+    } as T,
+    backToOrders: { en: 'Back to orders', fr: 'Retour aux commandes' } as T,
+    loadingOdontogram: { en: 'Loading odontogram…', fr: 'Chargement de l’odontogramme…' } as T,
+    newActivity: { en: 'New activity', fr: 'Nouvelle activité' } as T,
+
+    // Soft + permanent delete dialog copy
+    deleteDescription: {
+      en: 'This soft-deletes the order. Backend permissions still enforce dentist ownership.',
+      fr: 'La commande sera archivée. Les permissions backend continuent d’appliquer la propriété du praticien.',
+    } as T,
+    deletePermanentlyDescription: {
+      en: 'This removes the order, tooth instructions, file records, and stored files. This cannot be undone.',
+      fr: 'Cela supprime la commande, les instructions par dent, les fichiers enregistrés et les pièces stockées. Cette action est irréversible.',
+    } as T,
+
+    // Sex / gender labels (used on the patient card)
+    gender: {
+      male: { en: 'Male', fr: 'Homme' } as T,
+      female: { en: 'Female', fr: 'Femme' } as T,
+      other: { en: 'Other', fr: 'Autre' } as T,
+    },
+
+    // Age display ("32 yrs" / "2 yrs 4 mo")
+    age: {
+      yr: { en: 'yr', fr: 'an' } as T,
+      yrs: { en: 'yrs', fr: 'ans' } as T,
+      mo: { en: 'mo', fr: 'mois' } as T,
+    },
+
+    // Movement / mechanics labels under the odontogram
+    movement: {
+      elastics: { en: 'Elastics', fr: 'Élastiques' } as T,
+      openBite: { en: 'Open bite', fr: 'Béance' } as T,
+      midline: { en: 'Midline', fr: 'Ligne médiane' } as T,
+      ipr: { en: 'IPR', fr: 'IPR' } as T,
+      biteRamps: { en: 'Bite ramps', fr: 'Plans de morsure' } as T,
+      expansion: { en: 'Expansion', fr: 'Expansion' } as T,
+      noExpansion: { en: 'No expansion', fr: 'Pas d’expansion' } as T,
+      crossbite: { en: 'Crossbite', fr: 'Articulé inversé' } as T,
+      spaces: { en: 'Spaces', fr: 'Espaces' } as T,
+      extractions: { en: 'Extractions', fr: 'Extractions' } as T,
+      specialInstructions: { en: 'Special instructions', fr: 'Instructions spéciales' } as T,
+      additionalNotes: { en: 'Additional notes', fr: 'Notes additionnelles' } as T,
+    },
+
+    // Order metadata block at the bottom
+    metadata: {
+      cbctRequested: { en: 'CBCT requested', fr: 'CBCT demandé' } as T,
+      yes: { en: 'Yes', fr: 'Oui' } as T,
+      no: { en: 'No', fr: 'Non' } as T,
+      manufacturing: { en: 'Manufacturing', fr: 'Fabrication' } as T,
+      requested: { en: 'Requested', fr: 'Demandée' } as T,
+      notRequested: { en: 'Not requested', fr: 'Non demandée' } as T,
+      materials: { en: 'Materials', fr: 'Matériaux' } as T,
+      notSet: { en: 'Not set', fr: 'Non renseigné' } as T,
+      orderCode: { en: 'Order code', fr: 'Code commande' } as T,
+    },
+
+    // Treatment plans section (inside the tab)
+    plans: {
+      loading: { en: 'Loading treatment plans…', fr: 'Chargement des plans de traitement…' } as T,
+      empty: { en: 'No treatment plans yet.', fr: 'Aucun plan de traitement pour le moment.' } as T,
+      newPlan: { en: 'New plan', fr: 'Nouveau plan' } as T,
+      createFirst: { en: 'Create the first plan', fr: 'Créer le premier plan' } as T,
+    },
+
+    // Treatment-fee gate banner (extra strings on top of orderDetail.fee.*)
+    feeBanner: {
+      awaitingTitle: {
+        en: 'Awaiting treatment fee — {amount} {currency}',
+        fr: 'En attente des honoraires — {amount} {currency}',
+      } as T,
+      awaitingHint: {
+        en: 'The professional fee must be settled before the admin can send the treatment plan. One-time payment per order.',
+        fr: 'Les honoraires professionnels doivent être réglés avant que l’administrateur ne puisse envoyer le plan de traitement. Paiement unique par commande.',
+      } as T,
+      pendingTitle: {
+        en: 'Bank transfer awaiting confirmation — {amount} {currency}',
+        fr: 'Virement en attente de confirmation — {amount} {currency}',
+      } as T,
+      paidViaSuffix: { en: 'via {method}', fr: 'via {method}' } as T,
+      paidHint: {
+        en: 'The treatment plan can now be sent.',
+        fr: 'Le plan de traitement peut désormais être envoyé.',
+      } as T,
     },
   },
 
@@ -1081,17 +1180,22 @@ export const dict = {
     } as T,
     newOrder: { en: 'New Order', fr: 'Nouvelle commande' } as T,
 
-    // Status tabs
+    // Status tabs. Final shape: 8 tabs (All + 7 lifecycle phases) so
+    // the strip stays readable on a phone. The previous strip listed
+    // 10 tabs with two duplicates (PAID vs FABRICATION, PLAN_READY
+    // vs APPROVED) that read like the same step from a clinician's
+    // perspective — collapsed here so each tab is one clear bucket.
+    // Tab labels match the badge labels word-for-word — "In Fabrication"
+    // on the badge → "In Fabrication" on the tab, so the user can
+    // recognise a row's tab home at a glance.
     tabAll: { en: 'All', fr: 'Toutes' } as T,
     tabDraft: { en: 'Draft', fr: 'Brouillon' } as T,
     tabSubmitted: { en: 'Submitted', fr: 'Soumises' } as T,
-    tabTreatmentReady: { en: 'Treatment ready', fr: 'Plan prêt' } as T,
-    tabTreatmentApproved: { en: 'Treatment approved', fr: 'Plan approuvé' } as T,
+    tabTreatmentPlan: { en: 'Treatment plan', fr: 'Plan de traitement' } as T,
     tabQuoteSent: { en: 'Quote sent', fr: 'Devis envoyé' } as T,
-    tabPaid: { en: 'Paid', fr: 'Payée' } as T,
-    tabFabrication: { en: 'Fabrication', fr: 'Fabrication' } as T,
+    tabInFabrication: { en: 'In Fabrication', fr: 'En fabrication' } as T,
     tabShipped: { en: 'Shipped', fr: 'Expédiée' } as T,
-    tabFinished: { en: 'Finished', fr: 'Terminée' } as T,
+    tabDone: { en: 'Done', fr: 'Terminée' } as T,
 
     // Toolbar
     searchPh: {

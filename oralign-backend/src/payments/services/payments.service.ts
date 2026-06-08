@@ -663,10 +663,16 @@ export class PaymentsService {
         },
       });
 
-      // Propagate order status.
+      // Propagate order status. When the quotation is fully paid we
+      // jump STRAIGHT to `fabrication` instead of pausing at `paid`:
+      // the moment the money lands, the lab work has effectively
+      // started — there's no business meaning to a long-lived `paid`
+      // state, and surfacing it as a separate tab on the orders page
+      // made the workflow harder to read. Keeps the enum value
+      // available for back-compat in case other callers still set it.
       const nextOrderStatus =
         newStatus === QuotationPaymentStatus.paid
-          ? OrderStatus.paid
+          ? OrderStatus.fabrication
           : OrderStatus.payment_pending;
       const order = await tx.dentalOrder.update({
         where: { id: installment.quotation.orderId },

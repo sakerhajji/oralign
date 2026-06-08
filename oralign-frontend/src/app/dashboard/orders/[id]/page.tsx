@@ -4,7 +4,8 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { useParams, useRouter } from 'next/navigation';
-import { format } from 'date-fns';
+import { format, type Locale } from 'date-fns';
+import { fr as frLocale } from 'date-fns/locale';
 import {
   ArrowLeft,
   Camera,
@@ -67,6 +68,15 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 // Defer the odontogram (its sprite payload is heavy) until the page mounts.
+function OdontogramLoading() {
+  const { t } = useT();
+  return (
+    <div className="flex h-48 items-center justify-center text-sm text-muted-foreground">
+      {t('orderDetail.loadingOdontogram')}
+    </div>
+  );
+}
+
 const OdontogramSelector = dynamic(
   () =>
     import('@/components/orders/odontogram-selector').then((m) => ({
@@ -74,15 +84,18 @@ const OdontogramSelector = dynamic(
     })),
   {
     ssr: false,
-    loading: () => (
-      <div className="flex h-48 items-center justify-center text-sm text-muted-foreground">
-        Loading odontogram…
-      </div>
-    ),
+    loading: () => <OdontogramLoading />,
   },
 );
 
 type OrderDetailTab = 'order' | 'treatment-plans' | 'quote';
+
+// Locale-aware date helpers. FR uses "d MMM yyyy" (e.g. "8 juin 2026")
+// matching the orders list page so dates read consistently.
+const dateLocale = (lang: 'en' | 'fr'): Locale | undefined =>
+  lang === 'fr' ? frLocale : undefined;
+const dateFmt = (lang: 'en' | 'fr') =>
+  lang === 'fr' ? 'd MMM yyyy' : 'MMM d, yyyy';
 
 export default function OrderDetailPage() {
   const params = useParams<{ id: string }>();
@@ -91,7 +104,7 @@ export default function OrderDetailPage() {
   const deleteOrder = useDeleteOrder();
   const permanentDeleteOrder = usePermanentDeleteOrder();
   const { isAdmin, isDentist, user } = useAuth();
-  const { t } = useT();
+  const { t, lang } = useT();
 
   // Pull the full patient record separately — the order endpoint only
   // returns a slim {id,fullName,email,phone} on purpose, but the detail
@@ -154,10 +167,10 @@ export default function OrderDetailPage() {
         <Card>
           <CardContent className="flex min-h-64 flex-col items-center justify-center gap-3 text-center">
             <p className="font-medium text-red-600">
-              Order not found or access is blocked
+              {t('orderDetail.orderNotFound')}
             </p>
             <Button asChild variant="outline">
-              <Link href="/dashboard/orders">Back to orders</Link>
+              <Link href="/dashboard/orders">{t('orderDetail.backToOrders')}</Link>
             </Button>
           </CardContent>
         </Card>
@@ -221,9 +234,10 @@ export default function OrderDetailPage() {
             )}
           </div>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            {t('orderDetail.createdOn')} {format(new Date(order.createdAt), 'MMM d, yyyy')}
+            {t('orderDetail.createdOn')}{' '}
+            {format(new Date(order.createdAt), dateFmt(lang), { locale: dateLocale(lang) })}
             {order.submittedAt
-              ? ` · ${t('orderDetail.submittedOn')} ${format(new Date(order.submittedAt), 'MMM d, yyyy')}`
+              ? ` · ${t('orderDetail.submittedOn')} ${format(new Date(order.submittedAt), dateFmt(lang), { locale: dateLocale(lang) })}`
               : ''}
           </p>
         </div>
@@ -238,9 +252,10 @@ export default function OrderDetailPage() {
           )}
           {canManage && (
             <OrderDeleteAction
-              title={t('orderDetail.delete') + '?'}
-              description="This soft-deletes the order. Backend permissions still enforce dentist ownership."
+              title={t('orderDetail.delete') + ' ?'}
+              description={t('orderDetail.deleteDescription')}
               actionLabel={t('common.delete')}
+              cancelLabel={t('common.cancel')}
               icon={<Trash2 className="mr-2 h-4 w-4" />}
               disabled={deleteOrder.isPending}
               onConfirm={() =>
@@ -252,9 +267,10 @@ export default function OrderDetailPage() {
           )}
           {isAdmin && (
             <OrderDeleteAction
-              title={t('orderDetail.deletePermanently') + '?'}
-              description="This removes the order, tooth instructions, file records, and stored files. This cannot be undone."
+              title={t('orderDetail.deletePermanently') + ' ?'}
+              description={t('orderDetail.deletePermanentlyDescription')}
               actionLabel={t('orderDetail.deletePermanently')}
+              cancelLabel={t('common.cancel')}
               icon={<ShieldX className="mr-2 h-4 w-4" />}
               disabled={permanentDeleteOrder.isPending}
               destructive
@@ -357,9 +373,9 @@ export default function OrderDetailPage() {
           <Info label={t('orderForm.patient.pickerLabel')} value={order.patient?.fullName} />
           <Info label={t('orderDetail.patientCard.dentist')} value={order.doctor?.fullName} />
           <Info label={t('orderDetail.patientCard.stage')} value={order.patientStage} />
-          <Info label={t('orderDetail.patientCard.sex')} value={genderLabel(patient?.gender)} />
-          <Info label={t('orderDetail.patientCard.dob')} value={formatBirthDate(patient?.dateOfBirth)} />
-          <Info label={t('orderForm.patient.age')} value={ageFromDob(patient?.dateOfBirth)} />
+          <Info label={t('orderDetail.patientCard.sex')} value={genderLabel(patient?.gender, t)} />
+          <Info label={t('orderDetail.patientCard.dob')} value={formatBirthDate(patient?.dateOfBirth, lang)} />
+          <Info label={t('orderForm.patient.age')} value={ageFromDob(patient?.dateOfBirth, t)} />
           <Info label={t('orderDetail.patientCard.email')} value={order.patient?.email} />
           <Info label={t('orderDetail.patientCard.phone')} value={order.patient?.phone} />
           <Info label={t('orderDetail.patientCard.arch')} value={order.archTreatment} />
@@ -431,15 +447,18 @@ export default function OrderDetailPage() {
           {/* Mechanics summary below the chart */}
           <div className="border-t pt-6">
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <Info label="Elastics" value={order.elastics} wide />
-              <Info label="Open bite" value={order.openBite} />
-              <Info label="Midline" value={order.midline} />
-              <Info label="IPR" value={order.ipr} />
-              <Info label="Bite ramps" value={order.biteRamps} />
-              <Info label="Expansion" value={order.expansion ?? 'No expansion'} />
-              <Info label="Crossbite" value={order.crossbite} />
-              <Info label="Spaces" value={order.spaces} wide />
-              <Info label="Extractions" value={order.extractions} wide />
+              <Info label={t('orderDetail.movement.elastics')} value={order.elastics} wide />
+              <Info label={t('orderDetail.movement.openBite')} value={order.openBite} />
+              <Info label={t('orderDetail.movement.midline')} value={order.midline} />
+              <Info label={t('orderDetail.movement.ipr')} value={order.ipr} />
+              <Info label={t('orderDetail.movement.biteRamps')} value={order.biteRamps} />
+              <Info
+                label={t('orderDetail.movement.expansion')}
+                value={order.expansion ?? t('orderDetail.movement.noExpansion')}
+              />
+              <Info label={t('orderDetail.movement.crossbite')} value={order.crossbite} />
+              <Info label={t('orderDetail.movement.spaces')} value={order.spaces} wide />
+              <Info label={t('orderDetail.movement.extractions')} value={order.extractions} wide />
             </div>
           </div>
 
@@ -447,12 +466,12 @@ export default function OrderDetailPage() {
             <div className="border-t pt-6">
               <div className="grid gap-4">
                 <Info
-                  label="Special instructions"
+                  label={t('orderDetail.movement.specialInstructions')}
                   value={order.specialInstructions}
                   wide
                 />
                 <Info
-                  label="Additional notes"
+                  label={t('orderDetail.movement.additionalNotes')}
                   value={order.additionalInstructions}
                   wide
                 />
@@ -464,22 +483,26 @@ export default function OrderDetailPage() {
 
       {/* Bottom meta block — small, low-priority info that used to be
           in a "Summary" sidebar but is more honest at the end. */}
-      <Section icon={ClipboardCheck} title="Order metadata">
+      <Section icon={ClipboardCheck} title={t('orderDetail.sections.orderMetadata')}>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Info
-            label="CBCT requested"
-            value={order.useCbctWithScans ? 'Yes' : 'No'}
+            label={t('orderDetail.metadata.cbctRequested')}
+            value={order.useCbctWithScans ? t('orderDetail.metadata.yes') : t('orderDetail.metadata.no')}
           />
           <Info
-            label="Manufacturing"
-            value={order.wantsManufacturing ? 'Requested' : 'Not requested'}
+            label={t('orderDetail.metadata.manufacturing')}
+            value={
+              order.wantsManufacturing
+                ? t('orderDetail.metadata.requested')
+                : t('orderDetail.metadata.notRequested')
+            }
           />
           <Info
-            label="Materials"
-            value={(order.materials ?? []).join(', ') || 'Not set'}
+            label={t('orderDetail.metadata.materials')}
+            value={(order.materials ?? []).join(', ') || t('orderDetail.metadata.notSet')}
           />
           <Info
-            label="Order code"
+            label={t('orderDetail.metadata.orderCode')}
             value={order.orderCode}
           />
         </div>
@@ -634,8 +657,9 @@ function needsQuoteAttention(args: {
  * shouty like a destructive red would.
  */
 function AttentionDot() {
+  const { t } = useT();
   return (
-    <span className="relative ml-1 flex h-2 w-2" aria-label="New activity">
+    <span className="relative ml-1 flex h-2 w-2" aria-label={t('orderDetail.newActivity')}>
       <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
       <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
     </span>
@@ -689,24 +713,26 @@ function Info({
 
 // ─── Patient demographic helpers ───────────────────────────────────────────
 
-function genderLabel(gender?: string | null): string | undefined {
+type TFn = (path: string, vars?: Record<string, string | number>) => string;
+
+function genderLabel(gender: string | null | undefined, t: TFn): string | undefined {
   switch (gender) {
     case Gender.MALE:
-      return 'Male';
+      return t('orderDetail.gender.male');
     case Gender.FEMALE:
-      return 'Female';
+      return t('orderDetail.gender.female');
     case Gender.OTHER:
-      return 'Other';
+      return t('orderDetail.gender.other');
     default:
       return undefined;
   }
 }
 
-function formatBirthDate(dob?: string | null): string | undefined {
+function formatBirthDate(dob: string | null | undefined, lang: 'en' | 'fr'): string | undefined {
   if (!dob) return undefined;
   const date = new Date(dob);
   if (Number.isNaN(date.getTime())) return undefined;
-  return format(date, 'MMM d, yyyy');
+  return format(date, dateFmt(lang), { locale: dateLocale(lang) });
 }
 
 /**
@@ -714,7 +740,7 @@ function formatBirthDate(dob?: string | null): string | undefined {
  * Returns "32 yrs" for adults, "2 yrs 4 mo" for toddlers (treatment-planning
  * for paediatric / growing patients hinges on this granularity).
  */
-function ageFromDob(dob?: string | null): string | undefined {
+function ageFromDob(dob: string | null | undefined, t: TFn): string | undefined {
   if (!dob) return undefined;
   const birth = new Date(dob);
   if (Number.isNaN(birth.getTime())) return undefined;
@@ -728,9 +754,10 @@ function ageFromDob(dob?: string | null): string | undefined {
   }
   if (years < 0) return undefined;
   if (years < 5) {
-    return `${years} yr${years === 1 ? '' : 's'}${months > 0 ? ` ${months} mo` : ''}`;
+    const yrLabel = years === 1 ? t('orderDetail.age.yr') : t('orderDetail.age.yrs');
+    return `${years} ${yrLabel}${months > 0 ? ` ${months} ${t('orderDetail.age.mo')}` : ''}`;
   }
-  return `${years} yrs`;
+  return `${years} ${t('orderDetail.age.yrs')}`;
 }
 
 // ─── Treatment plans list + review ─────────────────────────────────────────
@@ -745,6 +772,7 @@ function TreatmentPlansSection({
   const plansQuery = useTreatmentPlansByOrder(orderId);
   const create = useCreateTreatmentPlan();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const { t } = useT();
 
   // Order-scoped socket: keeps the plan list in sync (admin creating a
   // new plan → doctor sees it appear without a refresh) AND drives the
@@ -762,7 +790,7 @@ function TreatmentPlansSection({
   if (plansQuery.isLoading) {
     return (
       <div className="flex h-24 items-center justify-center text-sm text-muted-foreground">
-        Loading treatment plans…
+        {t('orderDetail.plans.loading')}
       </div>
     );
   }
@@ -796,14 +824,14 @@ function TreatmentPlansSection({
               className="gap-2"
             >
               <Plus className="h-4 w-4" />
-              New plan
+              {t('orderDetail.plans.newPlan')}
             </Button>
           )}
         </div>
       )}
       {plans.length === 0 ? (
         <div className="rounded-md border border-dashed bg-muted/30 p-6 text-center text-sm text-muted-foreground">
-          No treatment plans yet.
+          {t('orderDetail.plans.empty')}
           {isPlanner && (
             <div className="mt-3">
               <Button
@@ -814,7 +842,7 @@ function TreatmentPlansSection({
                 className="gap-2"
               >
                 <Plus className="h-4 w-4" />
-                Create the first plan
+                {t('orderDetail.plans.createFirst')}
               </Button>
             </div>
           )}
@@ -834,6 +862,7 @@ function OrderDeleteAction({
   title,
   description,
   actionLabel,
+  cancelLabel,
   icon,
   disabled,
   destructive,
@@ -842,6 +871,7 @@ function OrderDeleteAction({
   title: string;
   description: string;
   actionLabel: string;
+  cancelLabel: string;
   icon: ReactNode;
   disabled?: boolean;
   destructive?: boolean;
@@ -865,7 +895,7 @@ function OrderDeleteAction({
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogCancel>{cancelLabel}</AlertDialogCancel>
           <AlertDialogAction
             variant={destructive ? 'destructive' : 'default'}
             onClick={onConfirm}
@@ -922,6 +952,7 @@ function TreatmentFeeGateBanner({
   // banner. Replaces the previous "click Confirm and hope" flow with
   // "view the proof → click Confirm in the same modal".
   const [receiptOpen, setReceiptOpen] = useState(false);
+  const { t, lang } = useT();
 
   const fee = defaults?.defaultTreatmentFee ?? 0;
   const currency = defaults?.defaultCurrency ?? 'TND';
@@ -943,15 +974,15 @@ function TreatmentFeeGateBanner({
         <CardContent className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-sm font-semibold text-emerald-900">
-              Treatment fee paid
+              {t('orderDetail.fee.titlePaid')}
             </p>
             <p className="text-xs text-emerald-800/80">
               {order.treatmentFeeAmount ?? fee} {currency}
               {order.treatmentFeePaymentMethod &&
-                ` · via ${order.treatmentFeePaymentMethod.replace('_', ' ')}`}
+                ` · ${t('orderDetail.feeBanner.paidViaSuffix', { method: order.treatmentFeePaymentMethod.replace('_', ' ') })}`}
               {order.treatmentFeePaidAt &&
-                ` · ${format(new Date(order.treatmentFeePaidAt), 'MMM d, yyyy')}`}
-              . The treatment plan can now be sent.
+                ` · ${format(new Date(order.treatmentFeePaidAt), dateFmt(lang), { locale: dateLocale(lang) })}`}
+              . {t('orderDetail.feeBanner.paidHint')}
             </p>
           </div>
         </CardContent>
@@ -966,13 +997,15 @@ function TreatmentFeeGateBanner({
           <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-sm font-semibold text-blue-900">
-                Bank transfer awaiting confirmation — {order.treatmentFeeAmount ?? fee}{' '}
-                {currency}
+                {t('orderDetail.feeBanner.pendingTitle', {
+                  amount: String(order.treatmentFeeAmount ?? fee),
+                  currency,
+                })}
               </p>
               <p className="text-xs text-blue-800/80">
                 {canActAsAdmin
-                  ? 'A receipt was uploaded by the doctor. Review the proof and confirm once the funds land in the account.'
-                  : 'Your receipt has been received. An admin will review the proof and confirm the payment shortly.'}
+                  ? t('orderDetail.fee.adminPendingHint')
+                  : t('orderDetail.fee.doctorPendingHint')}
               </p>
             </div>
             {/*
@@ -994,7 +1027,7 @@ function TreatmentFeeGateBanner({
                   }
                   onClick={() => setReceiptOpen(true)}
                 >
-                  View receipt
+                  {t('orderDetail.fee.viewReceipt')}
                 </Button>
               )}
               {canActAsAdmin && (
@@ -1004,7 +1037,7 @@ function TreatmentFeeGateBanner({
                   className="bg-blue-600 hover:bg-blue-700"
                   onClick={() => setReceiptOpen(true)}
                 >
-                  Review &amp; confirm
+                  {t('orderDetail.fee.adminConfirm')}
                 </Button>
               )}
             </div>
@@ -1039,11 +1072,10 @@ function TreatmentFeeGateBanner({
         <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-sm font-semibold text-amber-900">
-              Awaiting treatment fee — {fee} {currency}
+              {t('orderDetail.feeBanner.awaitingTitle', { amount: String(fee), currency })}
             </p>
             <p className="text-xs text-amber-800/80">
-              The professional fee must be settled before the admin can send
-              the treatment plan. One-time payment per order.
+              {t('orderDetail.feeBanner.awaitingHint')}
             </p>
           </div>
           {canAct && (
@@ -1053,7 +1085,7 @@ function TreatmentFeeGateBanner({
               className="bg-amber-600 hover:bg-amber-700"
               onClick={() => setPayOpen(true)}
             >
-              Pay treatment fee
+              {t('orderDetail.fee.doctorPay')}
             </Button>
           )}
         </CardContent>

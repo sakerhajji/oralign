@@ -113,22 +113,32 @@ import { cn } from '@/lib/utils';
 const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
 type PageSize = (typeof PAGE_SIZE_OPTIONS)[number];
 
-// Status filter buckets surfaced as tabs above the table. Labels go
-// through the dict so the strip flips to FR on the language toggle —
-// every tab carries a `labelKey` instead of a hard-coded English
-// label. "All" sits first so the page reads as "everything → narrow
-// down". Modern lifecycle only; legacy enum values are suppressed.
+// Status filter buckets surfaced as tabs above the table. The final
+// strip is 8 tabs (All + 7 phases) — the previous 10-tab strip
+// duplicated stages (PAID and FABRICATION mean the same thing from a
+// clinician's point of view; PLAN_READY and APPROVED were two clicks
+// for the same "treatment plan" phase). We picked the single status
+// per bucket that the backend actually transitions THROUGH so the
+// filter returns the rows users expect:
+//   • Treatment plan tab    → APPROVED (the actionable end of the
+//                              planning phase — READY is a fleeting
+//                              transitional state)
+//   • In Fabrication tab    → FABRICATION (PAID auto-transitions
+//                              there now; any legacy PAID rows still
+//                              show up under their own badge but the
+//                              tab routes through the canonical
+//                              status so admin clicks consistent).
+//   • Done tab              → FINISHED (label flips to "Done" /
+//                              "Terminée" via the status dict)
 const STATUS_TABS = [
   { key: 'all' as const, labelKey: 'ordersPage.tabAll' },
   { key: OrderStatus.DRAFT, labelKey: 'ordersPage.tabDraft' },
   { key: OrderStatus.SUBMITTED, labelKey: 'ordersPage.tabSubmitted' },
-  { key: OrderStatus.TREATMENT_PLAN_READY, labelKey: 'ordersPage.tabTreatmentReady' },
-  { key: OrderStatus.TREATMENT_APPROVED, labelKey: 'ordersPage.tabTreatmentApproved' },
+  { key: OrderStatus.TREATMENT_APPROVED, labelKey: 'ordersPage.tabTreatmentPlan' },
   { key: OrderStatus.QUOTATION_SENT, labelKey: 'ordersPage.tabQuoteSent' },
-  { key: OrderStatus.PAID, labelKey: 'ordersPage.tabPaid' },
-  { key: OrderStatus.FABRICATION, labelKey: 'ordersPage.tabFabrication' },
+  { key: OrderStatus.FABRICATION, labelKey: 'ordersPage.tabInFabrication' },
   { key: OrderStatus.SHIPPED, labelKey: 'ordersPage.tabShipped' },
-  { key: OrderStatus.FINISHED, labelKey: 'ordersPage.tabFinished' },
+  { key: OrderStatus.FINISHED, labelKey: 'ordersPage.tabDone' },
 ] as const;
 
 const LEGACY_STATUSES = new Set<OrderStatus>([
@@ -786,8 +796,14 @@ export default function OrdersPage() {
               on the detail page with a warm cache (no spinner). */}
           <Card className="hidden overflow-hidden md:block">
             <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/40">
+              {/*
+                Sticky header so the column labels stay anchored while
+                the planner scrolls through long result sets. The
+                bg-muted/40 tint + backdrop-blur trick keeps the row
+                edges legible when rows scroll underneath.
+               */}
+              <TableHeader className="sticky top-0 z-10 bg-muted/40 backdrop-blur">
+                <TableRow className="hover:bg-muted/40">
                   {isAdmin && (
                     <TableHead className="w-10">
                       <SelectAllCheckbox
@@ -797,13 +813,29 @@ export default function OrdersPage() {
                       />
                     </TableHead>
                   )}
-                  <TableHead className="w-[200px]">{t('ordersPage.colOrder')}</TableHead>
-                  <TableHead>{t('ordersPage.colPatient')}</TableHead>
-                  {isAdmin && <TableHead>{t('ordersPage.colDentistCol')}</TableHead>}
-                  <TableHead>{t('ordersPage.colClinical')}</TableHead>
-                  <TableHead>{t('ordersPage.colStatus')}</TableHead>
-                  <TableHead>{t('ordersPage.colCreated')}</TableHead>
-                  <TableHead className="w-12 text-right">{t('ordersPage.colActions')}</TableHead>
+                  <TableHead className="w-[200px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {t('ordersPage.colOrder')}
+                  </TableHead>
+                  <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {t('ordersPage.colPatient')}
+                  </TableHead>
+                  {isAdmin && (
+                    <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      {t('ordersPage.colDentistCol')}
+                    </TableHead>
+                  )}
+                  <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {t('ordersPage.colClinical')}
+                  </TableHead>
+                  <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {t('ordersPage.colStatus')}
+                  </TableHead>
+                  <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {t('ordersPage.colCreated')}
+                  </TableHead>
+                  <TableHead className="w-12 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {t('ordersPage.colActions')}
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

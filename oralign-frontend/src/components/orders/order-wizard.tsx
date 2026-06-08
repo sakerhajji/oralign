@@ -862,33 +862,34 @@ function PatientStep({
     value: NewPatientDraft[K],
   ) => void;
 }) {
+  const { t } = useT();
   return (
     <div className="space-y-5">
       <div className="mx-auto grid max-w-[540px] gap-3 sm:grid-cols-2">
         <ChoiceCard
           active={patientMode === 'existing'}
-          title="Select one of your patients"
-          description={selectedPatientName ?? 'Choose an existing patient from your list.'}
+          title={t('orderForm.patient.chooseOneOfYour')}
+          description={selectedPatientName ?? t('orderForm.patient.chooseExistingHint')}
           onClick={() => setPatientMode('existing')}
         />
         <ChoiceCard
           active={patientMode === 'new'}
-          title="Create a new patient"
-          description="Add details to create a new patient."
+          title={t('orderForm.patient.createNewCardTitle')}
+          description={t('orderForm.patient.createNewHint')}
           onClick={() => setPatientMode('new')}
         />
       </div>
 
       {isAdmin && (
         <div className="grid gap-2">
-          <Label>Dentist</Label>
+          <Label>{t('orderForm.patient.dentistLabel')}</Label>
           <Select
             value={form.doctorId}
             onValueChange={(doctorId) => updateField('doctorId', doctorId)}
             disabled={!canModify}
           >
             <SelectTrigger className={cn('h-11', errors.doctorId && 'border-red-500')}>
-              <SelectValue placeholder="Select dentist" />
+              <SelectValue placeholder={t('orderForm.patient.selectDentistPh')} />
             </SelectTrigger>
             <SelectContent>
               {dentists.map((doctor) => (
@@ -904,14 +905,14 @@ function PatientStep({
 
       {patientMode === 'existing' ? (
         <div className="grid gap-2">
-          <Label>Patient</Label>
+          <Label>{t('orderForm.patient.patientLabel')}</Label>
           <Select
             value={form.patientId}
             onValueChange={(patientId) => updateField('patientId', patientId)}
             disabled={!canModify || patientsLoading}
           >
             <SelectTrigger className={cn('h-11', errors.patientId && 'border-red-500')}>
-              <SelectValue placeholder="Select patient from your list" />
+              <SelectValue placeholder={t('orderForm.patient.selectPatientFromListPh')} />
             </SelectTrigger>
             <SelectContent>
               {patients.map((patient) => (
@@ -934,9 +935,9 @@ function PatientStep({
           <div className="grid gap-5 md:grid-cols-2">
             <div className="md:col-span-2">
               <TextInput
-                label="Patient name"
+                label={t('orderForm.patient.patientNameLabel')}
                 value={newPatient.fullName}
-                placeholder="Full name"
+                placeholder={t('orderForm.patient.fullNameInputPh')}
                 icon={<UserRound className="h-4 w-4" />}
                 error={errors['newPatient.fullName']}
                 disabled={!canModify}
@@ -944,7 +945,7 @@ function PatientStep({
               />
             </div>
             <TextInput
-              label="Email"
+              label={t('orderForm.patient.email')}
               value={newPatient.email}
               type="email"
               placeholder="patient@example.com"
@@ -953,15 +954,15 @@ function PatientStep({
               onChange={(value) => updateNewPatient('email', value)}
             />
             <TextInput
-              label="Phone"
+              label={t('orderForm.patient.phone')}
               value={newPatient.phone}
-              placeholder="+216 12 345 678"
+              placeholder={t('orderForm.patient.phoneInputPh')}
               error={errors['newPatient.phone']}
               disabled={!canModify}
               onChange={(value) => updateNewPatient('phone', value)}
             />
             <TextInput
-              label="Date of birth"
+              label={t('orderForm.patient.dob')}
               value={newPatient.dateOfBirth}
               type="date"
               icon={<CalendarDays className="h-4 w-4" />}
@@ -970,7 +971,7 @@ function PatientStep({
               onChange={(value) => updateNewPatient('dateOfBirth', value)}
             />
             <div className="grid gap-2">
-              <Label>Gender</Label>
+              <Label>{t('orderForm.patient.genderLabel')}</Label>
               <Select
                 value={newPatient.gender}
                 onValueChange={(gender) => updateNewPatient('gender', gender as Gender)}
@@ -979,21 +980,21 @@ function PatientStep({
                 <SelectTrigger
                   className={cn('h-11', errors['newPatient.gender'] && 'border-red-500')}
                 >
-                  <SelectValue placeholder="Select patient gender" />
+                  <SelectValue placeholder={t('orderForm.patient.selectGenderPh')} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={Gender.FEMALE}>Female</SelectItem>
-                  <SelectItem value={Gender.MALE}>Male</SelectItem>
-                  <SelectItem value={Gender.OTHER}>Other</SelectItem>
+                  <SelectItem value={Gender.FEMALE}>{t('orderForm.patient.sexFemale')}</SelectItem>
+                  <SelectItem value={Gender.MALE}>{t('orderForm.patient.sexMale')}</SelectItem>
+                  <SelectItem value={Gender.OTHER}>{t('orderForm.patient.sexOther')}</SelectItem>
                 </SelectContent>
               </Select>
               <FieldError message={errors['newPatient.gender']} />
             </div>
             <div className="md:col-span-2">
               <TextInput
-                label="Address"
+                label={t('orderForm.patient.address')}
                 value={newPatient.address}
-                placeholder="Street, city, postal code"
+                placeholder={t('orderForm.patient.addressInputPh')}
                 error={errors['newPatient.address']}
                 disabled={!canModify}
                 onChange={(value) => updateNewPatient('address', value)}
@@ -1001,9 +1002,9 @@ function PatientStep({
             </div>
           </div>
           <TextAreaField
-            label="Notes"
+            label={t('orderForm.patient.notesLabel')}
             value={newPatient.notes}
-            placeholder="Allergies, medical history, anything the planner should know…"
+            placeholder={t('orderForm.patient.notesInputPh')}
             error={errors['newPatient.notes']}
             disabled={!canModify}
             onChange={(value) => updateNewPatient('notes', value)}
@@ -1046,6 +1047,35 @@ function TreatmentStep({
   errors: FieldErrors;
   updateField: <K extends keyof CreateOrderDto>(key: K, value: CreateOrderDto[K]) => void;
 }) {
+  const { t } = useT();
+
+  // ── Option-pill label resolvers ─────────────────────────────────────
+  // The SAVED value stays English (it's the backend storage key) but the
+  // VISIBLE label runs through `t()` so the same row renders in EN / FR /
+  // AR. A small map keeps the mapping in one spot per option list.
+  const TREATMENT_PLAN_KEY: Record<string, string> = {
+    'Full Arch': 'orderForm.treatment.planFullArch',
+    'Anterior Only': 'orderForm.treatment.planAnteriorOnly',
+    '4 - 4 only': 'orderForm.treatment.plan4to4',
+    'Dont Move 6 - 7 only': 'orderForm.treatment.planDontMove67',
+  };
+  const AP_KEY: Record<string, string> = {
+    Maintain: 'orderForm.treatment.apMaintainOpt',
+    'Improve canine only': 'orderForm.treatment.apImproveCanine',
+    'Improve canine and molar': 'orderForm.treatment.apImproveCanineMolar',
+    'Correct both Molar and Canine': 'orderForm.treatment.apCorrectBoth',
+  };
+  const PATIENT_STAGE_DESC: Record<PatientStage, string> = {
+    [PatientStage.INITIAL]: 'orderForm.treatment.stageInitialDesc',
+    [PatientStage.REFINEMENT]: 'orderForm.treatment.stageRefinementDesc',
+    [PatientStage.RETAINER]: 'orderForm.treatment.stageRetainerDesc',
+  };
+  const PATIENT_STAGE_LABEL: Record<PatientStage, string> = {
+    [PatientStage.INITIAL]: 'orderForm.patient.stageInitial',
+    [PatientStage.REFINEMENT]: 'orderForm.patient.stageRefinement',
+    [PatientStage.RETAINER]: 'orderForm.patient.stageRetainer',
+  };
+
   return (
     // Every field on Step 4 uses the SAME <fieldset> card pattern as
     // Step 5 (Movement plan) — legend heading + one-line muted hint +
@@ -1054,22 +1084,22 @@ function TreatmentStep({
     <div className="space-y-6">
       {/* ─── Patient stage ────────────────────────────────────────────── */}
       <fieldset className="space-y-3 rounded-lg border bg-card p-4">
-        <legend className="px-1 text-sm font-semibold">Patient stage</legend>
+        <legend className="px-1 text-sm font-semibold">{t('orderForm.treatment.patientStageLegend')}</legend>
         <p className="text-xs text-muted-foreground">
-          Where the patient is in their treatment lifecycle.
+          {t('orderForm.treatment.patientStageHint')}
         </p>
         <div
           role="radiogroup"
-          aria-label="Patient stage"
+          aria-label={t('orderForm.treatment.patientStageLegend')}
           className="grid gap-2 sm:grid-cols-3"
         >
-          {patientStageOptions.map(([value, label]) => (
+          {patientStageOptions.map(([value]) => (
             <ChoiceCard
               key={value}
               active={form.patientStage === value}
               disabled={disabled}
-              title={label}
-              description={stageDescription(value)}
+              title={t(PATIENT_STAGE_LABEL[value])}
+              description={t(PATIENT_STAGE_DESC[value])}
               onClick={() => updateField('patientStage', value)}
             />
           ))}
@@ -1079,20 +1109,19 @@ function TreatmentStep({
 
       {/* ─── Arch treatment ───────────────────────────────────────────── */}
       <fieldset className="space-y-3 rounded-lg border bg-card p-4">
-        <legend className="px-1 text-sm font-semibold">Arch treatment</legend>
+        <legend className="px-1 text-sm font-semibold">{t('orderForm.treatment.archTreatmentLegend')}</legend>
         <p className="text-xs text-muted-foreground">
-          Which arch(es) the planner will treat. Choosing "Both arches"
-          also sets the `treatBothArch` flag for downstream steps.
+          {t('orderForm.treatment.archTreatmentHint')}
         </p>
         <div
           role="radiogroup"
-          aria-label="Arch treatment"
+          aria-label={t('orderForm.treatment.archTreatmentLegend')}
           className="grid gap-2 sm:grid-cols-3"
         >
           <OptionPill
             active={form.archTreatment === ArchTreatment.UPPER}
             disabled={disabled}
-            label="Upper"
+            label={t('orderForm.treatment.archUpper')}
             onClick={() => {
               updateField('archTreatment', ArchTreatment.UPPER);
               updateField('treatBothArch', false);
@@ -1101,7 +1130,7 @@ function TreatmentStep({
           <OptionPill
             active={form.archTreatment === ArchTreatment.LOWER}
             disabled={disabled}
-            label="Lower"
+            label={t('orderForm.treatment.archLower')}
             onClick={() => {
               updateField('archTreatment', ArchTreatment.LOWER);
               updateField('treatBothArch', false);
@@ -1110,7 +1139,7 @@ function TreatmentStep({
           <OptionPill
             active={form.archTreatment === ArchTreatment.BOTH}
             disabled={disabled}
-            label="Both arches"
+            label={t('orderForm.treatment.archBoth')}
             onClick={() => {
               updateField('archTreatment', ArchTreatment.BOTH);
               updateField('treatBothArch', true);
@@ -1122,18 +1151,16 @@ function TreatmentStep({
 
       {/* ─── Chief complaint ──────────────────────────────────────────── */}
       <fieldset className="space-y-3 rounded-lg border bg-card p-4">
-        <legend className="px-1 text-sm font-semibold">Chief complaint</legend>
+        <legend className="px-1 text-sm font-semibold">{t('orderForm.treatment.chiefComplaintLegend')}</legend>
         <p className="text-xs text-muted-foreground">
-          The patient's main concern in their own words. Used by the
-          planner when designing the treatment plan and shown on the
-          order detail page.
+          {t('orderForm.treatment.chiefComplaintHint')}
         </p>
         {/* Inline <Input> rather than the TextInput helper because the
             fieldset legend already supplies the field label. */}
         <Input
           type="text"
           value={form.chiefComplaint ?? ''}
-          placeholder="Describe the patient's main concern..."
+          placeholder={t('orderForm.treatment.chiefComplaintInputPh')}
           disabled={disabled}
           onChange={(event) => updateField('chiefComplaint', event.target.value)}
           className={cn('h-11', errors.chiefComplaint && 'border-red-500')}
@@ -1142,18 +1169,14 @@ function TreatmentStep({
       </fieldset>
 
       {/* ─── Treatment plan ───────────────────────────────────────────── */}
-      {/* "Treat both arch" text input removed — it was a duplicate of the
-          "Both arches" pill above. Choosing the pill already sets the
-          boolean. The duplicate text input could leave the radio and the
-          boolean out of sync (a real bug). */}
       <fieldset className="space-y-3 rounded-lg border bg-card p-4">
-        <legend className="px-1 text-sm font-semibold">Treatment plan</legend>
+        <legend className="px-1 text-sm font-semibold">{t('orderForm.treatment.treatmentPlanLegend')}</legend>
         <p className="text-xs text-muted-foreground">
-          Which segments the planner is allowed to move.
+          {t('orderForm.treatment.treatmentPlanHint')}
         </p>
         <div
           role="radiogroup"
-          aria-label="Treatment plan"
+          aria-label={t('orderForm.treatment.treatmentPlanLegend')}
           className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4"
         >
           {treatmentPlanOptions.map((opt) => (
@@ -1161,7 +1184,7 @@ function TreatmentStep({
               key={opt}
               active={form.treatmentPlan === opt}
               disabled={disabled}
-              label={opt}
+              label={TREATMENT_PLAN_KEY[opt] ? t(TREATMENT_PLAN_KEY[opt]) : opt}
               onClick={() => updateField('treatmentPlan', opt)}
             />
           ))}
@@ -1170,16 +1193,14 @@ function TreatmentStep({
       </fieldset>
 
       {/* ─── A-P relationship ─────────────────────────────────────────── */}
-      {/* "Don't move" text removed — the Odontogram's "Do Not Move" colour
-          captures this per-tooth in step 5 (the canonical place). */}
       <fieldset className="space-y-3 rounded-lg border bg-card p-4">
-        <legend className="px-1 text-sm font-semibold">A-P relationship</legend>
+        <legend className="px-1 text-sm font-semibold">{t('orderForm.treatment.apLegend')}</legend>
         <p className="text-xs text-muted-foreground">
-          Antero-posterior treatment goal for canines and molars.
+          {t('orderForm.treatment.apHint')}
         </p>
         <div
           role="radiogroup"
-          aria-label="A-P relationship"
+          aria-label={t('orderForm.treatment.apLegend')}
           className="grid gap-2 sm:grid-cols-2"
         >
           {apRelationshipOptions.map((opt) => (
@@ -1187,7 +1208,7 @@ function TreatmentStep({
               key={opt}
               active={form.apRelationship === opt}
               disabled={disabled}
-              label={opt}
+              label={AP_KEY[opt] ? t(AP_KEY[opt]) : opt}
               onClick={() => updateField('apRelationship', opt)}
             />
           ))}
@@ -1323,6 +1344,58 @@ function AdvancedMovementStep({
    */
   toothInstructions: ToothInstruction[];
 }) {
+  const { t } = useT();
+
+  // ── Option-pill label resolvers ─────────────────────────────────────
+  // Saved values stay English (backend storage key) — labels run
+  // through t() for localisation. Tables collect every mapping in one
+  // place so a translator can find them at a glance.
+  const SEGMENT_KEY: Record<string, string> = {
+    No: 'orderForm.advanced.segmentNo',
+    Anterior: 'orderForm.advanced.segmentAnterior',
+    Posterior: 'orderForm.advanced.segmentPosterior',
+    Both: 'orderForm.advanced.segmentBoth',
+  };
+  const BITE_RAMPS_KEY: Record<string, string> = {
+    'No bite ramps': 'orderForm.advanced.biteRampsNoneOpt',
+    Anterior: 'orderForm.advanced.biteRampsAnteriorOpt',
+    'Canine / cuspid': 'orderForm.advanced.biteRampsCanineOpt',
+    Molar: 'orderForm.advanced.biteRampsMolarOpt',
+  };
+  const EXPANSION_KEY: Record<string, string> = {
+    'No expansion': 'orderForm.advanced.expansionNoneOpt',
+    Anterior: 'orderForm.advanced.segmentAnterior',
+    Posterior: 'orderForm.advanced.segmentPosterior',
+    Both: 'orderForm.advanced.segmentBoth',
+  };
+  const ELASTIC_KEY: Record<string, string> = {
+    'No elastics': 'orderForm.advanced.elasticsNone',
+    'Class I elastics': 'orderForm.advanced.elasticsClassI',
+    'Class II elastics': 'orderForm.advanced.elasticsClassII',
+    'Class III elastics': 'orderForm.advanced.elasticsClassIII',
+    'Vertical bite elastics': 'orderForm.advanced.elasticsVertical',
+    'Criss-cross elastics': 'orderForm.advanced.elasticsCrossCross',
+  };
+  const OPEN_BITE_KEY: Record<string, string> = {
+    Correct: 'orderForm.advanced.openBiteCorrectOpt',
+    Maintain: 'orderForm.advanced.openBiteMaintainOpt',
+    Improved: 'orderForm.advanced.openBiteImprovedOpt',
+  };
+  const MIDLINE_KEY: Record<string, string> = {
+    Maintain: 'orderForm.advanced.midlineMaintainOpt',
+    Correct: 'orderForm.advanced.midlineCorrectOpt',
+  };
+  const CROSSBITE_KEY: Record<string, string> = {
+    Correct: 'orderForm.advanced.crossbiteCorrectOpt',
+    Maintain: 'orderForm.advanced.crossbiteMaintainOpt',
+    'Correct only anterior': 'orderForm.advanced.crossbiteAnteriorOpt',
+    'Correct only posterior': 'orderForm.advanced.crossbitePosteriorOpt',
+  };
+  const SPACES_KEY: Record<string, string> = {
+    'Close all spaces': 'orderForm.advanced.spacesCloseOpt',
+    'Maintain spaces': 'orderForm.advanced.spacesMaintainOpt',
+  };
+
   // Decode the current saved strings into structured UI state. Each
   // segment is just `'No' | 'Anterior' | 'Posterior' | 'Both'` now —
   // the legacy priority qualifier was removed at the clinical team's
@@ -1393,15 +1466,13 @@ function AdvancedMovementStep({
           configuration per case. Multi-elastic cases capture the
           secondary type in the notes field. */}
       <fieldset className="space-y-3 rounded-lg border bg-card p-4">
-        <legend className="px-1 text-sm font-semibold">Elastics</legend>
+        <legend className="px-1 text-sm font-semibold">{t('orderForm.advanced.elastics')}</legend>
         <p className="text-xs text-muted-foreground">
-          Pick the primary elastic configuration. Use the notes field for
-          wear time, hook positions or a secondary type if more than one
-          is needed.
+          {t('orderForm.advanced.elasticsHint')}
         </p>
         <div
           role="radiogroup"
-          aria-label="Elastic type"
+          aria-label={t('orderForm.advanced.elastics')}
           className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3"
         >
           {elasticTypeOptions.map((opt) => (
@@ -1409,15 +1480,15 @@ function AdvancedMovementStep({
               key={opt}
               active={elastics.type === opt}
               disabled={disabled}
-              label={opt}
+              label={ELASTIC_KEY[opt] ? t(ELASTIC_KEY[opt]) : opt}
               onClick={() => setElasticType(opt)}
             />
           ))}
         </div>
         <TextInput
-          label="Notes (optional)"
+          label={t('orderForm.advanced.elasticsNotesLabel')}
           value={elastics.notes}
-          placeholder="e.g. Full-time wear; upper canine → lower first molar"
+          placeholder={t('orderForm.advanced.elasticsNotesPh')}
           icon={<Info className="h-4 w-4" />}
           disabled={disabled || elastics.type === 'No elastics'}
           onChange={setElasticsNotes}
@@ -1426,13 +1497,13 @@ function AdvancedMovementStep({
 
       {/* ─── Open bite ────────────────────────────────────────────────── */}
       <fieldset className="space-y-3 rounded-lg border bg-card p-4">
-        <legend className="px-1 text-sm font-semibold">Open bite</legend>
+        <legend className="px-1 text-sm font-semibold">{t('orderForm.advanced.openBite')}</legend>
         <p className="text-xs text-muted-foreground">
-          What should happen to the open bite during treatment?
+          {t('orderForm.advanced.openBiteHint')}
         </p>
         <div
           role="radiogroup"
-          aria-label="Open bite"
+          aria-label={t('orderForm.advanced.openBite')}
           className="grid gap-2 sm:grid-cols-3"
         >
           {openBiteOptions.map((opt) => (
@@ -1440,7 +1511,7 @@ function AdvancedMovementStep({
               key={opt}
               active={form.openBite === opt}
               disabled={disabled}
-              label={opt}
+              label={OPEN_BITE_KEY[opt] ? t(OPEN_BITE_KEY[opt]) : opt}
               onClick={() => updateField('openBite', opt)}
             />
           ))}
@@ -1449,13 +1520,13 @@ function AdvancedMovementStep({
 
       {/* ─── Midline ──────────────────────────────────────────────────── */}
       <fieldset className="space-y-3 rounded-lg border bg-card p-4">
-        <legend className="px-1 text-sm font-semibold">Midline</legend>
+        <legend className="px-1 text-sm font-semibold">{t('orderForm.treatment.midline')}</legend>
         <p className="text-xs text-muted-foreground">
-          Should the dental midline be maintained or corrected?
+          {t('orderForm.advanced.midlineHint')}
         </p>
         <div
           role="radiogroup"
-          aria-label="Midline"
+          aria-label={t('orderForm.treatment.midline')}
           className="grid gap-2 sm:grid-cols-2"
         >
           {midlineOptions.map((opt) => (
@@ -1463,7 +1534,7 @@ function AdvancedMovementStep({
               key={opt}
               active={form.midline === opt}
               disabled={disabled}
-              label={opt}
+              label={MIDLINE_KEY[opt] ? t(MIDLINE_KEY[opt]) : opt}
               onClick={() => updateField('midline', opt)}
             />
           ))}
@@ -1478,11 +1549,11 @@ function AdvancedMovementStep({
       <fieldset className="space-y-3 rounded-lg border bg-card p-4">
         <legend className="px-1 text-sm font-semibold">IPR</legend>
         <p className="text-xs text-muted-foreground">
-          Pick where interproximal reduction is allowed.
+          {t('orderForm.advanced.iprHint')}
         </p>
         <div
           role="radiogroup"
-          aria-label="IPR segment"
+          aria-label="IPR"
           className="grid gap-2 sm:grid-cols-4"
         >
           {segmentOptions.map((opt) => (
@@ -1490,7 +1561,7 @@ function AdvancedMovementStep({
               key={opt}
               active={iprSegment === opt}
               disabled={disabled}
-              label={opt === 'No' ? 'No IPR' : opt}
+              label={opt === 'No' ? t('orderForm.advanced.segmentNoIpr') : (SEGMENT_KEY[opt] ? t(SEGMENT_KEY[opt]) : opt)}
               onClick={() => setIpr(opt)}
             />
           ))}
@@ -1499,13 +1570,13 @@ function AdvancedMovementStep({
 
       {/* ─── Bite ramps ─────────────────────────────────────────────────── */}
       <fieldset className="space-y-3 rounded-lg border bg-card p-4">
-        <legend className="px-1 text-sm font-semibold">Bite ramps</legend>
+        <legend className="px-1 text-sm font-semibold">{t('orderForm.advanced.biteRamps')}</legend>
         <p className="text-xs text-muted-foreground">
-          Where should the planner place bite ramps, if any?
+          {t('orderForm.advanced.biteRampsHint')}
         </p>
         <div
           role="radiogroup"
-          aria-label="Bite ramps"
+          aria-label={t('orderForm.advanced.biteRamps')}
           className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4"
         >
           {biteRampOptions.map((opt) => (
@@ -1513,7 +1584,7 @@ function AdvancedMovementStep({
               key={opt}
               active={form.biteRamps === opt}
               disabled={disabled}
-              label={opt}
+              label={BITE_RAMPS_KEY[opt] ? t(BITE_RAMPS_KEY[opt]) : opt}
               onClick={() => updateField('biteRamps', opt)}
             />
           ))}
@@ -1524,14 +1595,13 @@ function AdvancedMovementStep({
           Same removal as IPR above — no anterior / posterior priority
           when "Both" is selected. */}
       <fieldset className="space-y-3 rounded-lg border bg-card p-4">
-        <legend className="px-1 text-sm font-semibold">Expansion</legend>
+        <legend className="px-1 text-sm font-semibold">{t('orderForm.advanced.expansion')}</legend>
         <p className="text-xs text-muted-foreground">
-          Select the segment that needs expansion, or "No expansion" if
-          the arches are well-developed.
+          {t('orderForm.advanced.expansionHint')}
         </p>
         <div
           role="radiogroup"
-          aria-label="Expansion segment"
+          aria-label={t('orderForm.advanced.expansion')}
           className="grid gap-2 sm:grid-cols-4"
         >
           {expansionOptions.map((opt) => {
@@ -1541,7 +1611,7 @@ function AdvancedMovementStep({
                 key={opt}
                 active={expansionSegment === norm}
                 disabled={disabled}
-                label={opt}
+                label={EXPANSION_KEY[opt] ? t(EXPANSION_KEY[opt]) : opt}
                 onClick={() => setExpansion(norm)}
               />
             );
@@ -1551,13 +1621,13 @@ function AdvancedMovementStep({
 
       {/* ─── Crossbite ─────────────────────────────────────────────────── */}
       <fieldset className="space-y-3 rounded-lg border bg-card p-4">
-        <legend className="px-1 text-sm font-semibold">Crossbite</legend>
+        <legend className="px-1 text-sm font-semibold">{t('orderForm.advanced.crossbite')}</legend>
         <p className="text-xs text-muted-foreground">
-          What should happen to any present crossbite?
+          {t('orderForm.advanced.crossbiteHint')}
         </p>
         <div
           role="radiogroup"
-          aria-label="Crossbite"
+          aria-label={t('orderForm.advanced.crossbite')}
           className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4"
         >
           {crossbiteOptions.map((opt) => (
@@ -1565,7 +1635,7 @@ function AdvancedMovementStep({
               key={opt}
               active={form.crossbite === opt}
               disabled={disabled}
-              label={opt}
+              label={CROSSBITE_KEY[opt] ? t(CROSSBITE_KEY[opt]) : opt}
               onClick={() => updateField('crossbite', opt)}
             />
           ))}
@@ -1574,14 +1644,13 @@ function AdvancedMovementStep({
 
       {/* ─── Spaces — single source of truth ────────────────────────────── */}
       <fieldset className="space-y-3 rounded-lg border bg-card p-4">
-        <legend className="px-1 text-sm font-semibold">Spaces</legend>
+        <legend className="px-1 text-sm font-semibold">{t('orderForm.advanced.spaces')}</legend>
         <p className="text-xs text-muted-foreground">
-          Close existing spaces or maintain them for future restorative
-          work? Add detail in the notes field below.
+          {t('orderForm.advanced.spacesHint')}
         </p>
         <div
           role="radiogroup"
-          aria-label="Spaces"
+          aria-label={t('orderForm.advanced.spaces')}
           className="grid gap-2 sm:grid-cols-2"
         >
           {spacesOptions.map((opt) => (
@@ -1589,13 +1658,13 @@ function AdvancedMovementStep({
               key={opt}
               active={spaces.startsWith(opt)}
               disabled={disabled}
-              label={opt}
+              label={SPACES_KEY[opt] ? t(SPACES_KEY[opt]) : opt}
               onClick={() => updateField('spaces', opt)}
             />
           ))}
         </div>
         <TextAreaField
-          label="Notes (optional)"
+          label={t('orderForm.advanced.elasticsNotesLabel')}
           compact
           value={
             spaces && !spacesOptions.some((o) => spaces === o)
@@ -1605,7 +1674,7 @@ function AdvancedMovementStep({
                 )
               : ''
           }
-          placeholder="e.g. Close upper midline diastema; maintain space at #15 for future implant"
+          placeholder={t('orderForm.advanced.spacesNotesPh')}
           disabled={disabled}
           onChange={(detail) => {
             // Preserve the doctor's whitespace as-is while they type —
@@ -1624,21 +1693,18 @@ function AdvancedMovementStep({
 
       {/* ─── Extractions — odontogram picks + free-text notes ──────── */}
       <fieldset className="space-y-3 rounded-lg border bg-card p-4">
-        <legend className="px-1 text-sm font-semibold">Extractions</legend>
+        <legend className="px-1 text-sm font-semibold">{t('orderForm.advanced.extractions')}</legend>
         <p className="text-xs text-muted-foreground">
-          Teeth flagged with the orange <strong>Extract</strong> chip in
-          the odontogram above appear here automatically. Use the notes
-          field for confirmation status, sequencing, or extra context.
+          {t('orderForm.advanced.extractionsHint')}
         </p>
 
         <div className="rounded-md border bg-muted/30 p-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Selected tooth-level instructions (FDI)
+            {t('orderForm.advanced.extractionsTeethTitle')}
           </p>
           {extractTeeth.length === 0 ? (
             <p className="mt-2 text-xs italic text-muted-foreground">
-              No teeth marked for extraction yet. Click a tooth in the
-              odontogram above and pick <em>Extract</em> to add it here.
+              {t('orderForm.advanced.extractionsEmpty')}
             </p>
           ) : (
             <div className="mt-2 flex flex-wrap gap-1.5">
@@ -1655,9 +1721,9 @@ function AdvancedMovementStep({
         </div>
 
         <TextInput
-          label="Notes (optional)"
+          label={t('orderForm.advanced.elasticsNotesLabel')}
           value={form.extractions ?? ''}
-          placeholder="e.g. Confirmed with patient; extract before treatment start"
+          placeholder={t('orderForm.advanced.extractionsNotesPh')}
           icon={<Info className="h-4 w-4" />}
           disabled={disabled}
           onChange={(value) => updateField('extractions', value)}
@@ -1785,6 +1851,7 @@ function ReviewStep({
   form: CreateOrderDto;
   toothInstructions: ToothInstruction[];
 }) {
+  const { t } = useT();
   // Resolve patient demographics from whichever source is populated.
   // `selectedPatient` wins when the planner picked an existing record;
   // `newPatient` fills in for the inline-create flow before the draft
@@ -1837,7 +1904,7 @@ function ReviewStep({
   return (
     <div className="space-y-6">
       {/* ─── 1 · Patient information ─────────────────────────────── */}
-      <ReviewSection icon={UserRound} title="Patient information">
+      <ReviewSection icon={UserRound} title={t('orderForm.review.patientInfo')}>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <ReviewInfo label="Patient" value={patientName} />
           <ReviewInfo label="Dentist" value={dentistName} />
@@ -1876,7 +1943,7 @@ function ReviewStep({
           If `savedOrder` isn't there yet (draft hasn't been saved at
           all), the component already renders its own "save the draft
           first" notice — we don't gate it here. */}
-      <ReviewSection icon={Camera} title="Patient images">
+      <ReviewSection icon={Camera} title={t('orderForm.review.patientImages')}>
         <ClinicalOrderFiles
           orderId={savedOrder?.id}
           readOnly
@@ -1890,7 +1957,7 @@ function ReviewStep({
           (with the Download button) that we just polished. Avoiding
           a separate "Files" block keeps Review one-to-one with the
           upload flow above. */}
-      <ReviewSection icon={ScanLine} title="Radiography & STL scans">
+      <ReviewSection icon={ScanLine} title={t('orderForm.review.radiographyScans')}>
         <ClinicalOrderFiles
           orderId={savedOrder?.id}
           readOnly
@@ -1899,7 +1966,7 @@ function ReviewStep({
       </ReviewSection>
 
       {/* ─── 4 · Treatment plan & clinical objective ─────────────── */}
-      <ReviewSection icon={Target} title="Treatment plan & clinical objective">
+      <ReviewSection icon={Target} title={t('orderForm.review.treatmentObjective')}>
         <div className="grid gap-4 sm:grid-cols-2">
           <ReviewInfo
             label="Chief complaint"
@@ -1918,7 +1985,7 @@ function ReviewStep({
       {/* ─── 3 · Movement plan + odontogram ──────────────────────── */}
       <ReviewSection
         icon={ListChecks}
-        title="Tooth-level instructions & movement plan"
+        title={t('orderForm.review.toothLevel')}
       >
         <div className="space-y-8">
           <OdontogramSelector
@@ -1965,7 +2032,7 @@ function ReviewStep({
       </ReviewSection>
 
       {/* ─── 4 · Order metadata ──────────────────────────────────── */}
-      <ReviewSection icon={ClipboardCheck} title="Order metadata">
+      <ReviewSection icon={ClipboardCheck} title={t('orderForm.review.orderMetadata')}>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <ReviewInfo
             label="CBCT requested"

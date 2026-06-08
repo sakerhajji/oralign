@@ -126,6 +126,42 @@ export const dict = {
 
     // ── Patient step ─────────────────────────────────────────────
     patient: {
+      // Choice cards atop the step
+      chooseOneOfYour: { en: 'Select one of your patients', fr: 'Choisir un de vos patients', ar: 'اختر أحد مرضاك' } as T,
+      chooseExistingHint: {
+        en: 'Choose an existing patient from your list.',
+        fr: 'Choisissez un patient existant dans votre liste.',
+        ar: 'اختر مريضًا موجودًا من قائمتك.',
+      } as T,
+      createNewCardTitle: { en: 'Create a new patient', fr: 'Créer un nouveau patient', ar: 'إنشاء مريض جديد' } as T,
+      createNewHint: {
+        en: 'Add details to create a new patient.',
+        fr: 'Renseignez les informations pour créer un nouveau patient.',
+        ar: 'أدخل المعلومات لإنشاء مريض جديد.',
+      } as T,
+      // Selects
+      dentistLabel: { en: 'Dentist', fr: 'Praticien', ar: 'الطبيب' } as T,
+      selectDentistPh: { en: 'Select dentist', fr: 'Choisir un praticien', ar: 'اختر طبيبًا' } as T,
+      patientLabel: { en: 'Patient', fr: 'Patient', ar: 'المريض' } as T,
+      selectPatientFromListPh: {
+        en: 'Select patient from your list',
+        fr: 'Choisir un patient dans votre liste',
+        ar: 'اختر مريضًا من قائمتك',
+      } as T,
+      // Form fields (inline new-patient form)
+      patientNameLabel: { en: 'Patient name', fr: 'Nom du patient', ar: 'اسم المريض' } as T,
+      fullNameInputPh: { en: 'Full name', fr: 'Nom complet', ar: 'الاسم الكامل' } as T,
+      phoneInputPh: { en: '+216 12 345 678', fr: '+216 12 345 678', ar: '+216 12 345 678' } as T,
+      addressInputPh: { en: 'Street, city, postal code', fr: 'Rue, ville, code postal', ar: 'الشارع، المدينة، الرمز البريدي' } as T,
+      genderLabel: { en: 'Gender', fr: 'Sexe', ar: 'الجنس' } as T,
+      selectGenderPh: { en: 'Select patient gender', fr: 'Choisir le sexe du patient', ar: 'اختر جنس المريض' } as T,
+      notesLabel: { en: 'Notes', fr: 'Notes', ar: 'ملاحظات' } as T,
+      notesInputPh: {
+        en: 'Allergies, medical history, anything the planner should know…',
+        fr: 'Allergies, antécédents médicaux, toute information utile au planificateur…',
+        ar: 'الحساسية، التاريخ الطبي، أي معلومة مفيدة للمخطّط…',
+      } as T,
+
       sectionTitle: { en: 'Patient information', fr: 'Informations du patient', ar: 'معلومات المريض' } as T,
       sectionHint: {
         en: 'Pick an existing patient from your case files, or create a new one in seconds.',
@@ -186,6 +222,71 @@ export const dict = {
 
     // ── Treatment plan step ──────────────────────────────────────
     treatment: {
+      // Fieldset legends
+      patientStageLegend: { en: 'Patient stage', fr: 'Phase du patient', ar: 'مرحلة المريض' } as T,
+      patientStageHint: {
+        en: 'Where the patient is in their treatment lifecycle.',
+        fr: 'Où en est le patient dans son parcours de traitement.',
+        ar: 'في أي مرحلة من العلاج يقع المريض.',
+      } as T,
+      // Per-stage helper text shown under each ChoiceCard
+      stageInitialDesc: {
+        en: 'First aligner setup for this patient.',
+        fr: 'Premier traitement par aligneurs pour ce patient.',
+        ar: 'أول مجموعة من المصفّات لهذا المريض.',
+      } as T,
+      stageRefinementDesc: {
+        en: 'Top-up after the first treatment phase.',
+        fr: 'Reprise après la première phase de traitement.',
+        ar: 'استكمال بعد المرحلة الأولى من العلاج.',
+      } as T,
+      stageRetainerDesc: {
+        en: 'Retention only — keep teeth in their corrected position.',
+        fr: 'Contention uniquement — maintenir la position corrigée.',
+        ar: 'تثبيت فقط — للحفاظ على وضع الأسنان المُصحَّح.',
+      } as T,
+
+      archTreatmentLegend: { en: 'Arch treatment', fr: 'Traitement des arcades', ar: 'علاج الأقواس' } as T,
+      archTreatmentHint: {
+        en: 'Which arch(es) the planner will treat.',
+        fr: 'Quelle(s) arcade(s) seront traitées par le planificateur.',
+        ar: 'أيّ الأقواس سيعالجها المخطّط.',
+      } as T,
+      chiefComplaintLegend: { en: 'Chief complaint', fr: 'Motif de consultation', ar: 'سبب الاستشارة' } as T,
+      chiefComplaintHint: {
+        en: 'The patient’s main concern in their own words.',
+        fr: 'La préoccupation principale du patient, dans ses propres mots.',
+        ar: 'شكوى المريض الرئيسية بكلماته.',
+      } as T,
+      chiefComplaintInputPh: {
+        en: 'Describe the patient’s main concern…',
+        fr: 'Décrivez la préoccupation principale du patient…',
+        ar: 'صف الشكوى الرئيسية للمريض…',
+      } as T,
+
+      treatmentPlanLegend: { en: 'Treatment plan', fr: 'Plan de traitement', ar: 'خطة العلاج' } as T,
+      treatmentPlanHint: {
+        en: 'Which segments the planner is allowed to move.',
+        fr: 'Quels segments le planificateur est autorisé à déplacer.',
+        ar: 'الأجزاء التي يُسمح للمخطّط بتحريكها.',
+      } as T,
+      // Treatment-plan option pills (the saved string is English; this maps to localized labels)
+      planFullArch: { en: 'Full Arch', fr: 'Arcade complète', ar: 'القوس بأكمله' } as T,
+      planAnteriorOnly: { en: 'Anterior only', fr: 'Antérieurs uniquement', ar: 'الأماميات فقط' } as T,
+      plan4to4: { en: '4 to 4 only', fr: 'De 4 à 4 uniquement', ar: 'من 4 إلى 4 فقط' } as T,
+      planDontMove67: { en: 'Don’t move 6 / 7', fr: 'Ne pas déplacer 6 / 7', ar: 'عدم تحريك 6 و 7' } as T,
+
+      apLegend: { en: 'A-P relationship', fr: 'Relation A-P', ar: 'العلاقة الأمامية الخلفية' } as T,
+      apHint: {
+        en: 'Antero-posterior treatment goal for canines and molars.',
+        fr: 'Objectif antéro-postérieur pour les canines et les molaires.',
+        ar: 'الهدف الأمامي الخلفي للأنياب والأرحاء.',
+      } as T,
+      apMaintainOpt: { en: 'Maintain', fr: 'Maintenir', ar: 'حفظ' } as T,
+      apImproveCanine: { en: 'Improve canine only', fr: 'Améliorer la canine uniquement', ar: 'تحسين الناب فقط' } as T,
+      apImproveCanineMolar: { en: 'Improve canine and molar', fr: 'Améliorer canine et molaire', ar: 'تحسين الناب والرحى' } as T,
+      apCorrectBoth: { en: 'Correct both molar and canine', fr: 'Corriger molaire et canine', ar: 'تصحيح الرحى والناب معًا' } as T,
+
       chiefComplaint: { en: 'Chief complaint', fr: 'Motif de consultation', ar: 'سبب الاستشارة' } as T,
       chiefComplaintPh: {
         en: 'What does the patient want to fix? E.g. crowded lower arch, gaps, midline shift…',
@@ -227,6 +328,109 @@ export const dict = {
 
     // ── Advanced movements step ──────────────────────────────────
     advanced: {
+      // Helper text under each <legend>
+      elasticsHint: {
+        en: 'Pick the primary elastic configuration. Use the notes field for wear time, hook positions or a secondary type.',
+        fr: 'Choisissez la configuration principale d’élastiques. Utilisez le champ de notes pour le port, les crochets ou un type secondaire.',
+        ar: 'اختر إعداد المطّاطات الأساسي. استخدم خانة الملاحظات لمدة الارتداء، مواضع الخطّاف أو نوعٍ ثانوي.',
+      } as T,
+      elasticsNotesLabel: { en: 'Notes (optional)', fr: 'Notes (facultatif)', ar: 'ملاحظات (اختياري)' } as T,
+      elasticsNotesPh: {
+        en: 'e.g. Full-time wear; upper canine → lower first molar',
+        fr: 'p. ex. port permanent ; canine supérieure → première molaire inférieure',
+        ar: 'مثال: ارتداء دائم؛ الناب العلوي → الرحى الأولى السفلية',
+      } as T,
+      openBiteHint: {
+        en: 'What should happen to the open bite during treatment?',
+        fr: 'Que faire de la béance pendant le traitement ?',
+        ar: 'ماذا يحدث للعضّة المفتوحة أثناء العلاج؟',
+      } as T,
+      openBiteCorrectOpt: { en: 'Correct', fr: 'Corriger', ar: 'تصحيح' } as T,
+      openBiteMaintainOpt: { en: 'Maintain', fr: 'Maintenir', ar: 'حفظ' } as T,
+      openBiteImprovedOpt: { en: 'Improved', fr: 'Amélioration', ar: 'تحسين' } as T,
+
+      midlineHint: {
+        en: 'Should the dental midline be maintained or corrected?',
+        fr: 'La ligne médiane dentaire doit-elle être maintenue ou corrigée ?',
+        ar: 'هل يجب الحفاظ على الخط المتوسط أم تصحيحه؟',
+      } as T,
+      midlineMaintainOpt: { en: 'Maintain', fr: 'Maintenir', ar: 'حفظ' } as T,
+      midlineCorrectOpt: { en: 'Correct', fr: 'Corriger', ar: 'تصحيح' } as T,
+
+      iprHint: {
+        en: 'Pick where interproximal reduction is allowed.',
+        fr: 'Indiquez où la réduction interproximale est autorisée.',
+        ar: 'حدّد المواضع المسموح فيها بالتقليم بين الأسنان.',
+      } as T,
+
+      biteRampsHint: {
+        en: 'Where should the planner place bite ramps, if any?',
+        fr: 'Où le planificateur doit-il placer des plans de morsure, si nécessaire ?',
+        ar: 'أين يضع المخطّط مرتفعات العضّ، إن وُجدت؟',
+      } as T,
+      biteRampsNoneOpt: { en: 'No bite ramps', fr: 'Aucun plan de morsure', ar: 'لا توجد مرتفعات' } as T,
+      biteRampsAnteriorOpt: { en: 'Anterior', fr: 'Antérieurs', ar: 'الأماميات' } as T,
+      biteRampsCanineOpt: { en: 'Canine / cuspid', fr: 'Canines', ar: 'الأنياب' } as T,
+      biteRampsMolarOpt: { en: 'Molar', fr: 'Molaires', ar: 'الأرحاء' } as T,
+
+      expansionHint: {
+        en: 'Select the segment that needs expansion, or “No expansion” if the arches are well-developed.',
+        fr: 'Sélectionnez le segment à expandre, ou « Pas d’expansion » si les arcades sont déjà bien développées.',
+        ar: 'اختر الجزء الذي يحتاج إلى توسعة، أو "لا توسعة" إذا كانت الأقواس جيدة.',
+      } as T,
+      expansionNoneOpt: { en: 'No expansion', fr: 'Pas d’expansion', ar: 'لا توسعة' } as T,
+
+      crossbiteHint: {
+        en: 'What should happen to any present crossbite?',
+        fr: 'Que faire de l’articulé inversé, s’il est présent ?',
+        ar: 'ماذا يحدث للعضّة المعكوسة إن وُجدت؟',
+      } as T,
+      crossbiteCorrectOpt: { en: 'Correct', fr: 'Corriger', ar: 'تصحيح' } as T,
+      crossbiteMaintainOpt: { en: 'Maintain', fr: 'Maintenir', ar: 'حفظ' } as T,
+      crossbiteAnteriorOpt: { en: 'Correct only anterior', fr: 'Corriger seulement les antérieurs', ar: 'تصحيح الأماميات فقط' } as T,
+      crossbitePosteriorOpt: { en: 'Correct only posterior', fr: 'Corriger seulement les postérieurs', ar: 'تصحيح الخلفيات فقط' } as T,
+
+      spacesHint: {
+        en: 'Close existing spaces or maintain them for future restorative work?',
+        fr: 'Fermer les espaces existants ou les maintenir pour un futur traitement prothétique ?',
+        ar: 'إغلاق الفراغات الحالية أم الحفاظ عليها لعمل تعويضي مستقبلي؟',
+      } as T,
+      spacesCloseOpt: { en: 'Close all spaces', fr: 'Fermer tous les espaces', ar: 'إغلاق جميع الفراغات' } as T,
+      spacesMaintainOpt: { en: 'Maintain spaces', fr: 'Maintenir les espaces', ar: 'الحفاظ على الفراغات' } as T,
+      spacesNotesPh: {
+        en: 'e.g. Close upper midline diastema; maintain space at #15 for future implant',
+        fr: 'p. ex. fermer le diastème médian supérieur ; conserver l’espace en #15 pour un futur implant',
+        ar: 'مثال: إغلاق الفجوة المتوسطة العلوية؛ الحفاظ على المساحة عند 15 لزرعة مستقبلية',
+      } as T,
+
+      // Generic segment options shared by IPR / Expansion
+      segmentNo: { en: 'No', fr: 'Non', ar: 'لا' } as T,
+      segmentNoIpr: { en: 'No IPR', fr: 'Pas d’IPR', ar: 'بدون IPR' } as T,
+      segmentAnterior: { en: 'Anterior', fr: 'Antérieurs', ar: 'الأماميات' } as T,
+      segmentPosterior: { en: 'Posterior', fr: 'Postérieurs', ar: 'الخلفيات' } as T,
+      segmentBoth: { en: 'Both', fr: 'Les deux', ar: 'كلاهما' } as T,
+
+      extractionsHint: {
+        en: 'Teeth flagged with the orange Extract chip in the odontogram above appear here automatically. Use the notes field for confirmation, sequencing or extra context.',
+        fr: 'Les dents marquées en orange « Extract » dans l’odontogramme apparaissent ici automatiquement. Utilisez les notes pour la confirmation, la séquence ou tout contexte additionnel.',
+        ar: 'الأسنان المعلَّمة بالشريحة البرتقالية "Extract" في مخطط الأسنان أعلاه تظهر هنا تلقائيًا. استخدم الملاحظات للتأكيد، التسلسل أو السياق الإضافي.',
+      } as T,
+      extractionsTeethTitle: {
+        en: 'Selected tooth-level instructions (FDI)',
+        fr: 'Dents sélectionnées (notation FDI)',
+        ar: 'الأسنان المختارة (ترقيم FDI)',
+      } as T,
+      extractionsEmpty: {
+        en: 'No teeth marked for extraction yet. Click a tooth in the odontogram above and pick Extract to add it here.',
+        fr: 'Aucune dent à extraire pour le moment. Cliquez une dent dans l’odontogramme et choisissez « Extract » pour l’ajouter ici.',
+        ar: 'لم تُحدَّد أي سن للقلع بعد. انقر على سن في مخطط الأسنان واختر "Extract" لإضافتها.',
+      } as T,
+      extractionsNotesPh: {
+        en: 'e.g. Confirmed with patient; extract before treatment start',
+        fr: 'p. ex. confirmé avec le patient ; extraction avant le début du traitement',
+        ar: 'مثال: تم التأكيد مع المريض؛ القلع قبل بدء العلاج',
+      } as T,
+
       sectionTitle: { en: 'Tooth-level instructions & mechanics', fr: 'Instructions par dent & mécaniques', ar: 'تعليمات لكل سن وميكانيكا العلاج' } as T,
       sectionHint: {
         en: 'Fine-tune what should happen on each tooth — extractions, attachments, IPR — and choose the mechanics the planner should apply.',
@@ -307,7 +511,7 @@ export const dict = {
       radiographyScans: { en: 'Radiography & STL scans', fr: 'Radiographies & STL', ar: 'الأشعّة وملفات STL' } as T,
       treatmentObjective: { en: 'Treatment plan & clinical objective', fr: 'Plan de traitement & objectif clinique', ar: 'خطة العلاج والهدف السريري' } as T,
       toothLevel: { en: 'Tooth-level instructions & movement plan', fr: 'Instructions par dent & plan de mouvement', ar: 'تعليمات لكل سن وخطة الحركة' } as T,
-      orderMetadata: { en: 'Order metadata', fr: 'Métadonnées de la commande', ar: 'بيانات الطلب' } as T,
+      orderMetadata: { en: 'Order metadata', fr: 'Informations de commande', ar: 'بيانات الطلب' } as T,
       readyToSubmit: { en: 'Ready to submit', fr: 'Prêt à soumettre', ar: 'جاهز للإرسال' } as T,
       readyToSubmitHint: {
         en: 'Once submitted, the planner is notified and you’ll receive the treatment plan to approve.',

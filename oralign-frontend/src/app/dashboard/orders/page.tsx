@@ -83,6 +83,7 @@ import {
   OrderStatusBadge,
   orderStatusLabel,
 } from '@/components/orders/order-status-badge';
+import { TreatmentFeeBadge } from '@/components/orders/treatment-fee-badge';
 import { usersService } from '@/lib/api';
 import { useAuth } from '@/lib/providers/auth-provider';
 import {
@@ -874,6 +875,15 @@ export default function OrdersPage() {
                           isDoctor={isDentist}
                           isAdmin={isAdmin}
                         />
+                        {/*
+                          Treatment-fee chip — derived from the existing
+                          treatmentFeePaidAt / treatmentFeePaymentStatus
+                          fields. Returns null on DRAFT / CANCELED rows
+                          where the fee is moot. Updates live because the
+                          orders query is invalidated whenever the pay /
+                          confirm mutations succeed.
+                         */}
+                        <TreatmentFeeBadge order={order} />
                       </div>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
@@ -1361,6 +1371,7 @@ function OrderMobileCard({
         <div className="flex flex-wrap gap-1.5">
           <OrderStatusBadge status={order.status} />
           <PlanBadge order={order} isDoctor={!isAdmin} isAdmin={isAdmin} />
+          <TreatmentFeeBadge order={order} />
         </div>
         <div className="grid grid-cols-2 gap-2 text-sm">
           <MobileMeta label="Stage" value={order.patientStage ?? 'Not set'} />

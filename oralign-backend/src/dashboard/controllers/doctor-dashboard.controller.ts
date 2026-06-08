@@ -29,4 +29,13 @@ export class DoctorDashboardController {
   async availablePacks(@CurrentUser() user: JwtPayload) {
     return this.service.listAvailablePacks(user.sub);
   }
+
+  @Get('outstanding-orders')
+  @ApiOperation({
+    summary:
+      'Per-order breakdown of the doctor\'s outstanding balance — what the dashboard "Outstanding balance" popup renders.',
+  })
+  async outstandingOrders(@CurrentUser() user: JwtPayload) {
+    return this.service.listOutstandingOrders(user.sub);
+  }
 }

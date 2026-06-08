@@ -39,9 +39,10 @@ export interface KpiCardProps {
   /** Tweaks the title size so cramped grids stay readable. */
   compact?: boolean;
   /**
-   * Extra Tailwind classes applied to the value (CardTitle). Used by
-   * the doctor dashboard to tone Outstanding balance red (>0) or
-   * green (=0). Merged with the default sizing classes via cn().
+   * Extra Tailwind classes applied to the value (CardTitle). Most KPIs
+   * use the default neutral tone — this hook is here for the rare
+   * surface that needs e.g. a destructive red on a negative number.
+   * Default UX keeps the value the same colour as every other tile.
    */
   valueClassName?: string;
   /**
@@ -51,6 +52,14 @@ export interface KpiCardProps {
    * link into the payment history filtered view.
    */
   href?: string;
+  /**
+   * When set, the entire card becomes a button that fires `onClick`
+   * instead of navigating. Use this for KPI tiles that open a popup
+   * (e.g. the doctor's Outstanding balance details). Mutually
+   * exclusive with `href` — if both are passed, `href` wins because
+   * navigation is the stricter contract.
+   */
+  onClick?: () => void;
 }
 
 export function KpiCard({
@@ -65,6 +74,7 @@ export function KpiCard({
   compact,
   valueClassName,
   href,
+  onClick,
 }: KpiCardProps) {
   if (loading) {
     return (
@@ -90,13 +100,15 @@ export function KpiCard({
   const DeltaIcon =
     delta?.direction === 'down' ? TrendingDownIcon : TrendingUpIcon;
 
+  // Either the card navigates (`href`), opens a popup (`onClick`), or
+  // is purely informational. The first two get a subtle hover cue so
+  // the user knows the card is interactive.
+  const isInteractive = !!href || !!onClick;
   const cardBody = (
     <Card
       className={cn(
         '@container/card',
-        // When the card is a link, add hover / focus affordance so the
-        // user gets the standard "I can click this" cue.
-        href &&
+        isInteractive &&
           'transition cursor-pointer hover:border-primary/50 hover:shadow-md focus-visible:ring-2 focus-visible:ring-primary/40',
         className,
       )}
@@ -148,6 +160,21 @@ export function KpiCard({
       <Link href={href} aria-label={label} className="block focus:outline-none">
         {cardBody}
       </Link>
+    );
+  }
+  if (onClick) {
+    // Plain semantic button — keyboard activation + screen-reader role
+    // come for free. `text-left` keeps the card content left-aligned
+    // because <button> defaults to centred text in some browsers.
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label={label}
+        className="block w-full text-left focus:outline-none"
+      >
+        {cardBody}
+      </button>
     );
   }
   return cardBody;

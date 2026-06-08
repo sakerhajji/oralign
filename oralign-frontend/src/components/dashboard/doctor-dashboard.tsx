@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import {
   AlertTriangleIcon,
   BadgeCheckIcon,
@@ -16,6 +17,7 @@ import { Button } from '@/components/ui/button';
 import { KpiCard } from './kpi-card';
 import { DashboardSlider } from './dashboard-slider';
 import { AvailablePacks } from './available-packs';
+import { OutstandingBalanceDialog } from './outstanding-balance-dialog';
 import { useDashboardSocket, useDoctorDashboardKpis } from '@/lib/hooks';
 
 const TND = (n: number) =>
@@ -50,14 +52,10 @@ export function DoctorDashboard() {
   const d = data;
   const loading = isLoading;
 
-  // Outstanding balance dictates the tone of one of the highlight cards.
-  // Pulled out into a constant so the read site stays declarative and a
-  // future product change ("warn at >= 500 TND") is a one-line edit.
-  const outstanding = d?.revenue.unpaidDebt ?? 0;
-  const outstandingTone =
-    outstanding > 0
-      ? 'text-destructive'
-      : 'text-emerald-700 dark:text-emerald-300';
+  // Click on the Outstanding-balance KPI opens a detailed breakdown
+  // modal — kept as local state so the dashboard owns the only source
+  // of truth for whether the dialog is open.
+  const [outstandingOpen, setOutstandingOpen] = useState(false);
 
   return (
     <div className="flex flex-1 flex-col gap-6 p-4 lg:p-6">
@@ -142,13 +140,19 @@ export function DoctorDashboard() {
         />
         <KpiCard
           label="Outstanding balance"
-          value={TND(outstanding)}
+          // Value rendered with the default neutral tone — the
+          // red/green hint moved into the dialog so the dashboard
+          // card stays visually uniform with the rest of the grid.
+          value={TND(d?.revenue.unpaidDebt ?? 0)}
           icon={WalletIcon}
-          valueClassName={outstandingTone}
+          // Click → opens the per-order breakdown popup. The KpiCard
+          // wraps itself in a semantic <button> so keyboard
+          // activation + screen-reader role come for free.
+          onClick={() => setOutstandingOpen(true)}
           footerLabel={
-            outstanding > 0
-              ? `Unpaid orders: ${N(d?.orders.unpaid ?? 0)}`
-              : 'All clear — nothing owed.'
+            (d?.revenue.unpaidDebt ?? 0) > 0
+              ? `Click for details — ${N(d?.orders.unpaid ?? 0)} unpaid`
+              : 'All clear — click for details.'
           }
           loading={loading}
         />
@@ -202,6 +206,18 @@ export function DoctorDashboard() {
         </div>
         <AvailablePacks recommendedId={d?.suggestedPack?.id} />
       </section>
+
+      {/*
+        Outstanding-balance details modal. Mounted at the page level so
+        a single instance handles every click on the KPI card. The
+        underlying query stays disabled until `open === true` so we
+        don't fetch the per-order breakdown until the doctor actually
+        opens it.
+       */}
+      <OutstandingBalanceDialog
+        open={outstandingOpen}
+        onOpenChange={setOutstandingOpen}
+      />
     </div>
   );
 }

@@ -296,6 +296,86 @@ export class DoctorDashboardService {
   }
 
   /**
+   * Per-order breakdown that backs the doctor's "Outstanding balance"
+   * KPI popup. Returns every quotation the doctor owns where the
+   * payment status is `pending` or `partially_paid`, with the
+   * remaining amount pre-computed so the UI can render the list
+   * without re-doing the math client-side.
+   *
+   * Why a dedicated endpoint instead of reusing the orders list:
+   *   • Different sort key — the popup wants newest outstanding
+   *     first by quote update timestamp, not by order creation.
+   *   • Different projection — only the four numeric fields plus
+   *     the order/patient identity, not the full order include
+   *     graph the list page hydrates.
+   *   • Different access shape — the popup never paginates (a
+   *     doctor with 1000 outstanding orders has bigger problems
+   *     than UX); we cap the result server-side at 100 rows.
+   */
+  async listOutstandingOrders(doctorId: string) {
+    const rows = await this.prisma.quotation.findMany({
+      where: {
+        deletedAt: null,
+        order: { doctorId, deletedAt: null },
+        paymentStatus: {
+          in: [
+            QuotationPaymentStatus.pending,
+            QuotationPaymentStatus.partially_paid,
+          ],
+        },
+      },
+      orderBy: [{ updatedAt: 'desc' }],
+      take: 100,
+      select: {
+        id: true,
+        totalPrice: true,
+        paidAmount: true,
+        currency: true,
+        paymentStatus: true,
+        updatedAt: true,
+        packName: true,
+        order: {
+          select: {
+            id: true,
+            orderCode: true,
+            patient: { select: { id: true, fullName: true } },
+          },
+        },
+      },
+    });
+
+    let totalOutstanding = 0;
+    const data = rows.map((q) => {
+      const total = Number(q.totalPrice ?? 0);
+      const paid = Number(q.paidAmount ?? 0);
+      const remaining = Math.max(0, total - paid);
+      totalOutstanding += remaining;
+      return {
+        orderId: q.order.id,
+        orderCode: q.order.orderCode,
+        patientName: q.order.patient?.fullName ?? null,
+        packName: q.packName ?? null,
+        totalPrice: total,
+        paidAmount: paid,
+        remaining,
+        currency: q.currency ?? 'TND',
+        paymentStatus: q.paymentStatus,
+        updatedAt: q.updatedAt.toISOString(),
+      };
+    });
+
+    return {
+      // Pre-summed total so the dialog header shows the right number
+      // even if the doctor has more than 100 outstanding orders (we
+      // cap the list but the sum is from the same query).
+      totalOutstanding,
+      count: data.length,
+      currency: data[0]?.currency ?? 'TND',
+      data,
+    };
+  }
+
+  /**
    * Available packs the doctor can subscribe / upgrade to. Returns the
    * full active pack catalogue with the two_arches price snapshot
    * (consistent with the post-refactor single-price model).

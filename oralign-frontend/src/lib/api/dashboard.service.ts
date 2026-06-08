@@ -59,6 +59,33 @@ export const adminDashboardService = {
   },
 };
 
+/**
+ * Per-order breakdown of the doctor's outstanding balance. Powers the
+ * KPI popup on the doctor dashboard. Shape is dictated by
+ * `DoctorDashboardService.listOutstandingOrders` on the backend.
+ */
+export interface DoctorOutstandingOrder {
+  orderId: string;
+  orderCode: string;
+  patientName: string | null;
+  packName: string | null;
+  totalPrice: number;
+  paidAmount: number;
+  remaining: number;
+  currency: string;
+  paymentStatus: 'pending' | 'partially_paid';
+  updatedAt: string;
+}
+
+export interface DoctorOutstandingOrdersResponse {
+  /** Sum of `remaining` across every row. */
+  totalOutstanding: number;
+  /** Row count (capped at 100 server-side). */
+  count: number;
+  currency: string;
+  data: DoctorOutstandingOrder[];
+}
+
 export const doctorDashboardService = {
   async kpis(): Promise<DoctorDashboardKpis> {
     const res = await apiClient.get<DoctorDashboardKpis>('/doctor/dashboard/kpis');
@@ -67,6 +94,12 @@ export const doctorDashboardService = {
   async availablePacks(): Promise<AvailablePack[]> {
     const res = await apiClient.get<AvailablePack[]>(
       '/doctor/dashboard/available-packs',
+    );
+    return res.data;
+  },
+  async outstandingOrders(): Promise<DoctorOutstandingOrdersResponse> {
+    const res = await apiClient.get<DoctorOutstandingOrdersResponse>(
+      '/doctor/dashboard/outstanding-orders',
     );
     return res.data;
   },

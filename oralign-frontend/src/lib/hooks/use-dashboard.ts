@@ -27,6 +27,7 @@ export const dashboardKeys = {
     [...dashboardKeys.all, 'admin', 'trends', range ?? {}] as const,
   doctorKpis: () => [...dashboardKeys.all, 'doctor', 'kpis'] as const,
   doctorPacks: () => [...dashboardKeys.all, 'doctor', 'packs'] as const,
+  doctorOutstanding: () => [...dashboardKeys.all, 'doctor', 'outstanding'] as const,
 };
 
 // 30 s polling fallback. WebSocket invalidation will kick in sooner on
@@ -107,5 +108,28 @@ export function useDoctorAvailablePacks(
     queryFn: () => doctorDashboardService.availablePacks(),
     enabled,
     staleTime: 60_000,
+  });
+}
+
+/**
+ * Powers the "Outstanding balance" popup on the doctor dashboard.
+ * Lazy by default — the query only fires when the dialog opens, so we
+ * don't pay for the per-order breakdown on every dashboard mount.
+ * Pass `enabled={true}` once the user clicks the KPI card.
+ */
+export function useDoctorOutstandingOrders(
+  enabled = false,
+): UseQueryResult<
+  import('@/lib/api/dashboard.service').DoctorOutstandingOrdersResponse,
+  Error
+> {
+  return useQuery({
+    queryKey: dashboardKeys.doctorOutstanding(),
+    queryFn: () => doctorDashboardService.outstandingOrders(),
+    enabled,
+    // Match the KPI poll cadence — when the dialog stays open and a
+    // payment lands, the row drops out automatically on the next tick.
+    staleTime: 15_000,
+    refetchInterval: enabled ? POLL_MS : false,
   });
 }

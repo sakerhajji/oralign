@@ -18,6 +18,7 @@ import { KpiCard } from './kpi-card';
 import { DashboardSlider } from './dashboard-slider';
 import { AvailablePacks } from './available-packs';
 import { OutstandingBalanceDialog } from './outstanding-balance-dialog';
+import { PaidOrdersDialog } from './paid-orders-dialog';
 import { useDashboardSocket, useDoctorDashboardKpis } from '@/lib/hooks';
 
 const TND = (n: number) =>
@@ -52,10 +53,13 @@ export function DoctorDashboard() {
   const d = data;
   const loading = isLoading;
 
-  // Click on the Outstanding-balance KPI opens a detailed breakdown
-  // modal — kept as local state so the dashboard owns the only source
-  // of truth for whether the dialog is open.
+  // Click on the Outstanding-balance KPI (and the Unpaid-orders KPI —
+  // they show the same underlying data) opens a detailed breakdown
+  // modal. Kept as local state so the dashboard owns the only source
+  // of truth for whether the dialog is open. The Paid-orders KPI gets
+  // its own mirrored dialog with an emerald "money collected" story.
   const [outstandingOpen, setOutstandingOpen] = useState(false);
+  const [paidOpen, setPaidOpen] = useState(false);
 
   return (
     <div className="flex flex-1 flex-col gap-6 p-4 lg:p-6">
@@ -136,6 +140,10 @@ export function DoctorDashboard() {
           label="Total orders"
           value={N(d?.orders.total ?? 0)}
           icon={ClipboardListIcon}
+          // Deep-link to the orders page so the count acts as a real
+          // navigation entry — clicking the headline number takes the
+          // doctor straight into the book of work it describes.
+          href="/dashboard/orders"
           footerLabel={`This month: ${N(d?.orders.thisMonth ?? 0)}`}
           footerDetail={`Today: ${N(d?.orders.today ?? 0)}`}
           loading={loading}
@@ -169,6 +177,10 @@ export function DoctorDashboard() {
           label="Total patients"
           value={N(d?.patients.total ?? 0)}
           icon={UserRoundIcon}
+          // Same idea as Total orders — clicking the count navigates
+          // into the patients page so the doctor can browse the list
+          // behind the number.
+          href="/dashboard/patients"
           footerLabel={`+${N(d?.patients.newThisMonth ?? 0)} new this month`}
           loading={loading}
         />
@@ -187,12 +199,32 @@ export function DoctorDashboard() {
           label="Unpaid orders"
           value={N(d?.orders.unpaid ?? 0)}
           icon={BanIcon}
+          // Unpaid orders surface the SAME per-order list as the
+          // Outstanding-balance KPI — both KPIs describe the same set
+          // of rows from different angles (count vs total due). Reuse
+          // the single dialog so the doctor sees consistent data and
+          // we don't end up with two near-identical popups to maintain.
+          onClick={() => setOutstandingOpen(true)}
+          footerLabel={
+            (d?.orders.unpaid ?? 0) > 0
+              ? 'Click for the per-order breakdown.'
+              : 'Nothing unpaid — click for details.'
+          }
           loading={loading}
         />
         <KpiCard
           label="Paid orders"
           value={N(d?.orders.paid ?? 0)}
           icon={BadgeCheckIcon}
+          // Mirror of the outstanding popup but tuned to collected
+          // revenue — emerald tone, "Total collected" headline, every
+          // row a 100 %-paid record.
+          onClick={() => setPaidOpen(true)}
+          footerLabel={
+            (d?.orders.paid ?? 0) > 0
+              ? `Collected: ${TND(d?.revenue.collected ?? 0)}`
+              : 'No paid orders yet — click for details.'
+          }
           loading={loading}
         />
       </section>
@@ -237,6 +269,20 @@ export function DoctorDashboard() {
         onOpenChange={setOutstandingOpen}
         fallbackTotal={d?.revenue.unpaidDebt ?? 0}
         fallbackCount={d?.orders.unpaid ?? 0}
+      />
+
+      {/*
+        Paid-orders details modal — same lazy-fetch + graceful-degrade
+        pattern as the outstanding dialog. Falls back to the KPI's own
+        collected revenue + paid-order count if the dedicated
+        breakdown endpoint isn't reachable, so the popup is still
+        useful during deploy windows when the new route hasn't shipped.
+       */}
+      <PaidOrdersDialog
+        open={paidOpen}
+        onOpenChange={setPaidOpen}
+        fallbackTotal={d?.revenue.collected ?? 0}
+        fallbackCount={d?.orders.paid ?? 0}
       />
     </div>
   );

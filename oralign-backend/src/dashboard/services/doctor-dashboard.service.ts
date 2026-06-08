@@ -500,6 +500,80 @@ export class DoctorDashboardService {
   }
 
   /**
+   * Per-order breakdown that backs the doctor's "Paid orders" KPI
+   * popup. Mirror of `listOutstandingOrders` but for the opposite
+   * payment state — quotes that are fully paid. Same QUALIFYING_QUOTE
+   * rule + sort key so both dialogs feel like two sides of the same
+   * coin.
+   *
+   * Returns up to 100 most recently updated paid orders. The
+   * `totalCollected` headline sums all matching rows (not capped) so
+   * the dialog's headline figure is always accurate even when the
+   * list is truncated.
+   */
+  async listPaidOrders(doctorId: string) {
+    const rows = await this.prisma.quotation.findMany({
+      where: {
+        deletedAt: null,
+        // Same qualifying-quote rule used everywhere else on the
+        // dashboard — only priced + approved quotes that are fully
+        // paid count here.
+        packId: { not: null },
+        status: QuotationStatus.approved,
+        paymentStatus: QuotationPaymentStatus.paid,
+        order: { doctorId, deletedAt: null },
+      },
+      orderBy: [{ updatedAt: 'desc' }],
+      take: 100,
+      select: {
+        id: true,
+        totalPrice: true,
+        paidAmount: true,
+        currency: true,
+        paymentStatus: true,
+        updatedAt: true,
+        packName: true,
+        order: {
+          select: {
+            id: true,
+            orderCode: true,
+            patient: { select: { id: true, fullName: true } },
+          },
+        },
+      },
+    });
+
+    let totalCollected = 0;
+    const data = rows.map((q) => {
+      const total = Number(q.totalPrice ?? 0);
+      const paid = Number(q.paidAmount ?? 0);
+      totalCollected += paid;
+      return {
+        orderId: q.order.id,
+        orderCode: q.order.orderCode,
+        patientName: q.order.patient?.fullName ?? null,
+        packName: q.packName ?? null,
+        totalPrice: total,
+        paidAmount: paid,
+        // `remaining` is always 0 for paid orders, but we ship it so
+        // the frontend can reuse the OutstandingOrder row component
+        // without a separate type.
+        remaining: 0,
+        currency: q.currency ?? 'TND',
+        paymentStatus: q.paymentStatus,
+        updatedAt: q.updatedAt.toISOString(),
+      };
+    });
+
+    return {
+      totalCollected,
+      count: data.length,
+      currency: data[0]?.currency ?? 'TND',
+      data,
+    };
+  }
+
+  /**
    * Available packs the doctor can subscribe / upgrade to. Returns the
    * full active pack catalogue with the two_arches price snapshot
    * (consistent with the post-refactor single-price model).

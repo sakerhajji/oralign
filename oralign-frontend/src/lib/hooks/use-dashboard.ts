@@ -28,6 +28,7 @@ export const dashboardKeys = {
   doctorKpis: () => [...dashboardKeys.all, 'doctor', 'kpis'] as const,
   doctorPacks: () => [...dashboardKeys.all, 'doctor', 'packs'] as const,
   doctorOutstanding: () => [...dashboardKeys.all, 'doctor', 'outstanding'] as const,
+  doctorPaid: () => [...dashboardKeys.all, 'doctor', 'paid'] as const,
 };
 
 // 30 s polling fallback. WebSocket invalidation will kick in sooner on
@@ -129,6 +130,26 @@ export function useDoctorOutstandingOrders(
     enabled,
     // Match the KPI poll cadence — when the dialog stays open and a
     // payment lands, the row drops out automatically on the next tick.
+    staleTime: 15_000,
+    refetchInterval: enabled ? POLL_MS : false,
+  });
+}
+
+/**
+ * Powers the "Paid orders" popup on the doctor dashboard. Same lazy
+ * pattern as outstanding orders — only fires when the dialog opens so
+ * we don't pay the per-order breakdown cost on every dashboard mount.
+ */
+export function useDoctorPaidOrders(
+  enabled = false,
+): UseQueryResult<
+  import('@/lib/api/dashboard.service').DoctorPaidOrdersResponse,
+  Error
+> {
+  return useQuery({
+    queryKey: dashboardKeys.doctorPaid(),
+    queryFn: () => doctorDashboardService.paidOrders(),
+    enabled,
     staleTime: 15_000,
     refetchInterval: enabled ? POLL_MS : false,
   });

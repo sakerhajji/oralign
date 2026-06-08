@@ -86,6 +86,20 @@ export interface DoctorOutstandingOrdersResponse {
   data: DoctorOutstandingOrder[];
 }
 
+/**
+ * Same row shape as the outstanding-orders endpoint — paid orders
+ * always have `remaining: 0`. Kept as a separate type so a future
+ * paid-order-specific field doesn't bleed into the outstanding type.
+ */
+export interface DoctorPaidOrdersResponse {
+  /** Sum of `paidAmount` across every row — total collected revenue. */
+  totalCollected: number;
+  /** Row count (capped at 100 server-side). */
+  count: number;
+  currency: string;
+  data: DoctorOutstandingOrder[];
+}
+
 export const doctorDashboardService = {
   async kpis(): Promise<DoctorDashboardKpis> {
     const res = await apiClient.get<DoctorDashboardKpis>('/doctor/dashboard/kpis');
@@ -100,6 +114,12 @@ export const doctorDashboardService = {
   async outstandingOrders(): Promise<DoctorOutstandingOrdersResponse> {
     const res = await apiClient.get<DoctorOutstandingOrdersResponse>(
       '/doctor/dashboard/outstanding-orders',
+    );
+    return res.data;
+  },
+  async paidOrders(): Promise<DoctorPaidOrdersResponse> {
+    const res = await apiClient.get<DoctorPaidOrdersResponse>(
+      '/doctor/dashboard/paid-orders',
     );
     return res.data;
   },

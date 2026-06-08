@@ -38,4 +38,13 @@ export class DoctorDashboardController {
   async outstandingOrders(@CurrentUser() user: JwtPayload) {
     return this.service.listOutstandingOrders(user.sub);
   }
+
+  @Get('paid-orders')
+  @ApiOperation({
+    summary:
+      'Per-order breakdown of the doctor\'s paid orders — what the dashboard "Paid orders" popup renders.',
+  })
+  async paidOrders(@CurrentUser() user: JwtPayload) {
+    return this.service.listPaidOrders(user.sub);
+  }
 }

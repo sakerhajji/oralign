@@ -39,6 +39,15 @@ import { QuotationPdfService } from './services/quotation-pdf.service';
     QuotationPaymentPlanService,
     QuotationPdfService,
   ],
-  exports: [QuotationService, QuotationPaymentPlanService, QuotationPdfService],
+  exports: [
+    QuotationService,
+    QuotationPaymentPlanService,
+    QuotationPdfService,
+    // Re-exported so InvoicesModule (which renders the bilingual
+    // payment receipt PDF) can inject the same company-billing
+    // settings the quote PDF uses — keeps the receipt header
+    // visually consistent with the quote header.
+    CompanyBillingSettingsService,
+  ],
 })
 export class QuotationModule {}

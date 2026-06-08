@@ -6,7 +6,6 @@ import {
   CheckCircle2,
   Clock,
   Download,
-  ExternalLink,
   FileText,
   Loader2,
   ReceiptText,
@@ -107,7 +106,12 @@ export function TreatmentFeeReceiptDialog({
         onOpenChange(next);
       }}
     >
-      <DialogContent className="flex h-[92vh] max-h-[92vh] w-full max-w-3xl flex-col gap-0 overflow-hidden p-0 sm:h-auto">
+      {/*
+        Tall fixed height on every breakpoint — gives the receipt
+        viewport real estate to render the proof at full-bleed
+        instead of collapsing the modal to header+footer.
+       */}
+      <DialogContent className="flex h-[92vh] max-h-[92vh] w-full max-w-4xl flex-col gap-0 overflow-hidden p-0 sm:h-[90vh]">
         {/* ─── Header ─────────────────────────────────────────────── */}
         <DialogHeader className="space-y-3 border-b bg-card px-5 py-4">
           <div className="flex items-start justify-between gap-3">
@@ -166,38 +170,16 @@ export function TreatmentFeeReceiptDialog({
         </div>
 
         {/* ─── Footer ─────────────────────────────────────────────── */}
-        <div className="flex flex-row flex-wrap items-center justify-between gap-2 border-t bg-card px-5 py-3">
-          <div className="flex flex-wrap items-center gap-2">
-            {fileUrl && (
-              <Button
-                asChild
-                type="button"
-                variant="outline"
-                size="sm"
-                className="gap-1.5"
-              >
-                <a
-                  href={fileUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  download={fileName}
-                >
-                  <ExternalLink className="h-3.5 w-3.5" />
-                  Open in new tab
-                </a>
-              </Button>
-            )}
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={confirm.isPending}
-              onClick={() => onOpenChange(false)}
-            >
-              Close
-            </Button>
+        <div className="flex flex-row flex-wrap items-center justify-end gap-2 border-t bg-card px-5 py-3">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={confirm.isPending}
+            onClick={() => onOpenChange(false)}
+          >
+            Close
+          </Button>
             {canConfirm && (
               <Button
                 type="button"
@@ -221,7 +203,6 @@ export function TreatmentFeeReceiptDialog({
                 Confirm payment
               </Button>
             )}
-          </div>
         </div>
       </DialogContent>
     </Dialog>
@@ -290,7 +271,10 @@ function ReceiptViewport({
 
   if (kind === 'image' && !imgError) {
     return (
-      <div className="flex h-full w-full items-center justify-center p-4">
+      // Full-bleed viewport: the image fills the entire available
+      // area inside the modal, contained to keep aspect ratio.
+      // No padding — admins want maximum surface for verification.
+      <div className="flex h-full w-full items-center justify-center">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={fileUrl}
@@ -298,7 +282,7 @@ function ReceiptViewport({
           loading="eager"
           decoding="async"
           onError={() => setImgError(true)}
-          className="max-h-[70vh] max-w-full rounded-md border bg-white object-contain shadow-sm"
+          className="h-full w-full object-contain"
         />
       </div>
     );

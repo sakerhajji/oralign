@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { OrderModule } from '../orders/order.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { QuotationModule } from '../quotations/quotation.module';
@@ -24,13 +25,15 @@ import { InvoicePdfService } from './services/invoice-pdf.service';
  *
  * Imports:
  *   • PaymentsModule — for the PaymentsService RBAC helper that gates
- *     the download endpoint (admin OR owning dentist).
+ *     the payment-receipt download endpoint (admin OR owning dentist).
+ *   • OrderModule — for the OrderService RBAC helper that gates the
+ *     treatment-fee invoice endpoint (admin OR owning dentist).
  *   • QuotationModule — for CompanyBillingSettingsService which feeds
  *     the company header block on the receipt.
  *   • PrismaModule — DB access for the rehydration query.
  */
 @Module({
-  imports: [PrismaModule, PaymentsModule, QuotationModule],
+  imports: [PrismaModule, PaymentsModule, QuotationModule, OrderModule],
   controllers: [InvoicesController],
   providers: [InvoicePdfService],
   exports: [InvoicePdfService],

@@ -4,20 +4,27 @@ import { useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import { DayOfWeek, WorkingHours } from '@/lib/types';
 import { Switch } from '@/components/ui/switch';
+import { useT } from '@/lib/i18n/lang-context';
+
+// Internal day-key used to look up labels via the i18n dictionary.
+// The static `label`/`short` properties are kept for back-compat with
+// callers that still read DAY_META directly without a translator.
+type DayKey = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
 
 export const DAY_META: Array<{
   key: DayOfWeek;
   label: string;
   short: string;
   isWeekend?: boolean;
+  i18nKey: DayKey;
 }> = [
-  { key: DayOfWeek.MONDAY, label: 'Monday', short: 'Mon' },
-  { key: DayOfWeek.TUESDAY, label: 'Tuesday', short: 'Tue' },
-  { key: DayOfWeek.WEDNESDAY, label: 'Wednesday', short: 'Wed' },
-  { key: DayOfWeek.THURSDAY, label: 'Thursday', short: 'Thu' },
-  { key: DayOfWeek.FRIDAY, label: 'Friday', short: 'Fri' },
-  { key: DayOfWeek.SATURDAY, label: 'Saturday', short: 'Sat', isWeekend: true },
-  { key: DayOfWeek.SUNDAY, label: 'Sunday', short: 'Sun', isWeekend: true },
+  { key: DayOfWeek.MONDAY, label: 'Monday', short: 'Mon', i18nKey: 'monday' },
+  { key: DayOfWeek.TUESDAY, label: 'Tuesday', short: 'Tue', i18nKey: 'tuesday' },
+  { key: DayOfWeek.WEDNESDAY, label: 'Wednesday', short: 'Wed', i18nKey: 'wednesday' },
+  { key: DayOfWeek.THURSDAY, label: 'Thursday', short: 'Thu', i18nKey: 'thursday' },
+  { key: DayOfWeek.FRIDAY, label: 'Friday', short: 'Fri', i18nKey: 'friday' },
+  { key: DayOfWeek.SATURDAY, label: 'Saturday', short: 'Sat', isWeekend: true, i18nKey: 'saturday' },
+  { key: DayOfWeek.SUNDAY, label: 'Sunday', short: 'Sun', isWeekend: true, i18nKey: 'sunday' },
 ];
 
 export type DaySchedule = {
@@ -44,19 +51,21 @@ export function buildScheduleFromHours(hours?: WorkingHours[] | null): DaySchedu
 export function WorkingHoursList({
   hours,
   className,
-  emptyLabel = 'Not set',
+  emptyLabel,
 }: {
   hours?: WorkingHours[] | null;
   className?: string;
   emptyLabel?: string;
 }) {
+  const { t } = useT();
   const schedule = buildScheduleFromHours(hours);
+  const fallbackEmpty = emptyLabel ?? t('accountHome.workingHoursNotSet');
 
   return (
     <div className={cn('space-y-2', className)}>
       {schedule.map((day) => {
         const meta = DAY_META.find((item) => item.key === day.dayOfWeek);
-        const label = meta?.label ?? day.dayOfWeek;
+        const label = meta ? t(`accountHome.days.${meta.i18nKey}`) : day.dayOfWeek;
         return (
           <div
             key={day.dayOfWeek}
@@ -64,7 +73,7 @@ export function WorkingHoursList({
           >
             <span className="font-medium">{label}</span>
             <span className="text-muted-foreground">
-              {day.isClosed ? emptyLabel : `${day.openTime} - ${day.closeTime}`}
+              {day.isClosed ? fallbackEmpty : `${day.openTime} - ${day.closeTime}`}
             </span>
           </div>
         );

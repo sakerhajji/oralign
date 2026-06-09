@@ -219,6 +219,61 @@ export class CompanyBillingSettingsService {
   }
 
   /**
+   * Allocate the next sequential invoice / receipt number — `FAC-000001`.
+   * Receipts are legal documents, so the numbering is a plain gapless
+   * counter (no patient stamp). The read + counter-bump run in one
+   * transaction so two concurrent receipt renders can't collide on the
+   * same value.
+   */
+  async allocateInvoiceNumber(): Promise<string> {
+    return this.prisma.$transaction(async (tx) => {
+      const settings = await tx.companyBillingSettings.findFirst({
+        where: { isActive: true },
+        orderBy: { updatedAt: 'desc' },
+      });
+      if (!settings) {
+        throw new NotFoundException(
+          'Cannot allocate invoice number — company billing settings missing.',
+        );
+      }
+      const prefix = settings.invoicePrefix || 'FAC';
+      const next = settings.invoiceNextNumber;
+      await tx.companyBillingSettings.update({
+        where: { id: settings.id },
+        data: { invoiceNextNumber: next + 1 },
+      });
+      return `${prefix}-${String(next).padStart(6, '0')}`;
+    });
+  }
+
+  /**
+   * Allocate the next sequential treatment-fee receipt number —
+   * `TF-000001`. A SEPARATE gapless counter from the installment
+   * invoice sequence (product decision); same transactional bump so
+   * concurrent renders can't collide on the same value.
+   */
+  async allocateTreatmentFeeInvoiceNumber(): Promise<string> {
+    return this.prisma.$transaction(async (tx) => {
+      const settings = await tx.companyBillingSettings.findFirst({
+        where: { isActive: true },
+        orderBy: { updatedAt: 'desc' },
+      });
+      if (!settings) {
+        throw new NotFoundException(
+          'Cannot allocate treatment-fee invoice number — company billing settings missing.',
+        );
+      }
+      const prefix = settings.treatmentFeeInvoicePrefix || 'TF';
+      const next = settings.treatmentFeeInvoiceNextNumber;
+      await tx.companyBillingSettings.update({
+        where: { id: settings.id },
+        data: { treatmentFeeInvoiceNextNumber: next + 1 },
+      });
+      return `${prefix}-${String(next).padStart(6, '0')}`;
+    });
+  }
+
+  /**
    * Legacy entry point — kept so any external caller that hasn't been
    * updated still resolves to a sensible counter-based number. New
    * code should call `allocateQuotationNumber({ patientFullName, … })`.

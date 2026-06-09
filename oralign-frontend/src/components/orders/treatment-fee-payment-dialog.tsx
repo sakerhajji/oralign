@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   Banknote,
@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   Copy,
   CreditCard,
+  FileText,
   Landmark,
   Loader2,
   Upload,
@@ -18,7 +19,6 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
@@ -141,6 +141,19 @@ export function TreatmentFeePaymentDialog({
   const [selected, setSelected] = useState<MethodKey | null>(null);
   const [proofFile, setProofFile] = useState<File | null>(null);
 
+  // Object-URL preview so the doctor can eyeball the receipt before
+  // submitting. Derived from the file (not effect-driven state, which
+  // would cascade renders); the effect below only revokes it when the
+  // file changes or the dialog unmounts so we never leak blob URLs.
+  const proofPreview = useMemo(
+    () => (proofFile ? URL.createObjectURL(proofFile) : null),
+    [proofFile],
+  );
+  useEffect(() => {
+    if (!proofPreview) return;
+    return () => URL.revokeObjectURL(proofPreview);
+  }, [proofPreview]);
+
   const busy = pay.isPending || uploadProof.isPending;
 
   // Card / Cash → single backend call, stamps paidAt and closes.
@@ -186,147 +199,215 @@ export function TreatmentFeePaymentDialog({
         onOpenChange(next);
       }}
     >
-      <DialogContent className="max-h-[90vh] max-w-xl overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Pay treatment fee</DialogTitle>
-          <DialogDescription>
-            Order <span className="font-medium">{order.orderCode}</span> needs
-            the professional fee settled before the treatment plan can be
-            prepared.
+      <DialogContent className="flex h-[calc(100dvh-1rem)] max-h-[900px] w-full flex-col gap-0 overflow-hidden rounded-2xl border-0 p-0 shadow-2xl sm:h-[90dvh] sm:max-w-[600px] lg:h-[82dvh] lg:max-w-[920px]">
+        {/* ─── Header ─────────────────────────────────────────── */}
+        <DialogHeader className="shrink-0 space-y-1 border-b bg-card px-6 py-5 text-left sm:px-8">
+          <DialogTitle className="text-lg font-semibold sm:text-xl">
+            Pay treatment fee
+          </DialogTitle>
+          <DialogDescription className="truncate font-mono text-xs text-muted-foreground">
+            Order {order.orderCode}
           </DialogDescription>
         </DialogHeader>
 
-        {/* Amount strip */}
-        <div className="flex items-center justify-between rounded-lg border bg-muted/40 px-4 py-3">
-          <span className="text-sm text-muted-foreground">Amount due</span>
-          <span className="text-xl font-bold tabular-nums">
-            {amount} {currency}
-          </span>
-        </div>
-
         {/*
-          Step 1 — payment method.
-
-          Two states:
-          • No selection → full description tiles so the doctor learns
-            what each method does (most users only pick once).
-          • A method picked → collapse to a compact strip ("Bank
-            transfer ✓  [Change]") so the bank-instructions + receipt
-            upload below get the vertical real estate they need on
-            mobile. Hitting Change re-renders the full picker.
+          ─── Body: summary rail (left) + payment flow (right) ───
+          A CSS grid whose tracks use minmax(0,1fr): the 0 floor lets
+          each column shrink below its content, so the flow column
+          scrolls on its own when the bank details + receipt upload run
+          long (a plain flex child would grow past the frame and get
+          clipped instead of scrolling). Below lg the rail stacks on top
+          of the flow.
          */}
-        {selected ? (
-          <SelectedMethodStrip
-            method={METHODS.find((m) => m.key === selected)!}
-            disabled={busy}
-            onChange={() => setSelected(null)}
-          />
-        ) : (
-          <div className="space-y-2">
-            <p className="text-sm font-medium">Payment method</p>
-            <div className="grid gap-2">
-              {methods.map((m) => {
-                const Icon = m.icon;
-                return (
-                  <button
-                    key={m.key}
-                    type="button"
-                    disabled={busy}
-                    onClick={() => setSelected(m.key)}
-                    className={cn(
-                      'flex items-start gap-3 rounded-lg border bg-card p-3 text-left transition',
-                      'hover:border-primary/70',
-                      'disabled:cursor-not-allowed disabled:opacity-60',
-                    )}
-                  >
-                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-muted text-foreground">
-                      <Icon className="h-4 w-4" />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold">{m.label}</p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        {m.description}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable] lg:grid lg:grid-cols-[38%_minmax(0,1fr)] lg:overflow-hidden">
+          {/* Summary rail — stable context, fixed 38% on desktop */}
+          <aside className="flex flex-col border-b bg-muted/30 p-5 sm:p-6 lg:min-h-0 lg:overflow-y-auto lg:border-b-0 lg:border-r lg:p-7">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Amount due
+            </p>
+            <p className="mt-1.5 text-3xl font-bold tabular-nums text-foreground sm:text-4xl">
+              {amount} {currency}
+            </p>
+            <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
+              The professional fee must be settled before the treatment
+              plan can be prepared.
+            </p>
+
+            <div className="mt-auto pt-6">
+              <p className="rounded-lg border bg-card p-3 text-xs leading-relaxed text-muted-foreground">
+                {isBankTransferSelected
+                  ? 'After you upload the receipt, an admin confirms the transfer once the funds land.'
+                  : 'Settling this fee unblocks the treatment plan for this order.'}
+              </p>
+            </div>
+          </aside>
+
+          {/* Payment flow — method picker → bank details → receipt */}
+          <div
+            role="region"
+            aria-label="Payment details"
+            tabIndex={0}
+            className="min-w-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:[scrollbar-gutter:stable]"
+          >
+            {/*
+              Keep the payment steps in normal document flow. Making this
+              wrapper a flex column allows its cards to shrink to the
+              viewport height, which clips the receipt uploader without
+              producing any scrollable overflow.
+             */}
+            <div className="space-y-4 p-5 sm:p-6 lg:p-7">
+              {/*
+                Step 1 — payment method. No selection → full description
+                tiles so the doctor learns what each method does; a method
+                picked → a compact strip with a Change button so the steps
+                below get the room they need.
+               */}
+              {selected ? (
+                <SelectedMethodStrip
+                  method={METHODS.find((m) => m.key === selected)!}
+                  disabled={busy}
+                  onChange={() => setSelected(null)}
+                />
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">Payment method</p>
+                  <div className="grid gap-2">
+                    {methods.map((m) => {
+                      const Icon = m.icon;
+                      return (
+                        <button
+                          key={m.key}
+                          type="button"
+                          disabled={busy}
+                          onClick={() => setSelected(m.key)}
+                          className={cn(
+                            'flex items-start gap-3 rounded-lg border bg-card p-3 text-left transition',
+                            'hover:border-primary/70',
+                            'disabled:cursor-not-allowed disabled:opacity-60',
+                          )}
+                        >
+                          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-muted text-foreground">
+                            <Icon className="h-4 w-4" />
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-semibold">{m.label}</p>
+                            <p className="mt-0.5 text-xs text-muted-foreground">
+                              {m.description}
+                            </p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/*
+                Step 2 (bank transfer only) — the clinic's bank details
+                come BEFORE the receipt upload: the doctor needs the
+                IBAN/SWIFT to wire first; the receipt only exists after.
+               */}
+              {isBankTransferSelected && (
+                <BankTransferInstructions
+                  bankDetails={bankDetails}
+                  beneficiary={beneficiary}
+                  beneficiaryAddress={beneficiaryAddress}
+                  amount={amount}
+                  currency={currency}
+                  paymentReference={order.orderCode}
+                />
+              )}
+
+              {isBankTransferSelected && (
+                <Card id="bank-transfer-receipt" className="scroll-mt-4">
+                  <CardContent className="space-y-3 pt-4">
+                    <div>
+                      <p className="text-sm font-medium">
+                        Upload bank-transfer receipt
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Once the wire is sent, upload the bank&apos;s receipt /
+                        proof. Accepted: PDF, JPG, PNG · max 10 MB.
                       </p>
                     </div>
-                  </button>
-                );
-              })}
+                    <label
+                      className={cn(
+                        'flex cursor-pointer items-center gap-3 rounded-lg border border-dashed bg-muted/30 p-3',
+                        'hover:bg-muted/50',
+                        busy && 'cursor-not-allowed opacity-60',
+                      )}
+                    >
+                      <Upload className="h-4 w-4 text-muted-foreground" />
+                      <span className="flex-1 truncate text-sm">
+                        {proofFile ? proofFile.name : 'Click to pick a file'}
+                      </span>
+                      {proofFile && (
+                        <button
+                          type="button"
+                          aria-label="Remove file"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            setProofFile(null);
+                          }}
+                          className="rounded p-1 hover:bg-muted"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                      <input
+                        type="file"
+                        accept="image/*,.pdf"
+                        className="hidden"
+                        disabled={busy}
+                        onChange={(e) =>
+                          setProofFile(e.target.files?.[0] ?? null)
+                        }
+                      />
+                    </label>
+
+                    {/*
+                      Receipt preview — let the doctor verify they picked
+                      the right file before it's submitted. Image → inline
+                      thumbnail; PDF → inline frame; anything else → a
+                      filename tile.
+                     */}
+                    {proofFile && (
+                      <div className="space-y-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Preview — confirm this is the right receipt before
+                          submitting
+                        </p>
+                        {proofPreview && proofFile.type.startsWith('image/') ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={proofPreview}
+                            alt="Selected receipt preview"
+                            className="max-h-[320px] w-full rounded-lg border bg-muted/30 object-contain"
+                          />
+                        ) : proofPreview &&
+                          proofFile.type === 'application/pdf' ? (
+                          <iframe
+                            title="Selected receipt preview"
+                            src={proofPreview}
+                            className="h-[360px] w-full rounded-lg border bg-white"
+                          />
+                        ) : (
+                          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+                            <FileText className="h-4 w-4 shrink-0" />
+                            <span className="truncate">{proofFile.name}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
             </div>
           </div>
-        )}
+        </div>
 
-        {/*
-          Step 2 (bank transfer only) — show the clinic's bank account
-          details so the doctor knows where to wire the money. This is
-          the same data the admin enters under /account/billing-settings;
-          we read it through the doctor-safe public-defaults endpoint so
-          it stays in lockstep with the admin form.
-
-          UX rationale: bank instructions come BEFORE the receipt upload
-          because the doctor needs the IBAN/SWIFT to execute the transfer
-          first; the receipt only exists after that.
-         */}
-        {isBankTransferSelected && (
-          <BankTransferInstructions
-            bankDetails={bankDetails}
-            beneficiary={beneficiary}
-            beneficiaryAddress={beneficiaryAddress}
-            amount={amount}
-            currency={currency}
-            paymentReference={order.orderCode}
-          />
-        )}
-
-        {/* Step 2 (bank transfer only) — receipt upload affordance */}
-        {isBankTransferSelected && (
-          <Card>
-            <CardContent className="space-y-3 pt-4">
-              <div>
-                <p className="text-sm font-medium">
-                  Upload bank-transfer receipt
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Once the wire is sent, upload the bank&apos;s receipt /
-                  proof. Accepted: PDF, JPG, PNG · max 10 MB.
-                </p>
-              </div>
-              <label
-                className={cn(
-                  'flex cursor-pointer items-center gap-3 rounded-lg border border-dashed bg-muted/30 p-3',
-                  'hover:bg-muted/50',
-                  busy && 'cursor-not-allowed opacity-60',
-                )}
-              >
-                <Upload className="h-4 w-4 text-muted-foreground" />
-                <span className="flex-1 truncate text-sm">
-                  {proofFile ? proofFile.name : 'Click to pick a file'}
-                </span>
-                {proofFile && (
-                  <button
-                    type="button"
-                    aria-label="Remove file"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      setProofFile(null);
-                    }}
-                    className="rounded p-1 hover:bg-muted"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                )}
-                <input
-                  type="file"
-                  accept="image/*,.pdf"
-                  className="hidden"
-                  disabled={busy}
-                  onChange={(e) => setProofFile(e.target.files?.[0] ?? null)}
-                />
-              </label>
-            </CardContent>
-          </Card>
-        )}
-
-        <DialogFooter className="gap-2 sm:gap-2">
+        {/* ─── Footer ─────────────────────────────────────────── */}
+        <div className="flex shrink-0 flex-row flex-wrap items-center justify-end gap-2.5 border-t bg-card px-6 py-4 sm:px-8">
           <Button
             type="button"
             variant="outline"
@@ -356,7 +437,7 @@ export function TreatmentFeePaymentDialog({
               {selected === 'cash' ? 'Record cash payment' : `Pay ${amount} ${currency}`}
             </Button>
           )}
-        </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );

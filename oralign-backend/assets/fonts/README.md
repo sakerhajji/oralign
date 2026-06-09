@@ -12,9 +12,13 @@ binaries — the operator deploys whichever they are licensed to ship.
 ## Arabic rendering
 
 Chromium handles RTL direction and Arabic glyph shaping. The Docker
-runtime also installs system fonts, so Arabic PDFs still generate when
-this optional file is absent. Adding Amiri keeps the document style more
-consistent and readable.
+image bundles **Noto Naskh Arabic** (`font-noto-arabic`), which the PDF
+template's RTL font stack prefers — so Arabic PDFs render with a clean
+Naskh face even when the optional Amiri file below is absent. (Plain
+`ttf-dejavu` has **no** Arabic glyphs, so without an Arabic font package
+Arabic would print as tofu boxes.) Adding Amiri embeds the font directly
+in the PDF, keeping Arabic identical across every environment, including
+local dev where the host may lack a good Arabic face.
 
 ## How to enable Arabic rendering
 

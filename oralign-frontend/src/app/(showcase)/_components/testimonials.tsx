@@ -34,7 +34,7 @@ export function Testimonials() {
               const item = testimonialCases[i] ?? showcaseCases[i];
               return (
                 <li
-                  key={i}
+                  key={t.name.fr}
                   className="sc-card-tint flex flex-col gap-6 bg-[var(--sc-white)]"
                   style={{ padding: "32px 28px" }}
                 >

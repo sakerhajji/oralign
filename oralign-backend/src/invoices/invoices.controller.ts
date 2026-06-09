@@ -1,8 +1,10 @@
 import {
+  Body,
   Controller,
   Get,
   HttpStatus,
   Param,
+  Patch,
   Query,
   Res,
   UseGuards,
@@ -25,9 +27,11 @@ import {
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
+import { OrderService } from '../orders/services/order.service';
 import { PaymentsService } from '../payments/services/payments.service';
 import { InvoiceLanguage } from './services/invoice-i18n';
 import { InvoicePdfService } from './services/invoice-pdf.service';
+import { UpdateInvoiceNumberDto } from './dto/update-invoice-number.dto';
 
 /**
  * RFC 5987 Content-Disposition helper. ASCII filename for legacy
@@ -76,6 +80,7 @@ export class InvoicesController {
   constructor(
     private readonly payments: PaymentsService,
     private readonly invoicePdf: InvoicePdfService,
+    private readonly orderService: OrderService,
   ) {}
 
   @Get('payments/:paymentId/invoice')
@@ -121,5 +126,74 @@ export class InvoicesController {
     res.setHeader('Content-Disposition', contentDispositionFileName(fileName));
     res.setHeader('Content-Length', buffer.length.toString());
     res.status(HttpStatus.OK).end(buffer);
+  }
+
+  @Get('orders/:orderId/treatment-fee/invoice')
+  @SkipThrottle()
+  @ApiOperation({
+    summary:
+      "Download the order's treatment-fee invoice as a bilingual (FR/EN) PDF. Admin sees every order; the owning dentist sees only their own. A sequential TF-XXXXXX number is allocated on the first render of a paid fee.",
+  })
+  @ApiParam({ name: 'orderId', type: String })
+  @ApiQuery({
+    name: 'lang',
+    required: false,
+    enum: ['fr', 'en'],
+    description:
+      'Force a French or English render of the treatment-fee invoice. Falls back to French when omitted.',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'application/pdf stream',
+    content: { 'application/pdf': {} },
+  })
+  async downloadTreatmentFeeInvoice(
+    @Param('orderId') orderId: string,
+    @CurrentUser() user: JwtPayload,
+    @Res() res: Response,
+    @Query('lang') lang?: string,
+  ): Promise<void> {
+    // RBAC: getOrderById throws 403 on a foreign order, 404 on missing.
+    // We only need the access gate here — the renderer rehydrates its
+    // own projection straight from the order id.
+    await this.orderService.getOrderById(orderId, {
+      userId: user.sub,
+      role: user.role as UserRole,
+    });
+
+    const { buffer, fileName, mimeType } =
+      await this.invoicePdf.renderTreatmentFeeInvoiceBuffer({
+        orderId,
+        language: parseInvoiceLanguage(lang),
+      });
+
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Content-Disposition', contentDispositionFileName(fileName));
+    res.setHeader('Content-Length', buffer.length.toString());
+    res.status(HttpStatus.OK).end(buffer);
+  }
+
+  @Patch('payments/:paymentId/invoice-number')
+  @Roles(UserRole.admin, UserRole.super_admin)
+  @ApiOperation({
+    summary:
+      'Admin-only: set or override the printed invoice / receipt number on a payment. Rejects a number already used by another receipt.',
+  })
+  @ApiParam({ name: 'paymentId', type: String })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'The updated payment id and its new invoice number.',
+  })
+  async updateInvoiceNumber(
+    @Param('paymentId') paymentId: string,
+    @Body() dto: UpdateInvoiceNumberDto,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<{ id: string; invoiceNumber: string | null }> {
+    const updated = await this.payments.updateInvoiceNumber(
+      paymentId,
+      dto.invoiceNumber,
+      { userId: user.sub, role: user.role as UserRole },
+    );
+    return { id: updated.id, invoiceNumber: updated.invoiceNumber };
   }
 }

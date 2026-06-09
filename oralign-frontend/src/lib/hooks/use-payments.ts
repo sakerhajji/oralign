@@ -9,6 +9,7 @@ import {
 } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { paymentsService } from '@/lib/api/payments.service';
+import { invoicesService } from '@/lib/api/invoices.service';
 import { extractApiErrorMessage } from '@/lib/api/error';
 import { paymentPlanKeys } from './use-quotation-payment-plan';
 import { quotationKeys } from './use-quotations';
@@ -119,6 +120,30 @@ function invalidateAfterPayment(
     queryClient.invalidateQueries({ queryKey: orderKeys.detail(orderId) });
   }
   queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
+}
+
+/**
+ * Admin-only: set/override a payment's printed invoice number. On
+ * success the whole payments fan-out is invalidated so the new number
+ * shows in the history + mine lists and any open invoice preview.
+ */
+export function useUpdateInvoiceNumber(): UseMutationResult<
+  { id: string; invoiceNumber: string | null },
+  Error,
+  { paymentId: string; invoiceNumber: string }
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ paymentId, invoiceNumber }) =>
+      invoicesService.updateInvoiceNumber(paymentId, invoiceNumber),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: paymentKeys.all });
+      toast.success('Invoice number updated.');
+    },
+    onError: (error) => {
+      toast.error(extractApiErrorMessage(error));
+    },
+  });
 }
 
 export function usePayByCard(): UseMutationResult<

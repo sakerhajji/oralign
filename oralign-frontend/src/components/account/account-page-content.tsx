@@ -5,8 +5,10 @@ import { AccountSkeleton } from '@/components/account/account-skeleton';
 import { AccountOverviewCard } from '@/components/account/account-overview-card';
 import { ClinicOverviewCard } from '@/components/account/clinic-overview-card';
 import { useAccountData } from '@/lib/hooks';
+import { useT } from '@/lib/i18n/lang-context';
 
 export function AccountPageContent() {
+  const { t } = useT();
   const { user, dentistProfile, workingHours, isDentist, isLoading, error } = useAccountData();
 
   return (
@@ -14,9 +16,9 @@ export function AccountPageContent() {
       <div className="flex flex-col gap-6 py-6">
         <div className="px-4 lg:px-6">
           <div className="space-y-1">
-            <h1 className="text-2xl font-semibold">Account</h1>
+            <h1 className="text-2xl font-semibold">{t('accountHome.title')}</h1>
             <p className="text-sm text-muted-foreground">
-              Review your profile details and clinic information.
+              {t('accountHome.subtitle')}
             </p>
           </div>
         </div>
@@ -24,9 +26,9 @@ export function AccountPageContent() {
           {isLoading && <AccountSkeleton />}
           {!isLoading && error && (
             <Alert variant="destructive">
-              <AlertTitle>Unable to load account</AlertTitle>
+              <AlertTitle>{t('accountHome.unableToLoad')}</AlertTitle>
               <AlertDescription>
-                {error instanceof Error ? error.message : 'Please try again later.'}
+                {error instanceof Error ? error.message : t('accountHome.tryAgainLater')}
               </AlertDescription>
             </Alert>
           )}

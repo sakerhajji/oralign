@@ -42,6 +42,33 @@ export const dict = {
     about: { fr: "FAQ", en: "FAQ", ar: "الأسئلة" } as T,
     bookDemo: { fr: "Consultation", en: "Consultation", ar: "احجز" } as T,
     login: { fr: "Connexion", en: "Login", ar: "دخول" } as T,
+
+    // ── Patient mega-menu (grouped nav) — short menu labels ──
+    whyOralign: { fr: "Découvrir", en: "Discover", ar: "اكتشف" } as T,
+    clinicalCases: { fr: "Cas", en: "Cases", ar: "حالات" } as T,
+    community: { fr: "Communauté", en: "Community", ar: "المجتمع" } as T,
+    guide: { fr: "Guide", en: "Guide", ar: "دليل" } as T,
+    shop: { fr: "Shop", en: "Shop", ar: "المتجر" } as T,
+    blogs: { fr: "Blog", en: "Blog", ar: "مدوّنة" } as T,
+    navOralign: { fr: "Oralign", en: "Oralign", ar: "أورالاين" } as T,
+    oralignPrime: { fr: "Oralign Prime", en: "Oralign Prime", ar: "أورالاين برايم" } as T,
+    findPractitioner: { fr: "Praticiens", en: "Practitioners", ar: "الأطباء" } as T,
+    beforeAfter: { fr: "Avant / Après", en: "Before / After", ar: "قبل / بعد" } as T,
+    actEarly: { fr: "Agir tôt", en: "Act early", ar: "التدخّل مبكرًا" } as T,
+    temoignages: { fr: "Témoignages", en: "Testimonials", ar: "شهادات" } as T,
+    shareExperience: { fr: "Partager", en: "Share", ar: "شارك" } as T,
+  },
+
+  // ── Scaffold copy for the empty per-page SEO pages ──
+  pages: {
+    eyebrow: { fr: "ORALIGN", en: "ORALIGN", ar: "ORALIGN" } as T,
+    placeholder: {
+      fr: "Cette page est en cours de préparation. Le contenu et les visuels arrivent très bientôt.",
+      en: "This page is being prepared. Content and visuals are coming very soon.",
+      ar: "هذه الصفحة قيد الإعداد. سيتوفّر المحتوى والصور قريبًا.",
+    } as T,
+    imageSoon: { fr: "Visuel à venir", en: "Image coming soon", ar: "صورة قريبًا" } as T,
+    backHome: { fr: "Retour à l'accueil", en: "Back to home", ar: "العودة إلى الرئيسية" } as T,
   },
   hero: {
     eyebrow: {
@@ -251,6 +278,16 @@ export const dict = {
         ar: "من أوّل فحص إلى الابتسامة الأخيرة، يُشرف طبيب مُرخَّص على كل خطوة.",
       },
     ] as T[],
+    imageAlt: {
+      fr: "Sourire aligné après traitement ORALIGN",
+      en: "Aligned smile after ORALIGN treatment",
+      ar: "ابتسامة مصطفة بعد علاج ORALIGN",
+    } as T,
+    imageCaption: {
+      fr: "Un plan numérique, des aligneurs fabriqués sur mesure, un suivi régulier.",
+      en: "Digital planning, custom-made aligners and regular follow-up.",
+      ar: "تخطيط رقمي، أجهزة مخصصة ومتابعة منتظمة.",
+    } as T,
   },
   how: {
     eyebrow: { fr: "Votre parcours", en: "Your Journey", ar: "رحلتك" } as T,

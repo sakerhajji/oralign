@@ -1449,6 +1449,741 @@ export const dict = {
     phaseProduction: { en: 'Production', fr: 'Production' } as T,
     phaseTerminal: { en: 'Terminal', fr: 'Final' } as T,
   },
+
+  // ─── ANCHOR · payments cluster ─────────────────────────────────
+  // Reserved for the dedicated /dashboard/payments translation pass.
+  // Agent inserts a `paymentsHistory`, `paymentsMine`, `paymentsPending`
+  // and `paymentsInvoice` block here.
+
+  // Shared payments vocabulary — used by every page in the
+  // /dashboard/payments cluster so a doctor and an admin reading two
+  // different surfaces always see the same label for the same enum.
+  paymentsCommon: {
+    // PaymentRecordStatus → human label. Mirrors orders.statusLabel
+    // for the *order* lifecycle; these cover the *payment record*
+    // lifecycle and intentionally stay distinct.
+    status: {
+      success: { en: 'Successful', fr: 'Succès' } as T,
+      awaiting_confirmation: {
+        en: 'Awaiting confirmation',
+        fr: 'En attente de confirmation',
+      } as T,
+      pending: { en: 'Pending', fr: 'En attente' } as T,
+      rejected: { en: 'Rejected', fr: 'Rejetée' } as T,
+      failed: { en: 'Failed', fr: 'Échouée' } as T,
+      cancelled: { en: 'Cancelled', fr: 'Annulée' } as T,
+    },
+
+    // PaymentMethod → human label.
+    method: {
+      card: { en: 'Card', fr: 'Carte' } as T,
+      bank_transfer: { en: 'Bank transfer', fr: 'Virement bancaire' } as T,
+      cash: { en: 'Cash', fr: 'Espèces' } as T,
+      mock: { en: 'Test (mock)', fr: 'Test (mock)' } as T,
+    },
+
+    // Reused widgets / column titles
+    columns: {
+      date: { en: 'Date', fr: 'Date' } as T,
+      doctorPatient: { en: 'Doctor · patient', fr: 'Praticien · patient' } as T,
+      order: { en: 'Order', fr: 'Commande' } as T,
+      method: { en: 'Method', fr: 'Mode' } as T,
+      installment: { en: 'Installment', fr: 'Échéance' } as T,
+      amount: { en: 'Amount', fr: 'Montant' } as T,
+      status: { en: 'Status', fr: 'Statut' } as T,
+      proof: { en: 'Proof', fr: 'Justificatif' } as T,
+      actions: { en: 'Actions', fr: 'Actions' } as T,
+      doctorSlashPatient: {
+        en: 'Doctor / Patient',
+        fr: 'Praticien / Patient',
+      } as T,
+    },
+
+    // Shared action labels
+    actions: {
+      viewReceipt: {
+        en: 'View the doctor-uploaded receipt',
+        fr: 'Consulter le reçu téléversé par le praticien',
+      } as T,
+      view: { en: 'View', fr: 'Consulter' } as T,
+      openQuote: { en: 'Open quote', fr: 'Ouvrir le devis' } as T,
+      viewInvoice: { en: 'View invoice', fr: 'Voir la facture' } as T,
+      previous: { en: 'Previous', fr: 'Précédent' } as T,
+      next: { en: 'Next', fr: 'Suivant' } as T,
+      refresh: { en: 'Refresh', fr: 'Actualiser' } as T,
+    },
+
+    // Empty / loading
+    emptyDefault: { en: 'No payments yet.', fr: 'Aucun paiement pour le moment.' } as T,
+    submittedShort: { en: 'Submitted {date}', fr: 'Soumis le {date}' } as T,
+    invoiceNumberPh: { en: 'FAC-000123', fr: 'FAC-000123' } as T,
+    invoiceNumberAria: {
+      en: 'Invoice number',
+      fr: 'Numéro de facture',
+    } as T,
+    saveInvoiceAria: {
+      en: 'Save invoice number',
+      fr: 'Enregistrer le numéro de facture',
+    } as T,
+    cancelAria: { en: 'Cancel', fr: 'Annuler' } as T,
+    editInvoiceAria: {
+      en: 'Edit invoice number',
+      fr: 'Modifier le numéro de facture',
+    } as T,
+  },
+
+  // /dashboard/payments/history — the full role-aware payment history
+  // page. Used both by admins (sees every payment) and doctors (sees
+  // their own).
+  paymentsHistory: {
+    title: { en: 'Payment history', fr: 'Historique des paiements' } as T,
+    subtitleAdmin: {
+      en: 'Every payment recorded by the platform — card, bank transfer and cash combined. Search, filter, and sort to find any record across the full history.',
+      fr: 'Tous les paiements enregistrés par la plateforme — carte, virement bancaire et espèces réunis. Recherchez, filtrez et triez pour retrouver tout enregistrement dans l’historique complet.',
+    } as T,
+    subtitleDoctor: {
+      en: 'Every payment recorded against your orders, newest first. Search by order code or amount, filter by method or status.',
+      fr: 'Tous les paiements enregistrés sur vos commandes, du plus récent au plus ancien. Recherchez par code de commande ou par montant, filtrez par mode ou par statut.',
+    } as T,
+
+    searchPhAdmin: {
+      en: 'Search order code, doctor, patient, or transaction…',
+      fr: 'Rechercher un code de commande, un praticien, un patient ou une transaction…',
+    } as T,
+    searchPhDoctor: {
+      en: 'Search order code or transaction…',
+      fr: 'Rechercher un code de commande ou une transaction…',
+    } as T,
+    filters: { en: 'Filters', fr: 'Filtres' } as T,
+
+    fromDate: { en: 'From date', fr: 'Date de début' } as T,
+    toDate: { en: 'To date', fr: 'Date de fin' } as T,
+    doctor: { en: 'Doctor', fr: 'Praticien' } as T,
+    clearFilters: { en: 'Clear filters', fr: 'Effacer les filtres' } as T,
+    methodsCount: {
+      en: 'Methods ({count} selected)',
+      fr: 'Modes ({count} sélectionné(s))',
+    } as T,
+    statusCount: {
+      en: 'Status ({count} selected)',
+      fr: 'Statut ({count} sélectionné(s))',
+    } as T,
+
+    active: { en: 'Active:', fr: 'Actifs :' } as T,
+    chipSearch: { en: 'Search: "{value}"', fr: 'Recherche : « {value} »' } as T,
+    chipMethodsOne: { en: '1 method', fr: '1 mode' } as T,
+    chipMethodsMany: { en: '{count} methods', fr: '{count} modes' } as T,
+    chipStatusOne: { en: '1 status', fr: '1 statut' } as T,
+    chipStatusMany: { en: '{count} statuses', fr: '{count} statuts' } as T,
+    chipDoctor: { en: 'Doctor: {name}', fr: 'Praticien : {name}' } as T,
+    chipDoctorSelected: { en: 'Selected', fr: 'Sélectionné' } as T,
+    chipFrom: { en: 'From {date}', fr: 'Depuis le {date}' } as T,
+    chipTo: { en: 'To {date}', fr: 'Jusqu’au {date}' } as T,
+
+    cardTitleAdmin: { en: 'Installment payments', fr: 'Paiements échelonnés' } as T,
+    cardTitleDoctor: { en: 'My payments', fr: 'Mes paiements' } as T,
+    countEntriesOne: { en: '1 entry', fr: '1 enregistrement' } as T,
+    countEntriesMany: { en: '{count} entries', fr: '{count} enregistrements' } as T,
+    sortedPrefix: { en: 'Sorted: {label}', fr: 'Trié : {label}' } as T,
+
+    emptyNoMatch: {
+      en: 'No payments match these filters.',
+      fr: 'Aucun paiement ne correspond à ces filtres.',
+    } as T,
+    emptyAdmin: {
+      en: 'No payments recorded yet.',
+      fr: 'Aucun paiement enregistré pour le moment.',
+    } as T,
+    emptyDoctor: {
+      en: 'You have not made any payments yet.',
+      fr: 'Vous n’avez encore effectué aucun paiement.',
+    } as T,
+
+    errorTitle: { en: 'Could not load payments.', fr: 'Impossible de charger les paiements.' } as T,
+    errorStaleBackendTitle: {
+      en: 'Backend may need a rebuild.',
+      fr: 'Le backend doit peut-être être reconstruit.',
+    } as T,
+    errorStaleBackendBody: {
+      en: "A 400 here typically means the running backend container is an older build that doesn't recognise the new filter fields. Rebuild and restart it:",
+      fr: 'Un code 400 ici signifie en général que le conteneur backend en cours d’exécution est une version plus ancienne qui ne reconnaît pas les nouveaux champs de filtre. Reconstruisez-le et redémarrez :',
+    } as T,
+    errorTryAgain: { en: 'Try again', fr: 'Réessayer' } as T,
+
+    sortBy: { en: 'Sort by', fr: 'Trier par' } as T,
+    sort: { en: 'Sort', fr: 'Trier' } as T,
+    sortOptions: {
+      'date-desc': { en: 'Newest first', fr: 'Plus récents d’abord' } as T,
+      'date-asc': { en: 'Oldest first', fr: 'Plus anciens d’abord' } as T,
+      'paid-desc': { en: 'Recently paid', fr: 'Récemment payés' } as T,
+      'amount-desc': { en: 'Highest amount', fr: 'Montant le plus élevé' } as T,
+      'amount-asc': { en: 'Lowest amount', fr: 'Montant le plus bas' } as T,
+      'status-asc': { en: 'Status (A→Z)', fr: 'Statut (A→Z)' } as T,
+    },
+
+    rowsPerPage: { en: 'Rows per page', fr: 'Lignes par page' } as T,
+    paginationRange: {
+      en: '{from}–{to} of {total} payments',
+      fr: '{from}–{to} sur {total} paiements',
+    } as T,
+    pageOf: { en: 'Page {page} of {total}', fr: 'Page {page} sur {total}' } as T,
+
+    // Doctor search picker
+    pickerSearchPh: { en: 'Search doctor name…', fr: 'Rechercher un praticien…' } as T,
+    pickerClearAria: { en: 'Clear search', fr: 'Effacer la recherche' } as T,
+    pickerClearDoctorAria: {
+      en: 'Clear doctor filter',
+      fr: 'Effacer le filtre praticien',
+    } as T,
+    pickerSearching: { en: 'Searching…', fr: 'Recherche en cours…' } as T,
+    pickerNoMatch: {
+      en: 'No doctors match "{value}".',
+      fr: 'Aucun praticien ne correspond à « {value} ».',
+    } as T,
+    pickerNoneAvailable: { en: 'No doctors available.', fr: 'Aucun praticien disponible.' } as T,
+    pickerShowingTop: {
+      en: 'Showing top {count}. Type to narrow.',
+      fr: 'Affichage des {count} premiers. Tapez pour affiner.',
+    } as T,
+
+    // Treatment-fee sections
+    treatmentFeesTitleAdmin: {
+      en: 'Treatment fee payments',
+      fr: 'Paiements des honoraires de traitement',
+    } as T,
+    treatmentFeesTitleDoctor: {
+      en: 'My treatment fee payments',
+      fr: 'Mes paiements d’honoraires de traitement',
+    } as T,
+    treatmentFeesDescAdmin: {
+      en: 'Every treatment-fee payment across the system — card, bank transfer, and cash. Separate from installment payments below.',
+      fr: 'Tous les paiements d’honoraires de traitement de la plateforme — carte, virement bancaire et espèces. Distincts des paiements échelonnés ci-dessous.',
+    } as T,
+    treatmentFeesDescDoctor: {
+      en: 'Treatment fees you have paid on your orders — card, bank transfer, and cash. Separate from installment payments below.',
+      fr: 'Les honoraires de traitement que vous avez réglés sur vos commandes — carte, virement bancaire et espèces. Distincts des paiements échelonnés ci-dessous.',
+    } as T,
+    treatmentFeesTotalSuffix: { en: '{count} total', fr: '{count} au total' } as T,
+    treatmentFeesEmpty: {
+      en: 'No treatment-fee payments recorded yet.',
+      fr: 'Aucun paiement d’honoraires de traitement enregistré pour le moment.',
+    } as T,
+    treatmentFeeInvoiceTitle: {
+      en: 'View the treatment-fee invoice',
+      fr: 'Voir la facture des honoraires de traitement',
+    } as T,
+    treatmentFeeInvoiceLabel: { en: 'Invoice', fr: 'Facture' } as T,
+    openOrderTitle: { en: 'Open order', fr: 'Ouvrir la commande' } as T,
+    openOrderLabel: { en: 'Order', fr: 'Commande' } as T,
+  },
+
+  // /dashboard/payments/mine — legacy route that permanent-redirects
+  // to /dashboard/payments/history. Kept here for completeness so the
+  // anchor reference stays valid; no UI strings to translate.
+  paymentsMine: {
+    // (intentional placeholder — `mine/page.tsx` only calls `redirect()`)
+    placeholder: { en: '', fr: '' } as T,
+  },
+
+  // /dashboard/payments/pending — admin queue of payments awaiting
+  // confirmation (bank transfers declared by doctors).
+  paymentsPending: {
+    title: {
+      en: 'Pending payment confirmations',
+      fr: 'Confirmations de paiement en attente',
+    } as T,
+    subtitle: {
+      en: "Doctor-declared bank transfers awaiting verification — both the per-order treatment fee and individual installments. Confirming a payment runs the SUCCESS transition: for installments the linked step batch unlocks; for treatment fees the order's treatment plan unlocks.",
+      fr: 'Virements bancaires déclarés par les praticiens en attente de vérification — qu’il s’agisse des honoraires de traitement ou des échéances. Confirmer un paiement déclenche la transition vers SUCCÈS : pour les échéances, le lot d’étapes lié se déverrouille ; pour les honoraires de traitement, le plan de traitement de la commande se déverrouille.',
+    } as T,
+
+    installmentsCardTitle: {
+      en: 'Installment payments awaiting confirmation',
+      fr: 'Paiements échelonnés en attente de confirmation',
+    } as T,
+    queueCountOne: { en: '1 payment in queue', fr: '1 paiement en file' } as T,
+    queueCountMany: {
+      en: '{count} payments in queue',
+      fr: '{count} paiements en file',
+    } as T,
+    queueEmpty: {
+      en: 'Nothing to confirm — queue is empty.',
+      fr: 'Rien à confirmer — la file est vide.',
+    } as T,
+
+    confirm: { en: 'Confirm', fr: 'Confirmer' } as T,
+    reject: { en: 'Reject', fr: 'Rejeter' } as T,
+
+    confirmDialogTitle: {
+      en: 'Confirm bank transfer',
+      fr: 'Confirmer le virement bancaire',
+    } as T,
+    confirmDialogDesc: {
+      en: 'The linked installment will be marked paid and the step batch will unlock. This action is logged with your user id.',
+      fr: 'L’échéance correspondante sera marquée comme payée et le lot d’étapes sera déverrouillé. Cette action est consignée avec votre identifiant utilisateur.',
+    } as T,
+    notesLabel: { en: 'Notes (optional)', fr: 'Notes (facultatif)' } as T,
+    notesPh: {
+      en: 'e.g. matched on statement line 2026-05-22',
+      fr: 'p. ex. ligne du relevé du 2026-05-22 rapprochée',
+    } as T,
+    cancel: { en: 'Cancel', fr: 'Annuler' } as T,
+    confirmPayment: { en: 'Confirm payment', fr: 'Confirmer le paiement' } as T,
+
+    rejectDialogTitle: {
+      en: 'Reject bank transfer',
+      fr: 'Rejeter le virement bancaire',
+    } as T,
+    rejectDialogDesc: {
+      en: 'The payment will be marked rejected. The doctor can declare a fresh transfer afterwards; previous attempts stay in the audit trail.',
+      fr: 'Le paiement sera marqué comme rejeté. Le praticien pourra déclarer un nouveau virement par la suite ; les tentatives précédentes restent dans la piste d’audit.',
+    } as T,
+    rejectReasonLabel: {
+      en: 'Rejection reason *',
+      fr: 'Motif du rejet *',
+    } as T,
+    rejectReasonPh: {
+      en: 'Required — shown to the doctor.',
+      fr: 'Obligatoire — communiqué au praticien.',
+    } as T,
+    rejectPayment: { en: 'Reject payment', fr: 'Rejeter le paiement' } as T,
+
+    // Treatment-fee pending queue
+    treatmentFeesPendingTitle: {
+      en: 'Treatment fees awaiting confirmation',
+      fr: 'Honoraires de traitement en attente de confirmation',
+    } as T,
+    treatmentFeesPendingDesc: {
+      en: "Doctor-uploaded bank-transfer receipts for the order's professional fee. Open the receipt to review the proof and confirm in one place.",
+      fr: 'Reçus de virement bancaire téléversés par le praticien pour les honoraires de la commande. Ouvrez le reçu pour vérifier la pièce justificative et confirmer en un seul endroit.',
+    } as T,
+    treatmentFeesPendingCount: {
+      en: '{count} pending',
+      fr: '{count} en attente',
+    } as T,
+    treatmentFeesPendingEmpty: {
+      en: 'No treatment fees waiting for confirmation.',
+      fr: 'Aucun honoraires de traitement en attente de confirmation.',
+    } as T,
+    reviewAndConfirm: {
+      en: 'Review & confirm',
+      fr: 'Vérifier & confirmer',
+    } as T,
+  },
+
+  // /dashboard/payments/[paymentId]/invoice — bilingual receipt PDF
+  // preview page.
+  paymentsInvoice: {
+    backToPayments: {
+      en: 'Back to payments',
+      fr: 'Retour aux paiements',
+    } as T,
+    title: { en: 'Invoice', fr: 'Facture' } as T,
+    numberLabel: { en: 'No.', fr: 'N°' } as T,
+    receiptPreview: {
+      en: 'Payment receipt preview.',
+      fr: 'Aperçu du reçu de paiement.',
+    } as T,
+    downloadPdf: { en: 'Download PDF', fr: 'Télécharger le PDF' } as T,
+    loading: { en: 'Loading invoice…', fr: 'Chargement de la facture…' } as T,
+    errorDefault: {
+      en: 'Could not load the invoice PDF.',
+      fr: 'Impossible de charger le PDF de la facture.',
+    } as T,
+    retry: { en: 'Retry', fr: 'Réessayer' } as T,
+    previewTitle: { en: 'Invoice preview', fr: 'Aperçu de la facture' } as T,
+  },
+
+  // ─── ANCHOR · account cluster ──────────────────────────────────
+  // Strings for the /account/* pages: home, profile, clinic,
+  // billing-settings, settings — plus the company billing settings
+  // form used by the /account/billing-settings page.
+
+  // ── /account home ────────────────────────────────────────────────
+  accountHome: {
+    title: { en: 'Account', fr: 'Compte' } as T,
+    subtitle: {
+      en: 'Review your profile details and clinic information.',
+      fr: 'Consultez vos informations personnelles et celles de votre cabinet.',
+    } as T,
+    unableToLoad: { en: 'Unable to load account', fr: 'Impossible de charger le compte' } as T,
+    tryAgainLater: { en: 'Please try again later.', fr: 'Veuillez réessayer plus tard.' } as T,
+
+    // AccountOverviewCard
+    editProfile: { en: 'Edit Profile', fr: 'Modifier le profil' } as T,
+    roleLabel: { en: 'Role', fr: 'Rôle' } as T,
+    phoneLabel: { en: 'Phone', fr: 'Téléphone' } as T,
+    statusLabel: { en: 'Status', fr: 'Statut' } as T,
+    statusActive: { en: 'Active', fr: 'Actif' } as T,
+    statusInactive: { en: 'Inactive', fr: 'Inactif' } as T,
+    notProvided: { en: 'Not provided', fr: 'Non renseigné' } as T,
+    roleAdmin: { en: 'Admin', fr: 'Administrateur' } as T,
+    roleSuperAdmin: { en: 'Super Admin', fr: 'Super administrateur' } as T,
+    roleDentist: { en: 'Dentist', fr: 'Praticien' } as T,
+    roleDesigner: { en: 'Designer', fr: 'Designer' } as T,
+
+    // ClinicOverviewCard
+    clinicTitle: { en: 'Clinic', fr: 'Cabinet' } as T,
+    clinicCompleteHint: {
+      en: 'Complete your clinic profile in settings.',
+      fr: 'Complétez le profil de votre cabinet dans les paramètres.',
+    } as T,
+    clinicInfoHint: {
+      en: 'Your clinic information and availability.',
+      fr: 'Les informations et la disponibilité de votre cabinet.',
+    } as T,
+    clinicNameLabel: { en: 'Clinic name', fr: 'Nom du cabinet' } as T,
+    addressLabel: { en: 'Address', fr: 'Adresse' } as T,
+    workingHoursLabel: { en: 'Working hours', fr: 'Horaires d’ouverture' } as T,
+
+    // Account nav tabs
+    tabProfile: { en: 'Profile', fr: 'Profil' } as T,
+    tabClinic: { en: 'Clinic', fr: 'Cabinet' } as T,
+    tabBilling: { en: 'Billing', fr: 'Facturation' } as T,
+
+    // Working hours list (shared)
+    workingHoursNotSet: { en: 'Not set', fr: 'Non défini' } as T,
+    days: {
+      monday: { en: 'Monday', fr: 'Lundi' } as T,
+      tuesday: { en: 'Tuesday', fr: 'Mardi' } as T,
+      wednesday: { en: 'Wednesday', fr: 'Mercredi' } as T,
+      thursday: { en: 'Thursday', fr: 'Jeudi' } as T,
+      friday: { en: 'Friday', fr: 'Vendredi' } as T,
+      saturday: { en: 'Saturday', fr: 'Samedi' } as T,
+      sunday: { en: 'Sunday', fr: 'Dimanche' } as T,
+    },
+    daysShort: {
+      monday: { en: 'Mon', fr: 'Lun' } as T,
+      tuesday: { en: 'Tue', fr: 'Mar' } as T,
+      wednesday: { en: 'Wed', fr: 'Mer' } as T,
+      thursday: { en: 'Thu', fr: 'Jeu' } as T,
+      friday: { en: 'Fri', fr: 'Ven' } as T,
+      saturday: { en: 'Sat', fr: 'Sam' } as T,
+      sunday: { en: 'Sun', fr: 'Dim' } as T,
+    },
+    // Working hours editor
+    dayOpen: { en: 'Open', fr: 'Ouvert' } as T,
+    dayClosed: { en: 'Closed', fr: 'Fermé' } as T,
+    dayOpens: { en: 'Opens', fr: 'Ouvre' } as T,
+    dayCloses: { en: 'Closes', fr: 'Ferme' } as T,
+    dayIsOpenAria: { en: '{day} is open', fr: '{day} est ouvert' } as T,
+    dayIsClosedAria: { en: '{day} is closed', fr: '{day} est fermé' } as T,
+  },
+
+  // ── /account/profile ─────────────────────────────────────────────
+  accountProfile: {
+    title: { en: 'Profile', fr: 'Profil' } as T,
+    subtitle: {
+      en: 'Manage your personal profile details.',
+      fr: 'Gérez les informations de votre profil personnel.',
+    } as T,
+    clinicSettings: { en: 'Clinic settings', fr: 'Paramètres du cabinet' } as T,
+    onboardingCompleteTitle: { en: 'Complete your profile', fr: 'Complétez votre profil' } as T,
+    onboardingConfirmTitle: { en: 'Confirm your profile', fr: 'Confirmez votre profil' } as T,
+    onboardingConfirmBody: {
+      en: 'Review your details and click "Save & Continue" to proceed.',
+      fr: 'Vérifiez vos informations puis cliquez sur « Enregistrer et continuer » pour poursuivre.',
+    } as T,
+    onboardingCompleteBody: {
+      en: 'Add your phone number and country to continue onboarding.',
+      fr: 'Ajoutez votre numéro de téléphone et votre pays pour poursuivre l’intégration.',
+    } as T,
+    unableToLoad: { en: 'Unable to load profile', fr: 'Impossible de charger le profil' } as T,
+    tryAgainLater: { en: 'Please try again later.', fr: 'Veuillez réessayer plus tard.' } as T,
+
+    // Profile form (card)
+    cardTitle: { en: 'Profile', fr: 'Profil' } as T,
+    cardSubtitle: {
+      en: 'Update your personal information and avatar.',
+      fr: 'Mettez à jour vos informations personnelles et votre photo.',
+    } as T,
+    profilePhotoLabel: { en: 'Profile photo', fr: 'Photo de profil' } as T,
+    profilePhotoHint: {
+      en: 'Pick a square image (max 5 MB). It uploads as soon as you choose the file — no separate save step.',
+      fr: 'Choisissez une image carrée (5 Mo max). L’envoi se fait dès la sélection — pas besoin d’étape d’enregistrement.',
+    } as T,
+    uploadAvatar: { en: 'Upload avatar', fr: 'Téléverser une photo' } as T,
+    uploading: { en: 'Uploading…', fr: 'Envoi en cours…' } as T,
+    fullNameLabel: { en: 'Full name', fr: 'Nom complet' } as T,
+    emailLabel: { en: 'Email', fr: 'E-mail' } as T,
+    emailManagedHint: {
+      en: 'Email updates are managed by support.',
+      fr: 'Les modifications d’e-mail sont gérées par le support.',
+    } as T,
+    phoneLabel: { en: 'Phone', fr: 'Téléphone' } as T,
+    countryLabel: { en: 'Country (ISO code)', fr: 'Pays (code ISO)' } as T,
+    saving: { en: 'Saving...', fr: 'Enregistrement…' } as T,
+    saveChanges: { en: 'Save changes', fr: 'Enregistrer les modifications' } as T,
+    saveAndContinue: { en: 'Save & Continue', fr: 'Enregistrer et continuer' } as T,
+
+    // Toasts (user-facing)
+    toastSelectImage: { en: 'Please select an image file.', fr: 'Veuillez sélectionner un fichier image.' } as T,
+    toastAvatarTooLarge: { en: 'Avatar must be 5MB or smaller.', fr: 'La photo doit faire 5 Mo maximum.' } as T,
+    toastAvatarUpdated: { en: 'Avatar updated.', fr: 'Photo mise à jour.' } as T,
+    toastProfileUpdated: { en: 'Profile updated successfully.', fr: 'Modifications enregistrées.' } as T,
+
+    // Security card (on /account/profile)
+    securityTitle: { en: 'Security', fr: 'Sécurité' } as T,
+    securitySubtitle: {
+      en: 'Change your password or request a reset link.',
+      fr: 'Modifiez votre mot de passe ou demandez un lien de réinitialisation.',
+    } as T,
+    currentPassword: { en: 'Current password', fr: 'Mot de passe actuel' } as T,
+    newPassword: { en: 'New password', fr: 'Nouveau mot de passe' } as T,
+    confirmPassword: { en: 'Confirm new password', fr: 'Confirmer le nouveau mot de passe' } as T,
+    updating: { en: 'Updating…', fr: 'Mise à jour…' } as T,
+    updatePassword: { en: 'Update password', fr: 'Mettre à jour le mot de passe' } as T,
+    forgotTitle: { en: 'Forgot your password?', fr: 'Mot de passe oublié ?' } as T,
+    forgotBody: {
+      en: 'We’ll send a reset link to {email}.',
+      fr: 'Nous enverrons un lien de réinitialisation à {email}.',
+    } as T,
+    sending: { en: 'Sending…', fr: 'Envoi…' } as T,
+    sendResetLink: { en: 'Send reset link', fr: 'Envoyer le lien de réinitialisation' } as T,
+  },
+
+  // ── /account/clinic ──────────────────────────────────────────────
+  accountClinic: {
+    title: { en: 'Clinic', fr: 'Cabinet' } as T,
+    subtitle: {
+      en: 'Manage your clinic profile and availability.',
+      fr: 'Gérez les informations et la disponibilité de votre cabinet.',
+    } as T,
+    finishSetupTitle: { en: 'Finish clinic setup', fr: 'Terminer la configuration du cabinet' } as T,
+    finishSetupBody: {
+      en: 'Add clinic details and working hours to complete onboarding.',
+      fr: 'Renseignez les informations du cabinet et les horaires d’ouverture pour terminer l’intégration.',
+    } as T,
+    unableToLoad: { en: 'Unable to load clinic', fr: 'Impossible de charger le cabinet' } as T,
+    tryAgainLater: { en: 'Please try again later.', fr: 'Veuillez réessayer plus tard.' } as T,
+    accessUnavailableTitle: { en: 'Clinic access unavailable', fr: 'Accès au cabinet indisponible' } as T,
+    accessUnavailableBody: {
+      en: 'Clinic settings are only available for dentist accounts.',
+      fr: 'Les paramètres du cabinet sont réservés aux comptes praticien.',
+    } as T,
+
+    // ClinicForm
+    cardTitle: { en: 'Clinic', fr: 'Cabinet' } as T,
+    cardSubtitle: {
+      en: 'Manage your clinic profile details.',
+      fr: 'Gérez les informations de votre cabinet.',
+    } as T,
+    clinicNameLabel: { en: 'Clinic name', fr: 'Nom du cabinet' } as T,
+    phoneLabel: { en: 'Phone', fr: 'Téléphone' } as T,
+    addressLabel: { en: 'Address', fr: 'Adresse' } as T,
+    cityLabel: { en: 'City', fr: 'Ville' } as T,
+    countryLabel: { en: 'Country', fr: 'Pays' } as T,
+    locationLabel: { en: 'Location', fr: 'Emplacement' } as T,
+    descriptionLabel: { en: 'Description', fr: 'Description' } as T,
+    saving: { en: 'Saving...', fr: 'Enregistrement…' } as T,
+    saveClinicDetails: { en: 'Save clinic details', fr: 'Enregistrer les informations du cabinet' } as T,
+    toastClinicCreated: { en: 'Clinic profile created.', fr: 'Profil du cabinet créé.' } as T,
+
+    // ScheduleForm
+    scheduleTitle: { en: 'Working hours', fr: 'Horaires d’ouverture' } as T,
+    scheduleSubtitle: { en: 'Set your weekly availability.', fr: 'Définissez votre disponibilité hebdomadaire.' } as T,
+    scheduleSaveFirstHint: {
+      en: 'Save your clinic details first to enable scheduling.',
+      fr: 'Enregistrez d’abord les informations du cabinet pour activer la planification.',
+    } as T,
+    saveSchedule: { en: 'Save schedule', fr: 'Enregistrer les horaires' } as T,
+    toastWorkingHoursSaved: { en: 'Working hours saved.', fr: 'Horaires d’ouverture enregistrés.' } as T,
+    toastInvalidHours: {
+      en: 'Please provide valid working hours (HH:mm).',
+      fr: 'Veuillez saisir des horaires valides (HH:mm).',
+    } as T,
+    toastOpeningBeforeClosing: {
+      en: 'Opening time must be before closing time.',
+      fr: 'L’heure d’ouverture doit être antérieure à l’heure de fermeture.',
+    } as T,
+  },
+
+  // ── /account/billing-settings (Company billing settings) ─────────
+  accountBillingSettings: {
+    title: { en: 'Billing settings', fr: 'Paramètres de facturation' } as T,
+    subtitle: {
+      en: 'Company-wide configuration used by every quotation PDF.',
+      fr: 'Configuration applicable à l’ensemble des devis PDF de la société.',
+    } as T,
+    adminsOnly: {
+      en: 'Only admins can view the company billing settings.',
+      fr: 'Seuls les administrateurs peuvent consulter les paramètres de facturation.',
+    } as T,
+
+    // Company section
+    companyTitle: { en: 'Company', fr: 'Société' } as T,
+    companyLogoAlt: { en: 'Company logo', fr: 'Logo de la société' } as T,
+    replaceLogo: { en: 'Replace logo', fr: 'Remplacer le logo' } as T,
+    uploadLogo: { en: 'Upload logo', fr: 'Téléverser le logo' } as T,
+    removeLogo: { en: 'Remove', fr: 'Supprimer' } as T,
+    companyName: { en: 'Company name', fr: 'Raison sociale' } as T,
+    taxRegistrationNumber: { en: 'Tax registration number', fr: 'Numéro RNE' } as T,
+    phone: { en: 'Phone', fr: 'Téléphone' } as T,
+    email: { en: 'Email', fr: 'E-mail' } as T,
+    address: { en: 'Address', fr: 'Adresse' } as T,
+    addressPlaceholder: { en: 'Street, suite…', fr: 'Rue, suite…' } as T,
+
+    // Quote defaults
+    quoteDefaultsTitle: { en: 'Quote defaults', fr: 'Valeurs par défaut du devis' } as T,
+    quoteDefaultsBody: {
+      en: 'These values are auto-applied to every new quotation. The admin can still override them per-quote when editing a specific case.',
+      fr: 'Ces valeurs sont appliquées automatiquement à chaque nouveau devis. L’administrateur peut les remplacer au cas par cas lors de la modification d’un devis.',
+    } as T,
+    // Wording preserved from the source — "TVA" is the Tunisian /
+    // Maghreb convention so we keep it inside the FR label too.
+    defaultTvaLabel: { en: 'Default TVA (%)', fr: 'TVA par défaut (%)' } as T,
+    defaultTreatmentFeeLabel: {
+      en: 'Default treatment fee ({currency})',
+      fr: 'Honoraires de traitement par défaut ({currency})',
+    } as T,
+    defaultCurrencyLabel: { en: 'Default currency', fr: 'Devise par défaut' } as T,
+    devisPrefixLabel: { en: 'Devis prefix', fr: 'Préfixe du devis' } as T,
+    nextQuoteNumberLabel: { en: 'Next quote number', fr: 'Prochain numéro de devis' } as T,
+
+    // Translations
+    translationsTitle: { en: 'Legal & footer text', fr: 'Mentions légales & pied de page' } as T,
+    translationsBody: {
+      en: 'Each language is rendered on the PDF when the admin generates the quote in that language. Empty languages fall back to French.',
+      fr: 'Chaque langue est imprimée sur le PDF lorsque l’administrateur génère le devis dans cette langue. Les langues vides reprennent le français par défaut.',
+    } as T,
+    legalText: { en: 'Legal text — {label}', fr: 'Mentions légales — {label}' } as T,
+    footerText: { en: 'Footer text — {label}', fr: 'Pied de page — {label}' } as T,
+    legalPlaceholderFr: {
+      en: 'Texte légal qui apparaîtra en bas du devis…',
+      fr: 'Texte légal qui apparaîtra en bas du devis…',
+    } as T,
+    legalPlaceholderEn: {
+      en: 'Legal text that will appear at the bottom of every quotation…',
+      fr: 'Legal text that will appear at the bottom of every quotation…',
+    } as T,
+    legalPlaceholderAr: {
+      en: 'النص القانوني…',
+      fr: 'النص القانوني…',
+    } as T,
+    footerPlaceholderFr: {
+      en: 'Merci pour votre confiance.',
+      fr: 'Merci pour votre confiance.',
+    } as T,
+    footerPlaceholderEn: {
+      en: 'Thank you for your trust.',
+      fr: 'Thank you for your trust.',
+    } as T,
+    footerPlaceholderAr: {
+      en: 'شكراً لثقتكم.',
+      fr: 'شكراً لثقتكم.',
+    } as T,
+    languageFrench: { en: 'Français', fr: 'Français' } as T,
+    languageEnglish: { en: 'English', fr: 'Anglais' } as T,
+    languageArabic: { en: 'العربية', fr: 'العربية' } as T,
+
+    // Bank details
+    bankDetailsTitle: { en: 'Bank details', fr: 'Coordonnées bancaires' } as T,
+    bankName: { en: 'Bank name', fr: 'Nom de la banque' } as T,
+    accountName: { en: 'Account name', fr: 'Titulaire du compte' } as T,
+    rib: { en: 'RIB', fr: 'RIB' } as T,
+    iban: { en: 'IBAN', fr: 'IBAN' } as T,
+    swift: { en: 'SWIFT', fr: 'SWIFT' } as T,
+
+    // Save
+    saveSettings: { en: 'Save settings', fr: 'Enregistrer les paramètres' } as T,
+  },
+
+  // ── /account/settings (AccountSettingsContent) ───────────────────
+  accountSettings: {
+    title: { en: 'Account settings', fr: 'Paramètres du compte' } as T,
+    subtitle: {
+      en: 'Update your profile, clinic details, and security preferences.',
+      fr: 'Mettez à jour votre profil, les informations du cabinet et les préférences de sécurité.',
+    } as T,
+    unableToLoad: { en: 'Unable to load settings', fr: 'Impossible de charger les paramètres' } as T,
+    tryAgainLater: { en: 'Please try again later.', fr: 'Veuillez réessayer plus tard.' } as T,
+
+    // Tabs
+    tabProfile: { en: 'Profile', fr: 'Profil' } as T,
+    tabClinic: { en: 'Clinic', fr: 'Cabinet' } as T,
+    tabSecurity: { en: 'Security', fr: 'Sécurité' } as T,
+
+    // Profile tab
+    profileDetailsTitle: { en: 'Profile details', fr: 'Informations du profil' } as T,
+    profileDetailsBody: {
+      en: 'Keep your personal information up to date.',
+      fr: 'Gardez vos informations personnelles à jour.',
+    } as T,
+    profilePhotoLabel: { en: 'Profile photo', fr: 'Photo de profil' } as T,
+    profilePhotoHint: {
+      en: 'Upload a square image for best results.',
+      fr: 'Téléversez une image carrée pour un meilleur rendu.',
+    } as T,
+    uploadAvatar: { en: 'Upload avatar', fr: 'Téléverser une photo' } as T,
+    reset: { en: 'Reset', fr: 'Réinitialiser' } as T,
+    fullNameLabel: { en: 'Full name', fr: 'Nom complet' } as T,
+    emailLabel: { en: 'Email', fr: 'E-mail' } as T,
+    emailManagedHint: {
+      en: 'Email updates are managed by support.',
+      fr: 'Les modifications d’e-mail sont gérées par le support.',
+    } as T,
+    phoneLabel: { en: 'Phone', fr: 'Téléphone' } as T,
+    saving: { en: 'Saving...', fr: 'Enregistrement…' } as T,
+    saveChanges: { en: 'Save changes', fr: 'Enregistrer les modifications' } as T,
+
+    // Clinic tab
+    clinicSettingsTitle: { en: 'Clinic settings', fr: 'Paramètres du cabinet' } as T,
+    clinicSettingsBody: {
+      en: 'Manage your clinic profile and availability.',
+      fr: 'Gérez les informations et la disponibilité de votre cabinet.',
+    } as T,
+    clinicNameLabel: { en: 'Clinic name', fr: 'Nom du cabinet' } as T,
+    clinicPhoneLabel: { en: 'Clinic phone', fr: 'Téléphone du cabinet' } as T,
+    addressLabel: { en: 'Address', fr: 'Adresse' } as T,
+    workingHoursLabel: { en: 'Working hours', fr: 'Horaires d’ouverture' } as T,
+    workingHoursHint: {
+      en: 'Set your weekly availability.',
+      fr: 'Définissez votre disponibilité hebdomadaire.',
+    } as T,
+    saveClinic: { en: 'Save clinic settings', fr: 'Enregistrer les paramètres du cabinet' } as T,
+
+    // Security tab — change password card
+    changePasswordTitle: { en: 'Change password', fr: 'Changer le mot de passe' } as T,
+    changePasswordBody: {
+      en: 'Enter your current password to set a new one.',
+      fr: 'Saisissez votre mot de passe actuel pour en définir un nouveau.',
+    } as T,
+    currentPassword: { en: 'Current password', fr: 'Mot de passe actuel' } as T,
+    newPassword: { en: 'New password', fr: 'Nouveau mot de passe' } as T,
+    confirmPassword: { en: 'Confirm new password', fr: 'Confirmer le nouveau mot de passe' } as T,
+    updating: { en: 'Updating...', fr: 'Mise à jour…' } as T,
+    updatePassword: { en: 'Update password', fr: 'Mettre à jour le mot de passe' } as T,
+
+    // Security tab — reset link card
+    forgotTitle: { en: 'Forgot your password?', fr: 'Mot de passe oublié ?' } as T,
+    forgotBody: {
+      en: 'We’ll send a password-reset link to {email}.',
+      fr: 'Nous enverrons un lien de réinitialisation à {email}.',
+    } as T,
+    sending: { en: 'Sending…', fr: 'Envoi…' } as T,
+    sendResetLink: { en: 'Send reset link', fr: 'Envoyer le lien de réinitialisation' } as T,
+
+    // Toasts
+    toastSelectImage: { en: 'Please select an image file.', fr: 'Veuillez sélectionner un fichier image.' } as T,
+    toastAvatarTooLarge: { en: 'Avatar must be 5MB or smaller.', fr: 'La photo doit faire 5 Mo maximum.' } as T,
+    toastProfileUpdated: { en: 'Profile updated successfully.', fr: 'Modifications enregistrées.' } as T,
+    toastClinicCreated: { en: 'Clinic profile created.', fr: 'Profil du cabinet créé.' } as T,
+    toastWorkingHoursSaved: { en: 'Working hours saved.', fr: 'Horaires d’ouverture enregistrés.' } as T,
+    toastInvalidHours: {
+      en: 'Please provide valid working hours (HH:mm).',
+      fr: 'Veuillez saisir des horaires valides (HH:mm).',
+    } as T,
+    toastOpeningBeforeClosing: {
+      en: 'Opening time must be before closing time.',
+      fr: 'L’heure d’ouverture doit être antérieure à l’heure de fermeture.',
+    } as T,
+  },
+
+  // ─── ANCHOR · operational cluster ──────────────────────────────
+  // Reserved for the dashboard operational pages — notifications,
+  // packs admin, media admin, users admin, reports, support, edit
+  // order, treatment-fee-invoice.
+
 } as const;
 
 // ────────────────────────────────────────────────────────────────────

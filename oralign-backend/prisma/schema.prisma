@@ -427,6 +427,12 @@ model DentalOrder {
   // Relative path under uploads/ for the bank-transfer receipt.
   treatmentFeeProofPath         String?
 
+  // Sequential treatment-fee receipt number (TF-000001) — a SEPARATE
+  // sequence from the installment FAC- invoices. Allocated lazily on
+  // first receipt render; admin-editable; unique so two receipts never
+  // share a printed number.
+  treatmentFeeInvoiceNumber     String?                   @unique
+
   // Approved treatment plan reference — used by the order's lifecycle.
   approvedTreatmentPlanId       String?
 
@@ -775,6 +781,16 @@ model CompanyBillingSettings {
   devisPrefix             String        @default("DEV")
   devisNextNumber         Int           @default(1)
 
+  // Invoice/receipt numbering. Same transactional-counter scheme as the
+  // devis number above — sequential FAC-XXXXXX, legally gapless.
+  invoicePrefix           String        @default("FAC")
+  invoiceNextNumber       Int           @default(1)
+
+  // Treatment-fee receipt numbering — a SEPARATE sequence from the
+  // installment invoice counter above (TF-XXXXXX).
+  treatmentFeeInvoicePrefix     String  @default("TF")
+  treatmentFeeInvoiceNextNumber Int     @default(1)
+
   legalTextTranslations   Json?
   footerTextTranslations  Json?
   bankDetails             Json?
@@ -1045,6 +1061,12 @@ model Payment {
   // is self-contained even if the installment is later edited (only
   // possible before approval).
   amount          Decimal             @db.Decimal(12, 3)
+
+  // Sequential receipt/invoice number (e.g. FAC-000001), allocated
+  // lazily the first time a successful payment's receipt is rendered.
+  // Null for pending/legacy rows. Admin can override it; unique so two
+  // receipts never print the same number.
+  invoiceNumber   String?             @unique
 
   status          PaymentRecordStatus
   paymentMethod   PaymentMethod

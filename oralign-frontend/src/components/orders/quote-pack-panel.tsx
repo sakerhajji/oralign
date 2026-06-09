@@ -77,6 +77,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import {
+  AlertTriangle,
   Calendar,
   CheckCircle2,
   Clock,
@@ -84,13 +85,15 @@ import {
   FileText,
   Hash,
   Landmark,
+  Layers,
   Loader2,
   Lock,
+  Minus,
   Package,
   Plus,
+  Scale,
   Send,
   Stethoscope,
-  Trash2,
   Truck,
   Unlock,
   Upload,
@@ -102,6 +105,14 @@ import {
 interface Props {
   quote: Quotation;
   role: UserRole;
+  /**
+   * Which admin slice to render. The admin surface composes the steps
+   * in order — Pack → (pricing) → Plan — so it mounts the panel twice:
+   * once as `"pack"` and once as `"plan"`, with the pricing controls
+   * rendered between them by the parent. `"all"` (the default, used by
+   * the doctor view) renders everything in one block.
+   */
+  section?: 'pack' | 'plan' | 'all';
   /**
    * Optional context surfaced inside the doctor's installment-pay
    * dialog. The component still works without these — the right-hand
@@ -130,6 +141,7 @@ const money = (s: string | number | null | undefined, ccy = 'TND'): string =>
 export function QuotePackPanel({
   quote,
   role,
+  section = 'all',
   patientName,
   doctorName,
   orderCode,
@@ -139,22 +151,29 @@ export function QuotePackPanel({
 
   const hasPack = !!quote.packId;
   // Fetch installments + batches in parallel; both queries are
-  // cheap and the admin/doctor views read the same data.
+  // cheap and the admin/doctor views read the same data. (When the
+  // admin mounts the panel twice for the pack + plan slots, React Query
+  // dedupes these by key, so there's no double fetch.)
   const installmentsQ = useInstallments(quote.id, hasPack);
   const batchesQ = useStepBatches(quote.id, hasPack);
 
   if (!isAdmin && !isDoctor) return null;
 
+  const showPack = section === 'all' || section === 'pack';
+  const showPlan = section === 'all' || section === 'plan';
+
   return (
-    <div className="mt-6 flex flex-col gap-4">
+    <div className="flex flex-col gap-4">
       {isAdmin ? (
         <>
-          {!hasPack ? (
-            <AttachPackCard quote={quote} />
-          ) : (
-            <PackSnapshotCard quote={quote} />
-          )}
-          {hasPack ? (
+          {showPack ? (
+            !hasPack ? (
+              <AttachPackCard quote={quote} />
+            ) : (
+              <PackSnapshotCard quote={quote} />
+            )
+          ) : null}
+          {showPlan && hasPack ? (
             (installmentsQ.data?.length ?? 0) === 0 ? (
               <PlanBuilderCard quote={quote} />
             ) : (
@@ -192,7 +211,12 @@ function AttachPackCard({ quote }: { quote: Quotation }) {
   const [packId, setPackId] = useState<string>('');
 
   const activePacks = (packsQ.data?.data ?? []).filter((p) => p.isActive);
-  const selectedPack = activePacks.find((p) => p.id === packId);
+  // Default the selection to the FIRST active pack so the admin lands on
+  // a sensible choice and the price preview shows immediately. Deriving
+  // it (rather than syncing via an effect after the fetch) keeps the
+  // picker controlled without a render-after-fetch state write.
+  const effectiveId = packId || activePacks[0]?.id || '';
+  const selectedPack = activePacks.find((p) => p.id === effectiveId);
 
   // Single-price-per-pack model — every pack has ONE active price
   // (archType=two_arches as the canonical pricing unit on the
@@ -206,7 +230,7 @@ function AttachPackCard({ quote }: { quote: Quotation }) {
     null;
 
   const submit = () => {
-    if (!packId) return;
+    if (!effectiveId) return;
     // Always send `archType: TWO_ARCHES` explicitly — even though the
     // refactored backend defaults to two_arches when omitted, the
     // running container may still be the older build that REQUIRES
@@ -216,7 +240,7 @@ function AttachPackCard({ quote }: { quote: Quotation }) {
     // only valid value the admin would pick anyway.
     attach.mutate({
       quotationId: quote.id,
-      dto: { packId, archType: ArchType.TWO_ARCHES },
+      dto: { packId: effectiveId, archType: ArchType.TWO_ARCHES },
     });
   };
 
@@ -225,18 +249,18 @@ function AttachPackCard({ quote }: { quote: Quotation }) {
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <Package className="h-4 w-4 text-primary" />
-          Attach a pack to this quotation
+          Choose a pack
         </CardTitle>
         <CardDescription>
-          Pick the commercial pack — the total price is snapshotted
-          onto the quote so later catalogue edits don&apos;t affect this
+          Start here — pick the commercial pack. Its price is snapshotted
+          onto the quote, so later catalogue edits won&apos;t change this
           quotation.
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4 md:grid-cols-3">
         <div className="grid gap-2 md:col-span-2">
           <Label>Pack</Label>
-          <Select value={packId} onValueChange={setPackId}>
+          <Select value={effectiveId} onValueChange={setPackId}>
             <SelectTrigger>
               <SelectValue placeholder="Pick a pack…" />
             </SelectTrigger>
@@ -274,7 +298,7 @@ function AttachPackCard({ quote }: { quote: Quotation }) {
         <div className="md:col-span-3 flex justify-end">
           <Button
             onClick={submit}
-            disabled={!packId || !activePrice || attach.isPending}
+            disabled={!effectiveId || !activePrice || attach.isPending}
           >
             Attach pack
           </Button>
@@ -342,14 +366,64 @@ interface DraftRow {
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
-function emptyRow(fromStep = 1, toStep = 1, amount = '0'): DraftRow {
-  return {
-    amount,
-    fromStep: String(fromStep),
-    toStep: String(toStep),
+const round3 = (n: number) => Math.round(n * 1000) / 1000;
+
+/**
+ * Split `total` into `n` parts that sum EXACTLY to it at TND's 3-decimal
+ * precision: every part is the floored even share and the last absorbs
+ * the rounding remainder, so Σ === total with no drift.
+ */
+function splitAmounts(total: number, n: number): number[] {
+  if (n <= 1) return [round3(total)];
+  const base = Math.floor((total / n) * 1000) / 1000;
+  const parts = Array<number>(n).fill(base);
+  parts[n - 1] = round3(total - base * (n - 1));
+  return parts;
+}
+
+/**
+ * Split steps `1..maxSteps` into `n` contiguous, non-overlapping ranges.
+ * Unlimited packs (or a missing step count) fall back to one step per
+ * tranche so the batches stay distinct. Callers cap `n` at `maxSteps`
+ * for limited packs, so each tranche always gets at least one step.
+ */
+function splitSteps(
+  maxSteps: number,
+  n: number,
+  isUnlimited: boolean,
+): Array<{ from: number; to: number }> {
+  if (isUnlimited || maxSteps <= 0) {
+    return Array.from({ length: n }, (_, i) => ({ from: i + 1, to: i + 1 }));
+  }
+  const ranges: Array<{ from: number; to: number }> = [];
+  let start = 1;
+  for (let i = 0; i < n; i++) {
+    const remainingSteps = Math.max(1, maxSteps - start + 1);
+    const remainingTranches = n - i;
+    const size = Math.max(1, Math.round(remainingSteps / remainingTranches));
+    const end = i === n - 1 ? maxSteps : Math.min(maxSteps, start + size - 1);
+    ranges.push({ from: start, to: Math.max(start, end) });
+    start = end + 1;
+  }
+  return ranges;
+}
+
+/** Auto-distribute the total + step ranges across `n` tranches. */
+function buildRows(
+  total: number,
+  n: number,
+  maxSteps: number,
+  isUnlimited: boolean,
+): DraftRow[] {
+  const amounts = splitAmounts(total, n);
+  const steps = splitSteps(maxSteps, n, isUnlimited);
+  return amounts.map((amt, i) => ({
+    amount: amt.toFixed(3),
+    fromStep: String(steps[i]?.from ?? i + 1),
+    toStep: String(steps[i]?.to ?? i + 1),
     availableFrom: todayISO(),
     dueDate: '',
-  };
+  }));
 }
 
 function PlanBuilderCard({ quote }: { quote: Quotation }) {
@@ -358,52 +432,46 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
   const isUnlimited = !!quote.isUnlimitedSteps;
   const configure = useConfigurePaymentPlan();
 
-  const [mode, setMode] = useState<PaymentMode>(PaymentMode.INSTALLMENTS);
-  const [rows, setRows] = useState<DraftRow[]>(() => [
-    emptyRow(1, isUnlimited ? 1 : Math.max(1, maxSteps), total.toFixed(3)),
-  ]);
+  // A tranche maps to a distinct step batch, so a limited pack can't have
+  // more tranches than steps. Unlimited packs get a sane upper bound so
+  // the stepper can't run away.
+  const maxTranches = isUnlimited ? 12 : Math.max(2, maxSteps);
 
-  // Switching modes resets the draft so the admin never accidentally
-  // submits a 3-tranche plan still labelled "full_payment".
-  const setModeWithReset = (next: PaymentMode) => {
+  const [mode, setMode] = useState<PaymentMode>(PaymentMode.FULL_PAYMENT);
+  // Rows are seeded by the auto-distributor and stay editable. Changing
+  // the tranche count (or "Split evenly") re-runs the distribution; a
+  // single cell edit only touches that cell.
+  const [rows, setRows] = useState<DraftRow[]>(() =>
+    buildRows(total, 1, maxSteps, isUnlimited),
+  );
+
+  const applyMode = (next: PaymentMode) => {
     setMode(next);
-    if (next === PaymentMode.FULL_PAYMENT) {
-      setRows([
-        emptyRow(
-          1,
-          isUnlimited ? 1 : Math.max(1, maxSteps),
-          total.toFixed(3),
-        ),
-      ]);
-    } else {
-      // Default to two tranches halving the total + step range.
-      const half = (total / 2).toFixed(3);
-      const mid = isUnlimited ? 1 : Math.max(1, Math.floor(maxSteps / 2));
-      setRows([
-        emptyRow(1, mid, half),
-        emptyRow(mid + 1, isUnlimited ? mid + 1 : maxSteps, half),
-      ]);
-    }
+    setRows(
+      buildRows(
+        total,
+        next === PaymentMode.FULL_PAYMENT ? 1 : Math.min(2, maxTranches),
+        maxSteps,
+        isUnlimited,
+      ),
+    );
   };
+
+  const setCount = (n: number) => {
+    const clamped = Math.min(maxTranches, Math.max(2, n));
+    setRows(buildRows(total, clamped, maxSteps, isUnlimited));
+  };
+
+  const splitEvenly = () =>
+    setRows((rs) => buildRows(total, rs.length, maxSteps, isUnlimited));
 
   const updateRow = (i: number, patch: Partial<DraftRow>) =>
     setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
 
-  const addRow = () =>
-    setRows((rs) => {
-      const last = rs[rs.length - 1];
-      const nextFrom = last ? Number(last.toStep) + 1 : 1;
-      return [
-        ...rs,
-        emptyRow(nextFrom, isUnlimited ? nextFrom : maxSteps, '0'),
-      ];
-    });
+  const count = rows.length;
 
-  const removeRow = (i: number) =>
-    setRows((rs) => rs.filter((_, idx) => idx !== i));
-
-  // Live validation — sum vs total, overlap, range bounds. Errors are
-  // printed inline so the admin can fix them before submitting.
+  // Live validation — sum vs total, overlap, range bounds. Auto-built
+  // rows are valid by construction; this guards manual edits.
   const validation = useMemo(() => {
     const errors: string[] = [];
     const numeric = rows.map((r) => ({
@@ -411,10 +479,13 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
       from: Number(r.fromStep),
       to: Number(r.toStep),
     }));
-    const sum = numeric.reduce((acc, r) => acc + (isFinite(r.amount) ? r.amount : 0), 0);
+    const sum = numeric.reduce(
+      (acc, r) => acc + (isFinite(r.amount) ? r.amount : 0),
+      0,
+    );
     if (Math.abs(sum - total) > 0.001) {
       errors.push(
-        `Σ amounts (${sum.toFixed(3)}) must equal total (${total.toFixed(3)}).`,
+        `Tranche amounts (${sum.toFixed(3)}) must add up to the total (${total.toFixed(3)}).`,
       );
     }
     for (let i = 0; i < numeric.length; i++) {
@@ -434,18 +505,17 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
     const sorted = [...numeric].sort((a, b) => a.from - b.from);
     for (let i = 1; i < sorted.length; i++) {
       if (sorted[i]!.from <= sorted[i - 1]!.to) {
-        errors.push(`Step ranges overlap.`);
+        errors.push('Step ranges overlap between tranches.');
         break;
       }
     }
-    if (mode === PaymentMode.FULL_PAYMENT && rows.length !== 1) {
-      errors.push('Full payment requires exactly one tranche.');
-    }
     if (mode === PaymentMode.INSTALLMENTS && rows.length < 2) {
-      errors.push('Installments mode requires at least two tranches.');
+      errors.push('Splitting into tranches needs at least two of them.');
     }
     return { errors, sum };
   }, [rows, total, mode, maxSteps, isUnlimited]);
+
+  const balanced = Math.abs(validation.sum - total) <= 0.001;
 
   const submit = () => {
     if (validation.errors.length > 0) {
@@ -474,83 +544,153 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Payment & delivery plan</CardTitle>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Layers className="h-4 w-4 text-primary" />
+          Payment plan
+        </CardTitle>
         <CardDescription>
-          Split the {money(quote.totalPrice, quote.currency)} total into as
-          many tranches as you need. Each tranche unlocks a step range
-          when paid (or admin-confirmed for cash/transfer). Locked steps
-          can never be delivered.
+          Split the{' '}
+          <strong>{money(quote.totalPrice, quote.currency)}</strong> total into
+          tranches. Each tranche unlocks a range of treatment steps once it&apos;s
+          paid. Amounts are calculated for you — fine-tune any row if you need
+          to.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <Label>Mode:</Label>
-          <Button
-            size="sm"
-            variant={mode === PaymentMode.FULL_PAYMENT ? 'default' : 'outline'}
-            onClick={() => setModeWithReset(PaymentMode.FULL_PAYMENT)}
-          >
-            Full payment
-          </Button>
-          <Button
-            size="sm"
-            variant={mode === PaymentMode.INSTALLMENTS ? 'default' : 'outline'}
-            onClick={() => setModeWithReset(PaymentMode.INSTALLMENTS)}
-          >
-            Installments
-          </Button>
+      <CardContent className="space-y-5">
+        {/* Mode — pay in full or split into tranches */}
+        <div className="inline-flex rounded-lg border bg-muted/40 p-1">
+          {[
+            { m: PaymentMode.FULL_PAYMENT, label: 'Pay in full' },
+            { m: PaymentMode.INSTALLMENTS, label: 'Split into tranches' },
+          ].map(({ m, label }) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => applyMode(m)}
+              aria-pressed={mode === m}
+              className={cn(
+                'rounded-md px-4 py-1.5 text-sm font-medium transition',
+                mode === m
+                  ? 'bg-card text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
-        <div className="overflow-x-auto rounded-md border">
+        {/* Tranche count — drives the auto-distribution */}
+        {mode === PaymentMode.INSTALLMENTS ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/20 p-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-sm font-medium">Number of tranches</span>
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => setCount(count - 1)}
+                  disabled={count <= 2}
+                  aria-label="One fewer tranche"
+                >
+                  <Minus className="h-4 w-4" />
+                </Button>
+                <span className="w-9 text-center text-lg font-semibold tabular-nums">
+                  {count}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => setCount(count + 1)}
+                  disabled={count >= maxTranches}
+                  aria-label="One more tranche"
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+              <div className="hidden items-center gap-1 sm:flex">
+                {[2, 3, 4].filter((n) => n <= maxTranches).map((n) => (
+                  <Button
+                    key={n}
+                    type="button"
+                    size="sm"
+                    variant={count === n ? 'default' : 'outline'}
+                    className="h-8 w-9 px-0"
+                    onClick={() => setCount(n)}
+                  >
+                    {n}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={splitEvenly}
+            >
+              <Scale className="h-4 w-4" />
+              Split evenly
+            </Button>
+          </div>
+        ) : null}
+
+        <div className="overflow-x-auto rounded-lg border">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-12">#</TableHead>
-                <TableHead>Amount</TableHead>
-                <TableHead>From step</TableHead>
-                <TableHead>To step</TableHead>
+                <TableHead className="w-10">#</TableHead>
+                <TableHead>Amount ({quote.currency})</TableHead>
+                <TableHead>Steps unlocked</TableHead>
                 <TableHead>Available from</TableHead>
                 <TableHead>Due date</TableHead>
-                <TableHead className="w-12" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {rows.map((row, i) => (
                 <TableRow key={i}>
-                  <TableCell className="font-medium">{i + 1}</TableCell>
+                  <TableCell className="font-medium text-muted-foreground">
+                    {i + 1}
+                  </TableCell>
                   <TableCell>
                     <Input
                       type="number"
                       step="0.001"
                       min={0.001}
                       value={row.amount}
-                      onChange={(e) =>
-                        updateRow(i, { amount: e.target.value })
-                      }
-                      className="w-32"
+                      onChange={(e) => updateRow(i, { amount: e.target.value })}
+                      className="w-32 font-medium tabular-nums"
                     />
                   </TableCell>
                   <TableCell>
-                    <Input
-                      type="number"
-                      min={1}
-                      value={row.fromStep}
-                      onChange={(e) =>
-                        updateRow(i, { fromStep: e.target.value })
-                      }
-                      className="w-20"
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Input
-                      type="number"
-                      min={1}
-                      value={row.toStep}
-                      onChange={(e) =>
-                        updateRow(i, { toStep: e.target.value })
-                      }
-                      className="w-20"
-                    />
+                    <div className="flex items-center gap-1.5">
+                      <Input
+                        type="number"
+                        min={1}
+                        value={row.fromStep}
+                        onChange={(e) =>
+                          updateRow(i, { fromStep: e.target.value })
+                        }
+                        className="w-16"
+                        aria-label={`Tranche ${i + 1} first step`}
+                      />
+                      <span className="text-muted-foreground">→</span>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={row.toStep}
+                        onChange={(e) =>
+                          updateRow(i, { toStep: e.target.value })
+                        }
+                        className="w-16"
+                        aria-label={`Tranche ${i + 1} last step`}
+                      />
+                    </div>
                   </TableCell>
                   <TableCell>
                     <Input
@@ -559,27 +699,16 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
                       onChange={(e) =>
                         updateRow(i, { availableFrom: e.target.value })
                       }
+                      className="w-40"
                     />
                   </TableCell>
                   <TableCell>
                     <Input
                       type="date"
                       value={row.dueDate}
-                      onChange={(e) =>
-                        updateRow(i, { dueDate: e.target.value })
-                      }
+                      onChange={(e) => updateRow(i, { dueDate: e.target.value })}
+                      className="w-40"
                     />
-                  </TableCell>
-                  <TableCell>
-                    {mode === PaymentMode.INSTALLMENTS && rows.length > 1 ? (
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() => removeRow(i)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    ) : null}
                   </TableCell>
                 </TableRow>
               ))}
@@ -587,24 +716,45 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
           </Table>
         </div>
 
-        <div className="flex items-center justify-between text-xs">
-          <div className="text-muted-foreground">
-            Σ tranches: <strong>{validation.sum.toFixed(3)}</strong> ·
-            target: <strong>{total.toFixed(3)}</strong>{' '}
-            {Math.abs(validation.sum - total) <= 0.001 ? (
-              <CheckCircle2 className="ml-1 inline h-3 w-3 text-emerald-600" />
-            ) : null}
-          </div>
-          {mode === PaymentMode.INSTALLMENTS ? (
-            <Button size="sm" variant="outline" onClick={addRow}>
-              <Plus className="mr-1 h-4 w-4" />
-              Add tranche
+        {/* Balance indicator — green when Σ matches the target. */}
+        <div
+          className={cn(
+            'flex flex-wrap items-center justify-between gap-2 rounded-lg border px-4 py-2.5 text-sm',
+            balanced
+              ? 'border-emerald-200 bg-emerald-50/60 text-emerald-800'
+              : 'border-amber-200 bg-amber-50/70 text-amber-900',
+          )}
+        >
+          <span className="flex items-center gap-2">
+            {balanced ? (
+              <CheckCircle2 className="h-4 w-4" />
+            ) : (
+              <AlertTriangle className="h-4 w-4" />
+            )}
+            <span>
+              Tranches total{' '}
+              <strong className="tabular-nums">
+                {validation.sum.toFixed(3)}
+              </strong>{' '}
+              / {total.toFixed(3)} {quote.currency}
+            </span>
+          </span>
+          {!balanced ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 gap-1.5"
+              onClick={splitEvenly}
+            >
+              <Scale className="h-3.5 w-3.5" />
+              Rebalance
             </Button>
           ) : null}
         </div>
 
         {validation.errors.length > 0 ? (
-          <ul className="space-y-1 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
+          <ul className="space-y-1 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
             {validation.errors.map((err, i) => (
               <li key={i}>• {err}</li>
             ))}
@@ -615,7 +765,13 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
           <Button
             onClick={submit}
             disabled={configure.isPending || validation.errors.length > 0}
+            className="gap-2"
           >
+            {configure.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <CheckCircle2 className="h-4 w-4" />
+            )}
             Save plan
           </Button>
         </div>
@@ -689,8 +845,6 @@ function AdminPlanView({
 
   return (
     <>
-      <PackSnapshotCard quote={quote} />
-
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Tranches & deliveries</CardTitle>

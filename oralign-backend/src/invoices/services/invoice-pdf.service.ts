@@ -47,8 +47,27 @@ interface InvoiceTotalLine {
  * fields we actually consume — the rest of the include payload is
  * intentionally invisible to the rest of the service.
  */
+/**
+ * The slice of a Payment the renderer actually consumes. Declaring it
+ * as a `Pick` (instead of the full `Payment`) lets the treatment-fee
+ * invoice path — which has no Payment row at all — synthesise this view
+ * straight from the order's inline `treatmentFee*` columns without
+ * fabricating the dozen unrelated Payment fields.
+ */
+export type InvoicePaymentView = Pick<
+  Payment,
+  | 'id'
+  | 'amount'
+  | 'status'
+  | 'paymentMethod'
+  | 'transactionId'
+  | 'paidAt'
+  | 'createdAt'
+  | 'invoiceNumber'
+>;
+
 export interface InvoiceRenderPayload {
-  payment: Payment;
+  payment: InvoicePaymentView;
   quotation: {
     id: string;
     currency: string;
@@ -84,6 +103,12 @@ export interface InvoiceRenderPayload {
   installment: { installmentNumber: number; totalInstallments: number } | null;
   settings: CompanyBillingSettings;
   language: InvoiceLanguage;
+  /**
+   * Prefix for the id-derived fallback number when no sequential number
+   * has been allocated yet — `INV` for an installment receipt, `TF` for
+   * a treatment-fee invoice. Ignored once a real number exists.
+   */
+  numberFallbackPrefix?: 'INV' | 'TF';
 }
 
 /**
@@ -149,6 +174,32 @@ export class InvoicePdfService implements OnModuleDestroy {
     return { buffer, fileName, mimeType: 'application/pdf' };
   }
 
+  /**
+   * Build the treatment-fee invoice PDF for a given order id. The
+   * treatment fee lives inline on `DentalOrder` (there's no Payment
+   * row), so we synthesise an `InvoiceRenderPayload` from the order's
+   * `treatmentFee*` columns and reuse the exact same HTML template — the
+   * line item already reads "Treatment fee" when there's no installment.
+   *
+   * The controller is responsible for the RBAC check (admin OR owning
+   * doctor) before calling in.
+   */
+  async renderTreatmentFeeInvoiceBuffer(args: {
+    orderId: string;
+    language?: InvoiceLanguage;
+  }): Promise<{ buffer: Buffer; fileName: string; mimeType: string }> {
+    const payload = await this.loadTreatmentFeeForRender(
+      args.orderId,
+      args.language,
+    );
+    const html = this.renderHtml(payload);
+    const buffer = await this.renderHtmlToBuffer(html);
+    const fileName = this.safePdfFileName(
+      `treatment-fee-${this.invoiceNumber(payload.payment, 'TF')}-${payload.language}`,
+    );
+    return { buffer, fileName, mimeType: 'application/pdf' };
+  }
+
   // ─── Loaders ───────────────────────────────────────────────────
 
   private async loadPaymentForRender(
@@ -203,6 +254,31 @@ export class InvoicePdfService implements OnModuleDestroy {
     });
     if (!payment) throw new NotFoundException('Payment not found.');
 
+    // Lazily allocate a stable, sequential receipt number the first
+    // time a *successful* payment's receipt is rendered, then persist
+    // it so re-downloads keep the same number and an admin can later
+    // override it. The `invoiceNumber: null` filter makes this a no-op
+    // when a concurrent render already numbered the row.
+    if (
+      payment.status === PaymentRecordStatus.success &&
+      !payment.invoiceNumber
+    ) {
+      const allocated = await this.settingsService.allocateInvoiceNumber();
+      const res = await this.prisma.payment.updateMany({
+        where: { id: payment.id, invoiceNumber: null },
+        data: { invoiceNumber: allocated },
+      });
+      if (res.count > 0) {
+        payment.invoiceNumber = allocated;
+      } else {
+        const fresh = await this.prisma.payment.findUnique({
+          where: { id: payment.id },
+          select: { invoiceNumber: true },
+        });
+        payment.invoiceNumber = fresh?.invoiceNumber ?? allocated;
+      }
+    }
+
     // Pull the total-installment count for the quotation so the line
     // item reads as "Installment 2 of 4" — the quote table doesn't
     // store the count, but a cheap `count()` on QuoteInstallment is
@@ -237,6 +313,126 @@ export class InvoicePdfService implements OnModuleDestroy {
         : null,
       settings,
       language: finalLanguage,
+    };
+  }
+
+  /**
+   * Hydrate a synthetic render payload for an order's treatment fee.
+   * Unlike the installment path there's no Payment / Quotation row to
+   * read — the fee is stored inline on the order — so we map those
+   * columns into the same shape and let `mergeCompany` / `mergeClinic`
+   * fall back to the live billing settings + dentist profile (both
+   * snapshots are null here).
+   */
+  private async loadTreatmentFeeForRender(
+    orderId: string,
+    language: InvoiceLanguage | undefined,
+  ): Promise<InvoiceRenderPayload> {
+    const order = await this.prisma.dentalOrder.findUnique({
+      where: { id: orderId },
+      select: {
+        id: true,
+        orderCode: true,
+        createdAt: true,
+        treatmentFeeAmount: true,
+        treatmentFeePaymentMethod: true,
+        treatmentFeePaymentStatus: true,
+        treatmentFeePaidAt: true,
+        treatmentFeeInvoiceNumber: true,
+        doctor: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            phone: true,
+            dentistProfile: {
+              select: {
+                clinicName: true,
+                clinicAddress: true,
+                city: true,
+                country: true,
+                clinicPhone: true,
+                clinicEmail: true,
+              },
+            },
+          },
+        },
+        patient: { select: { fullName: true } },
+      },
+    });
+    if (!order) throw new NotFoundException('Order not found.');
+    if (order.treatmentFeeAmount === null) {
+      throw new NotFoundException(
+        'This order has no treatment fee to invoice.',
+      );
+    }
+
+    // Lazily allocate a stable, sequential TF-XXXXXX number the first
+    // time a *paid* treatment-fee invoice is rendered, then persist it
+    // so re-downloads keep the same number and an admin can override it
+    // later. Mirrors the installment-receipt allocation; the
+    // `treatmentFeeInvoiceNumber: null` filter makes it a no-op when a
+    // concurrent render already numbered the row. Unpaid / awaiting rows
+    // stay unnumbered and fall back to the id-derived `TF-XXXXXXXX`.
+    let invoiceNumber = order.treatmentFeeInvoiceNumber;
+    if (
+      order.treatmentFeePaymentStatus === PaymentRecordStatus.success &&
+      !invoiceNumber
+    ) {
+      const allocated =
+        await this.settingsService.allocateTreatmentFeeInvoiceNumber();
+      const res = await this.prisma.dentalOrder.updateMany({
+        where: { id: order.id, treatmentFeeInvoiceNumber: null },
+        data: { treatmentFeeInvoiceNumber: allocated },
+      });
+      if (res.count > 0) {
+        invoiceNumber = allocated;
+      } else {
+        const fresh = await this.prisma.dentalOrder.findUnique({
+          where: { id: order.id },
+          select: { treatmentFeeInvoiceNumber: true },
+        });
+        invoiceNumber = fresh?.treatmentFeeInvoiceNumber ?? allocated;
+      }
+    }
+
+    const settings = await this.settingsService.requireActive();
+    const finalLanguage: InvoiceLanguage = language ?? 'fr';
+
+    const payment: InvoicePaymentView = {
+      id: order.id,
+      amount: order.treatmentFeeAmount ?? new Prisma.Decimal(0),
+      status: order.treatmentFeePaymentStatus ?? PaymentRecordStatus.pending,
+      // Default only matters for the (rare) unpaid render; a settled fee
+      // always carries its real method.
+      paymentMethod: order.treatmentFeePaymentMethod ?? PaymentMethod.cash,
+      transactionId: null,
+      paidAt: order.treatmentFeePaidAt,
+      createdAt: order.createdAt,
+      invoiceNumber,
+    };
+
+    return {
+      payment,
+      quotation: {
+        id: order.id,
+        currency: 'TND',
+        // Treatment fee is a flat professional fee — no VAT line.
+        tvaRate: 0,
+        totalTtc: this.toNumber(order.treatmentFeeAmount),
+        packName: null,
+        companySnapshot: null,
+        clinicSnapshot: null,
+        order: {
+          orderCode: order.orderCode,
+          doctor: order.doctor,
+          patient: order.patient,
+        },
+      },
+      installment: null,
+      settings,
+      language: finalLanguage,
+      numberFallbackPrefix: 'TF',
     };
   }
 
@@ -357,6 +553,7 @@ export class InvoicePdfService implements OnModuleDestroy {
 
   private renderHtml(payload: InvoiceRenderPayload): string {
     const { payment, quotation, installment, settings, language } = payload;
+    const numberFallbackPrefix = payload.numberFallbackPrefix ?? 'INV';
     const labels = getInvoiceLabels(language);
     const companySnapshot = this.asJsonRecord(quotation.companySnapshot);
     const clinicSnapshot = this.asJsonRecord(quotation.clinicSnapshot);
@@ -369,12 +566,12 @@ export class InvoicePdfService implements OnModuleDestroy {
     const rows = this.buildLineItems(payload, labels);
     const totals = this.buildTotals(payload, labels);
     const legal = pickInvoiceTranslation(
-      companySnapshot?.legalTextTranslations ??
-        (settings.legalTextTranslations as unknown),
+      (settings.legalTextTranslations as unknown) ??
+        companySnapshot?.legalTextTranslations,
       language,
     );
-    const bank = (companySnapshot?.bankDetails ??
-      (settings.bankDetails as unknown)) as Record<string, string> | null;
+    const bank = ((settings.bankDetails as unknown) ??
+      companySnapshot?.bankDetails) as Record<string, string> | null;
     const cityCountry = [company.companyCity, company.companyCountry]
       .filter(Boolean)
       .join(', ');
@@ -400,29 +597,33 @@ export class InvoicePdfService implements OnModuleDestroy {
         line-height: 1.42;
       }
       .document { width: 100%; }
-      .topbar {
-        display: grid;
-        grid-template-columns: 1fr auto;
-        gap: 16px;
+      /* Centered logo masthead — the logo sits alone, centered, at the
+         very top of the first page; the document title + meta follow it. */
+      .masthead {
+        display: flex;
+        flex-direction: column;
         align-items: center;
-        padding-bottom: 11px;
+        justify-content: center;
+        padding-bottom: 12px;
+        margin-bottom: 13px;
         border-bottom: 1.5px solid #111111;
         break-inside: avoid;
       }
-      .brand { display: flex; align-items: center; gap: 11px; min-width: 0; }
-      .logo-img { max-width: 116px; max-height: 50px; object-fit: contain; }
-      .logo-fallback {
-        display: grid;
-        width: 48px;
-        height: 48px;
-        place-items: center;
-        border: 1px solid #111111;
-        border-radius: 11px;
+      .logo-img { max-width: 168px; max-height: 66px; object-fit: contain; }
+      .masthead-name {
+        font-size: 22px;
         font-weight: 800;
-        letter-spacing: .04em;
+        letter-spacing: .16em;
+        text-transform: uppercase;
+        text-align: center;
       }
-      .brand-name { font-size: 15px; font-weight: 800; letter-spacing: .12em; overflow-wrap: anywhere; }
-      .brand-sub { margin-top: 2px; color: #666666; font-size: 9.5px; overflow-wrap: anywhere; }
+      .docrow {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 16px;
+        align-items: start;
+        break-inside: avoid;
+      }
       .doc-meta { min-width: 188px; text-align: right; }
       .title {
         margin: 0;
@@ -599,26 +800,24 @@ export class InvoicePdfService implements OnModuleDestroy {
   </head>
   <body>
     <main class="document">
-      <header class="topbar">
-        <section class="brand">
-          ${
-            logo
-              ? `<img class="logo-img" src="${logo}" alt="${this.htmlAttr(brandName)}" />`
-              : `<div class="logo-fallback">${this.html(brandName.slice(0, 2).toUpperCase())}</div>`
-          }
-          <div>
-            <div class="brand-name">${this.html(brandName)}</div>
-            <div class="brand-sub">${this.html(company.companyEmail ?? company.companyPhone ?? '')}</div>
-          </div>
-        </section>
+      <header class="masthead">
+        ${
+          logo
+            ? `<img class="logo-img" src="${logo}" alt="${this.htmlAttr(brandName)}" />`
+            : `<div class="masthead-name">${this.html(brandName)}</div>`
+        }
+      </header>
 
-        <section class="doc-meta">
+      <section class="docrow">
+        <div>
           <h1 class="title">${this.html(labels.documentTitle.toUpperCase())}</h1>
-          <div class="meta-line">${this.html(labels.number)}: <strong>${this.html(this.invoiceNumber(payment))}</strong></div>
+        </div>
+        <div class="doc-meta">
+          <div class="meta-line">${this.html(labels.number)}: <strong>${this.html(this.invoiceNumber(payment, numberFallbackPrefix))}</strong></div>
           <div class="meta-line">${this.html(labels.date)}: ${this.html(this.formatDate(new Date(), language))}</div>
           <div class="status${statusPaid ? ' paid' : ''}">${this.html(labels.status)}: ${this.html(statusLabel)}</div>
-        </section>
-      </header>
+        </div>
+      </section>
 
       <section class="section keep party-grid">
         <article class="box">
@@ -705,12 +904,11 @@ export class InvoicePdfService implements OnModuleDestroy {
   // ─── Section helpers ───────────────────────────────────────────
 
   /**
-   * Prefer the historical snapshot (so old receipts stay correct when
-   * the admin edits CompanyBillingSettings later) and fall back to the
-   * live settings row. The receipt is generated long after the
-   * payment, but the snapshot path covers the rare case where the
-   * tenant has rotated their company name / RNE / address between
-   * payment and download.
+   * Prefer the LIVE billing settings so updating the company
+   * configuration (logo, name, address, RNE / tax id, …) is reflected on
+   * every invoice — the historical snapshot is only a fallback for a
+   * field left blank in settings. Product decision: an invoice should
+   * always show the company's current identity, not a frozen copy.
    */
   private mergeCompany(
     settings: CompanyBillingSettings,
@@ -730,19 +928,19 @@ export class InvoicePdfService implements OnModuleDestroy {
       return typeof v === 'string' && v.length > 0 ? v : null;
     };
     return {
-      companyName: fromSnap('companyName') ?? settings.companyName ?? null,
+      companyName: settings.companyName ?? fromSnap('companyName') ?? null,
       companyLogoPath:
-        fromSnap('companyLogoPath') ?? settings.companyLogoPath ?? null,
+        settings.companyLogoPath ?? fromSnap('companyLogoPath') ?? null,
       companyAddress:
-        fromSnap('companyAddress') ?? settings.companyAddress ?? null,
-      companyCity: fromSnap('companyCity') ?? settings.companyCity ?? null,
+        settings.companyAddress ?? fromSnap('companyAddress') ?? null,
+      companyCity: settings.companyCity ?? fromSnap('companyCity') ?? null,
       companyCountry:
-        fromSnap('companyCountry') ?? settings.companyCountry ?? null,
-      companyPhone: fromSnap('companyPhone') ?? settings.companyPhone ?? null,
-      companyEmail: fromSnap('companyEmail') ?? settings.companyEmail ?? null,
+        settings.companyCountry ?? fromSnap('companyCountry') ?? null,
+      companyPhone: settings.companyPhone ?? fromSnap('companyPhone') ?? null,
+      companyEmail: settings.companyEmail ?? fromSnap('companyEmail') ?? null,
       taxRegistrationNumber:
-        fromSnap('taxRegistrationNumber') ??
         settings.taxRegistrationNumber ??
+        fromSnap('taxRegistrationNumber') ??
         null,
     };
   }
@@ -923,7 +1121,7 @@ export class InvoicePdfService implements OnModuleDestroy {
     return [head, dateLine, tx].filter(Boolean).join(' · ');
   }
 
-  private shouldShowBank(payment: Payment): boolean {
+  private shouldShowBank(payment: InvoicePaymentView): boolean {
     // The bank block is only useful on a bank-transfer receipt — that's
     // where the doctor needs the IBAN / RIB they wired against. We
     // suppress it for CARD and CASH so the footer stays tight.
@@ -969,14 +1167,19 @@ export class InvoicePdfService implements OnModuleDestroy {
   }
 
   /**
-   * Synthesise a stable, short invoice number from the payment id.
-   * Format: `INV-XXXXXXXX` (8 lowercase hex chars). The full UUID is
-   * preserved for audit lookups; the short form is just for the
-   * printed face of the document.
+   * The printed receipt number. Prefers the persisted, admin-editable
+   * `payment.invoiceNumber` (a sequential `FAC-XXXXXX` / `TF-XXXXXX`
+   * allocated on the first successful render); falls back to a stable
+   * id-derived `${fallbackPrefix}-XXXXXXXX` for pending / legacy rows
+   * that never got one.
    */
-  private invoiceNumber(payment: Payment): string {
+  private invoiceNumber(
+    payment: InvoicePaymentView,
+    fallbackPrefix: 'INV' | 'TF' = 'INV',
+  ): string {
+    if (payment.invoiceNumber) return payment.invoiceNumber;
     const short = payment.id.replace(/-/g, '').slice(0, 8).toUpperCase();
-    return `INV-${short}`;
+    return `${fallbackPrefix}-${short}`;
   }
 
   private safePdfFileName(input: string): string {

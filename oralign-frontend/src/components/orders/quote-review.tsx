@@ -1,10 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import {
-  AlertTriangle,
   Calendar,
   Check,
   ChevronDown,
@@ -18,7 +17,6 @@ import {
   Sparkles,
   Trash2,
   User as UserIcon,
-  X,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -469,31 +467,102 @@ function AdminLayout({
         }
       />
 
-      {/* Compact admin controls — language + delivery + discount + net.
-          Delivery and discount only get touched AFTER the admin has
-          attached a pack; the workflow is intentional: pick the pack
-          first (in the panel below), then dial in the line-item
-          adjustments here. */}
+      {/* Step 1 — Pack. Choosing the pack is the first thing the admin
+          does; its price snapshot drives every number below. */}
+      <QuotePackPanel
+        quote={quote}
+        role={UserRole.ADMIN}
+        section="pack"
+        patientName={patientName}
+        orderCode={orderCode}
+      />
+
+      {/* Step 2 — Pricing adjustments. Only meaningful once a pack is
+          attached, so they sit directly under it. */}
+      {quote.packId ? (
+        <Card>
+          <CardContent className="space-y-4 p-5">
+            <div>
+              <h3 className="text-sm font-semibold">Pricing adjustments</h3>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Optional delivery fee and discount, applied on top of the
+                pack price. Save before building the plan so the tranches
+                split the right total.
+              </p>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div className="grid gap-1.5">
+                <Label className="text-sm font-medium">
+                  Delivery fees ({quote.currency})
+                </Label>
+                <Input
+                  type="number"
+                  step="0.001"
+                  min={0}
+                  value={form.deliveryFees}
+                  onChange={(e) =>
+                    setForm((s) => ({
+                      ...s,
+                      deliveryFees: Number(e.target.value) || 0,
+                    }))
+                  }
+                  disabled={!isEditable}
+                  placeholder="0.000"
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label className="text-sm font-medium">
+                  Discount ({quote.currency})
+                </Label>
+                <Input
+                  type="number"
+                  step="0.001"
+                  min={0}
+                  value={form.discountAmount}
+                  onChange={(e) =>
+                    setForm((s) => ({
+                      ...s,
+                      discountAmount: Number(e.target.value) || 0,
+                    }))
+                  }
+                  disabled={!isEditable}
+                  placeholder="0.000"
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label className="text-sm font-medium">Net to bill</Label>
+                <div className="flex h-9 items-center rounded-md border bg-muted/40 px-3 text-sm font-semibold tabular-nums">
+                  {formatMoney(netAfter, quote.currency)}
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {/* Step 3 — Payment plan / tranches (auto-calculated). */}
+      {quote.packId ? (
+        <QuotePackPanel
+          quote={quote}
+          role={UserRole.ADMIN}
+          section="plan"
+          patientName={patientName}
+          orderCode={orderCode}
+        />
+      ) : null}
+
+      {/* Document settings — language + internal/PDF notes. Lower
+          priority than the pack + plan, so they sit near the actions. */}
       <Card>
         <CardContent className="space-y-4 p-5">
-          {!quote.packId ? (
-            <p className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
-              Pick a pack in the panel below to unlock delivery fees and
-              discount. The price snapshot lives on the quote once a
-              pack is attached.
-            </p>
-          ) : null}
-          <div className="grid gap-4 sm:grid-cols-4">
+          <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-1.5">
-              <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-                Document language
-              </Label>
+              <Label className="text-sm font-medium">Document language</Label>
               {/* Always interactive — once sent the rest of the form
-                  locks, but the language pick stays live so admins
-                  can issue a translated copy of the SAME quote on
-                  demand. "Regenerate PDF" below picks this value up
-                  and passes it to the backend as a `?lang=` override
-                  without rolling back the lifecycle. */}
+                  locks, but the language pick stays live so admins can
+                  issue a translated copy of the SAME quote on demand.
+                  "Regenerate PDF" passes it to the backend as a `?lang=`
+                  override without rolling back the lifecycle. */}
               <Select
                 value={form.language}
                 onValueChange={(v) =>
@@ -510,59 +579,11 @@ function AdminLayout({
                 </SelectContent>
               </Select>
               {!isEditable ? (
-                <p className="text-[10px] leading-tight text-muted-foreground">
-                  Pick another language and click <b>Regenerate PDF</b>{' '}
-                  to send the doctor a translated copy.
+                <p className="text-xs leading-tight text-muted-foreground">
+                  Pick another language and click <b>Regenerate PDF</b> to
+                  send the doctor a translated copy.
                 </p>
               ) : null}
-            </div>
-            <div className="grid gap-1.5">
-              <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-                Delivery fees ({quote.currency})
-              </Label>
-              <Input
-                type="number"
-                step="0.001"
-                min={0}
-                value={form.deliveryFees}
-                onChange={(e) =>
-                  setForm((s) => ({
-                    ...s,
-                    deliveryFees: Number(e.target.value) || 0,
-                  }))
-                }
-                disabled={!isEditable || !quote.packId}
-                placeholder="0.000"
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-                Discount ({quote.currency})
-              </Label>
-              <Input
-                type="number"
-                step="0.001"
-                min={0}
-                value={form.discountAmount}
-                onChange={(e) =>
-                  setForm((s) => ({
-                    ...s,
-                    discountAmount: Number(e.target.value) || 0,
-                  }))
-                }
-                disabled={!isEditable || !quote.packId}
-                placeholder="0.000"
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-                Net to bill
-              </Label>
-              <div className="flex h-9 items-center rounded-md border bg-muted/30 px-3 text-sm font-semibold tabular-nums">
-                {quote.packId
-                  ? formatMoney(netAfter, quote.currency)
-                  : '—'}
-              </div>
             </div>
           </div>
 
@@ -571,24 +592,22 @@ function AdminLayout({
           <button
             type="button"
             onClick={() => setNotesOpen((v) => !v)}
-            className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+            className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
           >
             {notesOpen ? (
-              <ChevronUp className="h-3 w-3" />
+              <ChevronUp className="h-4 w-4" />
             ) : (
-              <ChevronDown className="h-3 w-3" />
+              <ChevronDown className="h-4 w-4" />
             )}
-            Notes & admin message
+            Notes &amp; admin message
             {(form.notes || form.adminMessage) && !notesOpen ? (
-              <span className="text-[10px] text-amber-700">
-                · has content
-              </span>
+              <span className="text-xs text-amber-700">· has content</span>
             ) : null}
           </button>
           {notesOpen ? (
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="grid gap-1.5">
-                <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                <Label className="text-sm font-medium">
                   Notes (visible to doctor)
                 </Label>
                 <Textarea
@@ -601,7 +620,7 @@ function AdminLayout({
                 />
               </div>
               <div className="grid gap-1.5">
-                <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                <Label className="text-sm font-medium">
                   Admin message (PDF, above totals)
                 </Label>
                 <Textarea
@@ -617,14 +636,6 @@ function AdminLayout({
           ) : null}
         </CardContent>
       </Card>
-
-      {/* Pack + plan + tranches — the real workhorse. */}
-      <QuotePackPanel
-        quote={quote}
-        role={UserRole.ADMIN}
-        patientName={patientName}
-        orderCode={orderCode}
-      />
 
       {/* Sticky-ish action bar at the bottom. */}
       <Card>

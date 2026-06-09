@@ -8,21 +8,23 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
-
-const ROLE_LABELS: Record<string, string> = {
-  admin: 'Admin',
-  super_admin: 'Super Admin',
-  dentist: 'Dentist',
-  designer: 'Designer',
-};
+import { useT } from '@/lib/i18n/lang-context';
 
 export function AccountOverviewCard({ user }: { user: User }) {
+  const { t } = useT();
   const initials = user.fullName
     .split(' ')
     .map((part) => part[0])
     .join('')
     .toUpperCase()
     .slice(0, 2);
+
+  const roleLabels: Record<string, string> = {
+    admin: t('accountHome.roleAdmin'),
+    super_admin: t('accountHome.roleSuperAdmin'),
+    dentist: t('accountHome.roleDentist'),
+    designer: t('accountHome.roleDesigner'),
+  };
 
   return (
     <Card>
@@ -38,24 +40,26 @@ export function AccountOverviewCard({ user }: { user: User }) {
           </div>
         </div>
         <Button asChild>
-          <Link href="/account/profile">Edit Profile</Link>
+          <Link href="/account/profile">{t('accountHome.editProfile')}</Link>
         </Button>
       </CardHeader>
       <Separator />
       <CardContent className="grid gap-4 py-6 sm:grid-cols-3">
         <div>
-          <p className="text-sm text-muted-foreground">Role</p>
+          <p className="text-sm text-muted-foreground">{t('accountHome.roleLabel')}</p>
           <Badge variant="secondary" className="mt-2">
-            {ROLE_LABELS[user.role] ?? user.role}
+            {roleLabels[user.role] ?? user.role}
           </Badge>
         </div>
         <div>
-          <p className="text-sm text-muted-foreground">Phone</p>
-          <p className="mt-2 text-sm">{user.phone || 'Not provided'}</p>
+          <p className="text-sm text-muted-foreground">{t('accountHome.phoneLabel')}</p>
+          <p className="mt-2 text-sm">{user.phone || t('accountHome.notProvided')}</p>
         </div>
         <div>
-          <p className="text-sm text-muted-foreground">Status</p>
-          <p className="mt-2 text-sm">{user.isActive ? 'Active' : 'Inactive'}</p>
+          <p className="text-sm text-muted-foreground">{t('accountHome.statusLabel')}</p>
+          <p className="mt-2 text-sm">
+            {user.isActive ? t('accountHome.statusActive') : t('accountHome.statusInactive')}
+          </p>
         </div>
       </CardContent>
     </Card>

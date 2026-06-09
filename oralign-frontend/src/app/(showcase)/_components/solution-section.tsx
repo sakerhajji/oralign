@@ -51,7 +51,7 @@ export function SolutionSection() {
             <figure className="relative min-h-[500px] overflow-hidden border border-[#303030] bg-[#202020]">
               <Image
                 src="/showcase/palndetaritemt.webp"
-                alt={lang === "fr" ? "Sourire aligné après traitement ORALIGN" : lang === "en" ? "Aligned smile after ORALIGN treatment" : "ابتسامة مصطفة بعد علاج ORALIGN"}
+                alt={dict.solution.imageAlt[lang]}
                 fill
                 sizes="(min-width: 1024px) 420px, 100vw"
                 unoptimized
@@ -63,11 +63,7 @@ export function SolutionSection() {
                 style={{ background: "linear-gradient(to top, rgba(25,25,25,0.72), transparent 55%)" }}
               />
               <figcaption className="absolute bottom-5 left-5 right-5 text-sm leading-7 text-[rgba(242,245,239,0.78)]">
-                {lang === "fr"
-                  ? "Un plan numérique, des aligneurs fabriqués sur mesure, un suivi régulier."
-                  : lang === "en"
-                    ? "Digital planning, custom-made aligners and regular follow-up."
-                    : "تخطيط رقمي، أجهزة مخصصة ومتابعة منتظمة."}
+                {dict.solution.imageCaption[lang]}
               </figcaption>
             </figure>
           </Reveal>
@@ -76,7 +72,7 @@ export function SolutionSection() {
             <ul className="list-none flex flex-col gap-px bg-[#1e1e1e] h-full">
               {dict.solution.cards.map((c, i) => (
                 <li
-                  key={i}
+                  key={c.fr}
                   className="bg-[var(--sc-black)] relative overflow-hidden border-l-2 border-transparent hover:border-[var(--sc-sun)] transition-colors group flex-1"
                   style={{ padding: "26px 28px" }}
                 >

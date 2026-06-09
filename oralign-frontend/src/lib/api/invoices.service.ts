@@ -66,4 +66,50 @@ export const invoicesService = {
       throw new Error(message ?? 'Could not download the invoice PDF.');
     }
   },
+
+  /**
+   * Doctor or admin fetches the treatment-fee invoice PDF blob for an
+   * order. Same bilingual renderer as the installment receipt, but the
+   * fee lives inline on the order so this endpoint is keyed by orderId.
+   * `lang` is the dashboard's current language.
+   */
+  async downloadTreatmentFeeInvoice(
+    orderId: string,
+    lang: 'en' | 'fr',
+  ): Promise<Blob> {
+    try {
+      const res = await apiClient.get(
+        `/orders/${orderId}/treatment-fee/invoice`,
+        {
+          responseType: 'blob',
+          params: { lang },
+        },
+      );
+      return res.data instanceof Blob
+        ? res.data
+        : new Blob([res.data as ArrayBuffer], { type: 'application/pdf' });
+    } catch (error) {
+      const message = await extractBlobErrorMessage(error);
+      throw new Error(
+        message ?? 'Could not download the treatment-fee invoice PDF.',
+      );
+    }
+  },
+
+  /**
+   * Admin-only: set/override the printed invoice number on a payment.
+   * Resolves to the saved number; throws a normal axios error on a
+   * 400/409 (e.g. "already used by another receipt") which the calling
+   * hook turns into a toast via `extractApiErrorMessage`.
+   */
+  async updateInvoiceNumber(
+    paymentId: string,
+    invoiceNumber: string,
+  ): Promise<{ id: string; invoiceNumber: string | null }> {
+    const res = await apiClient.patch(
+      `/payments/${paymentId}/invoice-number`,
+      { invoiceNumber },
+    );
+    return res.data as { id: string; invoiceNumber: string | null };
+  },
 };

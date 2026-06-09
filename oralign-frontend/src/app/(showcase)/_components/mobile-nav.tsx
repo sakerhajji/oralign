@@ -4,7 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { X } from "lucide-react";
+import { ChevronDown, X } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -28,6 +28,9 @@ export function MobileNav() {
   const audience = getShowcaseAudience(pathname);
   const basePath = getShowcaseBasePath(pathname);
   const navItems = getShowcaseNavItems(pathname);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const navLabel = (key: string): string =>
+    dict.nav[key as keyof typeof dict.nav]?.[lang] ?? key;
 
   // Same trick as the desktop Header: anchor links must target the active
   // audience page before adding a hash.
@@ -100,26 +103,75 @@ export function MobileNav() {
 
         <nav aria-label="Mobile" className="flex min-h-[calc(100dvh-76px)] flex-col px-5 pb-8 pt-6">
           <ul className="flex list-none flex-col border-t border-[var(--sc-grey)]">
-            {navItems.map((item) => (
-              <li key={item.id}>
-                <SheetClose asChild>
-                  <Link
-                    href={resolveAnchor(item.href)}
-                    className="group flex min-h-16 items-center justify-between gap-4 border-b border-[var(--sc-grey)] py-4 no-underline text-[var(--sc-text-dark)]/70 transition-colors hover:text-[var(--sc-black)]"
+            {navItems.map((item) => {
+              const hasChildren = !!item.children?.length;
+
+              if (!hasChildren) {
+                return (
+                  <li key={item.id}>
+                    <SheetClose asChild>
+                      <Link
+                        href={resolveAnchor(item.href)}
+                        className="group flex min-h-16 items-center justify-between gap-4 border-b border-[var(--sc-grey)] py-4 no-underline text-[var(--sc-text-dark)]/70 transition-colors hover:text-[var(--sc-black)]"
+                      >
+                        <span className="text-[0.92rem] font-medium">
+                          {navLabel(item.labelKey)}
+                        </span>
+                        <span
+                          aria-hidden="true"
+                          className="text-[var(--sc-sun-deep)] opacity-70 transition-all group-hover:translate-x-1 group-hover:opacity-100"
+                        >
+                          →
+                        </span>
+                      </Link>
+                    </SheetClose>
+                  </li>
+                );
+              }
+
+              const isOpen = openId === item.id;
+              return (
+                <li key={item.id} className="border-b border-[var(--sc-grey)]">
+                  <button
+                    type="button"
+                    onClick={() => setOpenId(isOpen ? null : item.id)}
+                    aria-expanded={isOpen}
+                    className="flex min-h-16 w-full items-center justify-between gap-4 py-4 text-left text-[var(--sc-text-dark)]/70 transition-colors hover:text-[var(--sc-black)]"
                   >
-                    <span className="text-[0.86rem] uppercase tracking-[0.22em]">
-                      {dict.nav[item.labelKey][lang]}
+                    <span className="text-[0.92rem] font-medium">
+                      {navLabel(item.labelKey)}
                     </span>
-                    <span
+                    <ChevronDown
                       aria-hidden="true"
-                      className="text-[var(--sc-sun-deep)] opacity-70 transition-all group-hover:translate-x-1 group-hover:opacity-100"
-                    >
-                      →
-                    </span>
-                  </Link>
-                </SheetClose>
-              </li>
-            ))}
+                      className={[
+                        "h-4 w-4 shrink-0 text-[var(--sc-sun-deep)] transition-transform duration-200",
+                        isOpen ? "rotate-180" : "",
+                      ].join(" ")}
+                    />
+                  </button>
+                  {isOpen ? (
+                    <ul className="list-none pb-2">
+                      {(item.children ?? []).map((child) => (
+                        <li key={child.id}>
+                          <SheetClose asChild>
+                            <Link
+                              href={resolveAnchor(child.href)}
+                              className="flex min-h-12 items-center gap-3 py-2.5 ps-3 no-underline text-[0.85rem] text-[var(--sc-text-mid)] transition-colors hover:text-[var(--sc-black)]"
+                            >
+                              <span
+                                aria-hidden="true"
+                                className="h-px w-4 shrink-0 bg-[var(--sc-sun-deep)]"
+                              />
+                              <span>{navLabel(child.labelKey)}</span>
+                            </Link>
+                          </SheetClose>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </li>
+              );
+            })}
           </ul>
 
           <div className="mt-7 grid grid-cols-3 border border-[var(--sc-grey)]">

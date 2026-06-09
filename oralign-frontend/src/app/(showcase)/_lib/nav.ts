@@ -1,45 +1,79 @@
 /**
- * Navigation order — mirrors the visual order of sections on the
- * homepage so the active-link IntersectionObserver and smooth-scroll
- * jump targets stay in sync.
+ * Showcase navigation model.
  *
- * Update this array first when adding, moving, or removing a section.
+ * The PATIENT nav is a grouped mega-menu (per the 2026 sitemap): a few
+ * top-level entries open a dropdown of `children`, the rest are plain
+ * links. The PRACTITIONER nav stays a flat list of section anchors.
+ * Both render through the same Header / MobileNav — an entry with no
+ * `children` is a plain link; one with `children` opens a dropdown
+ * (desktop) / accordion (mobile).
  *
- * The patient page renders sections in this order:
- *   Hero → Ribbon → Confidence → Solution → HowItWorks
- *     → AdultBrochure → ParentBrochure → DashboardPreview
- *     → Testimonials → FAQ → FinalCta
+ * `labelKey` indexes `dict.nav` (resolved by the renderer, so this file
+ * stays free of the i18n import). `href` is where the top-level click
+ * lands — a `#section` on the current audience page or a route.
  *
- * Anchorable sections (those with an `id`) that the nav exposes:
- *   1. #confidence         — Confidence
- *   2. #solution           — Why ORALIGN
- *   3. #how-it-works       — Patient journey
- *   4. #adults             — Adults
- *   5. #parents            — Children / parents
- *   6. #dashboard-preview  — Results / before-after gallery
- *   7. #testimonials       — Patient stories
- *   8. #faq                — FAQ
- *
- * Keep the public nav intentionally compact on mobile; the practitioner
- * and CTA sections remain reachable through page CTAs.
+ * Each grouped patient entry is ONE page whose dropdown children are
+ * `#section` anchors within it (e.g. /patient/decouvrir + #oralign,
+ * #oralign-prime …). The standalone entries (guide, shop, blogs) are
+ * their own routes. Smooth scroll + the sticky-header offset for those
+ * anchors are handled in showcase.css (`scroll-behavior` + the
+ * `section[id]` scroll-margin); the active child is tracked by the
+ * Header's IntersectionObserver.
  */
-export const PATIENT_NAV_ITEMS = [
-  { id: "confidence", labelKey: "confidence" as const, href: "#confidence" },
-  { id: "solution", labelKey: "solution" as const, href: "#solution" },
-  { id: "how-it-works", labelKey: "howItWorks" as const, href: "#how-it-works" },
-  { id: "adults", labelKey: "adults" as const, href: "#adults" },
-  { id: "parents", labelKey: "parents" as const, href: "#parents" },
-  { id: "dashboard-preview", labelKey: "results" as const, href: "#dashboard-preview" },
-  { id: "testimonials", labelKey: "testimonials" as const, href: "#testimonials" },
-  { id: "faq", labelKey: "about" as const, href: "#faq" },
+export type NavChild = {
+  id: string;
+  labelKey: string;
+  href: string;
+};
+
+export type NavItem = {
+  id: string;
+  labelKey: string;
+  href: string;
+  children?: readonly NavChild[];
+};
+
+export const PATIENT_NAV_ITEMS: readonly NavItem[] = [
+  {
+    id: "why-oralign",
+    labelKey: "whyOralign",
+    href: "/patient/decouvrir",
+    children: [
+      { id: "oralign", labelKey: "navOralign", href: "/patient/decouvrir#oralign" },
+      { id: "oralign-prime", labelKey: "oralignPrime", href: "/patient/decouvrir#oralign-prime" },
+      { id: "parcours", labelKey: "howItWorks", href: "/patient/decouvrir#parcours" },
+      { id: "find-practitioner", labelKey: "findPractitioner", href: "/patient/decouvrir#praticiens" },
+    ],
+  },
+  {
+    id: "clinical-cases",
+    labelKey: "clinicalCases",
+    href: "/patient/cas",
+    children: [
+      { id: "before-after", labelKey: "beforeAfter", href: "/patient/cas#avant-apres" },
+      { id: "act-early", labelKey: "actEarly", href: "/patient/cas#agir-tot" },
+    ],
+  },
+  {
+    id: "community",
+    labelKey: "community",
+    href: "/patient/communaute",
+    children: [
+      { id: "testimonials", labelKey: "temoignages", href: "/patient/communaute#temoignages" },
+      { id: "share-experience", labelKey: "shareExperience", href: "/patient/communaute#partager" },
+    ],
+  },
+  { id: "guide", labelKey: "guide", href: "/patient/guide" },
+  { id: "shop", labelKey: "shop", href: "/patient/shop" },
+  { id: "blogs", labelKey: "blogs", href: "/patient/blog" },
 ] as const;
 
-export const PRACTITIONER_NAV_ITEMS = [
-  { id: "contrast", labelKey: "contrast" as const, href: "#contrast" },
-  { id: "workflow", labelKey: "workflow" as const, href: "#workflow" },
-  { id: "clinical", labelKey: "clinical" as const, href: "#clinical" },
-  { id: "platform-b2b", labelKey: "platformB2B" as const, href: "#platform-b2b" },
-  { id: "cta", labelKey: "challenge" as const, href: "#cta" },
+export const PRACTITIONER_NAV_ITEMS: readonly NavItem[] = [
+  { id: "contrast", labelKey: "contrast", href: "#contrast" },
+  { id: "workflow", labelKey: "workflow", href: "#workflow" },
+  { id: "clinical", labelKey: "clinical", href: "#clinical" },
+  { id: "platform-b2b", labelKey: "platformB2B", href: "#platform-b2b" },
+  { id: "cta", labelKey: "challenge", href: "#cta" },
 ] as const;
 
 export const NAV_ITEMS = PATIENT_NAV_ITEMS;
@@ -57,9 +91,32 @@ export function getShowcaseBasePath(pathname: string | null): "/patient" | "/pra
   return getShowcaseAudience(pathname) === "practitioner" ? "/practitioner" : "/patient";
 }
 
-export function getShowcaseNavItems(pathname: string | null) {
+export function getShowcaseNavItems(pathname: string | null): readonly NavItem[] {
   const audience = getShowcaseAudience(pathname);
   if (audience === "practitioner") return PRACTITIONER_NAV_ITEMS;
   if (audience === "patient") return PATIENT_NAV_ITEMS;
   return [];
+}
+
+/**
+ * Every in-page section id the nav points at (top-level + children),
+ * from either a bare `#section` href or a `route#section` href — fed to
+ * the Header's active-link IntersectionObserver.
+ */
+function hrefHash(href: string): string | null {
+  const i = href.indexOf("#");
+  return i >= 0 ? href.slice(i + 1) : null;
+}
+
+export function getNavSectionIds(items: readonly NavItem[]): string[] {
+  const ids: string[] = [];
+  for (const item of items) {
+    const top = hrefHash(item.href);
+    if (top) ids.push(top);
+    for (const child of item.children ?? []) {
+      const hash = hrefHash(child.href);
+      if (hash) ids.push(hash);
+    }
+  }
+  return Array.from(new Set(ids));
 }

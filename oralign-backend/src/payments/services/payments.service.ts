@@ -997,6 +997,46 @@ export class PaymentsService {
     return payment;
   }
 
+  /**
+   * Admin-only: override the printed invoice / receipt number on a
+   * payment. The unique index guarantees no two receipts share a
+   * number — a collision surfaces as a clean 400 rather than a Prisma
+   * stack trace.
+   */
+  async updateInvoiceNumber(
+    id: string,
+    invoiceNumber: string,
+    caller: Caller,
+  ): Promise<Payment> {
+    if (!this.isAdmin(caller)) {
+      throw new ForbiddenException(
+        'Only an admin can edit the invoice number.',
+      );
+    }
+    const trimmed = invoiceNumber.trim();
+    if (!trimmed) {
+      throw new BadRequestException('Invoice number cannot be empty.');
+    }
+    const existing = await this.prisma.payment.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Payment not found.');
+    try {
+      return await this.prisma.payment.update({
+        where: { id },
+        data: { invoiceNumber: trimmed },
+      });
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        throw new BadRequestException(
+          `Invoice number "${trimmed}" is already used by another receipt.`,
+        );
+      }
+      throw err;
+    }
+  }
+
   // ─── Guards used by every entry point ──────────────────────────
 
   private assertPayable(row: {

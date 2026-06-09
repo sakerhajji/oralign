@@ -47,6 +47,7 @@ RUN apk add --no-cache \
     chromium \
     dumb-init \
     fontconfig \
+    font-noto-arabic \
     ttf-dejavu
 
 RUN addgroup -g 1001 -S nodejs && \

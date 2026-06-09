@@ -368,18 +368,42 @@ export function TreatmentFeesHistorySection() {
             emptyMessage="No treatment-fee payments recorded yet."
             onViewProof={(row) => setActiveReceipt(row)}
             renderActions={(row) => (
-              <Button
-                asChild
-                size="sm"
-                variant="ghost"
-                className="gap-1"
-                title="Open order"
-              >
-                <Link href={`/dashboard/orders/${row.orderId}`}>
-                  <ExternalLink className="size-3.5" />
-                  Order
-                </Link>
-              </Button>
+              <>
+                {/*
+                  Only a settled fee has an invoice — the sequential
+                  TF-XXXXXX number is allocated on the first render of a
+                  paid fee. Pending / awaiting rows show just the Order
+                  link until the payment lands.
+                 */}
+                {row.status === PaymentRecordStatus.SUCCESS && (
+                  <Button
+                    asChild
+                    size="sm"
+                    variant="outline"
+                    className="gap-1"
+                    title="View the treatment-fee invoice"
+                  >
+                    <Link
+                      href={`/dashboard/orders/${row.orderId}/treatment-fee-invoice`}
+                    >
+                      <ReceiptText className="size-3.5" />
+                      Invoice
+                    </Link>
+                  </Button>
+                )}
+                <Button
+                  asChild
+                  size="sm"
+                  variant="ghost"
+                  className="gap-1"
+                  title="Open order"
+                >
+                  <Link href={`/dashboard/orders/${row.orderId}`}>
+                    <ExternalLink className="size-3.5" />
+                    Order
+                  </Link>
+                </Button>
+              </>
             )}
           />
         </CardContent>

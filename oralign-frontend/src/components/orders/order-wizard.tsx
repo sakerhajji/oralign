@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -259,6 +259,13 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
   const updateTeeth = useUpdateToothInstructions();
   const submitOrder = useSubmitOrder();
 
+  // Dedup guard for inline new-patient creation. A single "Continue"
+  // click calls ensurePatientReady() twice (validateCurrentStep then
+  // saveDraft), and setForm({ patientId }) only commits next render —
+  // so we cache the in-flight POST here to guarantee exactly one
+  // patient is created per planner action.
+  const newPatientPromiseRef = useRef<Promise<string> | null>(null);
+
   const dentistsQuery = useQuery({
     queryKey: ['order-dentists'],
     queryFn: () =>
@@ -356,50 +363,78 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
     }
 
     if (patientMode === 'new' && !form.patientId) {
-      // Strip the "Other" detail when "Other" isn't selected so we
-      // never persist orphan text. Empty arrays become `undefined`
-      // on the wire so the backend's PATCH semantics also work.
-      const conditions = newPatient.clinicalConditions.filter(Boolean);
-      const otherSelected = conditions.includes('Other');
-      const otherDetail = otherSelected
-        ? newPatient.clinicalConditionsOther.trim() || undefined
-        : undefined;
+      // A single "Continue" click runs validateCurrentStep() AND then
+      // saveDraft(), and both call ensurePatientReady(). Because the
+      // setForm({ patientId }) below only commits on the next render,
+      // the second call still sees an empty form.patientId — so without
+      // a guard the patient is POSTed twice and the backend (correctly)
+      // rejects the second as a duplicate, producing the "created" +
+      // "already exists" double toast. Cache the in-flight creation so
+      // every caller within the same click awaits the SAME request.
+      let pending = newPatientPromiseRef.current;
+      if (!pending) {
+        // Strip the "Other" detail when "Other" isn't selected so we
+        // never persist orphan text. Empty arrays become `undefined`
+        // on the wire so the backend's PATCH semantics also work.
+        const conditions = newPatient.clinicalConditions.filter(Boolean);
+        const otherSelected = conditions.includes('Other');
+        const otherDetail = otherSelected
+          ? newPatient.clinicalConditionsOther.trim() || undefined
+          : undefined;
 
-      // Auto-derive the order's chief complaint from the conditions:
-      // the standard labels first, with the free-text "Other" detail
-      // appended after an em-dash separator. Clipped at 240 chars to
-      // stay within the column's reasonable size. Falls back to any
-      // chief-complaint the planner had already typed in this session
-      // (rare — the field doesn't appear on the patient step today,
-      // but kept for forward-compatibility).
-      const standardLabels = conditions.filter((c) => c !== 'Other');
-      const derivedChiefComplaint = [
-        standardLabels.join(', '),
-        otherDetail ?? '',
-      ]
-        .filter(Boolean)
-        .join(' — ')
-        .slice(0, 240);
+        // Auto-derive the order's chief complaint from the conditions:
+        // the standard labels first, with the free-text "Other" detail
+        // appended after an em-dash separator. Clipped at 240 chars to
+        // stay within the column's reasonable size. Falls back to any
+        // chief-complaint the planner had already typed in this session
+        // (rare — the field doesn't appear on the patient step today,
+        // but kept for forward-compatibility).
+        const standardLabels = conditions.filter((c) => c !== 'Other');
+        const derivedChiefComplaint = [
+          standardLabels.join(', '),
+          otherDetail ?? '',
+        ]
+          .filter(Boolean)
+          .join(' — ')
+          .slice(0, 240);
 
-      const createdPatient = await createPatient.mutateAsync({
-        fullName: newPatient.fullName.trim(),
-        email: newPatient.email.trim() || undefined,
-        phone: newPatient.phone.trim() || undefined,
-        gender: newPatient.gender,
-        dateOfBirth: newPatient.dateOfBirth || undefined,
-        address: newPatient.address.trim() || undefined,
-        notes: newPatient.notes.trim() || undefined,
-        clinicalConditions: conditions.length > 0 ? conditions : undefined,
-        clinicalConditionsOther: otherDetail,
-        doctorId: isAdmin ? form.doctorId : undefined,
-      });
-      setForm((current) => ({
-        ...current,
-        patientId: createdPatient.id,
-        chiefComplaint:
-          current.chiefComplaint?.trim() || derivedChiefComplaint || undefined,
-      }));
-      return createdPatient.id;
+        pending = createPatient
+          .mutateAsync({
+            fullName: newPatient.fullName.trim(),
+            email: newPatient.email.trim() || undefined,
+            phone: newPatient.phone.trim() || undefined,
+            gender: newPatient.gender,
+            dateOfBirth: newPatient.dateOfBirth || undefined,
+            address: newPatient.address.trim() || undefined,
+            notes: newPatient.notes.trim() || undefined,
+            clinicalConditions: conditions.length > 0 ? conditions : undefined,
+            clinicalConditionsOther: otherDetail,
+            doctorId: isAdmin ? form.doctorId : undefined,
+          })
+          .then((createdPatient) => {
+            setForm((current) => ({
+              ...current,
+              patientId: createdPatient.id,
+              chiefComplaint:
+                current.chiefComplaint?.trim() ||
+                derivedChiefComplaint ||
+                undefined,
+            }));
+            return createdPatient.id;
+          });
+        // On failure, drop the cached promise so a later attempt POSTs
+        // again instead of replaying a rejected request. The awaiting
+        // caller still sees the original rejection (the create hook has
+        // already surfaced the error toast).
+        const inFlight = pending;
+        inFlight.catch(() => {
+          if (newPatientPromiseRef.current === inFlight) {
+            newPatientPromiseRef.current = null;
+          }
+        });
+        newPatientPromiseRef.current = inFlight;
+      }
+      return pending;
     }
 
     return form.patientId;
@@ -671,6 +706,7 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
           {step < steps.length - 1 ? (
             <Button
               type="button"
+              disabled={isSaving}
               onClick={async () => {
                 const valid = await validateCurrentStep();
                 if (!valid) return;

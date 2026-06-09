@@ -605,6 +605,8 @@ export interface Payment {
   bankReference?: string | null;
   proofUrl?: string | null;
   receiptNumber?: string | null;
+  /** Printed receipt/invoice number (sequential FAC-XXXXXX; admin-editable). */
+  invoiceNumber?: string | null;
   notes?: string | null;
   rejectionReason?: string | null;
   initiatedById?: string | null;

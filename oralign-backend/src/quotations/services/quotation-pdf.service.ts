@@ -226,7 +226,7 @@ export class QuotationPdfService implements OnModuleDestroy {
     <meta charset="utf-8" />
     <style>
       ${this.fontFaceCss()}
-      @page { size: A4; margin: 12mm; }
+      @page { size: A4; margin: 11mm; }
       * { box-sizing: border-box; }
       html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       body {
@@ -235,96 +235,98 @@ export class QuotationPdfService implements OnModuleDestroy {
         background: #ffffff;
         font-family: Inter, Roboto, Arial, "DejaVu Sans", sans-serif;
         font-size: 10.5px;
-        line-height: 1.45;
+        line-height: 1.42;
       }
       body.rtl {
         direction: rtl;
         font-family: "OralignArabic", "Noto Naskh Arabic", "Noto Sans Arabic", "DejaVu Sans", Arial, sans-serif;
         font-size: 11px;
-        line-height: 1.65;
+        line-height: 1.6;
       }
       .document { width: 100%; }
-      .topbar {
-        display: grid;
-        grid-template-columns: 1fr auto;
-        gap: 18px;
-        align-items: start;
-        padding-bottom: 14px;
-        border-bottom: 2px solid #111111;
+      /* Centered logo masthead — the logo sits alone, centered, at the
+         very top; the document title + meta follow it. */
+      .masthead {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding-bottom: 12px;
+        margin-bottom: 13px;
+        border-bottom: 1.5px solid #111111;
         break-inside: avoid;
       }
-      body.rtl .topbar { grid-template-columns: auto 1fr; }
-      .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
-      body.rtl .brand { flex-direction: row-reverse; text-align: right; }
-      .logo-img { max-width: 122px; max-height: 56px; object-fit: contain; }
-      .logo-fallback {
-        display: grid;
-        width: 54px;
-        height: 54px;
-        place-items: center;
-        border: 1px solid #111111;
-        border-radius: 16px;
+      .logo-img { max-width: 168px; max-height: 66px; object-fit: contain; }
+      .masthead-name {
+        font-size: 22px;
         font-weight: 800;
-        letter-spacing: .04em;
+        letter-spacing: .16em;
+        text-transform: uppercase;
+        text-align: center;
       }
-      .brand-name { font-size: 17px; font-weight: 800; letter-spacing: .14em; overflow-wrap: anywhere; }
-      body.rtl .brand-name { letter-spacing: 0; }
-      .brand-sub { margin-top: 2px; color: #666666; overflow-wrap: anywhere; }
-      .doc-meta { min-width: 205px; text-align: right; }
+      body.rtl .masthead-name { letter-spacing: 0; }
+      .docrow {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 16px;
+        align-items: start;
+        break-inside: avoid;
+      }
+      body.rtl .docrow { grid-template-columns: auto 1fr; }
+      .doc-meta { min-width: 188px; text-align: right; }
       body.rtl .doc-meta { text-align: left; }
       .title {
         margin: 0;
-        font-size: 30px;
+        font-size: 22px;
         line-height: 1;
-        letter-spacing: .14em;
-        font-weight: 850;
+        letter-spacing: .12em;
+        font-weight: 800;
         text-transform: uppercase;
       }
-      body.rtl .title { font-size: 27px; letter-spacing: 0; text-transform: none; }
-      .meta-line { margin-top: 6px; color: #555555; overflow-wrap: anywhere; }
+      body.rtl .title { font-size: 20px; letter-spacing: 0; text-transform: none; }
+      .meta-line { margin-top: 4px; color: #555555; font-size: 9.5px; overflow-wrap: anywhere; }
       .status {
         display: inline-flex;
-        margin-top: 9px;
+        margin-top: 7px;
         max-width: 100%;
         align-items: center;
         border: 1px solid #111111;
         border-radius: 999px;
-        padding: 3px 9px;
-        font-size: 9.5px;
+        padding: 2px 8px;
+        font-size: 9px;
         font-weight: 700;
         overflow-wrap: anywhere;
       }
-      .section { margin-top: 14px; }
+      .section { margin-top: 11px; }
       .section.keep { break-inside: avoid; page-break-inside: avoid; }
       .section-title {
-        margin: 0 0 8px;
+        margin: 0 0 6px;
         color: #666666;
-        font-size: 9px;
+        font-size: 8.5px;
         font-weight: 800;
-        letter-spacing: .14em;
+        letter-spacing: .12em;
         text-transform: uppercase;
       }
       body.rtl .section-title { letter-spacing: 0; text-transform: none; }
-      .party-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      .party-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
       .box {
         min-width: 0;
-        min-height: 118px;
-        border: 1px solid #d7d7d7;
-        border-radius: 14px;
-        padding: 12px;
+        border: 1px solid #e2e4e8;
+        border-radius: 10px;
+        padding: 10px 11px;
         break-inside: avoid;
         page-break-inside: avoid;
       }
       .box-line {
-        margin: 2px 0;
+        margin: 1.5px 0;
         overflow-wrap: anywhere;
         word-break: normal;
       }
-      .box-line.strong { font-weight: 750; }
+      .box-line.strong { font-weight: 700; }
       table {
         width: 100%;
         border: 1px solid #111111;
-        border-radius: 14px;
+        border-radius: 10px;
         border-collapse: separate;
         border-spacing: 0;
         table-layout: fixed;
@@ -335,32 +337,32 @@ export class QuotationPdfService implements OnModuleDestroy {
       th {
         background: #111111;
         color: #ffffff;
-        padding: 10px 12px;
-        font-size: 9px;
+        padding: 8px 11px;
+        font-size: 8.5px;
         font-weight: 800;
-        letter-spacing: .14em;
+        letter-spacing: .12em;
         text-transform: uppercase;
       }
       body.rtl th { letter-spacing: 0; text-transform: none; }
-      th.desc, td.desc { width: 70%; text-align: start; }
-      th.amount, td.amount { width: 30%; text-align: end; white-space: nowrap; }
+      th.desc, td.desc { width: 72%; text-align: start; }
+      th.amount, td.amount { width: 28%; text-align: end; white-space: nowrap; }
       body.rtl th.amount, body.rtl td.amount { text-align: start; }
       td {
-        padding: 11px 12px;
-        border-top: 1px solid #dcdcdc;
+        padding: 8px 11px;
+        border-top: 1px solid #ececec;
         vertical-align: top;
         overflow-wrap: anywhere;
       }
       .line-label { font-weight: 700; }
-      .line-note { margin-top: 3px; color: #666666; font-size: 9.5px; overflow-wrap: anywhere; }
+      .line-note { margin-top: 2px; color: #666666; font-size: 9px; overflow-wrap: anywhere; }
       .discount { color: #111111; }
       .totals {
-        width: min(100%, 285px);
-        margin-top: 13px;
+        width: min(100%, 262px);
+        margin-top: 10px;
         margin-left: auto;
-        border: 1px solid #d7d7d7;
-        border-radius: 14px;
-        padding: 9px;
+        border: 1px solid #e2e4e8;
+        border-radius: 10px;
+        padding: 7px 8px;
         break-inside: avoid;
         page-break-inside: avoid;
       }
@@ -369,34 +371,34 @@ export class QuotationPdfService implements OnModuleDestroy {
         display: flex;
         justify-content: space-between;
         gap: 12px;
-        padding: 6px 5px;
-        border-bottom: 1px solid #ededed;
+        padding: 4px 4px;
+        border-bottom: 1px solid #eef0f2;
       }
       .total-row span:first-child { overflow-wrap: anywhere; }
-      .total-row span:last-child { white-space: nowrap; font-variant-numeric: tabular-nums; }
+      .total-row span:last-child { white-space: nowrap; font-variant-numeric: tabular-nums; font-weight: 650; }
       .total-row.final {
         margin-top: 4px;
         border: 0;
-        border-radius: 11px;
+        border-radius: 8px;
         background: #111111;
         color: #ffffff;
-        padding: 11px 10px;
-        font-size: 13px;
-        font-weight: 850;
+        padding: 9px 10px;
+        font-size: 12px;
+        font-weight: 800;
       }
       .text-block {
-        margin-top: 13px;
-        border: 1px solid #d7d7d7;
-        border-radius: 14px;
-        padding: 11px 12px;
+        margin-top: 10px;
+        border: 1px solid #e2e4e8;
+        border-radius: 10px;
+        padding: 9px 11px;
         break-inside: auto;
       }
       .text-block-title {
-        margin: 0 0 6px;
+        margin: 0 0 5px;
         color: #666666;
-        font-size: 9px;
+        font-size: 8.5px;
         font-weight: 800;
-        letter-spacing: .14em;
+        letter-spacing: .12em;
         text-transform: uppercase;
       }
       body.rtl .text-block-title { letter-spacing: 0; text-transform: none; }
@@ -406,51 +408,49 @@ export class QuotationPdfService implements OnModuleDestroy {
         overflow-wrap: anywhere;
       }
       .footer {
-        margin-top: 16px;
-        padding-top: 11px;
-        border-top: 1px solid #cfcfcf;
+        margin-top: 12px;
+        padding-top: 9px;
+        border-top: 1px solid #e2e4e8;
         color: #555555;
-        font-size: 9px;
+        font-size: 8.5px;
         break-inside: avoid;
         page-break-inside: avoid;
       }
-      .footer p { margin: 0 0 5px; overflow-wrap: anywhere; }
+      .footer p { margin: 0 0 4px; overflow-wrap: anywhere; }
       .bank-title {
-        margin-top: 8px;
+        margin-top: 7px;
         color: #111111;
         font-weight: 800;
       }
       .bank-grid {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 3px 14px;
-        margin-top: 4px;
+        gap: 2px 14px;
+        margin-top: 3px;
       }
       .bank-grid div { overflow-wrap: anywhere; }
     </style>
   </head>
   <body class="${rtl ? 'rtl' : 'ltr'}">
     <main class="document">
-      <header class="topbar">
-        <section class="brand">
-          ${
-            logo
-              ? `<img class="logo-img" src="${logo}" alt="${this.htmlAttr(brandName)}" />`
-              : `<div class="logo-fallback">${this.html(brandName.slice(0, 2).toUpperCase())}</div>`
-          }
-          <div>
-            <div class="brand-name">${this.html(brandName)}</div>
-            <div class="brand-sub">${this.html(String(company.companyEmail ?? company.companyPhone ?? ''))}</div>
-          </div>
-        </section>
+      <header class="masthead">
+        ${
+          logo
+            ? `<img class="logo-img" src="${logo}" alt="${this.htmlAttr(brandName)}" />`
+            : `<div class="masthead-name">${this.html(brandName)}</div>`
+        }
+      </header>
 
-        <section class="doc-meta">
+      <section class="docrow">
+        <div>
           <h1 class="title">${this.html(this.titleLabel(labels.documentTitle, rtl))}</h1>
+        </div>
+        <div class="doc-meta">
           <div class="meta-line">${this.html(labels.number)}: <strong>${this.html(quote.quotationNumber ?? '—')}</strong></div>
           <div class="meta-line">${this.html(labels.date)}: ${this.html(this.formatDate(quote.createdAt, quote.language))}</div>
           <div class="status">${this.html(labels.status)}: ${this.html(this.statusLabel(quote.status, labels))}</div>
-        </section>
-      </header>
+        </div>
+      </section>
 
       <section class="section keep party-grid">
         <article class="box">

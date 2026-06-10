@@ -385,11 +385,43 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
         // Auto-derive the order's chief complaint from the conditions:
         // the standard labels first, with the free-text "Other" detail
         // appended after an em-dash separator. Clipped at 240 chars to
-        // stay within the column's reasonable size. Falls back to any
-        // chief-complaint the planner had already typed in this session
-        // (rare — the field doesn't appear on the patient step today,
-        // but kept for forward-compatibility).
-        const standardLabels = conditions.filter((c) => c !== 'Other');
+        // stay within the column's reasonable size.
+        //
+        // Saved in the DOCTOR'S CURRENT LANGUAGE — the conditions array
+        // itself still holds the canonical English values (e.g.
+        // 'Crowding') for stable filtering / aggregation, but the
+        // free-text chief-complaint snapshot reflects what the doctor
+        // saw on the wizard at submit time. A French clinician gets
+        // "Encombrement, Béance" persisted; an English one gets
+        // "Crowding, Open bite". This matches the user-requested
+        // "save the answer in the doctor's language" behaviour for
+        // the only place where the wizard derives prose from the
+        // selected checkboxes.
+        const conditionLabel = (canonical: string): string => {
+          // Map canonical → dict key suffix. Aligns with the keys
+          // already defined under `orderForm.patient.cond*`.
+          const map: Record<string, string> = {
+            Crowding: 'condCrowding',
+            Spacing: 'condSpacing',
+            'Class II Division 1': 'condClassII1',
+            'Class II Division 2': 'condClassII2',
+            'Class III': 'condClassIII',
+            'Open bite': 'condOpenBite',
+            'Anterior crossbite': 'condAnteriorCrossbite',
+            'Posterior crossbite': 'condPosteriorCrossbite',
+            'Deep bite': 'condDeepBite',
+            'Narrow arch': 'condNarrowArch',
+            Proclination: 'condProclination',
+            'Increased overjet': 'condIncreasedOverjet',
+            'Unesthetic smile': 'condUnestheticSmile',
+            'Dental shape anomaly': 'condDentalShapeAnomaly',
+          };
+          const key = map[canonical];
+          return key ? t(`orderForm.patient.${key}`) : canonical;
+        };
+        const standardLabels = conditions
+          .filter((c) => c !== 'Other')
+          .map(conditionLabel);
         const derivedChiefComplaint = [
           standardLabels.join(', '),
           otherDetail ?? '',

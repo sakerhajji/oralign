@@ -59,6 +59,7 @@ import {
   useUploadOrderFiles,
 } from '@/lib/hooks';
 import { getAccessToken } from '@/lib/api';
+import { useT } from '@/lib/i18n/lang-context';
 import { OrderFile, OrderFileCategory } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { ImageEditDialog } from './image-edit-dialog';
@@ -86,11 +87,16 @@ const categories = [
 //   Row 2 (intraoral):  left lateral | frontal occl | right lateral
 //   Row 3 (occlusal):   upper occl   | lower occl
 // On 2-column screens they pair into natural left/right couples instead.
+// Each slot now carries an i18n LABEL KEY (not a raw title string) so
+// the title flips on the language toggle. The English fallback that
+// used to live in `title` is gone — `t(titleKey)` is the single source
+// of truth (dict's miss-handler still returns the dotted path so a
+// typo at the call site stays visible on screen).
 const patientImageSlots = [
   // ── Row 1: extraoral facial views ──────────────────────────────────────
   {
     key: 'profile',
-    title: 'Profile photo',
+    titleKey: 'orderForm.files.slots.profilePhoto',
     category: OrderFileCategory.LEFT_PHOTO,
     icon: ImageIcon,
     accept: 'image/*',
@@ -98,7 +104,7 @@ const patientImageSlots = [
   },
   {
     key: 'face-rest',
-    title: 'Face at rest photo',
+    titleKey: 'orderForm.files.slots.faceRest',
     category: OrderFileCategory.IMAGE,
     icon: ImageIcon,
     accept: 'image/*',
@@ -109,7 +115,7 @@ const patientImageSlots = [
   },
   {
     key: 'smile',
-    title: 'Smile photo',
+    titleKey: 'orderForm.files.slots.smile',
     category: OrderFileCategory.FRONT_PHOTO,
     icon: ImageIcon,
     accept: 'image/*',
@@ -118,7 +124,7 @@ const patientImageSlots = [
   // ── Row 2: intraoral left / frontal / right ────────────────────────────
   {
     key: 'left-lateral',
-    title: 'Left lateral view',
+    titleKey: 'orderForm.files.slots.leftLateral',
     category: OrderFileCategory.LEFT_PHOTO,
     icon: ImageIcon,
     accept: 'image/*',
@@ -126,7 +132,7 @@ const patientImageSlots = [
   },
   {
     key: 'frontal-occlusion',
-    title: 'Frontal occlusion view',
+    titleKey: 'orderForm.files.slots.frontalOcclusion',
     category: OrderFileCategory.FRONT_PHOTO,
     icon: ImageIcon,
     accept: 'image/*',
@@ -134,7 +140,7 @@ const patientImageSlots = [
   },
   {
     key: 'right-lateral',
-    title: 'Right lateral view',
+    titleKey: 'orderForm.files.slots.rightLateral',
     category: OrderFileCategory.RIGHT_PHOTO,
     icon: ImageIcon,
     accept: 'image/*',
@@ -143,7 +149,7 @@ const patientImageSlots = [
   // ── Row 3: intraoral occlusal views ────────────────────────────────────
   {
     key: 'upper-occlusal',
-    title: 'Upper occlusal view',
+    titleKey: 'orderForm.files.slots.upperOcclusal',
     category: OrderFileCategory.UPPER_PHOTO,
     icon: ScanLine,
     accept: 'image/*',
@@ -151,7 +157,7 @@ const patientImageSlots = [
   },
   {
     key: 'lower-occlusal',
-    title: 'Lower occlusal view',
+    titleKey: 'orderForm.files.slots.lowerOcclusal',
     category: OrderFileCategory.LOWER_PHOTO,
     icon: ScanLine,
     accept: 'image/*',
@@ -162,7 +168,7 @@ const patientImageSlots = [
 const radiographySlots = [
   {
     key: 'panoramic',
-    title: 'Panoramic radiography',
+    titleKey: 'orderForm.files.slots.panoramic',
     category: OrderFileCategory.ORTHOPANTOMOGRAPHY,
     icon: ScanLine,
     accept: 'image/*,.pdf',
@@ -170,7 +176,7 @@ const radiographySlots = [
   },
   {
     key: 'profile-tele',
-    title: 'Profile teleradiography',
+    titleKey: 'orderForm.files.slots.profileTele',
     category: OrderFileCategory.IMAGE,
     icon: ScanLine,
     accept: 'image/*,.pdf',
@@ -181,22 +187,22 @@ const radiographySlots = [
 const stlSlots = [
   {
     key: 'upper-stl',
-    title: 'Add Upper STL impression',
+    titleKey: 'orderForm.files.slots.upperStl',
     category: OrderFileCategory.STL,
   },
   {
     key: 'lower-stl',
-    title: 'Add Lower STL impression',
+    titleKey: 'orderForm.files.slots.lowerStl',
     category: OrderFileCategory.STL,
   },
   {
     key: 'first-occlusion',
-    title: 'Add First occlusion STL',
+    titleKey: 'orderForm.files.slots.firstOcclusion',
     category: OrderFileCategory.STL,
   },
   {
     key: 'second-occlusion',
-    title: 'Add Second occlusion STL',
+    titleKey: 'orderForm.files.slots.secondOcclusion',
     category: OrderFileCategory.STL,
   },
 ] as const;
@@ -204,7 +210,10 @@ const stlSlots = [
 type ClinicalFileSection = 'patient-images' | 'radiography-stl';
 type UploadSlotDefinition = {
   key: string;
-  title: string;
+  /** Dotted dict path resolved with `useT()` at render time. The raw
+   *  English label that used to live in a `title` field is now in the
+   *  dictionary so the slot name flips with the language switcher. */
+  titleKey: string;
   category: OrderFileCategory;
   icon?: typeof ImageIcon;
   accept?: string;
@@ -219,6 +228,7 @@ export function OrderFileUpload({
   orderId?: string;
   readOnly?: boolean;
 }) {
+  const { t } = useT();
   const filesQuery = useOrderFiles(orderId);
   const uploadFiles = useUploadOrderFiles();
   const deleteFile = useDeleteOrderFile();
@@ -304,6 +314,7 @@ export function ClinicalOrderFiles({
   readOnly?: boolean;
   section: ClinicalFileSection;
 }) {
+  const { t } = useT();
   const filesQuery = useOrderFiles(orderId);
   const uploadFiles = useUploadOrderFiles();
   const deleteFile = useDeleteOrderFile();
@@ -358,8 +369,8 @@ export function ClinicalOrderFiles({
     return (
       <div className="space-y-6">
         <SectionIntro
-          title="Patient images"
-          description="Upload each facial and intraoral view. The faint reference shows the expected angle — rotate or flip your photo to match before it uploads."
+          title={t('orderForm.files.sections.patientImagesTitle')}
+          description={t('orderForm.files.sections.patientImagesDesc')}
         />
 
         {/* ZIP bulk-upload moved to the Radiography / STL section — that
@@ -372,7 +383,7 @@ export function ClinicalOrderFiles({
             <ClinicalMediaSlot
               key={slot.key}
               orderId={orderId}
-              title={slot.title}
+              title={t(slot.titleKey)}
               icon={slot.icon}
               accept={slot.accept}
               referenceImage={slot.referenceImage}
@@ -393,7 +404,7 @@ export function ClinicalOrderFiles({
               >
                 <ClinicalMediaSlot
                   orderId={orderId}
-                  title={slot.title}
+                  title={t(slot.titleKey)}
                   icon={slot.icon}
                   accept={slot.accept}
                   referenceImage={slot.referenceImage}
@@ -444,15 +455,15 @@ export function ClinicalOrderFiles({
     <div className="space-y-8">
       <section className="space-y-5">
         <SectionIntro
-          title="Radiography images"
-          description="Include panoramic and profile radiography files to support the diagnosis."
+          title={t('orderForm.files.sections.radiographyTitle')}
+          description={t('orderForm.files.sections.radiographyDesc')}
         />
         <div className="grid justify-items-center gap-6 md:grid-cols-2 md:justify-items-stretch">
           {radiographySlots.map((slot) => (
             <ClinicalMediaSlot
               key={slot.key}
               orderId={orderId}
-              title={slot.title}
+              title={t(slot.titleKey)}
               icon={slot.icon}
               accept={slot.accept}
               referenceImage={slot.referenceImage}
@@ -470,15 +481,15 @@ export function ClinicalOrderFiles({
 
       <section className="space-y-5">
         <SectionIntro
-          title="STL files"
-          description="Upload upper, lower, and occlusion scan files. STL, PLY, and OBJ are supported by the backend."
+          title={t('orderForm.files.sections.stlTitle')}
+          description={t('orderForm.files.sections.stlDesc')}
         />
         <div className="grid items-start gap-4 xl:grid-cols-2">
           {stlSlots.map((slot) => (
             <StlUploadTile
               key={slot.key}
               orderId={orderId}
-              title={slot.title}
+              title={t(slot.titleKey)}
               disabled={readOnly || uploadFiles.isPending}
               file={fileForSlot(files, slot, stlSlots)}
               readOnly={readOnly}

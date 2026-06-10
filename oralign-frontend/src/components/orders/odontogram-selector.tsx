@@ -19,6 +19,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { TOOTH_VIEWBOXES } from './tooth-viewboxes';
+import { useT } from '@/lib/i18n/lang-context';
 
 // ── Layout (FDI numbering) ──────────────────────────────────────────────────
 const UPPER_RIGHT = [18, 17, 16, 15, 14, 13, 12, 11] as const;
@@ -254,6 +255,7 @@ export function OdontogramSelector({
   /** Override the default section subheading. */
   subtitle?: string;
 }) {
+  const { t } = useT();
   const toothSpriteReady = useToothSpriteReady();
   const [showLegend, setShowLegend] = useState(true);
   const [popup, setPopup] = useState<{
@@ -442,18 +444,18 @@ export function OdontogramSelector({
           <h2 className="text-lg font-semibold text-foreground">
             {title ??
               (mode === 'attachments'
-                ? 'Attachments & IPR'
+                ? t('orderForm.files.tooth.attachmentsTitle')
                 : mode === 'treatment'
-                  ? 'Treatment odontogram'
-                  : 'Select tooth-level instructions')}
+                  ? t('orderForm.files.tooth.treatmentTitle')
+                  : t('orderForm.files.tooth.selectorTitle'))}
           </h2>
           <p className="text-sm text-muted-foreground">
             {subtitle ??
               (mode === 'attachments'
-                ? 'Tap a tooth to mark an attachment. Tap between teeth to set IPR (mm) and the optional STEP value.'
+                ? t('orderForm.files.tooth.attachmentsHint')
                 : mode === 'treatment'
-                  ? 'Tap a tooth to choose a clinical instruction color. Tap between teeth to set IPR in millimetres and STEP values.'
-                : 'Tap any tooth to assign a color. Each tooth carries one instruction at a time.')}
+                  ? t('orderForm.files.tooth.treatmentHint')
+                : t('orderForm.files.tooth.selectorHint'))}
           </p>
         </div>
         <Button
@@ -463,7 +465,9 @@ export function OdontogramSelector({
           onClick={() => setShowLegend((s) => !s)}
         >
           <Palette className="mr-2 h-4 w-4" />
-          {showLegend ? 'Hide' : 'View'} color guide
+          {showLegend
+            ? t('orderForm.files.tooth.hideGuide')
+            : t('orderForm.files.tooth.viewGuide')}
         </Button>
       </div>
 
@@ -520,11 +524,29 @@ export function OdontogramSelector({
         </div>
 
         <p className="px-3 pb-3 text-center text-xs text-muted-foreground sm:px-5">
-          FDI numbering · Press{' '}
-          <kbd className="rounded border bg-muted px-1.5 py-0.5 text-[10px] font-medium">
-            Esc
-          </kbd>{' '}
-          to close the picker.
+          {/*
+            The hint reads "FDI numbering · Press <Esc> to close the
+            picker." but we need the <kbd> element rendered as JSX
+            mid-sentence, so we hand-split the translated string at
+            its `{esc}` placeholder and inject the kbd in between.
+            Keeps the i18n simple while preserving the keyboard hint
+            affordance.
+           */}
+          {t('orderForm.files.tooth.fdiHint', { esc: '__ESC__' })
+            .split('__ESC__')
+            .flatMap((chunk, i) =>
+              i === 0
+                ? [chunk]
+                : [
+                    <kbd
+                      key="kbd"
+                      className="rounded border bg-muted px-1.5 py-0.5 text-[10px] font-medium"
+                    >
+                      Esc
+                    </kbd>,
+                    chunk,
+                  ],
+            )}
         </p>
       </div>
 
@@ -545,7 +567,7 @@ export function OdontogramSelector({
                     style={{ background: c?.hex }}
                     aria-hidden
                   />
-                  <span>Tooth {toothNumber}</span>
+                  <span>{t('orderForm.files.tooth.toothBadge', { n: toothNumber })}</span>
                   <span className="text-muted-foreground">{c?.label}</span>
                 </Badge>
               );
@@ -554,7 +576,7 @@ export function OdontogramSelector({
       ) : (
         <div className="flex items-center gap-2 rounded-md border border-dashed p-4 text-sm text-muted-foreground">
           <Info className="h-4 w-4" />
-          No tooth-level instructions selected yet.
+          {t('orderForm.files.tooth.emptyState')}
         </div>
       )}
 

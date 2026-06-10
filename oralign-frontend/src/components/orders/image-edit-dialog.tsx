@@ -22,6 +22,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n/lang-context';
 
 // Zoom range used by the crop-mode slider. The minimum is 1× because going
 // below "fits the editor" gains nothing — react-image-crop already lets
@@ -73,6 +74,7 @@ export function ImageEditDialog({
   onCancel,
   onConfirm,
 }: ImageEditDialogProps) {
+  const { t } = useT();
   const [rotation, setRotation] = useState(0); // 0 / 90 / 180 / 270
   const [flipH, setFlipH] = useState(false);
   const [flipV, setFlipV] = useState(false);
@@ -192,11 +194,11 @@ export function ImageEditDialog({
   const applyCrop = async () => {
     const imgEl = imageRef.current;
     if (!workingBlobUrl || !workingFile || !imgEl) {
-      setError('Image not ready yet.');
+      setError(t('orderForm.files.imageEdit.errorNotReady'));
       return;
     }
     if (!pixelCrop || pixelCrop.width < 4 || pixelCrop.height < 4) {
-      setError('Pick a crop region first (drag on the image).');
+      setError(t('orderForm.files.imageEdit.errorPickRegion'));
       return;
     }
 
@@ -240,7 +242,9 @@ export function ImageEditDialog({
       setPixelCrop(undefined);
       setZoom(1);
     } catch (err) {
-      setError((err as Error).message || 'Could not apply crop.');
+      setError(
+        (err as Error).message || t('orderForm.files.imageEdit.errorApplyCrop'),
+      );
     } finally {
       setBusy(false);
     }
@@ -267,7 +271,9 @@ export function ImageEditDialog({
       );
       onConfirm(transformed);
     } catch (err) {
-      setError((err as Error).message || 'Could not save image edits.');
+      setError(
+        (err as Error).message || t('orderForm.files.imageEdit.errorSaveEdits'),
+      );
     } finally {
       setBusy(false);
     }
@@ -298,11 +304,12 @@ export function ImageEditDialog({
           <header className="flex items-center justify-between gap-3 border-b bg-muted/30 px-3 py-3 sm:px-6">
             <div className="min-w-0">
               <DialogTitle className="text-sm font-semibold sm:text-base">
-                Adjust {title.toLowerCase()}
+                {t('orderForm.files.imageEdit.title', {
+                  slot: title.toLowerCase(),
+                })}
               </DialogTitle>
               <p className="hidden text-xs text-muted-foreground sm:block">
-                Crop, rotate or flip the photo before it uploads. Changes
-                are applied to the saved file.
+                {t('orderForm.files.imageEdit.subtitle')}
               </p>
             </div>
             <Button
@@ -312,7 +319,7 @@ export function ImageEditDialog({
               onClick={() => !busy && onCancel()}
               disabled={busy}
             >
-              Cancel
+              {t('orderForm.files.imageEdit.cancel')}
             </Button>
           </header>
 
@@ -387,16 +394,16 @@ export function ImageEditDialog({
                   />
                 ) : (
                   <span className="text-xs text-muted-foreground">
-                    No reference
+                    {t('orderForm.files.imageEdit.noReference')}
                   </span>
                 )}
               </div>
               <div className="flex min-w-0 flex-col justify-center gap-1">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Reference
+                  {t('orderForm.files.imageEdit.reference')}
                 </p>
                 <p className="text-[11px] leading-tight text-muted-foreground">
-                  Match the patient's view to this orientation.
+                  {t('orderForm.files.imageEdit.referenceHint')}
                 </p>
               </div>
             </aside>
@@ -420,7 +427,7 @@ export function ImageEditDialog({
                   ) : (
                     <CropIcon className="h-4 w-4" />
                   )}
-                  Apply crop
+                  {t('orderForm.files.imageEdit.applyCrop')}
                 </Button>
                 <Button
                   type="button"
@@ -429,7 +436,7 @@ export function ImageEditDialog({
                   onClick={cancelCropMode}
                   disabled={busy}
                 >
-                  Cancel crop
+                  {t('orderForm.files.imageEdit.cancelCrop')}
                 </Button>
 
                 {/* Zoom controls — slider gives precise selection of a
@@ -445,7 +452,7 @@ export function ImageEditDialog({
                       setZoom((z) => Math.max(ZOOM_MIN, +(z - ZOOM_STEP).toFixed(2)))
                     }
                     disabled={busy || zoom <= ZOOM_MIN}
-                    aria-label="Zoom out"
+                    aria-label={t('orderForm.files.imageEdit.zoomOut')}
                   >
                     <Minus className="h-3.5 w-3.5" />
                   </Button>
@@ -457,7 +464,7 @@ export function ImageEditDialog({
                     value={zoom}
                     onChange={(e) => setZoom(Number(e.target.value))}
                     disabled={busy}
-                    aria-label="Zoom"
+                    aria-label={t('orderForm.files.imageEdit.zoomLabel')}
                     className="h-1 w-24 cursor-pointer accent-primary disabled:opacity-50"
                   />
                   <Button
@@ -468,7 +475,7 @@ export function ImageEditDialog({
                       setZoom((z) => Math.min(ZOOM_MAX, +(z + ZOOM_STEP).toFixed(2)))
                     }
                     disabled={busy || zoom >= ZOOM_MAX}
-                    aria-label="Zoom in"
+                    aria-label={t('orderForm.files.imageEdit.zoomIn')}
                   >
                     <Plus className="h-3.5 w-3.5" />
                   </Button>
@@ -478,9 +485,7 @@ export function ImageEditDialog({
                 </div>
 
                 <p className="col-span-2 hidden text-xs text-muted-foreground sm:block">
-                  Drag to draw or move the rectangle, drag the corners
-                  to resize. Use the zoom slider above for precision on
-                  small details — the editor scrolls when zoomed in.
+                  {t('orderForm.files.imageEdit.cropHint')}
                 </p>
               </div>
             ) : (
@@ -494,7 +499,7 @@ export function ImageEditDialog({
                   className="gap-1.5"
                 >
                   <CropIcon className="h-4 w-4" />
-                  Crop
+                  {t('orderForm.files.imageEdit.crop')}
                 </Button>
                 <Button
                   type="button"
@@ -505,7 +510,7 @@ export function ImageEditDialog({
                   className="gap-1.5"
                 >
                   <RotateCcw className="h-4 w-4" />
-                  Rotate left
+                  {t('orderForm.files.imageEdit.rotateLeft')}
                 </Button>
                 <Button
                   type="button"
@@ -516,7 +521,7 @@ export function ImageEditDialog({
                   className="gap-1.5"
                 >
                   <RotateCw className="h-4 w-4" />
-                  Rotate right
+                  {t('orderForm.files.imageEdit.rotateRight')}
                 </Button>
                 <Button
                   type="button"
@@ -530,7 +535,7 @@ export function ImageEditDialog({
                   )}
                 >
                   <FlipHorizontal className="h-4 w-4" />
-                  Flip H
+                  {t('orderForm.files.imageEdit.flipHorizontal')}
                 </Button>
                 <Button
                   type="button"
@@ -544,7 +549,7 @@ export function ImageEditDialog({
                   )}
                 >
                   <FlipVertical className="h-4 w-4" />
-                  Flip V
+                  {t('orderForm.files.imageEdit.flipVertical')}
                 </Button>
                 <Button
                   type="button"
@@ -555,7 +560,7 @@ export function ImageEditDialog({
                   className="col-span-2 gap-1.5 sm:col-span-1"
                 >
                   <Undo2 className="h-4 w-4" />
-                  Reset
+                  {t('orderForm.files.imageEdit.reset')}
                 </Button>
               </div>
             )}
@@ -575,10 +580,10 @@ export function ImageEditDialog({
                 {busy ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Saving…
+                    {t('common.loading')}
                   </>
                 ) : (
-                  'Use this image'
+                  t('orderForm.files.imageEdit.useImage')
                 )}
               </Button>
             </div>

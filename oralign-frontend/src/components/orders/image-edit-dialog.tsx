@@ -1,11 +1,10 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import ReactCrop, {
   centerCrop,
   makeAspectCrop,
   type Crop,
-  type PixelCrop,
 } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 import {
@@ -81,21 +80,16 @@ export function ImageEditDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Crop state — keeps the user's in-progress rectangle (CSS units of
-  // the rendered <img>) and a "completed" snapshot that we'll convert
-  // to natural-pixel coordinates at confirm time.
-  //
-  // We do NOT store a "natural pixel" version up front because the
-  // displayed-vs-natural ratio depends on the image's CURRENT layout
-  // size, which changes when the user moves the zoom slider. Reading
-  // both at the same instant (in applyCrop) keeps the math correct
-  // regardless of what the slider was set to during selection.
+  // Crop state — the selection rectangle in PERCENT units (resolution-
+  // and zoom-independent). We deliberately don't keep a display-pixel
+  // copy: `applyCrop` converts this percent rectangle straight to
+  // natural-pixel coordinates, so the saved file is always identical to
+  // the selection the user sees regardless of the current zoom level.
   const [cropMode, setCropMode] = useState(false);
   const [crop, setCrop] = useState<Crop | undefined>(undefined);
-  const [pixelCrop, setPixelCrop] = useState<PixelCrop | undefined>(undefined);
-  // Zoom factor in crop mode. Applied via inline width:`${zoom * 100}%`
-  // on the <img>, which mutates `element.width` — so the
-  // CSS-pixel-to-natural-pixel ratio in `applyCrop` stays correct
+  // Zoom factor in crop mode. Drives the explicit px width/height of the
+  // contain-fitted crop image (see `cropFit`), so the
+  // display-pixel-to-natural-pixel ratio in `applyCrop` stays correct
   // regardless of zoom level.
   const [zoom, setZoom] = useState(1);
 
@@ -108,6 +102,60 @@ export function ImageEditDialog({
   const [workingFile, setWorkingFile] = useState<File | null>(null);
 
   const imageRef = useRef<HTMLImageElement | null>(null);
+
+  // Editor-canvas measurement. The crop image is sized to CONTAIN-fit
+  // this box at zoom 1 (so portrait, landscape AND square photos are
+  // fully visible without being clipped), then scaled up from that fit
+  // by the zoom slider. We measure with a ResizeObserver so the fit
+  // recomputes on viewport changes / phone rotation / dialog resize.
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const [canvasSize, setCanvasSize] = useState<{ w: number; h: number } | null>(
+    null,
+  );
+  // Natural pixel size of the CURRENT working image (the un-rotated
+  // buffer the cropper operates on). Captured on image load.
+  const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(
+    null,
+  );
+
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => {
+      const cr = entries[0]?.contentRect;
+      if (cr) setCanvasSize({ w: cr.width, h: cr.height });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // CONTAIN-fit dimensions for the crop image: the largest size that
+  // fits inside the editor canvas while preserving the image's aspect
+  // ratio, multiplied by the zoom factor. `baseScale` is capped at 1×
+  // so a small source photo renders crisp at its natural size (no
+  // upscaling blur) rather than being stretched to fill the canvas;
+  // large photos shrink to fit. The zoom slider scales from there.
+  //
+  // Because we hand the cropper an explicit px width/height that
+  // matches what the user sees, react-image-crop reports its rectangle
+  // in those same display pixels — and `applyCrop`'s
+  // `naturalWidth / element.width` ratio recovers the correct
+  // natural-pixel region. No CSS-only "fake zoom" anywhere; the saved
+  // file is always a real canvas crop of the selected region.
+  const cropFit = useMemo(() => {
+    if (!canvasSize || !naturalSize) return null;
+    if (canvasSize.w <= 0 || canvasSize.h <= 0) return null;
+    const containScale = Math.min(
+      canvasSize.w / naturalSize.w,
+      canvasSize.h / naturalSize.h,
+    );
+    const baseScale = Math.min(containScale, 1);
+    const scale = baseScale * zoom;
+    return {
+      width: Math.max(1, Math.round(naturalSize.w * scale)),
+      height: Math.max(1, Math.round(naturalSize.h * scale)),
+    };
+  }, [canvasSize, naturalSize, zoom]);
 
   // First mount of a new file → seed working state from the source file.
   useEffect(() => {
@@ -130,22 +178,28 @@ export function ImageEditDialog({
     setFlipH(false);
     setFlipV(false);
     setCrop(undefined);
-    setPixelCrop(undefined);
+    setNaturalSize(null);
     setCropMode(false);
     setZoom(1);
     setError(null);
     return () => URL.revokeObjectURL(url);
   }, [file]);
 
-  // Initial crop selection — center an 80%-width rectangle when the user
-  // first enters crop mode so they can resize/move rather than draw from
-  // scratch. Library handles all the resize / drag interactions.
+  // Capture the working image's natural size on every load (a fresh
+  // file, or the re-load after a crop is baked into the buffer) so the
+  // contain-fit math always reflects the pixels currently on screen.
+  // Then seed a gentle default crop so the user resizes/moves rather
+  // than drawing from scratch.
   const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
     const { naturalWidth, naturalHeight } = e.currentTarget;
+    setNaturalSize({ w: naturalWidth, h: naturalHeight });
     if (cropMode && !crop) {
       const initial = centerCrop(
         makeAspectCrop(
-          { unit: '%', width: 80 },
+          // 90% keeps the default selection close to the full frame so
+          // accepting it without dragging only trims a thin border —
+          // never an aggressive center-zoom of the face.
+          { unit: '%', width: 90 },
           // Aspect ratio derived from the image's natural dimensions so the
           // default crop frames the photo nicely regardless of orientation.
           naturalWidth / naturalHeight,
@@ -165,7 +219,6 @@ export function ImageEditDialog({
     setFlipH(false);
     setFlipV(false);
     setCrop(undefined);
-    setPixelCrop(undefined);
     setCropMode(false);
     setZoom(1);
     // Restore the working buffer to the ORIGINAL file — so reset also
@@ -187,40 +240,46 @@ export function ImageEditDialog({
   const cancelCropMode = () => {
     setCropMode(false);
     setCrop(undefined);
-    setPixelCrop(undefined);
     setZoom(1);
   };
 
   const applyCrop = async () => {
-    const imgEl = imageRef.current;
-    if (!workingBlobUrl || !workingFile || !imgEl) {
+    if (!workingBlobUrl || !workingFile) {
       setError(t('orderForm.files.imageEdit.errorNotReady'));
       return;
     }
-    if (!pixelCrop || pixelCrop.width < 4 || pixelCrop.height < 4) {
+    // Require a selection that covers a meaningful slice of the image.
+    // We validate against the PERCENT crop (not the display-pixel one)
+    // so the guard is independent of the current zoom level.
+    if (!crop || crop.width < 1 || crop.height < 1) {
       setError(t('orderForm.files.imageEdit.errorPickRegion'));
       return;
     }
 
-    // Convert CSS-pixel crop (what react-image-crop reports) to
-    // natural-pixel crop (what the canvas needs).
+    // Convert the PERCENT crop directly to NATURAL-pixel coordinates.
     //
-    // Critical bug this fixes: previously we loaded a DETACHED <img> in
-    // bakeCrop to read its `width`. A detached image's `.width` equals
-    // its `.naturalWidth`, so the scale factor came out to 1 and we
-    // were treating CSS pixels as natural pixels — cropping the wrong
-    // region. We must read the ratio from the IMAGE ELEMENT THAT IS
-    // CURRENTLY ON SCREEN, because react-image-crop's coordinates are
-    // in CSS pixels of THAT element. With the zoom slider in play the
-    // element's CSS width changes too, so this has to be read here
-    // (not at module load).
-    const scaleX = imgEl.naturalWidth / imgEl.width;
-    const scaleY = imgEl.naturalHeight / imgEl.height;
+    // We deliberately derive the region from the percent crop + the
+    // image's natural size rather than from the display-pixel crop
+    // react-image-crop reports. The percent crop is resolution- and
+    // zoom-independent: it means the same region whether the editor is
+    // showing the image at 0.3× (large photo, contain-fit) or 4×
+    // (zoomed in). Reading display pixels instead would go stale the
+    // moment the user nudges the zoom slider without re-dragging,
+    // baking a crop from the wrong place. Percent removes that whole
+    // class of bug and keeps the saved file pixel-identical to the
+    // selection the user sees.
+    const naturalW = imageRef.current?.naturalWidth ?? naturalSize?.w ?? 0;
+    const naturalH = imageRef.current?.naturalHeight ?? naturalSize?.h ?? 0;
+    if (naturalW <= 0 || naturalH <= 0) {
+      setError(t('orderForm.files.imageEdit.errorNotReady'));
+      return;
+    }
+    const pct = crop.unit === '%';
     const naturalRegion = {
-      x: pixelCrop.x * scaleX,
-      y: pixelCrop.y * scaleY,
-      width: pixelCrop.width * scaleX,
-      height: pixelCrop.height * scaleY,
+      x: pct ? (crop.x / 100) * naturalW : crop.x,
+      y: pct ? (crop.y / 100) * naturalH : crop.y,
+      width: pct ? (crop.width / 100) * naturalW : crop.width,
+      height: pct ? (crop.height / 100) * naturalH : crop.height,
     };
 
     setBusy(true);
@@ -239,7 +298,6 @@ export function ImageEditDialog({
       });
       setCropMode(false);
       setCrop(undefined);
-      setPixelCrop(undefined);
       setZoom(1);
     } catch (err) {
       setError(
@@ -330,31 +388,39 @@ export function ImageEditDialog({
                 In crop mode this becomes `overflow-auto` so a zoomed-in
                 image can be panned by scrolling. */}
             <div
+              ref={canvasRef}
               className={cn(
                 'relative flex h-[42vh] min-h-[220px] items-center justify-center rounded-lg border bg-[linear-gradient(135deg,_#f8fafc_25%,_#f1f5f9_25%,_#f1f5f9_50%,_#f8fafc_50%,_#f8fafc_75%,_#f1f5f9_75%)] bg-[length:24px_24px] sm:h-[55vh]',
+                // Zoomed-in images can exceed the canvas — let the user pan
+                // by scrolling. At the contain-fit baseline (zoom 1) the
+                // whole image is visible so we clip the checker overflow.
                 cropMode && zoom > 1 ? 'overflow-auto' : 'overflow-hidden',
               )}
             >
               {workingBlobUrl ? (
                 cropMode ? (
                   // Crop mode — react-image-crop drives the selection.
-                  // The image is sized to `${zoom * 100}%` so the layout
-                  // width changes with the zoom slider; react-image-crop
-                  // reports its rect in CSS pixels of the rendered image,
-                  // and applyCrop divides by element.width to recover
-                  // natural-pixel coords. CSS `transform: scale()` is
-                  // intentionally NOT used because it would leave
-                  // element.width unchanged and break the math.
+                  //
+                  // The image is given an EXPLICIT pixel size (`cropFit`)
+                  // that contain-fits the editor canvas at zoom 1 and
+                  // scales up from there. This is the fix for the
+                  // "portrait photo looks zoomed into the face" bug: the
+                  // previous `w-full` forced tall images past the canvas
+                  // height so only their middle slice was visible. Now
+                  // every orientation is shown whole, and what the user
+                  // selects is exactly what gets baked.
+                  //
+                  // react-image-crop reports its rectangle in the display
+                  // pixels of this sized image, and `applyCrop` divides by
+                  // `element.width` to recover natural-pixel coords — so a
+                  // real canvas crop is produced, never a CSS-only zoom.
                   <ReactCrop
                     crop={crop}
+                    // Store the selection in PERCENT — resolution- and
+                    // zoom-independent, and exactly what `applyCrop`
+                    // converts to natural pixels.
                     onChange={(_, percentCrop) => setCrop(percentCrop)}
-                    onComplete={(c) => setPixelCrop(c)}
                     keepSelection
-                    className="max-h-full"
-                    style={{
-                      width: `${zoom * 100}%`,
-                      maxWidth: zoom === 1 ? '100%' : 'none',
-                    }}
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
@@ -363,7 +429,14 @@ export function ImageEditDialog({
                       alt="Crop preview"
                       onLoad={handleImageLoad}
                       draggable={false}
-                      className="block w-full select-none"
+                      className="block select-none"
+                      style={
+                        cropFit
+                          ? { width: cropFit.width, height: cropFit.height }
+                          : // Until the canvas is measured, contain-fit via
+                            // CSS so there's no flash of an oversized image.
+                            { maxWidth: '100%', maxHeight: '100%' }
+                      }
                     />
                   </ReactCrop>
                 ) : (
@@ -419,7 +492,7 @@ export function ImageEditDialog({
                 <Button
                   type="button"
                   onClick={applyCrop}
-                  disabled={busy || !pixelCrop || pixelCrop.width < 4}
+                  disabled={busy || !crop || crop.width < 1}
                   className="gap-1.5"
                 >
                   {busy ? (

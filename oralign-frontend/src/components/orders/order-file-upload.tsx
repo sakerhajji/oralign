@@ -797,10 +797,18 @@ function PreviewSurface({
         alt={displayFileName(file)}
         loading="lazy"
         decoding="async"
+        // `object-contain` in BOTH the fullscreen (large) and the card
+        // thumbnail (small) so the WHOLE clinical photo is always
+        // visible. The thumbnail used to be `object-cover`, which
+        // center-cropped portrait patient photos inside the rectangular
+        // card — the face looked zoomed-in and the head/chin were
+        // clipped. A neutral muted backdrop frames the letterboxing so
+        // it reads as intentional. (Patient avatars are letter-based,
+        // so no surface here needs a cover-cropped circular thumbnail.)
         className={cn(
           large
             ? 'max-h-full max-w-full object-contain'
-            : 'h-full w-full object-cover',
+            : 'h-full w-full bg-muted/40 object-contain',
         )}
       />
     );

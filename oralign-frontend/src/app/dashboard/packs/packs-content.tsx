@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useT } from '@/lib/i18n/lang-context';
 import {
   usePacks,
   useCreatePack,
@@ -94,6 +95,7 @@ function formatMoney(p: PackPrice): string {
 // Page
 
 export function PacksPageContent() {
+  const { t } = useT();
   const [includeInactive, setIncludeInactive] = useState(false);
   const { data: packsResponse, isLoading } = usePacks({
     includeInactive,
@@ -114,12 +116,10 @@ export function PacksPageContent() {
       <header className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div className="space-y-1">
           <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
-            Pack catalogue
+            {t('packsAdmin.title')}
           </h1>
           <p className="text-xs leading-relaxed text-muted-foreground sm:text-sm">
-            Commercial bundles attached to quotations. Each pack carries
-            one price — edit it inline alongside the rest of the pack
-            details.
+            {t('packsAdmin.intro')}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -128,20 +128,22 @@ export function PacksPageContent() {
               checked={includeInactive}
               onCheckedChange={(v) => setIncludeInactive(!!v)}
             />
-            Show inactive
+            {t('packsAdmin.showInactive')}
           </label>
           <Button onClick={() => setCreateOpen(true)} className="gap-2">
             <Plus className="size-4" />
-            New pack
+            {t('packsAdmin.newPack')}
           </Button>
         </div>
       </header>
 
       <Card>
         <CardHeader className="gap-2">
-          <CardTitle>Active packs</CardTitle>
+          <CardTitle>{t('packsAdmin.activePacks')}</CardTitle>
           <CardDescription>
-            {packs?.length ?? 0} pack{packs?.length === 1 ? '' : 's'}
+            {packs?.length === 1
+              ? t('packsAdmin.countOne', { count: packs.length })
+              : t('packsAdmin.countMany', { count: packs?.length ?? 0 })}
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
@@ -154,10 +156,10 @@ export function PacksPageContent() {
           ) : !packs || packs.length === 0 ? (
             <div className="flex flex-col items-center gap-2 p-8 text-center text-muted-foreground">
               <PackageIcon className="size-8 opacity-50" />
-              <p className="text-sm">No packs yet.</p>
+              <p className="text-sm">{t('packsAdmin.emptyTitle')}</p>
               <Button size="sm" onClick={() => setCreateOpen(true)}>
                 <Plus className="mr-1 size-4" />
-                Create your first pack
+                {t('packsAdmin.createFirst')}
               </Button>
             </div>
           ) : (
@@ -169,10 +171,10 @@ export function PacksPageContent() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Limits</TableHead>
-                      <TableHead>Price</TableHead>
-                      <TableHead>Status</TableHead>
+                      <TableHead>{t('packsAdmin.colName')}</TableHead>
+                      <TableHead>{t('packsAdmin.colLimits')}</TableHead>
+                      <TableHead>{t('packsAdmin.colPrice')}</TableHead>
+                      <TableHead>{t('packsAdmin.colStatus')}</TableHead>
                       <TableHead className="w-12" />
                     </TableRow>
                   </TableHeader>
@@ -191,12 +193,16 @@ export function PacksPageContent() {
                           </TableCell>
                           <TableCell className="text-xs leading-relaxed">
                             {pack.isUnlimitedSteps
-                              ? 'Unlimited steps'
-                              : `Max ${pack.maxStepsPerArch ?? 0} steps`}
+                              ? t('packsAdmin.unlimitedSteps')
+                              : t('packsAdmin.maxStepsTpl', {
+                                  count: pack.maxStepsPerArch ?? 0,
+                                })}
                             <br />
                             {pack.isUnlimitedCorrections
-                              ? 'Unlimited corrections'
-                              : `${pack.includedCorrections ?? 0} corrections`}
+                              ? t('packsAdmin.unlimitedCorrections')
+                              : t('packsAdmin.correctionsTpl', {
+                                  count: pack.includedCorrections ?? 0,
+                                })}
                           </TableCell>
                           <TableCell>
                             {price ? (
@@ -205,15 +211,15 @@ export function PacksPageContent() {
                               </span>
                             ) : (
                               <span className="text-xs text-muted-foreground">
-                                No price set
+                                {t('packsAdmin.noPriceSet')}
                               </span>
                             )}
                           </TableCell>
                           <TableCell>
                             {pack.isActive ? (
-                              <Badge>Active</Badge>
+                              <Badge>{t('packsAdmin.active')}</Badge>
                             ) : (
-                              <Badge variant="outline">Inactive</Badge>
+                              <Badge variant="outline">{t('packsAdmin.inactive')}</Badge>
                             )}
                           </TableCell>
                           <TableCell className="text-right">
@@ -251,9 +257,9 @@ export function PacksPageContent() {
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="font-semibold">{pack.name}</span>
                             {pack.isActive ? (
-                              <Badge>Active</Badge>
+                              <Badge>{t('packsAdmin.active')}</Badge>
                             ) : (
-                              <Badge variant="outline">Inactive</Badge>
+                              <Badge variant="outline">{t('packsAdmin.inactive')}</Badge>
                             )}
                           </div>
                           {pack.description ? (
@@ -273,30 +279,32 @@ export function PacksPageContent() {
                       <dl className="mt-3 grid grid-cols-2 gap-2 text-xs">
                         <div className="rounded border bg-muted/30 p-2">
                           <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                            Steps
+                            {t('packsAdmin.cardSteps')}
                           </dt>
                           <dd className="mt-0.5 font-medium">
                             {pack.isUnlimitedSteps
-                              ? 'Unlimited'
-                              : `Max ${pack.maxStepsPerArch ?? 0}`}
+                              ? t('packsAdmin.cardUnlimited')
+                              : t('packsAdmin.cardMaxTpl', {
+                                  count: pack.maxStepsPerArch ?? 0,
+                                })}
                           </dd>
                         </div>
                         <div className="rounded border bg-muted/30 p-2">
                           <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                            Corrections
+                            {t('packsAdmin.cardCorrections')}
                           </dt>
                           <dd className="mt-0.5 font-medium">
                             {pack.isUnlimitedCorrections
-                              ? 'Unlimited'
+                              ? t('packsAdmin.cardUnlimited')
                               : pack.includedCorrections ?? 0}
                           </dd>
                         </div>
                         <div className="col-span-2 rounded border bg-muted/30 p-2">
                           <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                            Price
+                            {t('packsAdmin.cardPrice')}
                           </dt>
                           <dd className="mt-0.5 font-semibold tabular-nums">
-                            {price ? formatMoney(price) : '— no price set'}
+                            {price ? formatMoney(price) : t('packsAdmin.cardNoPrice')}
                           </dd>
                         </div>
                       </dl>
@@ -327,16 +335,13 @@ export function PacksPageContent() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete this pack?</AlertDialogTitle>
+            <AlertDialogTitle>{t('packsAdmin.deleteTitle')}</AlertDialogTitle>
             <AlertDialogDescription>
-              The pack &quot;{confirmDelete?.name}&quot; will be soft-deleted
-              and hidden from the catalogue. Quotations that already
-              snapshotted this pack keep working — they don&apos;t reference
-              the pack row, only a copy of its fields.
+              {t('packsAdmin.deleteBody', { name: confirmDelete?.name ?? '' })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t('packsAdmin.cancel')}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 if (confirmDelete) {
@@ -345,7 +350,7 @@ export function PacksPageContent() {
                 }
               }}
             >
-              Delete
+              {t('packsAdmin.delete')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -372,6 +377,7 @@ function RowActions({
   onDeactivate: () => void;
   onDelete: () => void;
 }) {
+  const { t } = useT();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -382,18 +388,18 @@ function RowActions({
       <DropdownMenuContent align="end">
         <DropdownMenuItem onClick={onEdit}>
           <Pencil className="mr-2 size-4" />
-          Edit pack
+          {t('packsAdmin.editPack')}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         {pack.isActive ? (
           <DropdownMenuItem onClick={onDeactivate}>
             <PowerOff className="mr-2 size-4" />
-            Deactivate
+            {t('packsAdmin.deactivate')}
           </DropdownMenuItem>
         ) : (
           <DropdownMenuItem onClick={onActivate}>
             <Power className="mr-2 size-4" />
-            Activate
+            {t('packsAdmin.activate')}
           </DropdownMenuItem>
         )}
         <DropdownMenuItem
@@ -401,7 +407,7 @@ function RowActions({
           onClick={onDelete}
         >
           <Trash2 className="mr-2 size-4" />
-          Delete pack
+          {t('packsAdmin.deletePack')}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -422,6 +428,7 @@ function PackFormDialog({
   onClose: () => void;
   pack: Pack | null;
 }) {
+  const { t } = useT();
   const editing = !!pack;
   const create = useCreatePack();
   const update = useUpdatePack();
@@ -544,40 +551,39 @@ function PackFormDialog({
           dialog instead of pushing off-screen on small phones. */}
       <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{editing ? 'Edit pack' : 'New pack'}</DialogTitle>
+          <DialogTitle>
+            {editing ? t('packsAdmin.dialogEditTitle') : t('packsAdmin.dialogNewTitle')}
+          </DialogTitle>
           <DialogDescription>
-            Pack name is the only user-visible identifier — pick something
-            short and consistent (LITE, ESSENTIAL, SMART, PRO, PRO+). Price
-            is edited inline below — leave the field empty to keep the
-            current price (or create the pack without one).
+            {t('packsAdmin.dialogDescription')}
           </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4 py-2">
           <div className="grid gap-2">
-            <Label htmlFor="pack-name">Name *</Label>
+            <Label htmlFor="pack-name">{t('packsAdmin.nameLabel')}</Label>
             <Input
               id="pack-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. ESSENTIAL"
+              placeholder={t('packsAdmin.namePlaceholder')}
             />
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="pack-description">Description</Label>
+            <Label htmlFor="pack-description">{t('packsAdmin.descriptionLabel')}</Label>
             <Textarea
               id="pack-description"
               rows={2}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Optional — short note shown alongside the pack name."
+              placeholder={t('packsAdmin.descriptionPlaceholder')}
             />
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
-              <Label htmlFor="pack-steps">Max steps</Label>
+              <Label htmlFor="pack-steps">{t('packsAdmin.maxStepsLabel')}</Label>
               <Input
                 id="pack-steps"
                 type="number"
@@ -591,11 +597,11 @@ function PackFormDialog({
                   checked={isUnlimitedSteps}
                   onCheckedChange={(v) => setIsUnlimitedSteps(!!v)}
                 />
-                Unlimited steps
+                {t('packsAdmin.unlimitedStepsCb')}
               </label>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="pack-corrections">Included corrections</Label>
+              <Label htmlFor="pack-corrections">{t('packsAdmin.includedCorrectionsLabel')}</Label>
               <Input
                 id="pack-corrections"
                 type="number"
@@ -609,7 +615,7 @@ function PackFormDialog({
                   checked={isUnlimitedCorrections}
                   onCheckedChange={(v) => setIsUnlimitedCorrections(!!v)}
                 />
-                Unlimited corrections
+                {t('packsAdmin.unlimitedCorrectionsCb')}
               </label>
             </div>
           </div>
@@ -619,7 +625,7 @@ function PackFormDialog({
               underlying PackPrice atomically. Currency stays in TND
               for now but the field is editable for future markets. */}
           <div className="grid gap-2 rounded-md border bg-muted/30 p-3">
-            <Label className="text-sm font-medium">Pack price</Label>
+            <Label className="text-sm font-medium">{t('packsAdmin.packPriceLabel')}</Label>
             <div className="grid grid-cols-[1fr_auto] gap-2 sm:grid-cols-[2fr_1fr]">
               <Input
                 type="number"
@@ -631,8 +637,8 @@ function PackFormDialog({
                   editing
                     ? currentPrice
                       ? String(currentPrice.price)
-                      : 'e.g. 1950.000'
-                    : 'e.g. 1950.000'
+                      : t('packsAdmin.pricePlaceholder')
+                    : t('packsAdmin.pricePlaceholder')
                 }
                 aria-invalid={priceInvalid}
               />
@@ -648,14 +654,13 @@ function PackFormDialog({
             <p className="text-[11px] leading-snug text-muted-foreground">
               {editing
                 ? currentPrice
-                  ? 'Saving changes the active price. Existing quotations that already snapshotted the old price are unaffected.'
-                  : 'No price set yet. Enter one to expose this pack on new quotations.'
-                : 'Optional on create — you can add a price later from the same Edit form.'}
+                  ? t('packsAdmin.priceHelpEdited')
+                  : t('packsAdmin.priceHelpNoneYet')
+                : t('packsAdmin.priceHelpCreate')}
             </p>
             {priceInvalid ? (
               <p className="text-[11px] text-destructive">
-                Enter a positive number with up to 3 decimals (e.g. 1950 or
-                1950.000).
+                {t('packsAdmin.priceInvalid')}
               </p>
             ) : null}
           </div>
@@ -670,25 +675,25 @@ function PackFormDialog({
                 checked={isActive}
                 onCheckedChange={(v) => setIsActive(!!v)}
               />
-              Active in catalogue
+              {t('packsAdmin.activeInCatalogue')}
             </label>
             <p className="text-xs text-muted-foreground">
               {isActive
-                ? 'Visible to practitioners and selectable on new quotes.'
-                : 'Hidden from new quotes and the public showcase. Existing quotes that already use this pack are unaffected.'}
+                ? t('packsAdmin.activeYes')
+                : t('packsAdmin.activeNo')}
             </p>
           </div>
         </div>
 
         <DialogFooter className="gap-2 sm:gap-0">
           <Button variant="ghost" onClick={onClose} disabled={submitting}>
-            Cancel
+            {t('packsAdmin.cancel')}
           </Button>
           <Button
             onClick={submit}
             disabled={!name.trim() || submitting || priceInvalid}
           >
-            {editing ? 'Save changes' : 'Create pack'}
+            {editing ? t('packsAdmin.saveChanges') : t('packsAdmin.createPack')}
           </Button>
         </DialogFooter>
       </DialogContent>

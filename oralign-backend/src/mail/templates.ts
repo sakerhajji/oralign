@@ -10,7 +10,15 @@
  *   - Buttons rendered as <a> with table padding so they look right in
  *     Outlook desktop, which doesn't honour `display:inline-block` padding
  *     on links.
+ *
+ * i18n:
+ *   - Every renderer takes a `lang` ('en' | 'fr') as its last parameter and
+ *     resolves the human-visible copy from a small per-template TEXTS
+ *     object. The HTML skeleton is built once per template — only the text
+ *     nodes, subjects, button labels and footers differ between languages.
  */
+
+import { Lang } from '../common/i18n/lang';
 
 const APP_NAME = 'Oralign';
 // Strict black-and-white palette. Everything renders the same on a
@@ -41,19 +49,33 @@ function logoUrl(): string {
     : 'https://oralign.com.tn/ORALIGN%20BLACK.png';
 }
 
+const SHELL_TEXTS: Record<Lang, { rights: string; ignore: string }> = {
+  en: {
+    rights: `All rights reserved.`,
+    ignore: `If you didn't request this email you can safely ignore it.`,
+  },
+  fr: {
+    rights: `Tous droits réservés.`,
+    ignore: `Si vous n'êtes pas à l'origine de cet e-mail, vous pouvez l'ignorer en toute sécurité.`,
+  },
+};
+
 function shell({
   title,
   preheader,
   body,
+  lang,
 }: {
   title: string;
   /** Hidden 1-line summary that some mail clients show next to the subject. */
   preheader: string;
   body: string;
+  lang: Lang;
 }): string {
   const year = new Date().getFullYear();
+  const t = SHELL_TEXTS[lang];
   return `<!DOCTYPE html>
-<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<html lang="${lang}" xmlns="http://www.w3.org/1999/xhtml">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -100,14 +122,14 @@ function shell({
             <tr>
               <td style="padding:20px 32px;background:${SUBTLE_BG};border-top:1px solid ${BORDER_COLOR};">
                 <p style="margin:0;font-size:12px;line-height:1.6;color:${MUTED_COLOR};text-align:center;">
-                  &copy; ${year} ${APP_NAME}. All rights reserved.
+                  &copy; ${year} ${APP_NAME}. ${t.rights}
                 </p>
               </td>
             </tr>
           </table>
 
           <p style="margin:16px 0 0;font-size:11px;color:${MUTED_COLOR};text-align:center;">
-            If you didn't request this email you can safely ignore it.
+            ${t.ignore}
           </p>
         </td>
       </tr>
@@ -118,9 +140,10 @@ function shell({
 
 // ─── Reusable atoms ─────────────────────────────────────────────────────────
 
-function greeting(fullName: string): string {
+function greeting(fullName: string, lang: Lang): string {
+  const hi = lang === 'fr' ? 'Bonjour' : 'Hi';
   return `<p style="margin:0 0 12px;font-size:18px;font-weight:600;color:${TEXT_COLOR};">
-    Hi ${fullName},
+    ${hi} ${fullName},
   </p>`;
 }
 
@@ -157,7 +180,8 @@ function button(href: string, label: string): string {
   </table>`;
 }
 
-function otpBlock(code: string): string {
+function otpBlock(code: string, lang: Lang): string {
+  const label = lang === 'fr' ? 'Code de vérification' : 'Verification code';
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
            style="margin:0 0 24px;">
     <tr>
@@ -165,7 +189,7 @@ function otpBlock(code: string): string {
           style="background:${SUBTLE_BG};border:1px solid ${BORDER_COLOR};padding:28px 24px;">
         <p style="margin:0 0 10px;font-size:11px;font-weight:700;letter-spacing:2px;
                   text-transform:uppercase;color:${MUTED_COLOR};">
-          Verification code
+          ${label}
         </p>
         <p style="margin:0;font-size:38px;font-weight:800;letter-spacing:12px;
                   color:${TEXT_COLOR};font-variant-numeric:tabular-nums;">
@@ -176,9 +200,13 @@ function otpBlock(code: string): string {
   </table>`;
 }
 
-function urlFallback(url: string): string {
+function urlFallback(url: string, lang: Lang): string {
+  const hint =
+    lang === 'fr'
+      ? `Le bouton ne fonctionne pas&nbsp;? Copiez ce lien dans votre navigateur&nbsp;:`
+      : `Button not working? Paste this link into your browser:`;
   return `<p style="margin:16px 0 0;font-size:12px;color:${MUTED_COLOR};text-align:center;">
-    Button not working? Paste this link into your browser:<br/>
+    ${hint}<br/>
     <a href="${url}" style="color:${TEXT_COLOR};text-decoration:underline;word-break:break-all;">${url}</a>
   </p>`;
 }
@@ -195,75 +223,152 @@ function escape(input: string): string {
 
 // ─── Public renderers ───────────────────────────────────────────────────────
 
-export function renderVerificationEmail(args: {
-  fullName: string;
-  code: string;
-}): { html: string; subject: string } {
-  return {
-    subject: `${args.code} is your ${APP_NAME} verification code`,
-    html: shell({
+export function renderVerificationEmail(
+  args: {
+    fullName: string;
+    code: string;
+  },
+  lang: Lang,
+): { html: string; subject: string } {
+  const TEXTS = {
+    en: {
+      subject: `${args.code} is your ${APP_NAME} verification code`,
       title: `Verify your ${APP_NAME} account`,
       preheader: `Your verification code is ${args.code}. Expires in 15 minutes.`,
+      lead:
+        `Use the code below to verify your email address. ` +
+        `It expires in <strong>15 minutes</strong>.`,
+      note:
+        `Once verified you'll be guided through completing your profile and ` +
+        `clinic details. Final activation requires admin review.`,
+    },
+    fr: {
+      subject: `${args.code} est votre code de vérification ${APP_NAME}`,
+      title: `Vérifiez votre compte ${APP_NAME}`,
+      preheader: `Votre code de vérification est ${args.code}. Il expire dans 15 minutes.`,
+      lead:
+        `Utilisez le code ci-dessous pour vérifier votre adresse e-mail. ` +
+        `Il expire dans <strong>15 minutes</strong>.`,
+      note:
+        `Une fois votre adresse vérifiée, vous serez guidé(e) pour compléter ` +
+        `votre profil et les informations de votre cabinet. L'activation ` +
+        `finale nécessite la validation d'un administrateur.`,
+    },
+  };
+  const t = TEXTS[lang];
+  return {
+    subject: t.subject,
+    html: shell({
+      lang,
+      title: t.title,
+      preheader: t.preheader,
       body: `
-        ${greeting(escape(args.fullName))}
-        ${lead(
-          `Use the code below to verify your email address. ` +
-            `It expires in <strong>15 minutes</strong>.`,
-        )}
-        ${otpBlock(args.code)}
+        ${greeting(escape(args.fullName), lang)}
+        ${lead(t.lead)}
+        ${otpBlock(args.code, lang)}
         <p style="margin:0;font-size:13px;line-height:1.6;color:${MUTED_COLOR};text-align:center;">
-          Once verified you'll be guided through completing your profile and
-          clinic details. Final activation requires admin review.
+          ${t.note}
         </p>
       `,
     }),
   };
 }
 
-export function renderPasswordResetEmail(args: {
-  fullName: string;
-  resetUrl: string;
-}): { html: string; subject: string } {
-  return {
-    subject: `Reset your ${APP_NAME} password`,
-    html: shell({
+export function renderPasswordResetEmail(
+  args: {
+    fullName: string;
+    resetUrl: string;
+  },
+  lang: Lang,
+): { html: string; subject: string } {
+  const TEXTS = {
+    en: {
+      subject: `Reset your ${APP_NAME} password`,
       title: `Reset your ${APP_NAME} password`,
       preheader: `Reset your ${APP_NAME} password. Link expires in 1 hour.`,
+      lead:
+        `We received a request to reset your ${APP_NAME} password. ` +
+        `Click the button below to choose a new password. This link ` +
+        `expires in <strong>1 hour</strong>.`,
+      button: `Reset password`,
+      note:
+        `Didn't request a reset? You can safely ignore this email — your ` +
+        `password won't change unless you click the link above.`,
+    },
+    fr: {
+      subject: `Réinitialisez votre mot de passe ${APP_NAME}`,
+      title: `Réinitialisez votre mot de passe ${APP_NAME}`,
+      preheader: `Réinitialisez votre mot de passe ${APP_NAME}. Le lien expire dans 1 heure.`,
+      lead:
+        `Nous avons reçu une demande de réinitialisation de votre mot de ` +
+        `passe ${APP_NAME}. Cliquez sur le bouton ci-dessous pour choisir un ` +
+        `nouveau mot de passe. Ce lien expire dans <strong>1 heure</strong>.`,
+      button: `Réinitialiser le mot de passe`,
+      note:
+        `Vous n'avez pas demandé de réinitialisation&nbsp;? Vous pouvez ignorer ` +
+        `cet e-mail en toute sécurité — votre mot de passe ne sera pas modifié ` +
+        `tant que vous ne cliquerez pas sur le lien ci-dessus.`,
+    },
+  };
+  const t = TEXTS[lang];
+  return {
+    subject: t.subject,
+    html: shell({
+      lang,
+      title: t.title,
+      preheader: t.preheader,
       body: `
-        ${greeting(escape(args.fullName))}
-        ${lead(
-          `We received a request to reset your ${APP_NAME} password. ` +
-            `Click the button below to choose a new password. This link ` +
-            `expires in <strong>1 hour</strong>.`,
-        )}
-        ${button(args.resetUrl, 'Reset password')}
+        ${greeting(escape(args.fullName), lang)}
+        ${lead(t.lead)}
+        ${button(args.resetUrl, t.button)}
         ${divider()}
-        ${urlFallback(args.resetUrl)}
+        ${urlFallback(args.resetUrl, lang)}
         <p style="margin:24px 0 0;font-size:12px;line-height:1.6;color:${MUTED_COLOR};">
-          Didn't request a reset? You can safely ignore this email — your
-          password won't change unless you click the link above.
+          ${t.note}
         </p>
       `,
     }),
   };
 }
 
-export function renderApprovalGrantedEmail(args: {
-  fullName: string;
-  dashboardUrl: string;
-}): { html: string; subject: string } {
-  return {
-    subject: `Your ${APP_NAME} account has been approved`,
-    html: shell({
+export function renderApprovalGrantedEmail(
+  args: {
+    fullName: string;
+    dashboardUrl: string;
+  },
+  lang: Lang,
+): { html: string; subject: string } {
+  const TEXTS = {
+    en: {
+      subject: `Your ${APP_NAME} account has been approved`,
       title: `${APP_NAME} account approved`,
       preheader: `Welcome to ${APP_NAME}. Your account is now active.`,
+      lead:
+        `Your ${APP_NAME} account has been approved. ` +
+        `You can now sign in and start managing your clinic.`,
+      button: `Open dashboard`,
+    },
+    fr: {
+      subject: `Votre compte ${APP_NAME} a été approuvé`,
+      title: `Compte ${APP_NAME} approuvé`,
+      preheader: `Bienvenue sur ${APP_NAME}. Votre compte est désormais actif.`,
+      lead:
+        `Votre compte ${APP_NAME} a été approuvé. ` +
+        `Vous pouvez désormais vous connecter et commencer à gérer votre cabinet.`,
+      button: `Accéder au tableau de bord`,
+    },
+  };
+  const t = TEXTS[lang];
+  return {
+    subject: t.subject,
+    html: shell({
+      lang,
+      title: t.title,
+      preheader: t.preheader,
       body: `
-        ${greeting(escape(args.fullName))}
-        ${lead(
-          `Your ${APP_NAME} account has been approved. ` +
-            `You can now sign in and start managing your clinic.`,
-        )}
-        ${button(args.dashboardUrl, 'Open dashboard')}
+        ${greeting(escape(args.fullName), lang)}
+        ${lead(t.lead)}
+        ${button(args.dashboardUrl, t.button)}
       `,
     }),
   };
@@ -306,12 +411,22 @@ function metaTable(rows: Array<{ label: string; value: string }>): string {
   </table>`;
 }
 
-function decisionBadge(decision: 'approved' | 'rejected'): string {
+function decisionBadge(
+  decision: 'approved' | 'rejected',
+  lang: Lang,
+): string {
   // B&W badge — solid black for approved, inverted (white-fill /
   // black-border / black-text) for rejected. Same legible contrast
   // as the old green/red palette, no chroma.
   const isApproved = decision === 'approved';
-  const label = isApproved ? 'Approved' : 'Rejected';
+  const label =
+    lang === 'fr'
+      ? isApproved
+        ? 'Approuvé'
+        : 'Rejeté'
+      : isApproved
+        ? 'Approved'
+        : 'Rejected';
   const bg = isApproved ? '#000000' : '#ffffff';
   const fg = isApproved ? '#ffffff' : '#000000';
   return `<span style="display:inline-block;padding:5px 14px;font-size:11px;
@@ -327,30 +442,57 @@ function decisionBadge(decision: 'approved' | 'rejected'): string {
  * Sent to the doctor when they submit a new order. Confirms the order
  * was received and points them at the dashboard so they can track it.
  */
-export function renderNewOrderForDoctorEmail(args: {
-  doctorName: string;
-  orderCode: string;
-  patientName: string;
-  dashboardUrl: string;
-}): { html: string; subject: string } {
-  return {
-    subject: `Order ${args.orderCode} submitted — ${APP_NAME}`,
-    html: shell({
+export function renderNewOrderForDoctorEmail(
+  args: {
+    doctorName: string;
+    orderCode: string;
+    patientName: string;
+    dashboardUrl: string;
+  },
+  lang: Lang,
+): { html: string; subject: string } {
+  const TEXTS = {
+    en: {
+      subject: `Order ${args.orderCode} submitted — ${APP_NAME}`,
       title: `Order ${args.orderCode} received`,
       preheader: `We've received your order for ${args.patientName}. Our team is on it.`,
+      lead:
+        `Thanks — your order has been submitted to our team. ` +
+        `You'll get an email as soon as the treatment plan is ready ` +
+        `for your review.`,
+      labels: { order: `Order`, patient: `Patient`, status: `Status` },
+      statusValue: `Submitted — under review`,
+      button: `Open order`,
+    },
+    fr: {
+      subject: `Commande ${args.orderCode} soumise — ${APP_NAME}`,
+      title: `Commande ${args.orderCode} reçue`,
+      preheader: `Nous avons bien reçu votre commande pour ${args.patientName}. Notre équipe s'en occupe.`,
+      lead:
+        `Merci — votre commande a bien été transmise à notre équipe. ` +
+        `Vous recevrez un e-mail dès que le plan de traitement sera prêt ` +
+        `pour votre validation.`,
+      labels: { order: `Commande`, patient: `Patient`, status: `Statut` },
+      statusValue: `Soumise — en cours d'examen`,
+      button: `Voir la commande`,
+    },
+  };
+  const t = TEXTS[lang];
+  return {
+    subject: t.subject,
+    html: shell({
+      lang,
+      title: t.title,
+      preheader: t.preheader,
       body: `
-        ${greeting(escape(args.doctorName))}
-        ${lead(
-          `Thanks — your order has been submitted to our team. ` +
-            `You'll get an email as soon as the treatment plan is ready ` +
-            `for your review.`,
-        )}
+        ${greeting(escape(args.doctorName), lang)}
+        ${lead(t.lead)}
         ${metaTable([
-          { label: 'Order', value: args.orderCode },
-          { label: 'Patient', value: args.patientName },
-          { label: 'Status', value: 'Submitted — under review' },
+          { label: t.labels.order, value: args.orderCode },
+          { label: t.labels.patient, value: args.patientName },
+          { label: t.labels.status, value: t.statusValue },
         ])}
-        ${button(args.dashboardUrl, 'Open order')}
+        ${button(args.dashboardUrl, t.button)}
       `,
     }),
   };
@@ -360,31 +502,67 @@ export function renderNewOrderForDoctorEmail(args: {
  * Sent to each admin / super_admin when a doctor submits a new order so
  * they know there's something fresh to plan.
  */
-export function renderNewOrderForAdminEmail(args: {
-  adminName: string;
-  orderCode: string;
-  doctorName: string;
-  patientName: string;
-  dashboardUrl: string;
-}): { html: string; subject: string } {
-  return {
-    subject: `New order ${args.orderCode} from ${args.doctorName}`,
-    html: shell({
+export function renderNewOrderForAdminEmail(
+  args: {
+    adminName: string;
+    orderCode: string;
+    doctorName: string;
+    patientName: string;
+    dashboardUrl: string;
+  },
+  lang: Lang,
+): { html: string; subject: string } {
+  const TEXTS = {
+    en: {
+      subject: `New order ${args.orderCode} from ${args.doctorName}`,
       title: `New order ${args.orderCode}`,
       preheader: `${args.doctorName} submitted a new order for ${args.patientName}.`,
+      lead:
+        `A new order has just been submitted and is waiting for ` +
+        `treatment planning.`,
+      labels: {
+        order: `Order`,
+        doctor: `Doctor`,
+        patient: `Patient`,
+        status: `Status`,
+      },
+      statusValue: `Submitted — needs planner assignment`,
+      button: `Review order`,
+    },
+    fr: {
+      subject: `Nouvelle commande ${args.orderCode} de ${args.doctorName}`,
+      title: `Nouvelle commande ${args.orderCode}`,
+      preheader: `${args.doctorName} a soumis une nouvelle commande pour ${args.patientName}.`,
+      lead:
+        `Une nouvelle commande vient d'être soumise et attend la ` +
+        `planification du traitement.`,
+      labels: {
+        order: `Commande`,
+        doctor: `Praticien`,
+        patient: `Patient`,
+        status: `Statut`,
+      },
+      statusValue: `Soumise — en attente d'affectation à un planificateur`,
+      button: `Examiner la commande`,
+    },
+  };
+  const t = TEXTS[lang];
+  return {
+    subject: t.subject,
+    html: shell({
+      lang,
+      title: t.title,
+      preheader: t.preheader,
       body: `
-        ${greeting(escape(args.adminName))}
-        ${lead(
-          `A new order has just been submitted and is waiting for ` +
-            `treatment planning.`,
-        )}
+        ${greeting(escape(args.adminName), lang)}
+        ${lead(t.lead)}
         ${metaTable([
-          { label: 'Order', value: args.orderCode },
-          { label: 'Doctor', value: args.doctorName },
-          { label: 'Patient', value: args.patientName },
-          { label: 'Status', value: 'Submitted — needs planner assignment' },
+          { label: t.labels.order, value: args.orderCode },
+          { label: t.labels.doctor, value: args.doctorName },
+          { label: t.labels.patient, value: args.patientName },
+          { label: t.labels.status, value: t.statusValue },
         ])}
-        ${button(args.dashboardUrl, 'Review order')}
+        ${button(args.dashboardUrl, t.button)}
       `,
     }),
   };
@@ -394,32 +572,61 @@ export function renderNewOrderForAdminEmail(args: {
  * Sent to the doctor when admin / designer marks the treatment plan as
  * READY for the doctor's review.
  */
-export function renderTreatmentReadyForDoctorEmail(args: {
-  doctorName: string;
-  orderCode: string;
-  planName: string;
-  dashboardUrl: string;
-}): { html: string; subject: string } {
-  return {
-    subject: `${args.planName} is ready for review — ${args.orderCode}`,
-    html: shell({
+export function renderTreatmentReadyForDoctorEmail(
+  args: {
+    doctorName: string;
+    orderCode: string;
+    planName: string;
+    dashboardUrl: string;
+  },
+  lang: Lang,
+): { html: string; subject: string } {
+  const TEXTS = {
+    en: {
+      subject: `${args.planName} is ready for review — ${args.orderCode}`,
       title: `Treatment plan ready`,
       preheader: `${args.planName} is ready for your review.`,
+      lead:
+        `The treatment plan for order <strong>${escape(
+          args.orderCode,
+        )}</strong> has been prepared and is ready for your review. ` +
+        `You can approve it to move on to quotation, or request a ` +
+        `revision if anything needs to change.`,
+      labels: { order: `Order`, plan: `Plan`, status: `Status` },
+      statusValue: `Ready for your review`,
+      button: `Review treatment plan`,
+    },
+    fr: {
+      subject: `${args.planName} est prêt pour validation — ${args.orderCode}`,
+      title: `Plan de traitement prêt`,
+      preheader: `${args.planName} est prêt pour votre validation.`,
+      lead:
+        `Le plan de traitement de la commande <strong>${escape(
+          args.orderCode,
+        )}</strong> a été préparé et est prêt pour votre validation. ` +
+        `Vous pouvez l'approuver pour passer à l'étape du devis, ou ` +
+        `demander une révision si une modification est nécessaire.`,
+      labels: { order: `Commande`, plan: `Plan`, status: `Statut` },
+      statusValue: `Prêt pour votre validation`,
+      button: `Examiner le plan de traitement`,
+    },
+  };
+  const t = TEXTS[lang];
+  return {
+    subject: t.subject,
+    html: shell({
+      lang,
+      title: t.title,
+      preheader: t.preheader,
       body: `
-        ${greeting(escape(args.doctorName))}
-        ${lead(
-          `The treatment plan for order <strong>${escape(
-            args.orderCode,
-          )}</strong> has been prepared and is ready for your review. ` +
-            `You can approve it to move on to quotation, or request a ` +
-            `revision if anything needs to change.`,
-        )}
+        ${greeting(escape(args.doctorName), lang)}
+        ${lead(t.lead)}
         ${metaTable([
-          { label: 'Order', value: args.orderCode },
-          { label: 'Plan', value: args.planName },
-          { label: 'Status', value: 'Ready for your review' },
+          { label: t.labels.order, value: args.orderCode },
+          { label: t.labels.plan, value: args.planName },
+          { label: t.labels.status, value: t.statusValue },
         ])}
-        ${button(args.dashboardUrl, 'Review treatment plan')}
+        ${button(args.dashboardUrl, t.button)}
       `,
     }),
   };
@@ -429,43 +636,74 @@ export function renderTreatmentReadyForDoctorEmail(args: {
  * Sent to each admin when the doctor approves or rejects a treatment
  * plan. One template covers both outcomes via the `decision` flag.
  */
-export function renderTreatmentDecisionForAdminEmail(args: {
-  adminName: string;
-  orderCode: string;
-  doctorName: string;
-  planName: string;
-  decision: 'approved' | 'rejected';
-  reason?: string;
-  dashboardUrl: string;
-}): { html: string; subject: string } {
+export function renderTreatmentDecisionForAdminEmail(
+  args: {
+    adminName: string;
+    orderCode: string;
+    doctorName: string;
+    planName: string;
+    decision: 'approved' | 'rejected';
+    reason?: string;
+    dashboardUrl: string;
+  },
+  lang: Lang,
+): { html: string; subject: string } {
   const isApproved = args.decision === 'approved';
-  const subject = isApproved
-    ? `${args.doctorName} approved ${args.planName} (${args.orderCode})`
-    : `${args.doctorName} requested a revision on ${args.planName} (${args.orderCode})`;
-  const leadText = isApproved
-    ? `<strong>${escape(args.doctorName)}</strong> approved the treatment plan. The order has moved to fabrication.`
-    : `<strong>${escape(args.doctorName)}</strong> requested a revision on the treatment plan. The order is back in planning.`;
+  const TEXTS = {
+    en: {
+      subjectApproved: `${args.doctorName} approved ${args.planName} (${args.orderCode})`,
+      subjectRejected: `${args.doctorName} requested a revision on ${args.planName} (${args.orderCode})`,
+      preheaderApproved: `${args.doctorName} approved ${args.planName}.`,
+      preheaderRejected: `${args.doctorName} rejected ${args.planName}.`,
+      leadApproved: `<strong>${escape(args.doctorName)}</strong> approved the treatment plan. The order has moved to fabrication.`,
+      leadRejected: `<strong>${escape(args.doctorName)}</strong> requested a revision on the treatment plan. The order is back in planning.`,
+      labels: {
+        order: `Order`,
+        plan: `Plan`,
+        doctor: `Doctor`,
+        reason: `Reason`,
+      },
+      button: `Open order`,
+    },
+    fr: {
+      subjectApproved: `${args.doctorName} a approuvé ${args.planName} (${args.orderCode})`,
+      subjectRejected: `${args.doctorName} a demandé une révision de ${args.planName} (${args.orderCode})`,
+      preheaderApproved: `${args.doctorName} a approuvé ${args.planName}.`,
+      preheaderRejected: `${args.doctorName} a rejeté ${args.planName}.`,
+      leadApproved: `<strong>${escape(args.doctorName)}</strong> a approuvé le plan de traitement. La commande est passée en fabrication.`,
+      leadRejected: `<strong>${escape(args.doctorName)}</strong> a demandé une révision du plan de traitement. La commande est de retour en phase de planification.`,
+      labels: {
+        order: `Commande`,
+        plan: `Plan`,
+        doctor: `Praticien`,
+        reason: `Motif`,
+      },
+      button: `Voir la commande`,
+    },
+  };
+  const t = TEXTS[lang];
+  const subject = isApproved ? t.subjectApproved : t.subjectRejected;
+  const leadText = isApproved ? t.leadApproved : t.leadRejected;
   const rows: Array<{ label: string; value: string }> = [
-    { label: 'Order', value: args.orderCode },
-    { label: 'Plan', value: args.planName },
-    { label: 'Doctor', value: args.doctorName },
+    { label: t.labels.order, value: args.orderCode },
+    { label: t.labels.plan, value: args.planName },
+    { label: t.labels.doctor, value: args.doctorName },
   ];
   if (args.reason && args.reason.trim()) {
-    rows.push({ label: 'Reason', value: args.reason.trim() });
+    rows.push({ label: t.labels.reason, value: args.reason.trim() });
   }
   return {
     subject,
     html: shell({
+      lang,
       title: subject,
-      preheader: isApproved
-        ? `${args.doctorName} approved ${args.planName}.`
-        : `${args.doctorName} rejected ${args.planName}.`,
+      preheader: isApproved ? t.preheaderApproved : t.preheaderRejected,
       body: `
-        ${greeting(escape(args.adminName))}
-        <p style="margin:0 0 16px;">${decisionBadge(args.decision)}</p>
+        ${greeting(escape(args.adminName), lang)}
+        <p style="margin:0 0 16px;">${decisionBadge(args.decision, lang)}</p>
         ${lead(leadText)}
         ${metaTable(rows)}
-        ${button(args.dashboardUrl, 'Open order')}
+        ${button(args.dashboardUrl, t.button)}
       `,
     }),
   };
@@ -475,34 +713,60 @@ export function renderTreatmentDecisionForAdminEmail(args: {
  * Sent to the doctor when admin sends a quotation. Includes the total
  * for at-a-glance approval/refusal.
  */
-export function renderQuoteSentForDoctorEmail(args: {
-  doctorName: string;
-  orderCode: string;
-  quotationNumber: string;
-  totalTtc: number;
-  currency: string;
-  dashboardUrl: string;
-}): { html: string; subject: string } {
+export function renderQuoteSentForDoctorEmail(
+  args: {
+    doctorName: string;
+    orderCode: string;
+    quotationNumber: string;
+    totalTtc: number;
+    currency: string;
+    dashboardUrl: string;
+  },
+  lang: Lang,
+): { html: string; subject: string } {
   const formattedTotal = formatMoney(args.totalTtc, args.currency);
-  return {
-    subject: `Quotation ${args.quotationNumber} is ready — ${args.orderCode}`,
-    html: shell({
+  const TEXTS = {
+    en: {
+      subject: `Quotation ${args.quotationNumber} is ready — ${args.orderCode}`,
       title: `Quotation ready`,
       preheader: `Your quotation for order ${args.orderCode} is ready: ${formattedTotal}.`,
+      lead:
+        `A quotation for your order <strong>${escape(
+          args.orderCode,
+        )}</strong> is ready for your review. Approve it to start ` +
+        `fabrication or reject it to stop the order.`,
+      labels: { order: `Order`, quotation: `Quotation`, total: `Total (TTC)` },
+      button: `Review quotation`,
+    },
+    fr: {
+      subject: `Votre devis ${args.quotationNumber} est prêt — ${args.orderCode}`,
+      title: `Devis prêt`,
+      preheader: `Votre devis pour la commande ${args.orderCode} est prêt&nbsp;: ${formattedTotal}.`,
+      lead:
+        `Un devis pour votre commande <strong>${escape(
+          args.orderCode,
+        )}</strong> est prêt pour votre validation. Approuvez-le pour ` +
+        `lancer la fabrication ou refusez-le pour arrêter la commande.`,
+      labels: { order: `Commande`, quotation: `Devis`, total: `Total (TTC)` },
+      button: `Examiner le devis`,
+    },
+  };
+  const t = TEXTS[lang];
+  return {
+    subject: t.subject,
+    html: shell({
+      lang,
+      title: t.title,
+      preheader: t.preheader,
       body: `
-        ${greeting(escape(args.doctorName))}
-        ${lead(
-          `A quotation for your order <strong>${escape(
-            args.orderCode,
-          )}</strong> is ready for your review. Approve it to start ` +
-            `fabrication or reject it to stop the order.`,
-        )}
+        ${greeting(escape(args.doctorName), lang)}
+        ${lead(t.lead)}
         ${metaTable([
-          { label: 'Order', value: args.orderCode },
-          { label: 'Quotation', value: args.quotationNumber },
-          { label: 'Total (TTC)', value: formattedTotal },
+          { label: t.labels.order, value: args.orderCode },
+          { label: t.labels.quotation, value: args.quotationNumber },
+          { label: t.labels.total, value: formattedTotal },
         ])}
-        ${button(args.dashboardUrl, 'Review quotation')}
+        ${button(args.dashboardUrl, t.button)}
       `,
     }),
   };
@@ -512,43 +776,74 @@ export function renderQuoteSentForDoctorEmail(args: {
  * Sent to each admin when the doctor approves or rejects a quotation.
  * One template covers both outcomes.
  */
-export function renderQuoteDecisionForAdminEmail(args: {
-  adminName: string;
-  orderCode: string;
-  doctorName: string;
-  quotationNumber: string;
-  decision: 'approved' | 'rejected';
-  reason?: string;
-  dashboardUrl: string;
-}): { html: string; subject: string } {
+export function renderQuoteDecisionForAdminEmail(
+  args: {
+    adminName: string;
+    orderCode: string;
+    doctorName: string;
+    quotationNumber: string;
+    decision: 'approved' | 'rejected';
+    reason?: string;
+    dashboardUrl: string;
+  },
+  lang: Lang,
+): { html: string; subject: string } {
   const isApproved = args.decision === 'approved';
-  const subject = isApproved
-    ? `${args.doctorName} approved quotation ${args.quotationNumber} (${args.orderCode})`
-    : `${args.doctorName} rejected quotation ${args.quotationNumber} (${args.orderCode})`;
-  const leadText = isApproved
-    ? `<strong>${escape(args.doctorName)}</strong> approved the quotation. The order has moved to fabrication.`
-    : `<strong>${escape(args.doctorName)}</strong> rejected the quotation. The order has been canceled.`;
+  const TEXTS = {
+    en: {
+      subjectApproved: `${args.doctorName} approved quotation ${args.quotationNumber} (${args.orderCode})`,
+      subjectRejected: `${args.doctorName} rejected quotation ${args.quotationNumber} (${args.orderCode})`,
+      preheaderApproved: `${args.doctorName} approved quotation ${args.quotationNumber}.`,
+      preheaderRejected: `${args.doctorName} rejected quotation ${args.quotationNumber}.`,
+      leadApproved: `<strong>${escape(args.doctorName)}</strong> approved the quotation. The order has moved to fabrication.`,
+      leadRejected: `<strong>${escape(args.doctorName)}</strong> rejected the quotation. The order has been canceled.`,
+      labels: {
+        order: `Order`,
+        quotation: `Quotation`,
+        doctor: `Doctor`,
+        reason: `Reason`,
+      },
+      button: `Open order`,
+    },
+    fr: {
+      subjectApproved: `${args.doctorName} a approuvé le devis ${args.quotationNumber} (${args.orderCode})`,
+      subjectRejected: `${args.doctorName} a refusé le devis ${args.quotationNumber} (${args.orderCode})`,
+      preheaderApproved: `${args.doctorName} a approuvé le devis ${args.quotationNumber}.`,
+      preheaderRejected: `${args.doctorName} a refusé le devis ${args.quotationNumber}.`,
+      leadApproved: `<strong>${escape(args.doctorName)}</strong> a approuvé le devis. La commande est passée en fabrication.`,
+      leadRejected: `<strong>${escape(args.doctorName)}</strong> a refusé le devis. La commande a été annulée.`,
+      labels: {
+        order: `Commande`,
+        quotation: `Devis`,
+        doctor: `Praticien`,
+        reason: `Motif`,
+      },
+      button: `Voir la commande`,
+    },
+  };
+  const t = TEXTS[lang];
+  const subject = isApproved ? t.subjectApproved : t.subjectRejected;
+  const leadText = isApproved ? t.leadApproved : t.leadRejected;
   const rows: Array<{ label: string; value: string }> = [
-    { label: 'Order', value: args.orderCode },
-    { label: 'Quotation', value: args.quotationNumber },
-    { label: 'Doctor', value: args.doctorName },
+    { label: t.labels.order, value: args.orderCode },
+    { label: t.labels.quotation, value: args.quotationNumber },
+    { label: t.labels.doctor, value: args.doctorName },
   ];
   if (args.reason && args.reason.trim()) {
-    rows.push({ label: 'Reason', value: args.reason.trim() });
+    rows.push({ label: t.labels.reason, value: args.reason.trim() });
   }
   return {
     subject,
     html: shell({
+      lang,
       title: subject,
-      preheader: isApproved
-        ? `${args.doctorName} approved quotation ${args.quotationNumber}.`
-        : `${args.doctorName} rejected quotation ${args.quotationNumber}.`,
+      preheader: isApproved ? t.preheaderApproved : t.preheaderRejected,
       body: `
-        ${greeting(escape(args.adminName))}
-        <p style="margin:0 0 16px;">${decisionBadge(args.decision)}</p>
+        ${greeting(escape(args.adminName), lang)}
+        <p style="margin:0 0 16px;">${decisionBadge(args.decision, lang)}</p>
         ${lead(leadText)}
         ${metaTable(rows)}
-        ${button(args.dashboardUrl, 'Open order')}
+        ${button(args.dashboardUrl, t.button)}
       `,
     }),
   };

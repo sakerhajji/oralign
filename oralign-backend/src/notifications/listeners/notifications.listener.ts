@@ -20,18 +20,30 @@ import {
  * of every admin-facing notification so the row reads as a single
  * legible line without forcing the admin to open the order detail.
  * Falls back gracefully when any piece is missing (legacy events,
- * deleted patients, etc.).
+ * deleted patients, etc.). Returns both language renderings (French
+ * drops the dot after `Dr` and says `commande` instead of `order`);
+ * the two sides are empty together, so truthiness checks use `.en`.
  */
 function adminByline(parts: {
   doctorName?: string | null;
   orderCode?: string | null;
   patientName?: string | null;
-}): string {
-  const segments: string[] = [];
-  if (parts.doctorName) segments.push(`Dr. ${parts.doctorName}`);
-  if (parts.patientName) segments.push(`patient ${parts.patientName}`);
-  if (parts.orderCode) segments.push(`order ${parts.orderCode}`);
-  return segments.join(' · ');
+}): { en: string; fr: string } {
+  const en: string[] = [];
+  const fr: string[] = [];
+  if (parts.doctorName) {
+    en.push(`Dr. ${parts.doctorName}`);
+    fr.push(`Dr ${parts.doctorName}`);
+  }
+  if (parts.patientName) {
+    en.push(`patient ${parts.patientName}`);
+    fr.push(`patient ${parts.patientName}`);
+  }
+  if (parts.orderCode) {
+    en.push(`order ${parts.orderCode}`);
+    fr.push(`commande ${parts.orderCode}`);
+  }
+  return { en: en.join(' · '), fr: fr.join(' · ') };
 }
 
 /**
@@ -99,8 +111,14 @@ export class NotificationsListener {
     await this.safe('user.registered', async () => {
       await this.notifications.broadcastToAdmins({
         type: NotificationType.user_registered,
-        title: 'New user registered',
-        message: `${payload.fullName} (${payload.email}) just signed up as ${payload.role}.`,
+        title: {
+          en: 'New user registered',
+          fr: 'Nouvel utilisateur inscrit',
+        },
+        message: {
+          en: `${payload.fullName} (${payload.email}) just signed up as ${payload.role}.`,
+          fr: `${payload.fullName} (${payload.email}) vient de s'inscrire en tant que ${payload.role}.`,
+        },
         link: `/dashboard/users`,
         metadata: {
           userId: payload.userId,
@@ -124,15 +142,26 @@ export class NotificationsListener {
       // Headline message — clean, one-line, names the doctor + the
       // order code explicitly so the admin can act without opening
       // the row first.
-      const doctor = payload.doctorName
+      const doctorEn = payload.doctorName
         ? `Dr. ${payload.doctorName}`
         : 'A doctor';
-      const message = `Order ${payload.orderCode} created by ${doctor}${
-        payload.patientName ? ` for patient ${payload.patientName}` : ''
-      } — ready for review.`;
+      const doctorFr = payload.doctorName
+        ? `Dr ${payload.doctorName}`
+        : 'Un praticien';
+      const message = {
+        en: `Order ${payload.orderCode} created by ${doctorEn}${
+          payload.patientName ? ` for patient ${payload.patientName}` : ''
+        } — ready for review.`,
+        fr: `Commande ${payload.orderCode} créée par ${doctorFr}${
+          payload.patientName ? ` pour le patient ${payload.patientName}` : ''
+        } — prête pour examen.`,
+      };
       await this.notifications.broadcastToAdmins({
         type: NotificationType.order_submitted,
-        title: 'New order to review',
+        title: {
+          en: 'New order to review',
+          fr: 'Nouvelle commande à examiner',
+        },
         message,
         link: `/dashboard/orders/${payload.orderId}`,
         metadata: {
@@ -160,10 +189,18 @@ export class NotificationsListener {
       await this.notifications.create({
         recipientId: payload.doctorId,
         type: NotificationType.order_status_changed,
-        title: 'Order status updated',
-        message: `Order ${payload.orderCode}${
-          payload.patientName ? ` for patient ${payload.patientName}` : ''
-        }: ${payload.previousStatus} → ${payload.nextStatus}.`,
+        title: {
+          en: 'Order status updated',
+          fr: 'Statut de la commande mis à jour',
+        },
+        message: {
+          en: `Order ${payload.orderCode}${
+            payload.patientName ? ` for patient ${payload.patientName}` : ''
+          }: ${payload.previousStatus} → ${payload.nextStatus}.`,
+          fr: `Commande ${payload.orderCode}${
+            payload.patientName ? ` pour le patient ${payload.patientName}` : ''
+          } : ${payload.previousStatus} → ${payload.nextStatus}.`,
+        },
         link: `/dashboard/orders/${payload.orderId}`,
         metadata: {
           orderId: payload.orderId,
@@ -185,17 +222,28 @@ export class NotificationsListener {
       // Body weaves patient + order code so the bell reads as a
       // standalone line: "Treatment plan for patient Foulen Ben Foulen
       // (ORD-2025-0042) is ready for review."
-      const subject = payload.patientName
+      const subjectEn = payload.patientName
         ? `Treatment plan for patient ${payload.patientName}`
         : payload.planName
           ? `Your treatment plan "${payload.planName}"`
           : 'Your treatment plan';
+      const subjectFr = payload.patientName
+        ? `Le plan de traitement du patient ${payload.patientName}`
+        : payload.planName
+          ? `Votre plan de traitement « ${payload.planName} »`
+          : 'Votre plan de traitement';
       const code = payload.orderCode ? ` (${payload.orderCode})` : '';
       await this.notifications.create({
         recipientId: payload.doctorId,
         type: NotificationType.treatment_plan_ready,
-        title: 'Treatment plan ready',
-        message: `${subject}${code} is ready for review.`,
+        title: {
+          en: 'Treatment plan ready',
+          fr: 'Plan de traitement prêt',
+        },
+        message: {
+          en: `${subjectEn}${code} is ready for review.`,
+          fr: `${subjectFr}${code} est prêt pour examen.`,
+        },
         link: `/dashboard/orders/${payload.orderId}?tab=treatment`,
         metadata: {
           treatmentPlanId: payload.treatmentPlanId,
@@ -213,15 +261,24 @@ export class NotificationsListener {
     payload: TreatmentPlanEvent,
   ): Promise<void> {
     await this.safe('treatmentPlan.updated', async () => {
-      const subject = payload.patientName
+      const subjectEn = payload.patientName
         ? `The treatment plan for patient ${payload.patientName}`
         : 'Your treatment plan';
+      const subjectFr = payload.patientName
+        ? `Le plan de traitement du patient ${payload.patientName}`
+        : 'Votre plan de traitement';
       const code = payload.orderCode ? ` (${payload.orderCode})` : '';
       await this.notifications.create({
         recipientId: payload.doctorId,
         type: NotificationType.treatment_plan_updated,
-        title: 'Treatment plan updated',
-        message: `${subject}${code} was updated by the planner — please re-review.`,
+        title: {
+          en: 'Treatment plan updated',
+          fr: 'Plan de traitement mis à jour',
+        },
+        message: {
+          en: `${subjectEn}${code} was updated by the planner — please re-review.`,
+          fr: `${subjectFr}${code} a été mis à jour par le planificateur — veuillez le réexaminer.`,
+        },
         link: `/dashboard/orders/${payload.orderId}?tab=treatment`,
         metadata: {
           treatmentPlanId: payload.treatmentPlanId,
@@ -253,10 +310,19 @@ export class NotificationsListener {
       });
       await this.notifications.broadcastToAdmins({
         type: NotificationType.system_message,
-        title: 'Treatment plan approved by doctor',
-        message: byline
-          ? `${byline} — plan approved. Move the case forward.`
-          : 'A doctor approved their treatment plan.',
+        title: {
+          en: 'Treatment plan approved by doctor',
+          fr: 'Plan de traitement approuvé par le praticien',
+        },
+        message: byline.en
+          ? {
+              en: `${byline.en} — plan approved. Move the case forward.`,
+              fr: `${byline.fr} — plan approuvé. Faites avancer le dossier.`,
+            }
+          : {
+              en: 'A doctor approved their treatment plan.',
+              fr: 'Un praticien a approuvé son plan de traitement.',
+            },
         link: `/dashboard/orders/${payload.orderId}?tab=treatment`,
         metadata: {
           treatmentPlanId: payload.treatmentPlanId,
@@ -283,10 +349,19 @@ export class NotificationsListener {
       });
       await this.notifications.broadcastToAdmins({
         type: NotificationType.system_message,
-        title: 'Treatment plan rejected by doctor',
-        message: byline
-          ? `${byline} — plan rejected. Replan and resend.`
-          : 'A doctor rejected their treatment plan — re-planning needed.',
+        title: {
+          en: 'Treatment plan rejected by doctor',
+          fr: 'Plan de traitement rejeté par le praticien',
+        },
+        message: byline.en
+          ? {
+              en: `${byline.en} — plan rejected. Replan and resend.`,
+              fr: `${byline.fr} — plan rejeté. À replanifier et renvoyer.`,
+            }
+          : {
+              en: 'A doctor rejected their treatment plan — re-planning needed.',
+              fr: 'Un praticien a rejeté son plan de traitement — replanification nécessaire.',
+            },
         link: `/dashboard/orders/${payload.orderId}?tab=treatment`,
         metadata: {
           treatmentPlanId: payload.treatmentPlanId,
@@ -309,20 +384,33 @@ export class NotificationsListener {
       // Compose: "Quotation Q-… for patient X (ORD-…) is ready for
       // your approval (Français)." Every piece is optional so legacy
       // events still produce a clean sentence.
-      const headline = payload.quotationNumber
+      const headlineEn = payload.quotationNumber
         ? `Quotation ${payload.quotationNumber}`
         : 'A quotation';
-      const subject = payload.patientName
+      const headlineFr = payload.quotationNumber
+        ? `Le devis ${payload.quotationNumber}`
+        : 'Un devis';
+      const subjectEn = payload.patientName
         ? ` for patient ${payload.patientName}`
+        : '';
+      const subjectFr = payload.patientName
+        ? ` pour le patient ${payload.patientName}`
         : '';
       const code = payload.orderCode ? ` (${payload.orderCode})` : '';
       const lang = languageLabel(payload.language ?? null);
-      const langTail = lang ? ` — document in ${lang}` : '';
+      const langTailEn = lang ? ` — document in ${lang}` : '';
+      const langTailFr = lang ? ` — document en ${lang}` : '';
       await this.notifications.create({
         recipientId: payload.doctorId,
         type: NotificationType.quotation_sent,
-        title: 'New quotation received',
-        message: `${headline}${subject}${code} is ready for your approval${langTail}.`,
+        title: {
+          en: 'New quotation received',
+          fr: 'Nouveau devis reçu',
+        },
+        message: {
+          en: `${headlineEn}${subjectEn}${code} is ready for your approval${langTailEn}.`,
+          fr: `${headlineFr}${subjectFr}${code} est prêt pour votre approbation${langTailFr}.`,
+        },
         link: `/dashboard/orders/${payload.orderId}?tab=quote`,
         metadata: {
           quotationId: payload.quotationId,
@@ -343,18 +431,30 @@ export class NotificationsListener {
       // version is coming." We want the doctor to NOT act on the
       // stale quote (approve/reject), but also not panic that the
       // case is gone.
-      const headline = payload.quotationNumber
+      const headlineEn = payload.quotationNumber
         ? `Quotation ${payload.quotationNumber}`
         : 'A quotation';
-      const subject = payload.patientName
+      const headlineFr = payload.quotationNumber
+        ? `Le devis ${payload.quotationNumber}`
+        : 'Un devis';
+      const subjectEn = payload.patientName
         ? ` for patient ${payload.patientName}`
+        : '';
+      const subjectFr = payload.patientName
+        ? ` pour le patient ${payload.patientName}`
         : '';
       const code = payload.orderCode ? ` (${payload.orderCode})` : '';
       await this.notifications.create({
         recipientId: payload.doctorId,
         type: NotificationType.quotation_recalled,
-        title: 'Quotation recalled for revision',
-        message: `${headline}${subject}${code} was recalled by the team for correction. A revised version will be sent shortly.`,
+        title: {
+          en: 'Quotation recalled for revision',
+          fr: 'Devis rappelé pour révision',
+        },
+        message: {
+          en: `${headlineEn}${subjectEn}${code} was recalled by the team for correction. A revised version will be sent shortly.`,
+          fr: `${headlineFr}${subjectFr}${code} a été rappelé par l'équipe pour correction. Une version révisée vous sera envoyée prochainement.`,
+        },
         link: `/dashboard/orders/${payload.orderId}?tab=quote`,
         metadata: {
           quotationId: payload.quotationId,
@@ -370,18 +470,30 @@ export class NotificationsListener {
   @OnEvent(NotificationEvents.QuotationCanceled, { async: true })
   async onQuotationCanceled(payload: QuotationEvent): Promise<void> {
     await this.safe('quotation.canceled', async () => {
-      const headline = payload.quotationNumber
+      const headlineEn = payload.quotationNumber
         ? `Quotation ${payload.quotationNumber}`
         : 'A quotation';
-      const subject = payload.patientName
+      const headlineFr = payload.quotationNumber
+        ? `Le devis ${payload.quotationNumber}`
+        : 'Un devis';
+      const subjectEn = payload.patientName
         ? ` for patient ${payload.patientName}`
+        : '';
+      const subjectFr = payload.patientName
+        ? ` pour le patient ${payload.patientName}`
         : '';
       const code = payload.orderCode ? ` (${payload.orderCode})` : '';
       await this.notifications.create({
         recipientId: payload.doctorId,
         type: NotificationType.quotation_canceled,
-        title: 'Quotation canceled',
-        message: `${headline}${subject}${code} was canceled by the team.`,
+        title: {
+          en: 'Quotation canceled',
+          fr: 'Devis annulé',
+        },
+        message: {
+          en: `${headlineEn}${subjectEn}${code} was canceled by the team.`,
+          fr: `${headlineFr}${subjectFr}${code} a été annulé par l'équipe.`,
+        },
         link: `/dashboard/orders/${payload.orderId}?tab=quote`,
         metadata: {
           quotationId: payload.quotationId,
@@ -404,15 +516,27 @@ export class NotificationsListener {
         patientName: payload.patientName,
         orderCode: payload.orderCode,
       });
-      const tail = payload.installmentNumber
+      const tailEn = payload.installmentNumber
         ? ` for installment #${payload.installmentNumber}`
+        : '';
+      const tailFr = payload.installmentNumber
+        ? ` pour l'échéance n°${payload.installmentNumber}`
         : '';
       await this.notifications.broadcastToAdmins({
         type: NotificationType.payment_received,
-        title: 'New card payment',
-        message: byline
-          ? `${byline} — ${payload.amount} ${payload.currency} received by card${tail}.`
-          : `${payload.amount} ${payload.currency} received via card${tail}.`,
+        title: {
+          en: 'New card payment',
+          fr: 'Nouveau paiement par carte',
+        },
+        message: byline.en
+          ? {
+              en: `${byline.en} — ${payload.amount} ${payload.currency} received by card${tailEn}.`,
+              fr: `${byline.fr} — ${payload.amount} ${payload.currency} reçus par carte${tailFr}.`,
+            }
+          : {
+              en: `${payload.amount} ${payload.currency} received via card${tailEn}.`,
+              fr: `${payload.amount} ${payload.currency} reçus par carte${tailFr}.`,
+            },
         link: `/dashboard/orders/${payload.orderId}?tab=quote`,
         metadata: {
           paymentId: payload.paymentId,
@@ -435,15 +559,27 @@ export class NotificationsListener {
         patientName: payload.patientName,
         orderCode: payload.orderCode,
       });
-      const tail = payload.installmentNumber
+      const tailEn = payload.installmentNumber
         ? ` (installment #${payload.installmentNumber})`
+        : '';
+      const tailFr = payload.installmentNumber
+        ? ` (échéance n°${payload.installmentNumber})`
         : '';
       await this.notifications.broadcastToAdmins({
         type: NotificationType.payment_declared,
-        title: 'Bank transfer awaiting confirmation',
-        message: byline
-          ? `${byline} — ${payload.amount} ${payload.currency} declared${tail}. Verify the proof.`
-          : `${payload.amount} ${payload.currency} declared by the doctor${tail} — please verify the proof.`,
+        title: {
+          en: 'Bank transfer awaiting confirmation',
+          fr: 'Virement bancaire en attente de confirmation',
+        },
+        message: byline.en
+          ? {
+              en: `${byline.en} — ${payload.amount} ${payload.currency} declared${tailEn}. Verify the proof.`,
+              fr: `${byline.fr} — ${payload.amount} ${payload.currency} déclarés${tailFr}. Vérifiez le justificatif.`,
+            }
+          : {
+              en: `${payload.amount} ${payload.currency} declared by the doctor${tailEn} — please verify the proof.`,
+              fr: `${payload.amount} ${payload.currency} déclarés par le praticien${tailFr} — veuillez vérifier le justificatif.`,
+            },
         link: `/dashboard/payments/pending`,
         metadata: {
           paymentId: payload.paymentId,
@@ -461,18 +597,30 @@ export class NotificationsListener {
   @OnEvent(NotificationEvents.PaymentConfirmed, { async: true })
   async onPaymentConfirmed(payload: PaymentEvent): Promise<void> {
     await this.safe('payment.confirmed', async () => {
-      const subject = payload.patientName
+      const subjectEn = payload.patientName
         ? ` for patient ${payload.patientName}`
         : '';
+      const subjectFr = payload.patientName
+        ? ` pour le patient ${payload.patientName}`
+        : '';
       const code = payload.orderCode ? ` (${payload.orderCode})` : '';
-      const installment = payload.installmentNumber
+      const installmentEn = payload.installmentNumber
         ? ` — installment #${payload.installmentNumber} is now paid`
+        : '';
+      const installmentFr = payload.installmentNumber
+        ? ` — l'échéance n°${payload.installmentNumber} est désormais payée`
         : '';
       await this.notifications.create({
         recipientId: payload.doctorId,
         type: NotificationType.payment_confirmed,
-        title: 'Payment confirmed',
-        message: `${payload.amount} ${payload.currency}${subject}${code} has been confirmed${installment}.`,
+        title: {
+          en: 'Payment confirmed',
+          fr: 'Paiement confirmé',
+        },
+        message: {
+          en: `${payload.amount} ${payload.currency}${subjectEn}${code} has been confirmed${installmentEn}.`,
+          fr: `${payload.amount} ${payload.currency}${subjectFr}${code} ont été confirmés${installmentFr}.`,
+        },
         link: `/dashboard/orders/${payload.orderId}?tab=quote`,
         metadata: {
           paymentId: payload.paymentId,
@@ -488,18 +636,30 @@ export class NotificationsListener {
   @OnEvent(NotificationEvents.PaymentRejected, { async: true })
   async onPaymentRejected(payload: PaymentEvent): Promise<void> {
     await this.safe('payment.rejected', async () => {
-      const subject = payload.patientName
+      const subjectEn = payload.patientName
         ? ` for patient ${payload.patientName}`
         : '';
+      const subjectFr = payload.patientName
+        ? ` pour le patient ${payload.patientName}`
+        : '';
       const code = payload.orderCode ? ` (${payload.orderCode})` : '';
-      const installment = payload.installmentNumber
+      const installmentEn = payload.installmentNumber
         ? ` (installment #${payload.installmentNumber})`
+        : '';
+      const installmentFr = payload.installmentNumber
+        ? ` (échéance n°${payload.installmentNumber})`
         : '';
       await this.notifications.create({
         recipientId: payload.doctorId,
         type: NotificationType.payment_rejected,
-        title: 'Bank transfer rejected',
-        message: `Your bank-transfer proof for ${payload.amount} ${payload.currency}${subject}${code}${installment} was rejected. Please review and submit again.`,
+        title: {
+          en: 'Bank transfer rejected',
+          fr: 'Virement bancaire rejeté',
+        },
+        message: {
+          en: `Your bank-transfer proof for ${payload.amount} ${payload.currency}${subjectEn}${code}${installmentEn} was rejected. Please review and submit again.`,
+          fr: `Votre justificatif de virement de ${payload.amount} ${payload.currency}${subjectFr}${code}${installmentFr} a été rejeté. Veuillez le vérifier et le soumettre à nouveau.`,
+        },
         link: `/dashboard/orders/${payload.orderId}?tab=quote`,
         metadata: {
           paymentId: payload.paymentId,
@@ -522,20 +682,35 @@ export class NotificationsListener {
         patientName: payload.patientName,
         orderCode: payload.orderCode,
       });
-      const subject = payload.patientName
+      const subjectEn = payload.patientName
         ? ` for patient ${payload.patientName}`
         : '';
+      const subjectFr = payload.patientName
+        ? ` pour le patient ${payload.patientName}`
+        : '';
       const code = payload.orderCode ? ` (${payload.orderCode})` : '';
-      const installmentTail = payload.installmentNumber
+      const installmentTailEn = payload.installmentNumber
         ? ` — installment #${payload.installmentNumber}`
+        : '';
+      const installmentTailFr = payload.installmentNumber
+        ? ` — échéance n°${payload.installmentNumber}`
         : '';
       await Promise.all([
         this.notifications.broadcastToAdmins({
           type: NotificationType.cash_payment_recorded,
-          title: 'Cash payment recorded',
-          message: byline
-            ? `${byline} — ${payload.amount} ${payload.currency} cash recorded${installmentTail}.`
-            : `${payload.amount} ${payload.currency} cash recorded${installmentTail}.`,
+          title: {
+            en: 'Cash payment recorded',
+            fr: 'Paiement en espèces enregistré',
+          },
+          message: byline.en
+            ? {
+                en: `${byline.en} — ${payload.amount} ${payload.currency} cash recorded${installmentTailEn}.`,
+                fr: `${byline.fr} — ${payload.amount} ${payload.currency} en espèces enregistrés${installmentTailFr}.`,
+              }
+            : {
+                en: `${payload.amount} ${payload.currency} cash recorded${installmentTailEn}.`,
+                fr: `${payload.amount} ${payload.currency} en espèces enregistrés${installmentTailFr}.`,
+              },
           link: `/dashboard/orders/${payload.orderId}?tab=quote`,
           metadata: {
             paymentId: payload.paymentId,
@@ -550,8 +725,14 @@ export class NotificationsListener {
         this.notifications.create({
           recipientId: payload.doctorId,
           type: NotificationType.payment_confirmed,
-          title: 'Cash payment confirmed',
-          message: `${payload.amount} ${payload.currency} cash${subject}${code} has been recorded by the team${installmentTail}.`,
+          title: {
+            en: 'Cash payment confirmed',
+            fr: 'Paiement en espèces confirmé',
+          },
+          message: {
+            en: `${payload.amount} ${payload.currency} cash${subjectEn}${code} has been recorded by the team${installmentTailEn}.`,
+            fr: `${payload.amount} ${payload.currency} en espèces${subjectFr}${code} ont été enregistrés par l'équipe${installmentTailFr}.`,
+          },
           link: `/dashboard/orders/${payload.orderId}?tab=quote`,
           metadata: {
             paymentId: payload.paymentId,
@@ -579,10 +760,19 @@ export class NotificationsListener {
       });
       await this.notifications.broadcastToAdmins({
         type: NotificationType.treatment_fee_declared,
-        title: 'Treatment-fee bank transfer awaiting confirmation',
-        message: byline
-          ? `${byline} — ${payload.amount} ${payload.currency} treatment-fee receipt uploaded. Verify and confirm.`
-          : `${payload.amount} ${payload.currency} treatment-fee receipt uploaded by the doctor — please verify the proof.`,
+        title: {
+          en: 'Treatment-fee bank transfer awaiting confirmation',
+          fr: 'Virement des honoraires de traitement en attente de confirmation',
+        },
+        message: byline.en
+          ? {
+              en: `${byline.en} — ${payload.amount} ${payload.currency} treatment-fee receipt uploaded. Verify and confirm.`,
+              fr: `${byline.fr} — reçu des honoraires de traitement de ${payload.amount} ${payload.currency} téléversé. Vérifiez et confirmez.`,
+            }
+          : {
+              en: `${payload.amount} ${payload.currency} treatment-fee receipt uploaded by the doctor — please verify the proof.`,
+              fr: `Reçu des honoraires de traitement de ${payload.amount} ${payload.currency} téléversé par le praticien — veuillez vérifier le justificatif.`,
+            },
         link: `/dashboard/payments/pending`,
         metadata: {
           orderId: payload.orderId,
@@ -610,18 +800,33 @@ export class NotificationsListener {
         patientName: payload.patientName,
         orderCode: payload.orderCode,
       });
-      const methodLabel =
+      const methodLabelEn =
         payload.method === 'card'
           ? 'card'
           : payload.method === 'cash'
             ? 'cash'
             : 'bank transfer';
+      const methodLabelFr =
+        payload.method === 'card'
+          ? 'par carte'
+          : payload.method === 'cash'
+            ? 'en espèces'
+            : 'par virement bancaire';
       await this.notifications.broadcastToAdmins({
         type: NotificationType.treatment_fee_paid,
-        title: 'Treatment fee paid',
-        message: byline
-          ? `${byline} — ${payload.amount} ${payload.currency} treatment fee paid by ${methodLabel}.`
-          : `${payload.amount} ${payload.currency} treatment fee paid by ${methodLabel}.`,
+        title: {
+          en: 'Treatment fee paid',
+          fr: 'Honoraires de traitement payés',
+        },
+        message: byline.en
+          ? {
+              en: `${byline.en} — ${payload.amount} ${payload.currency} treatment fee paid by ${methodLabelEn}.`,
+              fr: `${byline.fr} — honoraires de traitement de ${payload.amount} ${payload.currency} payés ${methodLabelFr}.`,
+            }
+          : {
+              en: `${payload.amount} ${payload.currency} treatment fee paid by ${methodLabelEn}.`,
+              fr: `Honoraires de traitement de ${payload.amount} ${payload.currency} payés ${methodLabelFr}.`,
+            },
         link: `/dashboard/orders/${payload.orderId}`,
         metadata: {
           orderId: payload.orderId,
@@ -642,15 +847,24 @@ export class NotificationsListener {
     payload: TreatmentFeeEvent,
   ): Promise<void> {
     await this.safe('treatmentFee.confirmed', async () => {
-      const subject = payload.patientName
+      const subjectEn = payload.patientName
         ? ` for patient ${payload.patientName}`
+        : '';
+      const subjectFr = payload.patientName
+        ? ` pour le patient ${payload.patientName}`
         : '';
       const code = payload.orderCode ? ` (${payload.orderCode})` : '';
       await this.notifications.create({
         recipientId: payload.doctorId,
         type: NotificationType.treatment_fee_confirmed,
-        title: 'Treatment fee confirmed',
-        message: `Your ${payload.amount} ${payload.currency} treatment fee${subject}${code} has been confirmed — the treatment plan can now be prepared.`,
+        title: {
+          en: 'Treatment fee confirmed',
+          fr: 'Honoraires de traitement confirmés',
+        },
+        message: {
+          en: `Your ${payload.amount} ${payload.currency} treatment fee${subjectEn}${code} has been confirmed — the treatment plan can now be prepared.`,
+          fr: `Vos honoraires de traitement de ${payload.amount} ${payload.currency}${subjectFr}${code} ont été confirmés — le plan de traitement peut maintenant être préparé.`,
+        },
         link: `/dashboard/orders/${payload.orderId}`,
         metadata: {
           orderId: payload.orderId,
@@ -677,11 +891,18 @@ export class NotificationsListener {
         patientName: payload.patientName,
         orderCode: payload.orderCode,
       });
-      const head = byline ? `${byline} — ` : '';
+      const headEn = byline.en ? `${byline.en} — ` : '';
+      const headFr = byline.fr ? `${byline.fr} — ` : '';
       await this.notifications.broadcastToAdmins({
         type: NotificationType.batch_unlocked,
-        title: 'Step batch unlocked',
-        message: `${head}steps ${payload.fromStep}–${payload.toStep} are ready to deliver.`,
+        title: {
+          en: 'Step batch unlocked',
+          fr: "Lot d'étapes débloqué",
+        },
+        message: {
+          en: `${headEn}steps ${payload.fromStep}–${payload.toStep} are ready to deliver.`,
+          fr: `${headFr}les étapes ${payload.fromStep}–${payload.toStep} sont prêtes à livrer.`,
+        },
         link: `/dashboard/orders/${payload.orderId}?tab=quote`,
         metadata: {
           batchId: payload.batchId,
@@ -700,15 +921,24 @@ export class NotificationsListener {
   @OnEvent(NotificationEvents.BatchDelivered, { async: true })
   async onBatchDelivered(payload: BatchEvent): Promise<void> {
     await this.safe('batch.delivered', async () => {
-      const subject = payload.patientName
+      const subjectEn = payload.patientName
         ? ` for patient ${payload.patientName}`
+        : '';
+      const subjectFr = payload.patientName
+        ? ` pour le patient ${payload.patientName}`
         : '';
       const code = payload.orderCode ? ` (${payload.orderCode})` : '';
       await this.notifications.create({
         recipientId: payload.doctorId,
         type: NotificationType.batch_delivered,
-        title: 'Steps delivered',
-        message: `Steps ${payload.fromStep}–${payload.toStep}${subject}${code} have been marked delivered by the team.`,
+        title: {
+          en: 'Steps delivered',
+          fr: 'Étapes livrées',
+        },
+        message: {
+          en: `Steps ${payload.fromStep}–${payload.toStep}${subjectEn}${code} have been marked delivered by the team.`,
+          fr: `Les étapes ${payload.fromStep}–${payload.toStep}${subjectFr}${code} ont été marquées comme livrées par l'équipe.`,
+        },
         link: `/dashboard/orders/${payload.orderId}?tab=quote`,
         metadata: {
           batchId: payload.batchId,

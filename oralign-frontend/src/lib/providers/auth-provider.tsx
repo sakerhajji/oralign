@@ -4,6 +4,7 @@ import React, { createContext, useContext, useCallback, useMemo } from 'react';
 import { User, UserRole } from '@/lib/types';
 import { getAccessToken, getRefreshToken, clearTokens } from '@/lib/api';
 import { usersService } from '@/lib/api/users.service';
+import { applyStoredLang } from '@/lib/i18n/use-lang';
 import { useRouter } from 'next/navigation';
 
 interface AuthContextType {
@@ -63,6 +64,18 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
     },
     [user]
   );
+
+  // The profile is the source of truth for the user's language: when a
+  // user object lands (fresh login OR the me-fetch after a refresh),
+  // seed the i18n store from `preferredLanguage` so the dashboard,
+  // emails and notifications all speak the same language on every
+  // device the user signs in from. `applyStoredLang` no-ops on
+  // invalid / unchanged values, so this never fights the switcher.
+  React.useEffect(() => {
+    if (user?.preferredLanguage) {
+      applyStoredLang(user.preferredLanguage);
+    }
+  }, [user?.preferredLanguage]);
 
   React.useEffect(() => {
     const token = getAccessToken();

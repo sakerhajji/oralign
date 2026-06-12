@@ -5,10 +5,13 @@ import { usePathname, useRouter } from 'next/navigation';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAccountData } from '@/lib/hooks';
 import { useAuth } from '@/lib/providers/auth-provider';
+import { useT } from '@/lib/i18n/lang-context';
 
 interface AccountTab {
   value: string;
-  label: string;
+  // Dot-path into the i18n dictionary — resolved per render so the tab
+  // labels follow the active language.
+  labelKey: string;
   href: string;
   // Optional role gate — when undefined the tab is shown to everyone
   // who can reach the account area.
@@ -16,22 +19,23 @@ interface AccountTab {
 }
 
 const TAB_MAP: AccountTab[] = [
-  { value: 'profile', label: 'Profile', href: '/account/profile' },
+  { value: 'profile', labelKey: 'accountHome.tabProfile', href: '/account/profile' },
   {
     value: 'clinic',
-    label: 'Clinic',
+    labelKey: 'accountHome.tabClinic',
     href: '/account/clinic',
     show: ({ isDentist }) => isDentist,
   },
   {
     value: 'billing-settings',
-    label: 'Billing',
+    labelKey: 'accountHome.tabBilling',
     href: '/account/billing-settings',
     show: ({ isAdmin }) => isAdmin,
   },
 ];
 
 export function AccountNavTabs() {
+  const { t } = useT();
   const router = useRouter();
   const pathname = usePathname();
   const { isDentist } = useAccountData();
@@ -59,7 +63,7 @@ export function AccountNavTabs() {
       <TabsList variant="line">
         {tabs.map((tab) => (
           <TabsTrigger key={tab.value} value={tab.value}>
-            {tab.label}
+            {t(tab.labelKey)}
           </TabsTrigger>
         ))}
       </TabsList>

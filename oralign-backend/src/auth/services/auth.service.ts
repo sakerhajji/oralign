@@ -105,6 +105,9 @@ export class AuthService {
       isEmailVerified: user.isEmailVerified,
       verificationStatus: user.verificationStatus,
       avatarUrl: user.avatarUrl ?? undefined,
+      // Seeds the frontend i18n store immediately after sign-in /
+      // sign-up — before the first /users/me round-trip.
+      preferredLanguage: user.preferredLanguage ?? undefined,
       authToken,
     };
   }
@@ -189,6 +192,9 @@ export class AuthService {
       isEmailVerified: user.isEmailVerified,
       verificationStatus: user.verificationStatus,
       avatarUrl: user.avatarUrl ?? undefined,
+      // Seeds the frontend i18n store immediately after sign-in /
+      // sign-up — before the first /users/me round-trip.
+      preferredLanguage: user.preferredLanguage ?? undefined,
       authToken,
     };
   }

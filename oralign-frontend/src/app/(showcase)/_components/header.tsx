@@ -127,9 +127,9 @@ export function Header() {
         {/* Desktop nav — only on lg+ */}
         <nav
           aria-label="Primary"
-          className="mx-6 hidden flex-1 items-center justify-center lg:flex"
+          className="mx-4 hidden min-w-0 flex-1 items-center justify-center lg:flex xl:mx-6"
         >
-          <ul className="flex list-none items-center gap-0.5 xl:gap-1.5">
+          <ul className="flex list-none items-center gap-0.5 xl:gap-1">
             {navItems.map((item) => {
               const isActive = isItemActive(item);
               const hasChildren = !!item.children?.length;
@@ -140,7 +140,7 @@ export function Header() {
                   aria-current={isActive ? "true" : undefined}
                   aria-haspopup={hasChildren ? "true" : undefined}
                   className={[
-                    "relative inline-flex items-center gap-1 rounded-md px-2 py-2 text-[0.75rem] font-medium no-underline transition-colors xl:text-[0.8rem]",
+                    "relative inline-flex items-center gap-1.5 rounded-md px-2 py-2.5 text-[0.8rem] font-medium leading-none no-underline transition-colors xl:px-2.5 xl:text-[0.86rem] 2xl:px-3 2xl:text-[0.9rem]",
                     isActive
                       ? "text-[var(--sc-black)]"
                       : "text-[var(--sc-text-mid)] hover:text-[var(--sc-black)]",
@@ -187,7 +187,7 @@ export function Header() {
                               href={resolveAnchor(child.href)}
                               aria-current={childActive ? "true" : undefined}
                               className={[
-                                "block rounded-md px-3 py-2.5 text-[0.82rem] no-underline transition-colors",
+                                "block rounded-md px-3 py-2.5 text-[0.88rem] font-medium leading-snug no-underline transition-colors",
                                 childActive
                                   ? "bg-[var(--sc-sun-3)] text-[var(--sc-black)]"
                                   : "text-[var(--sc-text-mid)] hover:bg-[rgba(25,25,25,0.05)] hover:text-[var(--sc-black)]",
@@ -210,7 +210,7 @@ export function Header() {
         <div className="ms-auto flex shrink-0 items-center gap-2 sm:gap-3">
           <Link
             href="/login"
-            className="hidden lg:inline-flex items-center px-3 py-2 text-[0.6rem] uppercase tracking-[0.28em] text-[var(--sc-text-mid)] no-underline transition-colors hover:text-[var(--sc-black)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sc-sun)]"
+            className="hidden items-center px-2 py-2 text-[0.68rem] font-medium uppercase tracking-[0.16em] text-[var(--sc-text-mid)] no-underline transition-colors hover:text-[var(--sc-black)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sc-sun)] lg:inline-flex xl:px-3 xl:text-[0.72rem]"
           >
             {dict.nav.login[lang]}
           </Link>
@@ -218,7 +218,7 @@ export function Header() {
             <Link
               href={ctaHref}
               className={[
-                "hidden items-center px-5 py-3 text-[0.6rem] font-medium uppercase tracking-[0.28em] no-underline transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 lg:inline-flex",
+                "hidden min-h-11 items-center px-4 py-3 text-[0.68rem] font-semibold uppercase tracking-[0.15em] no-underline transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 lg:inline-flex xl:px-5 xl:text-[0.72rem]",
                 audience === "practitioner"
                   ? "bg-[var(--sc-black)] text-[var(--sc-white)] hover:bg-[rgba(25,25,25,0.82)] focus-visible:outline-[var(--sc-sun)]"
                   : "bg-[var(--sc-sun)] text-[var(--sc-black)] hover:bg-[var(--sc-sun-2,#f9d96a)] focus-visible:outline-[var(--sc-black)]",

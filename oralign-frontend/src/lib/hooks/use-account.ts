@@ -4,6 +4,7 @@ import { useEffect, useMemo } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/providers';
+import { useT } from '@/lib/i18n/lang-context';
 import { extractApiErrorMessage, usersService, dentistProfileService } from '@/lib/api';
 import { userKeys } from '@/lib/hooks/use-users';
 import { profileKeys } from '@/lib/hooks/use-dentist-profiles';
@@ -53,13 +54,14 @@ export function useAccountData() {
 export function useUpdateProfile(options?: { successMessage?: string }) {
   const queryClient = useQueryClient();
   const { login } = useAuth();
+  const { t } = useT();
 
   return useMutation<User, Error, { id: string; data: UpdateUserDto }>({
     mutationFn: ({ id, data }) => usersService.updateUser(id, data),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: userKeys.currentUser() });
       login(data);
-      toast.success(options?.successMessage ?? 'Profile updated successfully.');
+      toast.success(options?.successMessage ?? t('toasts.account.profileUpdated'));
     },
     onError: (error) => {
       toast.error(extractApiErrorMessage(error));
@@ -69,13 +71,14 @@ export function useUpdateProfile(options?: { successMessage?: string }) {
 
 export function useUpdateClinicProfile() {
   const queryClient = useQueryClient();
+  const { t } = useT();
 
   return useMutation<DentistProfile, Error, { id: string; data: UpdateDentistProfileDto }>({
     mutationFn: ({ id, data }) => dentistProfileService.updateProfile(id, data),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: profileKeys.detail(data.id) });
       queryClient.invalidateQueries({ queryKey: userKeys.currentUser() });
-      toast.success('Clinic details updated.');
+      toast.success(t('toasts.account.clinicUpdated'));
     },
     onError: (error) => {
       toast.error(extractApiErrorMessage(error));

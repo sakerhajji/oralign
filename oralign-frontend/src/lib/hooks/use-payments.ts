@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import { paymentsService } from '@/lib/api/payments.service';
 import { invoicesService } from '@/lib/api/invoices.service';
 import { extractApiErrorMessage } from '@/lib/api/error';
+import { useT } from '@/lib/i18n/lang-context';
 import { paymentPlanKeys } from './use-quotation-payment-plan';
 import { quotationKeys } from './use-quotations';
 import { orderKeys } from './use-orders';
@@ -133,12 +134,13 @@ export function useUpdateInvoiceNumber(): UseMutationResult<
   { paymentId: string; invoiceNumber: string }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ paymentId, invoiceNumber }) =>
       invoicesService.updateInvoiceNumber(paymentId, invoiceNumber),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: paymentKeys.all });
-      toast.success('Invoice number updated.');
+      toast.success(t('toasts.payments.invoiceNumberUpdated'));
     },
     onError: (error) => {
       toast.error(extractApiErrorMessage(error));
@@ -158,6 +160,7 @@ export function usePayByCard(): UseMutationResult<
   }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ quotationId, installmentId, idempotencyKey, mockOutcome }) =>
       paymentsService.payByCard({
@@ -169,11 +172,11 @@ export function usePayByCard(): UseMutationResult<
     onSuccess: (payment, { orderId }) => {
       invalidateAfterPayment(queryClient, payment, orderId);
       if (payment.status === 'success') {
-        toast.success('Payment successful.');
+        toast.success(t('toasts.payments.paymentSuccess'));
       } else if (payment.status === 'pending') {
-        toast.info('Payment pending — we will confirm shortly.');
+        toast.info(t('toasts.payments.paymentPending'));
       } else {
-        toast.error('Payment failed. Please try again.');
+        toast.error(t('toasts.payments.paymentFailed'));
       }
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
@@ -192,6 +195,7 @@ export function useDeclareBankTransfer(): UseMutationResult<
   }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({
       quotationId,
@@ -207,9 +211,7 @@ export function useDeclareBankTransfer(): UseMutationResult<
       }),
     onSuccess: (payment, { orderId }) => {
       invalidateAfterPayment(queryClient, payment, orderId);
-      toast.success(
-        'Bank transfer declared. An admin will confirm it shortly.',
-      );
+      toast.success(t('toasts.payments.bankTransferDeclared'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -221,12 +223,13 @@ export function useConfirmBankTransfer(): UseMutationResult<
   { paymentId: string; dto: ConfirmPaymentDto; orderId?: string }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ paymentId, dto }) =>
       paymentsService.confirmBankTransfer(paymentId, dto),
     onSuccess: (payment, { orderId }) => {
       invalidateAfterPayment(queryClient, payment, orderId);
-      toast.success('Bank transfer confirmed.');
+      toast.success(t('toasts.payments.bankTransferConfirmed'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -238,12 +241,13 @@ export function useRejectBankTransfer(): UseMutationResult<
   { paymentId: string; dto: RejectPaymentDto; orderId?: string }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ paymentId, dto }) =>
       paymentsService.rejectBankTransfer(paymentId, dto),
     onSuccess: (payment, { orderId }) => {
       invalidateAfterPayment(queryClient, payment, orderId);
-      toast.success('Bank transfer rejected.');
+      toast.success(t('toasts.payments.bankTransferRejected'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -260,12 +264,13 @@ export function useRecordCash(): UseMutationResult<
   }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ quotationId, installmentId, dto }) =>
       paymentsService.recordCash({ quotationId, installmentId, dto }),
     onSuccess: (payment, { orderId }) => {
       invalidateAfterPayment(queryClient, payment, orderId);
-      toast.success('Cash payment recorded.');
+      toast.success(t('toasts.payments.cashRecorded'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });

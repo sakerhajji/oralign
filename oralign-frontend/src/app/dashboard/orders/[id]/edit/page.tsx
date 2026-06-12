@@ -5,8 +5,10 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { OrderWizard } from '@/components/orders/order-wizard';
 import { useOrder } from '@/lib/hooks';
+import { useT } from '@/lib/i18n/lang-context';
 
 export default function EditOrderPage() {
+  const { t } = useT();
   const params = useParams<{ id: string }>();
   const orderQuery = useOrder(params.id);
 
@@ -24,7 +26,7 @@ export default function EditOrderPage() {
       <div className="@container/main flex flex-1 flex-col gap-4 p-4 lg:p-6">
         <Card>
           <CardContent className="flex min-h-64 items-center justify-center text-center text-red-600">
-            Order not found or access is blocked.
+            {t('orderEdit.notFound')}
           </CardContent>
         </Card>
       </div>

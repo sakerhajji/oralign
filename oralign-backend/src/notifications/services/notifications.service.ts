@@ -10,6 +10,7 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '../../common/exceptions/app.exception';
+import { LangText, pickLang, tr } from '../../common/i18n/lang';
 import { PrismaService } from '../../prisma/prisma.service';
 
 type Caller = { userId: string; role: UserRole | string };
@@ -40,21 +41,34 @@ export class NotificationsService {
    * Persist a single notification. Returns the row so the listener
    * can chain follow-ups (e.g. push it through a real-time channel
    * if/when we wire one up).
+   *
+   * i18n: `title` / `message` accept a `{ en, fr }` pair (or a plain
+   * string for back-compat). The recipient's `preferredLanguage` is
+   * resolved HERE — the single chokepoint every notification passes
+   * through — and the stored row carries the already-translated
+   * strings. Storing resolved text (rather than keys) keeps the read
+   * path and the existing schema untouched: the bell just renders
+   * what's in the row.
    */
   async create(args: {
     recipientId: string;
     type: NotificationType;
-    title: string;
-    message: string;
+    title: LangText | string;
+    message: LangText | string;
     link?: string | null;
     metadata?: Prisma.InputJsonValue;
   }): Promise<Notification> {
+    const recipient = await this.prisma.user.findUnique({
+      where: { id: args.recipientId },
+      select: { preferredLanguage: true },
+    });
+    const lang = pickLang(recipient?.preferredLanguage);
     return this.prisma.notification.create({
       data: {
         recipientId: args.recipientId,
         type: args.type,
-        title: args.title,
-        message: args.message,
+        title: tr(args.title, lang),
+        message: tr(args.message, lang),
         link: args.link ?? null,
         metadata: args.metadata ?? Prisma.JsonNull,
       },
@@ -69,8 +83,8 @@ export class NotificationsService {
    */
   async broadcastToAdmins(args: {
     type: NotificationType;
-    title: string;
-    message: string;
+    title: LangText | string;
+    message: LangText | string;
     link?: string | null;
     metadata?: Prisma.InputJsonValue;
   }): Promise<number> {
@@ -80,18 +94,24 @@ export class NotificationsService {
         isActive: true,
         role: { in: [UserRole.admin, UserRole.super_admin] },
       },
-      select: { id: true },
+      // preferredLanguage rides along so each admin's row is rendered
+      // in THEIR language — a French admin and an English admin get
+      // different copies of the same broadcast.
+      select: { id: true, preferredLanguage: true },
     });
     if (admins.length === 0) return 0;
     const result = await this.prisma.notification.createMany({
-      data: admins.map((a) => ({
-        recipientId: a.id,
-        type: args.type,
-        title: args.title,
-        message: args.message,
-        link: args.link ?? null,
-        metadata: args.metadata ?? Prisma.JsonNull,
-      })),
+      data: admins.map((a) => {
+        const lang = pickLang(a.preferredLanguage);
+        return {
+          recipientId: a.id,
+          type: args.type,
+          title: tr(args.title, lang),
+          message: tr(args.message, lang),
+          link: args.link ?? null,
+          metadata: args.metadata ?? Prisma.JsonNull,
+        };
+      }),
     });
     this.logger.debug(
       `Broadcast ${args.type} to ${result.count} admin(s)`,

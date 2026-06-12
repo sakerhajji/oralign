@@ -67,6 +67,16 @@ export class AuthResponseDto {
   avatarUrl?: string;
 
   @ApiProperty({
+    example: 'fr',
+    enum: ['fr', 'en'],
+    description:
+      'Preferred content language — the frontend seeds its i18n store ' +
+      'from this right after sign-in.',
+    required: false,
+  })
+  preferredLanguage?: string;
+
+  @ApiProperty({
     description: 'Object containing access and refresh tokens',
   })
   authToken!: AuthTokenDto;

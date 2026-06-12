@@ -80,6 +80,8 @@ function SidebarProvider({
   const setOpen = React.useCallback(
     (value: boolean | ((value: boolean) => boolean)) => {
       const openState = typeof value === "function" ? value(open) : value
+      if (openState === open) return
+
       if (setOpenProp) {
         setOpenProp(openState)
       } else {
@@ -237,34 +239,26 @@ function Sidebar({
       className="group peer hidden text-sidebar-foreground md:block"
       data-state={state}
       data-collapsible={state === "collapsed" ? collapsible : ""}
+      data-mode={collapsible}
       data-variant={variant}
       data-side={side}
       data-slot="sidebar"
     >
-      {/* Sidebar gap — the layout placeholder that pushes the main
-          content over. Animating `width` here forces a full document
-          reflow on every frame because every descendant of
-          sidebar-wrapper is re-flowed. We can't avoid animating width
-          (we need the rail to actually shrink), but we CAN:
-            • Promise the browser the property is changing
-              (`will-change: width`) so it pre-allocates a composite
-              layer instead of rasterising from scratch each frame.
-            • Force a GPU layer via `translateZ(0)` so the animation
-              doesn't fight the main thread.
-            • Scope reflow with `contain: layout` — the descendants of
-              this element don't influence the rest of the document's
-              layout calculation, so the dashboard table / cards
-              don't reflow alongside the rail. */}
+      {/* Keep the page canvas at the compact rail width for icon-mode
+          sidebars. The full sidebar expands as a fixed overlay instead
+          of resizing every chart, table, and grid on each animation
+          frame. Off-canvas sidebars retain the standard width animation. */}
       <div
         data-slot="sidebar-gap"
         className={cn(
           "relative w-(--sidebar-width) bg-transparent transition-[width] duration-200 ease-linear",
-          "[contain:layout] [will-change:width] [transform:translateZ(0)]",
+          "[contain:layout] [will-change:width]",
+          "group-data-[mode=icon]:transition-none",
           "group-data-[collapsible=offcanvas]:w-0",
           "group-data-[side=right]:rotate-180",
           variant === "floating" || variant === "inset"
-            ? "group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4)))]"
-            : "group-data-[collapsible=icon]:w-(--sidebar-width-icon)"
+            ? "group-data-[mode=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4)))]"
+            : "group-data-[mode=icon]:w-(--sidebar-width-icon)"
         )}
       />
       <div
@@ -272,8 +266,9 @@ function Sidebar({
         data-side={side}
         className={cn(
           "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-linear data-[side=left]:left-0 data-[side=left]:group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)] data-[side=right]:right-0 data-[side=right]:group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)] md:flex",
-          // Same perf treatment as the gap — see comment above.
-          "[contain:layout_style] [will-change:width] [transform:translateZ(0)] [backface-visibility:hidden]",
+          // Width changes are isolated to this fixed overlay, so route
+          // content remains stable while the sidebar opens and closes.
+          "[contain:layout_style] [will-change:width] [transform:translateZ(0)] [backface-visibility:hidden] group-data-[state=expanded]:shadow-[12px_0_32px_-24px_rgba(15,23,42,0.45)]",
           // Adjust the padding for floating and inset variants.
           variant === "floating" || variant === "inset"
             ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"
@@ -350,26 +345,11 @@ function SidebarInset({ className, ...props }: React.ComponentProps<"main">) {
     <main
       data-slot="sidebar-inset"
       className={cn(
-        "relative flex w-full flex-1 flex-col bg-background md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow-sm md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-2",
-        // Performance: the inset gets RESIZED on every frame of the
-        // sidebar open/close animation (the sibling gap div animates
-        // its width). Without containment, every child component is
-        // forced to participate in the layout calculation each frame
-        // — that's expensive on the dashboard, which has KPI cards,
-        // a Recharts AreaChart (which fires its ResponsiveContainer
-        // resize observer 60×), avatar lists, and the slider. The
-        // observable result is sidebar-toggle jank.
-        //
-        // `contain: layout style paint` tells the browser:
-        //   • layout — descendant size changes can't escape upward.
-        //     Combined with the sidebar's own `contain: layout`, the
-        //     two boxes form a clean reflow boundary.
-        //   • style — style changes inside don't trigger style
-        //     re-computation for siblings of the inset.
-        //   • paint — descendants are clipped to the inset's bounds
-        //     so the compositor doesn't paint outside it.
-        // `translateZ(0)` promotes the inset to its own GPU layer
-        // so its paint runs off the main thread.
+        "relative flex w-full flex-1 flex-col bg-background md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ml-2 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow-sm",
+        // Keep expensive dashboard descendants in their own rendering
+        // boundary. The sidebar no longer resizes this inset in icon
+        // mode, while containment still prevents charts and large data
+        // views from invalidating layout outside the page canvas.
         "[contain:layout_style_paint] [transform:translateZ(0)]",
         className
       )}

@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
+import { Lang, pickLang } from '../common/i18n/lang';
+import { PrismaService } from '../prisma/prisma.service';
 import {
   renderApprovalGrantedEmail,
   renderNewOrderForAdminEmail,
@@ -19,7 +21,7 @@ export class MailService {
   private readonly logger = new Logger(MailService.name);
   private transporter: Transporter | null = null;
 
-  constructor() {
+  constructor(private readonly prisma: PrismaService) {
     this.initTransporter();
   }
 
@@ -48,12 +50,34 @@ export class MailService {
     return process.env.MAIL_FROM || 'noreply@oralign.com';
   }
 
+  /**
+   * Language the recipient should receive their email in, looked up from
+   * the user's stored `preferredLanguage`. Any failure (unknown address,
+   * DB hiccup) falls back to English — an email must never fail to send
+   * because of a language lookup.
+   */
+  private async resolveLang(to: string): Promise<Lang> {
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { email: to },
+        select: { preferredLanguage: true },
+      });
+      return pickLang(user?.preferredLanguage);
+    } catch {
+      return 'en';
+    }
+  }
+
   async sendVerificationEmail(
     to: string,
     fullName: string,
     code: string,
+    lang?: Lang,
   ): Promise<void> {
-    const { html, subject } = renderVerificationEmail({ fullName, code });
+    const { html, subject } = renderVerificationEmail(
+      { fullName, code },
+      lang ?? (await this.resolveLang(to)),
+    );
     await this.send({
       to,
       subject,
@@ -66,8 +90,12 @@ export class MailService {
     to: string,
     fullName: string,
     resetUrl: string,
+    lang?: Lang,
   ): Promise<void> {
-    const { html, subject } = renderPasswordResetEmail({ fullName, resetUrl });
+    const { html, subject } = renderPasswordResetEmail(
+      { fullName, resetUrl },
+      lang ?? (await this.resolveLang(to)),
+    );
     await this.send({
       to,
       subject,
@@ -79,11 +107,15 @@ export class MailService {
     to: string,
     fullName: string,
     dashboardUrl: string,
+    lang?: Lang,
   ): Promise<void> {
-    const { html, subject } = renderApprovalGrantedEmail({
-      fullName,
-      dashboardUrl,
-    });
+    const { html, subject } = renderApprovalGrantedEmail(
+      {
+        fullName,
+        dashboardUrl,
+      },
+      lang ?? (await this.resolveLang(to)),
+    );
     await this.send({ to, subject, html });
   }
 
@@ -95,8 +127,12 @@ export class MailService {
     orderCode: string;
     patientName: string;
     dashboardUrl: string;
+    lang?: Lang;
   }): Promise<void> {
-    const { html, subject } = renderNewOrderForDoctorEmail(args);
+    const { html, subject } = renderNewOrderForDoctorEmail(
+      args,
+      args.lang ?? (await this.resolveLang(args.to)),
+    );
     await this.send({ to: args.to, subject, html });
   }
 
@@ -107,8 +143,12 @@ export class MailService {
     doctorName: string;
     patientName: string;
     dashboardUrl: string;
+    lang?: Lang;
   }): Promise<void> {
-    const { html, subject } = renderNewOrderForAdminEmail(args);
+    const { html, subject } = renderNewOrderForAdminEmail(
+      args,
+      args.lang ?? (await this.resolveLang(args.to)),
+    );
     await this.send({ to: args.to, subject, html });
   }
 
@@ -118,8 +158,12 @@ export class MailService {
     orderCode: string;
     planName: string;
     dashboardUrl: string;
+    lang?: Lang;
   }): Promise<void> {
-    const { html, subject } = renderTreatmentReadyForDoctorEmail(args);
+    const { html, subject } = renderTreatmentReadyForDoctorEmail(
+      args,
+      args.lang ?? (await this.resolveLang(args.to)),
+    );
     await this.send({ to: args.to, subject, html });
   }
 
@@ -132,8 +176,12 @@ export class MailService {
     decision: 'approved' | 'rejected';
     reason?: string;
     dashboardUrl: string;
+    lang?: Lang;
   }): Promise<void> {
-    const { html, subject } = renderTreatmentDecisionForAdminEmail(args);
+    const { html, subject } = renderTreatmentDecisionForAdminEmail(
+      args,
+      args.lang ?? (await this.resolveLang(args.to)),
+    );
     await this.send({ to: args.to, subject, html });
   }
 
@@ -145,8 +193,12 @@ export class MailService {
     totalTtc: number;
     currency: string;
     dashboardUrl: string;
+    lang?: Lang;
   }): Promise<void> {
-    const { html, subject } = renderQuoteSentForDoctorEmail(args);
+    const { html, subject } = renderQuoteSentForDoctorEmail(
+      args,
+      args.lang ?? (await this.resolveLang(args.to)),
+    );
     await this.send({ to: args.to, subject, html });
   }
 
@@ -159,8 +211,12 @@ export class MailService {
     decision: 'approved' | 'rejected';
     reason?: string;
     dashboardUrl: string;
+    lang?: Lang;
   }): Promise<void> {
-    const { html, subject } = renderQuoteDecisionForAdminEmail(args);
+    const { html, subject } = renderQuoteDecisionForAdminEmail(
+      args,
+      args.lang ?? (await this.resolveLang(args.to)),
+    );
     await this.send({ to: args.to, subject, html });
   }
 

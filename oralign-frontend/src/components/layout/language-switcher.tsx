@@ -12,6 +12,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useT } from '@/lib/i18n/lang-context';
 import { LANGS, type Lang } from '@/lib/i18n/dict';
+import { useAuth } from '@/lib/providers/auth-provider';
+import { usersService } from '@/lib/api/users.service';
 import { cn } from '@/lib/utils';
 
 /**
@@ -40,7 +42,23 @@ export function LanguageSwitcher({
   variant?: 'ghost' | 'outline';
 }) {
   const { lang, setLang, t } = useT();
+  const { user } = useAuth();
   const current = LABELS[lang];
+
+  // Switch the UI immediately, then persist the choice onto the user's
+  // profile (fire-and-forget). The profile copy is what the backend
+  // reads when it renders notifications and emails for this user, and
+  // what re-seeds the UI on the next login / other device. A failed
+  // sync is deliberately silent — the local switch already worked and
+  // the next successful save will reconcile.
+  const pickLanguage = (l: (typeof LANGS)[number]) => {
+    setLang(l);
+    if (user?.id) {
+      void usersService
+        .updateUser(user.id, { preferredLanguage: l })
+        .catch(() => undefined);
+    }
+  };
 
   return (
     <DropdownMenu>
@@ -70,7 +88,7 @@ export function LanguageSwitcher({
           return (
             <DropdownMenuItem
               key={l}
-              onSelect={() => setLang(l)}
+              onSelect={() => pickLanguage(l)}
               className={cn(
                 'cursor-pointer gap-2',
                 // Don't let RTL leak into the dropdown row layout —

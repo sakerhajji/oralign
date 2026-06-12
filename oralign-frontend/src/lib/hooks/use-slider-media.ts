@@ -10,6 +10,7 @@ import {
 import { toast } from 'sonner';
 import { sliderMediaService } from '@/lib/api/slider-media.service';
 import { extractApiErrorMessage } from '@/lib/api/error';
+import { useT } from '@/lib/i18n/lang-context';
 import type {
   CreateSliderMediaInput,
   PaginatedResponse,
@@ -65,11 +66,12 @@ export function useCreateSliderMedia(): UseMutationResult<
   CreateSliderMediaInput
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: (input) => sliderMediaService.create(input),
     onSuccess: () => {
       invalidateAll(queryClient);
-      toast.success('Slide added.');
+      toast.success(t('toasts.sliderMedia.added'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -81,11 +83,12 @@ export function useUpdateSliderMedia(): UseMutationResult<
   { id: string; input: UpdateSliderMediaInput }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ id, input }) => sliderMediaService.update(id, input),
     onSuccess: () => {
       invalidateAll(queryClient);
-      toast.success('Slide updated.');
+      toast.success(t('toasts.sliderMedia.updated'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -93,11 +96,12 @@ export function useUpdateSliderMedia(): UseMutationResult<
 
 export function useActivateSliderMedia(): UseMutationResult<SliderMedia, Error, string> {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: (id) => sliderMediaService.activate(id),
     onSuccess: () => {
       invalidateAll(queryClient);
-      toast.success('Slide activated.');
+      toast.success(t('toasts.sliderMedia.activated'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -105,11 +109,12 @@ export function useActivateSliderMedia(): UseMutationResult<SliderMedia, Error, 
 
 export function useDeactivateSliderMedia(): UseMutationResult<SliderMedia, Error, string> {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: (id) => sliderMediaService.deactivate(id),
     onSuccess: () => {
       invalidateAll(queryClient);
-      toast.success('Slide deactivated.');
+      toast.success(t('toasts.sliderMedia.deactivated'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -121,11 +126,12 @@ export function useReorderSliderMedia(): UseMutationResult<
   string[]
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: (ids) => sliderMediaService.reorder(ids),
     onSuccess: () => {
       invalidateAll(queryClient);
-      toast.success('Order updated.');
+      toast.success(t('toasts.sliderMedia.reordered'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -133,11 +139,12 @@ export function useReorderSliderMedia(): UseMutationResult<
 
 export function useDeleteSliderMedia(): UseMutationResult<{ id: string }, Error, string> {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: (id) => sliderMediaService.softDelete(id),
     onSuccess: () => {
       invalidateAll(queryClient);
-      toast.success('Slide moved to trash.');
+      toast.success(t('toasts.sliderMedia.trashed'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -145,11 +152,12 @@ export function useDeleteSliderMedia(): UseMutationResult<{ id: string }, Error,
 
 export function useRestoreSliderMedia(): UseMutationResult<SliderMedia, Error, string> {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: (id) => sliderMediaService.restore(id),
     onSuccess: () => {
       invalidateAll(queryClient);
-      toast.success('Slide restored.');
+      toast.success(t('toasts.sliderMedia.restored'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });

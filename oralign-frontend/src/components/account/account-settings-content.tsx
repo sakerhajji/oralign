@@ -39,6 +39,7 @@ import { usersService } from '@/lib/api';
 import { getAvatarUrl } from '@/lib/utils';
 import { useAuth } from '@/lib/providers';
 import { userKeys } from '@/lib/hooks/use-users';
+import { useT } from '@/lib/i18n/lang-context';
 
 const TIME_REGEX = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
 
@@ -48,10 +49,11 @@ const normalizeOptional = (value?: string | null) => {
 };
 
 export function AccountSettingsContent() {
+  const { t } = useT();
   const queryClient = useQueryClient();
   const { login } = useAuth();
   const { user, dentistProfile, workingHours, isDentist, isLoading, error, refetchWorkingHours } = useAccountData();
-  const profileMutation = useUpdateProfile({ successMessage: 'Profile updated successfully.' });
+  const profileMutation = useUpdateProfile({ successMessage: t('accountSettings.toastProfileUpdated') });
   const { mutateAsync: changePassword, isPending: isChangingPassword } = useChangePassword();
   const { mutate: sendResetLink, isPending: isSendingReset } = useForgotPassword();
   const clinicMutation = useUpdateClinicProfile();
@@ -150,11 +152,11 @@ export function AccountSettingsContent() {
     const file = event.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith('image/')) {
-      toast.error('Please select an image file.');
+      toast.error(t('accountSettings.toastSelectImage'));
       return;
     }
     if (file.size > 5 * 1024 * 1024) {
-      toast.error('Avatar must be 5MB or smaller.');
+      toast.error(t('accountSettings.toastAvatarTooLarge'));
       return;
     }
     setAvatarFile(file);
@@ -197,7 +199,7 @@ export function AccountSettingsContent() {
       if (hasProfileDataChanges) {
         updatedUser = await profileMutation.mutateAsync({ id: user.id, data: updateData });
       } else if (avatarFile) {
-        toast.success('Profile updated successfully.');
+        toast.success(t('accountSettings.toastProfileUpdated'));
       }
 
       profileForm.reset({
@@ -217,17 +219,17 @@ export function AccountSettingsContent() {
     for (const day of schedule) {
       if (!day.isClosed) {
         if (!TIME_REGEX.test(day.openTime) || !TIME_REGEX.test(day.closeTime)) {
-          toast.error('Please provide valid working hours (HH:mm).');
+          toast.error(t('accountSettings.toastInvalidHours'));
           return false;
         }
         if (day.openTime >= day.closeTime) {
-          toast.error('Opening time must be before closing time.');
+          toast.error(t('accountSettings.toastOpeningBeforeClosing'));
           return false;
         }
       }
     }
     return true;
-  }, [schedule]);
+  }, [schedule, t]);
 
   const handleClinicSubmit = clinicForm.handleSubmit(async (values) => {
     if (!user || user.role !== UserRole.DENTIST) return;
@@ -249,7 +251,7 @@ export function AccountSettingsContent() {
           clinicPhone: normalizeOptional(values.clinicPhone),
         });
         profileId = createdProfile.id;
-        toast.success('Clinic profile created.');
+        toast.success(t('accountSettings.toastClinicCreated'));
       } else {
         await clinicMutation.mutateAsync({ id: profileId, data: clinicPayload });
       }
@@ -276,7 +278,7 @@ export function AccountSettingsContent() {
           ),
         );
         await refetchWorkingHours();
-        toast.success('Working hours saved.');
+        toast.success(t('accountSettings.toastWorkingHoursSaved'));
       }
 
       clinicForm.reset({
@@ -309,11 +311,11 @@ export function AccountSettingsContent() {
 
   const tabItems = useMemo(
     () => [
-      { key: 'profile', label: 'Profile' },
-      ...(isDentist ? [{ key: 'clinic', label: 'Clinic' }] : []),
-      { key: 'security', label: 'Security' },
+      { key: 'profile', label: t('accountSettings.tabProfile') },
+      ...(isDentist ? [{ key: 'clinic', label: t('accountSettings.tabClinic') }] : []),
+      { key: 'security', label: t('accountSettings.tabSecurity') },
     ],
-    [isDentist],
+    [isDentist, t],
   );
 
   return (
@@ -321,9 +323,9 @@ export function AccountSettingsContent() {
       <div className="flex flex-col gap-6 py-6">
         <div className="px-4 lg:px-6">
           <div className="space-y-1">
-            <h1 className="text-2xl font-semibold">Account settings</h1>
+            <h1 className="text-2xl font-semibold">{t('accountSettings.title')}</h1>
             <p className="text-sm text-muted-foreground">
-              Update your profile, clinic details, and security preferences.
+              {t('accountSettings.subtitle')}
             </p>
           </div>
         </div>
@@ -332,9 +334,9 @@ export function AccountSettingsContent() {
           {isLoading && <AccountSkeleton />}
           {!isLoading && error && (
             <Alert variant="destructive">
-              <AlertTitle>Unable to load settings</AlertTitle>
+              <AlertTitle>{t('accountSettings.unableToLoad')}</AlertTitle>
               <AlertDescription>
-                {error instanceof Error ? error.message : 'Please try again later.'}
+                {error instanceof Error ? error.message : t('accountSettings.tryAgainLater')}
               </AlertDescription>
             </Alert>
           )}
@@ -352,9 +354,9 @@ export function AccountSettingsContent() {
               <TabsContent value="profile" className="space-y-6">
                 <Card>
                   <CardHeader>
-                    <h3 className="text-base font-semibold">Profile details</h3>
+                    <h3 className="text-base font-semibold">{t('accountSettings.profileDetailsTitle')}</h3>
                     <p className="text-sm text-muted-foreground">
-                      Keep your personal information up to date.
+                      {t('accountSettings.profileDetailsBody')}
                     </p>
                   </CardHeader>
                   <CardContent className="space-y-6">
@@ -372,9 +374,9 @@ export function AccountSettingsContent() {
                       </Avatar>
                       <div className="flex flex-1 flex-col gap-2">
                         <div>
-                          <p className="text-sm font-medium">Profile photo</p>
+                          <p className="text-sm font-medium">{t('accountSettings.profilePhotoLabel')}</p>
                           <p className="text-xs text-muted-foreground">
-                            Upload a square image for best results.
+                            {t('accountSettings.profilePhotoHint')}
                           </p>
                         </div>
                         <div className="flex flex-wrap gap-2">
@@ -384,7 +386,7 @@ export function AccountSettingsContent() {
                             onClick={() => fileInputRef.current?.click()}
                             disabled={isProfileSubmitting}
                           >
-                            Upload avatar
+                            {t('accountSettings.uploadAvatar')}
                           </Button>
                           {avatarFile && (
                             <Button
@@ -396,7 +398,7 @@ export function AccountSettingsContent() {
                               }}
                               disabled={isProfileSubmitting}
                             >
-                              Reset
+                              {t('accountSettings.reset')}
                             </Button>
                           )}
                         </div>
@@ -416,7 +418,7 @@ export function AccountSettingsContent() {
                       <div className="grid gap-4 md:grid-cols-2">
                         <div className="space-y-2">
                           <label className="text-sm font-medium" htmlFor="fullName">
-                            Full name
+                            {t('accountSettings.fullNameLabel')}
                           </label>
                           <Input id="fullName" {...profileForm.register('fullName')} />
                           {profileForm.formState.errors.fullName && (
@@ -428,17 +430,17 @@ export function AccountSettingsContent() {
 
                         <div className="space-y-2">
                           <label className="text-sm font-medium" htmlFor="email">
-                            Email
+                            {t('accountSettings.emailLabel')}
                           </label>
                           <Input id="email" {...profileForm.register('email')} disabled />
                           <p className="text-xs text-muted-foreground">
-                            Email updates are managed by support.
+                            {t('accountSettings.emailManagedHint')}
                           </p>
                         </div>
 
                         <div className="space-y-2 md:col-span-2">
                           <label className="text-sm font-medium" htmlFor="phone">
-                            Phone
+                            {t('accountSettings.phoneLabel')}
                           </label>
                           <Controller
                             name="phone"
@@ -475,7 +477,9 @@ export function AccountSettingsContent() {
 
                       <div className="flex justify-end">
                         <Button type="submit" disabled={isProfileSubmitting || !profileHasChanges}>
-                          {isProfileSubmitting ? 'Saving...' : 'Save changes'}
+                          {isProfileSubmitting
+                            ? t('accountSettings.saving')
+                            : t('accountSettings.saveChanges')}
                         </Button>
                       </div>
                     </Form>
@@ -487,9 +491,9 @@ export function AccountSettingsContent() {
                 <TabsContent value="clinic" className="space-y-6">
                   <Card>
                     <CardHeader>
-                      <h3 className="text-base font-semibold">Clinic settings</h3>
+                      <h3 className="text-base font-semibold">{t('accountSettings.clinicSettingsTitle')}</h3>
                       <p className="text-sm text-muted-foreground">
-                        Manage your clinic profile and availability.
+                        {t('accountSettings.clinicSettingsBody')}
                       </p>
                     </CardHeader>
                     <CardContent className="space-y-6">
@@ -497,7 +501,7 @@ export function AccountSettingsContent() {
                         <div className="grid gap-4 md:grid-cols-2">
                           <div className="space-y-2">
                             <label className="text-sm font-medium" htmlFor="clinicName">
-                              Clinic name
+                              {t('accountSettings.clinicNameLabel')}
                             </label>
                             <Input id="clinicName" {...clinicForm.register('clinicName')} />
                             {clinicForm.formState.errors.clinicName && (
@@ -509,7 +513,7 @@ export function AccountSettingsContent() {
 
                           <div className="space-y-2">
                             <label className="text-sm font-medium" htmlFor="clinicPhone">
-                              Clinic phone
+                              {t('accountSettings.clinicPhoneLabel')}
                             </label>
                             <Controller
                               name="clinicPhone"
@@ -539,7 +543,7 @@ export function AccountSettingsContent() {
 
                           <div className="space-y-2 md:col-span-2">
                             <label className="text-sm font-medium" htmlFor="clinicAddress">
-                              Address
+                              {t('accountSettings.addressLabel')}
                             </label>
                             <Input id="clinicAddress" {...clinicForm.register('clinicAddress')} />
                           </div>
@@ -549,9 +553,9 @@ export function AccountSettingsContent() {
 
                         <div className="space-y-3">
                           <div>
-                            <p className="text-sm font-medium">Working hours</p>
+                            <p className="text-sm font-medium">{t('accountSettings.workingHoursLabel')}</p>
                             <p className="text-xs text-muted-foreground">
-                              Set your weekly availability.
+                              {t('accountSettings.workingHoursHint')}
                             </p>
                           </div>
                           <WorkingHoursEditor
@@ -566,7 +570,9 @@ export function AccountSettingsContent() {
                             type="submit"
                             disabled={isClinicSubmitting || !clinicHasChanges}
                           >
-                            {isClinicSubmitting ? 'Saving...' : 'Save clinic settings'}
+                            {isClinicSubmitting
+                              ? t('accountSettings.saving')
+                              : t('accountSettings.saveClinic')}
                           </Button>
                         </div>
                       </Form>
@@ -579,16 +585,16 @@ export function AccountSettingsContent() {
                 {/* Change password with current password */}
                 <Card>
                   <CardHeader>
-                    <h3 className="text-base font-semibold">Change password</h3>
+                    <h3 className="text-base font-semibold">{t('accountSettings.changePasswordTitle')}</h3>
                     <p className="text-sm text-muted-foreground">
-                      Enter your current password to set a new one.
+                      {t('accountSettings.changePasswordBody')}
                     </p>
                   </CardHeader>
                   <CardContent>
                     <Form onSubmit={handlePasswordSubmit}>
                       <div className="space-y-2">
                         <label className="text-sm font-medium" htmlFor="currentPassword">
-                          Current password
+                          {t('accountSettings.currentPassword')}
                         </label>
                         <Input
                           id="currentPassword"
@@ -605,7 +611,7 @@ export function AccountSettingsContent() {
 
                       <div className="space-y-2">
                         <label className="text-sm font-medium" htmlFor="newPassword">
-                          New password
+                          {t('accountSettings.newPassword')}
                         </label>
                         <Input
                           id="newPassword"
@@ -622,7 +628,7 @@ export function AccountSettingsContent() {
 
                       <div className="space-y-2">
                         <label className="text-sm font-medium" htmlFor="confirmPassword">
-                          Confirm new password
+                          {t('accountSettings.confirmPassword')}
                         </label>
                         <Input
                           id="confirmPassword"
@@ -639,7 +645,9 @@ export function AccountSettingsContent() {
 
                       <div className="flex justify-end">
                         <Button type="submit" disabled={isPasswordSubmitting || !passwordHasChanges}>
-                          {isPasswordSubmitting ? 'Updating...' : 'Update password'}
+                          {isPasswordSubmitting
+                            ? t('accountSettings.updating')
+                            : t('accountSettings.updatePassword')}
                         </Button>
                       </div>
                     </Form>
@@ -649,10 +657,9 @@ export function AccountSettingsContent() {
                 {/* Forgot current password — send reset link */}
                 <Card>
                   <CardHeader>
-                    <h3 className="text-base font-semibold">Forgot your password?</h3>
+                    <h3 className="text-base font-semibold">{t('accountSettings.forgotTitle')}</h3>
                     <p className="text-sm text-muted-foreground">
-                      We&apos;ll send a password-reset link to{' '}
-                      <span className="font-medium text-foreground">{user?.email}</span>.
+                      {t('accountSettings.forgotBody', { email: user?.email ?? '' })}
                     </p>
                   </CardHeader>
                   <CardContent>
@@ -662,7 +669,9 @@ export function AccountSettingsContent() {
                       onClick={handleSendResetLink}
                       disabled={isSendingReset}
                     >
-                      {isSendingReset ? 'Sending…' : 'Send reset link'}
+                      {isSendingReset
+                        ? t('accountSettings.sending')
+                        : t('accountSettings.sendResetLink')}
                     </Button>
                   </CardContent>
                 </Card>

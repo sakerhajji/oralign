@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDebouncedCallback } from 'use-debounce';
 import { format, formatDistanceToNowStrict } from 'date-fns';
+import { fr as frLocale } from 'date-fns/locale';
+import { useT } from '@/lib/i18n/lang-context';
 import {
   AlertTriangle,
   ArchiveRestore,
@@ -83,17 +85,23 @@ import { Composer } from '@/components/support/support-bubble';
 // ─────────────────────────────────────────────────────────────────────
 // Constants
 
-const STATUS_OPTIONS: Array<{
-  key: SupportConversationStatus | 'all' | 'unread' | 'trash';
-  label: string;
+type StatusFilterKey =
+  | SupportConversationStatus
+  | 'all'
+  | 'unread'
+  | 'trash';
+
+const STATUS_OPTION_KEYS: ReadonlyArray<{
+  key: StatusFilterKey;
+  labelKey: string;
 }> = [
-  { key: 'all', label: 'All' },
-  { key: 'unread', label: 'Unread' },
-  { key: SupportConversationStatus.OPEN, label: 'Open' },
-  { key: SupportConversationStatus.PENDING, label: 'Pending' },
-  { key: SupportConversationStatus.RESOLVED, label: 'Resolved' },
-  { key: SupportConversationStatus.CLOSED, label: 'Closed' },
-  { key: 'trash', label: 'Trash' },
+  { key: 'all', labelKey: 'supportAdmin.tabAll' },
+  { key: 'unread', labelKey: 'supportAdmin.tabUnread' },
+  { key: SupportConversationStatus.OPEN, labelKey: 'supportAdmin.tabOpen' },
+  { key: SupportConversationStatus.PENDING, labelKey: 'supportAdmin.tabPending' },
+  { key: SupportConversationStatus.RESOLVED, labelKey: 'supportAdmin.tabResolved' },
+  { key: SupportConversationStatus.CLOSED, labelKey: 'supportAdmin.tabClosed' },
+  { key: 'trash', labelKey: 'supportAdmin.tabTrash' },
 ];
 
 const PRIORITY_TONE: Record<SupportPriority, string> = {
@@ -114,6 +122,7 @@ const STATUS_TONE: Record<SupportConversationStatus, string> = {
 // Page
 
 export function AdminSupportContent() {
+  const { t, lang } = useT();
   // Filter state
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -182,11 +191,10 @@ export function AdminSupportContent() {
         <div>
           <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight sm:text-2xl">
             <MessageCircle className="size-6 text-primary" />
-            Support inbox
+            {t('supportAdmin.title')}
           </h1>
           <p className="text-xs text-muted-foreground">
-            Direct doctor ↔ admin support threads. Reply, resolve,
-            assign priority, or move stale threads to trash.
+            {t('supportAdmin.intro')}
           </p>
         </div>
       </header>
@@ -194,7 +202,7 @@ export function AdminSupportContent() {
       {/* Status tabs */}
       <div className="overflow-x-auto">
         <div className="flex w-full min-w-max gap-1 rounded-lg border bg-card p-1">
-          {STATUS_OPTIONS.map((tab) => {
+          {STATUS_OPTION_KEYS.map((tab) => {
             const active = filter === tab.key;
             return (
               <button
@@ -212,7 +220,7 @@ export function AdminSupportContent() {
                     : 'text-muted-foreground hover:bg-muted hover:text-foreground',
                 )}
               >
-                {tab.label}
+                {t(tab.labelKey)}
               </button>
             );
           })}
@@ -233,7 +241,7 @@ export function AdminSupportContent() {
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
                 key={searchInputKey}
-                placeholder="Search doctor, subject, message…"
+                placeholder={t('supportAdmin.searchPlaceholder')}
                 defaultValue={search}
                 onChange={(e) => debouncedSearch(e.target.value)}
                 className="h-9 pl-8"
@@ -243,7 +251,7 @@ export function AdminSupportContent() {
                   type="button"
                   onClick={clearSearch}
                   className="absolute right-2 top-1/2 grid size-5 -translate-y-1/2 place-items-center rounded text-muted-foreground hover:text-foreground"
-                  aria-label="Clear search"
+                  aria-label={t('supportAdmin.clearSearch')}
                 >
                   <X className="size-3" />
                 </button>
@@ -258,13 +266,13 @@ export function AdminSupportContent() {
             >
               <SelectTrigger className="h-9 w-[110px]">
                 <Filter className="mr-1 size-3.5" />
-                <SelectValue placeholder="Priority" />
+                <SelectValue placeholder={t('supportAdmin.priorityLabel')} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Any priority</SelectItem>
+                <SelectItem value="all">{t('supportAdmin.anyPriority')}</SelectItem>
                 {Object.values(SupportPriority).map((p) => (
                   <SelectItem key={p} value={p}>
-                    {p}
+                    {t(`supportAdmin.priority${p[0].toUpperCase()}${p.slice(1).toLowerCase()}`)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -275,7 +283,7 @@ export function AdminSupportContent() {
               className="size-9"
               onClick={() => listQuery.refetch()}
               disabled={listQuery.isFetching}
-              aria-label="Refresh"
+              aria-label={t('supportAdmin.refresh')}
             >
               <RefreshCw
                 className={cn(
@@ -298,13 +306,13 @@ export function AdminSupportContent() {
                 <MessageCircle className="size-8 opacity-40" />
                 <p className="font-medium text-foreground">
                   {filter === 'trash'
-                    ? 'Trash is empty.'
-                    : 'No conversations match.'}
+                    ? t('supportAdmin.emptyTrash')
+                    : t('supportAdmin.emptyMatch')}
                 </p>
                 <p className="text-xs">
                   {filter === 'trash'
-                    ? 'Soft-deleted conversations show up here.'
-                    : 'New support threads will appear here automatically.'}
+                    ? t('supportAdmin.emptyTrashHint')
+                    : t('supportAdmin.emptyHint')}
                 </p>
               </div>
             ) : (
@@ -315,6 +323,7 @@ export function AdminSupportContent() {
                     conv={c}
                     active={activeId === c.id}
                     onSelect={() => setActiveId(c.id)}
+                    lang={lang}
                   />
                 ))}
               </ul>
@@ -324,7 +333,7 @@ export function AdminSupportContent() {
           {totalPages > 1 ? (
             <div className="flex items-center justify-between border-t p-2 text-xs">
               <span className="text-muted-foreground">
-                Page {page} of {totalPages} · {total} total
+                {t('supportAdmin.pageInfo', { page, total: totalPages, count: total })}
               </span>
               <div className="flex gap-1">
                 <Button
@@ -333,7 +342,7 @@ export function AdminSupportContent() {
                   className="size-7"
                   disabled={page <= 1}
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  aria-label="Previous page"
+                  aria-label={t('supportAdmin.prevPage')}
                 >
                   <ChevronLeft className="size-4" />
                 </Button>
@@ -343,7 +352,7 @@ export function AdminSupportContent() {
                   className="size-7"
                   disabled={page >= totalPages}
                   onClick={() => setPage((p) => p + 1)}
-                  aria-label="Next page"
+                  aria-label={t('supportAdmin.nextPage')}
                 >
                   <ChevronRight className="size-4" />
                 </Button>
@@ -368,11 +377,10 @@ export function AdminSupportContent() {
             <div className="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center text-muted-foreground">
               <MessageCircle className="size-10 opacity-30" />
               <p className="text-sm font-medium text-foreground">
-                Select a conversation
+                {t('supportAdmin.selectConv')}
               </p>
               <p className="max-w-xs text-xs">
-                Pick a doctor's thread from the list to read it and
-                reply directly.
+                {t('supportAdmin.selectConvHint')}
               </p>
             </div>
           )}
@@ -389,12 +397,18 @@ function ConversationListItem({
   conv,
   active,
   onSelect,
+  lang,
 }: {
   conv: SupportConversation;
   active: boolean;
   onSelect: () => void;
+  lang: 'en' | 'fr';
 }) {
+  const { t } = useT();
   const lastAt = new Date(conv.lastMessageAt);
+  const locale = lang === 'fr' ? frLocale : undefined;
+  const statusKey = `supportAdmin.status${conv.status[0].toUpperCase()}${conv.status.slice(1).toLowerCase()}`;
+  const priorityKey = `supportAdmin.priority${conv.priority[0].toUpperCase()}${conv.priority.slice(1).toLowerCase()}`;
   return (
     <li>
       <button
@@ -417,10 +431,10 @@ function ConversationListItem({
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
             <span className="truncate text-sm font-semibold">
-              {conv.doctor?.fullName ?? 'Unknown doctor'}
+              {conv.doctor?.fullName ?? t('supportAdmin.unknownDoctor')}
             </span>
             <span className="shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">
-              {formatDistanceToNowStrict(lastAt, { addSuffix: false })}
+              {formatDistanceToNowStrict(lastAt, { addSuffix: false, locale })}
             </span>
           </div>
           <p className="line-clamp-1 text-xs text-muted-foreground">
@@ -435,7 +449,7 @@ function ConversationListItem({
                 STATUS_TONE[conv.status],
               )}
             >
-              {conv.status}
+              {t(statusKey)}
             </span>
             <span
               className={cn(
@@ -443,7 +457,7 @@ function ConversationListItem({
                 PRIORITY_TONE[conv.priority],
               )}
             >
-              {conv.priority}
+              {t(priorityKey)}
             </span>
             {conv.unreadByAdmin > 0 ? (
               <Badge variant="destructive" className="h-4 px-1.5 text-[10px]">
@@ -467,6 +481,7 @@ function ActiveConversation({
   conversationId: string;
   onBack: () => void;
 }) {
+  const { t, lang } = useT();
   const { data, isLoading, refetch } = useSupportConversation(conversationId);
   const sendMessage = useSendSupportMessage();
   const markRead = useMarkSupportRead();
@@ -547,7 +562,7 @@ function ActiveConversation({
             size="icon"
             className="size-8 md:hidden"
             onClick={onBack}
-            aria-label="Back"
+            aria-label={t('supportAdmin.back')}
           >
             <ArrowLeft className="size-4" />
           </Button>
@@ -574,7 +589,7 @@ function ActiveConversation({
                 STATUS_TONE[conv.status],
               )}
             >
-              {conv.status}
+              {t(`supportAdmin.status${conv.status[0].toUpperCase()}${conv.status.slice(1).toLowerCase()}`)}
             </span>
           ) : null}
           {conv && !isDeleted ? (
@@ -586,7 +601,7 @@ function ActiveConversation({
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                  Status
+                  {t('supportAdmin.statusLabel')}
                 </DropdownMenuLabel>
                 {Object.values(SupportConversationStatus).map((s) => (
                   <DropdownMenuItem
@@ -597,13 +612,15 @@ function ActiveConversation({
                       conv.status === s && 'bg-accent text-accent-foreground',
                     )}
                   >
-                    <span className="capitalize">{s}</span>
+                    <span className="capitalize">
+                      {t(`supportAdmin.status${s[0].toUpperCase()}${s.slice(1).toLowerCase()}`)}
+                    </span>
                     {conv.status === s ? <CheckCircle2 className="size-3.5" /> : null}
                   </DropdownMenuItem>
                 ))}
                 <DropdownMenuSeparator />
                 <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                  Priority
+                  {t('supportAdmin.priorityLabel')}
                 </DropdownMenuLabel>
                 {Object.values(SupportPriority).map((p) => (
                   <DropdownMenuItem
@@ -614,7 +631,9 @@ function ActiveConversation({
                       conv.priority === p && 'bg-accent text-accent-foreground',
                     )}
                   >
-                    <span className="capitalize">{p}</span>
+                    <span className="capitalize">
+                      {t(`supportAdmin.priority${p[0].toUpperCase()}${p.slice(1).toLowerCase()}`)}
+                    </span>
                     {conv.priority === p ? <CheckCircle2 className="size-3.5" /> : null}
                   </DropdownMenuItem>
                 ))}
@@ -629,7 +648,7 @@ function ActiveConversation({
                   }}
                 >
                   <CheckCircle2 className="mr-2 size-4 text-emerald-600" />
-                  Mark as resolved
+                  {t('supportAdmin.markResolved')}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={(e) => {
@@ -639,7 +658,7 @@ function ActiveConversation({
                   className="text-destructive focus:text-destructive"
                 >
                   <Trash2 className="mr-2 size-4" />
-                  Delete conversation
+                  {t('supportAdmin.deleteConversation')}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -659,7 +678,7 @@ function ActiveConversation({
               }
             >
               <ArchiveRestore className="size-3.5" />
-              Restore
+              {t('supportAdmin.restore')}
             </Button>
           ) : null}
         </div>
@@ -680,10 +699,10 @@ function ActiveConversation({
           <div className="flex flex-col items-center gap-2 p-10 text-center text-sm">
             <AlertTriangle className="size-8 text-amber-600" />
             <p className="font-medium text-foreground">
-              This conversation is in trash.
+              {t('supportAdmin.convInTrashTitle')}
             </p>
             <p className="text-xs text-muted-foreground">
-              Restore it to resume replies, or close this view.
+              {t('supportAdmin.convInTrashHint')}
             </p>
           </div>
         ) : (
@@ -693,6 +712,7 @@ function ActiveConversation({
               message={m}
               fromAdmin={m.senderRole !== UserRole.DENTIST}
               onPreviewImage={() => setLightbox(m)}
+              lang={lang}
             />
           ))
         )}
@@ -710,11 +730,11 @@ function ActiveConversation({
           fileRef={fileRef}
           onSubmit={submit}
           pending={sendMessage.isPending}
-          placeholder="Reply to the doctor…"
+          placeholder={t('supportAdmin.replyPlaceholder')}
         />
       ) : isClosed ? (
         <div className="border-t bg-muted/40 p-4 text-center text-xs text-muted-foreground">
-          Conversation is closed. Mark it Open to resume replies.
+          {t('supportAdmin.convClosed')}
         </div>
       ) : null}
 
@@ -724,17 +744,14 @@ function ActiveConversation({
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
               <Trash2 className="size-4 text-destructive" />
-              Delete this conversation?
+              {t('supportAdmin.deleteTitle')}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              The doctor will no longer be able to send messages to this
-              thread, and it will move to <strong>Trash</strong>. You can
-              restore it later if needed. Soft delete — messages and
-              attachments stay on disk.
+              {t('supportAdmin.deleteBody')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t('supportAdmin.cancel')}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 if (conv) {
@@ -747,7 +764,7 @@ function ActiveConversation({
                 }
               }}
             >
-              Delete
+              {t('supportAdmin.delete')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -760,7 +777,7 @@ function ActiveConversation({
           if (!o) setLightbox(null);
         }}
         src={lightboxImg.src}
-        alt={lightbox?.attachmentName ?? 'attachment'}
+        alt={lightbox?.attachmentName ?? t('supportAdmin.attachmentAlt')}
         caption={lightbox?.attachmentName ?? undefined}
       />
     </>
@@ -774,11 +791,14 @@ function AdminMessageBubble({
   message,
   fromAdmin,
   onPreviewImage,
+  lang,
 }: {
   message: SupportMessage;
   fromAdmin: boolean;
   onPreviewImage: () => void;
+  lang: 'en' | 'fr';
 }) {
+  const { t } = useT();
   const attachmentApiUrl = message.attachmentRelativePath
     ? supportAttachmentUrl(message.conversationId, message.id)
     : null;
@@ -786,6 +806,9 @@ function AdminMessageBubble({
   // the Authorization header attached, then render the blob URL.
   const { src: attachmentSrc, loading: attachmentLoading } =
     useAuthedImage(attachmentApiUrl);
+  const attachmentName = message.attachmentName ?? t('supportAdmin.attachmentAlt');
+  const locale = lang === 'fr' ? frLocale : undefined;
+  const dateFormat = lang === 'fr' ? 'd MMM HH:mm' : 'MMM d, HH:mm';
   return (
     <div className={cn('flex flex-col', fromAdmin ? 'items-end' : 'items-start')}>
       <div className="flex items-start gap-2">
@@ -811,7 +834,7 @@ function AdminMessageBubble({
               onClick={onPreviewImage}
               disabled={!attachmentSrc}
               className="mb-1 block overflow-hidden rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              aria-label={`Open ${message.attachmentName ?? 'attachment'} in full view`}
+              aria-label={t('supportAdmin.openAttachment', { name: attachmentName })}
             >
               {attachmentLoading ? (
                 <div className="grid h-32 w-48 animate-pulse place-items-center rounded-md bg-muted/40" />
@@ -819,12 +842,12 @@ function AdminMessageBubble({
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={attachmentSrc}
-                  alt={message.attachmentName ?? 'attachment'}
+                  alt={attachmentName}
                   className="max-h-60 w-auto max-w-full cursor-zoom-in rounded-md object-contain"
                 />
               ) : (
                 <div className="grid h-32 w-48 place-items-center rounded-md bg-muted/40 text-xs text-muted-foreground">
-                  Could not load image
+                  {t('supportAdmin.imageLoadError')}
                 </div>
               )}
             </button>
@@ -847,8 +870,8 @@ function AdminMessageBubble({
           fromAdmin ? 'mr-9' : 'ml-9',
         )}
       >
-        {format(new Date(message.createdAt), 'MMM d, HH:mm')}
-        {fromAdmin && message.readAt ? ' · read' : null}
+        {format(new Date(message.createdAt), dateFormat, { locale })}
+        {fromAdmin && message.readAt ? t('supportAdmin.readMarker') : null}
       </p>
     </div>
   );

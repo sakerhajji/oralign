@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient, UseQueryResult, UseMutationResult } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { dentistProfileService, extractApiErrorMessage } from '@/lib/api';
+import { useT } from '@/lib/i18n/lang-context';
 import {
   DentistProfile,
   CreateDentistProfileDto,
@@ -125,12 +126,13 @@ export function useUpdateDentistProfile(): UseMutationResult<
  */
 export function useDeleteDentistProfile(): UseMutationResult<MessageResponse, Error, string> {
   const queryClient = useQueryClient();
+  const { t } = useT();
 
   return useMutation<MessageResponse, Error, string>({
     mutationFn: dentistProfileService.deleteProfile,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: profileKeys.lists() });
-      toast.success('Profile deleted successfully!');
+      toast.success(t('toasts.dentistProfiles.deleted'));
     },
     onError: (error: Error) => {
       toast.error(extractApiErrorMessage(error));

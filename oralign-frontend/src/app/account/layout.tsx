@@ -7,6 +7,7 @@ import { AccountNavTabs } from '@/components/account/account-nav-tabs';
 export default function AccountLayout({ children }: { children: ReactNode }) {
   return (
     <SidebarProvider
+      defaultOpen={false}
       style={
         {
           '--sidebar-width': 'calc(var(--spacing) * 72)',

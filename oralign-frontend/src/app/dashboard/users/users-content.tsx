@@ -53,8 +53,11 @@ import { UserDetailSheet } from "@/components/users/user-detail-sheet";
 import { ClinicViewDialog } from "@/components/users/clinic-view-dialog";
 import { SearchFilters } from "@/components/users/search-filters";
 import { format } from 'date-fns';
+import { fr as frLocale } from 'date-fns/locale';
+import { useT } from '@/lib/i18n/lang-context';
 
 export function UsersPageContent() {
+  const { t, lang } = useT();
   const searchParams = useSearchParams();
   
   // State - get page from URL params
@@ -187,12 +190,12 @@ export function UsersPageContent() {
         <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6 px-4 lg:px-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">Users</h1>
-            <p className="text-muted-foreground">Manage system users and their roles</p>
+            <h1 className="text-3xl font-bold tracking-tight">{t('usersAdmin.title')}</h1>
+            <p className="text-muted-foreground">{t('usersAdmin.intro')}</p>
           </div>
           <Button disabled>
             <Plus className="mr-2 h-4 w-4" />
-            Add User
+            {t('usersAdmin.addUser')}
           </Button>
         </div>
 
@@ -243,16 +246,16 @@ export function UsersPageContent() {
       <div className="@container/main flex flex-1 flex-col gap-2">
         <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6 px-4 lg:px-6 items-center justify-center min-h-[400px]">
           <div className="text-center">
-            <h2 className="text-2xl font-bold text-red-600">Error</h2>
-            <p className="text-muted-foreground mt-2">Failed to load users</p>
+            <h2 className="text-2xl font-bold text-red-600">{t('usersAdmin.error')}</h2>
+            <p className="text-muted-foreground mt-2">{t('usersAdmin.errorBody')}</p>
             <p className="text-sm text-red-500 mt-1">{error.message}</p>
-            <Button 
-              onClick={() => refetch()} 
+            <Button
+              onClick={() => refetch()}
               className="mt-4"
               variant="outline"
             >
               <RefreshCw className="mr-2 h-4 w-4" />
-              Retry
+              {t('usersAdmin.retry')}
             </Button>
           </div>
         </div>
@@ -266,12 +269,12 @@ export function UsersPageContent() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Users</h1>
-          <p className="text-muted-foreground">Manage system users and their roles</p>
+          <h1 className="text-3xl font-bold tracking-tight">{t('usersAdmin.title')}</h1>
+          <p className="text-muted-foreground">{t('usersAdmin.intro')}</p>
         </div>
         <Button onClick={() => setCreateOpen(true)}>
           <Plus className="mr-2 h-4 w-4" />
-          Add User
+          {t('usersAdmin.addUser')}
         </Button>
       </div>
 
@@ -282,10 +285,12 @@ export function UsersPageContent() {
           <ShieldAlert className="h-5 w-5 shrink-0 text-amber-600" />
           <div className="flex-1 text-sm">
             <span className="font-semibold text-amber-900 dark:text-amber-200">
-              {pendingCount} user{pendingCount === 1 ? '' : 's'} awaiting approval
+              {pendingCount === 1
+                ? t('usersAdmin.pendingBannerOne', { count: pendingCount })
+                : t('usersAdmin.pendingBannerMany', { count: pendingCount })}
             </span>
             <span className="ml-1 text-amber-700/80 dark:text-amber-300/80">
-              — they're listed at the top of the table.
+              {t('usersAdmin.pendingBannerSuffix')}
             </span>
           </div>
         </div>
@@ -301,8 +306,8 @@ export function UsersPageContent() {
         }}
       >
         <TabsList variant="line">
-          <TabsTrigger value="active">Active Users</TabsTrigger>
-          <TabsTrigger value="deleted">Deleted Users</TabsTrigger>
+          <TabsTrigger value="active">{t('usersAdmin.tabActive')}</TabsTrigger>
+          <TabsTrigger value="deleted">{t('usersAdmin.tabDeleted')}</TabsTrigger>
         </TabsList>
       </Tabs>
 
@@ -311,7 +316,7 @@ export function UsersPageContent() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">
-              {viewMode === 'deleted' ? 'Deleted Users' : 'Total Users'}
+              {viewMode === 'deleted' ? t('usersAdmin.statDeletedTotal') : t('usersAdmin.statTotal')}
             </CardTitle>
             <UsersIcon className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
@@ -322,7 +327,7 @@ export function UsersPageContent() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">
-              {viewMode === 'deleted' ? 'Active (deleted)' : 'Active Users'}
+              {viewMode === 'deleted' ? t('usersAdmin.statActiveDeleted') : t('usersAdmin.statActive')}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -334,7 +339,7 @@ export function UsersPageContent() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">
-              {viewMode === 'deleted' ? 'Blocked (deleted)' : 'Blocked Users'}
+              {viewMode === 'deleted' ? t('usersAdmin.statBlockedDeleted') : t('usersAdmin.statBlocked')}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -345,7 +350,7 @@ export function UsersPageContent() {
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Selected</CardTitle>
+            <CardTitle className="text-sm font-medium">{t('usersAdmin.statSelected')}</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{selectedUsers.size}</div>
@@ -356,9 +361,9 @@ export function UsersPageContent() {
       {/* Filters and Search */}
       <Card>
         <CardHeader>
-          <SearchFilters 
+          <SearchFilters
             onFiltersChange={handleFiltersChange}
-            placeholder={viewMode === 'deleted' ? 'Search deleted users...' : 'Search by name or email...'}
+            placeholder={viewMode === 'deleted' ? t('usersAdmin.searchDeletedPh') : t('usersAdmin.searchPh')}
           />
         </CardHeader>
       </Card>
@@ -369,7 +374,9 @@ export function UsersPageContent() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle className="text-lg">
-                {selectedUsers.size} user{selectedUsers.size > 1 ? 's' : ''} selected
+                {selectedUsers.size === 1
+                  ? t('usersAdmin.selectedOne', { count: selectedUsers.size })
+                  : t('usersAdmin.selectedMany', { count: selectedUsers.size })}
               </CardTitle>
               <div className="flex items-center gap-2">
                 {viewMode === 'deleted' ? (
@@ -383,7 +390,7 @@ export function UsersPageContent() {
                       }}
                     >
                       <RefreshCw className="mr-1 h-4 w-4" />
-                      Restore
+                      {t('usersAdmin.restore')}
                     </Button>
                     <Button
                       variant="destructive"
@@ -394,7 +401,7 @@ export function UsersPageContent() {
                       }}
                     >
                       <Trash2 className="mr-1 h-4 w-4" />
-                      Permanently Delete
+                      {t('usersAdmin.permanentlyDelete')}
                     </Button>
                   </>
                 ) : (
@@ -408,7 +415,7 @@ export function UsersPageContent() {
                       }}
                     >
                       <CheckCircle className="mr-1 h-4 w-4" />
-                      Activate
+                      {t('usersAdmin.activate')}
                     </Button>
                     <Button
                       variant="outline"
@@ -419,7 +426,7 @@ export function UsersPageContent() {
                       }}
                     >
                       <Ban className="mr-1 h-4 w-4" />
-                      Block
+                      {t('usersAdmin.block')}
                     </Button>
                     <Button
                       variant="destructive"
@@ -430,7 +437,7 @@ export function UsersPageContent() {
                       }}
                     >
                       <Trash2 className="mr-1 h-4 w-4" />
-                      Delete
+                      {t('usersAdmin.delete')}
                     </Button>
                   </>
                 )}
@@ -439,7 +446,7 @@ export function UsersPageContent() {
                   size="sm"
                   onClick={() => setSelectedUsers(new Set())}
                 >
-                  Clear
+                  {t('usersAdmin.clear')}
                 </Button>
               </div>
             </div>
@@ -451,12 +458,14 @@ export function UsersPageContent() {
       <Card>
         <CardHeader>
           <CardTitle>
-            {viewMode === 'deleted' ? 'Deleted Users' : 'Users'} ({data?.total || 0})
+            {viewMode === 'deleted'
+              ? t('usersAdmin.tableTitleDeleted', { total: data?.total || 0 })
+              : t('usersAdmin.tableTitle', { total: data?.total || 0 })}
           </CardTitle>
           <CardDescription>
             {viewMode === 'deleted'
-              ? 'A list of deleted users. You can restore or permanently delete them.'
-              : 'A list of all users in the system with their details and status.'}
+              ? t('usersAdmin.tableDescDeleted')
+              : t('usersAdmin.tableDesc')}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -471,14 +480,14 @@ export function UsersPageContent() {
                         onCheckedChange={toggleSelectAll}
                       />
                     </th>
-                    <th className="p-4 text-left font-medium">User</th>
-                    <th className="p-4 text-left font-medium">Approval</th>
-                    <th className="p-4 text-left font-medium">Phone</th>
-                    <th className="p-4 text-left font-medium">Role</th>
-                    <th className="p-4 text-left font-medium">Status</th>
-                    <th className="p-4 text-left font-medium">Email Verified</th>
-                    <th className="p-4 text-left font-medium">Last Login</th>
-                    <th className="p-4 text-right font-medium">Actions</th>
+                    <th className="p-4 text-left font-medium">{t('usersAdmin.colUser')}</th>
+                    <th className="p-4 text-left font-medium">{t('usersAdmin.colApproval')}</th>
+                    <th className="p-4 text-left font-medium">{t('usersAdmin.colPhone')}</th>
+                    <th className="p-4 text-left font-medium">{t('usersAdmin.colRole')}</th>
+                    <th className="p-4 text-left font-medium">{t('usersAdmin.colStatus')}</th>
+                    <th className="p-4 text-left font-medium">{t('usersAdmin.colEmailVerified')}</th>
+                    <th className="p-4 text-left font-medium">{t('usersAdmin.colLastLogin')}</th>
+                    <th className="p-4 text-right font-medium">{t('usersAdmin.colActions')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -534,12 +543,12 @@ export function UsersPageContent() {
                             className="gap-1 bg-emerald-600 hover:bg-emerald-600"
                           >
                             <ShieldCheck className="h-3 w-3" />
-                            Approved
+                            {t('usersAdmin.approved')}
                           </Badge>
                         ) : user.verificationStatus === VerificationStatus.REJECTED ? (
                           <Badge variant="destructive" className="gap-1">
                             <ShieldX className="h-3 w-3" />
-                            Rejected
+                            {t('usersAdmin.rejected')}
                           </Badge>
                         ) : (
                           <Badge
@@ -547,7 +556,7 @@ export function UsersPageContent() {
                             className="gap-1 border-amber-500/40 bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
                           >
                             <ShieldAlert className="h-3 w-3" />
-                            Not approved
+                            {t('usersAdmin.notApproved')}
                           </Badge>
                         )}
                       </td>
@@ -556,7 +565,7 @@ export function UsersPageContent() {
                           {user.phone ? (
                             <span className="text-muted-foreground">{user.phone}</span>
                           ) : (
-                            <span className="text-muted-foreground italic">Not provided</span>
+                            <span className="text-muted-foreground italic">{t('usersAdmin.notProvided')}</span>
                           )}
                         </div>
                       </td>
@@ -567,16 +576,20 @@ export function UsersPageContent() {
                       </td>
                       <td className="p-4">
                         <Badge variant={user.isActive ? 'default' : 'destructive'}>
-                          {user.isActive ? 'Active' : 'Blocked'}
+                          {user.isActive ? t('usersAdmin.statusActive') : t('usersAdmin.statusBlocked')}
                         </Badge>
                       </td>
                       <td className="p-4">
                         <Badge variant={user.isEmailVerified ? 'default' : 'outline'}>
-                          {user.isEmailVerified ? 'Verified' : 'Pending'}
+                          {user.isEmailVerified ? t('usersAdmin.verified') : t('usersAdmin.verifyPending')}
                         </Badge>
                       </td>
                       <td className="p-4 text-sm text-muted-foreground">
-                        {user.lastLoginAt ? format(new Date(user.lastLoginAt), 'MMM d, yyyy') : 'Never'}
+                        {user.lastLoginAt
+                          ? format(new Date(user.lastLoginAt), lang === 'fr' ? 'd MMM yyyy' : 'MMM d, yyyy', {
+                              locale: lang === 'fr' ? frLocale : undefined,
+                            })
+                          : t('usersAdmin.never')}
                       </td>
                       <td className="p-4">
                         <div className="flex justify-end">
@@ -587,7 +600,7 @@ export function UsersPageContent() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                              <DropdownMenuLabel>{t('usersAdmin.actions')}</DropdownMenuLabel>
                               <DropdownMenuItem
                                 onClick={() => {
                                   setDetailInitialTab('profile');
@@ -595,7 +608,7 @@ export function UsersPageContent() {
                                 }}
                               >
                                 <Eye className="mr-2 h-4 w-4" />
-                                View Details
+                                {t('usersAdmin.viewDetails')}
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 onClick={() => {
@@ -604,7 +617,7 @@ export function UsersPageContent() {
                                 }}
                               >
                                 <Edit className="mr-2 h-4 w-4" />
-                                Edit User
+                                {t('usersAdmin.editUser')}
                               </DropdownMenuItem>
                               {user.role === 'dentist' && !user.dentistProfile && (
                                 <DropdownMenuItem
@@ -614,7 +627,7 @@ export function UsersPageContent() {
                                   }}
                                 >
                                   <Building2 className="mr-2 h-4 w-4" />
-                                  Add Clinic
+                                  {t('usersAdmin.addClinic')}
                                 </DropdownMenuItem>
                               )}
                               {user.role === 'dentist' && user.dentistProfile && (
@@ -622,7 +635,7 @@ export function UsersPageContent() {
                                   onClick={() => setClinicViewUser(user)}
                                 >
                                   <Building2 className="mr-2 h-4 w-4" />
-                                  View Clinic
+                                  {t('usersAdmin.viewClinic')}
                                 </DropdownMenuItem>
                               )}
                               {user.role === 'dentist' && user.dentistProfile && (
@@ -633,7 +646,7 @@ export function UsersPageContent() {
                                   }}
                                 >
                                   <Clock className="mr-2 h-4 w-4" />
-                                  Opening Hours
+                                  {t('usersAdmin.openingHours')}
                                 </DropdownMenuItem>
                               )}
                               <DropdownMenuSeparator />
@@ -650,7 +663,7 @@ export function UsersPageContent() {
                                       className="text-emerald-600"
                                     >
                                       <ShieldCheck className="mr-2 h-4 w-4" />
-                                      Approve
+                                      {t('usersAdmin.approve')}
                                     </DropdownMenuItem>
                                   )}
                                   {user.verificationStatus !== VerificationStatus.REJECTED && (
@@ -664,7 +677,7 @@ export function UsersPageContent() {
                                       className="text-red-600"
                                     >
                                       <ShieldX className="mr-2 h-4 w-4" />
-                                      Reject
+                                      {t('usersAdmin.reject')}
                                     </DropdownMenuItem>
                                   )}
                                   {user.verificationStatus !== VerificationStatus.PENDING && (
@@ -677,7 +690,7 @@ export function UsersPageContent() {
                                       }
                                     >
                                       <ShieldAlert className="mr-2 h-4 w-4" />
-                                      Mark as pending
+                                      {t('usersAdmin.markPending')}
                                     </DropdownMenuItem>
                                   )}
                                   <DropdownMenuSeparator />
@@ -694,7 +707,7 @@ export function UsersPageContent() {
                                     className="text-emerald-600"
                                   >
                                     <RefreshCw className="mr-2 h-4 w-4" />
-                                    Restore User
+                                    {t('usersAdmin.restoreUser')}
                                   </DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuItem
@@ -706,7 +719,7 @@ export function UsersPageContent() {
                                     className="text-red-600"
                                   >
                                     <Trash2 className="mr-2 h-4 w-4" />
-                                    Permanently Delete
+                                    {t('usersAdmin.permanentlyDelete')}
                                   </DropdownMenuItem>
                                 </>
                               ) : (
@@ -721,12 +734,12 @@ export function UsersPageContent() {
                                     {user.isActive ? (
                                       <>
                                         <Ban className="mr-2 h-4 w-4" />
-                                        Block User
+                                        {t('usersAdmin.blockUser')}
                                       </>
                                     ) : (
                                       <>
                                         <CheckCircle className="mr-2 h-4 w-4" />
-                                        Activate User
+                                        {t('usersAdmin.activateUser')}
                                       </>
                                     )}
                                   </DropdownMenuItem>
@@ -740,7 +753,7 @@ export function UsersPageContent() {
                                     className="text-orange-600"
                                   >
                                     <Trash2 className="mr-2 h-4 w-4" />
-                                    Delete User
+                                    {t('usersAdmin.deleteUser')}
                                   </DropdownMenuItem>
                                 </>
                               )}
@@ -757,9 +770,9 @@ export function UsersPageContent() {
                         <div className="flex flex-col items-center justify-center text-muted-foreground">
                           <UsersIcon className="h-12 w-12 mb-4 opacity-50" />
                           <p className="text-lg font-medium">
-                            {viewMode === 'deleted' ? 'No deleted users found' : 'No users found'}
+                            {viewMode === 'deleted' ? t('usersAdmin.emptyDeleted') : t('usersAdmin.emptyActive')}
                           </p>
-                          <p className="text-sm">Try adjusting your search or filter criteria</p>
+                          <p className="text-sm">{t('usersAdmin.emptyHint')}</p>
                         </div>
                       </td>
                     </tr>
@@ -773,7 +786,11 @@ export function UsersPageContent() {
           {data && data.totalPages > 1 && (
             <div className="flex items-center justify-between mt-4">
               <div className="text-sm text-muted-foreground">
-                Showing {((page - 1) * limit) + 1} to {Math.min(page * limit, data.total)} of {data.total} results
+                {t('usersAdmin.pagShowing', {
+                  from: ((page - 1) * limit) + 1,
+                  to: Math.min(page * limit, data.total),
+                  total: data.total,
+                })}
               </div>
               <div className="flex items-center space-x-2">
                 <Button
@@ -783,7 +800,7 @@ export function UsersPageContent() {
                   disabled={page === 1}
                 >
                   <ChevronLeft className="h-4 w-4" />
-                  Previous
+                  {t('usersAdmin.previous')}
                 </Button>
                 <div className="flex items-center space-x-1">
                   {[...Array(data.totalPages)].map((_, i) => (
@@ -804,7 +821,7 @@ export function UsersPageContent() {
                   onClick={() => setPage(Math.min(data.totalPages, page + 1))}
                   disabled={page === data.totalPages}
                 >
-                  Next
+                  {t('usersAdmin.next')}
                   <ChevronRight className="h-4 w-4" />
                 </Button>
               </div>
@@ -837,39 +854,61 @@ export function UsersPageContent() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {bulkActionType === 'delete' 
-                ? 'Delete Users' 
+              {bulkActionType === 'delete'
+                ? t('usersAdmin.bulkDeleteTitle')
                 : bulkActionType === 'restore'
-                  ? 'Restore Users'
+                  ? t('usersAdmin.bulkRestoreTitle')
                 : bulkActionType === 'permanent'
-                  ? 'Permanently Delete Users'
-                : bulkActionType === 'block' 
-                  ? 'Block Users' 
-                  : 'Activate Users'}
+                  ? t('usersAdmin.bulkPermanentTitle')
+                : bulkActionType === 'block'
+                  ? t('usersAdmin.bulkBlockTitle')
+                  : t('usersAdmin.bulkActivateTitle')}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to {bulkActionType === 'permanent' ? 'permanently delete' : bulkActionType} {selectedUsers.size} user{selectedUsers.size > 1 ? 's' : ''}?
-              {(bulkActionType === 'delete' || bulkActionType === 'permanent') && ' This action cannot be undone.'}
-              {bulkActionType === 'permanent' && ' The user data will be permanently removed from the database.'}
+              {(() => {
+                const actionKey =
+                  bulkActionType === 'delete'
+                    ? 'usersAdmin.bulkActionDelete'
+                    : bulkActionType === 'restore'
+                      ? 'usersAdmin.bulkActionRestore'
+                    : bulkActionType === 'permanent'
+                      ? 'usersAdmin.bulkActionPermanent'
+                    : bulkActionType === 'block'
+                      ? 'usersAdmin.bulkActionBlock'
+                      : 'usersAdmin.bulkActionActivate';
+                const actionLabel = t(actionKey);
+                const baseTpl =
+                  selectedUsers.size === 1
+                    ? 'usersAdmin.bulkConfirmOne'
+                    : 'usersAdmin.bulkConfirmMany';
+                const main = t(baseTpl, { action: actionLabel, count: selectedUsers.size });
+                const irreversible =
+                  bulkActionType === 'delete' || bulkActionType === 'permanent'
+                    ? t('usersAdmin.bulkIrreversible')
+                    : '';
+                const permanentNote =
+                  bulkActionType === 'permanent' ? t('usersAdmin.bulkPermanentNote') : '';
+                return `${main}${irreversible}${permanentNote}`;
+              })()}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => setBulkActionType(null)}>
-              Cancel
+              {t('usersAdmin.cancel')}
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={() => bulkActionType && handleBulkAction(bulkActionType)}
               className={bulkActionType === 'permanent' ? 'bg-red-700 hover:bg-red-800' : bulkActionType === 'delete' ? 'bg-orange-600 hover:bg-orange-700' : ''}
             >
-              {bulkActionType === 'delete' 
-                ? 'Delete' 
+              {bulkActionType === 'delete'
+                ? t('usersAdmin.btnDelete')
                 : bulkActionType === 'restore'
-                  ? 'Restore'
+                  ? t('usersAdmin.btnRestore')
                 : bulkActionType === 'permanent'
-                  ? 'Permanently Delete'
-                : bulkActionType === 'block' 
-                  ? 'Block' 
-                  : 'Activate'}
+                  ? t('usersAdmin.btnPermanent')
+                : bulkActionType === 'block'
+                  ? t('usersAdmin.btnBlock')
+                  : t('usersAdmin.btnActivate')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -10,6 +10,7 @@ import {
 import { toast } from 'sonner';
 import { quotationPaymentPlanService } from '@/lib/api/quotation-payment-plan.service';
 import { extractApiErrorMessage } from '@/lib/api/error';
+import { useT } from '@/lib/i18n/lang-context';
 import { quotationKeys } from './use-quotations';
 import { orderKeys } from './use-orders';
 import type {
@@ -90,12 +91,13 @@ export function useAttachPackToQuotation(): UseMutationResult<
   { quotationId: string; dto: AttachPackToQuotationDto }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ quotationId, dto }) =>
       quotationPaymentPlanService.attachPack(quotationId, dto),
     onSuccess: (quote) => {
       invalidatePaymentPlan(queryClient, quote);
-      toast.success('Pack attached to quotation.');
+      toast.success(t('toasts.quotationPaymentPlan.packAttached'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -107,12 +109,13 @@ export function useConfigurePaymentPlan(): UseMutationResult<
   { quotationId: string; dto: ConfigurePaymentPlanDto }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ quotationId, dto }) =>
       quotationPaymentPlanService.configurePaymentPlan(quotationId, dto),
     onSuccess: (quote) => {
       invalidatePaymentPlan(queryClient, quote);
-      toast.success('Payment plan configured.');
+      toast.success(t('toasts.quotationPaymentPlan.planConfigured'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -124,12 +127,13 @@ export function useDeliverBatch(): UseMutationResult<
   { quotationId: string; orderId: string; batchId: string }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ quotationId, batchId }) =>
       quotationPaymentPlanService.deliverBatch(quotationId, batchId),
     onSuccess: (_batch, { quotationId, orderId }) => {
       invalidatePaymentPlan(queryClient, { id: quotationId, orderId });
-      toast.success('Batch marked as delivered.');
+      toast.success(t('toasts.quotationPaymentPlan.batchDelivered'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });

@@ -13,6 +13,7 @@ import {
   type BillingPublicDefaults,
 } from '@/lib/api/company-billing.service';
 import { extractApiErrorMessage } from '@/lib/api/error';
+import { useT } from '@/lib/i18n/lang-context';
 import type {
   CompanyBillingSettings,
   UpsertCompanyBillingSettingsDto,
@@ -70,6 +71,7 @@ export function useUpsertCompanyBilling(): UseMutationResult<
   UpsertCompanyBillingSettingsDto
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: (dto) => companyBillingService.upsert(dto),
     onSuccess: (saved) => {
@@ -80,7 +82,7 @@ export function useUpsertCompanyBilling(): UseMutationResult<
       queryClient.invalidateQueries({
         queryKey: companyBillingKeys.publicDefaults(),
       });
-      toast.success('Company billing settings saved.');
+      toast.success(t('toasts.companyBilling.settingsSaved'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -92,11 +94,12 @@ export function useUploadCompanyLogo(): UseMutationResult<
   File
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: (file) => companyBillingService.uploadLogo(file),
     onSuccess: (saved) => {
       queryClient.setQueryData(companyBillingKeys.active(), saved);
-      toast.success('Logo uploaded.');
+      toast.success(t('toasts.companyBilling.logoUploaded'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -108,11 +111,12 @@ export function useDeleteCompanyLogo(): UseMutationResult<
   void
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: () => companyBillingService.deleteLogo(),
     onSuccess: (saved) => {
       queryClient.setQueryData(companyBillingKeys.active(), saved);
-      toast.success('Logo removed.');
+      toast.success(t('toasts.companyBilling.logoRemoved'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });

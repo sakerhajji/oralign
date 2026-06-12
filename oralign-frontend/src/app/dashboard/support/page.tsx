@@ -1,6 +1,7 @@
 'use client';
 
 import { Suspense } from 'react';
+import { useT } from '@/lib/i18n/lang-context';
 import { AdminSupportContent } from './admin-support-content';
 
 /**
@@ -10,14 +11,17 @@ import { AdminSupportContent } from './admin-support-content';
  */
 export default function AdminSupportPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="p-6 text-sm text-muted-foreground">
-          Loading support inbox…
-        </div>
-      }
-    >
+    <Suspense fallback={<SupportFallback />}>
       <AdminSupportContent />
     </Suspense>
+  );
+}
+
+function SupportFallback() {
+  const { t } = useT();
+  return (
+    <div className="p-6 text-sm text-muted-foreground">
+      {t('supportAdmin.loading')}
+    </div>
   );
 }

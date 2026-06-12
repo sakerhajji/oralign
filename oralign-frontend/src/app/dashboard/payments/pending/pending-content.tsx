@@ -32,8 +32,10 @@ import {
   type PaymentRow,
 } from '@/components/payments/payment-history-table';
 import { PendingTreatmentFeesSection } from '@/components/payments/treatment-fees-section';
+import { useT } from '@/lib/i18n/lang-context';
 
 export function PendingPaymentsContent() {
+  const { t } = useT();
   const [page, setPage] = useState(1);
   const { data, isLoading } = usePendingConfirmations({ page, limit: 20 });
   const confirm = useConfirmBankTransfer();
@@ -48,19 +50,16 @@ export function PendingPaymentsContent() {
   // (`{ data, total, page, limit, totalPages }`); UI used to expect
   // `.items` and crashed on first render. Use `.data` consistently.
   const items = (data?.data ?? []) as PaymentRow[];
+  const totalCount = data?.total ?? 0;
 
   return (
     <div className="flex flex-col gap-6 p-4 md:p-6">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">
-          Pending payment confirmations
+          {t('paymentsPending.title')}
         </h1>
         <p className="text-sm text-muted-foreground">
-          Doctor-declared bank transfers awaiting verification — both the
-          per-order treatment fee and individual installments. Confirming
-          a payment runs the SUCCESS transition: for installments the
-          linked step batch unlocks; for treatment fees the order's
-          treatment plan unlocks.
+          {t('paymentsPending.subtitle')}
         </p>
       </header>
 
@@ -77,10 +76,11 @@ export function PendingPaymentsContent() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
-            <CardTitle>Installment payments awaiting confirmation</CardTitle>
+            <CardTitle>{t('paymentsPending.installmentsCardTitle')}</CardTitle>
             <CardDescription>
-              {data?.total ?? 0} payment{data?.total === 1 ? '' : 's'} in
-              queue
+              {totalCount === 1
+                ? t('paymentsPending.queueCountOne')
+                : t('paymentsPending.queueCountMany', { count: totalCount })}
             </CardDescription>
           </div>
         </CardHeader>
@@ -88,7 +88,7 @@ export function PendingPaymentsContent() {
           <PaymentHistoryTable
             payments={items}
             isLoading={isLoading}
-            emptyMessage="Nothing to confirm — queue is empty."
+            emptyMessage={t('paymentsPending.queueEmpty')}
             renderActions={(p) => (
               <>
                 <OpenQuoteButton
@@ -103,7 +103,7 @@ export function PendingPaymentsContent() {
                   }}
                 >
                   <CheckCircle2 className="mr-1 size-4" />
-                  Confirm
+                  {t('paymentsPending.confirm')}
                 </Button>
                 <Button
                   size="sm"
@@ -115,7 +115,7 @@ export function PendingPaymentsContent() {
                   }}
                 >
                   <XCircle className="mr-1 size-4" />
-                  Reject
+                  {t('paymentsPending.reject')}
                 </Button>
               </>
             )}
@@ -127,7 +127,10 @@ export function PendingPaymentsContent() {
       {data && data.totalPages > 1 ? (
         <div className="flex items-center justify-between text-xs">
           <span className="text-muted-foreground">
-            Page {data.page} of {data.totalPages}
+            {t('paymentsHistory.pageOf', {
+              page: data.page,
+              total: data.totalPages,
+            })}
           </span>
           <div className="flex gap-2">
             <Button
@@ -136,7 +139,7 @@ export function PendingPaymentsContent() {
               disabled={page <= 1}
               onClick={() => setPage((p) => Math.max(1, p - 1))}
             >
-              Previous
+              {t('paymentsCommon.actions.previous')}
             </Button>
             <Button
               size="sm"
@@ -144,7 +147,7 @@ export function PendingPaymentsContent() {
               disabled={page >= data.totalPages}
               onClick={() => setPage((p) => p + 1)}
             >
-              Next
+              {t('paymentsCommon.actions.next')}
             </Button>
           </div>
         </div>
@@ -156,25 +159,24 @@ export function PendingPaymentsContent() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Confirm bank transfer</DialogTitle>
+            <DialogTitle>{t('paymentsPending.confirmDialogTitle')}</DialogTitle>
             <DialogDescription>
-              The linked installment will be marked paid and the step
-              batch will unlock. This action is logged with your user id.
+              {t('paymentsPending.confirmDialogDesc')}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-2">
-            <Label htmlFor="notes">Notes (optional)</Label>
+            <Label htmlFor="notes">{t('paymentsPending.notesLabel')}</Label>
             <Textarea
               id="notes"
               rows={3}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="e.g. matched on statement line 2026-05-22"
+              placeholder={t('paymentsPending.notesPh')}
             />
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setConfirming(null)}>
-              Cancel
+              {t('paymentsPending.cancel')}
             </Button>
             <Button
               disabled={confirm.isPending}
@@ -186,7 +188,7 @@ export function PendingPaymentsContent() {
                 );
               }}
             >
-              Confirm payment
+              {t('paymentsPending.confirmPayment')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -198,26 +200,26 @@ export function PendingPaymentsContent() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Reject bank transfer</DialogTitle>
+            <DialogTitle>{t('paymentsPending.rejectDialogTitle')}</DialogTitle>
             <DialogDescription>
-              The payment will be marked rejected. The doctor can declare
-              a fresh transfer afterwards; previous attempts stay in the
-              audit trail.
+              {t('paymentsPending.rejectDialogDesc')}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-2">
-            <Label htmlFor="reason">Rejection reason *</Label>
+            <Label htmlFor="reason">
+              {t('paymentsPending.rejectReasonLabel')}
+            </Label>
             <Textarea
               id="reason"
               rows={3}
               value={rejectionReason}
               onChange={(e) => setRejectionReason(e.target.value)}
-              placeholder="Required — shown to the doctor."
+              placeholder={t('paymentsPending.rejectReasonPh')}
             />
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setRejecting(null)}>
-              Cancel
+              {t('paymentsPending.cancel')}
             </Button>
             <Button
               variant="destructive"
@@ -233,7 +235,7 @@ export function PendingPaymentsContent() {
                 );
               }}
             >
-              Reject payment
+              {t('paymentsPending.rejectPayment')}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient, UseQueryResult, UseMutationResult } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { workingHoursService, extractApiErrorMessage } from '@/lib/api';
+import { useT } from '@/lib/i18n/lang-context';
 import { WorkingHours, CreateWorkingHoursDto, UpdateWorkingHoursDto, MessageResponse } from '@/lib/types';
 
 // Query keys
@@ -77,6 +78,7 @@ export function useUpdateWorkingHours(): UseMutationResult<
  */
 export function useDeleteWorkingHours(): UseMutationResult<MessageResponse, Error, { id: string; profileId: string }> {
   const queryClient = useQueryClient();
+  const { t } = useT();
 
   return useMutation<MessageResponse, Error, { id: string; profileId: string }>({
     mutationFn: ({ id }) => workingHoursService.deleteWorkingHours(id),
@@ -84,7 +86,7 @@ export function useDeleteWorkingHours(): UseMutationResult<MessageResponse, Erro
       queryClient.invalidateQueries({
         queryKey: workingHoursKeys.byProfile(variables.profileId)
       });
-      toast.success('Working hours deleted.');
+      toast.success(t('toasts.workingHours.deleted'));
     },
     onError: (error: Error) => {
       toast.error(extractApiErrorMessage(error));

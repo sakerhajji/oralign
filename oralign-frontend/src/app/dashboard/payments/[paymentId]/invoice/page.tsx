@@ -28,8 +28,7 @@ export default function InvoicePreviewPage() {
   const params = useParams<{ paymentId: string }>();
   const paymentId = params.paymentId;
   const { isAdmin } = useAuth();
-  const { lang: dashLang } = useT();
-  const fr = dashLang === 'fr';
+  const { lang: dashLang, t } = useT();
 
   const [lang, setLang] = useState<InvoiceLang>(dashLang === 'en' ? 'en' : 'fr');
 
@@ -52,7 +51,7 @@ export default function InvoicePreviewPage() {
   const error = pdfQuery.isError
     ? pdfQuery.error instanceof Error
       ? pdfQuery.error.message
-      : 'Could not load the invoice PDF.'
+      : t('paymentsInvoice.errorDefault')
     : null;
 
   // Derive the object URL from the blob; revoke on change / unmount so
@@ -101,7 +100,7 @@ export default function InvoicePreviewPage() {
         className="inline-flex w-fit items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="h-4 w-4" />
-        {fr ? 'Retour aux paiements' : 'Back to payments'}
+        {t('paymentsInvoice.backToPayments')}
       </Link>
 
       {/* ─── Header card: title + editable number + actions ───────── */}
@@ -112,12 +111,12 @@ export default function InvoicePreviewPage() {
           </span>
           <div className="min-w-0">
             <h1 className="text-lg font-semibold sm:text-xl">
-              {fr ? 'Facture' : 'Invoice'}
+              {t('paymentsInvoice.title')}
             </h1>
             {isAdmin ? (
               <div className="mt-1 flex flex-wrap items-center gap-1.5">
                 <span className="text-xs uppercase tracking-wide text-muted-foreground">
-                  {fr ? 'N°' : 'No.'}
+                  {t('paymentsInvoice.numberLabel')}
                 </span>
                 <InvoiceNumberEditor
                   paymentId={paymentId}
@@ -128,7 +127,7 @@ export default function InvoicePreviewPage() {
               </div>
             ) : (
               <p className="mt-0.5 text-sm text-muted-foreground">
-                {fr ? 'Aperçu du reçu de paiement.' : 'Payment receipt preview.'}
+                {t('paymentsInvoice.receiptPreview')}
               </p>
             )}
           </div>
@@ -146,7 +145,7 @@ export default function InvoicePreviewPage() {
             className="gap-1.5"
           >
             <Download className="h-4 w-4" />
-            {fr ? 'Télécharger le PDF' : 'Download PDF'}
+            {t('paymentsInvoice.downloadPdf')}
           </Button>
         </div>
       </div>
@@ -156,9 +155,7 @@ export default function InvoicePreviewPage() {
         {loading ? (
           <div className="flex flex-col items-center gap-2 text-muted-foreground">
             <Loader2 className="h-6 w-6 animate-spin" />
-            <p className="text-sm">
-              {fr ? 'Chargement de la facture…' : 'Loading invoice…'}
-            </p>
+            <p className="text-sm">{t('paymentsInvoice.loading')}</p>
           </div>
         ) : error ? (
           <div className="flex max-w-md flex-col items-center gap-3 p-6 text-center">
@@ -171,12 +168,12 @@ export default function InvoicePreviewPage() {
                 void pdfQuery.refetch();
               }}
             >
-              {fr ? 'Réessayer' : 'Retry'}
+              {t('paymentsInvoice.retry')}
             </Button>
           </div>
         ) : pdfUrl ? (
           <iframe
-            title={fr ? 'Aperçu de la facture' : 'Invoice preview'}
+            title={t('paymentsInvoice.previewTitle')}
             src={pdfUrl}
             className="h-full min-h-[70vh] w-full border-0 bg-white"
           />

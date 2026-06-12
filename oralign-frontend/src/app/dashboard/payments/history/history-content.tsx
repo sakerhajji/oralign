@@ -72,63 +72,43 @@ import { TreatmentFeesHistorySection } from '@/components/payments/treatment-fee
 const PAGE_SIZE_OPTIONS = [25, 50, 100] as const;
 type PageSize = (typeof PAGE_SIZE_OPTIONS)[number];
 
-const STATUS_LABEL: Record<PaymentRecordStatus, string> = {
-  [PaymentRecordStatus.SUCCESS]: 'Success',
-  [PaymentRecordStatus.AWAITING_CONFIRMATION]: 'Awaiting confirmation',
-  [PaymentRecordStatus.PENDING]: 'Pending',
-  [PaymentRecordStatus.REJECTED]: 'Rejected',
-  [PaymentRecordStatus.FAILED]: 'Failed',
-  [PaymentRecordStatus.CANCELLED]: 'Cancelled',
-};
-
-const METHOD_LABEL: Record<PaymentMethod, string> = {
-  [PaymentMethod.CARD]: 'Card',
-  [PaymentMethod.BANK_TRANSFER]: 'Bank transfer',
-  [PaymentMethod.CASH]: 'Cash',
-};
-
 const ALL_STATUSES = Object.values(PaymentRecordStatus);
 const ALL_METHODS = Object.values(PaymentMethod);
 
+// Sort options are now defined as pure data + a translation key. The
+// human label is resolved at render time via `t('paymentsHistory.sortOptions.<key>')`.
 const SORT_OPTIONS: Array<{
   key: string;
-  label: string;
   sortBy: PaymentSortBy;
   sortOrder: PaymentSortOrder;
 }> = [
   {
     key: 'date-desc',
-    label: 'Newest first',
     sortBy: PaymentSortBy.CREATED_AT,
     sortOrder: PaymentSortOrder.DESC,
   },
   {
     key: 'date-asc',
-    label: 'Oldest first',
     sortBy: PaymentSortBy.CREATED_AT,
     sortOrder: PaymentSortOrder.ASC,
   },
   {
     key: 'paid-desc',
-    label: 'Recently paid',
     sortBy: PaymentSortBy.PAID_AT,
     sortOrder: PaymentSortOrder.DESC,
   },
   {
     key: 'amount-desc',
-    label: 'Highest amount',
     sortBy: PaymentSortBy.AMOUNT,
     sortOrder: PaymentSortOrder.DESC,
   },
   {
     key: 'amount-asc',
-    label: 'Lowest amount',
     sortBy: PaymentSortBy.AMOUNT,
     sortOrder: PaymentSortOrder.ASC,
   },
   {
     key: 'status-asc',
-    label: 'Status (A→Z)',
     sortBy: PaymentSortBy.STATUS,
     sortOrder: PaymentSortOrder.ASC,
   },
@@ -139,6 +119,7 @@ const SORT_OPTIONS: Array<{
 
 export function PaymentHistoryContent() {
   const { isAdmin } = useAuth();
+  const { t } = useT();
 
   // ── Filter state ─────────────────────────────────────────────────
   const [page, setPage] = useState(1);
@@ -246,6 +227,9 @@ export function PaymentHistoryContent() {
   const total = listQuery.data?.total ?? 0;
   const totalPages = listQuery.data?.totalPages ?? 1;
   const activeSort = SORT_OPTIONS.find((s) => s.key === sortKey);
+  const activeSortLabel = activeSort
+    ? t(`paymentsHistory.sortOptions.${activeSort.key}`)
+    : '';
 
   // ── Handlers ─────────────────────────────────────────────────────
   const debouncedSearch = useDebouncedCallback((value: string) => {
@@ -301,12 +285,12 @@ export function PaymentHistoryContent() {
       <header>
         <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight sm:text-2xl">
           <CreditCardIcon className="size-6 text-primary" />
-          Payment history
+          {t('paymentsHistory.title')}
         </h1>
         <p className="mt-1 text-xs leading-relaxed text-muted-foreground sm:text-sm">
           {isAdmin
-            ? 'Every payment recorded by the platform — card, bank transfer and cash combined. Search, filter, and sort to find any record across the full history.'
-            : 'Every payment recorded against your orders, newest first. Search by order code or amount, filter by method or status.'}
+            ? t('paymentsHistory.subtitleAdmin')
+            : t('paymentsHistory.subtitleDoctor')}
         </p>
       </header>
 
@@ -320,8 +304,8 @@ export function PaymentHistoryContent() {
               className="h-10 pl-10"
               placeholder={
                 isAdmin
-                  ? 'Search order code, doctor, patient, or transaction…'
-                  : 'Search order code or transaction…'
+                  ? t('paymentsHistory.searchPhAdmin')
+                  : t('paymentsHistory.searchPhDoctor')
               }
               defaultValue={search}
               onChange={(e) => debouncedSearch(e.target.value)}
@@ -335,7 +319,7 @@ export function PaymentHistoryContent() {
               onClick={() => setShowFilters((c) => !c)}
             >
               <Filter className="size-4" />
-              Filters
+              {t('paymentsHistory.filters')}
               {activeFilterCount > 0 ? (
                 <Badge
                   variant="secondary"
@@ -354,7 +338,7 @@ export function PaymentHistoryContent() {
               className="h-10 w-10"
               onClick={() => listQuery.refetch()}
               disabled={listQuery.isFetching}
-              aria-label="Refresh"
+              aria-label={t('paymentsCommon.actions.refresh')}
             >
               <RefreshCw
                 className={cn(
@@ -371,7 +355,7 @@ export function PaymentHistoryContent() {
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="space-y-1.5">
                   <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    From date
+                    {t('paymentsHistory.fromDate')}
                   </Label>
                   <Input
                     type="date"
@@ -385,7 +369,7 @@ export function PaymentHistoryContent() {
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    To date
+                    {t('paymentsHistory.toDate')}
                   </Label>
                   <Input
                     type="date"
@@ -400,7 +384,7 @@ export function PaymentHistoryContent() {
                 {isAdmin ? (
                   <div className="space-y-1.5">
                     <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Doctor
+                      {t('paymentsHistory.doctor')}
                     </Label>
                     <DoctorSearchPicker
                       selectedId={doctorId}
@@ -436,7 +420,7 @@ export function PaymentHistoryContent() {
                     disabled={activeFilterCount === 0}
                   >
                     <X className="size-4" />
-                    Clear filters
+                    {t('paymentsHistory.clearFilters')}
                   </Button>
                 </div>
               </div>
@@ -445,7 +429,9 @@ export function PaymentHistoryContent() {
                   values so a single row works on every viewport. */}
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Methods ({selectedMethods.length} selected)
+                  {t('paymentsHistory.methodsCount', {
+                    count: selectedMethods.length,
+                  })}
                 </Label>
                 <div className="flex flex-wrap gap-1.5">
                   {ALL_METHODS.map((m) => {
@@ -463,7 +449,7 @@ export function PaymentHistoryContent() {
                         )}
                       >
                         {checked ? <CheckCircle2 className="size-3" /> : null}
-                        {METHOD_LABEL[m]}
+                        {t(`paymentsCommon.method.${m}`)}
                       </button>
                     );
                   })}
@@ -473,7 +459,9 @@ export function PaymentHistoryContent() {
               {/* Status chips — multi-select; six values fit in 2 rows. */}
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Status ({selectedStatuses.length} selected)
+                  {t('paymentsHistory.statusCount', {
+                    count: selectedStatuses.length,
+                  })}
                 </Label>
                 <div className="flex flex-wrap gap-1.5">
                   {ALL_STATUSES.map((s) => {
@@ -491,7 +479,7 @@ export function PaymentHistoryContent() {
                         )}
                       >
                         {checked ? <CheckCircle2 className="size-3" /> : null}
-                        {STATUS_LABEL[s]}
+                        {t(`paymentsCommon.status.${s}`)}
                       </button>
                     );
                   })}
@@ -505,28 +493,45 @@ export function PaymentHistoryContent() {
       {/* ─── Active filter chips ──────────────────────────────────── */}
       {activeFilterCount > 0 ? (
         <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="text-muted-foreground">Active:</span>
+          <span className="text-muted-foreground">
+            {t('paymentsHistory.active')}
+          </span>
           {search ? (
             <FilterChip
-              label={`Search: "${search}"`}
+              label={t('paymentsHistory.chipSearch', { value: search })}
               onRemove={clearSearch}
             />
           ) : null}
           {selectedMethods.length > 0 ? (
             <FilterChip
-              label={`${selectedMethods.length} method${selectedMethods.length === 1 ? '' : 's'}`}
+              label={
+                selectedMethods.length === 1
+                  ? t('paymentsHistory.chipMethodsOne')
+                  : t('paymentsHistory.chipMethodsMany', {
+                      count: selectedMethods.length,
+                    })
+              }
               onRemove={() => setSelectedMethods([])}
             />
           ) : null}
           {selectedStatuses.length > 0 ? (
             <FilterChip
-              label={`${selectedStatuses.length} status${selectedStatuses.length === 1 ? '' : 'es'}`}
+              label={
+                selectedStatuses.length === 1
+                  ? t('paymentsHistory.chipStatusOne')
+                  : t('paymentsHistory.chipStatusMany', {
+                      count: selectedStatuses.length,
+                    })
+              }
               onRemove={() => setSelectedStatuses([])}
             />
           ) : null}
           {isAdmin && doctorId !== 'all' ? (
             <FilterChip
-              label={`Doctor: ${doctorName || 'Selected'}`}
+              label={t('paymentsHistory.chipDoctor', {
+                name:
+                  doctorName || t('paymentsHistory.chipDoctorSelected'),
+              })}
               onRemove={() => {
                 setDoctorId('all');
                 setDoctorName('');
@@ -537,13 +542,13 @@ export function PaymentHistoryContent() {
           ) : null}
           {createdFrom ? (
             <FilterChip
-              label={`From ${createdFrom}`}
+              label={t('paymentsHistory.chipFrom', { date: createdFrom })}
               onRemove={() => setCreatedFrom('')}
             />
           ) : null}
           {createdTo ? (
             <FilterChip
-              label={`To ${createdTo}`}
+              label={t('paymentsHistory.chipTo', { date: createdTo })}
               onRemove={() => setCreatedTo('')}
             />
           ) : null}
@@ -573,17 +578,23 @@ export function PaymentHistoryContent() {
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 pb-3">
           <div>
             <CardTitle>
-              {isAdmin ? 'Installment payments' : 'My payments'}
+              {isAdmin
+                ? t('paymentsHistory.cardTitleAdmin')
+                : t('paymentsHistory.cardTitleDoctor')}
             </CardTitle>
             <CardDescription>
               {listQuery.isLoading
-                ? 'Loading…'
-                : `${total.toLocaleString()} entr${total === 1 ? 'y' : 'ies'}`}
+                ? t('common.loading')
+                : total === 1
+                  ? t('paymentsHistory.countEntriesOne')
+                  : t('paymentsHistory.countEntriesMany', {
+                      count: total.toLocaleString(),
+                    })}
             </CardDescription>
           </div>
           {activeSort ? (
             <span className="rounded-full border bg-muted/40 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-              Sorted: {activeSort.label}
+              {t('paymentsHistory.sortedPrefix', { label: activeSortLabel })}
             </span>
           ) : null}
         </CardHeader>
@@ -600,10 +611,10 @@ export function PaymentHistoryContent() {
               showActor={isAdmin}
               emptyMessage={
                 activeFilterCount > 0
-                  ? 'No payments match these filters.'
+                  ? t('paymentsHistory.emptyNoMatch')
                   : isAdmin
-                    ? 'No payments recorded yet.'
-                    : 'You have not made any payments yet.'
+                    ? t('paymentsHistory.emptyAdmin')
+                    : t('paymentsHistory.emptyDoctor')
               }
               // Per-row Invoice download — fetches the bilingual
               // receipt PDF (EN / FR based on the dashboard's current
@@ -653,7 +664,9 @@ function SortMenu({
   sortKey: string;
   onChange: (next: string) => void;
 }) {
+  const { t } = useT();
   const active = SORT_OPTIONS.find((o) => o.key === sortKey);
+  const activeLabel = active ? t(`paymentsHistory.sortOptions.${active.key}`) : '';
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -665,13 +678,15 @@ function SortMenu({
           ) : (
             <ArrowUpDown className="size-4" />
           )}
-          <span className="hidden sm:inline">{active?.label ?? 'Sort'}</span>
-          <span className="sm:hidden">Sort</span>
+          <span className="hidden sm:inline">
+            {activeLabel || t('paymentsHistory.sort')}
+          </span>
+          <span className="sm:hidden">{t('paymentsHistory.sort')}</span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel className="text-xs uppercase tracking-wide text-muted-foreground">
-          Sort by
+          {t('paymentsHistory.sortBy')}
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         {SORT_OPTIONS.map((option) => (
@@ -683,7 +698,7 @@ function SortMenu({
               option.key === sortKey && 'bg-accent text-accent-foreground',
             )}
           >
-            <span>{option.label}</span>
+            <span>{t(`paymentsHistory.sortOptions.${option.key}`)}</span>
             {option.key === sortKey ? (
               <CheckCircle2 className="size-3.5" />
             ) : null}
@@ -708,6 +723,7 @@ function PaymentsErrorState({
   error: Error;
   onRetry: () => void;
 }) {
+  const { t } = useT();
   const message = error.message ?? '';
   // Axios surfaces validation rejections as "Request failed with
   // status code 400" — if we see that exact shape we can confidently
@@ -716,15 +732,17 @@ function PaymentsErrorState({
     message.includes('400') || /should not exist|must be/i.test(message);
   return (
     <div className="flex flex-col items-center gap-3 p-10 text-center text-sm">
-      <p className="font-medium text-destructive">Could not load payments.</p>
+      <p className="font-medium text-destructive">
+        {t('paymentsHistory.errorTitle')}
+      </p>
       <p className="max-w-md text-xs text-muted-foreground">{message}</p>
       {looksLikeStaleBackend ? (
         <div className="max-w-md rounded-md border border-amber-300 bg-amber-50 p-3 text-left text-xs text-amber-900">
-          <p className="font-semibold">Backend may need a rebuild.</p>
+          <p className="font-semibold">
+            {t('paymentsHistory.errorStaleBackendTitle')}
+          </p>
           <p className="mt-1">
-            A 400 here typically means the running backend container is
-            an older build that doesn&apos;t recognise the new filter
-            fields. Rebuild and restart it:
+            {t('paymentsHistory.errorStaleBackendBody')}
           </p>
           <pre className="mt-2 rounded bg-white/60 px-2 py-1 font-mono text-[11px]">
             cd oralign-backend{'\n'}
@@ -736,7 +754,7 @@ function PaymentsErrorState({
         </div>
       ) : null}
       <Button variant="outline" size="sm" onClick={onRetry}>
-        Try again
+        {t('paymentsHistory.errorTryAgain')}
       </Button>
     </div>
   );
@@ -776,19 +794,23 @@ function PaymentsPagination({
   onPageChange: (page: number) => void;
   onPageSizeChange: (size: PageSize) => void;
 }) {
+  const { t } = useT();
   const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const to = Math.min(page * pageSize, total);
   return (
     <div className="flex flex-col gap-3 rounded-lg border bg-card p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4">
       <div className="flex flex-col gap-1 text-sm text-muted-foreground sm:flex-row sm:items-center sm:gap-3">
         <span>
-          {from.toLocaleString()}–{to.toLocaleString()} of{' '}
-          {total.toLocaleString()} payments
+          {t('paymentsHistory.paginationRange', {
+            from: from.toLocaleString(),
+            to: to.toLocaleString(),
+            total: total.toLocaleString(),
+          })}
         </span>
         <Separator orientation="vertical" className="hidden h-4 sm:block" />
         <div className="flex items-center gap-2">
           <Label htmlFor="payments-page-size" className="text-xs">
-            Rows per page
+            {t('paymentsHistory.rowsPerPage')}
           </Label>
           <Select
             value={String(pageSize)}
@@ -817,10 +839,13 @@ function PaymentsPagination({
           disabled={page === 1}
         >
           <ChevronLeft className="mr-1 size-4" />
-          Previous
+          {t('paymentsCommon.actions.previous')}
         </Button>
         <span className="text-sm text-muted-foreground">
-          Page {page} of {totalPages.toLocaleString()}
+          {t('paymentsHistory.pageOf', {
+            page,
+            total: totalPages.toLocaleString(),
+          })}
         </span>
         <Button
           variant="outline"
@@ -828,7 +853,7 @@ function PaymentsPagination({
           onClick={() => onPageChange(Math.min(totalPages, page + 1))}
           disabled={page >= totalPages}
         >
-          Next
+          {t('paymentsCommon.actions.next')}
           <ChevronRight className="ml-1 size-4" />
         </Button>
       </div>
@@ -872,6 +897,7 @@ function DoctorSearchPicker({
   results: DentistOption[];
   isFetching: boolean;
 }) {
+  const { t } = useT();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -921,7 +947,7 @@ function DoctorSearchPicker({
               }
             }}
             className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-            aria-label="Clear doctor filter"
+            aria-label={t('paymentsHistory.pickerClearDoctorAria')}
           >
             <X className="size-3.5" />
           </span>
@@ -936,7 +962,7 @@ function DoctorSearchPicker({
               if (!open) setOpen(true);
             }}
             onFocus={() => setOpen(true)}
-            placeholder="Search doctor name…"
+            placeholder={t('paymentsHistory.pickerSearchPh')}
             className="h-10 pl-10 pr-9"
           />
           {isFetching ? (
@@ -948,7 +974,7 @@ function DoctorSearchPicker({
                 onSearchChange('');
                 if (selectedId !== 'all') onClear();
               }}
-              aria-label="Clear search"
+              aria-label={t('paymentsHistory.pickerClearAria')}
               className="absolute right-3 top-1/2 grid size-5 -translate-y-1/2 place-items-center rounded text-muted-foreground hover:text-foreground"
             >
               <X className="size-3.5" />
@@ -966,13 +992,13 @@ function DoctorSearchPicker({
           {isFetching && results.length === 0 ? (
             <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
               <Loader2 className="size-3.5 animate-spin" />
-              Searching…
+              {t('paymentsHistory.pickerSearching')}
             </div>
           ) : results.length === 0 ? (
             <div className="px-3 py-4 text-center text-xs text-muted-foreground">
               {searchValue
-                ? `No doctors match "${searchValue}".`
-                : 'No doctors available.'}
+                ? t('paymentsHistory.pickerNoMatch', { value: searchValue })
+                : t('paymentsHistory.pickerNoneAvailable')}
             </div>
           ) : (
             <ul className="flex flex-col">
@@ -1001,7 +1027,7 @@ function DoctorSearchPicker({
             </ul>
           )}
           <div className="border-t px-3 py-1.5 text-[10px] text-muted-foreground">
-            Showing top {results.length}. Type to narrow.
+            {t('paymentsHistory.pickerShowingTop', { count: results.length })}
           </div>
         </div>
       ) : null}
@@ -1017,16 +1043,16 @@ function DoctorSearchPicker({
 // invoice number.
 // ──────────────────────────────────────────────────────────────────
 function ViewInvoiceButton({ paymentId }: { paymentId: string }) {
-  const { lang } = useT();
+  const { t } = useT();
   return (
     <Button asChild size="sm" variant="ghost" className="h-8 gap-1.5 text-xs">
       <Link
         href={`/dashboard/payments/${paymentId}/invoice`}
-        aria-label="View invoice"
+        aria-label={t('paymentsCommon.actions.viewInvoice')}
       >
         <FileText className="h-3.5 w-3.5" />
         <span className="hidden sm:inline">
-          {lang === 'fr' ? 'Voir la facture' : 'View invoice'}
+          {t('paymentsCommon.actions.viewInvoice')}
         </span>
       </Link>
     </Button>

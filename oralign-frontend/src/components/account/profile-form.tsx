@@ -19,6 +19,7 @@ import { usersService, extractApiErrorMessage } from '@/lib/api';
 import { getAvatarUrl } from '@/lib/utils';
 import { useAuth } from '@/lib/providers';
 import { userKeys } from '@/lib/hooks/use-users';
+import { useT } from '@/lib/i18n/lang-context';
 
 const normalizeOptional = (value?: string | null) => {
   const trimmed = value?.trim();
@@ -34,10 +35,11 @@ interface ProfileFormProps {
 }
 
 export function ProfileForm({ user, onboarding = false, onSaved }: ProfileFormProps) {
+  const { t } = useT();
   const queryClient = useQueryClient();
   const { login } = useAuth();
   const { mutateAsync: updateProfile, isPending } = useUpdateProfile({
-    successMessage: 'Profile updated successfully.',
+    successMessage: t('accountProfile.toastProfileUpdated'),
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -90,11 +92,11 @@ export function ProfileForm({ user, onboarding = false, onSaved }: ProfileFormPr
     event.target.value = '';
     if (!file) return;
     if (!file.type.startsWith('image/')) {
-      toast.error('Please select an image file.');
+      toast.error(t('accountProfile.toastSelectImage'));
       return;
     }
     if (file.size > 5 * 1024 * 1024) {
-      toast.error('Avatar must be 5MB or smaller.');
+      toast.error(t('accountProfile.toastAvatarTooLarge'));
       return;
     }
 
@@ -121,7 +123,7 @@ export function ProfileForm({ user, onboarding = false, onSaved }: ProfileFormPr
       login(updated);
       queryClient.invalidateQueries({ queryKey: userKeys.currentUser() });
       queryClient.invalidateQueries({ queryKey: userKeys.lists() });
-      toast.success('Avatar updated.');
+      toast.success(t('accountProfile.toastAvatarUpdated'));
     } catch (err) {
       setAvatarPreview(previousPreview);
       toast.error(extractApiErrorMessage(err));
@@ -180,9 +182,9 @@ export function ProfileForm({ user, onboarding = false, onSaved }: ProfileFormPr
   return (
     <Card>
       <CardHeader>
-        <h2 className="text-lg font-semibold">Profile</h2>
+        <h2 className="text-lg font-semibold">{t('accountProfile.cardTitle')}</h2>
         <p className="text-sm text-muted-foreground">
-          Update your personal information and avatar.
+          {t('accountProfile.cardSubtitle')}
         </p>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -212,10 +214,9 @@ export function ProfileForm({ user, onboarding = false, onSaved }: ProfileFormPr
           </div>
           <div className="flex flex-1 flex-col gap-2">
             <div>
-              <p className="text-sm font-medium">Profile photo</p>
+              <p className="text-sm font-medium">{t('accountProfile.profilePhotoLabel')}</p>
               <p className="text-xs text-muted-foreground">
-                Pick a square image (max 5 MB). It uploads as soon as you
-                choose the file — no separate save step.
+                {t('accountProfile.profilePhotoHint')}
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -225,7 +226,9 @@ export function ProfileForm({ user, onboarding = false, onSaved }: ProfileFormPr
                 onClick={() => fileInputRef.current?.click()}
                 disabled={isUploadingAvatar || isSubmitting}
               >
-                {isUploadingAvatar ? 'Uploading…' : 'Upload avatar'}
+                {isUploadingAvatar
+                  ? t('accountProfile.uploading')
+                  : t('accountProfile.uploadAvatar')}
               </Button>
             </div>
             <input
@@ -242,7 +245,7 @@ export function ProfileForm({ user, onboarding = false, onSaved }: ProfileFormPr
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <label className="text-sm font-medium" htmlFor="fullName">
-                Full name
+                {t('accountProfile.fullNameLabel')}
               </label>
               <Input id="fullName" {...form.register('fullName')} />
               {form.formState.errors.fullName && (
@@ -254,17 +257,17 @@ export function ProfileForm({ user, onboarding = false, onSaved }: ProfileFormPr
 
             <div className="space-y-2">
               <label className="text-sm font-medium" htmlFor="email">
-                Email
+                {t('accountProfile.emailLabel')}
               </label>
               <Input id="email" {...form.register('email')} disabled />
               <p className="text-xs text-muted-foreground">
-                Email updates are managed by support.
+                {t('accountProfile.emailManagedHint')}
               </p>
             </div>
 
             <div className="space-y-2">
               <label className="text-sm font-medium" htmlFor="phone">
-                Phone
+                {t('accountProfile.phoneLabel')}
               </label>
               <Controller
                 name="phone"
@@ -299,7 +302,7 @@ export function ProfileForm({ user, onboarding = false, onSaved }: ProfileFormPr
 
             <div className="space-y-2">
               <label className="text-sm font-medium" htmlFor="country">
-                Country (ISO code)
+                {t('accountProfile.countryLabel')}
               </label>
               <Input id="country" placeholder="TN" {...form.register('country')} />
               {form.formState.errors.country && (
@@ -313,10 +316,10 @@ export function ProfileForm({ user, onboarding = false, onSaved }: ProfileFormPr
           <div className="flex justify-end">
             <Button type="submit" disabled={!hasChanges || isSubmitting}>
               {isSubmitting
-                ? 'Saving...'
+                ? t('accountProfile.saving')
                 : onboarding
-                  ? 'Save & Continue'
-                  : 'Save changes'}
+                  ? t('accountProfile.saveAndContinue')
+                  : t('accountProfile.saveChanges')}
             </Button>
           </div>
         </Form>

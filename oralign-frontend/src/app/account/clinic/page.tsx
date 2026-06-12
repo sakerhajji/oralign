@@ -7,10 +7,12 @@ import { ClinicForm } from '@/components/account/clinic-form';
 import { useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAccountData, useOnboardingStatus } from '@/lib/hooks';
+import { useT } from '@/lib/i18n/lang-context';
 
 // ── Inner component — uses useSearchParams, must be inside <Suspense> ─────────
 
 function AccountClinicContent() {
+  const { t } = useT();
   const router = useRouter();
   const searchParams = useSearchParams();
   const onboarding = searchParams.get('onboarding') === '1';
@@ -37,9 +39,9 @@ function AccountClinicContent() {
       <div className="flex flex-col gap-6 py-6">
         <div className="px-4 lg:px-6">
           <div className="space-y-1">
-            <h1 className="text-2xl font-semibold">Clinic</h1>
+            <h1 className="text-2xl font-semibold">{t('accountClinic.title')}</h1>
             <p className="text-sm text-muted-foreground">
-              Manage your clinic profile and availability.
+              {t('accountClinic.subtitle')}
             </p>
           </div>
         </div>
@@ -47,26 +49,26 @@ function AccountClinicContent() {
         <div className="px-4 lg:px-6">
           {onboarding && isDentist && (!clinicComplete || !scheduleComplete) && (
             <Alert className="mb-4">
-              <AlertTitle>Finish clinic setup</AlertTitle>
+              <AlertTitle>{t('accountClinic.finishSetupTitle')}</AlertTitle>
               <AlertDescription>
-                Add clinic details and working hours to complete onboarding.
+                {t('accountClinic.finishSetupBody')}
               </AlertDescription>
             </Alert>
           )}
           {isLoading && <AccountSkeleton />}
           {!isLoading && error && (
             <Alert variant="destructive">
-              <AlertTitle>Unable to load clinic</AlertTitle>
+              <AlertTitle>{t('accountClinic.unableToLoad')}</AlertTitle>
               <AlertDescription>
-                {error instanceof Error ? error.message : 'Please try again later.'}
+                {error instanceof Error ? error.message : t('accountClinic.tryAgainLater')}
               </AlertDescription>
             </Alert>
           )}
           {!isLoading && !error && user && !isDentist && (
             <Alert>
-              <AlertTitle>Clinic access unavailable</AlertTitle>
+              <AlertTitle>{t('accountClinic.accessUnavailableTitle')}</AlertTitle>
               <AlertDescription>
-                Clinic settings are only available for dentist accounts.
+                {t('accountClinic.accessUnavailableBody')}
               </AlertDescription>
             </Alert>
           )}

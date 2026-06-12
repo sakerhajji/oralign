@@ -10,6 +10,7 @@ import {
 import { toast } from 'sonner';
 import { notificationsService } from '@/lib/api/notifications.service';
 import { extractApiErrorMessage } from '@/lib/api/error';
+import { useT } from '@/lib/i18n/lang-context';
 import type {
   Notification,
   NotificationFilters,
@@ -88,11 +89,13 @@ export function useMarkAllNotificationsRead(): UseMutationResult<
   void
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: () => notificationsService.markAllRead(),
     onSuccess: (data) => {
       invalidate(queryClient);
-      if (data.updated > 0) toast.success(`Marked ${data.updated} as read.`);
+      if (data.updated > 0)
+        toast.success(t('toasts.notifications.markedRead', { count: data.updated }));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });

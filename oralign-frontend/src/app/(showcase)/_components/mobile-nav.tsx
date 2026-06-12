@@ -114,7 +114,7 @@ export function MobileNav() {
                         href={resolveAnchor(item.href)}
                         className="group flex min-h-16 items-center justify-between gap-4 border-b border-[var(--sc-grey)] py-4 no-underline text-[var(--sc-text-dark)]/70 transition-colors hover:text-[var(--sc-black)]"
                       >
-                        <span className="text-[0.92rem] font-medium">
+                        <span className="text-[0.98rem] font-medium leading-snug">
                           {navLabel(item.labelKey)}
                         </span>
                         <span
@@ -138,7 +138,7 @@ export function MobileNav() {
                     aria-expanded={isOpen}
                     className="flex min-h-16 w-full items-center justify-between gap-4 py-4 text-left text-[var(--sc-text-dark)]/70 transition-colors hover:text-[var(--sc-black)]"
                   >
-                    <span className="text-[0.92rem] font-medium">
+                    <span className="text-[0.98rem] font-medium leading-snug">
                       {navLabel(item.labelKey)}
                     </span>
                     <ChevronDown
@@ -156,7 +156,7 @@ export function MobileNav() {
                           <SheetClose asChild>
                             <Link
                               href={resolveAnchor(child.href)}
-                              className="flex min-h-12 items-center gap-3 py-2.5 ps-3 no-underline text-[0.85rem] text-[var(--sc-text-mid)] transition-colors hover:text-[var(--sc-black)]"
+                              className="flex min-h-12 items-center gap-3 py-2.5 ps-3 text-[0.9rem] leading-snug text-[var(--sc-text-mid)] no-underline transition-colors hover:text-[var(--sc-black)]"
                             >
                               <span
                                 aria-hidden="true"
@@ -201,7 +201,7 @@ export function MobileNav() {
               <Link
                 href={ctaHref}
                 className={[
-                  "block w-full px-5 py-4 text-center text-[0.72rem] font-bold uppercase tracking-[0.18em] no-underline transition-colors",
+                  "block w-full px-5 py-4 text-center text-[0.76rem] font-bold uppercase tracking-[0.14em] no-underline transition-colors",
                   audience === "practitioner"
                     ? "bg-[var(--sc-black)] text-[var(--sc-white)] hover:bg-[rgba(25,25,25,0.82)]"
                     : "bg-[var(--sc-sun)] text-[var(--sc-black)] hover:bg-[var(--sc-sun-2)]",
@@ -213,7 +213,7 @@ export function MobileNav() {
             <SheetClose asChild>
               <Link
                 href="/login"
-                className="block w-full border border-[var(--sc-black)] px-5 py-4 text-center text-[0.72rem] uppercase tracking-[0.18em] text-[var(--sc-black)] no-underline transition-colors hover:bg-[var(--sc-black)] hover:text-[var(--sc-white)]"
+                className="block w-full border border-[var(--sc-black)] px-5 py-4 text-center text-[0.76rem] font-medium uppercase tracking-[0.14em] text-[var(--sc-black)] no-underline transition-colors hover:bg-[var(--sc-black)] hover:text-[var(--sc-white)]"
               >
                 {dict.nav.login[lang]}
               </Link>

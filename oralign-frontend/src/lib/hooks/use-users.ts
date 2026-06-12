@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient, UseQueryResult, UseMutationResult } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { usersService, extractApiErrorMessage } from '@/lib/api';
+import { useT } from '@/lib/i18n/lang-context';
 import { User, CreateUserDto, UpdateUserDto, PaginatedResponse, UserFilterParams, MessageResponse, BulkActionDto, BulkUpdateStatusDto } from '@/lib/types';
 
 // Query keys
@@ -66,12 +67,13 @@ export function useUser(id: string): UseQueryResult<User, Error> {
  */
 export function useCreateUser(): UseMutationResult<User, Error, CreateUserDto> {
   const queryClient = useQueryClient();
+  const { t } = useT();
 
   return useMutation<User, Error, CreateUserDto>({
     mutationFn: usersService.createUser,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: userKeys.lists() });
-      toast.success('User created successfully!');
+      toast.success(t('toasts.users.created'));
     },
     onError: (error: Error) => {
       toast.error(extractApiErrorMessage(error));
@@ -100,6 +102,7 @@ export function useUpdateUser(): UseMutationResult<User, Error, { id: string; da
  */
 export function useDeleteUser(): UseMutationResult<MessageResponse, Error, string> {
   const queryClient = useQueryClient();
+  const { t } = useT();
 
   return useMutation<MessageResponse, Error, string>({
     mutationFn: usersService.deleteUser,
@@ -107,7 +110,7 @@ export function useDeleteUser(): UseMutationResult<MessageResponse, Error, strin
       // Invalidate users list to refetch
       queryClient.invalidateQueries({ queryKey: userKeys.lists() });
       queryClient.invalidateQueries({ queryKey: userKeys.deletedLists() });
-      toast.success('User deleted successfully!');
+      toast.success(t('toasts.users.deleted'));
     },
     onError: (error: Error) => {
       toast.error(extractApiErrorMessage(error));
@@ -120,13 +123,14 @@ export function useDeleteUser(): UseMutationResult<MessageResponse, Error, strin
  */
 export function useRestoreUser(): UseMutationResult<User, Error, string> {
   const queryClient = useQueryClient();
+  const { t } = useT();
 
   return useMutation<User, Error, string>({
     mutationFn: usersService.restoreUser,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: userKeys.lists() });
       queryClient.invalidateQueries({ queryKey: userKeys.deletedLists() });
-      toast.success('User restored successfully!');
+      toast.success(t('toasts.users.restored'));
     },
     onError: (error: Error) => {
       toast.error(extractApiErrorMessage(error));
@@ -196,13 +200,14 @@ export function useBulkUpdateStatus(): UseMutationResult<MessageResponse & { cou
  */
 export function usePermanentlyDeleteUser(): UseMutationResult<MessageResponse, Error, string> {
   const queryClient = useQueryClient();
+  const { t } = useT();
 
   return useMutation<MessageResponse, Error, string>({
     mutationFn: usersService.permanentlyDeleteUser,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: userKeys.lists() });
       queryClient.invalidateQueries({ queryKey: userKeys.deletedLists() });
-      toast.success('User permanently deleted!');
+      toast.success(t('toasts.users.permanentlyDeleted'));
     },
     onError: (error: Error) => {
       toast.error(extractApiErrorMessage(error));
@@ -220,6 +225,7 @@ export function useUpdateApproval(): UseMutationResult<
   { id: string; verificationStatus: 'pending' | 'approved' | 'rejected' }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation<
     User,
     Error,
@@ -232,13 +238,13 @@ export function useUpdateApproval(): UseMutationResult<
       queryClient.invalidateQueries({
         queryKey: userKeys.detail(variables.id),
       });
-      const verb =
+      const key =
         variables.verificationStatus === 'approved'
-          ? 'approved'
+          ? 'toasts.users.approved'
           : variables.verificationStatus === 'rejected'
-            ? 'rejected'
-            : 'set to pending';
-      toast.success(`User ${verb}.`);
+            ? 'toasts.users.rejected'
+            : 'toasts.users.setPending';
+      toast.success(t(key));
     },
     onError: (error: Error) => {
       toast.error(extractApiErrorMessage(error));

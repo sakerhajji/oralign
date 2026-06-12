@@ -95,12 +95,26 @@ const processQueue = (error: Error | null, token: string | null = null): void =>
   failedQueue = [];
 };
 
-// Request interceptor - Add auth token to requests
+// Request interceptor - Add auth token + content language to requests
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     const token = getAccessToken();
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
+    }
+    // Advertise the dashboard's current language so the backend can
+    // localise per-request content (errors, generated documents)
+    // without a profile lookup. Reads the same localStorage key the
+    // i18n store owns; guarded for SSR + private-mode storage.
+    if (config.headers && typeof window !== 'undefined') {
+      try {
+        const lang = window.localStorage.getItem('oralign.dashboard.lang');
+        if (lang === 'fr' || lang === 'en') {
+          config.headers['Accept-Language'] = lang;
+        }
+      } catch {
+        /* storage unavailable — skip the header */
+      }
     }
     return config;
   },

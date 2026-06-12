@@ -709,6 +709,8 @@ export interface User {
   isEmailVerified: boolean;
   verificationStatus: VerificationStatus;
   avatarUrl?: string;
+  /** Content language ('fr' | 'en') — UI, notifications and emails. */
+  preferredLanguage?: string;
   lastLoginAt?: string;
   createdAt: string;
   updatedAt: string;
@@ -926,6 +928,8 @@ export interface AuthResponseDto {
   isEmailVerified: boolean;
   verificationStatus: VerificationStatus;
   avatarUrl?: string;
+  /** 'fr' | 'en' — seeds the i18n store right after sign-in. */
+  preferredLanguage?: string;
   authToken: AuthTokenDto;
 }
 
@@ -961,6 +965,9 @@ export interface UpdateUserDto {
   phone?: string;
   country?: string;
   avatarUrl?: string;
+  /** 'fr' | 'en' — synced by the language switcher, read by the
+   *  backend when rendering notifications + emails for this user. */
+  preferredLanguage?: string;
   password?: string;
   role?: UserRole;
   isEmailVerified?: boolean;

@@ -1,6 +1,7 @@
 'use client';
 
 import { Suspense } from 'react';
+import { useT } from '@/lib/i18n/lang-context';
 import { NotificationsPageContent } from './notifications-content';
 
 /**
@@ -11,14 +12,17 @@ import { NotificationsPageContent } from './notifications-content';
  */
 export default function NotificationsPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="p-6 text-sm text-muted-foreground">
-          Loading notifications…
-        </div>
-      }
-    >
+    <Suspense fallback={<NotificationsFallback />}>
       <NotificationsPageContent />
     </Suspense>
+  );
+}
+
+function NotificationsFallback() {
+  const { t } = useT();
+  return (
+    <div className="p-6 text-sm text-muted-foreground">
+      {t('notificationsPage.loading')}
+    </div>
   );
 }

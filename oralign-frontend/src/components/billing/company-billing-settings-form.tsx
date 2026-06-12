@@ -31,6 +31,7 @@ import {
   type TranslatedTexts,
   type UpsertCompanyBillingSettingsDto,
 } from '@/lib/types';
+import { useT } from '@/lib/i18n/lang-context';
 
 interface FormState extends UpsertCompanyBillingSettingsDto {
   companyName: string;
@@ -74,6 +75,7 @@ const emptyState: FormState = {
  * fills in companyName and saves to create the singleton row.
  */
 export function CompanyBillingSettingsForm() {
+  const { t } = useT();
   const { isAdmin } = useAuth();
   const { data: settings, isLoading } = useCompanyBilling(isAdmin);
   const upsert = useUpsertCompanyBilling();
@@ -117,7 +119,7 @@ export function CompanyBillingSettingsForm() {
       <div className="@container/main flex flex-1 flex-col gap-4 p-4 lg:p-6">
         <Card>
           <CardContent className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">
-            Only admins can view the company billing settings.
+            {t('accountBillingSettings.adminsOnly')}
           </CardContent>
         </Card>
       </div>
@@ -165,9 +167,9 @@ export function CompanyBillingSettingsForm() {
   return (
     <div className="@container/main flex flex-1 flex-col gap-4 p-4 lg:p-6">
       <header>
-        <h1 className="text-xl font-semibold sm:text-2xl">Billing settings</h1>
+        <h1 className="text-xl font-semibold sm:text-2xl">{t('accountBillingSettings.title')}</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Company-wide configuration used by every quotation PDF.
+          {t('accountBillingSettings.subtitle')}
         </p>
       </header>
 
@@ -176,7 +178,7 @@ export function CompanyBillingSettingsForm() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Building2 className="h-4 w-4 text-primary" />
-            Company
+            {t('accountBillingSettings.companyTitle')}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-5">
@@ -187,7 +189,7 @@ export function CompanyBillingSettingsForm() {
                 /* eslint-disable-next-line @next/next/no-img-element */
                 <img
                   src={logoUrl}
-                  alt="Company logo"
+                  alt={t('accountBillingSettings.companyLogoAlt')}
                   className="h-full w-full object-contain p-1"
                 />
               ) : (
@@ -208,7 +210,9 @@ export function CompanyBillingSettingsForm() {
                 ) : (
                   <Upload className="h-4 w-4" />
                 )}
-                {logoUrl ? 'Replace logo' : 'Upload logo'}
+                {logoUrl
+                  ? t('accountBillingSettings.replaceLogo')
+                  : t('accountBillingSettings.uploadLogo')}
               </Button>
               {logoUrl && (
                 <Button
@@ -220,7 +224,7 @@ export function CompanyBillingSettingsForm() {
                   className="gap-2 text-red-600"
                 >
                   <Trash2 className="h-4 w-4" />
-                  Remove
+                  {t('accountBillingSettings.removeLogo')}
                 </Button>
               )}
               <input
@@ -239,35 +243,35 @@ export function CompanyBillingSettingsForm() {
 
           <div className="grid gap-4 sm:grid-cols-2">
             <Field
-              label="Company name"
+              label={t('accountBillingSettings.companyName')}
               required
               value={form.companyName}
               onChange={(v) => updateField('companyName', v)}
               placeholder="Oralign SARL"
             />
             <Field
-              label="Tax registration number"
+              label={t('accountBillingSettings.taxRegistrationNumber')}
               value={form.taxRegistrationNumber ?? ''}
               onChange={(v) => updateField('taxRegistrationNumber', v)}
               placeholder="MF 0000000A"
             />
             <Field
-              label="Phone"
+              label={t('accountBillingSettings.phone')}
               value={form.companyPhone ?? ''}
               onChange={(v) => updateField('companyPhone', v)}
               placeholder="+216 71 000 000"
             />
             <Field
-              label="Email"
+              label={t('accountBillingSettings.email')}
               value={form.companyEmail ?? ''}
               onChange={(v) => updateField('companyEmail', v)}
               placeholder="contact@oralign.com"
             />
             <Field
-              label="Address"
+              label={t('accountBillingSettings.address')}
               value={form.companyAddress ?? ''}
               onChange={(v) => updateField('companyAddress', v)}
-              placeholder="Street, suite…"
+              placeholder={t('accountBillingSettings.addressPlaceholder')}
               wide
             />
             {/* Country + City — searchable pickers with the full world list
@@ -295,10 +299,9 @@ export function CompanyBillingSettingsForm() {
       {/* ─── Quote defaults ─────────────────────────────────────────────── */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Quote defaults</CardTitle>
+          <CardTitle className="text-base">{t('accountBillingSettings.quoteDefaultsTitle')}</CardTitle>
           <p className="text-xs text-muted-foreground">
-            These values are auto-applied to every new quotation. The admin
-            can still override them per-quote when editing a specific case.
+            {t('accountBillingSettings.quoteDefaultsBody')}
           </p>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
@@ -309,7 +312,7 @@ export function CompanyBillingSettingsForm() {
             // the only thing that flips here. Keeps the form
             // vocabulary aligned with what doctors actually see on
             // their tax filings.
-            label="Default TVA (%)"
+            label={t('accountBillingSettings.defaultTvaLabel')}
             value={String(form.defaultTvaRate)}
             type="number"
             onChange={(v) => updateField('defaultTvaRate', Number(v) || 0)}
@@ -321,26 +324,28 @@ export function CompanyBillingSettingsForm() {
               quote itself remains editable, so promotions and free
               first-consults still work without touching this. */}
           <Field
-            label={`Default treatment fee (${form.defaultCurrency || 'TND'})`}
+            label={t('accountBillingSettings.defaultTreatmentFeeLabel', {
+              currency: form.defaultCurrency || 'TND',
+            })}
             value={String(form.defaultTreatmentFee)}
             type="number"
             onChange={(v) => updateField('defaultTreatmentFee', Number(v) || 0)}
             placeholder="0"
           />
           <Field
-            label="Default currency"
+            label={t('accountBillingSettings.defaultCurrencyLabel')}
             value={form.defaultCurrency}
             onChange={(v) => updateField('defaultCurrency', v.toUpperCase())}
             placeholder="TND"
           />
           <Field
-            label="Devis prefix"
+            label={t('accountBillingSettings.devisPrefixLabel')}
             value={form.devisPrefix}
             onChange={(v) => updateField('devisPrefix', v.toUpperCase())}
             placeholder="DEV"
           />
           <Field
-            label="Next quote number"
+            label={t('accountBillingSettings.nextQuoteNumberLabel')}
             value={String(form.devisNextNumber)}
             type="number"
             onChange={(v) => updateField('devisNextNumber', Number(v) || 1)}
@@ -352,11 +357,9 @@ export function CompanyBillingSettingsForm() {
       {/* ─── Translations ────────────────────────────────────────────────── */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Legal & footer text</CardTitle>
+          <CardTitle className="text-base">{t('accountBillingSettings.translationsTitle')}</CardTitle>
           <p className="text-xs text-muted-foreground">
-            Each language is rendered on the PDF when the admin generates
-            the quote in that language. Empty languages fall back to
-            French.
+            {t('accountBillingSettings.translationsBody')}
           </p>
         </CardHeader>
         <CardContent>
@@ -369,46 +372,55 @@ export function CompanyBillingSettingsForm() {
 
             {(
               [
-                { code: 'fr' as const, label: 'Français' },
-                { code: 'en' as const, label: 'English' },
-                { code: 'ar' as const, label: 'العربية', dir: 'rtl' as const },
+                { code: 'fr' as const, labelKey: 'accountBillingSettings.languageFrench' },
+                { code: 'en' as const, labelKey: 'accountBillingSettings.languageEnglish' },
+                {
+                  code: 'ar' as const,
+                  labelKey: 'accountBillingSettings.languageArabic',
+                  dir: 'rtl' as const,
+                },
               ]
-            ).map(({ code, label, dir }) => (
-              <TabsContent key={code} value={code} className="space-y-3 pt-3">
-                <div className="grid gap-2">
-                  <Label>Legal text — {label}</Label>
-                  <Textarea
-                    rows={3}
-                    dir={dir ?? 'ltr'}
-                    value={form.legalTextTranslations?.[code] ?? ''}
-                    onChange={(e) => updateLegal(code, e.target.value)}
-                    placeholder={
-                      code === 'fr'
-                        ? "Texte légal qui apparaîtra en bas du devis…"
-                        : code === 'en'
-                          ? 'Legal text that will appear at the bottom of every quotation…'
-                          : 'النص القانوني…'
-                    }
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label>Footer text — {label}</Label>
-                  <Textarea
-                    rows={2}
-                    dir={dir ?? 'ltr'}
-                    value={form.footerTextTranslations?.[code] ?? ''}
-                    onChange={(e) => updateFooter(code, e.target.value)}
-                    placeholder={
-                      code === 'fr'
-                        ? 'Merci pour votre confiance.'
-                        : code === 'en'
-                          ? 'Thank you for your trust.'
-                          : 'شكراً لثقتكم.'
-                    }
-                  />
-                </div>
-              </TabsContent>
-            ))}
+            ).map(({ code, labelKey, dir }) => {
+              const label = t(labelKey);
+              const legalPlaceholder = t(
+                code === 'fr'
+                  ? 'accountBillingSettings.legalPlaceholderFr'
+                  : code === 'en'
+                    ? 'accountBillingSettings.legalPlaceholderEn'
+                    : 'accountBillingSettings.legalPlaceholderAr',
+              );
+              const footerPlaceholder = t(
+                code === 'fr'
+                  ? 'accountBillingSettings.footerPlaceholderFr'
+                  : code === 'en'
+                    ? 'accountBillingSettings.footerPlaceholderEn'
+                    : 'accountBillingSettings.footerPlaceholderAr',
+              );
+              return (
+                <TabsContent key={code} value={code} className="space-y-3 pt-3">
+                  <div className="grid gap-2">
+                    <Label>{t('accountBillingSettings.legalText', { label })}</Label>
+                    <Textarea
+                      rows={3}
+                      dir={dir ?? 'ltr'}
+                      value={form.legalTextTranslations?.[code] ?? ''}
+                      onChange={(e) => updateLegal(code, e.target.value)}
+                      placeholder={legalPlaceholder}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>{t('accountBillingSettings.footerText', { label })}</Label>
+                    <Textarea
+                      rows={2}
+                      dir={dir ?? 'ltr'}
+                      value={form.footerTextTranslations?.[code] ?? ''}
+                      onChange={(e) => updateFooter(code, e.target.value)}
+                      placeholder={footerPlaceholder}
+                    />
+                  </div>
+                </TabsContent>
+              );
+            })}
           </Tabs>
         </CardContent>
       </Card>
@@ -418,36 +430,36 @@ export function CompanyBillingSettingsForm() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <CreditCard className="h-4 w-4 text-primary" />
-            Bank details
+            {t('accountBillingSettings.bankDetailsTitle')}
           </CardTitle>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
           <Field
-            label="Bank name"
+            label={t('accountBillingSettings.bankName')}
             value={form.bankDetails.bankName ?? ''}
             onChange={(v) => updateBank('bankName', v)}
             placeholder="BIAT"
           />
           <Field
-            label="Account name"
+            label={t('accountBillingSettings.accountName')}
             value={form.bankDetails.accountName ?? ''}
             onChange={(v) => updateBank('accountName', v)}
             placeholder="Oralign SARL"
           />
           <Field
-            label="RIB"
+            label={t('accountBillingSettings.rib')}
             value={form.bankDetails.rib ?? ''}
             onChange={(v) => updateBank('rib', v)}
             placeholder="123 4567890 1234567890"
           />
           <Field
-            label="IBAN"
+            label={t('accountBillingSettings.iban')}
             value={form.bankDetails.iban ?? ''}
             onChange={(v) => updateBank('iban', v)}
             placeholder="TN59 0000 0000 0000 0000 0000"
           />
           <Field
-            label="SWIFT"
+            label={t('accountBillingSettings.swift')}
             value={form.bankDetails.swift ?? ''}
             onChange={(v) => updateBank('swift', v)}
             placeholder="BIATTNTT"
@@ -469,7 +481,7 @@ export function CompanyBillingSettingsForm() {
           ) : (
             <Check className="h-4 w-4" />
           )}
-          Save settings
+          {t('accountBillingSettings.saveSettings')}
         </Button>
       </div>
     </div>

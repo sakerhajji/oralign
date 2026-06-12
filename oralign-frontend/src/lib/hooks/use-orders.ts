@@ -9,6 +9,7 @@ import {
 } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { extractApiErrorMessage, ordersService } from '@/lib/api';
+import { useT } from '@/lib/i18n/lang-context';
 import {
   CreateOrderDto,
   DentalOrder,
@@ -137,12 +138,13 @@ export function useCreateOrder(): UseMutationResult<
   CreateOrderDto
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ordersService.createOrder,
     onSuccess: (order) => {
       syncOrderCaches(queryClient, order);
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
-      toast.success('Order draft saved');
+      toast.success(t('toasts.orders.draftSaved'));
     },
     onError: (error) => toast.error(extractApiErrorMessage(error)),
   });
@@ -154,13 +156,14 @@ export function useUpdateOrder(): UseMutationResult<
   { id: string; data: UpdateOrderDto }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ id, data }) => ordersService.updateOrder(id, data),
     onSuccess: (order, variables) => {
       syncOrderCaches(queryClient, order);
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(variables.id) });
-      toast.success('Order updated');
+      toast.success(t('toasts.orders.updated'));
     },
     onError: (error) => toast.error(extractApiErrorMessage(error)),
   });
@@ -168,13 +171,14 @@ export function useUpdateOrder(): UseMutationResult<
 
 export function useSubmitOrder(): UseMutationResult<DentalOrder, Error, string> {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ordersService.submitOrder,
     onSuccess: (order, id) => {
       syncOrderCaches(queryClient, order);
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
-      toast.success('Order submitted');
+      toast.success(t('toasts.orders.submitted'));
     },
     onError: (error) => toast.error(extractApiErrorMessage(error)),
   });
@@ -193,6 +197,7 @@ export function usePayTreatmentFee(): UseMutationResult<
   { id: string; method: 'card' | 'cash' | 'bank_transfer'; amount: number }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ id, method, amount }) =>
       ordersService.payTreatmentFee(id, method, amount),
@@ -201,11 +206,9 @@ export function usePayTreatmentFee(): UseMutationResult<
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
       if (method === 'bank_transfer') {
-        toast.success(
-          'Bank-transfer payment recorded. Upload your receipt next.',
-        );
+        toast.success(t('toasts.orders.bankTransferRecorded'));
       } else {
-        toast.success('Treatment fee paid');
+        toast.success(t('toasts.orders.treatmentFeePaid'));
       }
     },
     onError: (error) => toast.error(extractApiErrorMessage(error)),
@@ -219,15 +222,14 @@ export function useUploadTreatmentFeeProof(): UseMutationResult<
   { id: string; proof: File; amount: number }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ id, proof, amount }) =>
       ordersService.uploadTreatmentFeeProof(id, proof, amount),
     onSuccess: (order, { id }) => {
       syncOrderCaches(queryClient, order);
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
-      toast.success(
-        'Receipt uploaded. An admin will confirm once funds land.',
-      );
+      toast.success(t('toasts.orders.receiptUploaded'));
     },
     onError: (error) => toast.error(extractApiErrorMessage(error)),
   });
@@ -240,6 +242,7 @@ export function useConfirmTreatmentFeePayment(): UseMutationResult<
   string
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: (id) => ordersService.confirmTreatmentFeePayment(id),
     onSuccess: (order, id) => {
@@ -249,7 +252,7 @@ export function useConfirmTreatmentFeePayment(): UseMutationResult<
       // Bust both treatment-fee list caches so the confirmed row
       // hops from the pending queue into the history table.
       queryClient.invalidateQueries({ queryKey: ['treatment-fees'] });
-      toast.success('Bank transfer confirmed');
+      toast.success(t('toasts.orders.bankTransferConfirmed'));
     },
     onError: (error) => toast.error(extractApiErrorMessage(error)),
   });
@@ -293,6 +296,7 @@ export function useOverrideOrderStatus(): UseMutationResult<
   { id: string; status: OrderStatus; reason?: string }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ id, status, reason }) =>
       ordersService.overrideStatus(id, status, reason),
@@ -305,7 +309,7 @@ export function useOverrideOrderStatus(): UseMutationResult<
       // shown next to those tabs stay accurate.
       queryClient.invalidateQueries({ queryKey: ['treatment-plans'] });
       queryClient.invalidateQueries({ queryKey: ['quotations'] });
-      toast.success('Order status updated.');
+      toast.success(t('toasts.orders.statusUpdated'));
     },
     onError: (error) => toast.error(extractApiErrorMessage(error)),
   });
@@ -317,13 +321,14 @@ export function useDeleteOrder(): UseMutationResult<
   string
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ordersService.deleteOrder,
     onSuccess: (_data, id) => {
       removeOrderFromLists(queryClient, id);
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
       queryClient.removeQueries({ queryKey: orderKeys.detail(id) });
-      toast.success('Order deleted');
+      toast.success(t('toasts.orders.deleted'));
     },
     onError: (error) => toast.error(extractApiErrorMessage(error)),
   });
@@ -335,13 +340,14 @@ export function usePermanentDeleteOrder(): UseMutationResult<
   string
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ordersService.permanentDeleteOrder,
     onSuccess: (_data, id) => {
       removeOrderFromLists(queryClient, id);
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
       queryClient.removeQueries({ queryKey: orderKeys.detail(id) });
-      toast.success('Order permanently deleted');
+      toast.success(t('toasts.orders.permanentlyDeleted'));
     },
     onError: (error) => toast.error(extractApiErrorMessage(error)),
   });
@@ -359,13 +365,14 @@ export function useRestoreOrder(): UseMutationResult<
   string
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ordersService.restoreOrder,
     onSuccess: (_data, id) => {
       removeOrderFromLists(queryClient, id);
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
-      toast.success('Order restored');
+      toast.success(t('toasts.orders.restored'));
     },
     onError: (error) => toast.error(extractApiErrorMessage(error)),
   });
@@ -386,6 +393,7 @@ export function useBulkUpdateOrderStatus(): UseMutationResult<
   { ids: string[]; status: OrderStatus; reason?: string }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ ids, status, reason }) =>
       ordersService.bulkUpdateStatus(ids, status, reason),
@@ -397,15 +405,13 @@ export function useBulkUpdateOrderStatus(): UseMutationResult<
       queryClient.invalidateQueries({ queryKey: ['treatment-plans'] });
       queryClient.invalidateQueries({ queryKey: ['quotations'] });
       if (updated === 0) {
-        toast.info('No orders changed — already at the requested status.');
+        toast.info(t('toasts.orders.bulkNoChange'));
       } else if (skipped > 0) {
         toast.success(
-          `${updated} order${updated === 1 ? '' : 's'} updated · ${skipped} skipped.`,
+          t('toasts.orders.bulkUpdatedSkipped', { count: updated, skipped }),
         );
       } else {
-        toast.success(
-          `${updated} order${updated === 1 ? '' : 's'} updated.`,
-        );
+        toast.success(t('toasts.orders.bulkUpdated', { count: updated }));
       }
     },
     onError: (error) => toast.error(extractApiErrorMessage(error)),
@@ -424,6 +430,7 @@ export function useBulkDeleteOrders(): UseMutationResult<
   string[]
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: (ids: string[]) => ordersService.bulkDelete(ids),
     onSuccess: ({ deleted, skipped }, ids) => {
@@ -434,12 +441,10 @@ export function useBulkDeleteOrders(): UseMutationResult<
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
       if (skipped > 0) {
         toast.success(
-          `${deleted} order${deleted === 1 ? '' : 's'} deleted · ${skipped} skipped.`,
+          t('toasts.orders.bulkDeletedSkipped', { count: deleted, skipped }),
         );
       } else {
-        toast.success(
-          `${deleted} order${deleted === 1 ? '' : 's'} deleted.`,
-        );
+        toast.success(t('toasts.orders.bulkDeleted', { count: deleted }));
       }
     },
     onError: (error) => toast.error(extractApiErrorMessage(error)),
@@ -456,18 +461,17 @@ export function useBulkRestoreOrders(): UseMutationResult<
   string[]
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: (ids: string[]) => ordersService.bulkRestore(ids),
     onSuccess: ({ restored, skipped }) => {
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
       if (skipped > 0) {
         toast.success(
-          `${restored} order${restored === 1 ? '' : 's'} restored · ${skipped} skipped.`,
+          t('toasts.orders.bulkRestoredSkipped', { count: restored, skipped }),
         );
       } else {
-        toast.success(
-          `${restored} order${restored === 1 ? '' : 's'} restored.`,
-        );
+        toast.success(t('toasts.orders.bulkRestored', { count: restored }));
       }
     },
     onError: (error) => toast.error(extractApiErrorMessage(error)),
@@ -485,6 +489,7 @@ export function useBulkPermanentDeleteOrders(): UseMutationResult<
   string[]
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: (ids: string[]) => ordersService.bulkPermanentDelete(ids),
     onSuccess: ({ deleted, skipped }, ids) => {
@@ -495,11 +500,14 @@ export function useBulkPermanentDeleteOrders(): UseMutationResult<
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
       if (skipped > 0) {
         toast.success(
-          `${deleted} order${deleted === 1 ? '' : 's'} permanently deleted · ${skipped} skipped.`,
+          t('toasts.orders.bulkPermanentlyDeletedSkipped', {
+            count: deleted,
+            skipped,
+          }),
         );
       } else {
         toast.success(
-          `${deleted} order${deleted === 1 ? '' : 's'} permanently deleted.`,
+          t('toasts.orders.bulkPermanentlyDeleted', { count: deleted }),
         );
       }
     },
@@ -524,6 +532,7 @@ export function useUpdateToothInstructions(): UseMutationResult<
   }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ id, instructions, replaceTypes }) =>
       ordersService.updateToothInstructions(id, instructions, replaceTypes),
@@ -535,7 +544,7 @@ export function useUpdateToothInstructions(): UseMutationResult<
       // invalidation, the IPR purple bars in the plan editor stay
       // stale until the user manually refreshes.
       queryClient.invalidateQueries({ queryKey: ['treatment-plans'] });
-      toast.success('Odontogram saved');
+      toast.success(t('toasts.orders.odontogramSaved'));
     },
     onError: (error) => toast.error(extractApiErrorMessage(error)),
   });
@@ -565,13 +574,14 @@ export function useUploadOrderFiles(): UseMutationResult<
   }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ id, files, category, onProgress }) =>
       ordersService.uploadFiles(id, files, category, onProgress),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: orderKeys.files(variables.id) });
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(variables.id) });
-      toast.success('Files uploaded');
+      toast.success(t('toasts.orders.filesUploaded'));
     },
     onError: (error) => {
       // Friendlier message for the most common big-upload failures.
@@ -579,13 +589,9 @@ export function useUploadOrderFiles(): UseMutationResult<
       // on the shared extractor for status-code → human-readable text.
       const msg = extractApiErrorMessage(error);
       if (/network error|timeout/i.test(msg)) {
-        toast.error(
-          'Upload failed — connection lost or too slow. Try again with a stable internet connection.',
-        );
+        toast.error(t('toasts.orders.uploadConnectionLost'));
       } else if (/413|payload too large|file too large/i.test(msg)) {
-        toast.error(
-          'File is larger than the 1 GB upload limit. Compress further or split the volume.',
-        );
+        toast.error(t('toasts.orders.uploadTooLarge'));
       } else {
         toast.error(msg);
       }
@@ -599,12 +605,13 @@ export function useDeleteOrderFile(): UseMutationResult<
   { id: string; fileId: string }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ id, fileId }) => ordersService.deleteFile(id, fileId),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: orderKeys.files(variables.id) });
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(variables.id) });
-      toast.success('File deleted');
+      toast.success(t('toasts.orders.fileDeleted'));
     },
     onError: (error) => toast.error(extractApiErrorMessage(error)),
   });

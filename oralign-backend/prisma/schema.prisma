@@ -254,6 +254,11 @@ model User {
   // Profile
   avatarUrl           String?            // validated path only, no raw URLs
   country             String?            // personal country, separate from clinic
+  // UI + outbound-content language ("fr" | "en"). Drives the language
+  // of notifications, emails and any backend-generated copy addressed
+  // to this user. Plain String (not enum) so adding a locale later is
+  // a data change, not a migration. Default matches the app default.
+  preferredLanguage   String             @default("fr")
 
   // Timestamps
   lastLoginAt         DateTime?

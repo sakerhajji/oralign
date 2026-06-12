@@ -5,6 +5,7 @@ import { Check, Loader2, Pencil, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useUpdateInvoiceNumber } from '@/lib/hooks/use-payments';
+import { useT } from '@/lib/i18n/lang-context';
 import { cn } from '@/lib/utils';
 
 /**
@@ -29,6 +30,7 @@ export function InvoiceNumberEditor({
   size?: 'sm' | 'lg';
   className?: string;
 }) {
+  const { t } = useT();
   const update = useUpdateInvoiceNumber();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value ?? '');
@@ -68,8 +70,8 @@ export function InvoiceNumberEditor({
             if (e.key === 'Escape') setEditing(false);
           }}
           disabled={update.isPending}
-          placeholder="FAC-000123"
-          aria-label="Invoice number"
+          placeholder={t('paymentsCommon.invoiceNumberPh')}
+          aria-label={t('paymentsCommon.invoiceNumberAria')}
           className={cn(
             'font-mono',
             large ? 'h-9 w-48 text-sm' : 'h-7 w-32 text-xs',
@@ -81,7 +83,7 @@ export function InvoiceNumberEditor({
           variant="ghost"
           onClick={save}
           disabled={update.isPending}
-          aria-label="Save invoice number"
+          aria-label={t('paymentsCommon.saveInvoiceAria')}
         >
           {update.isPending ? (
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -95,7 +97,7 @@ export function InvoiceNumberEditor({
           variant="ghost"
           onClick={() => setEditing(false)}
           disabled={update.isPending}
-          aria-label="Cancel"
+          aria-label={t('paymentsCommon.cancelAria')}
         >
           <X className="h-4 w-4" />
         </Button>
@@ -120,7 +122,7 @@ export function InvoiceNumberEditor({
           size="icon-sm"
           variant="ghost"
           onClick={start}
-          aria-label="Edit invoice number"
+          aria-label={t('paymentsCommon.editInvoiceAria')}
           className="text-muted-foreground hover:text-foreground"
         >
           <Pencil className={large ? 'h-4 w-4' : 'h-3 w-3'} />

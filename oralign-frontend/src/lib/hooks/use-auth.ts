@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { isAxiosError } from 'axios';
 import { authService } from '@/lib/api';
 import { useAuth } from '@/lib/providers';
+import { useT } from '@/lib/i18n/lang-context';
 import {
   SignUpDto,
   SignInDto,
@@ -85,6 +86,7 @@ export function useBackendHealth(): UseQueryResult<
 export function useSignUp() {
   const router = useRouter();
   const { login } = useAuth();
+  const { t } = useT();
 
   return useMutation<AuthResponseDto, unknown, SignUpDto>({
     mutationFn: authService.signUp,
@@ -96,17 +98,20 @@ export function useSignUp() {
         role: data.role,
         isEmailVerified: data.isEmailVerified,
         isActive: true,
+        // Seed the i18n store right at login — auth-provider applies
+        // this to localStorage so a FR user never flashes English.
+        preferredLanguage: data.preferredLanguage,
         verificationStatus:
           (data as { verificationStatus?: VerificationStatus })
             .verificationStatus ?? VerificationStatus.PENDING,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       });
-      toast.success('Account created! Please verify your email.');
+      toast.success(t('toasts.auth.accountCreated'));
       router.push('/auth/verify-email');
     },
     onError: (error: unknown) => {
-      toast.error(getApiErrorMessage(error, 'Failed to create account'));
+      toast.error(getApiErrorMessage(error, t('toasts.auth.signUpFailed')));
     },
   });
 }
@@ -125,6 +130,7 @@ export function useSignUp() {
 export function useSignIn() {
   const router = useRouter();
   const { login } = useAuth();
+  const { t } = useT();
 
   return useMutation<AuthResponseDto, unknown, SignInDto>({
     mutationFn: authService.signIn,
@@ -139,11 +145,14 @@ export function useSignIn() {
         role: data.role,
         isEmailVerified: data.isEmailVerified,
         isActive: true,
+        // Seed the i18n store right at login — auth-provider applies
+        // this to localStorage so a FR user never flashes English.
+        preferredLanguage: data.preferredLanguage,
         verificationStatus,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       });
-      toast.success('Logged in successfully!');
+      toast.success(t('toasts.auth.loggedIn'));
 
       if (!data.isEmailVerified) {
         // Just route them to the verify page — DON'T fire an automatic
@@ -162,7 +171,7 @@ export function useSignIn() {
       router.push('/dashboard');
     },
     onError: (error: unknown) => {
-      toast.error(getApiErrorMessage(error, 'Invalid credentials'));
+      toast.error(getApiErrorMessage(error, t('toasts.auth.invalidCredentials')));
     },
   });
 }
@@ -174,6 +183,7 @@ export function useSignIn() {
  */
 export function useVerifyEmail(): UseMutationResult<VerifyEmailResponseDto, Error, VerifyEmailDto> {
   const { login } = useAuth();
+  const { t } = useT();
 
   return useMutation<VerifyEmailResponseDto, Error, VerifyEmailDto>({
     mutationFn: authService.verifyEmail,
@@ -193,7 +203,7 @@ export function useVerifyEmail(): UseMutationResult<VerifyEmailResponseDto, Erro
           updatedAt: new Date().toISOString(),
         });
       }
-      toast.success('Email verified successfully!');
+      toast.success(t('toasts.auth.emailVerified'));
     },
     onError: (error: unknown) => {
       // The backend's BadRequestException carries a useful message
@@ -201,7 +211,7 @@ export function useVerifyEmail(): UseMutationResult<VerifyEmailResponseDto, Erro
       // `error.message` on an Axios error is "Request failed with status
       // code 400", which hides that information from the user. Always go
       // through getApiErrorMessage to unwrap the response body.
-      toast.error(getApiErrorMessage(error, 'Failed to verify email'));
+      toast.error(getApiErrorMessage(error, t('toasts.auth.verifyEmailFailed')));
     },
   });
 }
@@ -214,13 +224,15 @@ export function useResendVerification(): UseMutationResult<
   unknown,
   { email: string }
 > {
+  const { t } = useT();
+
   return useMutation<MessageResponse, unknown, { email: string }>({
     mutationFn: authService.resendVerification,
     onSuccess: () => {
-      toast.success('A new verification code has been sent to your email.');
+      toast.success(t('toasts.auth.codeResent'));
     },
     onError: (error: unknown) => {
-      toast.error(getApiErrorMessage(error, 'Failed to resend code'));
+      toast.error(getApiErrorMessage(error, t('toasts.auth.resendCodeFailed')));
     },
   });
 }
@@ -229,13 +241,15 @@ export function useResendVerification(): UseMutationResult<
  * Hook for forgot password.
  */
 export function useForgotPassword(): UseMutationResult<MessageResponse, Error, ForgotPasswordDto> {
+  const { t } = useT();
+
   return useMutation<MessageResponse, Error, ForgotPasswordDto>({
     mutationFn: authService.forgotPassword,
     onSuccess: () => {
-      toast.success('If that email exists, a reset link has been sent. Check your inbox.');
+      toast.success(t('toasts.auth.resetLinkSent'));
     },
     onError: (error: Error) => {
-      toast.error(getApiErrorMessage(error, 'Failed to send reset email'));
+      toast.error(getApiErrorMessage(error, t('toasts.auth.resetEmailFailed')));
     },
   });
 }
@@ -245,15 +259,16 @@ export function useForgotPassword(): UseMutationResult<MessageResponse, Error, F
  */
 export function useResetPassword() {
   const router = useRouter();
+  const { t } = useT();
 
   return useMutation<MessageResponse, unknown, ResetPasswordDto & { confirmPassword?: string }>({
     mutationFn: authService.resetPassword,
     onSuccess: () => {
-      toast.success('Password reset successfully!');
+      toast.success(t('toasts.auth.passwordReset'));
       router.push('/login');
     },
     onError: (error: unknown) => {
-      toast.error(getApiErrorMessage(error, 'Failed to reset password'));
+      toast.error(getApiErrorMessage(error, t('toasts.auth.resetPasswordFailed')));
     },
   });
 }
@@ -263,13 +278,15 @@ export function useResetPassword() {
  * Calls the authenticated POST /auth/change-password endpoint.
  */
 export function useChangePassword() {
+  const { t } = useT();
+
   return useMutation<MessageResponse, unknown, { currentPassword: string; newPassword: string }>({
     mutationFn: authService.changePassword,
     onSuccess: () => {
-      toast.success('Password changed successfully!');
+      toast.success(t('toasts.auth.passwordChanged'));
     },
     onError: (error: unknown) => {
-      toast.error(getApiErrorMessage(error, 'Failed to change password'));
+      toast.error(getApiErrorMessage(error, t('toasts.auth.changePasswordFailed')));
     },
   });
 }
@@ -281,12 +298,13 @@ export function useLogout() {
   const { logout } = useAuth();
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { t } = useT();
 
   return useCallback(() => {
     queryClient.clear();
     authService.logout();
     logout(false);
-    toast.success('Logged out successfully');
+    toast.success(t('toasts.auth.loggedOut'));
     router.replace('/login');
-  }, [logout, router, queryClient]);
+  }, [logout, router, queryClient, t]);
 }

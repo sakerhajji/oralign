@@ -25,8 +25,7 @@ type InvoiceLang = 'fr' | 'en';
 export default function TreatmentFeeInvoicePreviewPage() {
   const params = useParams<{ id: string }>();
   const orderId = params.id;
-  const { lang: dashLang } = useT();
-  const fr = dashLang === 'fr';
+  const { t, lang: dashLang } = useT();
 
   const [lang, setLang] = useState<InvoiceLang>(dashLang === 'en' ? 'en' : 'fr');
 
@@ -42,7 +41,7 @@ export default function TreatmentFeeInvoicePreviewPage() {
   const error = pdfQuery.isError
     ? pdfQuery.error instanceof Error
       ? pdfQuery.error.message
-      : 'Could not load the treatment-fee invoice PDF.'
+      : t('feeInvoicePage.loadError')
     : null;
 
   // Derive the object URL from the blob; revoke on change / unmount so
@@ -89,7 +88,7 @@ export default function TreatmentFeeInvoicePreviewPage() {
         className="inline-flex w-fit items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="h-4 w-4" />
-        {fr ? 'Retour aux paiements' : 'Back to payments'}
+        {t('feeInvoicePage.back')}
       </Link>
 
       {/* ─── Header card: title + actions ─────────────────────────── */}
@@ -100,12 +99,10 @@ export default function TreatmentFeeInvoicePreviewPage() {
           </span>
           <div className="min-w-0">
             <h1 className="text-lg font-semibold sm:text-xl">
-              {fr ? 'Facture — Frais de traitement' : 'Treatment fee invoice'}
+              {t('feeInvoicePage.title')}
             </h1>
             <p className="mt-0.5 text-sm text-muted-foreground">
-              {fr
-                ? 'Aperçu de la facture des frais de traitement.'
-                : 'Treatment-fee invoice preview.'}
+              {t('feeInvoicePage.subtitle')}
             </p>
           </div>
         </div>
@@ -122,7 +119,7 @@ export default function TreatmentFeeInvoicePreviewPage() {
             className="gap-1.5"
           >
             <Download className="h-4 w-4" />
-            {fr ? 'Télécharger le PDF' : 'Download PDF'}
+            {t('feeInvoicePage.download')}
           </Button>
         </div>
       </div>
@@ -133,7 +130,7 @@ export default function TreatmentFeeInvoicePreviewPage() {
           <div className="flex flex-col items-center gap-2 text-muted-foreground">
             <Loader2 className="h-6 w-6 animate-spin" />
             <p className="text-sm">
-              {fr ? 'Chargement de la facture…' : 'Loading invoice…'}
+              {t('feeInvoicePage.loading')}
             </p>
           </div>
         ) : error ? (
@@ -147,12 +144,12 @@ export default function TreatmentFeeInvoicePreviewPage() {
                 void pdfQuery.refetch();
               }}
             >
-              {fr ? 'Réessayer' : 'Retry'}
+              {t('feeInvoicePage.retry')}
             </Button>
           </div>
         ) : pdfUrl ? (
           <iframe
-            title={fr ? 'Aperçu de la facture' : 'Invoice preview'}
+            title={t('feeInvoicePage.previewTitle')}
             src={pdfUrl}
             className="h-full min-h-[70vh] w-full border-0 bg-white"
           />

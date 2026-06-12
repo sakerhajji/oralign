@@ -112,6 +112,7 @@ export class UserService {
       phone?: string;
       country?: string;
       avatarUrl?: string;
+      preferredLanguage?: string;
       passwordHash?: string;
       role?: UserRole;
       isEmailVerified?: boolean;
@@ -126,6 +127,8 @@ export class UserService {
       updateData.country = updateUserDto.country;
     if (updateUserDto.avatarUrl !== undefined)
       updateData.avatarUrl = updateUserDto.avatarUrl;
+    if (updateUserDto.preferredLanguage !== undefined)
+      updateData.preferredLanguage = updateUserDto.preferredLanguage;
 
     // Password update: Only if provided and not empty
     if (updateUserDto.password && updateUserDto.password.trim() !== '') {
@@ -311,6 +314,9 @@ export class UserService {
       isEmailVerified: user.isEmailVerified,
       avatarUrl: user.avatarUrl ?? undefined,
       country: user.country ?? undefined,
+      // Drives the language of the dashboard UI, notifications and
+      // emails for this user. Seeded into the frontend on login.
+      preferredLanguage: user.preferredLanguage ?? undefined,
       lastLoginAt: user.lastLoginAt ?? undefined,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,

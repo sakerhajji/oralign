@@ -36,10 +36,11 @@ import { useAuth } from '@/lib/providers/auth-provider';
 import { useDownloadReportCsv, useReportSummary } from '@/lib/hooks';
 import type { DashboardRange, ReportExportType } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n/lang-context';
 
-const TND = (n: number) =>
-  `${new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(n)} TND`;
-const N = (n: number) => new Intl.NumberFormat('en-US').format(n);
+const TND = (n: number, locale: string) =>
+  `${new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(n)} TND`;
+const N = (n: number, locale: string) => new Intl.NumberFormat(locale).format(n);
 
 function defaultRange(): DashboardRange {
   const to = new Date();
@@ -50,7 +51,9 @@ function defaultRange(): DashboardRange {
 
 export default function ReportsPage() {
   const router = useRouter();
+  const { t, lang } = useT();
   const { user, isAdmin } = useAuth();
+  const numLocale = lang === 'fr' ? 'fr-FR' : 'en-US';
   const [range, setRange] = useState<DashboardRange>(defaultRange);
   const reportRange = useMemo(() => ({ ...range, limit: 10 }), [range]);
   const summary = useReportSummary(reportRange, isAdmin);
@@ -70,16 +73,14 @@ export default function ReportsPage() {
       <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-2xl font-semibold tracking-tight">Reports</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">{t('reportsPage.title')}</h1>
             <Badge variant="outline" className="gap-1">
               <FileBarChartIcon className="size-3" />
-              Admin
+              {t('reportsPage.admin')}
             </Badge>
           </div>
           <p className="max-w-2xl text-sm text-muted-foreground">
-            Exportable platform reports for revenue, doctor performance, and
-            pack activity. The numbers use the same backend aggregates as the
-            Admin Dashboard.
+            {t('reportsPage.intro')}
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -92,7 +93,7 @@ export default function ReportsPage() {
             <RefreshCwIcon
               className={cn('size-4', summary.isFetching && 'animate-spin')}
             />
-            Refresh
+            {t('reportsPage.refresh')}
           </Button>
         </div>
       </div>
@@ -100,38 +101,40 @@ export default function ReportsPage() {
       {summary.isError ? (
         <Card className="border-destructive/30 bg-destructive/5">
           <CardContent className="p-4 text-sm text-destructive">
-            Reports could not load. Check that the backend is running and that
-            your account has admin access.
+            {t('reportsPage.loadError')}
           </CardContent>
         </Card>
       ) : null}
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <ReportMetric
-          title="Revenue"
-          value={TND(data?.kpis.revenue.total ?? 0)}
-          detail={`Collected ${TND(data?.kpis.revenue.collected ?? 0)}`}
+          title={t('reportsPage.revenue')}
+          value={TND(data?.kpis.revenue.total ?? 0, numLocale)}
+          detail={t('reportsPage.revenueDetail', { amount: TND(data?.kpis.revenue.collected ?? 0, numLocale) })}
           icon={WalletIcon}
           loading={summary.isLoading}
         />
         <ReportMetric
-          title="Orders"
-          value={N(data?.kpis.orders.inRange ?? 0)}
-          detail={`${N(data?.kpis.orders.paid ?? 0)} paid · ${N(data?.kpis.orders.unpaid ?? 0)} unpaid`}
+          title={t('reportsPage.orders')}
+          value={N(data?.kpis.orders.inRange ?? 0, numLocale)}
+          detail={t('reportsPage.ordersDetail', {
+            paid: N(data?.kpis.orders.paid ?? 0, numLocale),
+            unpaid: N(data?.kpis.orders.unpaid ?? 0, numLocale),
+          })}
           icon={BarChart3Icon}
           loading={summary.isLoading}
         />
         <ReportMetric
-          title="Doctors"
-          value={N(data?.kpis.doctors.total ?? 0)}
-          detail={`${N(data?.kpis.doctors.active ?? 0)} active`}
+          title={t('reportsPage.doctors')}
+          value={N(data?.kpis.doctors.total ?? 0, numLocale)}
+          detail={t('reportsPage.doctorsDetail', { count: N(data?.kpis.doctors.active ?? 0, numLocale) })}
           icon={UsersIcon}
           loading={summary.isLoading}
         />
         <ReportMetric
-          title="Conversion"
+          title={t('reportsPage.conversion')}
           value={`${data?.kpis.packs.conversionRatePct ?? 0}%`}
-          detail={`AOV ${TND(data?.kpis.packs.averageOrderValue ?? 0)}`}
+          detail={t('reportsPage.conversionDetail', { amount: TND(data?.kpis.packs.averageOrderValue ?? 0, numLocale) })}
           icon={TrendingUpIcon}
           loading={summary.isLoading}
         />
@@ -139,22 +142,22 @@ export default function ReportsPage() {
 
       <div className="grid gap-4 lg:grid-cols-3">
         <ExportCard
-          title="Revenue report"
-          description="Daily revenue, order volume, new doctors, and new patients."
+          title={t('reportsPage.revenueReportTitle')}
+          description={t('reportsPage.revenueReportDesc')}
           icon={WalletIcon}
           onExport={() => exportCsv('revenue')}
           pending={download.isPending}
         />
         <ExportCard
-          title="Doctor report"
-          description="Top doctors by orders, paid orders, revenue, and outstanding balance."
+          title={t('reportsPage.doctorReportTitle')}
+          description={t('reportsPage.doctorReportDesc')}
           icon={UsersIcon}
           onExport={() => exportCsv('doctors')}
           pending={download.isPending}
         />
         <ExportCard
-          title="Pack report"
-          description="Pack sales, revenue, collected amount, and current prices."
+          title={t('reportsPage.packReportTitle')}
+          description={t('reportsPage.packReportDesc')}
           icon={PackageIcon}
           onExport={() => exportCsv('packs')}
           pending={download.isPending}
@@ -164,8 +167,8 @@ export default function ReportsPage() {
       <div className="grid gap-4 xl:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Top doctors</CardTitle>
-            <CardDescription>Ranked by orders in the selected range.</CardDescription>
+            <CardTitle>{t('reportsPage.topDoctors')}</CardTitle>
+            <CardDescription>{t('reportsPage.topDoctorsDesc')}</CardDescription>
           </CardHeader>
           <CardContent>
             {summary.isLoading ? (
@@ -176,10 +179,10 @@ export default function ReportsPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Doctor</TableHead>
-                    <TableHead className="text-right">Orders</TableHead>
-                    <TableHead className="text-right">Revenue</TableHead>
-                    <TableHead className="text-right">Outstanding</TableHead>
+                    <TableHead>{t('reportsPage.colDoctor')}</TableHead>
+                    <TableHead className="text-right">{t('reportsPage.colOrders')}</TableHead>
+                    <TableHead className="text-right">{t('reportsPage.colRevenue')}</TableHead>
+                    <TableHead className="text-right">{t('reportsPage.colOutstanding')}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -192,13 +195,13 @@ export default function ReportsPage() {
                         </div>
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
-                        {N(doctor.orders)}
+                        {N(doctor.orders, numLocale)}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
-                        {TND(doctor.revenue)}
+                        {TND(doctor.revenue, numLocale)}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
-                        {TND(doctor.outstanding)}
+                        {TND(doctor.outstanding, numLocale)}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -210,8 +213,8 @@ export default function ReportsPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Best-selling packs</CardTitle>
-            <CardDescription>Pack performance in the selected range.</CardDescription>
+            <CardTitle>{t('reportsPage.bestPacks')}</CardTitle>
+            <CardDescription>{t('reportsPage.bestPacksDesc')}</CardDescription>
           </CardHeader>
           <CardContent>
             {summary.isLoading ? (
@@ -222,10 +225,10 @@ export default function ReportsPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Pack</TableHead>
-                    <TableHead className="text-right">Sold</TableHead>
-                    <TableHead className="text-right">Revenue</TableHead>
-                    <TableHead className="text-right">Collected</TableHead>
+                    <TableHead>{t('reportsPage.colPack')}</TableHead>
+                    <TableHead className="text-right">{t('reportsPage.colSold')}</TableHead>
+                    <TableHead className="text-right">{t('reportsPage.colRevenue')}</TableHead>
+                    <TableHead className="text-right">{t('reportsPage.colCollected')}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -235,18 +238,18 @@ export default function ReportsPage() {
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="font-medium">{pack.name}</span>
                           {!pack.isActive ? (
-                            <Badge variant="outline">Inactive</Badge>
+                            <Badge variant="outline">{t('reportsPage.inactive')}</Badge>
                           ) : null}
                         </div>
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
-                        {N(pack.sold)}
+                        {N(pack.sold, numLocale)}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
-                        {TND(pack.revenue)}
+                        {TND(pack.revenue, numLocale)}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
-                        {TND(pack.collected)}
+                        {TND(pack.collected, numLocale)}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -306,6 +309,7 @@ function ExportCard({
   onExport: () => void;
   pending: boolean;
 }) {
+  const { t } = useT();
   return (
     <Card>
       <CardHeader className="space-y-3">
@@ -315,7 +319,7 @@ function ExportCard({
           </div>
           <Button variant="outline" size="sm" onClick={onExport} disabled={pending}>
             <DownloadIcon className="size-4" />
-            CSV
+            {t('reportsPage.csv')}
           </Button>
         </div>
         <div>
@@ -328,9 +332,10 @@ function ExportCard({
 }
 
 function EmptyReport() {
+  const { t } = useT();
   return (
     <div className="grid h-40 place-items-center rounded-lg border border-dashed text-center text-sm text-muted-foreground">
-      No report data in this range.
+      {t('reportsPage.emptyReport')}
     </div>
   );
 }

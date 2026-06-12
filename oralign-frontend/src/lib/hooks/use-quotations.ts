@@ -10,6 +10,7 @@ import {
 import { toast } from 'sonner';
 import { quotationsService } from '@/lib/api/quotations.service';
 import { extractApiErrorMessage } from '@/lib/api/error';
+import { useT } from '@/lib/i18n/lang-context';
 import { orderKeys } from './use-orders';
 import type { DevisLanguage, Quotation, UpsertQuotationDto } from '@/lib/types';
 
@@ -60,11 +61,12 @@ export function useCreateQuotation(): UseMutationResult<
   { orderId: string; dto: UpsertQuotationDto }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ orderId, dto }) => quotationsService.create(orderId, dto),
     onSuccess: (quote) => {
       invalidateQuotation(queryClient, quote);
-      toast.success('Quotation draft created.');
+      toast.success(t('toasts.quotations.draftCreated'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -76,11 +78,12 @@ export function useUpdateQuotation(): UseMutationResult<
   { id: string; dto: UpsertQuotationDto }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ id, dto }) => quotationsService.update(id, dto),
     onSuccess: (quote) => {
       invalidateQuotation(queryClient, quote);
-      toast.success('Quotation updated.');
+      toast.success(t('toasts.quotations.updated'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -88,11 +91,12 @@ export function useUpdateQuotation(): UseMutationResult<
 
 export function useSendQuotation(): UseMutationResult<Quotation, Error, string> {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: (id) => quotationsService.send(id),
     onSuccess: (quote) => {
       invalidateQuotation(queryClient, quote);
-      toast.success('Quotation sent to the doctor.');
+      toast.success(t('toasts.quotations.sent'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -111,11 +115,12 @@ export function useGenerateQuotationPdf(): UseMutationResult<
   { id: string; lang?: DevisLanguage }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ id, lang }) => quotationsService.generatePdf(id, lang),
     onSuccess: (quote) => {
       invalidateQuotation(queryClient, quote);
-      toast.success('Quotation PDF generated.');
+      toast.success(t('toasts.quotations.pdfGenerated'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -127,6 +132,7 @@ export function useCancelQuotation(): UseMutationResult<
   { id: string; orderId: string }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ id }) => quotationsService.cancel(id),
     onSuccess: (_data, { orderId }) => {
@@ -135,7 +141,7 @@ export function useCancelQuotation(): UseMutationResult<
       });
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(orderId) });
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
-      toast.success('Quotation canceled. You can issue a new one now.');
+      toast.success(t('toasts.quotations.canceled'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -153,11 +159,12 @@ export function useRevertQuotationToDraft(): UseMutationResult<
   string
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: (id) => quotationsService.revertToDraft(id),
     onSuccess: (quote) => {
       invalidateQuotation(queryClient, quote);
-      toast.success('Quote recalled to draft. Edit it and resend.');
+      toast.success(t('toasts.quotations.recalled'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -169,11 +176,12 @@ export function useApproveQuotation(): UseMutationResult<
   string
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: (id) => quotationsService.approve(id),
     onSuccess: (quote) => {
       invalidateQuotation(queryClient, quote);
-      toast.success('Quotation approved.');
+      toast.success(t('toasts.quotations.approved'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -185,12 +193,13 @@ export function useRejectQuotation(): UseMutationResult<
   { id: string; rejectionReason?: string }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ id, rejectionReason }) =>
       quotationsService.reject(id, rejectionReason),
     onSuccess: (quote) => {
       invalidateQuotation(queryClient, quote);
-      toast.success('Quotation rejected.');
+      toast.success(t('toasts.quotations.rejected'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });

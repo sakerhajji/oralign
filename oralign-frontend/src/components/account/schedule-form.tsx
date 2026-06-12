@@ -7,10 +7,12 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { WorkingHoursEditor, buildScheduleFromHours, type DaySchedule } from '@/components/account/working-hours';
 import { useCreateWorkingHours, useUpdateWorkingHours, useWorkingHoursByProfile } from '@/lib/hooks';
+import { useT } from '@/lib/i18n/lang-context';
 
 const TIME_REGEX = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
 
 export function ScheduleForm({ profileId }: { profileId?: string | null }) {
+  const { t } = useT();
   const { data: workingHours, isLoading } = useWorkingHoursByProfile(profileId ?? '');
   const { mutateAsync: createWorkingHours } = useCreateWorkingHours();
   const { mutateAsync: updateWorkingHours } = useUpdateWorkingHours();
@@ -42,17 +44,17 @@ export function ScheduleForm({ profileId }: { profileId?: string | null }) {
     for (const day of schedule) {
       if (!day.isClosed) {
         if (!TIME_REGEX.test(day.openTime) || !TIME_REGEX.test(day.closeTime)) {
-          toast.error('Please provide valid working hours (HH:mm).');
+          toast.error(t('accountClinic.toastInvalidHours'));
           return false;
         }
         if (day.openTime >= day.closeTime) {
-          toast.error('Opening time must be before closing time.');
+          toast.error(t('accountClinic.toastOpeningBeforeClosing'));
           return false;
         }
       }
     }
     return true;
-  }, [schedule]);
+  }, [schedule, t]);
 
   const handleSave = async () => {
     if (!profileId) return;
@@ -79,7 +81,7 @@ export function ScheduleForm({ profileId }: { profileId?: string | null }) {
               }),
         ),
       );
-      toast.success('Working hours saved.');
+      toast.success(t('accountClinic.toastWorkingHoursSaved'));
     } finally {
       setIsSaving(false);
     }
@@ -88,13 +90,13 @@ export function ScheduleForm({ profileId }: { profileId?: string | null }) {
   return (
     <Card>
       <CardHeader>
-        <h3 className="text-base font-semibold">Working hours</h3>
-        <p className="text-sm text-muted-foreground">Set your weekly availability.</p>
+        <h3 className="text-base font-semibold">{t('accountClinic.scheduleTitle')}</h3>
+        <p className="text-sm text-muted-foreground">{t('accountClinic.scheduleSubtitle')}</p>
       </CardHeader>
       <CardContent className="space-y-4">
         {!profileId && (
           <p className="text-sm text-muted-foreground">
-            Save your clinic details first to enable scheduling.
+            {t('accountClinic.scheduleSaveFirstHint')}
           </p>
         )}
 
@@ -115,7 +117,7 @@ export function ScheduleForm({ profileId }: { profileId?: string | null }) {
             />
             <div className="flex justify-end">
               <Button onClick={handleSave} disabled={!scheduleDirty || isSaving}>
-                {isSaving ? 'Saving...' : 'Save schedule'}
+                {isSaving ? t('accountClinic.saving') : t('accountClinic.saveSchedule')}
               </Button>
             </div>
           </>

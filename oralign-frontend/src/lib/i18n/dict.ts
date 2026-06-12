@@ -2821,6 +2821,259 @@ export const dict = {
     previewTitle: { en: 'Invoice preview', fr: 'Aperçu de la facture' } as T,
   },
 
+  // ─── Toast messages (src/lib/hooks/*) ───────────────────────────
+  toasts: {
+    account: {
+      profileUpdated: { en: 'Profile updated successfully.', fr: 'Profil mis à jour.' } as T,
+      clinicUpdated: { en: 'Clinic details updated.', fr: 'Informations du cabinet mises à jour.' } as T,
+    },
+    auth: {
+      accountCreated: {
+        en: 'Account created! Please verify your email.',
+        fr: 'Compte créé ! Veuillez vérifier votre e-mail.',
+      } as T,
+      signUpFailed: { en: 'Failed to create account', fr: 'Échec de la création du compte' } as T,
+      loggedIn: { en: 'Logged in successfully!', fr: 'Connexion réussie !' } as T,
+      invalidCredentials: { en: 'Invalid credentials', fr: 'Identifiants invalides' } as T,
+      emailVerified: { en: 'Email verified successfully!', fr: 'E-mail vérifié avec succès !' } as T,
+      verifyEmailFailed: { en: 'Failed to verify email', fr: 'Échec de la vérification de l’e-mail' } as T,
+      codeResent: {
+        en: 'A new verification code has been sent to your email.',
+        fr: 'Un nouveau code de vérification a été envoyé à votre adresse e-mail.',
+      } as T,
+      resendCodeFailed: { en: 'Failed to resend code', fr: 'Échec du renvoi du code' } as T,
+      resetLinkSent: {
+        en: 'If that email exists, a reset link has been sent. Check your inbox.',
+        fr: 'Si cette adresse existe, un lien de réinitialisation a été envoyé. Vérifiez votre boîte de réception.',
+      } as T,
+      resetEmailFailed: {
+        en: 'Failed to send reset email',
+        fr: 'Échec de l’envoi de l’e-mail de réinitialisation',
+      } as T,
+      passwordReset: { en: 'Password reset successfully!', fr: 'Mot de passe réinitialisé avec succès !' } as T,
+      resetPasswordFailed: {
+        en: 'Failed to reset password',
+        fr: 'Échec de la réinitialisation du mot de passe',
+      } as T,
+      passwordChanged: { en: 'Password changed successfully!', fr: 'Mot de passe modifié avec succès !' } as T,
+      changePasswordFailed: {
+        en: 'Failed to change password',
+        fr: 'Échec de la modification du mot de passe',
+      } as T,
+      loggedOut: { en: 'Logged out successfully', fr: 'Déconnexion réussie' } as T,
+    },
+    companyBilling: {
+      settingsSaved: {
+        en: 'Company billing settings saved.',
+        fr: 'Paramètres de facturation enregistrés.',
+      } as T,
+      logoUploaded: { en: 'Logo uploaded.', fr: 'Logo téléversé.' } as T,
+      logoRemoved: { en: 'Logo removed.', fr: 'Logo supprimé.' } as T,
+    },
+    dentistProfiles: {
+      deleted: { en: 'Profile deleted successfully!', fr: 'Profil supprimé.' } as T,
+    },
+    notifications: {
+      markedRead: {
+        en: 'Marked {count} as read.',
+        fr: '{count} notification(s) marquée(s) comme lue(s).',
+      } as T,
+    },
+    orders: {
+      draftSaved: { en: 'Order draft saved', fr: 'Brouillon de commande enregistré' } as T,
+      updated: { en: 'Order updated', fr: 'Commande mise à jour' } as T,
+      submitted: { en: 'Order submitted', fr: 'Commande envoyée' } as T,
+      bankTransferRecorded: {
+        en: 'Bank-transfer payment recorded. Upload your receipt next.',
+        fr: 'Paiement par virement bancaire enregistré. Téléversez maintenant votre reçu.',
+      } as T,
+      treatmentFeePaid: { en: 'Treatment fee paid', fr: 'Honoraires de traitement payés' } as T,
+      receiptUploaded: {
+        en: 'Receipt uploaded. An admin will confirm once funds land.',
+        fr: 'Reçu téléversé. Un administrateur confirmera dès réception des fonds.',
+      } as T,
+      bankTransferConfirmed: { en: 'Bank transfer confirmed', fr: 'Virement bancaire confirmé' } as T,
+      statusUpdated: { en: 'Order status updated.', fr: 'Statut de la commande mis à jour.' } as T,
+      deleted: { en: 'Order deleted', fr: 'Commande supprimée' } as T,
+      permanentlyDeleted: { en: 'Order permanently deleted', fr: 'Commande supprimée définitivement' } as T,
+      restored: { en: 'Order restored', fr: 'Commande restaurée' } as T,
+      bulkNoChange: {
+        en: 'No orders changed — already at the requested status.',
+        fr: 'Aucune commande modifiée — déjà au statut demandé.',
+      } as T,
+      bulkUpdated: { en: '{count} order(s) updated.', fr: '{count} commande(s) mise(s) à jour.' } as T,
+      bulkUpdatedSkipped: {
+        en: '{count} order(s) updated · {skipped} skipped.',
+        fr: '{count} commande(s) mise(s) à jour · {skipped} ignorée(s).',
+      } as T,
+      bulkDeleted: { en: '{count} order(s) deleted.', fr: '{count} commande(s) supprimée(s).' } as T,
+      bulkDeletedSkipped: {
+        en: '{count} order(s) deleted · {skipped} skipped.',
+        fr: '{count} commande(s) supprimée(s) · {skipped} ignorée(s).',
+      } as T,
+      bulkRestored: { en: '{count} order(s) restored.', fr: '{count} commande(s) restaurée(s).' } as T,
+      bulkRestoredSkipped: {
+        en: '{count} order(s) restored · {skipped} skipped.',
+        fr: '{count} commande(s) restaurée(s) · {skipped} ignorée(s).',
+      } as T,
+      bulkPermanentlyDeleted: {
+        en: '{count} order(s) permanently deleted.',
+        fr: '{count} commande(s) supprimée(s) définitivement.',
+      } as T,
+      bulkPermanentlyDeletedSkipped: {
+        en: '{count} order(s) permanently deleted · {skipped} skipped.',
+        fr: '{count} commande(s) supprimée(s) définitivement · {skipped} ignorée(s).',
+      } as T,
+      odontogramSaved: { en: 'Odontogram saved', fr: 'Odontogramme enregistré' } as T,
+      filesUploaded: { en: 'Files uploaded', fr: 'Fichiers téléversés' } as T,
+      uploadConnectionLost: {
+        en: 'Upload failed — connection lost or too slow. Try again with a stable internet connection.',
+        fr: 'Échec du téléversement — connexion perdue ou trop lente. Réessayez avec une connexion internet stable.',
+      } as T,
+      uploadTooLarge: {
+        en: 'File is larger than the 1 GB upload limit. Compress further or split the volume.',
+        fr: 'Le fichier dépasse la limite de téléversement de 1 Go. Compressez-le davantage ou divisez le volume.',
+      } as T,
+      fileDeleted: { en: 'File deleted', fr: 'Fichier supprimé' } as T,
+    },
+    packs: {
+      created: { en: 'Pack created.', fr: 'Forfait créé.' } as T,
+      updated: { en: 'Pack updated.', fr: 'Forfait mis à jour.' } as T,
+      deleted: { en: 'Pack deleted.', fr: 'Forfait supprimé.' } as T,
+      activated: { en: 'Pack activated.', fr: 'Forfait activé.' } as T,
+      deactivated: { en: 'Pack deactivated.', fr: 'Forfait désactivé.' } as T,
+      priceAdded: { en: 'Price added.', fr: 'Tarif ajouté.' } as T,
+      priceUpdated: { en: 'Price updated.', fr: 'Tarif mis à jour.' } as T,
+      priceArchived: { en: 'Price archived.', fr: 'Tarif archivé.' } as T,
+    },
+    patients: {
+      created: { en: 'Patient created successfully', fr: 'Patient créé' } as T,
+      updated: { en: 'Patient updated successfully', fr: 'Patient mis à jour' } as T,
+      deleted: { en: 'Patient deleted successfully', fr: 'Patient supprimé' } as T,
+      bulkDeleted: { en: '{count} patient(s) deleted', fr: '{count} patient(s) supprimé(s)' } as T,
+    },
+    payments: {
+      invoiceNumberUpdated: { en: 'Invoice number updated.', fr: 'Numéro de facture mis à jour.' } as T,
+      paymentSuccess: { en: 'Payment successful.', fr: 'Paiement effectué.' } as T,
+      paymentPending: {
+        en: 'Payment pending — we will confirm shortly.',
+        fr: 'Paiement en attente — nous le confirmerons sous peu.',
+      } as T,
+      paymentFailed: { en: 'Payment failed. Please try again.', fr: 'Échec du paiement. Veuillez réessayer.' } as T,
+      bankTransferDeclared: {
+        en: 'Bank transfer declared. An admin will confirm it shortly.',
+        fr: 'Virement bancaire déclaré. Un administrateur le confirmera sous peu.',
+      } as T,
+      bankTransferConfirmed: { en: 'Bank transfer confirmed.', fr: 'Virement bancaire confirmé.' } as T,
+      bankTransferRejected: { en: 'Bank transfer rejected.', fr: 'Virement bancaire rejeté.' } as T,
+      cashRecorded: { en: 'Cash payment recorded.', fr: 'Paiement en espèces enregistré.' } as T,
+    },
+    quotationPaymentPlan: {
+      packAttached: { en: 'Pack attached to quotation.', fr: 'Forfait associé au devis.' } as T,
+      planConfigured: { en: 'Payment plan configured.', fr: 'Plan de paiement configuré.' } as T,
+      batchDelivered: { en: 'Batch marked as delivered.', fr: 'Lot marqué comme livré.' } as T,
+    },
+    quotations: {
+      draftCreated: { en: 'Quotation draft created.', fr: 'Brouillon de devis créé.' } as T,
+      updated: { en: 'Quotation updated.', fr: 'Devis mis à jour.' } as T,
+      sent: { en: 'Quotation sent to the doctor.', fr: 'Devis envoyé au praticien.' } as T,
+      pdfGenerated: { en: 'Quotation PDF generated.', fr: 'PDF du devis généré.' } as T,
+      canceled: {
+        en: 'Quotation canceled. You can issue a new one now.',
+        fr: 'Devis annulé. Vous pouvez en émettre un nouveau.',
+      } as T,
+      recalled: {
+        en: 'Quote recalled to draft. Edit it and resend.',
+        fr: 'Devis rappelé en brouillon. Modifiez-le et renvoyez-le.',
+      } as T,
+      approved: { en: 'Quotation approved.', fr: 'Devis approuvé.' } as T,
+      rejected: { en: 'Quotation rejected.', fr: 'Devis rejeté.' } as T,
+    },
+    reports: {
+      exported: { en: 'Report exported.', fr: 'Rapport exporté.' } as T,
+    },
+    sliderMedia: {
+      added: { en: 'Slide added.', fr: 'Diapositive ajoutée.' } as T,
+      updated: { en: 'Slide updated.', fr: 'Diapositive mise à jour.' } as T,
+      activated: { en: 'Slide activated.', fr: 'Diapositive activée.' } as T,
+      deactivated: { en: 'Slide deactivated.', fr: 'Diapositive désactivée.' } as T,
+      reordered: { en: 'Order updated.', fr: 'Ordre mis à jour.' } as T,
+      trashed: { en: 'Slide moved to trash.', fr: 'Diapositive placée dans la corbeille.' } as T,
+      restored: { en: 'Slide restored.', fr: 'Diapositive restaurée.' } as T,
+    },
+    support: {
+      opened: { en: 'Support conversation opened.', fr: 'Conversation de support ouverte.' } as T,
+      statusChanged: { en: 'Conversation marked {status}.', fr: 'Conversation marquée {status}.' } as T,
+      status: {
+        open: { en: 'open', fr: 'ouverte' } as T,
+        pending: { en: 'pending', fr: 'en attente' } as T,
+        resolved: { en: 'resolved', fr: 'résolue' } as T,
+        closed: { en: 'closed', fr: 'fermée' } as T,
+      },
+      prioritySet: { en: 'Priority set to {priority}.', fr: 'Priorité définie sur {priority}.' } as T,
+      priority: {
+        low: { en: 'low', fr: 'basse' } as T,
+        normal: { en: 'normal', fr: 'normale' } as T,
+        high: { en: 'high', fr: 'haute' } as T,
+        urgent: { en: 'urgent', fr: 'urgente' } as T,
+      },
+      trashed: { en: 'Conversation moved to trash.', fr: 'Conversation placée dans la corbeille.' } as T,
+      restored: { en: 'Conversation restored.', fr: 'Conversation restaurée.' } as T,
+    },
+    treatmentPlans: {
+      created: { en: '{name} created.', fr: '{name} créé.' } as T,
+      viewerUrlSaved: {
+        en: 'Treatment viewer URL saved.',
+        fr: 'URL de la visionneuse de traitement enregistrée.',
+      } as T,
+      readyNewVersion: {
+        en: '{name} created and marked ready (replaces the rejected plan).',
+        fr: '{name} créé et marqué prêt (remplace le plan rejeté).',
+      } as T,
+      markedReady: {
+        en: 'Plan marked ready for doctor review.',
+        fr: 'Plan marqué prêt pour validation par le praticien.',
+      } as T,
+      approved: { en: 'Treatment plan approved.', fr: 'Plan de traitement approuvé.' } as T,
+      rejected: {
+        en: 'Treatment plan rejected. Replanning requested.',
+        fr: 'Plan de traitement rejeté. Replanification demandée.',
+      } as T,
+      movementImageUploaded: {
+        en: 'Movement table image uploaded.',
+        fr: 'Image du tableau des mouvements téléversée.',
+      } as T,
+      movementImageRemoved: {
+        en: 'Movement table image removed.',
+        fr: 'Image du tableau des mouvements supprimée.',
+      } as T,
+      dentalImageUploaded: {
+        en: 'Dental treatment table image uploaded.',
+        fr: 'Image du tableau de traitement dentaire téléversée.',
+      } as T,
+      dentalImageRemoved: {
+        en: 'Dental treatment table image removed.',
+        fr: 'Image du tableau de traitement dentaire supprimée.',
+      } as T,
+      publicLinkGenerated: {
+        en: 'Public viewer link generated.',
+        fr: 'Lien public de la visionneuse généré.',
+      } as T,
+    },
+    users: {
+      created: { en: 'User created successfully!', fr: 'Utilisateur créé.' } as T,
+      deleted: { en: 'User deleted successfully!', fr: 'Utilisateur supprimé.' } as T,
+      restored: { en: 'User restored successfully!', fr: 'Utilisateur restauré.' } as T,
+      permanentlyDeleted: { en: 'User permanently deleted!', fr: 'Utilisateur supprimé définitivement.' } as T,
+      approved: { en: 'User approved.', fr: 'Utilisateur approuvé.' } as T,
+      rejected: { en: 'User rejected.', fr: 'Utilisateur rejeté.' } as T,
+      setPending: { en: 'User set to pending.', fr: 'Utilisateur remis en attente.' } as T,
+    },
+    workingHours: {
+      deleted: { en: 'Working hours deleted.', fr: 'Horaires de travail supprimés.' } as T,
+    },
+  },
+
 } as const;
 
 // ────────────────────────────────────────────────────────────────────

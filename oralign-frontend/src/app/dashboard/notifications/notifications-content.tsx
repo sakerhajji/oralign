@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { formatDistanceToNowStrict, format } from 'date-fns';
+import { fr as frLocale } from 'date-fns/locale';
 import {
   BellRing,
   CheckCheck,
@@ -22,6 +23,7 @@ import {
 } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n/lang-context';
 import {
   useMarkAllNotificationsRead,
   useMarkNotificationRead,
@@ -45,6 +47,7 @@ const PAGE_SIZE = 25;
  * so admins and doctors see only their own inbox.
  */
 export function NotificationsPageContent() {
+  const { t, lang } = useT();
   const [filter, setFilter] = useState<Filter>('all');
   const [page, setPage] = useState(1);
 
@@ -73,12 +76,10 @@ export function NotificationsPageContent() {
         <div className="min-w-0 space-y-1">
           <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight sm:text-2xl">
             <BellRing className="size-6 text-primary" />
-            Notifications
+            {t('notificationsPage.title')}
           </h1>
           <p className="text-xs leading-relaxed text-muted-foreground sm:text-sm">
-            Every alert sent to your account — order updates, payment
-            events, treatment plan messages, and team broadcasts.
-            Unread first, with filters to narrow the view.
+            {t('notificationsPage.intro')}
           </p>
         </div>
         <Button
@@ -93,7 +94,7 @@ export function NotificationsPageContent() {
           ) : (
             <CheckCheck className="size-4" />
           )}
-          Mark all as read
+          {t('notificationsPage.markAllAsRead')}
         </Button>
       </header>
 
@@ -101,9 +102,15 @@ export function NotificationsPageContent() {
         <div className="flex w-full min-w-max gap-1 rounded-lg border bg-card p-1">
           {(
             [
-              { key: 'all', label: 'All' },
-              { key: 'unread', label: `Unread${unread > 0 ? ` (${unread})` : ''}` },
-              { key: 'read', label: 'Read' },
+              { key: 'all', label: t('notificationsPage.tabAll') },
+              {
+                key: 'unread',
+                label:
+                  unread > 0
+                    ? t('notificationsPage.tabUnreadCount', { count: unread })
+                    : t('notificationsPage.tabUnread'),
+              },
+              { key: 'read', label: t('notificationsPage.tabRead') },
             ] as const
           ).map((tab) => {
             const active = filter === tab.key;
@@ -131,11 +138,14 @@ export function NotificationsPageContent() {
 
       <Card>
         <CardHeader className="gap-2">
-          <CardTitle>Inbox</CardTitle>
+          <CardTitle>{t('notificationsPage.inboxTitle')}</CardTitle>
           <CardDescription>
             {listQuery.isLoading
-              ? 'Loading…'
-              : `${items.length} of ${total} notifications`}
+              ? t('notificationsPage.inboxLoading')
+              : t('notificationsPage.inboxCount', {
+                  shown: items.length,
+                  total,
+                })}
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
@@ -151,15 +161,12 @@ export function NotificationsPageContent() {
               <Inbox className="size-10 opacity-40" />
               <p className="text-sm font-medium">
                 {filter === 'unread'
-                  ? 'No unread notifications.'
+                  ? t('notificationsPage.emptyUnread')
                   : filter === 'read'
-                    ? 'No read notifications yet.'
-                    : 'Your inbox is empty.'}
+                    ? t('notificationsPage.emptyRead')
+                    : t('notificationsPage.emptyAll')}
               </p>
-              <p className="text-xs">
-                New activity (orders, payments, treatment plans) will
-                show up here automatically.
-              </p>
+              <p className="text-xs">{t('notificationsPage.emptyHint')}</p>
             </div>
           ) : (
             <ul className="divide-y">
@@ -168,6 +175,7 @@ export function NotificationsPageContent() {
                   key={n.id}
                   notification={n}
                   onMarkRead={() => markRead.mutate(n.id)}
+                  lang={lang}
                 />
               ))}
             </ul>
@@ -178,7 +186,10 @@ export function NotificationsPageContent() {
       {!listQuery.isLoading && totalPages > 1 ? (
         <div className="flex flex-col gap-2 rounded-lg border bg-card p-3 text-xs sm:flex-row sm:items-center sm:justify-between sm:p-4">
           <span className="text-muted-foreground">
-            Page {listQuery.data?.page ?? page} of {totalPages}
+            {t('notificationsPage.pageOf', {
+              page: listQuery.data?.page ?? page,
+              total: totalPages,
+            })}
           </span>
           <div className="flex gap-2">
             <Button
@@ -188,7 +199,7 @@ export function NotificationsPageContent() {
               onClick={() => setPage((p) => Math.max(1, p - 1))}
             >
               <ChevronLeft className="mr-1 size-4" />
-              Previous
+              {t('notificationsPage.previous')}
             </Button>
             <Button
               size="sm"
@@ -196,7 +207,7 @@ export function NotificationsPageContent() {
               disabled={page >= totalPages}
               onClick={() => setPage((p) => p + 1)}
             >
-              Next
+              {t('notificationsPage.next')}
               <ChevronRight className="ml-1 size-4" />
             </Button>
           </div>
@@ -209,12 +220,16 @@ export function NotificationsPageContent() {
 function NotificationRow({
   notification,
   onMarkRead,
+  lang,
 }: {
   notification: Notification;
   onMarkRead: () => void;
+  lang: 'en' | 'fr';
 }) {
+  const { t } = useT();
   const isUnread = !notification.readAt;
   const createdAt = new Date(notification.createdAt);
+  const locale = lang === 'fr' ? frLocale : undefined;
 
   const body = (
     <div className="flex items-start gap-3 px-3 py-3 sm:px-4 sm:py-4">
@@ -239,7 +254,7 @@ function NotificationRow({
           </p>
           {isUnread ? (
             <Badge variant="secondary" className="h-4 px-1.5 text-[10px]">
-              New
+              {t('notificationsPage.newBadge')}
             </Badge>
           ) : null}
         </div>
@@ -248,10 +263,13 @@ function NotificationRow({
         </p>
         <div className="flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
           <time
-            title={format(createdAt, 'PPpp')}
+            title={format(createdAt, 'PPpp', { locale })}
             dateTime={notification.createdAt}
           >
-            {formatDistanceToNowStrict(createdAt, { addSuffix: true })}
+            {formatDistanceToNowStrict(createdAt, {
+              addSuffix: true,
+              locale,
+            })}
           </time>
           {isUnread ? (
             <button
@@ -263,10 +281,10 @@ function NotificationRow({
               }}
               className="font-medium text-foreground hover:text-primary"
             >
-              Mark as read
+              {t('notificationsPage.markAsRead')}
             </button>
           ) : (
-            <span>Read</span>
+            <span>{t('notificationsPage.readLabel')}</span>
           )}
         </div>
       </div>

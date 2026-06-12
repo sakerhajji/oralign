@@ -99,6 +99,7 @@ export function WorkingHoursEditor({
   onChange: (next: DaySchedule[]) => void;
   disabled?: boolean;
 }) {
+  const { t } = useT();
   const updateDay = useCallback(
     (dayOfWeek: DayOfWeek, update: Partial<DaySchedule>) => {
       onChange(
@@ -116,6 +117,8 @@ export function WorkingHoursEditor({
         const meta = DAY_META.find((item) => item.key === day.dayOfWeek);
         const isOpen = !day.isClosed;
         const toggleId = `day-toggle-${day.dayOfWeek}`;
+        const dayLabel = meta ? t(`accountHome.days.${meta.i18nKey}`) : day.dayOfWeek;
+        const dayShort = meta ? t(`accountHome.daysShort.${meta.i18nKey}`) : '??';
 
         return (
           <div
@@ -150,7 +153,7 @@ export function WorkingHoursEditor({
                     )}
                     aria-hidden
                   >
-                    {meta?.short ?? '??'}
+                    {dayShort}
                   </span>
                   <label
                     htmlFor={toggleId}
@@ -159,7 +162,7 @@ export function WorkingHoursEditor({
                       isOpen ? 'text-foreground' : 'text-muted-foreground',
                     )}
                   >
-                    {meta?.label ?? day.dayOfWeek}
+                    {dayLabel}
                   </label>
                 </div>
 
@@ -172,7 +175,7 @@ export function WorkingHoursEditor({
                         : 'bg-muted text-muted-foreground',
                     )}
                   >
-                    {isOpen ? 'Open' : 'Closed'}
+                    {isOpen ? t('accountHome.dayOpen') : t('accountHome.dayClosed')}
                   </span>
                   <Switch
                     id={toggleId}
@@ -181,7 +184,10 @@ export function WorkingHoursEditor({
                       updateDay(day.dayOfWeek, { isClosed: !value })
                     }
                     disabled={disabled}
-                    aria-label={`${meta?.label ?? day.dayOfWeek} is ${isOpen ? 'open' : 'closed'}`}
+                    aria-label={t(
+                      isOpen ? 'accountHome.dayIsOpenAria' : 'accountHome.dayIsClosedAria',
+                      { day: dayLabel },
+                    )}
                   />
                 </div>
               </div>
@@ -193,7 +199,7 @@ export function WorkingHoursEditor({
                     htmlFor={`${toggleId}-open`}
                     className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
                   >
-                    Opens
+                    {t('accountHome.dayOpens')}
                   </label>
                   <input
                     id={`${toggleId}-open`}
@@ -219,7 +225,7 @@ export function WorkingHoursEditor({
                     htmlFor={`${toggleId}-close`}
                     className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
                   >
-                    Closes
+                    {t('accountHome.dayCloses')}
                   </label>
                   <input
                     id={`${toggleId}-close`}

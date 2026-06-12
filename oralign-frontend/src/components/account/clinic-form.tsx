@@ -16,6 +16,7 @@ import { type DentistProfile, type UpdateDentistProfileDto } from '@/lib/types';
 import { useCreateDentistProfile, useUpdateClinicProfile } from '@/lib/hooks';
 import { ScheduleForm } from '@/components/account/schedule-form';
 import { userKeys } from '@/lib/hooks/use-users';
+import { useT } from '@/lib/i18n/lang-context';
 
 const normalizeOptional = (value?: string | null) => {
   const trimmed = value?.trim();
@@ -23,6 +24,7 @@ const normalizeOptional = (value?: string | null) => {
 };
 
 export function ClinicForm({ profile }: { profile: DentistProfile | null }) {
+  const { t } = useT();
   const queryClient = useQueryClient();
   const { mutateAsync: createProfile, isPending: isCreating } = useCreateDentistProfile();
   const { mutateAsync: updateProfile, isPending: isUpdating } = useUpdateClinicProfile();
@@ -99,7 +101,7 @@ export function ClinicForm({ profile }: { profile: DentistProfile | null }) {
       });
       setCreatedProfileId(created.id);
       queryClient.invalidateQueries({ queryKey: userKeys.currentUser() });
-      toast.success('Clinic profile created.');
+      toast.success(t('accountClinic.toastClinicCreated'));
     } else {
       await updateProfile({ id: activeProfileId, data: payload });
     }
@@ -120,9 +122,9 @@ export function ClinicForm({ profile }: { profile: DentistProfile | null }) {
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <h2 className="text-lg font-semibold">Clinic</h2>
+          <h2 className="text-lg font-semibold">{t('accountClinic.cardTitle')}</h2>
           <p className="text-sm text-muted-foreground">
-            Manage your clinic profile details.
+            {t('accountClinic.cardSubtitle')}
           </p>
         </CardHeader>
         <CardContent>
@@ -130,7 +132,7 @@ export function ClinicForm({ profile }: { profile: DentistProfile | null }) {
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <label className="text-sm font-medium" htmlFor="clinicName">
-                  Clinic name
+                  {t('accountClinic.clinicNameLabel')}
                 </label>
                 <Input id="clinicName" {...form.register('clinicName')} />
                 {form.formState.errors.clinicName && (
@@ -142,7 +144,7 @@ export function ClinicForm({ profile }: { profile: DentistProfile | null }) {
 
               <div className="space-y-2">
                 <label className="text-sm font-medium" htmlFor="clinicPhone">
-                  Phone
+                  {t('accountClinic.phoneLabel')}
                 </label>
                 <Controller
                   name="clinicPhone"
@@ -172,27 +174,27 @@ export function ClinicForm({ profile }: { profile: DentistProfile | null }) {
 
               <div className="space-y-2 md:col-span-2">
                 <label className="text-sm font-medium" htmlFor="clinicAddress">
-                  Address
+                  {t('accountClinic.addressLabel')}
                 </label>
                 <Input id="clinicAddress" {...form.register('clinicAddress')} />
               </div>
 
               <div className="space-y-2">
                 <label className="text-sm font-medium" htmlFor="city">
-                  City
+                  {t('accountClinic.cityLabel')}
                 </label>
                 <Input id="city" {...form.register('city')} />
               </div>
 
               <div className="space-y-2">
                 <label className="text-sm font-medium" htmlFor="country">
-                  Country
+                  {t('accountClinic.countryLabel')}
                 </label>
                 <Input id="country" {...form.register('country')} />
               </div>
 
               <div className="space-y-2 md:col-span-2">
-                <label className="text-sm font-medium">Location</label>
+                <label className="text-sm font-medium">{t('accountClinic.locationLabel')}</label>
                 <LocationPicker
                   value={locationValue}
                   onChange={({ lat, lng, address, city, country }) => {
@@ -222,7 +224,7 @@ export function ClinicForm({ profile }: { profile: DentistProfile | null }) {
 
               <div className="space-y-2 md:col-span-2">
                 <label className="text-sm font-medium" htmlFor="description">
-                  Description
+                  {t('accountClinic.descriptionLabel')}
                 </label>
                 <Input id="description" {...form.register('description')} />
               </div>
@@ -230,7 +232,7 @@ export function ClinicForm({ profile }: { profile: DentistProfile | null }) {
 
             <div className="flex justify-end">
               <Button type="submit" disabled={!hasChanges || isSubmitting}>
-                {isSubmitting ? 'Saving...' : 'Save clinic details'}
+                {isSubmitting ? t('accountClinic.saving') : t('accountClinic.saveClinicDetails')}
               </Button>
             </div>
           </Form>

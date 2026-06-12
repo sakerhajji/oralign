@@ -4,6 +4,7 @@ import {
   IsString,
   IsOptional,
   IsEnum,
+  IsIn,
   MinLength,
   IsArray,
   IsBoolean,
@@ -150,6 +151,17 @@ export class UpdateUserDto {
   avatarUrl?: string;
 
   @ApiProperty({
+    example: 'fr',
+    description:
+      'Preferred content language — drives the dashboard UI, notifications and emails for this user.',
+    enum: ['fr', 'en'],
+    required: false,
+  })
+  @IsOptional()
+  @IsIn(['fr', 'en'], { message: 'preferredLanguage must be "fr" or "en"' })
+  preferredLanguage?: string;
+
+  @ApiProperty({
     example: 'NewP@ssword123',
     description: 'New user password (at least 8 characters)',
     required: false,
@@ -197,6 +209,8 @@ export class UserResponseDto {
   avatarUrl?: string;
   @ApiProperty({ required: false })
   country?: string;
+  @ApiProperty({ required: false, enum: ['fr', 'en'] })
+  preferredLanguage?: string;
   @ApiProperty({ required: false })
   lastLoginAt?: Date;
   @ApiProperty()

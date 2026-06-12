@@ -2,6 +2,9 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { format } from 'date-fns';
+import { fr as frLocale } from 'date-fns/locale';
+import type { Locale } from 'date-fns';
 import {
   Banknote,
   CreditCard,
@@ -23,6 +26,7 @@ import { Button } from '@/components/ui/button';
 import { PaymentMethod, PaymentRecordStatus, type Payment } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { TreatmentFeeReceiptDialog } from '@/components/orders/treatment-fee-receipt-dialog';
+import { useT } from '@/lib/i18n/lang-context';
 
 /**
  * Shared payment-history table used by:
@@ -66,23 +70,21 @@ export interface PaymentRow extends Payment {
 
 // Each method gets its own icon + colour palette so the column reads at
 // a glance — green for cash (physical), indigo for cards (gateway),
-// slate for bank transfers (manual confirmation).
+// slate for bank transfers (manual confirmation). Labels are resolved
+// from the i18n dictionary at render time.
 const METHOD_META: Record<
   PaymentMethod,
-  { label: string; icon: React.ComponentType<{ className?: string }>; tone: string }
+  { icon: React.ComponentType<{ className?: string }>; tone: string }
 > = {
   [PaymentMethod.CARD]: {
-    label: 'Card',
     icon: CreditCard,
     tone: 'border-indigo-200 bg-indigo-50 text-indigo-800',
   },
   [PaymentMethod.BANK_TRANSFER]: {
-    label: 'Bank transfer',
     icon: Landmark,
     tone: 'border-slate-200 bg-slate-50 text-slate-800',
   },
   [PaymentMethod.CASH]: {
-    label: 'Cash',
     icon: Banknote,
     tone: 'border-emerald-200 bg-emerald-50 text-emerald-800',
   },
@@ -94,6 +96,7 @@ const METHOD_META: Record<
  * confirmation" without reading each row.
  */
 function MethodChip({ method }: { method?: PaymentMethod }) {
+  const { t } = useT();
   if (!method) {
     return <span className="text-xs text-muted-foreground">—</span>;
   }
@@ -114,25 +117,27 @@ function MethodChip({ method }: { method?: PaymentMethod }) {
       )}
     >
       <Icon className="size-3.5" />
-      {meta.label}
+      {t(`paymentsCommon.method.${method}`)}
     </span>
   );
 }
 
-function statusBadge(status: PaymentRecordStatus): React.ReactNode {
+function StatusBadge({ status }: { status: PaymentRecordStatus }) {
+  const { t } = useT();
+  const label = t(`paymentsCommon.status.${status}`);
   switch (status) {
     case PaymentRecordStatus.SUCCESS:
-      return <Badge className="bg-emerald-600">Success</Badge>;
+      return <Badge className="bg-emerald-600">{label}</Badge>;
     case PaymentRecordStatus.AWAITING_CONFIRMATION:
-      return <Badge className="bg-amber-500">Awaiting confirmation</Badge>;
+      return <Badge className="bg-amber-500">{label}</Badge>;
     case PaymentRecordStatus.PENDING:
-      return <Badge variant="secondary">Pending</Badge>;
+      return <Badge variant="secondary">{label}</Badge>;
     case PaymentRecordStatus.REJECTED:
-      return <Badge variant="destructive">Rejected</Badge>;
+      return <Badge variant="destructive">{label}</Badge>;
     case PaymentRecordStatus.FAILED:
-      return <Badge variant="destructive">Failed</Badge>;
+      return <Badge variant="destructive">{label}</Badge>;
     case PaymentRecordStatus.CANCELLED:
-      return <Badge variant="outline">Cancelled</Badge>;
+      return <Badge variant="outline">{label}</Badge>;
     default:
       return <Badge variant="outline">{status}</Badge>;
   }
@@ -151,7 +156,7 @@ function hasProof(payment: PaymentRow): boolean {
 export function PaymentHistoryTable({
   payments,
   isLoading,
-  emptyMessage = 'No payments yet.',
+  emptyMessage,
   showActor = true,
   renderActions,
 }: {
@@ -163,6 +168,8 @@ export function PaymentHistoryTable({
   /** Per-row action buttons — Confirm/Reject on the pending queue. */
   renderActions?: (p: PaymentRow) => React.ReactNode;
 }) {
+  const { t, lang } = useT();
+  const dateLocale: Locale | undefined = lang === 'fr' ? frLocale : undefined;
   // Active row whose receipt is being inspected in the modal viewer.
   // We hoist it to the table (not each row) so only ONE dialog is
   // mounted at any time, no matter how many rows the page renders.
@@ -181,25 +188,36 @@ export function PaymentHistoryTable({
   if (payments.length === 0) {
     return (
       <div className="flex min-h-32 items-center justify-center p-8 text-center text-sm text-muted-foreground">
-        {emptyMessage}
+        {emptyMessage ?? t('paymentsCommon.emptyDefault')}
       </div>
     );
   }
+
+  // `d MMM yyyy HH:mm` keeps the same density as `toLocaleString()`
+  // while still respecting the active language.
+  const datetimeFmt =
+    lang === 'fr' ? 'd MMM yyyy HH:mm' : 'MMM d, yyyy HH:mm';
 
   return (
     <>
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead>Date</TableHead>
-          {showActor ? <TableHead>Doctor · patient</TableHead> : null}
-          <TableHead>Order</TableHead>
-          <TableHead>Method</TableHead>
-          <TableHead>Installment</TableHead>
-          <TableHead>Amount</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead>Proof</TableHead>
-          {renderActions ? <TableHead className="text-right">Actions</TableHead> : null}
+          <TableHead>{t('paymentsCommon.columns.date')}</TableHead>
+          {showActor ? (
+            <TableHead>{t('paymentsCommon.columns.doctorPatient')}</TableHead>
+          ) : null}
+          <TableHead>{t('paymentsCommon.columns.order')}</TableHead>
+          <TableHead>{t('paymentsCommon.columns.method')}</TableHead>
+          <TableHead>{t('paymentsCommon.columns.installment')}</TableHead>
+          <TableHead>{t('paymentsCommon.columns.amount')}</TableHead>
+          <TableHead>{t('paymentsCommon.columns.status')}</TableHead>
+          <TableHead>{t('paymentsCommon.columns.proof')}</TableHead>
+          {renderActions ? (
+            <TableHead className="text-right">
+              {t('paymentsCommon.columns.actions')}
+            </TableHead>
+          ) : null}
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -209,7 +227,9 @@ export function PaymentHistoryTable({
           return (
             <TableRow key={p.id}>
               <TableCell className="text-xs">
-                {new Date(p.createdAt).toLocaleString()}
+                {format(new Date(p.createdAt), datetimeFmt, {
+                  locale: dateLocale,
+                })}
               </TableCell>
               {showActor ? (
                 <TableCell className="text-xs">
@@ -267,7 +287,9 @@ export function PaymentHistoryTable({
               <TableCell className="font-mono">
                 {p.amount} {p.currency}
               </TableCell>
-              <TableCell>{statusBadge(p.status)}</TableCell>
+              <TableCell>
+                <StatusBadge status={p.status} />
+              </TableCell>
               <TableCell>
                 {proofAvailable ? (
                   // Opens the shared receipt viewer — same modal the
@@ -282,10 +304,10 @@ export function PaymentHistoryTable({
                     variant="ghost"
                     className="h-7 gap-1 px-2 text-xs"
                     onClick={() => setActiveReceipt(p)}
-                    title="View the doctor-uploaded receipt"
+                    title={t('paymentsCommon.actions.viewReceipt')}
                   >
                     <FileText className="size-3" />
-                    View
+                    {t('paymentsCommon.actions.view')}
                   </Button>
                 ) : (
                   <span className="text-xs text-muted-foreground">—</span>
@@ -338,12 +360,13 @@ export function PaymentHistoryTable({
  * everywhere we link back to the quotation surface.
  */
 export function OpenQuoteButton({ orderId }: { orderId: string | undefined }) {
+  const { t } = useT();
   if (!orderId) return null;
   return (
     <Button asChild size="sm" variant="outline">
       <Link href={`/dashboard/orders/${orderId}?tab=quote`}>
         <FileText className="mr-1 size-3" />
-        Open quote
+        {t('paymentsCommon.actions.openQuote')}
       </Link>
     </Button>
   );

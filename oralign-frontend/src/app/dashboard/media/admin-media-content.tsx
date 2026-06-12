@@ -63,6 +63,7 @@ import {
   XIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n/lang-context';
 import {
   SliderMediaDeviceTarget,
   SliderMediaSourceType,
@@ -100,6 +101,7 @@ import { useEffect } from 'react';
  * edit shows up here without a refresh.
  */
 export function AdminMediaContent() {
+  const { t } = useT();
   const { isAdmin, user } = useAuth();
   const router = useRouter();
   useDashboardSocket({ enabled: isAdmin });
@@ -166,11 +168,10 @@ export function AdminMediaContent() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">
-            Media Management
+            {t('mediaAdmin.title')}
           </h1>
           <p className="text-sm text-muted-foreground">
-            Manage the rotating gallery shown on every doctor's dashboard.
-            Separate lists for desktop and mobile are supported.
+            {t('mediaAdmin.intro')}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -183,22 +184,22 @@ export function AdminMediaContent() {
             <RefreshCwIcon
               className={cn('size-4', list.isFetching && 'animate-spin')}
             />
-            Refresh
+            {t('mediaAdmin.refresh')}
           </Button>
           <Button onClick={() => setCreating(true)}>
             <PlusIcon className="size-4" />
-            Add slide
+            {t('mediaAdmin.addSlide')}
           </Button>
         </div>
       </div>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
         <TabsList className="w-full justify-start overflow-x-auto sm:w-auto">
-          <TabsTrigger value="all">All</TabsTrigger>
-          <TabsTrigger value="desktop">Desktop</TabsTrigger>
-          <TabsTrigger value="mobile">Mobile</TabsTrigger>
-          <TabsTrigger value="inactive">Inactive</TabsTrigger>
-          <TabsTrigger value="trash">Trash</TabsTrigger>
+          <TabsTrigger value="all">{t('mediaAdmin.tabAll')}</TabsTrigger>
+          <TabsTrigger value="desktop">{t('mediaAdmin.tabDesktop')}</TabsTrigger>
+          <TabsTrigger value="mobile">{t('mediaAdmin.tabMobile')}</TabsTrigger>
+          <TabsTrigger value="inactive">{t('mediaAdmin.tabInactive')}</TabsTrigger>
+          <TabsTrigger value="trash">{t('mediaAdmin.tabTrash')}</TabsTrigger>
         </TabsList>
       </Tabs>
 
@@ -208,7 +209,7 @@ export function AdminMediaContent() {
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search slides by title…"
+            placeholder={t('mediaAdmin.searchPlaceholder')}
             className="pl-9"
           />
         </div>
@@ -216,10 +217,9 @@ export function AdminMediaContent() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Slides</CardTitle>
+          <CardTitle className="text-base">{t('mediaAdmin.slides')}</CardTitle>
           <CardDescription>
-            {list.data?.total ?? 0} total · drag-free reorder with the
-            arrow buttons.
+            {t('mediaAdmin.totalDescription', { total: list.data?.total ?? 0 })}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -231,12 +231,11 @@ export function AdminMediaContent() {
             </div>
           ) : list.isError ? (
             <div className="grid h-32 place-items-center rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-center text-sm text-destructive">
-              Could not load the media library. Check your connection and try
-              Refresh.
+              {t('mediaAdmin.loadError')}
             </div>
           ) : items.length === 0 ? (
             <div className="grid h-32 place-items-center text-sm text-muted-foreground">
-              No slides yet — click "Add slide" to create the first one.
+              {t('mediaAdmin.emptyHint')}
             </div>
           ) : (
             <ul className="divide-y">
@@ -252,7 +251,7 @@ export function AdminMediaContent() {
                   onPreview={() => setPreview(s)}
                   onActivate={() =>
                     activate.mutate(s.id, {
-                      onError: () => toast.error('Could not activate slide.'),
+                      onError: () => toast.error(t('mediaAdmin.activateError')),
                     })
                   }
                   onDeactivate={() => deactivate.mutate(s.id)}
@@ -291,20 +290,21 @@ export function AdminMediaContent() {
           <DialogHeader>
             <DialogTitle>{preview?.title}</DialogTitle>
             <DialogDescription>
-              Desktop + mobile preview of how this slide renders on the
-              doctor dashboard.
+              {t('mediaAdmin.previewDesc')}
             </DialogDescription>
           </DialogHeader>
           {preview ? (
             <div className="grid gap-4 md:grid-cols-2">
               <PreviewBox
-                label="Desktop"
+                label={t('mediaAdmin.previewLabelDesktop')}
+                emptyLabel={t('mediaAdmin.previewNoDesktop')}
                 url={resolveSliderMediaUrl(preview.desktopUrl ?? preview.mobileUrl)}
                 type={preview.mediaType}
                 aspect="16/6"
               />
               <PreviewBox
-                label="Mobile"
+                label={t('mediaAdmin.previewLabelMobile')}
+                emptyLabel={t('mediaAdmin.previewNoMobile')}
                 url={resolveSliderMediaUrl(preview.mobileUrl ?? preview.desktopUrl)}
                 type={preview.mediaType}
                 aspect="4/5"
@@ -321,15 +321,13 @@ export function AdminMediaContent() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Move slide to trash?</AlertDialogTitle>
+            <AlertDialogTitle>{t('mediaAdmin.deleteTitle')}</AlertDialogTitle>
             <AlertDialogDescription>
-              "{confirmDelete?.title}" will be hidden from the doctor
-              dashboard immediately. You can restore it from the Trash
-              tab.
+              {t('mediaAdmin.deleteBody', { title: confirmDelete?.title ?? '' })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t('mediaAdmin.cancel')}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 if (confirmDelete) {
@@ -338,7 +336,7 @@ export function AdminMediaContent() {
                 }
               }}
             >
-              Move to trash
+              {t('mediaAdmin.moveToTrash')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -375,6 +373,7 @@ function SlideRow({
   onDelete: () => void;
   onRestore: () => void;
 }) {
+  const { t } = useT();
   const thumbnail =
     resolveSliderMediaUrl(slide.desktopUrl) ??
     resolveSliderMediaUrl(slide.mobileUrl);
@@ -429,7 +428,7 @@ function SlideRow({
           </Badge>
           {inTrash ? (
             <Badge variant="destructive" className="text-[10px]">
-              trashed
+              {t('mediaAdmin.badgeTrashed')}
             </Badge>
           ) : null}
         </div>
@@ -443,7 +442,7 @@ function SlideRow({
             size="icon"
             disabled={isFirst}
             onClick={onMoveUp}
-            aria-label="Move up"
+            aria-label={t('mediaAdmin.moveUp')}
           >
             <ArrowUpIcon className="size-4" />
           </Button>
@@ -452,7 +451,7 @@ function SlideRow({
             size="icon"
             disabled={isLast}
             onClick={onMoveDown}
-            aria-label="Move down"
+            aria-label={t('mediaAdmin.moveDown')}
           >
             <ArrowDownIcon className="size-4" />
           </Button>
@@ -461,32 +460,32 @@ function SlideRow({
 
       {/* Actions */}
       <div className="flex items-center gap-1">
-        <Button variant="ghost" size="icon" onClick={onPreview} aria-label="Preview">
+        <Button variant="ghost" size="icon" onClick={onPreview} aria-label={t('mediaAdmin.preview')}>
           <EyeIcon className="size-4" />
         </Button>
         {!inTrash ? (
           <>
-            <Button variant="ghost" size="icon" onClick={onEdit} aria-label="Edit">
+            <Button variant="ghost" size="icon" onClick={onEdit} aria-label={t('mediaAdmin.edit')}>
               <PencilIcon className="size-4" />
             </Button>
             {slide.status === SliderMediaStatus.ACTIVE ? (
               <Switch
                 checked
                 onCheckedChange={() => onDeactivate()}
-                aria-label="Deactivate"
+                aria-label={t('mediaAdmin.deactivate')}
               />
             ) : (
               <Switch
                 checked={false}
                 onCheckedChange={() => onActivate()}
-                aria-label="Activate"
+                aria-label={t('mediaAdmin.activate')}
               />
             )}
             <Button
               variant="ghost"
               size="icon"
               onClick={onDelete}
-              aria-label="Delete"
+              aria-label={t('mediaAdmin.delete')}
               className="text-destructive hover:text-destructive"
             >
               <Trash2Icon className="size-4" />
@@ -500,7 +499,7 @@ function SlideRow({
             className="gap-1.5"
           >
             <RotateCcwIcon className="size-3" />
-            Restore
+            {t('mediaAdmin.restore')}
           </Button>
         )}
       </div>
@@ -513,11 +512,13 @@ function SlideRow({
 
 function PreviewBox({
   label,
+  emptyLabel,
   url,
   type,
   aspect,
 }: {
   label: string;
+  emptyLabel: string;
   url: string | null;
   type: SliderMediaType;
   aspect: '16/6' | '4/5';
@@ -542,7 +543,7 @@ function PreviewBox({
           )
         ) : (
           <div className="grid h-full place-items-center text-xs text-muted-foreground">
-            No {label.toLowerCase()} asset
+            {emptyLabel}
           </div>
         )}
       </div>
@@ -562,6 +563,7 @@ function MediaFormDialog({
   existing?: SliderMedia;
   onClose: () => void;
 }) {
+  const { t } = useT();
   const create = useCreateSliderMedia();
   const update = useUpdateSliderMedia();
   const pending = create.isPending || update.isPending;
@@ -604,11 +606,11 @@ function MediaFormDialog({
 
   const onSubmit = () => {
     if (!title.trim()) {
-      toast.error('Add a title for the slide.');
+      toast.error(t('mediaAdmin.toastTitleRequired'));
       return;
     }
     if (devices.length === 0) {
-      toast.error('Pick at least one device target (desktop, mobile).');
+      toast.error(t('mediaAdmin.toastDeviceRequired'));
       return;
     }
     if (mode === 'create') {
@@ -622,14 +624,14 @@ function MediaFormDialog({
       };
       if (sourceType === SliderMediaSourceType.UPLOAD) {
         if (!desktopFile && !mobileFile) {
-          toast.error('Upload a desktop or mobile asset.');
+          toast.error(t('mediaAdmin.toastUploadRequired'));
           return;
         }
         if (desktopFile) input.desktopFile = desktopFile;
         if (mobileFile) input.mobileFile = mobileFile;
       } else {
         if (!externalDesktop.trim() && !externalMobile.trim()) {
-          toast.error('Provide a desktop or mobile external URL.');
+          toast.error(t('mediaAdmin.toastUrlRequired'));
           return;
         }
         if (externalDesktop.trim()) input.desktopUrl = externalDesktop.trim();
@@ -667,27 +669,26 @@ function MediaFormDialog({
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{mode === 'create' ? 'Add slide' : 'Edit slide'}</DialogTitle>
+          <DialogTitle>{mode === 'create' ? t('mediaAdmin.dialogAdd') : t('mediaAdmin.dialogEdit')}</DialogTitle>
           <DialogDescription>
-            Slides appear on the doctor dashboard ordered by the display
-            order you set.
+            {t('mediaAdmin.dialogDesc')}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
           <div className="space-y-1.5">
-            <Label htmlFor="title">Title</Label>
+            <Label htmlFor="title">{t('mediaAdmin.fieldTitle')}</Label>
             <Input
               id="title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Spring promotion — 20% off Pro pack"
+              placeholder={t('mediaAdmin.fieldTitlePh')}
               maxLength={160}
             />
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label>Media type</Label>
+              <Label>{t('mediaAdmin.mediaType')}</Label>
               <Select
                 value={mediaType}
                 onValueChange={(v) => setMediaType(v as SliderMediaType)}
@@ -696,13 +697,13 @@ function MediaFormDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={SliderMediaType.IMAGE}>Image</SelectItem>
-                  <SelectItem value={SliderMediaType.VIDEO}>Video</SelectItem>
+                  <SelectItem value={SliderMediaType.IMAGE}>{t('mediaAdmin.image')}</SelectItem>
+                  <SelectItem value={SliderMediaType.VIDEO}>{t('mediaAdmin.video')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label>Source</Label>
+              <Label>{t('mediaAdmin.source')}</Label>
               <Select
                 value={sourceType}
                 onValueChange={(v) => setSourceType(v as SliderMediaSourceType)}
@@ -712,10 +713,10 @@ function MediaFormDialog({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={SliderMediaSourceType.UPLOAD}>
-                    Upload
+                    {t('mediaAdmin.upload')}
                   </SelectItem>
                   <SelectItem value={SliderMediaSourceType.EXTERNAL}>
-                    External URL
+                    {t('mediaAdmin.externalUrl')}
                   </SelectItem>
                 </SelectContent>
               </Select>
@@ -723,7 +724,7 @@ function MediaFormDialog({
           </div>
 
           <div className="space-y-1.5">
-            <Label>Device targets</Label>
+            <Label>{t('mediaAdmin.deviceTargets')}</Label>
             <div className="flex flex-wrap gap-3">
               {[SliderMediaDeviceTarget.DESKTOP, SliderMediaDeviceTarget.MOBILE].map(
                 (d) => (
@@ -735,28 +736,31 @@ function MediaFormDialog({
                       checked={devices.includes(d)}
                       onCheckedChange={() => toggleDevice(d)}
                     />
-                    <span className="capitalize">{d}</span>
+                    <span className="capitalize">
+                      {d === SliderMediaDeviceTarget.DESKTOP
+                        ? t('mediaAdmin.desktopLabel')
+                        : t('mediaAdmin.mobileLabel')}
+                    </span>
                   </label>
                 ),
               )}
             </div>
             <p className="text-xs text-muted-foreground">
-              Pick one or both. Desktop and mobile lists are independent so
-              you can ship different counts per surface.
+              {t('mediaAdmin.deviceHint')}
             </p>
           </div>
 
           {sourceType === SliderMediaSourceType.UPLOAD ? (
             <div className="grid gap-4 sm:grid-cols-2">
               <FilePicker
-                label="Desktop asset"
+                label={t('mediaAdmin.desktopAsset')}
                 accept={mediaType === SliderMediaType.IMAGE ? 'image/*' : 'video/*'}
                 onChange={setDesktopFile}
                 file={desktopFile}
                 existingUrl={existing?.desktopUrl ?? null}
               />
               <FilePicker
-                label="Mobile asset"
+                label={t('mediaAdmin.mobileAsset')}
                 accept={mediaType === SliderMediaType.IMAGE ? 'image/*' : 'video/*'}
                 onChange={setMobileFile}
                 file={mobileFile}
@@ -766,7 +770,7 @@ function MediaFormDialog({
           ) : (
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
-                <Label>Desktop URL</Label>
+                <Label>{t('mediaAdmin.desktopUrl')}</Label>
                 <Input
                   type="url"
                   value={externalDesktop}
@@ -775,7 +779,7 @@ function MediaFormDialog({
                 />
               </div>
               <div className="space-y-1.5">
-                <Label>Mobile URL</Label>
+                <Label>{t('mediaAdmin.mobileUrl')}</Label>
                 <Input
                   type="url"
                   value={externalMobile}
@@ -787,7 +791,7 @@ function MediaFormDialog({
           )}
 
           <div className="space-y-1.5">
-            <Label htmlFor="linkUrl">Click-through URL (optional)</Label>
+            <Label htmlFor="linkUrl">{t('mediaAdmin.linkUrl')}</Label>
             <Input
               id="linkUrl"
               type="url"
@@ -799,9 +803,9 @@ function MediaFormDialog({
 
           <div className="flex items-center justify-between rounded-lg border p-3">
             <div>
-              <p className="text-sm font-medium">Active</p>
+              <p className="text-sm font-medium">{t('mediaAdmin.activeRow')}</p>
               <p className="text-xs text-muted-foreground">
-                Only active slides appear on the doctor dashboard.
+                {t('mediaAdmin.activeRowHint')}
               </p>
             </div>
             <Switch
@@ -814,11 +818,11 @@ function MediaFormDialog({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={pending}>
-            Cancel
+            {t('mediaAdmin.cancel')}
           </Button>
           <Button onClick={onSubmit} disabled={pending}>
             {pending ? <Loader2Icon className="mr-2 size-4 animate-spin" /> : null}
-            {mode === 'create' ? 'Add slide' : 'Save changes'}
+            {mode === 'create' ? t('mediaAdmin.addSlide') : t('mediaAdmin.save')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -839,6 +843,7 @@ function FilePicker({
   existingUrl: string | null;
   onChange: (f: File | null) => void;
 }) {
+  const { t } = useT();
   const url = file ? URL.createObjectURL(file) : resolveSliderMediaUrl(existingUrl);
   return (
     <div className="space-y-1.5">
@@ -853,7 +858,7 @@ function FilePicker({
               <img src={url} alt={label} className="size-full object-contain" />
             )
           ) : (
-            <p className="text-xs text-muted-foreground">No file</p>
+            <p className="text-xs text-muted-foreground">{t('mediaAdmin.noFile')}</p>
           )}
         </div>
         <div className="flex items-center justify-between gap-2 border-t bg-background px-2 py-1.5">
@@ -865,7 +870,7 @@ function FilePicker({
               onChange={(e) => onChange(e.target.files?.[0] ?? null)}
             />
             <PlusIcon className="size-3.5" />
-            {file ? 'Replace' : 'Upload'}
+            {file ? t('mediaAdmin.replace') : t('mediaAdmin.uploadLabel')}
           </label>
           {file ? (
             <button

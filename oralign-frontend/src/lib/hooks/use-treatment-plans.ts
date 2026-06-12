@@ -10,6 +10,7 @@ import {
 import { toast } from 'sonner';
 import { treatmentPlansService } from '@/lib/api/treatment-plans.service';
 import { extractApiErrorMessage } from '@/lib/api/error';
+import { useT } from '@/lib/i18n/lang-context';
 import type {
   TreatmentAttachmentCategory,
   TreatmentMessage,
@@ -81,12 +82,13 @@ export function useCreateTreatmentPlan(): UseMutationResult<
   { orderId: string; name?: string; resultViewUrl?: string }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ orderId, name, resultViewUrl }) =>
       treatmentPlansService.create(orderId, { name, resultViewUrl }),
     onSuccess: (plan) => {
       invalidatePlan(queryClient, plan);
-      toast.success(`${plan.name} created.`);
+      toast.success(t('toasts.treatmentPlans.created', { name: plan.name }));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -98,12 +100,13 @@ export function useUpdateResultViewUrl(): UseMutationResult<
   { id: string; resultViewUrl: string }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ id, resultViewUrl }) =>
       treatmentPlansService.updateResultViewUrl(id, resultViewUrl),
     onSuccess: (plan) => {
       invalidatePlan(queryClient, plan);
-      toast.success('Treatment viewer URL saved.');
+      toast.success(t('toasts.treatmentPlans.viewerUrlSaved'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -115,6 +118,7 @@ export function useMarkTreatmentPlanReady(): UseMutationResult<
   string
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: (id: string) => treatmentPlansService.markReady(id),
     onSuccess: (plan, sourceId) => {
@@ -126,8 +130,8 @@ export function useMarkTreatmentPlanReady(): UseMutationResult<
       const isNewVersion = plan.id !== sourceId;
       toast.success(
         isNewVersion
-          ? `${plan.name} created and marked ready (replaces the rejected plan).`
-          : 'Plan marked ready for doctor review.',
+          ? t('toasts.treatmentPlans.readyNewVersion', { name: plan.name })
+          : t('toasts.treatmentPlans.markedReady'),
       );
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
@@ -140,12 +144,13 @@ export function useApproveTreatmentPlan(): UseMutationResult<
   string
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: (id: string) => treatmentPlansService.approve(id),
     onSuccess: (plan) => {
       invalidatePlan(queryClient, plan);
       queryClient.invalidateQueries({ queryKey: ['orders'] });
-      toast.success('Treatment plan approved.');
+      toast.success(t('toasts.treatmentPlans.approved'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -157,12 +162,13 @@ export function useRejectTreatmentPlan(): UseMutationResult<
   string
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: (id: string) => treatmentPlansService.reject(id),
     onSuccess: (plan) => {
       invalidatePlan(queryClient, plan);
       queryClient.invalidateQueries({ queryKey: ['orders'] });
-      toast.success('Treatment plan rejected. Replanning requested.');
+      toast.success(t('toasts.treatmentPlans.rejected'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -174,12 +180,13 @@ export function useUploadMovementTableImage(): UseMutationResult<
   { id: string; file: File }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ id, file }) =>
       treatmentPlansService.uploadMovementTableImage(id, file),
     onSuccess: (plan) => {
       invalidatePlan(queryClient, plan);
-      toast.success('Movement table image uploaded.');
+      toast.success(t('toasts.treatmentPlans.movementImageUploaded'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -191,12 +198,13 @@ export function useDeleteMovementTableImage(): UseMutationResult<
   string
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: (id: string) =>
       treatmentPlansService.deleteMovementTableImage(id),
     onSuccess: (plan) => {
       invalidatePlan(queryClient, plan);
-      toast.success('Movement table image removed.');
+      toast.success(t('toasts.treatmentPlans.movementImageRemoved'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -214,12 +222,13 @@ export function useUploadDentalTreatmentTableImage(): UseMutationResult<
   { id: string; file: File }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ id, file }) =>
       treatmentPlansService.uploadDentalTreatmentTableImage(id, file),
     onSuccess: (plan) => {
       invalidatePlan(queryClient, plan);
-      toast.success('Dental treatment table image uploaded.');
+      toast.success(t('toasts.treatmentPlans.dentalImageUploaded'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -231,12 +240,13 @@ export function useDeleteDentalTreatmentTableImage(): UseMutationResult<
   string
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: (id: string) =>
       treatmentPlansService.deleteDentalTreatmentTableImage(id),
     onSuccess: (plan) => {
       invalidatePlan(queryClient, plan);
-      toast.success('Dental treatment table image removed.');
+      toast.success(t('toasts.treatmentPlans.dentalImageRemoved'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -280,12 +290,13 @@ export function useGeneratePublicLink(): UseMutationResult<
   { id: string; validDays?: number }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ id, validDays }) =>
       treatmentPlansService.generatePublicLink(id, validDays),
     onSuccess: (plan) => {
       invalidatePlan(queryClient, plan);
-      toast.success('Public viewer link generated.');
+      toast.success(t('toasts.treatmentPlans.publicLinkGenerated'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });

@@ -17,10 +17,12 @@ import { AccountSkeleton } from '@/components/account/account-skeleton';
 import { ProfileForm } from '@/components/account/profile-form';
 import { useAccountData, useOnboardingStatus, useChangePassword, useForgotPassword } from '@/lib/hooks';
 import { securitySettingsSchema, type SecuritySettingsFormData } from '@/lib/schemas';
+import { useT } from '@/lib/i18n/lang-context';
 
 // ── Security card — change password + send reset link ─────────────────────────
 
 function SecurityCard({ email }: { email: string }) {
+  const { t } = useT();
   const { mutateAsync: changePassword, isPending: isChanging } = useChangePassword();
   const { mutate: sendResetLink, isPending: isSending } = useForgotPassword();
 
@@ -43,10 +45,10 @@ function SecurityCard({ email }: { email: string }) {
       <CardHeader>
         <div className="flex items-center gap-2">
           <KeyRoundIcon className="size-4 text-muted-foreground" />
-          <h2 className="text-lg font-semibold">Security</h2>
+          <h2 className="text-lg font-semibold">{t('accountProfile.securityTitle')}</h2>
         </div>
         <p className="text-sm text-muted-foreground">
-          Change your password or request a reset link.
+          {t('accountProfile.securitySubtitle')}
         </p>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -55,7 +57,7 @@ function SecurityCard({ email }: { email: string }) {
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2 sm:col-span-2">
               <label className="text-sm font-medium" htmlFor="currentPassword">
-                Current password
+                {t('accountProfile.currentPassword')}
               </label>
               <Input
                 id="currentPassword"
@@ -72,7 +74,7 @@ function SecurityCard({ email }: { email: string }) {
 
             <div className="space-y-2">
               <label className="text-sm font-medium" htmlFor="newPassword">
-                New password
+                {t('accountProfile.newPassword')}
               </label>
               <Input
                 id="newPassword"
@@ -89,7 +91,7 @@ function SecurityCard({ email }: { email: string }) {
 
             <div className="space-y-2">
               <label className="text-sm font-medium" htmlFor="confirmPassword">
-                Confirm new password
+                {t('accountProfile.confirmPassword')}
               </label>
               <Input
                 id="confirmPassword"
@@ -110,7 +112,7 @@ function SecurityCard({ email }: { email: string }) {
               type="submit"
               disabled={isChanging || !form.formState.isDirty}
             >
-              {isChanging ? 'Updating…' : 'Update password'}
+              {isChanging ? t('accountProfile.updating') : t('accountProfile.updatePassword')}
             </Button>
           </div>
         </Form>
@@ -120,10 +122,9 @@ function SecurityCard({ email }: { email: string }) {
         {/* ── Send reset link ── */}
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-sm font-medium">Forgot your password?</p>
+            <p className="text-sm font-medium">{t('accountProfile.forgotTitle')}</p>
             <p className="text-sm text-muted-foreground">
-              We&apos;ll send a reset link to{' '}
-              <span className="font-medium text-foreground">{email}</span>.
+              {t('accountProfile.forgotBody', { email })}
             </p>
           </div>
           <Button
@@ -134,7 +135,7 @@ function SecurityCard({ email }: { email: string }) {
             disabled={isSending}
           >
             <MailIcon className="size-4" />
-            {isSending ? 'Sending…' : 'Send reset link'}
+            {isSending ? t('accountProfile.sending') : t('accountProfile.sendResetLink')}
           </Button>
         </div>
       </CardContent>
@@ -145,6 +146,7 @@ function SecurityCard({ email }: { email: string }) {
 // ── Inner component — uses useSearchParams, must be inside <Suspense> ─────────
 
 function AccountProfileContent() {
+  const { t } = useT();
   const router = useRouter();
   const searchParams = useSearchParams();
   const onboarding = searchParams.get('onboarding') === '1';
@@ -189,14 +191,14 @@ function AccountProfileContent() {
         <div className="px-4 lg:px-6">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="space-y-1">
-              <h1 className="text-2xl font-semibold">Profile</h1>
+              <h1 className="text-2xl font-semibold">{t('accountProfile.title')}</h1>
               <p className="text-sm text-muted-foreground">
-                Manage your personal profile details.
+                {t('accountProfile.subtitle')}
               </p>
             </div>
             {isDentist && !onboarding && (
               <Button asChild variant="outline">
-                <Link href="/account/clinic">Clinic settings</Link>
+                <Link href="/account/clinic">{t('accountProfile.clinicSettings')}</Link>
               </Button>
             )}
           </div>
@@ -206,12 +208,14 @@ function AccountProfileContent() {
           {onboarding && (
             <Alert>
               <AlertTitle>
-                {profileComplete ? 'Confirm your profile' : 'Complete your profile'}
+                {profileComplete
+                  ? t('accountProfile.onboardingConfirmTitle')
+                  : t('accountProfile.onboardingCompleteTitle')}
               </AlertTitle>
               <AlertDescription>
                 {profileComplete
-                  ? 'Review your details and click "Save & Continue" to proceed.'
-                  : 'Add your phone number and country to continue onboarding.'}
+                  ? t('accountProfile.onboardingConfirmBody')
+                  : t('accountProfile.onboardingCompleteBody')}
               </AlertDescription>
             </Alert>
           )}
@@ -220,9 +224,9 @@ function AccountProfileContent() {
 
           {!isLoading && error && (
             <Alert variant="destructive">
-              <AlertTitle>Unable to load profile</AlertTitle>
+              <AlertTitle>{t('accountProfile.unableToLoad')}</AlertTitle>
               <AlertDescription>
-                {error instanceof Error ? error.message : 'Please try again later.'}
+                {error instanceof Error ? error.message : t('accountProfile.tryAgainLater')}
               </AlertDescription>
             </Alert>
           )}

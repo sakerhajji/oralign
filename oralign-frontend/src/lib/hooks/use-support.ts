@@ -10,6 +10,7 @@ import {
 import { toast } from 'sonner';
 import { supportService } from '@/lib/api/support.service';
 import { extractApiErrorMessage } from '@/lib/api/error';
+import { useT } from '@/lib/i18n/lang-context';
 import type {
   PaginatedResponse,
   SupportConversation,
@@ -95,11 +96,12 @@ export function useCreateSupportConversation(): UseMutationResult<
   { subject?: string; body?: string; attachment?: File | Blob }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: (args) => supportService.createConversation(args),
     onSuccess: (data) => {
       invalidateConversation(queryClient, data.conversation.id);
-      toast.success('Support conversation opened.');
+      toast.success(t('toasts.support.opened'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -140,11 +142,16 @@ export function useUpdateSupportStatus(): UseMutationResult<
   { id: string; status: SupportConversationStatus }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ id, status }) => supportService.updateStatus(id, status),
     onSuccess: (conv) => {
       invalidateConversation(queryClient, conv.id);
-      toast.success(`Conversation marked ${conv.status}.`);
+      toast.success(
+        t('toasts.support.statusChanged', {
+          status: t(`toasts.support.status.${conv.status}`),
+        }),
+      );
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -156,12 +163,17 @@ export function useUpdateSupportPriority(): UseMutationResult<
   { id: string; priority: SupportPriority }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ id, priority }) =>
       supportService.updatePriority(id, priority),
     onSuccess: (conv) => {
       invalidateConversation(queryClient, conv.id);
-      toast.success(`Priority set to ${conv.priority}.`);
+      toast.success(
+        t('toasts.support.prioritySet', {
+          priority: t(`toasts.support.priority.${conv.priority}`),
+        }),
+      );
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -173,11 +185,12 @@ export function useDeleteSupportConversation(): UseMutationResult<
   string
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: (id) => supportService.softDelete(id),
     onSuccess: (data) => {
       invalidateConversation(queryClient, data.id);
-      toast.success('Conversation moved to trash.');
+      toast.success(t('toasts.support.trashed'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -189,11 +202,12 @@ export function useRestoreSupportConversation(): UseMutationResult<
   string
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: (id) => supportService.restore(id),
     onSuccess: (conv) => {
       invalidateConversation(queryClient, conv.id);
-      toast.success('Conversation restored.');
+      toast.success(t('toasts.support.restored'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });

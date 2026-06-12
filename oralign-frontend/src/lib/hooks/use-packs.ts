@@ -10,6 +10,7 @@ import {
 import { toast } from 'sonner';
 import { packsService } from '@/lib/api/packs.service';
 import { extractApiErrorMessage } from '@/lib/api/error';
+import { useT } from '@/lib/i18n/lang-context';
 import type {
   CreatePackDto,
   CreatePackPriceDto,
@@ -80,11 +81,12 @@ function invalidatePacks(queryClient: ReturnType<typeof useQueryClient>) {
 
 export function useCreatePack(): UseMutationResult<Pack, Error, CreatePackDto> {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: (dto) => packsService.create(dto),
     onSuccess: () => {
       invalidatePacks(queryClient);
-      toast.success('Pack created.');
+      toast.success(t('toasts.packs.created'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -96,11 +98,12 @@ export function useUpdatePack(): UseMutationResult<
   { id: string; dto: UpdatePackDto }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ id, dto }) => packsService.update(id, dto),
     onSuccess: () => {
       invalidatePacks(queryClient);
-      toast.success('Pack updated.');
+      toast.success(t('toasts.packs.updated'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -112,11 +115,12 @@ export function useDeletePack(): UseMutationResult<
   string
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: (id) => packsService.remove(id),
     onSuccess: () => {
       invalidatePacks(queryClient);
-      toast.success('Pack deleted.');
+      toast.success(t('toasts.packs.deleted'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -124,11 +128,12 @@ export function useDeletePack(): UseMutationResult<
 
 export function useActivatePack(): UseMutationResult<Pack, Error, string> {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: (id) => packsService.activate(id),
     onSuccess: () => {
       invalidatePacks(queryClient);
-      toast.success('Pack activated.');
+      toast.success(t('toasts.packs.activated'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -136,11 +141,12 @@ export function useActivatePack(): UseMutationResult<Pack, Error, string> {
 
 export function useDeactivatePack(): UseMutationResult<Pack, Error, string> {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: (id) => packsService.deactivate(id),
     onSuccess: () => {
       invalidatePacks(queryClient);
-      toast.success('Pack deactivated.');
+      toast.success(t('toasts.packs.deactivated'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -152,11 +158,12 @@ export function useAddPackPrice(): UseMutationResult<
   { packId: string; dto: CreatePackPriceDto }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ packId, dto }) => packsService.addPrice(packId, dto),
     onSuccess: () => {
       invalidatePacks(queryClient);
-      toast.success('Price added.');
+      toast.success(t('toasts.packs.priceAdded'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -168,12 +175,13 @@ export function useUpdatePackPrice(): UseMutationResult<
   { packId: string; priceId: string; dto: UpdatePackPriceDto }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ packId, priceId, dto }) =>
       packsService.updatePrice(packId, priceId, dto),
     onSuccess: () => {
       invalidatePacks(queryClient);
-      toast.success('Price updated.');
+      toast.success(t('toasts.packs.priceUpdated'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -185,12 +193,13 @@ export function useArchivePackPrice(): UseMutationResult<
   { packId: string; priceId: string }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ packId, priceId }) =>
       packsService.archivePrice(packId, priceId),
     onSuccess: () => {
       invalidatePacks(queryClient);
-      toast.success('Price archived.');
+      toast.success(t('toasts.packs.priceArchived'));
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });

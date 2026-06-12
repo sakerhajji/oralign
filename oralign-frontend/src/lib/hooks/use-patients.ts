@@ -9,6 +9,7 @@ import {
 } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { extractApiErrorMessage, patientsService } from '@/lib/api';
+import { useT } from '@/lib/i18n/lang-context';
 import {
   CreatePatientDto,
   MessageResponse,
@@ -67,12 +68,13 @@ export function useCreatePatient(): UseMutationResult<
   CreatePatientDto
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
 
   return useMutation<Patient, Error, CreatePatientDto>({
     mutationFn: patientsService.createPatient,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: patientKeys.lists() });
-      toast.success('Patient created successfully');
+      toast.success(t('toasts.patients.created'));
     },
     onError: (error) => {
       toast.error(extractApiErrorMessage(error));
@@ -86,13 +88,14 @@ export function useUpdatePatient(): UseMutationResult<
   { id: string; data: UpdatePatientDto }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
 
   return useMutation<Patient, Error, { id: string; data: UpdatePatientDto }>({
     mutationFn: ({ id, data }) => patientsService.updatePatient(id, data),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: patientKeys.lists() });
       queryClient.invalidateQueries({ queryKey: patientKeys.detail(variables.id) });
-      toast.success('Patient updated successfully');
+      toast.success(t('toasts.patients.updated'));
     },
     onError: (error) => {
       toast.error(extractApiErrorMessage(error));
@@ -106,12 +109,13 @@ export function useDeletePatient(): UseMutationResult<
   string
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
 
   return useMutation<MessageResponse, Error, string>({
     mutationFn: patientsService.deletePatient,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: patientKeys.lists() });
-      toast.success('Patient deleted successfully');
+      toast.success(t('toasts.patients.deleted'));
     },
     onError: (error) => {
       toast.error(extractApiErrorMessage(error));
@@ -125,12 +129,13 @@ export function useBulkDeletePatients(): UseMutationResult<
   string[]
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
 
   return useMutation<{ message: string; deleted: number }, Error, string[]>({
     mutationFn: patientsService.bulkDeletePatients,
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: patientKeys.lists() });
-      toast.success(`${data.deleted} patient(s) deleted`);
+      toast.success(t('toasts.patients.bulkDeleted', { count: data.deleted }));
     },
     onError: (error) => {
       toast.error(extractApiErrorMessage(error));

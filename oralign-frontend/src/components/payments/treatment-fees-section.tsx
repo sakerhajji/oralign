@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { format } from 'date-fns';
+import { fr as frLocale } from 'date-fns/locale';
+import type { Locale } from 'date-fns';
 import {
   Banknote,
   CreditCard,
@@ -37,27 +39,26 @@ import { useAuth } from '@/lib/providers/auth-provider';
 import type { TreatmentFeeRow } from '@/lib/api/orders.service';
 import { PaymentMethod, PaymentRecordStatus } from '@/lib/types';
 import { TreatmentFeeReceiptDialog } from '@/components/orders/treatment-fee-receipt-dialog';
+import { useT } from '@/lib/i18n/lang-context';
 
 /**
- * Maps `PaymentMethod` → method label + icon + Tailwind color set.
- * Single source so the pending + history views read identically.
+ * Maps `PaymentMethod` → method icon + Tailwind color set. Labels come
+ * from the i18n dictionary at render time so a doctor and an admin see
+ * the same vocabulary across every payments surface.
  */
 const METHOD_META: Record<
   PaymentMethod,
-  { label: string; Icon: typeof CreditCard; tone: string }
+  { Icon: typeof CreditCard; tone: string }
 > = {
   [PaymentMethod.CARD]: {
-    label: 'Card',
     Icon: CreditCard,
     tone: 'bg-blue-50 text-blue-700 border-blue-200',
   },
   [PaymentMethod.BANK_TRANSFER]: {
-    label: 'Bank transfer',
     Icon: Landmark,
     tone: 'bg-violet-50 text-violet-700 border-violet-200',
   },
   [PaymentMethod.CASH]: {
-    label: 'Cash',
     Icon: Banknote,
     tone: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   },
@@ -78,6 +79,7 @@ function PaymentMethodBadge({
 }: {
   method: PaymentMethod | null;
 }) {
+  const { t } = useT();
   if (!method) return <span className="text-muted-foreground">—</span>;
   const meta = METHOD_META[method];
   return (
@@ -85,7 +87,7 @@ function PaymentMethodBadge({
       className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium ${meta.tone}`}
     >
       <meta.Icon className="size-3" />
-      {meta.label}
+      {t(`paymentsCommon.method.${method}`)}
     </span>
   );
 }
@@ -95,13 +97,14 @@ function StatusBadge({
 }: {
   status: PaymentRecordStatus | null;
 }) {
+  const { t } = useT();
   if (!status) return <span className="text-muted-foreground">—</span>;
   return (
     <Badge
       variant="outline"
-      className={`${STATUS_TONE[status]} border-transparent capitalize`}
+      className={`${STATUS_TONE[status]} border-transparent`}
     >
-      {status.replace('_', ' ')}
+      {t(`paymentsCommon.status.${status}`)}
     </Badge>
   );
 }
@@ -132,6 +135,11 @@ function TreatmentFeeTable({
    */
   onViewProof?: (row: TreatmentFeeRow) => void;
 }) {
+  const { t, lang } = useT();
+  const dateLocale: Locale | undefined = lang === 'fr' ? frLocale : undefined;
+  const dateFmt = lang === 'fr' ? 'd MMM yyyy' : 'MMM d, yyyy';
+  const shortDateFmt = lang === 'fr' ? 'd MMM' : 'MMM d';
+
   if (isLoading) {
     return (
       <div className="space-y-2 p-4">
@@ -152,12 +160,14 @@ function TreatmentFeeTable({
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead>Order</TableHead>
-          <TableHead>Doctor / Patient</TableHead>
-          <TableHead>Method</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead className="text-right">Amount</TableHead>
-          <TableHead>Date</TableHead>
+          <TableHead>{t('paymentsCommon.columns.order')}</TableHead>
+          <TableHead>{t('paymentsCommon.columns.doctorSlashPatient')}</TableHead>
+          <TableHead>{t('paymentsCommon.columns.method')}</TableHead>
+          <TableHead>{t('paymentsCommon.columns.status')}</TableHead>
+          <TableHead className="text-right">
+            {t('paymentsCommon.columns.amount')}
+          </TableHead>
+          <TableHead>{t('paymentsCommon.columns.date')}</TableHead>
           {/*
             Proof column — meaningful only for bank-transfer rows. Card
             and cash rows always render "—" because there's no proof
@@ -166,8 +176,10 @@ function TreatmentFeeTable({
             the pending queue) so doctor-uploaded photos / PDFs render
             inline with click-to-zoom.
            */}
-          <TableHead>Proof</TableHead>
-          <TableHead className="text-right">Actions</TableHead>
+          <TableHead>{t('paymentsCommon.columns.proof')}</TableHead>
+          <TableHead className="text-right">
+            {t('paymentsCommon.columns.actions')}
+          </TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -200,12 +212,13 @@ function TreatmentFeeTable({
             </TableCell>
             <TableCell className="text-xs text-muted-foreground">
               {row.paidAt
-                ? format(new Date(row.paidAt), 'MMM d, yyyy')
+                ? format(new Date(row.paidAt), dateFmt, { locale: dateLocale })
                 : row.submittedAt
-                  ? `Submitted ${format(
-                      new Date(row.submittedAt),
-                      'MMM d',
-                    )}`
+                  ? t('paymentsCommon.submittedShort', {
+                      date: format(new Date(row.submittedAt), shortDateFmt, {
+                        locale: dateLocale,
+                      }),
+                    })
                   : '—'}
             </TableCell>
             <TableCell>
@@ -215,10 +228,10 @@ function TreatmentFeeTable({
                   variant="ghost"
                   className="h-7 gap-1 px-2 text-xs"
                   onClick={() => onViewProof(row)}
-                  title="View the doctor-uploaded receipt"
+                  title={t('paymentsCommon.actions.viewReceipt')}
                 >
                   <FileText className="size-3" />
-                  View
+                  {t('paymentsCommon.actions.view')}
                 </Button>
               ) : (
                 <span className="text-xs text-muted-foreground">—</span>
@@ -241,6 +254,7 @@ function TreatmentFeeTable({
  * sprout an empty card on a clean queue.
  */
 export function PendingTreatmentFeesSection() {
+  const { t } = useT();
   const { data, isLoading } = usePendingTreatmentFees({ page: 1, limit: 20 });
   const rows = data?.data ?? [];
   // The currently-opened row drives the viewer modal. Holding the
@@ -258,16 +272,18 @@ export function PendingTreatmentFeesSection() {
             <div>
               <CardTitle className="flex items-center gap-2">
                 <ReceiptText className="size-5 text-primary" />
-                Treatment fees awaiting confirmation
+                {t('paymentsPending.treatmentFeesPendingTitle')}
               </CardTitle>
               <CardDescription>
-                Doctor-uploaded bank-transfer receipts for the order&apos;s
-                professional fee. Open the receipt to review the proof
-                and confirm in one place.
+                {t('paymentsPending.treatmentFeesPendingDesc')}
               </CardDescription>
             </div>
             {data?.total ? (
-              <Badge variant="secondary">{data.total} pending</Badge>
+              <Badge variant="secondary">
+                {t('paymentsPending.treatmentFeesPendingCount', {
+                  count: data.total,
+                })}
+              </Badge>
             ) : null}
           </div>
         </CardHeader>
@@ -275,7 +291,7 @@ export function PendingTreatmentFeesSection() {
           <TreatmentFeeTable
             rows={rows}
             isLoading={isLoading}
-            emptyMessage="No treatment fees waiting for confirmation."
+            emptyMessage={t('paymentsPending.treatmentFeesPendingEmpty')}
             onViewProof={(row) => setActive(row)}
             renderActions={(row) => (
               <Button
@@ -285,7 +301,7 @@ export function PendingTreatmentFeesSection() {
                 onClick={() => setActive(row)}
               >
                 <ReceiptText className="size-4" />
-                Review &amp; confirm
+                {t('paymentsPending.reviewAndConfirm')}
               </Button>
             )}
           />
@@ -326,6 +342,7 @@ export function PendingTreatmentFeesSection() {
  * card to fresh installations.
  */
 export function TreatmentFeesHistorySection() {
+  const { t } = useT();
   const { isAdmin } = useAuth();
   const { data, isLoading } = useTreatmentFeesHistory({ page: 1, limit: 20 });
   const rows = data?.data ?? [];
@@ -347,17 +364,21 @@ export function TreatmentFeesHistorySection() {
               <CardTitle className="flex items-center gap-2">
                 <ReceiptText className="size-5 text-primary" />
                 {isAdmin
-                  ? 'Treatment fee payments'
-                  : 'My treatment fee payments'}
+                  ? t('paymentsHistory.treatmentFeesTitleAdmin')
+                  : t('paymentsHistory.treatmentFeesTitleDoctor')}
               </CardTitle>
               <CardDescription>
                 {isAdmin
-                  ? 'Every treatment-fee payment across the system — card, bank transfer, and cash. Separate from installment payments below.'
-                  : 'Treatment fees you have paid on your orders — card, bank transfer, and cash. Separate from installment payments below.'}
+                  ? t('paymentsHistory.treatmentFeesDescAdmin')
+                  : t('paymentsHistory.treatmentFeesDescDoctor')}
               </CardDescription>
             </div>
             {data?.total ? (
-              <Badge variant="secondary">{data.total} total</Badge>
+              <Badge variant="secondary">
+                {t('paymentsHistory.treatmentFeesTotalSuffix', {
+                  count: data.total,
+                })}
+              </Badge>
             ) : null}
           </div>
         </CardHeader>
@@ -365,7 +386,7 @@ export function TreatmentFeesHistorySection() {
           <TreatmentFeeTable
             rows={rows}
             isLoading={isLoading}
-            emptyMessage="No treatment-fee payments recorded yet."
+            emptyMessage={t('paymentsHistory.treatmentFeesEmpty')}
             onViewProof={(row) => setActiveReceipt(row)}
             renderActions={(row) => (
               <>
@@ -381,13 +402,13 @@ export function TreatmentFeesHistorySection() {
                     size="sm"
                     variant="outline"
                     className="gap-1"
-                    title="View the treatment-fee invoice"
+                    title={t('paymentsHistory.treatmentFeeInvoiceTitle')}
                   >
                     <Link
                       href={`/dashboard/orders/${row.orderId}/treatment-fee-invoice`}
                     >
                       <ReceiptText className="size-3.5" />
-                      Invoice
+                      {t('paymentsHistory.treatmentFeeInvoiceLabel')}
                     </Link>
                   </Button>
                 )}
@@ -396,11 +417,11 @@ export function TreatmentFeesHistorySection() {
                   size="sm"
                   variant="ghost"
                   className="gap-1"
-                  title="Open order"
+                  title={t('paymentsHistory.openOrderTitle')}
                 >
                   <Link href={`/dashboard/orders/${row.orderId}`}>
                     <ExternalLink className="size-3.5" />
-                    Order
+                    {t('paymentsHistory.openOrderLabel')}
                   </Link>
                 </Button>
               </>

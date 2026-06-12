@@ -52,6 +52,25 @@ function subscribe(cb: () => void): () => void {
   };
 }
 
+/**
+ * Module-level setter for non-hook call sites (the auth provider seeds
+ * the language from the user's profile after login / refresh). Writes
+ * the store + pings every `useSyncExternalStore` subscriber, exactly
+ * like the hook's `setLang`. Invalid / unknown values are ignored so a
+ * corrupted profile field can never wedge the UI language.
+ */
+export function applyStoredLang(value: string | null | undefined): void {
+  if (typeof window === 'undefined') return;
+  if (!isLang(value)) return;
+  try {
+    if (window.localStorage.getItem(STORAGE_KEY) === value) return;
+    window.localStorage.setItem(STORAGE_KEY, value);
+  } catch {
+    /* private mode — still ping subscribers */
+  }
+  window.dispatchEvent(new Event(EVENT));
+}
+
 export function useLang(): { lang: Lang; setLang: (l: Lang) => void } {
   const lang = useSyncExternalStore(subscribe, readLang, () => DEFAULT_LANG);
 

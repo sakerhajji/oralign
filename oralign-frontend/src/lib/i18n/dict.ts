@@ -542,10 +542,13 @@ export const dict = {
         en: 'Where should the planner place bite ramps, if any?',
         fr: 'Où le planificateur doit-il placer des plans de morsure, si nécessaire ?',
       } as T,
-      biteRampsNoneOpt: { en: 'No bite ramps', fr: 'Aucun plan de morsure' } as T,
-      biteRampsAnteriorOpt: { en: 'Anterior', fr: 'Antérieurs' } as T,
-      biteRampsCanineOpt: { en: 'Canine / cuspid', fr: 'Canines' } as T,
-      biteRampsMolarOpt: { en: 'Molar', fr: 'Molaires' } as T,
+      // Bite-ramp placement options — re-spec'd to the occlusal-stop +
+      // tooth-group set the clinic uses ("Cale occlusale" + Incisives /
+      // Canines / Molaires).
+      biteRampsOcclusalStop: { en: 'Occlusal stop', fr: 'Cale occlusale' } as T,
+      biteRampsIncisors: { en: 'Incisors', fr: 'Incisives' } as T,
+      biteRampsCanines: { en: 'Canines', fr: 'Canines' } as T,
+      biteRampsMolars: { en: 'Molars', fr: 'Molaires' } as T,
 
       expansionHint: {
         en: 'Select the segment that needs expansion, or “No expansion” if the arches are well-developed.',

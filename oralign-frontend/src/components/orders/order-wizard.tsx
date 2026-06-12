@@ -1526,7 +1526,11 @@ function TreatmentStep({
 const segmentOptions = ['No', 'Anterior', 'Posterior', 'Both'] as const;
 type Segment = (typeof segmentOptions)[number];
 
-const biteRampOptions = ['No bite ramps', 'Anterior', 'Canine / cuspid', 'Molar'] as const;
+// Bite-ramp placement options. Re-spec'd at the clinic's request to
+// the occlusal-stop + tooth-group set the planners actually use:
+// "Cale occlusale" plus the three tooth groups. Storage values are
+// the stable English keys; FR labels resolve through the dict.
+const biteRampOptions = ['Occlusal stop', 'Incisors', 'Canines', 'Molars'] as const;
 const expansionOptions = ['No expansion', 'Anterior', 'Posterior', 'Both'] as const;
 
 /**
@@ -1657,10 +1661,10 @@ function AdvancedMovementStep({
     Both: 'orderForm.advanced.segmentBoth',
   };
   const BITE_RAMPS_KEY: Record<string, string> = {
-    'No bite ramps': 'orderForm.advanced.biteRampsNoneOpt',
-    Anterior: 'orderForm.advanced.biteRampsAnteriorOpt',
-    'Canine / cuspid': 'orderForm.advanced.biteRampsCanineOpt',
-    Molar: 'orderForm.advanced.biteRampsMolarOpt',
+    'Occlusal stop': 'orderForm.advanced.biteRampsOcclusalStop',
+    Incisors: 'orderForm.advanced.biteRampsIncisors',
+    Canines: 'orderForm.advanced.biteRampsCanines',
+    Molars: 'orderForm.advanced.biteRampsMolars',
   };
   const EXPANSION_KEY: Record<string, string> = {
     'No expansion': 'orderForm.advanced.expansionNoneOpt',
@@ -1700,8 +1704,19 @@ function AdvancedMovementStep({
   // segment is just `'No' | 'Anterior' | 'Posterior' | 'Both'` now —
   // the legacy priority qualifier was removed at the clinical team's
   // request and `unpackSegment` silently drops it from old data.
-  const iprSegment = unpackSegment(form.ipr);
-  const expansionSegment = unpackSegment(form.expansion);
+  //
+  // IMPORTANT: an UNSET field decodes to `undefined`, NOT `'No'`. The
+  // form must open with NOTHING pre-selected — the doctor actively
+  // picks an option (including "Pas d'IPR" / "Pas d'expansion") rather
+  // than the form quietly defaulting to "No" and silently submitting a
+  // choice the doctor never made. `unpackSegment('')` would return
+  // `'No'`, so we guard on the raw string being non-empty first.
+  const iprSegment: Segment | undefined = (form.ipr ?? '').trim()
+    ? unpackSegment(form.ipr)
+    : undefined;
+  const expansionSegment: Segment | undefined = (form.expansion ?? '').trim()
+    ? unpackSegment(form.expansion)
+    : undefined;
   // Don't trim here — that strips trailing spaces while the doctor is
   // still typing notes, which made it feel like the spacebar didn't
   // work in the Spaces card. We only need leading whitespace ignored
@@ -2302,10 +2317,10 @@ function ReviewStep({
               <ReviewInfo label="Midline" value={form.midline} />
               <ReviewInfo label="IPR" value={form.ipr} />
               <ReviewInfo label="Bite ramps" value={form.biteRamps} />
-              <ReviewInfo
-                label="Expansion"
-                value={form.expansion ?? 'No expansion'}
-              />
+              {/* No "No expansion" fallback — an unset field reads as
+                  empty in the review, matching the form's no-default
+                  behaviour instead of implying a choice. */}
+              <ReviewInfo label="Expansion" value={form.expansion} />
               <ReviewInfo label="Crossbite" value={form.crossbite} />
               <ReviewInfo label="Spaces" value={form.spaces} wide />
               <ReviewInfo label="Extractions" value={form.extractions} wide />

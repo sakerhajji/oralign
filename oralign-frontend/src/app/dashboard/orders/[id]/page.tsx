@@ -482,24 +482,16 @@ export default function OrderDetailPage() {
       </Section>
 
       {/* Bottom meta block — small, low-priority info that used to be
-          in a "Summary" sidebar but is more honest at the end. */}
+          in a "Summary" sidebar but is more honest at the end.
+          Manufacturing + Materials were dropped at the clinic's
+          request: the lab handles fabrication + material choice
+          internally, so surfacing them on the doctor-facing order
+          was noise. CBCT + order code are the meaningful metadata. */}
       <Section icon={ClipboardCheck} title={t('orderDetail.sections.orderMetadata')}>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2">
           <Info
             label={t('orderDetail.metadata.cbctRequested')}
             value={order.useCbctWithScans ? t('orderDetail.metadata.yes') : t('orderDetail.metadata.no')}
-          />
-          <Info
-            label={t('orderDetail.metadata.manufacturing')}
-            value={
-              order.wantsManufacturing
-                ? t('orderDetail.metadata.requested')
-                : t('orderDetail.metadata.notRequested')
-            }
-          />
-          <Info
-            label={t('orderDetail.metadata.materials')}
-            value={(order.materials ?? []).join(', ') || t('orderDetail.metadata.notSet')}
           />
           <Info
             label={t('orderDetail.metadata.orderCode')}

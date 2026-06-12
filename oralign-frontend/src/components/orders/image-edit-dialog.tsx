@@ -194,14 +194,19 @@ export function ImageEditDialog({
     const { naturalWidth, naturalHeight } = e.currentTarget;
     setNaturalSize({ w: naturalWidth, h: naturalHeight });
     if (cropMode && !crop) {
+      // Seed the selection at the FULL FRAME (100%), not a centred
+      // sub-region. Entering crop mode then shows the whole image with
+      // the selection covering everything — so clicking "Crop" never
+      // zooms, and clicking "Apply crop" without dragging is a no-op
+      // (no progressive shrink when the user enters crop mode several
+      // times in a row). The doctor pulls the handles inward only when
+      // they actually want to trim something. This is the "show the
+      // full image first, then crop" behaviour.
       const initial = centerCrop(
         makeAspectCrop(
-          // 90% keeps the default selection close to the full frame so
-          // accepting it without dragging only trims a thin border —
-          // never an aggressive center-zoom of the face.
-          { unit: '%', width: 90 },
+          { unit: '%', width: 100 },
           // Aspect ratio derived from the image's natural dimensions so the
-          // default crop frames the photo nicely regardless of orientation.
+          // 100% box exactly covers the photo regardless of orientation.
           naturalWidth / naturalHeight,
           naturalWidth,
           naturalHeight,
@@ -253,6 +258,25 @@ export function ImageEditDialog({
     // so the guard is independent of the current zoom level.
     if (!crop || crop.width < 1 || crop.height < 1) {
       setError(t('orderForm.files.imageEdit.errorPickRegion'));
+      return;
+    }
+
+    // Full-frame selection → nothing to crop. Exit crop mode WITHOUT
+    // re-baking: a 100% crop would re-encode the image through canvas
+    // (a lossy JPEG round-trip) and a stray rounding pixel could shave
+    // the edge, which compounds if the user enters crop mode several
+    // times. Treating "essentially the whole image" as a no-op keeps
+    // repeated Crop clicks from ever shrinking the photo.
+    if (
+      crop.unit === '%' &&
+      crop.width >= 99.5 &&
+      crop.height >= 99.5 &&
+      crop.x <= 0.5 &&
+      crop.y <= 0.5
+    ) {
+      setCropMode(false);
+      setCrop(undefined);
+      setZoom(1);
       return;
     }
 

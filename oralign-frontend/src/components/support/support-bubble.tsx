@@ -416,8 +416,11 @@ function ActiveThread({
     id: string;
     attachmentName?: string | null;
   } | null>(null);
+  // Full view asks for the `lg` optimized variant — the backend falls
+  // back to the original automatically when the variant isn't ready.
   const lightboxUrl = lightboxMessage
-    ? supportAttachmentUrl(lightboxMessage.conversationId, lightboxMessage.id)
+    ? supportAttachmentUrl(lightboxMessage.conversationId, lightboxMessage.id) +
+      '?variant=lg'
     : null;
   const lightboxImg = useAuthedImage(lightboxUrl);
 
@@ -867,11 +870,14 @@ export function MessageBubble({
   // The attachment route is JWT-guarded, so a plain `<img src={URL}>`
   // returns 401 — the browser doesn't attach Authorization headers
   // for resource loads. Fetch via the authed axios client and render
-  // the resulting blob URL instead.
+  // the resulting blob URL instead. The inline bubble only needs the
+  // `thumb` optimized variant (server falls back to the original when
+  // the variant isn't generated yet, so this is always safe).
   const attachmentApiUrl = useMemo(
     () =>
       message.attachmentRelativePath
-        ? supportAttachmentUrl(message.conversationId, message.id)
+        ? supportAttachmentUrl(message.conversationId, message.id) +
+          '?variant=thumb'
         : null,
     [message.conversationId, message.id, message.attachmentRelativePath],
   );
@@ -903,6 +909,8 @@ export function MessageBubble({
               <img
                 src={attachmentSrc}
                 alt={message.attachmentName ?? 'attachment'}
+                loading="lazy"
+                decoding="async"
                 className="max-h-60 w-auto max-w-full cursor-zoom-in rounded-md object-contain"
               />
             ) : (

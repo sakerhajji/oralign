@@ -21,6 +21,7 @@ import {
   SupportConversationFilterDto,
   CreateSupportConversationDto,
 } from '../dto/support.dto';
+import { MediaProcessingService } from '../../media/media-processing.service';
 
 type Caller = { userId: string; role: UserRole };
 
@@ -59,7 +60,26 @@ export class SupportService {
     private readonly prisma: PrismaService,
     @Inject(forwardRef(() => SupportChatGateway))
     private readonly gateway: SupportChatGateway,
+    private readonly mediaProcessing: MediaProcessingService,
   ) {}
+
+  /**
+   * Hand an image attachment to the async optimizer (chat-bubble
+   * thumbnails). Called strictly post-commit; variants are cosmetic
+   * here and the original is always the fallback.
+   */
+  private enqueueAttachmentProcessing(message: {
+    id: string;
+    attachmentRelativePath: string | null;
+    attachmentMime: string | null;
+  }): void {
+    if (
+      message.attachmentRelativePath &&
+      message.attachmentMime?.startsWith('image/')
+    ) {
+      this.mediaProcessing.enqueue('support-message', message.id);
+    }
+  }
 
   // ─── Helpers ──────────────────────────────────────────────────────
 
@@ -179,6 +199,8 @@ export class SupportService {
       },
     );
 
+    this.enqueueAttachmentProcessing(firstMessage);
+
     // Real-time fan-out: the new conversation goes to ALL admins, the
     // doctor joins their own room automatically when the bubble opens.
     this.gateway.broadcastConversationCreated(conversation);
@@ -254,6 +276,8 @@ export class SupportService {
       });
       return m;
     });
+
+    this.enqueueAttachmentProcessing(message);
 
     this.gateway.broadcastNewMessage(conv.id, message);
     this.gateway.broadcastConversationUpdated(conv.id);

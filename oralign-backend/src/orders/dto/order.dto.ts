@@ -1,6 +1,7 @@
 import { ApiProperty, PartialType } from '@nestjs/swagger';
 import {
   ArchTreatment,
+  MediaProcessingStatus,
   OrderFileCategory,
   OrderStatus,
   PatientStage,
@@ -501,6 +502,18 @@ export class BulkPermanentDeleteOrdersDto {
   ids!: string[];
 }
 
+/** Per-variant facts exposed over the API — never the disk path. */
+export class OrderFileVariantDto {
+  @ApiProperty({ required: false })
+  width?: number;
+  @ApiProperty({ required: false })
+  height?: number;
+  @ApiProperty({ required: false })
+  sizeBytes?: number;
+  @ApiProperty({ required: false, example: 'webp' })
+  format?: string;
+}
+
 export class OrderFileResponseDto {
   @ApiProperty()
   id!: string;
@@ -518,6 +531,46 @@ export class OrderFileResponseDto {
   size!: number;
   @ApiProperty()
   createdAt!: Date;
+
+  // ── Media-optimization pipeline ──────────────────────────────────
+  @ApiProperty({
+    required: false,
+    description:
+      'Clean ordered filename (Patient_Category_NNN.ext). Downloads are ' +
+      'saved under this name; legacy rows fall back to originalName.',
+  })
+  generatedName?: string;
+  @ApiProperty({
+    description: 'Per order+category upload sequence (0 on legacy rows)',
+  })
+  orderIndex!: number;
+  @ApiProperty({ required: false, description: 'Original image width (px)' })
+  width?: number;
+  @ApiProperty({ required: false, description: 'Original image height (px)' })
+  height?: number;
+  @ApiProperty({
+    required: false,
+    enum: MediaProcessingStatus,
+    description:
+      'pending | processing | completed | failed — absent when the ' +
+      'pipeline does not apply to this file type.',
+  })
+  processingStatus?: MediaProcessingStatus;
+  @ApiProperty({
+    required: false,
+    description:
+      'Available derived artefacts keyed by name (thumb | md | lg | avif ' +
+      '| model), each { width?, height?, sizeBytes?, format? }. Fetch via ' +
+      'the download endpoint with ?variant=<name>.',
+  })
+  variants?: Record<string, OrderFileVariantDto>;
+  @ApiProperty({
+    required: false,
+    description:
+      'Safe type-specific metadata: zip → entryCount/topLevelEntries/' +
+      'totalUncompressedBytes/suspicious; stl → triangleCount/vertexCount/bbox.',
+  })
+  mediaMetadata?: Record<string, unknown>;
 }
 
 export class OrderResponseDto {

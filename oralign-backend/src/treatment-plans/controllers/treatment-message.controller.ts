@@ -214,20 +214,37 @@ export class TreatmentMessageController {
   @SkipThrottle()
   @ApiOperation({ summary: 'Stream a treatment-message attachment' })
   @ApiParam({ name: 'attachmentId', type: String })
+  @ApiQuery({
+    name: 'variant',
+    required: false,
+    description:
+      'Optimized variant to serve inline (thumb | md | lg | avif | ' +
+      'model); falls back to the original while processing.',
+  })
   async download(
     @Param('attachmentId') attachmentId: string,
     @CurrentUser() user: JwtPayload,
     @Res() res: Response,
+    @Query('variant') variant?: string,
   ) {
-    const { stream, mimeType, fileName } =
-      await this.service.getAttachmentStream(attachmentId, {
-        userId: user.sub,
-        role: user.role as UserRole,
-      });
+    const { stream, mimeType, fileName, inline } =
+      await this.service.getAttachmentStream(
+        attachmentId,
+        {
+          userId: user.sub,
+          role: user.role as UserRole,
+        },
+        variant,
+      );
     res.setHeader('Content-Type', mimeType);
+    if (inline) {
+      // Derived previews render in place and are safe to cache —
+      // they're immutable per attachment id.
+      res.setHeader('Cache-Control', 'private, max-age=86400');
+    }
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="${encodeURIComponent(fileName)}"`,
+      `${inline ? 'inline' : 'attachment'}; filename="${encodeURIComponent(fileName)}"`,
     );
     stream.pipe(res);
   }

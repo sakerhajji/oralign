@@ -1,5 +1,6 @@
 import { Injectable, Logger, StreamableFile } from '@nestjs/common';
 import {
+  MediaProcessingStatus,
   OrderFile,
   OrderFileCategory,
   OrderStatus,
@@ -34,6 +35,10 @@ import {
   ToothInstructionDto,
   UpdateOrderDto,
 } from '../dto/order.dto';
+import { MediaProcessingService } from '../../media/media-processing.service';
+import { classifyMedia } from '../../media/media.constants';
+import { buildSequentialName } from '../../media/naming';
+import { MediaVariantInfo } from '../../media/media.types';
 
 type Caller = { userId: string; role: string };
 
@@ -46,7 +51,9 @@ const orderInclude = Prisma.validator<Prisma.DentalOrderInclude>()({
   },
   files: {
     where: { deletedAt: null },
-    orderBy: { createdAt: 'desc' },
+    // Saved upload order first (orderIndex is per order+category); the
+    // createdAt tie-break keeps legacy rows (all index 0) stable.
+    orderBy: [{ orderIndex: 'asc' }, { createdAt: 'asc' }],
   },
   // Used to compute notification badges in the orders list. `take: 1` keeps
   // the join tiny — Postgres only fetches one row per order, so this scales
@@ -145,6 +152,7 @@ export class OrderService {
     private readonly prisma: PrismaService,
     private readonly notifications: OrderNotificationService,
     private readonly events: EventEmitter2,
+    private readonly mediaProcessing: MediaProcessingService,
   ) {}
 
   readonly includeOrder = orderInclude;
@@ -1161,17 +1169,32 @@ export class OrderService {
     caller: Caller,
   ): Promise<OrderFileResponseDto[]> {
     this.ensureCanCreateOrModify(caller);
-    await this.findAccessibleOrder(id, caller);
+    const order = await this.findAccessibleOrder(id, caller);
 
     if (!files?.length) {
       throw new BadRequestException('No files uploaded');
     }
 
+    // Continue the per-(order, category) sequence — it drives both the
+    // display order and the `_NNN` suffix in the generated filename.
+    // Soft-deleted rows are counted on purpose: their index must never
+    // be reissued, or a new file could land on a path an old DB row
+    // still references.
+    const maxExisting = await this.prisma.orderFile.aggregate({
+      where: { orderId: id, category },
+      _max: { orderIndex: true },
+    });
+    let nextIndex = (maxExisting._max.orderIndex ?? 0) + 1;
+
     const savedFiles: Prisma.OrderFileCreateManyInput[] = [];
 
     for (const file of files) {
       this.validateFile(file, category);
-      const saved = await this.saveFileToDisk(id, category, file);
+      const saved = await this.saveFileToDisk(id, category, file, {
+        patientName: order.patient.fullName,
+        seq: nextIndex,
+      });
+      nextIndex += 1;
       savedFiles.push(saved);
     }
 
@@ -1183,8 +1206,16 @@ export class OrderService {
         deletedAt: null,
         relativePath: { in: savedFiles.map((file) => file.relativePath) },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ orderIndex: 'asc' }, { createdAt: 'asc' }],
     });
+
+    // Kick the async optimizer strictly AFTER the rows are committed —
+    // the upload response never waits on sharp/zip/stl work.
+    for (const file of orderFiles) {
+      if (file.processingStatus === MediaProcessingStatus.pending) {
+        this.mediaProcessing.enqueue('order-file', file.id);
+      }
+    }
 
     return orderFiles.map((file) => this.mapFileToDto(file));
   }
@@ -1194,7 +1225,7 @@ export class OrderService {
 
     const files = await this.prisma.orderFile.findMany({
       where: { orderId: id, deletedAt: null },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ orderIndex: 'asc' }, { createdAt: 'asc' }],
     });
 
     return files.map((file) => this.mapFileToDto(file));
@@ -1223,13 +1254,59 @@ export class OrderService {
     id: string,
     fileId: string,
     caller: Caller,
+    variant?: string,
   ): Promise<{
     stream: StreamableFile;
     file: OrderFile;
     absolutePath: string;
+    /** Content-Type to serve with. */
+    contentType: string;
+    /** true → render in place (variants); false → attachment download. */
+    inline: boolean;
+    /** Name used for Content-Disposition. */
+    downloadName: string;
   }> {
     await this.findAccessibleOrder(id, caller);
     const file = await this.findOrderFile(id, fileId);
+
+    // `?variant=thumb|md|lg|avif|model` — serve the derived artefact
+    // inline. Falls back to the original (still inline: the client
+    // asked for something to DISPLAY) when the variant isn't ready
+    // yet (processing) or never will be (failed/legacy) — so the
+    // frontend can request variants blindly without racing the queue.
+    if (variant) {
+      const variants = (file.variants ?? {}) as Record<
+        string,
+        Partial<MediaVariantInfo>
+      >;
+      const info = variants[variant];
+      if (info?.path) {
+        const variantAbs = this.resolveUploadPath(info.path);
+        if (fs.existsSync(variantAbs)) {
+          return {
+            stream: new StreamableFile(fs.createReadStream(variantAbs)),
+            file,
+            absolutePath: variantAbs,
+            contentType: variantContentType(info.format),
+            inline: true,
+            downloadName: path.basename(info.path),
+          };
+        }
+      }
+      const originalAbs = this.resolveUploadPath(file.relativePath);
+      if (!fs.existsSync(originalAbs)) {
+        throw new NotFoundException('Stored file not found');
+      }
+      return {
+        stream: new StreamableFile(fs.createReadStream(originalAbs)),
+        file,
+        absolutePath: originalAbs,
+        contentType: file.mimeType || 'application/octet-stream',
+        inline: true,
+        downloadName: file.generatedName ?? file.originalName,
+      };
+    }
+
     const absolutePath = this.resolveUploadPath(file.relativePath);
 
     if (!fs.existsSync(absolutePath)) {
@@ -1240,6 +1317,11 @@ export class OrderService {
       stream: new StreamableFile(fs.createReadStream(absolutePath)),
       file,
       absolutePath,
+      contentType: 'application/octet-stream',
+      inline: false,
+      // Downloads land on disk with the clean generated name; legacy
+      // rows (no generatedName) keep the original client filename.
+      downloadName: file.generatedName ?? file.originalName,
     };
   }
 
@@ -1530,15 +1612,32 @@ export class OrderService {
     orderId: string,
     category: OrderFileCategory,
     file: Express.Multer.File,
+    naming: { patientName: string | null | undefined; seq: number },
   ): Promise<Prisma.OrderFileCreateManyInput> {
-    const safeBase = path
-      .basename(file.originalname, path.extname(file.originalname))
-      .replace(/[^a-zA-Z0-9._-]+/g, '-')
-      .slice(0, 80);
     const ext = path.extname(file.originalname).toLowerCase();
-    const fileName = `${safeBase || 'file'}-${uuidv4()}${ext}`;
-    const relativePath = path.posix.join('orders', orderId, category, fileName);
-    const absolutePath = this.resolveUploadPath(relativePath);
+
+    // Clean ordered name: `<Patient>_<category>_<NNN>.<ext>` (e.g.
+    // "Marie-Dupont_front-photo_003.jpg"). The client's original
+    // filename is preserved in `originalName`. These files live behind
+    // the RBAC'd download endpoint — never under a public URL — so a
+    // readable patient name here is a feature for the lab, not a leak.
+    let fileName = buildSequentialName(
+      [naming.patientName || 'patient', category.replace(/_/g, '-')],
+      naming.seq,
+      ext,
+    );
+    let relativePath = path.posix.join('orders', orderId, category, fileName);
+    let absolutePath = this.resolveUploadPath(relativePath);
+
+    // Collision guard — two concurrent uploads to the same category
+    // can race the sequence read. Salt the stem instead of failing
+    // the upload; the DB row still records its own orderIndex.
+    if (fs.existsSync(absolutePath)) {
+      const stem = ext ? fileName.slice(0, -ext.length) : fileName;
+      fileName = `${stem}-${uuidv4().slice(0, 8)}${ext}`;
+      relativePath = path.posix.join('orders', orderId, category, fileName);
+      absolutePath = this.resolveUploadPath(relativePath);
+    }
 
     await fs.promises.mkdir(path.dirname(absolutePath), { recursive: true });
     await fs.promises.writeFile(absolutePath, file.buffer);
@@ -1551,6 +1650,13 @@ export class OrderService {
       relativePath,
       mimeType: file.mimetype || 'application/octet-stream',
       size: file.size,
+      generatedName: fileName,
+      orderIndex: naming.seq,
+      // pending = the async pipeline applies (image/zip/stl); null =
+      // nothing to derive (pdf, video, …) — readers serve the original.
+      processingStatus: classifyMedia(file.mimetype, fileName)
+        ? MediaProcessingStatus.pending
+        : null,
     };
   }
 
@@ -1674,6 +1780,60 @@ export class OrderService {
       mimeType: file.mimeType,
       size: file.size,
       createdAt: file.createdAt,
+      generatedName: file.generatedName ?? undefined,
+      orderIndex: file.orderIndex,
+      width: file.width ?? undefined,
+      height: file.height ?? undefined,
+      processingStatus: file.processingStatus ?? undefined,
+      variants: sanitizeVariantsForApi(file.variants),
+      // zip/stl descriptors are safe by construction (counts, names,
+      // bbox — never disk paths).
+      mediaMetadata:
+        (file.mediaMetadata as Record<string, unknown> | null) ?? undefined,
     };
   }
+}
+
+/** webp/avif/glb → the Content-Type the browser needs. */
+function variantContentType(format: string | undefined): string {
+  switch (format) {
+    case 'webp':
+      return 'image/webp';
+    case 'avif':
+      return 'image/avif';
+    case 'glb':
+      return 'model/gltf-binary';
+    default:
+      return 'application/octet-stream';
+  }
+}
+
+/**
+ * Strip disk paths from the variants JSON before it crosses the API:
+ * clients address variants by NAME (`?variant=thumb`), never by path.
+ */
+function sanitizeVariantsForApi(
+  variants: Prisma.JsonValue | null,
+): Record<
+  string,
+  { width?: number; height?: number; sizeBytes?: number; format?: string }
+> | undefined {
+  if (!variants || typeof variants !== 'object' || Array.isArray(variants)) {
+    return undefined;
+  }
+  const out: Record<
+    string,
+    { width?: number; height?: number; sizeBytes?: number; format?: string }
+  > = {};
+  for (const [name, raw] of Object.entries(variants)) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+    const v = raw as Partial<MediaVariantInfo>;
+    out[name] = {
+      width: typeof v.width === 'number' ? v.width : undefined,
+      height: typeof v.height === 'number' ? v.height : undefined,
+      sizeBytes: typeof v.sizeBytes === 'number' ? v.sizeBytes : undefined,
+      format: typeof v.format === 'string' ? v.format : undefined,
+    };
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }

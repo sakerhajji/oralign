@@ -22,6 +22,7 @@ import {
   SliderMediaFilterDto,
   UpdateSliderMediaDto,
 } from '../dto/slider-media.dto';
+import { MediaProcessingService } from '../../media/media-processing.service';
 
 const ACTIVE_CACHE_KEY = (device: SliderMediaDeviceTarget) =>
   `slider:active:${device}`;
@@ -44,6 +45,7 @@ export class SliderMediaService {
     private readonly prisma: PrismaService,
     private readonly events: EventEmitter2,
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
+    private readonly mediaProcessing: MediaProcessingService,
   ) {}
 
   // ─── Reads ─────────────────────────────────────────────────────────
@@ -171,6 +173,10 @@ export class SliderMediaService {
 
     await this.invalidateActiveCacheFor(dto.deviceTargets);
     this.events.emit('slider.changed', { id: created.id });
+    // Async variant generation for uploaded hero images — the slide
+    // serves its original until the worker writes variants (the
+    // active-list cache TTL picks them up shortly after).
+    this.mediaProcessing.enqueue('slider-media', created.id);
     return created;
   }
 
@@ -219,6 +225,10 @@ export class SliderMediaService {
       ...new Set([...existing.deviceTargets, ...nextTargets]),
     ]);
     this.events.emit('slider.changed', { id });
+    // Re-derive (or clear) variants whenever a slide changes — the
+    // worker reads the row fresh, so replaced URLs regenerate and
+    // rows that became external/video settle to empty variants.
+    this.mediaProcessing.enqueue('slider-media', id);
     return updated;
   }
 

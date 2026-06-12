@@ -501,8 +501,10 @@ function ActiveConversation({
   // The attachment endpoint is JWT-guarded — a plain `<img src>` would
   // 401 because the browser doesn't attach Authorization headers.
   // Fetch via axios (which does), then render the resulting blob URL.
+  // Full view asks for the `lg` optimized variant — the backend falls
+  // back to the original automatically when the variant isn't ready.
   const lightboxUrl = lightbox
-    ? supportAttachmentUrl(lightbox.conversationId, lightbox.id)
+    ? supportAttachmentUrl(lightbox.conversationId, lightbox.id) + '?variant=lg'
     : null;
   const lightboxImg = useAuthedImage(lightboxUrl);
 
@@ -799,8 +801,10 @@ function AdminMessageBubble({
   lang: 'en' | 'fr';
 }) {
   const { t } = useT();
+  // The inline bubble only needs the `thumb` optimized variant (server
+  // falls back to the original when the variant isn't generated yet).
   const attachmentApiUrl = message.attachmentRelativePath
-    ? supportAttachmentUrl(message.conversationId, message.id)
+    ? supportAttachmentUrl(message.conversationId, message.id) + '?variant=thumb'
     : null;
   // Same JWT-guarded route as the lightbox — fetch via axios to get
   // the Authorization header attached, then render the blob URL.
@@ -843,6 +847,8 @@ function AdminMessageBubble({
                 <img
                   src={attachmentSrc}
                   alt={attachmentName}
+                  loading="lazy"
+                  decoding="async"
                   className="max-h-60 w-auto max-w-full cursor-zoom-in rounded-md object-contain"
                 />
               ) : (

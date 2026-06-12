@@ -425,8 +425,12 @@ export class UserController {
       throw new BadRequestException('No file uploaded');
     }
 
-    // Upload the file
-    const avatarUrl = await this.storageService.uploadFile(file, 'avatars');
+    // Upload the file — avatars are downscaled to ≤512px WebP at
+    // write time (they render at 28-40px everywhere; the original
+    // multi-MB phone photo would be pure waste on every page view).
+    const avatarUrl = await this.storageService.uploadFile(file, 'avatars', {
+      optimizeImage: true,
+    });
 
     // Update user with new avatar URL
     return this.userService.updateUser(

@@ -4,7 +4,6 @@ import {
   Controller,
   Delete,
   Get,
-  Header,
   HttpCode,
   HttpStatus,
   Param,
@@ -574,21 +573,45 @@ export class OrderController {
   // 10-req/10s "short" bucket and produce HTTP 429.
   @SkipThrottle()
   @HttpCode(HttpStatus.OK)
-  @Header('Content-Type', 'application/octet-stream')
-  @ApiOperation({ summary: 'Download an order file' })
+  @ApiOperation({ summary: 'Download an order file (or an optimized variant)' })
   @ApiParam({ name: 'id', type: String })
   @ApiParam({ name: 'fileId', type: String })
+  @ApiQuery({
+    name: 'variant',
+    required: false,
+    description:
+      'Derived artefact to serve inline: thumb | md | lg | avif | model. ' +
+      'Falls back to the original (inline) while processing is pending.',
+  })
   async downloadFile(
     @Param('id') id: string,
     @Param('fileId') fileId: string,
     @CurrentUser() user: JwtPayload,
     @Res() response: Response,
+    @Query('variant') variant?: string,
   ): Promise<void> {
-    const { absolutePath, file } = await this.orderService.getDownloadFile(
+    const dl = await this.orderService.getDownloadFile(
       id,
       fileId,
       { userId: user.sub, role: user.role },
+      variant,
     );
-    response.download(absolutePath, file.originalName);
+
+    if (dl.inline) {
+      // Variants are immutable per file id (re-processing overwrites in
+      // place, new uploads get new ids) — let the browser keep them for
+      // a day instead of re-fetching on every order-detail visit.
+      response.setHeader('Content-Type', dl.contentType);
+      response.setHeader('Cache-Control', 'private, max-age=86400');
+      response.setHeader(
+        'Content-Disposition',
+        `inline; filename="${dl.downloadName.replace(/"/g, '')}"`,
+      );
+      dl.stream.getStream().pipe(response);
+      return;
+    }
+
+    response.setHeader('Content-Type', 'application/octet-stream');
+    response.download(dl.absolutePath, dl.downloadName);
   }
 }

@@ -98,8 +98,12 @@ export function TreatmentConversation({
   const [lightboxAttachment, setLightboxAttachment] = useState<
     ChatAttachment | null
   >(null);
+  // Full view asks for the `lg` optimized variant — the backend falls
+  // back to the original automatically when the variant isn't ready.
+  // (Non-image download chips keep the plain URL so files stay originals.)
   const lightboxApiUrl = lightboxAttachment
-    ? treatmentPlansService.attachmentDownloadUrl(lightboxAttachment.id)
+    ? treatmentPlansService.attachmentDownloadUrl(lightboxAttachment.id) +
+      '?variant=lg'
     : null;
   const lightboxImg = useAuthedImage(lightboxApiUrl);
   const isPlanner =
@@ -638,7 +642,11 @@ function ChatAttachmentImage({
   isOwn: boolean;
   onOpen: () => void;
 }) {
-  const apiUrl = treatmentPlansService.attachmentDownloadUrl(attachment.id);
+  // The inline bubble only needs the `thumb` optimized variant (server
+  // falls back to the original when the variant isn't generated yet).
+  const apiUrl =
+    treatmentPlansService.attachmentDownloadUrl(attachment.id) +
+    '?variant=thumb';
   const { src, loading } = useAuthedImage(apiUrl);
 
   return (

@@ -1,12 +1,14 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ChevronLeftIcon, ChevronRightIcon, PlayIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   SliderMediaDeviceTarget,
+  SliderMediaSourceType,
   SliderMediaType,
   type SliderMedia,
 } from '@/lib/types';
@@ -17,6 +19,24 @@ import {
 import { resolveSliderMediaUrl } from '@/lib/api/slider-media.service';
 
 const AUTOPLAY_MS = 6_000;
+
+/**
+ * Optimized-variant descriptor as stored in the slider rows'
+ * `desktopVariants` / `mobileVariants` JSON columns. `path` is
+ * uploads-root-relative (e.g. `slider/abc__lg.webp`), so prefixing
+ * `/uploads/` yields the same shape `resolveSliderMediaUrl` already
+ * resolves to a public URL.
+ *
+ * Typed locally (intersection over the shared SliderMedia) because the
+ * variant columns are an additive backend detail this carousel alone
+ * consumes — the shared type stays untouched.
+ */
+type SliderVariant = { path?: string };
+
+type SlideWithVariants = SliderMedia & {
+  desktopVariants?: Record<string, SliderVariant | undefined> | null;
+  mobileVariants?: Record<string, SliderVariant | undefined> | null;
+};
 
 /**
  * Doctor-dashboard hero carousel.
@@ -98,6 +118,9 @@ export function DashboardSlider() {
         {slides.map((s, i) => {
           const url = urlFor(s, device);
           if (!url) return null;
+          // Uploaded images get the device-appropriate resized variant
+          // when the backend has one; everything else keeps `url`.
+          const imageUrl = variantUrlFor(s, device) ?? url;
           const inner = (
             <>
               {s.mediaType === SliderMediaType.VIDEO ? (
@@ -111,12 +134,22 @@ export function DashboardSlider() {
                   poster={resolveSliderMediaUrl(s.desktopUrl) ?? undefined}
                 />
               ) : (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={url}
+                // `unoptimized` because the optimizer proxy would fetch
+                // NEXT_PUBLIC_API_URL server-side from inside the
+                // frontend container, where `localhost:3000` is the
+                // container itself (broken in Docker dev); the variant
+                // files are already resized WebP so a second re-encode
+                // buys nothing. `fill` anchors to the nearest positioned
+                // ancestor — the slide wrapper / link below.
+                <Image
+                  src={imageUrl}
                   alt={s.title}
-                  loading={i === 0 ? 'eager' : 'lazy'}
-                  className="absolute inset-0 size-full object-cover"
+                  fill
+                  sizes="100vw"
+                  unoptimized
+                  priority={i === 0}
+                  loading={i === 0 ? undefined : 'lazy'}
+                  className="object-cover"
                 />
               )}
               {/* Soft caption strip — only when there's a title or a
@@ -160,7 +193,9 @@ export function DashboardSlider() {
                   href={s.linkUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="block size-full"
+                  // `relative` so the next/image `fill` slide anchors to
+                  // the link box (same size as the slide wrapper).
+                  className="relative block size-full"
                 >
                   {inner}
                 </a>
@@ -224,6 +259,34 @@ function urlFor(s: SliderMedia, device: SliderMediaDeviceTarget): string | null 
   const primary = device === SliderMediaDeviceTarget.MOBILE ? s.mobileUrl : s.desktopUrl;
   const fallback = device === SliderMediaDeviceTarget.MOBILE ? s.desktopUrl : s.mobileUrl;
   return resolveSliderMediaUrl(primary ?? fallback);
+}
+
+/**
+ * Best optimized-variant URL for the rendering device, or null.
+ *
+ * Desktop heroes are wide so prefer `lg` then `md`; mobile flips that
+ * order. Only uploaded images carry variants — external URLs and
+ * videos always render their original source, and callers fall back
+ * to `urlFor` while the backend is still generating variants.
+ */
+function variantUrlFor(
+  s: SlideWithVariants,
+  device: SliderMediaDeviceTarget,
+): string | null {
+  if (s.mediaType !== SliderMediaType.IMAGE) return null;
+  if (s.sourceType !== SliderMediaSourceType.UPLOAD) return null;
+  const variants =
+    device === SliderMediaDeviceTarget.MOBILE
+      ? s.mobileVariants
+      : s.desktopVariants;
+  if (!variants) return null;
+  const preferred =
+    device === SliderMediaDeviceTarget.MOBILE ? ['md', 'lg'] : ['lg', 'md'];
+  for (const key of preferred) {
+    const path = variants[key]?.path;
+    if (path) return resolveSliderMediaUrl(`/uploads/${path}`);
+  }
+  return null;
 }
 
 /**

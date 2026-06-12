@@ -1155,7 +1155,11 @@ function ClinicalImagesSection({
     (file: OrderFile) => {
       const base =
         process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
-      return `${base}${ordersService.getDownloadUrl(review.orderId, file.id)}?t=${file.createdAt}`;
+      // `variant=lg` — one ~1600px WebP serves BOTH the gallery card and
+      // the lightbox (they share the same blob), replacing the multi-MB
+      // original this used to pull per slot. The backend falls back to
+      // the original automatically for legacy/unprocessed files.
+      return `${base}${ordersService.getDownloadUrl(review.orderId, file.id)}?variant=lg&t=${file.createdAt}`;
     },
     [review.orderId],
   );

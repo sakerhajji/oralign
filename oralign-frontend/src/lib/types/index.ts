@@ -817,6 +817,46 @@ export interface ToothInstruction {
   note?: string | null;
 }
 
+/** Lifecycle of the backend's async media-optimization pipeline. */
+export type MediaProcessingStatus =
+  | 'pending'
+  | 'processing'
+  | 'completed'
+  | 'failed';
+
+/**
+ * One derived artefact (no disk path crosses the API — fetch it via the
+ * download endpoint with `?variant=<name>`).
+ */
+export interface MediaVariantInfo {
+  width?: number;
+  height?: number;
+  sizeBytes?: number;
+  /** 'webp' | 'avif' | 'glb' */
+  format?: string;
+}
+
+/** Keys: thumb (~300px) | md (~800px) | lg (~1600px) | avif | model (GLB). */
+export type MediaVariants = Record<string, MediaVariantInfo>;
+
+/** Safe ZIP description — central directory only, nothing extracted. */
+export interface ZipMediaMetadata {
+  kind: 'zip';
+  entryCount: number;
+  topLevelEntries: string[];
+  totalUncompressedBytes: number;
+  truncated: boolean;
+  suspicious: boolean;
+}
+
+export interface StlMediaMetadata {
+  kind: 'stl';
+  format: 'binary' | 'ascii';
+  triangleCount: number;
+  vertexCount: number;
+  bbox: { min: [number, number, number]; max: [number, number, number] };
+}
+
 export interface OrderFile {
   id: string;
   category: OrderFileCategory;
@@ -826,6 +866,17 @@ export interface OrderFile {
   mimeType: string;
   size: number;
   createdAt: string;
+  // ── Media-optimization pipeline (absent on legacy rows) ──────────
+  /** Clean ordered filename (Patient_Category_NNN.ext) used for downloads. */
+  generatedName?: string;
+  /** Per order+category upload sequence; 0 on legacy rows. */
+  orderIndex?: number;
+  /** Original image dimensions (px). */
+  width?: number;
+  height?: number;
+  processingStatus?: MediaProcessingStatus;
+  variants?: MediaVariants;
+  mediaMetadata?: ZipMediaMetadata | StlMediaMetadata | Record<string, unknown>;
 }
 
 export interface DentalOrder {

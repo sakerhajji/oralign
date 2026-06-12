@@ -21,6 +21,7 @@ import {
   ApiConsumes,
   ApiOperation,
   ApiParam,
+  ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
@@ -277,23 +278,67 @@ export class SupportController {
   @ApiOperation({ summary: 'Stream an image attachment for a message.' })
   @ApiParam({ name: 'conversationId' })
   @ApiParam({ name: 'messageId' })
+  @ApiQuery({
+    name: 'variant',
+    required: false,
+    description:
+      'Optimized variant (thumb | md | lg | avif); falls back to the ' +
+      'original while processing is pending.',
+  })
   async downloadAttachment(
     @Param('conversationId') conversationId: string,
     @Param('messageId') messageId: string,
     @CurrentUser() user: JwtPayload,
     @Res() res: Response,
+    @Query('variant') variant?: string,
   ) {
     const { conversation, messages } = await this.service.getConversation(
       conversationId,
       { userId: user.sub, role: user.role as UserRole },
     );
     const message = messages.find(
-      (m: { id: string; attachmentRelativePath: string | null; attachmentMime: string | null; attachmentName: string | null }) =>
+      (m: { id: string; attachmentRelativePath: string | null; attachmentMime: string | null; attachmentName: string | null; attachmentVariants?: unknown }) =>
         m.id === messageId,
     );
     if (!message || !message.attachmentRelativePath) {
       throw new NotFoundException('Attachment not found.');
     }
+
+    // Serve the derived thumbnail/preview when asked and available —
+    // chat bubbles request `?variant=thumb` blindly and rely on this
+    // falling back to the original until the async pipeline catches up.
+    if (
+      variant &&
+      message.attachmentVariants &&
+      typeof message.attachmentVariants === 'object'
+    ) {
+      const info = (
+        message.attachmentVariants as Record<
+          string,
+          { path?: string; format?: string }
+        >
+      )[variant];
+      if (info?.path) {
+        try {
+          const variantAbs = this.service.resolveSafeAttachmentPath(info.path);
+          if (fs.existsSync(variantAbs)) {
+            res.setHeader(
+              'Content-Type',
+              info.format === 'avif' ? 'image/avif' : 'image/webp',
+            );
+            // Variants are immutable per message id — cache hard.
+            res.setHeader('Cache-Control', 'private, max-age=86400');
+            res.setHeader('Content-Disposition', 'inline');
+            fs.createReadStream(variantAbs).pipe(res);
+            void conversation.id;
+            return;
+          }
+        } catch {
+          /* fall back to the original below */
+        }
+      }
+    }
+
     const abs = this.service.resolveSafeAttachmentPath(
       message.attachmentRelativePath,
     );

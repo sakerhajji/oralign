@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import {
+  MediaProcessingStatus,
   TreatmentAttachmentCategory,
   TreatmentMessageType,
   UserRole,
@@ -14,6 +15,9 @@ import {
   NotFoundException,
 } from '../../common/exceptions/app.exception';
 import { TreatmentChatGateway } from '../gateways/treatment-chat.gateway';
+import { MediaProcessingService } from '../../media/media-processing.service';
+import { classifyMedia } from '../../media/media.constants';
+import { MediaVariantInfo } from '../../media/media.types';
 
 type Caller = { userId: string; role: UserRole };
 
@@ -61,6 +65,7 @@ export class TreatmentMessageService {
     private readonly prisma: PrismaService,
     @Inject(forwardRef(() => TreatmentChatGateway))
     private readonly chatGateway: TreatmentChatGateway,
+    private readonly mediaProcessing: MediaProcessingService,
   ) {}
 
   // ─── Access checks ────────────────────────────────────────────────────────
@@ -273,6 +278,11 @@ export class TreatmentMessageService {
               mimeType: file.mimetype || null,
               sizeBytes: file.size,
               category,
+              // Async media pipeline: pending = variants will be
+              // derived (image/zip/stl); null = nothing to derive.
+              processingStatus: classifyMedia(file.mimetype, safeName)
+                ? MediaProcessingStatus.pending
+                : null,
             },
           });
 
@@ -307,6 +317,14 @@ export class TreatmentMessageService {
               `socket broadcast failed: ${(err as Error).message}`,
             );
           }
+          // Enqueue strictly after the transaction committed — the
+          // worker re-reads each row by id, so a job racing an
+          // uncommitted tx would just see nothing.
+          for (const att of created.attachments) {
+            if (att.processingStatus === MediaProcessingStatus.pending) {
+              this.mediaProcessing.enqueue('treatment-attachment', att.id);
+            }
+          }
         }
         return created;
       });
@@ -314,7 +332,11 @@ export class TreatmentMessageService {
 
   // ─── Attachments — download / delete ─────────────────────────────────────
 
-  async getAttachmentStream(attachmentId: string, caller: Caller) {
+  async getAttachmentStream(
+    attachmentId: string,
+    caller: Caller,
+    variant?: string,
+  ) {
     const att = await this.prisma.treatmentMessageAttachment.findUnique({
       where: { id: attachmentId },
       select: {
@@ -323,6 +345,7 @@ export class TreatmentMessageService {
         filePath: true,
         mimeType: true,
         deletedAt: true,
+        variants: true,
         message: { select: { treatmentPlanId: true } },
       },
     });
@@ -331,11 +354,45 @@ export class TreatmentMessageService {
     }
     await this.assertPlanReadable(att.message.treatmentPlanId, caller);
 
+    // `?variant=thumb|md|lg|avif|model` → serve the derived artefact
+    // inline; silently falls back to the original while processing is
+    // pending (or for legacy/failed rows), so chat bubbles can request
+    // thumbnails unconditionally.
+    if (variant && att.variants && typeof att.variants === 'object') {
+      const info = (
+        att.variants as Record<string, Partial<MediaVariantInfo>>
+      )[variant];
+      if (info?.path) {
+        try {
+          const variantAbs = this.resolveSafePath(info.path);
+          if (fs.existsSync(variantAbs)) {
+            const mime =
+              info.format === 'webp'
+                ? 'image/webp'
+                : info.format === 'avif'
+                  ? 'image/avif'
+                  : info.format === 'glb'
+                    ? 'model/gltf-binary'
+                    : 'application/octet-stream';
+            return {
+              stream: fs.createReadStream(variantAbs),
+              fileName: path.basename(info.path),
+              mimeType: mime,
+              inline: true,
+            };
+          }
+        } catch {
+          /* fall through to original */
+        }
+      }
+    }
+
     const abs = this.resolveSafePath(att.filePath);
     return {
       stream: fs.createReadStream(abs),
       fileName: att.fileName,
       mimeType: att.mimeType ?? 'application/octet-stream',
+      inline: Boolean(variant),
     };
   }
 

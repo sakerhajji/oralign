@@ -2821,6 +2821,30 @@ export const dict = {
     previewTitle: { en: 'Invoice preview', fr: 'Aperçu de la facture' } as T,
   },
 
+  // ─── Optimized media (variants, ZIP metadata, 3D previews) ──────
+  media: {
+    view3d: { en: 'View 3D', fr: 'Voir en 3D' } as T,
+    loading3d: { en: 'Loading 3D viewer…', fr: 'Chargement de la vue 3D…' } as T,
+    optimizing: { en: 'Optimizing…', fr: 'Optimisation…' } as T,
+    preview: { en: 'Preview', fr: 'Aperçu' } as T,
+    download: { en: 'Download', fr: 'Télécharger' } as T,
+    zipArchive: { en: 'ZIP archive', fr: 'Archive ZIP' } as T,
+    zipFiles: { en: '{count} files', fr: '{count} fichiers' } as T,
+    zipUncompressed: { en: 'Uncompressed: {size}', fr: 'Décompressé : {size}' } as T,
+    zipContents: { en: 'Contents', fr: 'Contenu' } as T,
+    zipMore: { en: '+ {count} more…', fr: '+ {count} autres…' } as T,
+    zipSuspicious: {
+      en: 'This archive declares an unusually large content — handle with care.',
+      fr: 'Cette archive déclare un contenu inhabituellement volumineux — à manipuler avec prudence.',
+    } as T,
+    zipNoPreview: {
+      en: 'Archives are never opened in the browser — download to view.',
+      fr: 'Les archives ne s’ouvrent jamais dans le navigateur — téléchargez pour consulter.',
+    } as T,
+    stlModel: { en: '3D model', fr: 'Modèle 3D' } as T,
+    stlTriangles: { en: '{count} triangles', fr: '{count} triangles' } as T,
+  },
+
   // ─── Toast messages (src/lib/hooks/*) ───────────────────────────
   toasts: {
     account: {

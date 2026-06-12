@@ -559,6 +559,18 @@ export function useOrderFiles(id?: string): UseQueryResult<OrderFile[], Error> {
     refetchOnMount: 'always',
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
+    // Right after an upload the media pipeline is still deriving
+    // thumbnails/previews in the background (processingStatus pending/
+    // processing). Poll gently until every file settles so thumbnails
+    // pop in without a manual reload — then stop entirely.
+    refetchInterval: (query) => {
+      const busy = query.state.data?.some(
+        (file) =>
+          file.processingStatus === 'pending' ||
+          file.processingStatus === 'processing',
+      );
+      return busy ? 5_000 : false;
+    },
   });
 }
 

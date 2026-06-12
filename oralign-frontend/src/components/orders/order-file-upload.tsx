@@ -645,8 +645,15 @@ function LegacyFileRow({
   onDelete: () => void;
 }) {
   const previewType = getPreviewType(file);
-  const needsBlobPreview = ['image', 'pdf', 'video'].includes(previewType);
-  const { objectUrl } = useSecureFileUrl(orderId, file.id, needsBlobPreview);
+  // Rows only ever fetch the lightweight thumbnail, and only for
+  // images — PDFs/videos load lazily inside the fullscreen viewer the
+  // moment the user actually opens them.
+  const { objectUrl } = useSecureFileUrl(
+    orderId,
+    file.id,
+    previewType === 'image',
+    'thumb',
+  );
 
   return (
     <div className="flex flex-col gap-3 rounded-md border bg-background p-3 sm:flex-row sm:items-center sm:justify-between">
@@ -662,7 +669,7 @@ function LegacyFileRow({
           objectUrl={objectUrl}
           file={file}
           type={previewType}
-          disabled={!objectUrl && previewType !== 'model'}
+          disabled={false}
         />
         <Button
           type="button"
@@ -701,13 +708,25 @@ function SecureFilePreviewCard({
   readOnly?: boolean;
   onDelete: () => void;
 }) {
+  const { t } = useT();
   const previewType = getPreviewType(file);
-  const needsBlobPreview = ['image', 'pdf', 'video'].includes(previewType);
+  // Cards fetch ONLY the ~300px thumbnail, and only for images. The
+  // old behaviour blob-fetched the FULL original for images, PDFs and
+  // videos — an order with 8 clinical photos pulled 20-40 MB just to
+  // paint 160px cards. PDFs/videos now load lazily in the fullscreen
+  // viewer when opened.
   const { objectUrl, loading, error, refresh } = useSecureFileUrl(
     orderId,
     file.id,
-    needsBlobPreview,
+    previewType === 'image',
+    'thumb',
   );
+  const isOptimizing =
+    file.processingStatus === 'pending' || file.processingStatus === 'processing';
+  const zipMeta =
+    file.mediaMetadata && (file.mediaMetadata as { kind?: string }).kind === 'zip'
+      ? (file.mediaMetadata as unknown as import('@/lib/types').ZipMediaMetadata)
+      : undefined;
 
   return (
     <div className="overflow-hidden rounded-md border bg-background shadow-sm">
@@ -733,15 +752,21 @@ function SecureFilePreviewCard({
           <p className="truncate text-sm font-semibold">{displayFileName(file)}</p>
           <p className="text-xs text-muted-foreground">
             {labelForCategory(file.category)} · {formatBytes(file.size)}
+            {isOptimizing && (
+              <span className="ml-1 text-primary/80">
+                · {t('media.optimizing')}
+              </span>
+            )}
           </p>
         </div>
+        {zipMeta && <ZipMetaSummary meta={zipMeta} />}
         <div className="flex flex-wrap gap-2">
           <PreviewDialog
             objectUrl={objectUrl}
             orderId={orderId}
             file={file}
             type={previewType}
-            disabled={!objectUrl && previewType !== 'model'}
+            disabled={false}
           />
           <Button
             type="button"
@@ -829,11 +854,34 @@ function PreviewSurface({
   }
 
   if (type === 'model' && extensionFor(file.originalName) === 'stl') {
-    return <StlModelViewer orderId={orderId} file={file} large={large} />;
+    // The live three.js viewer is EXPENSIVE (multi-MB fetch + WebGL
+    // context per slot) — it only mounts in the fullscreen dialog.
+    // Cards show the server-rendered thumbnail (or a placeholder while
+    // the pipeline hasn't produced one yet).
+    return large ? (
+      <StlModelViewer orderId={orderId} file={file} large />
+    ) : (
+      <StlStaticPreview orderId={orderId} file={file} />
+    );
   }
 
   if (type === 'model') {
     return <ModelPlaceholder file={file} large={large} />;
+  }
+
+  // ZIP archives are NEVER rendered in the browser — show their safe
+  // server-side metadata (entry count, top-level listing) instead.
+  if (
+    file.mediaMetadata &&
+    (file.mediaMetadata as { kind?: string }).kind === 'zip'
+  ) {
+    return (
+      <ZipMetaPanel
+        meta={file.mediaMetadata as unknown as import('@/lib/types').ZipMediaMetadata}
+        file={file}
+        large={large}
+      />
+    );
   }
 
   return (
@@ -891,6 +939,21 @@ function FullscreenFileViewer({
 }) {
   const [open, setOpen] = useState(false);
 
+  // Lazy high-res fetch — runs ONLY once the dialog opens. Images pull
+  // the ~1600px `lg` variant (the card already holds the thumb, which
+  // shows instantly below while this loads); PDFs and videos pull
+  // their original since nothing lighter can represent them. Nothing
+  // here is fetched while the dialog stays closed — that's the whole
+  // point of dropping the eager full-size card fetches.
+  const wantsOwnFetch = type === 'image' || type === 'pdf' || type === 'video';
+  const fullRes = useSecureFileUrl(
+    orderId,
+    file.id,
+    open && wantsOwnFetch,
+    type === 'image' ? 'lg' : undefined,
+  );
+  const effectiveUrl = fullRes.objectUrl ?? objectUrl;
+
   // Stop click-to-close from firing when the user clicks ON the image —
   // only background clicks should dismiss. Defined here so both image and
   // non-image branches share it.
@@ -943,7 +1006,7 @@ function FullscreenFileViewer({
             child max-h-full → image) because some flexbox/grid combinations
             stop propagating the height cap, leaving the image at intrinsic
             size and clipping past the viewport. */}
-        {type === 'image' && objectUrl ? (
+        {type === 'image' && effectiveUrl ? (
           // ── Image preview surface ──
           // Was `flex h-full w-full` with inline `maxWidth/maxHeight:100%`
           // on the <img>. That path breaks for portrait phone photos
@@ -966,13 +1029,17 @@ function FullscreenFileViewer({
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={objectUrl}
+              src={effectiveUrl}
               alt={displayFileName(file)}
               draggable={false}
               decoding="async"
               onClick={(event) => event.stopPropagation()}
               className="block max-h-full max-w-full select-none rounded-md object-contain shadow-2xl"
             />
+          </div>
+        ) : wantsOwnFetch && fullRes.loading && !effectiveUrl ? (
+          <div className="flex h-full w-full items-center justify-center pt-14">
+            <Loader2 className="h-8 w-8 animate-spin text-white/70" />
           </div>
         ) : (
           <div
@@ -985,7 +1052,7 @@ function FullscreenFileViewer({
             >
               <PreviewSurface
                 orderId={orderId}
-                objectUrl={objectUrl}
+                objectUrl={effectiveUrl}
                 file={file}
                 type={type}
                 large
@@ -1008,6 +1075,7 @@ function SlotFilePreview({
   /** Pre-hoisted from the parent so we don't double-fetch the blob. */
   secureFile: SecureFileResult;
 }) {
+  const { t } = useT();
   const previewType = getPreviewType(file);
   const { objectUrl, loading, error } = secureFile;
 
@@ -1041,6 +1109,10 @@ function SlotFilePreview({
               // viewer. Background tint already provides the framing.
               className="h-full w-full object-contain bg-muted/40"
             />
+          ) : previewType === 'model' ? (
+            // Static server-rendered thumbnail — the live 3D viewer
+            // only mounts when the user opens the fullscreen dialog.
+            <StlStaticPreview orderId={orderId} file={file} />
           ) : (
             <span className="grid h-full w-full place-items-center text-muted-foreground">
               {previewType === 'pdf' ? (
@@ -1055,7 +1127,7 @@ function SlotFilePreview({
           {/* Hover affordance — solid pill in the bottom-right corner so it
               never sits ON the patient photo full-width. */}
           <span className="pointer-events-none absolute bottom-2 right-2 rounded-full bg-foreground/85 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-background opacity-0 shadow transition group-hover:opacity-100">
-            View
+            {previewType === 'model' ? t('media.view3d') : 'View'}
           </span>
         </button>
       }
@@ -1099,13 +1171,18 @@ function ClinicalMediaSlot({
   );
 
   // Hoist the secure-blob fetch up here (instead of leaving it inside
-  // SlotFilePreview) so both the preview AND the Edit button reuse the same
-  // cached blob — no duplicate authenticated request, no token-refresh race.
+  // SlotFilePreview) so the preview thumbnail is fetched exactly once.
+  // The slot grid fetches THUMB variants only — 8 clinical slots used
+  // to pull 8 full-resolution originals on page load; now it's 8
+  // ~10 KB WebPs. Edit/Copy fetch the original on demand (below).
   const isImage = !!file && file.mimeType.startsWith('image/');
   const previewType = file ? getPreviewType(file) : 'file';
-  const needsBlobPreview =
-    !!file && ['image', 'pdf', 'video'].includes(previewType);
-  const secureFile = useSecureFileUrl(orderId, file?.id ?? '', needsBlobPreview);
+  const secureFile = useSecureFileUrl(
+    orderId,
+    file?.id ?? '',
+    !!file && previewType === 'image',
+    'thumb',
+  );
 
   // Intercept the OS picker — instead of uploading immediately, open the
   // editor so the user can rotate/flip the image first. Non-image files
@@ -1121,31 +1198,20 @@ function ClinicalMediaSlot({
     }
   };
 
-  // Re-open the editor with the ALREADY-UPLOADED image. We don't refetch
-  // the bytes — `useSecureFileUrl` already loaded them into a blob: URL for
-  // the preview. We just convert that local blob back into a File so the
-  // editor's existing pipeline can consume it, exactly like an OS-picked
-  // file. blob: URLs are same-origin and unauthenticated, so this never
-  // races against token expiry or CORS.
+  // Re-open the editor with the ALREADY-UPLOADED image. This MUST fetch
+  // the ORIGINAL bytes — the preview blob is now a 300px thumbnail
+  // variant, and editing + re-uploading that would silently destroy the
+  // photo's resolution. The fetch is on-demand (only when the user
+  // actually clicks Edit), so the page-load win from thumbnails stays.
   const handleEditExisting = async () => {
     if (!file) return;
     if (!isImage) {
       toast.error('Only images can be rotated or flipped.');
       return;
     }
-    if (secureFile.error) {
-      toast.error(`Couldn't open the image: ${secureFile.error}`);
-      return;
-    }
-    if (!secureFile.objectUrl) {
-      toast.error('The image is still loading — try again in a moment.');
-      return;
-    }
     setReEditing(true);
     try {
-      const response = await fetch(secureFile.objectUrl); // blob: URL, local
-      if (!response.ok) throw new Error('Local image cache miss.');
-      const blob = await response.blob();
+      const blob = await fetchOriginalBlob(orderId, file.id);
       const reconstructed = new File([blob], displayFileName(file), {
         type: blob.type || file.mimeType || 'image/jpeg',
       });
@@ -1161,26 +1227,18 @@ function ClinicalMediaSlot({
   };
 
   // ── Copy / Paste handlers ──────────────────────────────────────────────
-  // The slot's image bytes live as a blob: URL once `useSecureFileUrl`
-  // resolves them. To "copy" the image to the shared clipboard, we fetch
-  // those bytes (local, instant) and wrap them in a fresh File whose name
-  // is the slot's title — so when the user pastes into another slot and
-  // we end up uploading the file, the OrderFile.originalName is something
-  // human-readable like "front-face.jpg" instead of the original camera
-  // filename which may have nothing to do with the new slot.
+  // "Copy" feeds a fresh File into the shared clipboard, named after
+  // the slot title so the pasted upload reads human-readably. It MUST
+  // fetch the ORIGINAL bytes — the preview blob is a 300px thumbnail
+  // variant now, and pasting that into another slot would re-upload a
+  // thumbnail as if it were the clinical photo.
   const [copying, setCopying] = useState(false);
 
   const handleCopy = async () => {
     if (!file || !isImage || !onClipboard) return;
-    if (!secureFile.objectUrl) {
-      toast.error('The image is still loading — try again in a moment.');
-      return;
-    }
     setCopying(true);
     try {
-      const response = await fetch(secureFile.objectUrl);
-      if (!response.ok) throw new Error('Local image cache miss.');
-      const blob = await response.blob();
+      const blob = await fetchOriginalBlob(orderId, file.id);
       const ext = file.mimeType.split('/')[1] || 'jpg';
       const safeTitle = title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
       const reconstructed = new File([blob], `${safeTitle}.${ext}`, {
@@ -1442,7 +1500,11 @@ function StlUploadTile({
         {file ? (
           <div className="space-y-3">
             {extensionFor(file.originalName) === 'stl' ? (
-              <StlModelViewer orderId={orderId} file={file} />
+              // Static thumbnail card — the WebGL viewer used to mount
+              // here on page load for every STL slot (multi-MB fetch +
+              // GL context × 4 slots). It now lives exclusively behind
+              // the Full View dialog below.
+              <StlStaticPreview orderId={orderId} file={file} tall />
             ) : (
               <ModelPlaceholder file={file} />
             )}
@@ -1549,9 +1611,9 @@ function StlModelViewer({
      *   - 413 → nginx body-size limit hit (large STL)
      *   - network error → CORS / DNS / dropped connection
      */
-    const fetchStlBuffer = async (signal: AbortSignal) => {
+    const fetchStlBuffer = async (signal: AbortSignal, variant?: string) => {
       const token = getAccessToken();
-      const url = buildDownloadUrl(orderId, file.id);
+      const url = buildDownloadUrl(orderId, file.id, variant);
 
       let response: Response;
       try {
@@ -1603,7 +1665,42 @@ function StlModelViewer({
         ]);
 
         abortController = new AbortController();
-        const arrayBuffer = await fetchStlBuffer(abortController.signal);
+
+        // Prefer the pipeline's optimized GLB (indexed + deduped —
+        // typically 40-60% smaller than the raw STL and parses faster).
+        // Any GLB failure falls back to the original STL so the viewer
+        // never regresses for legacy/unprocessed files.
+        let loadedGeometry: import('three').BufferGeometry | undefined;
+        if (file.variants?.model) {
+          try {
+            const glbBuffer = await fetchStlBuffer(
+              abortController.signal,
+              'model',
+            );
+            if (disposed) return;
+            const gltfModule = await import(
+              'three/examples/jsm/loaders/GLTFLoader.js'
+            );
+            const gltf = await new gltfModule.GLTFLoader().parseAsync(
+              glbBuffer,
+              '',
+            );
+            gltf.scene.traverse((obj) => {
+              const mesh = obj as import('three').Mesh;
+              if (!loadedGeometry && mesh.isMesh) {
+                loadedGeometry = mesh.geometry as import('three').BufferGeometry;
+              }
+            });
+          } catch {
+            loadedGeometry = undefined; // fall through to raw STL
+          }
+        }
+
+        if (!loadedGeometry) {
+          const arrayBuffer = await fetchStlBuffer(abortController.signal);
+          if (disposed) return;
+          loadedGeometry = new loaderModule.STLLoader().parse(arrayBuffer);
+        }
         if (disposed) return;
 
         const scene = new THREE.Scene();
@@ -1619,7 +1716,9 @@ function StlModelViewer({
         renderer.domElement.style.width = '100%';
         container.appendChild(renderer.domElement);
 
-        geometry = new loaderModule.STLLoader().parse(arrayBuffer);
+        geometry = loadedGeometry;
+        // The pipeline's GLB ships positions only (no normals — half
+        // the bytes), and raw STL needs them computed anyway.
         geometry.computeVertexNormals();
         geometry.center();
         geometry.computeBoundingSphere();
@@ -1808,6 +1907,183 @@ function ModelPlaceholder({ file, large }: { file: OrderFile; large?: boolean })
       <span className="absolute bottom-3 rounded-full bg-background/85 px-3 py-1 text-xs font-medium">
         {extensionFor(file.originalName).toUpperCase()} model
       </span>
+    </div>
+  );
+}
+
+/**
+ * Static STL preview — the server-rendered thumbnail when the pipeline
+ * has produced one, otherwise a lightweight placeholder with geometry
+ * facts. Never touches three.js and never downloads the model itself;
+ * the live viewer mounts exclusively in the fullscreen dialog.
+ */
+function StlStaticPreview({
+  orderId,
+  file,
+  tall,
+}: {
+  orderId: string;
+  file: OrderFile;
+  tall?: boolean;
+}) {
+  const { t } = useT();
+  // Only request the variant when the API says it exists — for STL a
+  // blind request would fall back to the RAW model bytes, which an
+  // <img> can't render.
+  const hasThumb = Boolean(file.variants?.thumb);
+  const { objectUrl, loading } = useSecureFileUrl(
+    orderId,
+    file.id,
+    hasThumb,
+    'thumb',
+  );
+  const stlMeta =
+    file.mediaMetadata && (file.mediaMetadata as { kind?: string }).kind === 'stl'
+      ? (file.mediaMetadata as unknown as import('@/lib/types').StlMediaMetadata)
+      : undefined;
+
+  return (
+    <div
+      className={cn(
+        'relative grid h-full w-full place-items-center overflow-hidden rounded-md bg-[radial-gradient(circle_at_top,_hsl(var(--primary)/0.10),_transparent_46%),linear-gradient(180deg,_hsl(var(--background)),_hsl(var(--muted)/0.55))]',
+        tall && 'h-64 md:h-72',
+      )}
+    >
+      {hasThumb && loading ? (
+        <Skeleton className="h-full w-full" />
+      ) : hasThumb && objectUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={objectUrl}
+          alt={displayFileName(file)}
+          loading="lazy"
+          decoding="async"
+          className="h-full w-full object-contain"
+        />
+      ) : (
+        <div className="grid place-items-center gap-2 p-4 text-center text-muted-foreground">
+          <Box className="h-9 w-9 text-primary/70" />
+          <span className="text-xs font-medium">{t('media.stlModel')}</span>
+          {stlMeta && (
+            <span className="text-[11px]">
+              {t('media.stlTriangles', {
+                count: stlMeta.triangleCount.toLocaleString(),
+              })}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Compact one-line ZIP facts under a gallery card. */
+function ZipMetaSummary({
+  meta,
+}: {
+  meta: import('@/lib/types').ZipMediaMetadata;
+}) {
+  const { t } = useT();
+  return (
+    <div className="space-y-1 rounded-md bg-muted/40 px-2 py-1.5 text-[11px] text-muted-foreground">
+      <p>
+        {t('media.zipFiles', { count: String(meta.entryCount) })} ·{' '}
+        {t('media.zipUncompressed', {
+          size: formatBytes(meta.totalUncompressedBytes),
+        })}
+      </p>
+      {meta.suspicious && (
+        <p className="font-medium text-amber-600">{t('media.zipSuspicious')}</p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * ZIP preview surface — metadata only, by design. The archive is NEVER
+ * inflated or rendered in the browser; this panel shows what the
+ * backend read from the central directory so the user can decide
+ * whether to download the (potentially 800 MB CBCT) bundle.
+ */
+function ZipMetaPanel({
+  meta,
+  file,
+  large,
+}: {
+  meta: import('@/lib/types').ZipMediaMetadata;
+  file: OrderFile;
+  large?: boolean;
+}) {
+  const { t } = useT();
+
+  if (!large) {
+    return (
+      <div className="grid place-items-center gap-1.5 p-3 text-center text-muted-foreground">
+        <FileArchive className="h-8 w-8" />
+        <span className="text-xs font-medium text-foreground">
+          {t('media.zipArchive')}
+        </span>
+        <span className="text-[11px]">
+          {t('media.zipFiles', { count: String(meta.entryCount) })} ·{' '}
+          {formatBytes(file.size)}
+        </span>
+      </div>
+    );
+  }
+
+  const shown = meta.topLevelEntries.slice(0, 24);
+  const hidden = Math.max(0, meta.topLevelEntries.length - shown.length);
+
+  return (
+    <div className="flex h-full w-full flex-col gap-4 overflow-y-auto p-6">
+      <div className="flex items-center gap-3">
+        <span className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-muted">
+          <FileArchive className="h-6 w-6 text-primary" />
+        </span>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold">{displayFileName(file)}</p>
+          <p className="text-xs text-muted-foreground">
+            {t('media.zipFiles', { count: String(meta.entryCount) })} ·{' '}
+            {formatBytes(file.size)} ·{' '}
+            {t('media.zipUncompressed', {
+              size: formatBytes(meta.totalUncompressedBytes),
+            })}
+          </p>
+        </div>
+      </div>
+
+      {meta.suspicious && (
+        <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700">
+          {t('media.zipSuspicious')}
+        </p>
+      )}
+
+      {shown.length > 0 && (
+        <div>
+          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            {t('media.zipContents')}
+          </p>
+          <ul className="grid gap-1 text-sm sm:grid-cols-2">
+            {shown.map((entry) => (
+              <li
+                key={entry}
+                className="truncate rounded bg-muted/40 px-2 py-1 font-mono text-xs"
+              >
+                {entry}
+              </li>
+            ))}
+          </ul>
+          {hidden > 0 && (
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              {t('media.zipMore', { count: String(hidden) })}
+            </p>
+          )}
+        </div>
+      )}
+
+      <p className="mt-auto text-xs text-muted-foreground">
+        {t('media.zipNoPreview')}
+      </p>
     </div>
   );
 }
@@ -2242,6 +2518,13 @@ function useSecureFileUrl(
   orderId: string,
   fileId: string,
   enabled: boolean,
+  /**
+   * Optimized variant to fetch (thumb | md | lg). The backend falls
+   * back to the original automatically while processing is pending,
+   * so cards can request thumbnails blindly — a 10 KB WebP instead of
+   * the multi-MB original on every render.
+   */
+  variant?: string,
 ): SecureFileResult {
   const [version, setVersion] = useState(0);
   const [state, setState] = useState<{
@@ -2258,7 +2541,7 @@ function useSecureFileUrl(
 
     let active = true;
     const token = getAccessToken();
-    const url = buildDownloadUrl(orderId, fileId);
+    const url = buildDownloadUrl(orderId, fileId, variant);
 
     fetch(url, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -2282,7 +2565,7 @@ function useSecureFileUrl(
     return () => {
       active = false;
     };
-  }, [enabled, fileId, orderId, version]);
+  }, [enabled, fileId, orderId, variant, version]);
 
   useEffect(
     () => () => {
@@ -2310,9 +2593,27 @@ function getPreviewType(file: OrderFile): PreviewType {
   return 'file';
 }
 
-function buildDownloadUrl(orderId: string, fileId: string) {
+function buildDownloadUrl(orderId: string, fileId: string, variant?: string) {
   const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
-  return `${apiBase}/orders/${orderId}/files/${fileId}/download`;
+  const base = `${apiBase}/orders/${orderId}/files/${fileId}/download`;
+  return variant ? `${base}?variant=${encodeURIComponent(variant)}` : base;
+}
+
+/**
+ * Authenticated fetch of the ORIGINAL bytes. Used by flows that must
+ * never operate on an optimized variant: re-editing a slot photo and
+ * copy/paste between slots both re-upload their result, so feeding
+ * them a 300px thumbnail would silently destroy the original quality.
+ */
+async function fetchOriginalBlob(orderId: string, fileId: string): Promise<Blob> {
+  const token = getAccessToken();
+  const response = await fetch(buildDownloadUrl(orderId, fileId), {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!response.ok) {
+    throw new Error(`Original download failed (HTTP ${response.status})`);
+  }
+  return response.blob();
 }
 
 function withSlotName(slotKey: string, file: File) {
@@ -2374,7 +2675,9 @@ function downloadOrderFile(orderId: string, file: OrderFile) {
       const href = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = href;
-      link.download = displayFileName(file);
+      // Prefer the backend's clean ordered name (Patient_Category_NNN.ext)
+      // so a bulk download lands sorted and self-describing on disk.
+      link.download = file.generatedName ?? displayFileName(file);
       link.click();
       URL.revokeObjectURL(href);
     });

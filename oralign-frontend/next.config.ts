@@ -7,6 +7,25 @@ const projectRoot = path.dirname(fileURLToPath(import.meta.url));
 const nextConfig: NextConfig = {
   // Bundle only required files for the Docker image (drops image from ~1.4GB to ~250MB)
   output: "standalone",
+  // Backend origins allowed to serve next/image sources from /uploads.
+  // Present for when next/image optimization is enabled against the API
+  // host; the dashboard slider currently renders pre-resized variants
+  // with `unoptimized`.
+  images: {
+    remotePatterns: [
+      {
+        protocol: "http",
+        hostname: "localhost",
+        port: "3000",
+        pathname: "/uploads/**",
+      },
+      {
+        protocol: "https",
+        hostname: "api.oralign.com.tn",
+        pathname: "/uploads/**",
+      },
+    ],
+  },
   async headers() {
     return [
       {

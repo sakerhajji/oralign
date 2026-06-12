@@ -483,6 +483,17 @@ model OrderToothInstruction {
   @@index([toothNumber])
 }
 
+// Lifecycle of the async media-optimization pipeline. `null` on a row
+// means the pipeline does not apply (e.g. PDFs, videos) or the row
+// predates the pipeline and hasn't been backfilled yet — readers must
+// treat null exactly like "no variants, serve the original".
+enum MediaProcessingStatus {
+  pending
+  processing
+  completed
+  failed
+}
+
 model OrderFile {
   id             String               @id @default(uuid())
   orderId        String
@@ -495,11 +506,37 @@ model OrderFile {
   createdAt      DateTime             @default(now())
   deletedAt      DateTime?
 
+  // ── Media-optimization pipeline ──────────────────────────────────
+  // Clean human-readable name built from patient + category + sequence
+  // (e.g. "Marie-Dupont_front-photo_003.jpg"). The original client
+  // filename is preserved above in `originalName`; this one is what the
+  // file is stored and downloaded as.
+  generatedName    String?
+  // Per (order, category) upload sequence — drives display order and
+  // the NNN suffix in generatedName. Legacy rows keep 0 and fall back
+  // to createdAt ordering.
+  orderIndex       Int                  @default(0)
+  // Intrinsic pixel size of the ORIGINAL image (null for non-images).
+  width            Int?
+  height           Int?
+  processingStatus MediaProcessingStatus?
+  // Variant map written by the pipeline:
+  //   { thumb|md|lg|avif|model: { path, width?, height?, sizeBytes, format } }
+  // Paths are uploads-root-relative and NEVER exposed raw over the API —
+  // the DTO mapper strips `path` and clients fetch via ?variant=<name>.
+  variants         Json?
+  // Type-specific safe metadata: zip → { entryCount, topLevelEntries,
+  // totalUncompressedBytes, suspicious }, stl → { format, triangleCount,
+  // vertexCount, bbox }.
+  mediaMetadata    Json?
+  processedAt      DateTime?
+
   order          DentalOrder          @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([orderId])
   @@index([category])
   @@index([deletedAt])
+  @@index([processingStatus])
 }
 
 // ─────────────────────────────────────────
@@ -660,6 +697,13 @@ model TreatmentMessageAttachment {
   mimeType      String?
   sizeBytes     Int?
   category      TreatmentAttachmentCategory  @default(other)
+
+  // ── Media-optimization pipeline (same contract as OrderFile) ─────
+  width            Int?
+  height           Int?
+  processingStatus MediaProcessingStatus?
+  variants         Json?
+  mediaMetadata    Json?
 
   createdAt     DateTime                     @default(now())
   deletedAt     DateTime?
@@ -1292,6 +1336,10 @@ model SupportMessage {
   attachmentMime         String?
   attachmentName         String?         // original filename (display only)
   attachmentSize         Int?            // bytes
+  // Variant map written by the async media pipeline for image
+  // attachments (same shape as OrderFile.variants). Best-effort: null
+  // simply means "serve the original".
+  attachmentVariants     Json?
 
   // Per-message read receipt — the recipient's read time. Updated
   // when the recipient calls mark-as-read on the conversation.
@@ -1371,6 +1419,13 @@ model SliderMedia {
   // gracefully falls back to the desktop URL.
   desktopUrl  String?
   mobileUrl   String?
+
+  // Variant maps written by the async media pipeline for UPLOADED
+  // images only (external CDN URLs and videos are never processed).
+  // Same shape as OrderFile.variants; paths resolve under /uploads/.
+  // Null = serve the original URL.
+  desktopVariants Json?
+  mobileVariants  Json?
 
   // Which device list this row belongs to. Stored as a postgres
   // array so the admin can pick desktop / mobile / both with one

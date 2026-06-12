@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { useT } from '@/lib/i18n/lang-context';
 import { cn } from '@/lib/utils';
 
 const ISO2_REGEX = /^[A-Za-z]{2}$/;
@@ -35,7 +36,7 @@ export function CountryFlag({
 export function CountryPhoneDisplay({
   phone,
   country,
-  fallback = 'Not provided',
+  fallback,
   className,
 }: {
   phone?: string;
@@ -43,16 +44,20 @@ export function CountryPhoneDisplay({
   fallback?: string;
   className?: string;
 }) {
+  const { t } = useT();
+  // Resolved here (not as a parameter default) so the fallback flips
+  // with the language toggle.
+  const effectiveFallback = fallback ?? t('uiBits.notProvided');
   const countryLabel = getCountryLabel(country);
 
   if (!phone && !countryLabel) {
-    return <span className={className}>{fallback}</span>;
+    return <span className={className}>{effectiveFallback}</span>;
   }
 
   return (
     <div className={cn('flex items-center gap-2', className)}>
       <CountryFlag country={country} />
-      <span className="font-medium">{countryLabel || fallback}</span>
+      <span className="font-medium">{countryLabel || effectiveFallback}</span>
       {phone && <span className="text-muted-foreground">· {phone}</span>}
     </div>
   );

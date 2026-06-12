@@ -1,3 +1,5 @@
+name: oralign-app
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -49,11 +51,11 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    # .env.docker supplies MAIL_* and other secrets; explicit environment
+    # .env supplies MAIL_* and other local settings; explicit environment
     # block overrides only the values that are computed at compose-time
     # (DATABASE_URL, REDIS_*, etc.).
     env_file:
-      - .env.docker
+      - .env
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       DATABASE_URL: postgresql://${DB_USER:-oralign}:${DB_PASSWORD:-oralign_secure_password}@postgres:5432/${DB_NAME:-oralign_db}
@@ -68,6 +70,7 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_secure_password}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3001}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      ENABLE_SWAGGER: ${ENABLE_SWAGGER:-true}
     ports:
       - "3000:3000"
     volumes:

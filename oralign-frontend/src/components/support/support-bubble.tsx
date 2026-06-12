@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { format } from 'date-fns';
+import { fr as frLocale } from 'date-fns/locale';
 import {
   ChevronLeft,
   ImageIcon,
@@ -22,6 +23,7 @@ import { Badge } from '@/components/ui/badge';
 import { ImageLightbox } from '@/components/ui/image-lightbox';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/providers/auth-provider';
+import { useT } from '@/lib/i18n/lang-context';
 import { supportAttachmentUrl } from '@/lib/api/support.service';
 import {
   useAuthedImage,
@@ -51,6 +53,13 @@ const ALLOWED_MIME = new Set([
 const MAX_BYTES = 10 * 1024 * 1024;
 
 /**
+ * Translator signature as exposed by `useT()`. Module-level helpers
+ * (e.g. `validateAttachment`) can't call hooks, so components resolve
+ * `t` once and pass it down (labelKey pattern).
+ */
+type Tr = (path: string, vars?: Record<string, string | number>) => string;
+
+/**
  * Floating "Need help?" bubble shown on every dashboard page for
  * dentist accounts. Click → opens a Sheet with either:
  *   • the conversation list (when 0 or 2+ threads exist), or
@@ -61,6 +70,7 @@ const MAX_BYTES = 10 * 1024 * 1024;
  * unread-count poll for the badge if the socket is offline.
  */
 export function SupportBubble() {
+  const { t } = useT();
   const { user, isAuthenticated } = useAuth();
   const isDoctor = user?.role === UserRole.DENTIST;
 
@@ -89,7 +99,11 @@ export function SupportBubble() {
         <button
           type="button"
           onClick={() => setOpen(true)}
-          aria-label={`Open support chat${unread > 0 ? ` (${unread} unread)` : ''}`}
+          aria-label={
+            unread > 0
+              ? t('supportChat.launcherAriaUnread', { count: unread })
+              : t('supportChat.launcherAria')
+          }
           className={cn(
             'group fixed bottom-4 right-4 z-40 grid size-14 place-items-center rounded-full bg-foreground text-background shadow-lg transition hover:bg-foreground/90 hover:shadow-xl sm:bottom-6 sm:right-6 sm:size-16',
           )}
@@ -203,6 +217,7 @@ function ConversationList({
   onPick: (id: string) => void;
   onClose: () => void;
 }) {
+  const { t, lang } = useT();
   const [composeOpen, setComposeOpen] = useState(false);
   if (composeOpen) {
     return <NewConversationForm onDone={onPick} onCancel={() => setComposeOpen(false)} />;
@@ -212,14 +227,14 @@ function ConversationList({
       <SheetHeader className="flex flex-row items-center justify-between border-b p-4">
         <SheetTitle className="flex items-center gap-2 text-base">
           <MessageCircle className="size-5 text-primary" />
-          Support
+          {t('supportChat.title')}
         </SheetTitle>
         <Button
           variant="ghost"
           size="icon"
           className="size-8"
           onClick={onClose}
-          aria-label="Close support panel"
+          aria-label={t('supportChat.closePanelAria')}
         >
           <X className="size-4" />
         </Button>
@@ -230,7 +245,7 @@ function ConversationList({
           className="w-full gap-2"
         >
           <Plus className="size-4" />
-          Start a new conversation
+          {t('supportChat.startNew')}
         </Button>
       </div>
       <ScrollArea className="flex-1">
@@ -243,10 +258,13 @@ function ConversationList({
         ) : items.length === 0 ? (
           <div className="flex flex-col items-center gap-2 p-8 text-center text-sm text-muted-foreground">
             <MessageCircle className="size-8 opacity-40" />
-            <p className="font-medium text-foreground">No conversations yet.</p>
+            <p className="font-medium text-foreground">
+              {t('supportChat.emptyTitle')}
+            </p>
             <p className="text-xs">
-              Click <strong>Start a new conversation</strong> to send your
-              first message to the support team.
+              {t('supportChat.emptyHintPrefix')}
+              <strong>{t('supportChat.startNew')}</strong>
+              {t('supportChat.emptyHintSuffix')}
             </p>
           </div>
         ) : (
@@ -260,7 +278,9 @@ function ConversationList({
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="truncate text-sm font-semibold">
-                      {c.subject || c.lastMessagePreview || 'Support thread'}
+                      {c.subject ||
+                        c.lastMessagePreview ||
+                        t('supportChat.threadFallback')}
                     </span>
                     {c.unreadByDoctor > 0 ? (
                       <Badge variant="destructive" className="h-4 px-1.5 text-[10px]">
@@ -272,8 +292,12 @@ function ConversationList({
                     {c.lastMessagePreview ?? '—'}
                   </p>
                   <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                    {format(new Date(c.lastMessageAt), 'MMM d, HH:mm')} ·{' '}
-                    {c.status}
+                    {format(
+                      new Date(c.lastMessageAt),
+                      lang === 'fr' ? 'd MMM, HH:mm' : 'MMM d, HH:mm',
+                      { locale: lang === 'fr' ? frLocale : undefined },
+                    )}{' '}
+                    · {t(`supportChat.status.${c.status}`)}
                   </p>
                 </button>
               </li>
@@ -295,6 +319,7 @@ function NewConversationForm({
   onDone: (id: string) => void;
   onCancel: () => void;
 }) {
+  const { t } = useT();
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [file, setFile] = useState<File | null>(null);
@@ -303,7 +328,7 @@ function NewConversationForm({
 
   const submit = () => {
     if (!body.trim() && !file) {
-      toast.error('Type a message or attach an image.');
+      toast.error(t('supportChat.toastEmpty'));
       return;
     }
     create.mutate(
@@ -329,40 +354,41 @@ function NewConversationForm({
             size="icon"
             className="size-8"
             onClick={onCancel}
-            aria-label="Back"
+            aria-label={t('common.back')}
           >
             <ChevronLeft className="size-4" />
           </Button>
-          <SheetTitle className="text-base">New conversation</SheetTitle>
+          <SheetTitle className="text-base">
+            {t('supportChat.newConvTitle')}
+          </SheetTitle>
         </div>
       </SheetHeader>
       <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4">
         <div className="space-y-1.5">
           <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Subject (optional)
+            {t('supportChat.subjectLabel')}
           </label>
           <Input
             value={subject}
             onChange={(e) => setSubject(e.target.value)}
-            placeholder="e.g. Cannot regenerate PDF in Arabic"
+            placeholder={t('supportChat.subjectPlaceholder')}
             maxLength={160}
           />
         </div>
         <div className="space-y-1.5">
           <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Describe your problem
+            {t('supportChat.describeLabel')}
           </label>
           <Textarea
             value={body}
             onChange={(e) => setBody(e.target.value)}
             rows={6}
             maxLength={4000}
-            placeholder="Tell us what happened. You can attach a screenshot below."
+            placeholder={t('supportChat.describePlaceholder')}
             className="resize-none"
           />
           <p className="text-[11px] text-muted-foreground">
-            Tip: include the order code, patient name, or page URL where the
-            problem happened so support can act faster.
+            {t('supportChat.tip')}
           </p>
         </div>
         <AttachmentRow file={file} onChange={setFile} fileRef={fileRef} />
@@ -379,7 +405,7 @@ function NewConversationForm({
           ) : (
             <Send className="size-4" />
           )}
-          Send to support
+          {t('supportChat.sendToSupport')}
         </Button>
       </div>
     </>
@@ -398,6 +424,7 @@ function ActiveThread({
   onBack: () => void;
   onClose: () => void;
 }) {
+  const { t } = useT();
   const { data, isLoading } = useSupportConversation(conversationId);
   const sendMessage = useSendSupportMessage();
   const markRead = useMarkSupportRead();
@@ -474,17 +501,17 @@ function ActiveThread({
     return (
       <>
         <SheetHeader className="flex flex-row items-center justify-between border-b p-4">
-          <SheetTitle className="text-base">Support</SheetTitle>
+          <SheetTitle className="text-base">{t('supportChat.title')}</SheetTitle>
           <Button variant="ghost" size="icon" className="size-8" onClick={onClose}>
             <X className="size-4" />
           </Button>
         </SheetHeader>
         <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center text-sm text-muted-foreground">
           <p className="font-medium text-foreground">
-            This support conversation has been closed or removed by admin.
+            {t('supportChat.deletedNotice')}
           </p>
           <Button variant="outline" onClick={onBack}>
-            Back to conversations
+            {t('supportChat.backToList')}
           </Button>
         </div>
       </>
@@ -500,10 +527,14 @@ function ActiveThread({
           </Button>
           <div className="min-w-0">
             <SheetTitle className="truncate text-sm">
-              {data?.conversation.subject ?? 'Support thread'}
+              {data?.conversation.subject ?? t('supportChat.threadFallback')}
             </SheetTitle>
             <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
-              Status: {data?.conversation.status ?? '…'}
+              {t('supportChat.statusLine', {
+                status: data?.conversation.status
+                  ? t(`supportChat.status.${data.conversation.status}`)
+                  : '…',
+              })}
             </p>
           </div>
         </div>
@@ -539,7 +570,7 @@ function ActiveThread({
       </div>
       {closed ? (
         <div className="border-t bg-muted/40 p-4 text-center text-xs text-muted-foreground">
-          This conversation is closed. Start a new one to keep talking.
+          {t('supportChat.closedNotice')}
         </div>
       ) : (
         <Composer
@@ -550,7 +581,7 @@ function ActiveThread({
           fileRef={fileRef}
           onSubmit={submit}
           pending={sendMessage.isPending}
-          placeholder="Type a message…"
+          placeholder={t('supportChat.composerPlaceholder')}
         />
       )}
       <ImageLightbox
@@ -559,7 +590,7 @@ function ActiveThread({
           if (!open) setLightboxMessage(null);
         }}
         src={lightboxImg.src}
-        alt={lightboxMessage?.attachmentName ?? 'attachment'}
+        alt={lightboxMessage?.attachmentName ?? t('supportChat.attachmentFallback')}
         caption={lightboxMessage?.attachmentName ?? undefined}
       />
     </>
@@ -590,14 +621,14 @@ function ActiveThread({
  * Returns the file when it passes, `null` when it's rejected (and
  * surfaces a toast in that case so the caller doesn't have to).
  */
-function validateAttachment(f: File | null): File | null {
+function validateAttachment(f: File | null, t: Tr): File | null {
   if (!f) return null;
   if (!ALLOWED_MIME.has(f.type)) {
-    toast.error('Only PNG, JPG, JPEG, or WebP images are supported.');
+    toast.error(t('supportChat.toastBadType'));
     return null;
   }
   if (f.size > MAX_BYTES) {
-    toast.error('Image too large (max 10 MB).');
+    toast.error(t('supportChat.toastTooLarge'));
     return null;
   }
   return f;
@@ -622,12 +653,13 @@ export function Composer({
   pending: boolean;
   placeholder: string;
 }) {
+  const { t } = useT();
   const onPickFile = (f: File | null) => {
     if (!f) {
       onFileChange(null);
       return;
     }
-    const ok = validateAttachment(f);
+    const ok = validateAttachment(f, t);
     if (!ok) {
       if (fileRef.current) fileRef.current.value = '';
       return;
@@ -661,14 +693,14 @@ export function Composer({
             ? blob.name
             : `pasted-image-${Date.now()}.${ext}`;
         const fileFromPaste = new File([blob], filename, { type: blob.type });
-        const ok = validateAttachment(fileFromPaste);
+        const ok = validateAttachment(fileFromPaste, t);
         if (!ok) {
           e.preventDefault();
           return;
         }
         e.preventDefault();
         onFileChange(ok);
-        toast.success('Image pasted from clipboard.');
+        toast.success(t('supportChat.toastPasted'));
         return;
       }
     }
@@ -701,7 +733,7 @@ export function Composer({
             type="button"
             onClick={() => onPickFile(null)}
             className="grid size-5 shrink-0 place-items-center rounded text-muted-foreground hover:text-foreground"
-            aria-label="Remove attachment"
+            aria-label={t('supportChat.removeAttachment')}
           >
             <X className="size-3" />
           </button>
@@ -718,8 +750,8 @@ export function Composer({
           size="icon"
           onClick={() => fileRef.current?.click()}
           className="size-9 shrink-0 text-muted-foreground hover:text-foreground"
-          aria-label="Attach screenshot"
-          title="Attach screenshot (PNG, JPG, WebP up to 10 MB) — you can also paste with Ctrl+V"
+          aria-label={t('supportChat.attachScreenshot')}
+          title={t('supportChat.attachTitle')}
         >
           <Paperclip className="size-4" />
         </Button>
@@ -751,7 +783,7 @@ export function Composer({
             'size-9 shrink-0 rounded-xl transition-transform',
             !disabled && 'hover:scale-105',
           )}
-          aria-label="Send message"
+          aria-label={t('supportChat.sendMessageAria')}
         >
           {pending ? (
             <Loader2 className="size-4 animate-spin" />
@@ -762,11 +794,11 @@ export function Composer({
       </div>
       <p className="mt-1.5 px-1 text-[10px] text-muted-foreground">
         <kbd className="rounded border bg-muted px-1 text-[10px]">Enter</kbd>{' '}
-        send ·{' '}
+        {t('supportChat.kbdSend')} ·{' '}
         <kbd className="rounded border bg-muted px-1 text-[10px]">Shift+Enter</kbd>{' '}
-        new line ·{' '}
+        {t('supportChat.kbdNewline')} ·{' '}
         <kbd className="rounded border bg-muted px-1 text-[10px]">Ctrl+V</kbd>{' '}
-        paste image
+        {t('supportChat.kbdPaste')}
       </p>
     </div>
   );
@@ -786,18 +818,19 @@ export function AttachmentRow({
   fileRef: React.RefObject<HTMLInputElement | null>;
   compact?: boolean;
 }) {
+  const { t } = useT();
   const onPick = (f: File | null) => {
     if (!f) {
       onChange(null);
       return;
     }
     if (!ALLOWED_MIME.has(f.type)) {
-      toast.error('Only PNG, JPG, JPEG, or WebP images are supported.');
+      toast.error(t('supportChat.toastBadType'));
       if (fileRef.current) fileRef.current.value = '';
       return;
     }
     if (f.size > MAX_BYTES) {
-      toast.error('Image too large (max 10 MB).');
+      toast.error(t('supportChat.toastTooLarge'));
       if (fileRef.current) fileRef.current.value = '';
       return;
     }
@@ -823,7 +856,7 @@ export function AttachmentRow({
             type="button"
             onClick={() => onPick(null)}
             className="grid size-5 place-items-center rounded text-muted-foreground hover:text-foreground"
-            aria-label="Remove attachment"
+            aria-label={t('supportChat.removeAttachment')}
           >
             <X className="size-3" />
           </button>
@@ -837,7 +870,7 @@ export function AttachmentRow({
           className="h-8 gap-2"
         >
           <Paperclip className="size-3.5" />
-          Attach screenshot
+          {t('supportChat.attachScreenshot')}
         </Button>
       )}
     </div>
@@ -867,6 +900,7 @@ export function MessageBubble({
    */
   onOpenImage?: () => void;
 }) {
+  const { t } = useT();
   // The attachment route is JWT-guarded, so a plain `<img src={URL}>`
   // returns 401 — the browser doesn't attach Authorization headers
   // for resource loads. Fetch via the authed axios client and render
@@ -899,7 +933,9 @@ export function MessageBubble({
             type="button"
             onClick={onOpenImage}
             disabled={!attachmentSrc}
-            aria-label={`Open ${message.attachmentName ?? 'attachment'} in full view`}
+            aria-label={t('supportChat.openImageAria', {
+              name: message.attachmentName ?? t('supportChat.attachmentFallback'),
+            })}
             className="mb-1 block overflow-hidden rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {attachmentLoading ? (
@@ -908,14 +944,14 @@ export function MessageBubble({
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={attachmentSrc}
-                alt={message.attachmentName ?? 'attachment'}
+                alt={message.attachmentName ?? t('supportChat.attachmentFallback')}
                 loading="lazy"
                 decoding="async"
                 className="max-h-60 w-auto max-w-full cursor-zoom-in rounded-md object-contain"
               />
             ) : (
               <div className="grid h-32 w-48 place-items-center rounded-md bg-muted/40 text-xs text-muted-foreground">
-                Could not load image
+                {t('supportChat.imageError')}
               </div>
             )}
           </button>
@@ -926,7 +962,7 @@ export function MessageBubble({
       </div>
       <p className="mt-1 text-[10px] text-muted-foreground">
         {format(new Date(message.createdAt), 'HH:mm')}
-        {fromMe && message.readAt ? ' · read' : null}
+        {fromMe && message.readAt ? ` · ${t('supportChat.readReceipt')}` : null}
       </p>
     </div>
   );

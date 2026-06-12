@@ -8,6 +8,7 @@ import { useSupportSocket, useSupportUnreadCount } from "@/lib/hooks"
 import { UserRole } from "@/lib/types"
 
 import { getAvatarUrl } from "@/lib/utils"
+import { useT } from "@/lib/i18n/lang-context"
 import { NavMain } from "@/components/nav-main"
 import { NavSecondary } from "@/components/nav-secondary"
 import { NavUser } from "@/components/nav-user"
@@ -61,8 +62,9 @@ function formatDisplayName(fullName: string): string {
 
 // ─── Nav item type ───────────────────────────────────────────────────────────
 
-interface NavItem {
-  title: string
+interface NavItemDef {
+  /** Dict path resolved with t() at render time (language-aware). */
+  titleKey: string
   url: string
   icon: React.ReactNode
   /** If set, only users with one of these roles can see this item. */
@@ -83,27 +85,27 @@ interface NavItem {
 // removed because clicking them broke the in-router navigation contract
 // (the URL would change to "#" and the page would do nothing).
 
-const NAV_MAIN: NavItem[] = [
+const NAV_MAIN: NavItemDef[] = [
   {
-    title: "Dashboard",
+    titleKey: "chrome.nav.dashboard",
     url: "/dashboard",
     icon: <LayoutDashboardIcon />,
   },
   {
-    title: "Users",
+    titleKey: "chrome.nav.users",
     url: "/dashboard/users",
     icon: <UsersIcon />,
     // Only admins and super-admins can manage users
     roles: [UserRole.ADMIN, UserRole.SUPER_ADMIN],
   },
   {
-    title: "Patients",
+    titleKey: "chrome.nav.patients",
     url: "/dashboard/patients",
     icon: <UserRoundIcon />,
     roles: [UserRole.DENTIST, UserRole.ADMIN, UserRole.SUPER_ADMIN],
   },
   {
-    title: "Orders",
+    titleKey: "chrome.nav.orders",
     url: "/dashboard/orders",
     icon: <ClipboardListIcon />,
     roles: [
@@ -114,7 +116,7 @@ const NAV_MAIN: NavItem[] = [
     ],
   },
   {
-    title: "Packs",
+    titleKey: "chrome.nav.packs",
     url: "/dashboard/packs",
     icon: <PackageIcon />,
     // Admin-only — pack catalogue + price management. Doctors see the
@@ -122,28 +124,28 @@ const NAV_MAIN: NavItem[] = [
     roles: [UserRole.ADMIN, UserRole.SUPER_ADMIN],
   },
   {
-    title: "Pending payments",
+    titleKey: "chrome.nav.pendingPayments",
     url: "/dashboard/payments/pending",
     icon: <CreditCardIcon />,
     // Admin queue: pending bank-transfer confirmations + recent activity.
     roles: [UserRole.ADMIN, UserRole.SUPER_ADMIN],
   },
   {
-    title: "Support",
+    titleKey: "chrome.nav.support",
     url: "/dashboard/support",
     icon: <MessageCircleIcon />,
     // Admin-only — doctors talk to support via the floating bubble.
     roles: [UserRole.ADMIN, UserRole.SUPER_ADMIN],
   },
   {
-    title: "Media Management",
+    titleKey: "chrome.nav.mediaManagement",
     url: "/dashboard/media",
     icon: <GalleryHorizontalIcon />,
     // Admin-only — curates the doctor-dashboard slider gallery.
     roles: [UserRole.ADMIN, UserRole.SUPER_ADMIN],
   },
   {
-    title: "Reports",
+    titleKey: "chrome.nav.reports",
     url: "/dashboard/reports",
     icon: <FileBarChartIcon />,
     // Admin-only stub — placeholder until the reports module ships.
@@ -158,14 +160,14 @@ const NAV_MAIN: NavItem[] = [
 // Footer secondary nav — settings + support + finance.
 // Get Help stays even though it doesn't have a destination yet (kept on
 // purpose; the user asked for it).
-const NAV_SECONDARY: NavItem[] = [
-  { title: "Settings",        url: "/account/profile",            icon: <Settings2Icon />    },
+const NAV_SECONDARY: NavItemDef[] = [
+  { titleKey: "chrome.nav.settings",       url: "/account/profile",            icon: <Settings2Icon />    },
   // Payment History lives at /dashboard/payments/history (was
   // /account/billing). The new URL is its own dedicated dashboard
   // page rather than nested under account-settings — same role-aware
   // logic (admin sees all, dentist sees their own).
-  { title: "Payment History", url: "/dashboard/payments/history", icon: <CreditCardIcon />   },
-  { title: "Get Help",        url: "#",                           icon: <CircleHelpIcon />   },
+  { titleKey: "chrome.nav.paymentHistory", url: "/dashboard/payments/history", icon: <CreditCardIcon />   },
+  { titleKey: "chrome.nav.getHelp",        url: "#",                           icon: <CircleHelpIcon />   },
 ]
 
 // Roles that can create new orders. Designers can VIEW orders (read-only
@@ -181,6 +183,7 @@ const NEW_ORDER_ROLES: UserRole[] = [
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const { user, isAdmin } = useAuth()
+  const { t } = useT()
 
   // Admin-only unread-support counter. The hook polls every 20s and is
   // invalidated by the /support-chat socket on incoming messages, so the
@@ -213,12 +216,19 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             ? isAdmin
             : user?.role === r,
         )
-      }).map((item) =>
-        item.url === "/dashboard/support"
-          ? { ...item, badge: supportUnread }
-          : item,
-      ),
-    [user, isAdmin, supportUnread],
+      }).map((item) => ({
+        ...item,
+        // Resolve the language-aware label here so NavMain stays a
+        // dumb renderer (it just prints `title`).
+        title: t(item.titleKey),
+        badge: item.url === "/dashboard/support" ? supportUnread : undefined,
+      })),
+    [user, isAdmin, supportUnread, t],
+  )
+
+  const secondaryNav = React.useMemo(
+    () => NAV_SECONDARY.map((item) => ({ ...item, title: t(item.titleKey) })),
+    [t],
   )
 
   const canCreateOrder = React.useMemo(
@@ -400,11 +410,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             >
               <Link
                 href="/dashboard/orders/new"
-                aria-label="Create a new order"
+                aria-label={t('chrome.nav.newOrderAria')}
               >
                 <PlusIcon className="size-4 shrink-0" />
                 <span className="truncate group-data-[collapsible=icon]:hidden">
-                  New Order
+                  {t('chrome.nav.newOrder')}
                 </span>
               </Link>
             </Button>
@@ -412,7 +422,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         )}
 
         <NavMain items={visibleNavMain} />
-        <NavSecondary items={NAV_SECONDARY} className="mt-auto" />
+        <NavSecondary items={secondaryNav} className="mt-auto" />
       </SidebarContent>
 
       <SidebarFooter>

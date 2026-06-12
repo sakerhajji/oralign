@@ -24,6 +24,7 @@ import {
 import { EllipsisVerticalIcon, CircleUserRoundIcon, CreditCardIcon, BellIcon, LogOutIcon } from "lucide-react"
 import { useLogout } from "@/lib/hooks/use-auth"
 import { useUnreadNotificationCount } from "@/lib/hooks/use-notifications"
+import { useT } from "@/lib/i18n/lang-context"
 
 function getInitials(name: string): string {
   return name
@@ -47,6 +48,7 @@ export function NavUser({
 }) {
   const { isMobile } = useSidebar()
   const handleLogout = useLogout()
+  const { t } = useT()
   const initials = getInitials(user.name)
   const unreadQuery = useUnreadNotificationCount()
   const unread = unreadQuery.data ?? 0
@@ -131,19 +133,19 @@ export function NavUser({
               <DropdownMenuItem asChild>
                 <Link href="/account/profile">
                   <CircleUserRoundIcon />
-                  Account
+                  {t('chrome.userMenu.account')}
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild>
                 <Link href="/account/billing">
                   <CreditCardIcon />
-                  Billing
+                  {t('chrome.userMenu.billing')}
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild>
                 <Link href="/dashboard/notifications" className="gap-2">
                   <BellIcon />
-                  Notifications
+                  {t('chrome.userMenu.notifications')}
                   {unread > 0 ? (
                     <span className="ml-auto grid min-h-5 min-w-5 place-items-center rounded-full bg-destructive px-1.5 text-[10px] font-bold leading-none text-white">
                       {unread > 99 ? "99+" : unread}
@@ -156,7 +158,7 @@ export function NavUser({
             <DropdownMenuItem onClick={handleLogout}>
               <LogOutIcon
               />
-              Log out
+              {t('chrome.userMenu.logOut')}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

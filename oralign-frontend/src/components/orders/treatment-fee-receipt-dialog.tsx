@@ -30,6 +30,7 @@ import { ImageLightbox } from '@/components/ui/image-lightbox';
 import { useConfirmTreatmentFeePayment } from '@/lib/hooks';
 import { resolveUploadUrl } from '@/lib/api/company-billing.service';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n/lang-context';
 import { PaymentMethod } from '@/lib/types';
 
 /**
@@ -108,6 +109,7 @@ export function TreatmentFeeReceiptDialog({
   canConfirm,
   onConfirmed,
 }: TreatmentFeeReceiptDialogProps) {
+  const { t } = useT();
   const fileUrl = useMemo(() => resolveUploadUrl(proofPath), [proofPath]);
   const fileName = extractFilename(proofPath) ?? `receipt-${orderCode}`;
   const proofKind = classifyProof(proofPath);
@@ -143,10 +145,10 @@ export function TreatmentFeeReceiptDialog({
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="min-w-0">
                 <DialogTitle className="text-lg font-semibold sm:text-xl">
-                  Bank-transfer receipt
+                  {t('feeUi.receiptDialog.title')}
                 </DialogTitle>
                 <DialogDescription className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
-                  Order {orderCode}
+                  {t('feeUi.receiptDialog.orderCode', { code: orderCode })}
                 </DialogDescription>
               </div>
               <Badge
@@ -154,7 +156,7 @@ export function TreatmentFeeReceiptDialog({
                 className="shrink-0 gap-1.5 border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700"
               >
                 <Clock className="h-3 w-3" />
-                Awaiting confirmation
+                {t('paymentsCommon.status.awaiting_confirmation')}
               </Badge>
             </div>
           </DialogHeader>
@@ -179,23 +181,23 @@ export function TreatmentFeeReceiptDialog({
             {/* Summary column — fixed 42% on desktop */}
             <div className="flex min-h-0 flex-col overflow-y-auto bg-card p-6 lg:w-[42%] lg:flex-shrink-0 lg:p-7">
               <h3 className="mb-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Payment summary
+                {t('feeUi.receiptDialog.summary')}
               </h3>
               <dl className="space-y-4">
                 <DetailRow
                   icon={<User className="h-3.5 w-3.5" />}
-                  label="Patient"
+                  label={t('feeUi.receiptDialog.patient')}
                   value={patientName ?? '—'}
                 />
                 <DetailRow
                   icon={<Stethoscope className="h-3.5 w-3.5" />}
-                  label="Doctor"
+                  label={t('feeUi.receiptDialog.doctor')}
                   value={doctorName ? `Dr. ${doctorName}` : '—'}
                 />
                 <Divider />
                 <DetailRow
                   icon={<Banknote className="h-3.5 w-3.5" />}
-                  label="Amount"
+                  label={t('feeUi.receiptDialog.amount')}
                   value={
                     <span className="text-lg font-bold tabular-nums">
                       {amount ?? 0} {currency}
@@ -205,19 +207,21 @@ export function TreatmentFeeReceiptDialog({
                 />
                 <DetailRow
                   icon={<MethodIcon method={method} />}
-                  label="Method"
-                  value={methodLabel(method)}
+                  label={t('feeUi.receiptDialog.method')}
+                  value={t(
+                    `paymentsCommon.method.${method ?? PaymentMethod.BANK_TRANSFER}`,
+                  )}
                 />
                 {submittedAt && (
                   <DetailRow
                     icon={<Calendar className="h-3.5 w-3.5" />}
-                    label="Submitted"
+                    label={t('feeUi.receiptDialog.submitted')}
                     value={format(new Date(submittedAt), 'MMM d, yyyy')}
                   />
                 )}
                 <DetailRow
                   icon={<FileText className="h-3.5 w-3.5" />}
-                  label="Receipt"
+                  label={t('feeUi.receiptDialog.receipt')}
                   value={
                     <span
                       className="block truncate font-mono text-[11px] text-muted-foreground"
@@ -236,9 +240,7 @@ export function TreatmentFeeReceiptDialog({
                */}
               <div className="mt-auto pt-6">
                 <p className="rounded-lg border border-blue-100 bg-blue-50/60 p-4 text-xs leading-relaxed text-blue-900/80">
-                  Confirming will mark the treatment fee as paid and
-                  unblock the treatment plan. This action is logged
-                  with your admin user id.
+                  {t('feeUi.receiptDialog.confirmHint')}
                 </p>
               </div>
             </div>
@@ -252,7 +254,7 @@ export function TreatmentFeeReceiptDialog({
               disabled={confirm.isPending}
               onClick={() => onOpenChange(false)}
             >
-              Cancel
+              {t('common.cancel')}
             </Button>
             {canConfirm && (
               <Button
@@ -276,7 +278,7 @@ export function TreatmentFeeReceiptDialog({
                 ) : (
                   <CheckCircle2 className="h-4 w-4" />
                 )}
-                Confirm payment
+                {t('feeUi.receiptDialog.confirmBtn')}
               </Button>
             )}
           </div>
@@ -293,8 +295,10 @@ export function TreatmentFeeReceiptDialog({
           open={lightboxOpen}
           onOpenChange={setLightboxOpen}
           src={fileUrl}
-          alt={`Bank-transfer receipt for ${orderCode}`}
-          caption={`${orderCode} — bank-transfer receipt`}
+          alt={t('feeUi.receiptDialog.lightboxAlt', { code: orderCode })}
+          caption={t('feeUi.receiptDialog.lightboxCaption', {
+            code: orderCode,
+          })}
           subCaption={fileName}
         />
       )}
@@ -366,18 +370,9 @@ function MethodIcon({ method }: { method?: PaymentMethod | null }) {
   return <Landmark className="h-3.5 w-3.5" />;
 }
 
-function methodLabel(method?: PaymentMethod | null): string {
-  switch (method) {
-    case PaymentMethod.CARD:
-      return 'Card';
-    case PaymentMethod.CASH:
-      return 'Cash';
-    case PaymentMethod.BANK_TRANSFER:
-      return 'Bank transfer';
-    default:
-      return 'Bank transfer';
-  }
-}
+// Method display labels come from `paymentsCommon.method.*` via t()
+// at the call site (the previous module-level `methodLabel` helper
+// couldn't access the translation hook).
 
 // ─────────────────────────────────────────────────────────────────────
 // Receipt viewport
@@ -414,14 +409,15 @@ function ReceiptViewport({
   fileName: string;
   onImageClick: () => void;
 }) {
+  const { t } = useT();
   const [imgError, setImgError] = useState(false);
 
   if (kind === 'missing' || !fileUrl) {
     return (
       <EmptyState
         icon={<AlertTriangle className="h-7 w-7 text-amber-500" />}
-        title="No receipt attached"
-        message="The doctor recorded a bank-transfer intent but did not upload a proof file."
+        title={t('feeUi.receiptDialog.noReceiptTitle')}
+        message={t('feeUi.receiptDialog.noReceiptDesc')}
       />
     );
   }
@@ -429,7 +425,7 @@ function ReceiptViewport({
   if (kind === 'pdf') {
     return (
       <iframe
-        title={`Receipt — ${fileName}`}
+        title={t('feeUi.receiptDialog.iframeTitle', { name: fileName })}
         src={fileUrl}
         className="h-full min-h-[420px] w-full rounded-lg border bg-white shadow-sm"
       />
@@ -445,12 +441,12 @@ function ReceiptViewport({
         // advertises that clicking expands to the full lightbox.
         // The image preserves its aspect ratio inside the container.
         className="group relative flex h-full w-full cursor-zoom-in items-center justify-center"
-        aria-label="Open receipt in full view"
+        aria-label={t('feeUi.receiptDialog.openFullAria')}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={fileUrl}
-          alt={`Bank-transfer receipt ${fileName}`}
+          alt={t('feeUi.receiptDialog.receiptImgAlt', { name: fileName })}
           loading="eager"
           decoding="async"
           onError={() => setImgError(true)}
@@ -476,11 +472,15 @@ function ReceiptViewport({
           <FileText className="h-7 w-7 text-muted-foreground" />
         )
       }
-      title={imgError ? "Couldn't load the receipt" : 'Preview not available'}
+      title={
+        imgError
+          ? t('feeUi.receiptDialog.loadErrorTitle')
+          : t('feeUi.receiptDialog.noPreviewTitle')
+      }
       message={
         imgError
-          ? "The image couldn't be loaded inline. Download to inspect the proof."
-          : `This file format can't be previewed in the browser. Download to inspect it.`
+          ? t('feeUi.receiptDialog.loadErrorDesc')
+          : t('feeUi.receiptDialog.noPreviewDesc')
       }
       action={
         <Button asChild size="sm" variant="outline" className="gap-1.5">
@@ -491,7 +491,7 @@ function ReceiptViewport({
             download={fileName}
           >
             <Download className="h-3.5 w-3.5" />
-            Download receipt
+            {t('feeUi.receiptDialog.downloadReceipt')}
           </a>
         </Button>
       }

@@ -13,6 +13,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n/lang-context';
 
 /**
  * Client-side ZIP upload screen with a *real* validation pass before bytes
@@ -72,12 +73,17 @@ export interface ZipUploadDialogProps {
   title?: string;
 }
 
+/** Shape of the translator forwarded into the module-scope audit engine. */
+type Translate = (path: string, vars?: Record<string, string | number>) => string;
+
 export function ZipUploadDialog({
   open,
   onClose,
   onConfirm,
-  title = 'Upload ZIP bundle',
+  title,
 }: ZipUploadDialogProps) {
+  const { t } = useT();
+  const dialogTitle = title ?? t('zipUi.defaultTitle');
   const [picked, setPicked] = useState<File | null>(null);
   const [audit, setAudit] = useState<ZipAudit | null>(null);
   const [auditing, setAuditing] = useState(false);
@@ -100,7 +106,7 @@ export function ZipUploadDialog({
     setError(null);
     setAuditing(true);
     try {
-      const result = await auditZip(file);
+      const result = await auditZip(file, t);
       setAudit(result);
     } catch (err) {
       setError((err as Error).message);
@@ -121,13 +127,13 @@ export function ZipUploadDialog({
           <div className="flex min-w-0 items-center gap-3">
             <FileArchive className="h-5 w-5 shrink-0 text-primary" />
             <DialogTitle className="truncate text-sm font-semibold sm:text-base">
-              {title}
+              {dialogTitle}
             </DialogTitle>
           </div>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close"
+            aria-label={t('common.close')}
             className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             <X className="h-4 w-4" />
@@ -142,11 +148,11 @@ export function ZipUploadDialog({
               className="flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border border-dashed bg-muted/20 p-8 text-center transition hover:border-primary hover:bg-primary/5"
             >
               <UploadCloud className="h-8 w-8 text-muted-foreground" />
-              <p className="text-sm font-medium">Choose a ZIP file</p>
+              <p className="text-sm font-medium">{t('zipUi.chooseFile')}</p>
               <p className="text-xs text-muted-foreground">
-                Up to {(MAX_ZIP_SIZE / (1024 * 1024 * 1024)).toFixed(0)} GB —
-                fits a full CBCT / DICOM volume. We scan it for executables
-                and unsafe filenames before it uploads.
+                {t('zipUi.chooseHint', {
+                  n: (MAX_ZIP_SIZE / (1024 * 1024 * 1024)).toFixed(0),
+                })}
               </p>
               <input
                 id="zip-upload-input"
@@ -166,7 +172,7 @@ export function ZipUploadDialog({
           {picked && auditing && (
             <div className="flex items-center gap-3 rounded-lg border bg-muted/20 p-4 text-sm">
               <Loader2 className="h-4 w-4 animate-spin text-primary" />
-              <span>Scanning {picked.name}…</span>
+              <span>{t('zipUi.scanning', { name: picked.name })}</span>
             </div>
           )}
 
@@ -175,7 +181,7 @@ export function ZipUploadDialog({
             <div className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
               <div className="min-w-0">
-                <p className="font-medium">Couldn't validate this file</p>
+                <p className="font-medium">{t('zipUi.validateError')}</p>
                 <p className="mt-0.5 text-xs">{error}</p>
               </div>
             </div>
@@ -206,10 +212,18 @@ export function ZipUploadDialog({
                   <div className="min-w-0 flex-1">
                     <p className="font-semibold">
                       {audit.blockers.length > 0
-                        ? 'Upload blocked — issues found'
+                        ? t('zipUi.blockedSummary')
                         : audit.warnings.length > 0
-                          ? `Looks OK with ${audit.warnings.length} warning${audit.warnings.length === 1 ? '' : 's'}`
-                          : `${audit.entries.length} file${audit.entries.length === 1 ? '' : 's'} inside · safe to upload`}
+                          ? audit.warnings.length === 1
+                            ? t('zipUi.warningsOne')
+                            : t('zipUi.warningsMany', {
+                                count: audit.warnings.length,
+                              })
+                          : audit.entries.length === 1
+                            ? t('zipUi.filesOne')
+                            : t('zipUi.filesMany', {
+                                count: audit.entries.length,
+                              })}
                     </p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       {picked.name} · {formatBytes(picked.size)}
@@ -236,13 +250,15 @@ export function ZipUploadDialog({
               {/* Contents preview */}
               <div className="overflow-hidden rounded-lg border">
                 <div className="flex items-center justify-between border-b bg-muted/30 px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  <span>Contents ({audit.entries.length})</span>
-                  <span>Size</span>
+                  <span>
+                    {t('zipUi.contents', { count: audit.entries.length })}
+                  </span>
+                  <span>{t('zipUi.size')}</span>
                 </div>
                 <div className="max-h-56 overflow-auto">
                   {audit.entries.length === 0 ? (
                     <p className="px-3 py-4 text-center text-sm text-muted-foreground">
-                      The archive is empty.
+                      {t('zipUi.emptyArchive')}
                     </p>
                   ) : (
                     audit.entries.slice(0, 250).map((entry) => (
@@ -263,7 +279,7 @@ export function ZipUploadDialog({
                 </div>
                 {audit.entries.length > 250 && (
                   <p className="border-t bg-muted/30 px-3 py-2 text-center text-xs text-muted-foreground">
-                    Showing first 250 of {audit.entries.length} entries
+                    {t('zipUi.firstEntries', { count: audit.entries.length })}
                   </p>
                 )}
               </div>
@@ -279,7 +295,7 @@ export function ZipUploadDialog({
             onClick={onClose}
             className="sm:w-auto"
           >
-            Cancel
+            {t('common.cancel')}
           </Button>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             {picked && audit && !auditing && (
@@ -293,7 +309,7 @@ export function ZipUploadDialog({
                   setError(null);
                 }}
               >
-                Pick another file
+                {t('zipUi.pickAnother')}
               </Button>
             )}
             <Button
@@ -303,7 +319,7 @@ export function ZipUploadDialog({
               className="gap-2"
             >
               <UploadCloud className="h-4 w-4" />
-              Upload ZIP
+              {t('zipUi.uploadBtn')}
             </Button>
           </div>
         </footer>
@@ -323,10 +339,13 @@ const SIG_LFH = 0x04034b50;
 const SIG_EOCD_EMPTY = 0x06054b50;
 const SIG_SPANNED = 0x08074b50;
 
-async function auditZip(file: File): Promise<ZipAudit> {
+async function auditZip(file: File, t: Translate): Promise<ZipAudit> {
   if (file.size > MAX_ZIP_SIZE) {
     throw new Error(
-      `File is ${formatBytes(file.size)}; the limit is ${formatBytes(MAX_ZIP_SIZE)}.`,
+      t('zipUi.audit.tooBig', {
+        size: formatBytes(file.size),
+        limit: formatBytes(MAX_ZIP_SIZE),
+      }),
     );
   }
 
@@ -336,9 +355,7 @@ async function auditZip(file: File): Promise<ZipAudit> {
   const head = new Uint8Array(await file.slice(0, 4).arrayBuffer());
   const headSig = readUint32LE(new DataView(head.buffer), 0);
   if (headSig !== SIG_LFH && headSig !== SIG_EOCD_EMPTY && headSig !== SIG_SPANNED) {
-    throw new Error(
-      'This file does not look like a real ZIP archive (signature mismatch). Refusing to upload.',
-    );
+    throw new Error(t('zipUi.audit.badSignature'));
   }
 
   // Read the tail to find the End-of-Central-Directory record.
@@ -348,9 +365,7 @@ async function auditZip(file: File): Promise<ZipAudit> {
   );
   const eocdOffset = findEocdOffset(tail);
   if (eocdOffset < 0) {
-    throw new Error(
-      'End-of-Central-Directory record not found — the archive may be corrupt.',
-    );
+    throw new Error(t('zipUi.audit.noEocd'));
   }
 
   const eocdView = new DataView(tail.buffer, eocdOffset);
@@ -361,7 +376,9 @@ async function auditZip(file: File): Promise<ZipAudit> {
   // Refuse archives that try to advertise more entries than reasonable.
   if (totalEntries > 50_000) {
     throw new Error(
-      `Refusing to scan an archive with ${totalEntries.toLocaleString()} entries.`,
+      t('zipUi.audit.tooManyEntries', {
+        count: totalEntries.toLocaleString(),
+      }),
     );
   }
 
@@ -402,21 +419,21 @@ async function auditZip(file: File): Promise<ZipAudit> {
   // Audit each filename.
   for (const entry of entries) {
     if (entry.name.includes('..')) {
-      blockers.push(`Path traversal attempted: "${entry.name}"`);
+      blockers.push(t('zipUi.audit.pathTraversal', { name: entry.name }));
     }
     if (entry.name.startsWith('/') || /^[a-zA-Z]:/.test(entry.name)) {
-      blockers.push(`Absolute path: "${entry.name}"`);
+      blockers.push(t('zipUi.audit.absolutePath', { name: entry.name }));
     }
     if (entry.name.includes(' ')) {
-      blockers.push(`NUL byte in filename: "${entry.name}"`);
+      blockers.push(t('zipUi.audit.nulByte', { name: entry.name }));
     }
     const ext = entry.name.split('.').pop()?.toLowerCase() ?? '';
     if (BLOCKED_EXTENSIONS.has(ext)) {
-      blockers.push(`Executable file inside: "${entry.name}" (.${ext})`);
+      blockers.push(t('zipUi.audit.executable', { name: entry.name, ext }));
     }
     // Mac metadata folders aren't dangerous, but the user should know.
     if (entry.name.startsWith('__MACOSX/') || entry.name.endsWith('.DS_Store')) {
-      warnings.push(`OS metadata included: "${entry.name}"`);
+      warnings.push(t('zipUi.audit.osMetadata', { name: entry.name }));
     }
   }
 
@@ -428,7 +445,9 @@ async function auditZip(file: File): Promise<ZipAudit> {
     totalUncompressed / totalCompressed > 100
   ) {
     blockers.push(
-      `Suspicious compression ratio (${(totalUncompressed / totalCompressed).toFixed(0)}× expansion). Refusing to upload.`,
+      t('zipUi.audit.zipBomb', {
+        ratio: (totalUncompressed / totalCompressed).toFixed(0),
+      }),
     );
   }
 

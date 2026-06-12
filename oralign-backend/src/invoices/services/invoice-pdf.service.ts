@@ -587,16 +587,26 @@ export class InvoicePdfService implements OnModuleDestroy {
     <style>
       @page { size: A4; margin: 11mm; }
       * { box-sizing: border-box; }
-      html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      html {
+        height: 100%;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
       body {
         margin: 0;
+        min-height: 100%;
         color: #111111;
         background: #ffffff;
         font-family: Inter, Roboto, Arial, "DejaVu Sans", sans-serif;
         font-size: 10.5px;
         line-height: 1.42;
       }
-      .document { width: 100%; }
+      .document {
+        display: flex;
+        min-height: 275mm;
+        width: 100%;
+        flex-direction: column;
+      }
       /* Centered logo masthead — the logo sits alone, centered, at the
          very top of the first page; the document title + meta follow it. */
       .masthead {
@@ -769,7 +779,7 @@ export class InvoicePdfService implements OnModuleDestroy {
         overflow-wrap: anywhere;
       }
       .footer {
-        margin-top: 12px;
+        margin-top: auto;
         padding-top: 9px;
         border-top: 1px solid #e2e4e8;
         color: #555555;

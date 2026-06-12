@@ -25,6 +25,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n/lang-context';
 import {
   useBillingPublicDefaults,
   usePayTreatmentFee,
@@ -36,8 +37,6 @@ type MethodKey = 'card' | 'bank_transfer' | 'cash';
 
 interface MethodConfig {
   key: MethodKey;
-  label: string;
-  description: string;
   icon: typeof CreditCard;
   adminOnly?: boolean;
 }
@@ -47,30 +46,15 @@ interface MethodConfig {
  * spec: Bank transfer → Card → Cash. Cash is admin-only and is
  * filtered out for the doctor view because cash collection happens
  * in-clinic and gets recorded by the admin.
+ *
+ * Labels + descriptions live in the dictionary under
+ * `feeUi.methods.<key>` and are resolved with t() at render time
+ * (module scope can't call hooks).
  */
 const METHODS: MethodConfig[] = [
-  {
-    key: 'bank_transfer',
-    label: 'Bank transfer',
-    description:
-      'Transfer to the clinic account, then upload your receipt. An admin will confirm once the funds land.',
-    icon: Landmark,
-  },
-  {
-    key: 'card',
-    label: 'Card payment',
-    description:
-      'Pay online instantly. We currently use a mock collector — the order is marked paid immediately on success.',
-    icon: CreditCard,
-  },
-  {
-    key: 'cash',
-    label: 'Cash (admin)',
-    description:
-      'Recorded in-clinic by an admin. Stamps the fee as paid right away.',
-    icon: Banknote,
-    adminOnly: true,
-  },
+  { key: 'bank_transfer', icon: Landmark },
+  { key: 'card', icon: CreditCard },
+  { key: 'cash', icon: Banknote, adminOnly: true },
 ];
 
 /**
@@ -105,6 +89,7 @@ export function TreatmentFeePaymentDialog({
   /** Fired after a terminal success so the parent can navigate. */
   onPaid?: () => void;
 }) {
+  const { t } = useT();
   // Doctor-safe defaults endpoint. The previous version called
   // `useCompanyBilling()` which hits `/admin/company-billing-settings`
   // and returned 403 for dentists, so the modal silently showed 0
@@ -203,10 +188,10 @@ export function TreatmentFeePaymentDialog({
         {/* ─── Header ─────────────────────────────────────────── */}
         <DialogHeader className="shrink-0 space-y-1 border-b bg-card px-6 py-5 text-left sm:px-8">
           <DialogTitle className="text-lg font-semibold sm:text-xl">
-            Pay treatment fee
+            {t('feeUi.payDialog.title')}
           </DialogTitle>
           <DialogDescription className="truncate font-mono text-xs text-muted-foreground">
-            Order {order.orderCode}
+            {t('feeUi.payDialog.orderCode', { code: order.orderCode })}
           </DialogDescription>
         </DialogHeader>
 
@@ -223,21 +208,20 @@ export function TreatmentFeePaymentDialog({
           {/* Summary rail — stable context, fixed 38% on desktop */}
           <aside className="flex flex-col border-b bg-muted/30 p-5 sm:p-6 lg:min-h-0 lg:overflow-y-auto lg:border-b-0 lg:border-r lg:p-7">
             <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Amount due
+              {t('feeUi.payDialog.amountDue')}
             </p>
             <p className="mt-1.5 text-3xl font-bold tabular-nums text-foreground sm:text-4xl">
               {amount} {currency}
             </p>
             <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
-              The professional fee must be settled before the treatment
-              plan can be prepared.
+              {t('feeUi.payDialog.feeIntro')}
             </p>
 
             <div className="mt-auto pt-6">
               <p className="rounded-lg border bg-card p-3 text-xs leading-relaxed text-muted-foreground">
                 {isBankTransferSelected
-                  ? 'After you upload the receipt, an admin confirms the transfer once the funds land.'
-                  : 'Settling this fee unblocks the treatment plan for this order.'}
+                  ? t('feeUi.payDialog.footnoteBank')
+                  : t('feeUi.payDialog.footnoteDefault')}
               </p>
             </div>
           </aside>
@@ -245,7 +229,7 @@ export function TreatmentFeePaymentDialog({
           {/* Payment flow — method picker → bank details → receipt */}
           <div
             role="region"
-            aria-label="Payment details"
+            aria-label={t('feeUi.payDialog.regionAria')}
             tabIndex={0}
             className="min-w-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:[scrollbar-gutter:stable]"
           >
@@ -270,7 +254,9 @@ export function TreatmentFeePaymentDialog({
                 />
               ) : (
                 <div className="space-y-2">
-                  <p className="text-sm font-medium">Payment method</p>
+                  <p className="text-sm font-medium">
+                    {t('feeUi.payDialog.methodHeading')}
+                  </p>
                   <div className="grid gap-2">
                     {methods.map((m) => {
                       const Icon = m.icon;
@@ -290,9 +276,11 @@ export function TreatmentFeePaymentDialog({
                             <Icon className="h-4 w-4" />
                           </span>
                           <div className="min-w-0 flex-1">
-                            <p className="text-sm font-semibold">{m.label}</p>
+                            <p className="text-sm font-semibold">
+                              {t(`feeUi.methods.${m.key}.label`)}
+                            </p>
                             <p className="mt-0.5 text-xs text-muted-foreground">
-                              {m.description}
+                              {t(`feeUi.methods.${m.key}.description`)}
                             </p>
                           </div>
                         </button>
@@ -323,11 +311,10 @@ export function TreatmentFeePaymentDialog({
                   <CardContent className="space-y-3 pt-4">
                     <div>
                       <p className="text-sm font-medium">
-                        Upload bank-transfer receipt
+                        {t('feeUi.payDialog.uploadReceiptTitle')}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        Once the wire is sent, upload the bank&apos;s receipt /
-                        proof. Accepted: PDF, JPG, PNG · max 10 MB.
+                        {t('feeUi.payDialog.uploadReceiptHint')}
                       </p>
                     </div>
                     <label
@@ -339,12 +326,14 @@ export function TreatmentFeePaymentDialog({
                     >
                       <Upload className="h-4 w-4 text-muted-foreground" />
                       <span className="flex-1 truncate text-sm">
-                        {proofFile ? proofFile.name : 'Click to pick a file'}
+                        {proofFile
+                          ? proofFile.name
+                          : t('feeUi.payDialog.pickFile')}
                       </span>
                       {proofFile && (
                         <button
                           type="button"
-                          aria-label="Remove file"
+                          aria-label={t('feeUi.payDialog.removeFileAria')}
                           onClick={(e) => {
                             e.preventDefault();
                             setProofFile(null);
@@ -374,20 +363,19 @@ export function TreatmentFeePaymentDialog({
                     {proofFile && (
                       <div className="space-y-2">
                         <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                          Preview — confirm this is the right receipt before
-                          submitting
+                          {t('feeUi.payDialog.previewConfirm')}
                         </p>
                         {proofPreview && proofFile.type.startsWith('image/') ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
                             src={proofPreview}
-                            alt="Selected receipt preview"
+                            alt={t('feeUi.payDialog.previewAlt')}
                             className="max-h-[320px] w-full rounded-lg border bg-muted/30 object-contain"
                           />
                         ) : proofPreview &&
                           proofFile.type === 'application/pdf' ? (
                           <iframe
-                            title="Selected receipt preview"
+                            title={t('feeUi.payDialog.previewAlt')}
                             src={proofPreview}
                             className="h-[360px] w-full rounded-lg border bg-white"
                           />
@@ -414,7 +402,7 @@ export function TreatmentFeePaymentDialog({
             disabled={busy}
             onClick={() => onOpenChange(false)}
           >
-            Cancel
+            {t('common.cancel')}
           </Button>
           {isBankTransferSelected ? (
             <Button
@@ -424,7 +412,7 @@ export function TreatmentFeePaymentDialog({
               className="gap-2"
             >
               {uploadProof.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-              Upload receipt
+              {t('feeUi.payDialog.uploadReceiptBtn')}
             </Button>
           ) : (
             <Button
@@ -434,7 +422,11 @@ export function TreatmentFeePaymentDialog({
               className="gap-2"
             >
               {pay.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-              {selected === 'cash' ? 'Record cash payment' : `Pay ${amount} ${currency}`}
+              {selected === 'cash'
+                ? t('feeUi.payDialog.recordCashBtn')
+                : t('feeUi.payDialog.payAmountBtn', {
+                    amount: `${amount} ${currency}`,
+                  })}
             </Button>
           )}
         </div>
@@ -473,6 +465,7 @@ function BankTransferInstructions({
   currency: string;
   paymentReference: string;
 }) {
+  const { t } = useT();
   // Empty-state — admin hasn't configured the bank account yet. We
   // surface this as a warning rather than silently rendering an empty
   // card so the doctor knows to contact support before wiring blind.
@@ -483,15 +476,14 @@ function BankTransferInstructions({
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
           <div className="space-y-1">
             <p className="font-medium text-amber-900">
-              Bank account not configured yet
+              {t('feeUi.bank.notConfiguredTitle')}
             </p>
             <p className="text-xs text-amber-800/90">
-              The clinic admin needs to fill in the bank details under{' '}
+              {t('feeUi.bank.notConfiguredBefore')}{' '}
               <span className="font-medium">
-                Account → Billing settings
+                {t('feeUi.bank.notConfiguredPath')}
               </span>{' '}
-              before bank transfers can be paid this way. Please contact
-              support — or pick Card / Cash instead.
+              {t('feeUi.bank.notConfiguredAfter')}
             </p>
           </div>
         </CardContent>
@@ -506,11 +498,10 @@ function BankTransferInstructions({
           <Landmark className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold">
-              Where to send the money
+              {t('feeUi.bank.whereTitle')}
             </p>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              Copy each field into your bank app. Include the payment
-              reference so we can match the wire to your order.
+              {t('feeUi.bank.whereDesc')}
             </p>
           </div>
         </div>
@@ -524,29 +515,29 @@ function BankTransferInstructions({
          */}
         <div className="divide-y rounded-lg border bg-muted/30">
           {beneficiary && (
-            <CopyableRow label="Beneficiary" value={beneficiary} />
+            <CopyableRow label={t('feeUi.bank.beneficiary')} value={beneficiary} />
           )}
           {beneficiaryAddress && (
-            <CopyableRow label="Address" value={beneficiaryAddress} />
+            <CopyableRow label={t('feeUi.bank.address')} value={beneficiaryAddress} />
           )}
           {bankDetails.bankName && (
-            <CopyableRow label="Bank" value={bankDetails.bankName} />
+            <CopyableRow label={t('feeUi.bank.bankName')} value={bankDetails.bankName} />
           )}
           {bankDetails.accountName && (
             <CopyableRow
-              label="Account holder"
+              label={t('feeUi.bank.accountHolder')}
               value={bankDetails.accountName}
             />
           )}
           {bankDetails.iban && (
-            <CopyableRow label="IBAN" value={bankDetails.iban} mono />
+            <CopyableRow label={t('feeUi.bank.iban')} value={bankDetails.iban} mono />
           )}
           {bankDetails.rib && (
-            <CopyableRow label="RIB" value={bankDetails.rib} mono />
+            <CopyableRow label={t('feeUi.bank.rib')} value={bankDetails.rib} mono />
           )}
           {bankDetails.swift && (
             <CopyableRow
-              label="SWIFT / BIC"
+              label={t('feeUi.bank.swift')}
               value={bankDetails.swift}
               mono
             />
@@ -563,14 +554,14 @@ function BankTransferInstructions({
          */}
         <div className="grid gap-2 sm:grid-cols-2">
           <HighlightCard
-            label="Amount to transfer"
+            label={t('feeUi.bank.amountToTransfer')}
             value={`${amount} ${currency}`}
             // Money goes one step bigger than the reference — eyes
             // should land here first when scanning the panel.
             valueClassName="text-base tabular-nums"
           />
           <HighlightCard
-            label="Payment reference"
+            label={t('feeUi.bank.paymentReference')}
             value={paymentReference}
             valueClassName="font-mono break-all"
             copyable
@@ -596,6 +587,7 @@ function SelectedMethodStrip({
   disabled?: boolean;
   onChange: () => void;
 }) {
+  const { t } = useT();
   const Icon = method.icon;
   return (
     <div className="flex items-center gap-3 rounded-lg border border-primary bg-primary/5 px-3 py-2 ring-2 ring-primary/10">
@@ -604,11 +596,11 @@ function SelectedMethodStrip({
       </span>
       <div className="min-w-0 flex-1">
         <p className="flex items-center gap-1.5 text-sm font-semibold">
-          {method.label}
+          {t(`feeUi.methods.${method.key}.label`)}
           <CheckCircle2 className="h-3.5 w-3.5 text-primary" />
         </p>
         <p className="truncate text-[11px] text-muted-foreground">
-          {method.description}
+          {t(`feeUi.methods.${method.key}.description`)}
         </p>
       </div>
       <Button
@@ -619,7 +611,7 @@ function SelectedMethodStrip({
         onClick={onChange}
         className="shrink-0 text-xs"
       >
-        Change
+        {t('feeUi.payDialog.changeBtn')}
       </Button>
     </div>
   );
@@ -649,9 +641,7 @@ function HighlightCard({
         <p className="text-[10px] font-semibold uppercase tracking-wide text-primary/80">
           {label}
         </p>
-        {copyable && (
-          <CopyButton value={value} successLabel={`${label} copied`} />
-        )}
+        {copyable && <CopyButton value={value} label={label} />}
       </div>
       <p
         className={cn(
@@ -709,7 +699,7 @@ function CopyableRow({
           {value}
         </p>
       </div>
-      <CopyButton value={value} successLabel={`${label} copied`} />
+      <CopyButton value={value} label={label} />
     </div>
   );
 }
@@ -723,13 +713,15 @@ function CopyableRow({
  */
 function CopyButton({
   value,
-  successLabel,
+  label,
   size = 'icon',
 }: {
   value: string;
-  successLabel: string;
+  /** Field name (already translated) — used in the toast + aria-label. */
+  label: string;
   size?: 'icon' | 'sm';
 }) {
+  const { t } = useT();
   const [justCopied, setJustCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -755,10 +747,10 @@ function CopyButton({
         document.body.removeChild(ta);
       }
       setJustCopied(true);
-      toast.success(successLabel);
+      toast.success(t('feeUi.bank.copiedToast', { label }));
       window.setTimeout(() => setJustCopied(false), 1500);
     } catch {
-      toast.error('Could not copy — please copy manually.');
+      toast.error(t('feeUi.bank.copyError'));
     }
   };
 
@@ -777,7 +769,7 @@ function CopyButton({
         size === 'sm' && 'h-8 gap-1 px-2',
       )}
       onClick={handleCopy}
-      aria-label={`Copy ${successLabel.replace(' copied', '')}`}
+      aria-label={t('feeUi.bank.copyAria', { label })}
     >
       {justCopied ? (
         <Check className="h-4 w-4 text-emerald-600" />
@@ -786,7 +778,7 @@ function CopyButton({
       )}
       {size === 'sm' && (
         <span className="text-xs">
-          {justCopied ? 'Copied' : 'Copy'}
+          {justCopied ? t('feeUi.bank.copied') : t('feeUi.bank.copy')}
         </span>
       )}
     </Button>

@@ -18,6 +18,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n/lang-context';
 import {
   ArchType,
   BatchStatus,
@@ -206,6 +207,7 @@ export function QuotePackPanel({
 // ═══════════════════════════════════════════════════════════════════════
 
 function AttachPackCard({ quote }: { quote: Quotation }) {
+  const { t } = useT();
   const packsQ = usePacks({ limit: 100 });
   const attach = useAttachPackToQuotation();
   const [packId, setPackId] = useState<string>('');
@@ -249,25 +251,23 @@ function AttachPackCard({ quote }: { quote: Quotation }) {
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <Package className="h-4 w-4 text-primary" />
-          Choose a pack
+          {t('quoteUi.attachPack.title')}
         </CardTitle>
         <CardDescription>
-          Start here — pick the commercial pack. Its price is snapshotted
-          onto the quote, so later catalogue edits won&apos;t change this
-          quotation.
+          {t('quoteUi.attachPack.desc')}
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4 md:grid-cols-3">
         <div className="grid gap-2 md:col-span-2">
-          <Label>Pack</Label>
+          <Label>{t('quoteUi.attachPack.packLabel')}</Label>
           <Select value={effectiveId} onValueChange={setPackId}>
             <SelectTrigger>
-              <SelectValue placeholder="Pick a pack…" />
+              <SelectValue placeholder={t('quoteUi.attachPack.packPlaceholder')} />
             </SelectTrigger>
             <SelectContent>
               {activePacks.length === 0 ? (
                 <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                  No active pack — create one in /dashboard/packs first.
+                  {t('quoteUi.attachPack.noActivePack')}
                 </div>
               ) : (
                 activePacks.map((p) => (
@@ -280,14 +280,14 @@ function AttachPackCard({ quote }: { quote: Quotation }) {
           </Select>
         </div>
         <div className="grid gap-2">
-          <Label>Active price</Label>
+          <Label>{t('quoteUi.attachPack.activePrice')}</Label>
           <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
             {selectedPack ? (
               activePrice ? (
                 <strong>{money(activePrice.price, activePrice.currency)}</strong>
               ) : (
                 <span className="text-destructive">
-                  No active price configured
+                  {t('quoteUi.attachPack.noActivePrice')}
                 </span>
               )
             ) : (
@@ -300,7 +300,7 @@ function AttachPackCard({ quote }: { quote: Quotation }) {
             onClick={submit}
             disabled={!effectiveId || !activePrice || attach.isPending}
           >
-            Attach pack
+            {t('quoteUi.attachPack.attachBtn')}
           </Button>
         </div>
       </CardContent>
@@ -313,13 +313,14 @@ function AttachPackCard({ quote }: { quote: Quotation }) {
 // ═══════════════════════════════════════════════════════════════════════
 
 function PackSnapshotCard({ quote }: { quote: Quotation }) {
+  const { t } = useT();
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
           <CardTitle className="flex items-center gap-2 text-base">
             <Package className="h-4 w-4 text-primary" />
-            {quote.packName ?? 'Pack'}
+            {quote.packName ?? t('quoteUi.snapshot.packFallback')}
             {/* Arch badge only surfaces on legacy single-arch quotes
                 — the consolidated model only uses two_arches and the
                 badge is redundant there. Kept for historical
@@ -327,22 +328,26 @@ function PackSnapshotCard({ quote }: { quote: Quotation }) {
                 existed. */}
             {quote.archType && quote.archType !== ArchType.TWO_ARCHES ? (
               <Badge variant="secondary" className="font-normal">
-                Single arch
+                {t('quoteUi.snapshot.singleArch')}
               </Badge>
             ) : null}
           </CardTitle>
           <CardDescription>
             {quote.isUnlimitedSteps
-              ? 'Unlimited steps'
-              : `Max ${quote.maxStepsPerArch ?? 0} steps`}
+              ? t('quoteUi.snapshot.unlimitedSteps')
+              : t('quoteUi.snapshot.maxSteps', { n: quote.maxStepsPerArch ?? 0 })}
             {' · '}
             {quote.isUnlimitedCorrections
-              ? 'unlimited corrections'
-              : `${quote.includedCorrections ?? 0} corrections`}
+              ? t('quoteUi.snapshot.unlimitedCorrections')
+              : t('quoteUi.snapshot.correctionsCount', {
+                  n: quote.includedCorrections ?? 0,
+                })}
           </CardDescription>
         </div>
         <div className="text-right">
-          <div className="text-xs text-muted-foreground">Total price</div>
+          <div className="text-xs text-muted-foreground">
+            {t('quoteUi.snapshot.totalPrice')}
+          </div>
           <div className="text-lg font-semibold">
             {money(quote.totalPrice, quote.currency)}
           </div>
@@ -427,6 +432,7 @@ function buildRows(
 }
 
 function PlanBuilderCard({ quote }: { quote: Quotation }) {
+  const { t } = useT();
   const total = toDec(quote.totalPrice);
   const maxSteps = quote.maxStepsPerArch ?? 0;
   const isUnlimited = !!quote.isUnlimitedSteps;
@@ -485,35 +491,36 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
     );
     if (Math.abs(sum - total) > 0.001) {
       errors.push(
-        `Tranche amounts (${sum.toFixed(3)}) must add up to the total (${total.toFixed(3)}).`,
+        t('quoteUi.plan.errSum', {
+          sum: sum.toFixed(3),
+          total: total.toFixed(3),
+        }),
       );
     }
     for (let i = 0; i < numeric.length; i++) {
       const r = numeric[i]!;
       if (!isFinite(r.amount) || r.amount <= 0) {
-        errors.push(`Tranche ${i + 1}: amount must be positive.`);
+        errors.push(t('quoteUi.plan.errPositive', { n: i + 1 }));
       }
       if (!isFinite(r.from) || !isFinite(r.to) || r.from > r.to) {
-        errors.push(`Tranche ${i + 1}: from-step must be ≤ to-step.`);
+        errors.push(t('quoteUi.plan.errRange', { n: i + 1 }));
       }
       if (!isUnlimited && r.to > maxSteps) {
-        errors.push(
-          `Tranche ${i + 1}: to-step exceeds pack max (${maxSteps}).`,
-        );
+        errors.push(t('quoteUi.plan.errMax', { n: i + 1, max: maxSteps }));
       }
     }
     const sorted = [...numeric].sort((a, b) => a.from - b.from);
     for (let i = 1; i < sorted.length; i++) {
       if (sorted[i]!.from <= sorted[i - 1]!.to) {
-        errors.push('Step ranges overlap between tranches.');
+        errors.push(t('quoteUi.plan.errOverlap'));
         break;
       }
     }
     if (mode === PaymentMode.INSTALLMENTS && rows.length < 2) {
-      errors.push('Splitting into tranches needs at least two of them.');
+      errors.push(t('quoteUi.plan.errMinTwo'));
     }
     return { errors, sum };
-  }, [rows, total, mode, maxSteps, isUnlimited]);
+  }, [rows, total, mode, maxSteps, isUnlimited, t]);
 
   const balanced = Math.abs(validation.sum - total) <= 0.001;
 
@@ -546,22 +553,20 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <Layers className="h-4 w-4 text-primary" />
-          Payment plan
+          {t('quoteUi.plan.title')}
         </CardTitle>
         <CardDescription>
-          Split the{' '}
-          <strong>{money(quote.totalPrice, quote.currency)}</strong> total into
-          tranches. Each tranche unlocks a range of treatment steps once it&apos;s
-          paid. Amounts are calculated for you — fine-tune any row if you need
-          to.
+          {t('quoteUi.plan.descBefore')}{' '}
+          <strong>{money(quote.totalPrice, quote.currency)}</strong>{' '}
+          {t('quoteUi.plan.descAfter')}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
         {/* Mode — pay in full or split into tranches */}
         <div className="inline-flex rounded-lg border bg-muted/40 p-1">
           {[
-            { m: PaymentMode.FULL_PAYMENT, label: 'Pay in full' },
-            { m: PaymentMode.INSTALLMENTS, label: 'Split into tranches' },
+            { m: PaymentMode.FULL_PAYMENT, label: t('quoteUi.plan.payInFull') },
+            { m: PaymentMode.INSTALLMENTS, label: t('quoteUi.plan.splitTranches') },
           ].map(({ m, label }) => (
             <button
               key={m}
@@ -584,7 +589,9 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
         {mode === PaymentMode.INSTALLMENTS ? (
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/20 p-3">
             <div className="flex flex-wrap items-center gap-3">
-              <span className="text-sm font-medium">Number of tranches</span>
+              <span className="text-sm font-medium">
+                {t('quoteUi.plan.trancheCount')}
+              </span>
               <div className="flex items-center gap-1">
                 <Button
                   type="button"
@@ -593,7 +600,7 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
                   className="h-8 w-8"
                   onClick={() => setCount(count - 1)}
                   disabled={count <= 2}
-                  aria-label="One fewer tranche"
+                  aria-label={t('quoteUi.plan.oneFewerAria')}
                 >
                   <Minus className="h-4 w-4" />
                 </Button>
@@ -607,7 +614,7 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
                   className="h-8 w-8"
                   onClick={() => setCount(count + 1)}
                   disabled={count >= maxTranches}
-                  aria-label="One more tranche"
+                  aria-label={t('quoteUi.plan.oneMoreAria')}
                 >
                   <Plus className="h-4 w-4" />
                 </Button>
@@ -635,7 +642,7 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
               onClick={splitEvenly}
             >
               <Scale className="h-4 w-4" />
-              Split evenly
+              {t('quoteUi.plan.splitEvenly')}
             </Button>
           </div>
         ) : null}
@@ -645,10 +652,12 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-10">#</TableHead>
-                <TableHead>Amount ({quote.currency})</TableHead>
-                <TableHead>Steps unlocked</TableHead>
-                <TableHead>Available from</TableHead>
-                <TableHead>Due date</TableHead>
+                <TableHead>
+                  {t('quoteUi.plan.colAmount', { currency: quote.currency })}
+                </TableHead>
+                <TableHead>{t('quoteUi.plan.colSteps')}</TableHead>
+                <TableHead>{t('quoteUi.plan.colAvailableFrom')}</TableHead>
+                <TableHead>{t('quoteUi.plan.colDueDate')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -677,7 +686,7 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
                           updateRow(i, { fromStep: e.target.value })
                         }
                         className="w-16"
-                        aria-label={`Tranche ${i + 1} first step`}
+                        aria-label={t('quoteUi.plan.firstStepAria', { n: i + 1 })}
                       />
                       <span className="text-muted-foreground">→</span>
                       <Input
@@ -688,7 +697,7 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
                           updateRow(i, { toStep: e.target.value })
                         }
                         className="w-16"
-                        aria-label={`Tranche ${i + 1} last step`}
+                        aria-label={t('quoteUi.plan.lastStepAria', { n: i + 1 })}
                       />
                     </div>
                   </TableCell>
@@ -732,7 +741,7 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
               <AlertTriangle className="h-4 w-4" />
             )}
             <span>
-              Tranches total{' '}
+              {t('quoteUi.plan.tranchesTotal')}{' '}
               <strong className="tabular-nums">
                 {validation.sum.toFixed(3)}
               </strong>{' '}
@@ -748,7 +757,7 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
               onClick={splitEvenly}
             >
               <Scale className="h-3.5 w-3.5" />
-              Rebalance
+              {t('quoteUi.plan.rebalance')}
             </Button>
           ) : null}
         </div>
@@ -772,7 +781,7 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
             ) : (
               <CheckCircle2 className="h-4 w-4" />
             )}
-            Save plan
+            {t('quoteUi.plan.saveBtn')}
           </Button>
         </div>
       </CardContent>
@@ -784,40 +793,46 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
 // Admin — Plan view (installments, batches, record-cash, deliver)
 // ═══════════════════════════════════════════════════════════════════════
 
-function statusBadge(status: InstallmentStatus): React.ReactNode {
+function InstallmentStatusBadge({ status }: { status: InstallmentStatus }) {
+  const { t } = useT();
+  // Enum value → quoteUi.installmentStatus.* key-map (all four
+  // lifecycle values are covered in the dictionary).
+  const label = t(`quoteUi.installmentStatus.${status}`);
   switch (status) {
     case InstallmentStatus.PAID:
-      return <Badge className="bg-emerald-600">Paid</Badge>;
+      return <Badge className="bg-emerald-600">{label}</Badge>;
     case InstallmentStatus.OVERDUE:
-      return <Badge variant="destructive">Overdue</Badge>;
+      return <Badge variant="destructive">{label}</Badge>;
     case InstallmentStatus.CANCELLED:
-      return <Badge variant="outline">Cancelled</Badge>;
+      return <Badge variant="outline">{label}</Badge>;
     default:
-      return <Badge variant="secondary">Pending</Badge>;
+      return <Badge variant="secondary">{label}</Badge>;
   }
 }
 
-function batchBadge(status: BatchStatus): React.ReactNode {
+function BatchStatusBadge({ status }: { status: BatchStatus }) {
+  const { t } = useT();
+  const label = t(`quoteUi.batchStatus.${status}`);
   switch (status) {
     case BatchStatus.DELIVERED:
       return (
         <Badge className="bg-emerald-600">
           <Truck className="mr-1 h-3 w-3" />
-          Delivered
+          {label}
         </Badge>
       );
     case BatchStatus.UNLOCKED:
       return (
         <Badge className="bg-amber-500">
           <Unlock className="mr-1 h-3 w-3" />
-          Unlocked
+          {label}
         </Badge>
       );
     default:
       return (
         <Badge variant="outline">
           <Lock className="mr-1 h-3 w-3" />
-          Locked
+          {label}
         </Badge>
       );
   }
@@ -832,6 +847,7 @@ function AdminPlanView({
   installments: QuoteInstallment[];
   batches: QuoteStepBatch[];
 }) {
+  const { t } = useT();
   const deliver = useDeliverBatch();
   const [cashTarget, setCashTarget] = useState<QuoteInstallment | null>(null);
 
@@ -847,12 +863,13 @@ function AdminPlanView({
     <>
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Tranches & deliveries</CardTitle>
+          <CardTitle className="text-base">
+            {t('quoteUi.adminPlan.title')}
+          </CardTitle>
           <CardDescription>
-            Confirm cash payments inline; unlocked batches get a
-            &quot;Mark delivered&quot; button. Bank transfers come in
-            through the <strong>/dashboard/payments/pending</strong>{' '}
-            queue.
+            {t('quoteUi.adminPlan.descBefore')}{' '}
+            <strong>/dashboard/payments/pending</strong>
+            {t('quoteUi.adminPlan.descAfter')}
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
@@ -860,13 +877,15 @@ function AdminPlanView({
             <TableHeader>
               <TableRow>
                 <TableHead>#</TableHead>
-                <TableHead>Amount</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Steps</TableHead>
-                <TableHead>Batch</TableHead>
-                <TableHead>Available</TableHead>
-                <TableHead>Due</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead>{t('quoteUi.adminPlan.colAmount')}</TableHead>
+                <TableHead>{t('quoteUi.adminPlan.colStatus')}</TableHead>
+                <TableHead>{t('quoteUi.adminPlan.colSteps')}</TableHead>
+                <TableHead>{t('quoteUi.adminPlan.colBatch')}</TableHead>
+                <TableHead>{t('quoteUi.adminPlan.colAvailable')}</TableHead>
+                <TableHead>{t('quoteUi.adminPlan.colDue')}</TableHead>
+                <TableHead className="text-right">
+                  {t('common.actions')}
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -881,14 +900,16 @@ function AdminPlanView({
                     <TableCell className="font-mono">
                       {money(inst.amount, quote.currency)}
                     </TableCell>
-                    <TableCell>{statusBadge(inst.status)}</TableCell>
+                    <TableCell>
+                      <InstallmentStatusBadge status={inst.status} />
+                    </TableCell>
                     <TableCell className="text-xs">
                       {batch
                         ? `${batch.fromStep} → ${batch.toStep}`
                         : '—'}
                     </TableCell>
                     <TableCell>
-                      {batch ? batchBadge(batch.status) : null}
+                      {batch ? <BatchStatusBadge status={batch.status} /> : null}
                     </TableCell>
                     <TableCell className="text-xs">
                       {new Date(inst.availableFrom).toLocaleDateString()}
@@ -907,7 +928,7 @@ function AdminPlanView({
                             onClick={() => setCashTarget(inst)}
                           >
                             <Wallet className="mr-1 h-3 w-3" />
-                            Record cash
+                            {t('quoteUi.adminPlan.recordCash')}
                           </Button>
                         ) : null}
                         {batch?.status === BatchStatus.UNLOCKED ? (
@@ -923,7 +944,7 @@ function AdminPlanView({
                             disabled={deliver.isPending}
                           >
                             <Truck className="mr-1 h-3 w-3" />
-                            Mark delivered
+                            {t('quoteUi.adminPlan.markDelivered')}
                           </Button>
                         ) : null}
                       </div>
@@ -955,6 +976,7 @@ function RecordCashDialog({
   quote: Quotation;
   onClose: () => void;
 }) {
+  const { t } = useT();
   const record = useRecordCash();
   const [receiptNumber, setReceiptNumber] = useState('');
   const [notes, setNotes] = useState('');
@@ -963,25 +985,26 @@ function RecordCashDialog({
     <Dialog open={!!target} onOpenChange={(o) => !o && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Record cash payment</DialogTitle>
+          <DialogTitle>{t('quoteUi.recordCash.title')}</DialogTitle>
           <DialogDescription>
-            Mark installment #{target?.installmentNumber} (
-            {money(target?.amount, quote.currency)}) as paid in cash.
-            The linked step batch will unlock immediately.
+            {t('quoteUi.recordCash.desc', {
+              n: target?.installmentNumber ?? '',
+              amount: money(target?.amount, quote.currency),
+            })}
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
           <div className="grid gap-1.5">
-            <Label htmlFor="receipt">Receipt number</Label>
+            <Label htmlFor="receipt">{t('quoteUi.recordCash.receiptNumber')}</Label>
             <Input
               id="receipt"
               value={receiptNumber}
               onChange={(e) => setReceiptNumber(e.target.value)}
-              placeholder="Optional"
+              placeholder={t('common.optional')}
             />
           </div>
           <div className="grid gap-1.5">
-            <Label htmlFor="notes">Notes</Label>
+            <Label htmlFor="notes">{t('quoteUi.recordCash.notes')}</Label>
             <Textarea
               id="notes"
               rows={3}
@@ -992,7 +1015,7 @@ function RecordCashDialog({
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button
             disabled={record.isPending}
@@ -1012,7 +1035,7 @@ function RecordCashDialog({
               );
             }}
           >
-            Record cash
+            {t('quoteUi.adminPlan.recordCash')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1040,6 +1063,7 @@ function DoctorPlanView({
   doctorName?: string | null;
   orderCode?: string | null;
 }) {
+  const { t } = useT();
   // Pay buttons used to be gated on `quote.status === APPROVED`, but
   // the doctor's review now skips an explicit Approve step — paying
   // the first installment IS the approval (backend auto-transitions
@@ -1088,12 +1112,14 @@ function DoctorPlanView({
           <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <div className="text-xs font-semibold uppercase tracking-wide text-emerald-900/70">
-                Pay everything at once
+                {t('quoteUi.doctor.payAllTitle')}
               </div>
               <p className="mt-0.5 text-sm text-emerald-900">
-                You have <strong>{payable.length}</strong> tranches available —{' '}
-                <strong>{payableSum.toFixed(3)} {quote.currency}</strong> in
-                total. Pay them tranche by tranche, or in one go.
+                {t('quoteUi.doctor.payAllBefore')}{' '}
+                <strong>{payable.length}</strong>{' '}
+                {t('quoteUi.doctor.payAllMiddle')}{' '}
+                <strong>{payableSum.toFixed(3)} {quote.currency}</strong>{' '}
+                {t('quoteUi.doctor.payAllAfter')}
               </p>
             </div>
             <DoctorPayActions
@@ -1101,7 +1127,7 @@ function DoctorPlanView({
               installment={nextPayable!}
               payable={payable}
               defaultScope="all"
-              label="Pay all now"
+              label={t('quoteUi.doctor.payAllBtn')}
               patientName={patientName}
               doctorName={doctorName}
               orderCode={orderCode}
@@ -1112,11 +1138,13 @@ function DoctorPlanView({
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Payment timeline</CardTitle>
+          <CardTitle className="text-base">
+            {t('quoteUi.doctor.timelineTitle')}
+          </CardTitle>
           <CardDescription>
             {isApproved
-              ? 'Pay each tranche when it becomes available. Steps unlock automatically once the payment is confirmed.'
-              : 'Approve the quotation first to start paying.'}
+              ? t('quoteUi.doctor.timelineDescApproved')
+              : t('quoteUi.doctor.timelineDescNotApproved')}
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
@@ -1124,11 +1152,13 @@ function DoctorPlanView({
             <TableHeader>
               <TableRow>
                 <TableHead>#</TableHead>
-                <TableHead>Amount</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Steps</TableHead>
-                <TableHead>Available</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead>{t('quoteUi.adminPlan.colAmount')}</TableHead>
+                <TableHead>{t('quoteUi.adminPlan.colStatus')}</TableHead>
+                <TableHead>{t('quoteUi.adminPlan.colSteps')}</TableHead>
+                <TableHead>{t('quoteUi.adminPlan.colAvailable')}</TableHead>
+                <TableHead className="text-right">
+                  {t('common.actions')}
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -1144,9 +1174,11 @@ function DoctorPlanView({
                       {money(inst.amount, quote.currency)}
                     </TableCell>
                     <TableCell className="space-y-1">
-                      {statusBadge(inst.status)}
+                      <InstallmentStatusBadge status={inst.status} />
                       {batch ? (
-                        <div className="text-xs">{batchBadge(batch.status)}</div>
+                        <div className="text-xs">
+                          <BatchStatusBadge status={batch.status} />
+                        </div>
                       ) : null}
                     </TableCell>
                     <TableCell className="text-xs">
@@ -1158,7 +1190,7 @@ function DoctorPlanView({
                       {new Date(inst.availableFrom).toLocaleDateString()}
                       {!available ? (
                         <div className="text-muted-foreground">
-                          locked until then
+                          {t('quoteUi.doctor.lockedUntil')}
                         </div>
                       ) : null}
                     </TableCell>
@@ -1190,7 +1222,7 @@ function DoctorPayActions({
   installment,
   payable,
   defaultScope = 'single',
-  label = 'Pay now',
+  label,
   patientName,
   doctorName,
   orderCode,
@@ -1207,12 +1239,13 @@ function DoctorPayActions({
   doctorName?: string | null;
   orderCode?: string | null;
 }) {
+  const { t } = useT();
   const [open, setOpen] = useState(false);
   return (
     <>
       <Button size="sm" onClick={() => setOpen(true)}>
         <CreditCard className="mr-1 h-3 w-3" />
-        {label}
+        {label ?? t('quoteUi.doctor.payNow')}
       </Button>
       <PaymentMethodDialog
         open={open}
@@ -1252,6 +1285,7 @@ function PaymentMethodDialog({
   doctorName?: string | null;
   orderCode?: string | null;
 }) {
+  const { t } = useT();
   // Backend currently allows all three methods. If the project later
   // adds `allowedPaymentMethods` on the quote, swap this constant for
   // `quote.allowedPaymentMethods ?? METHODS`.
@@ -1298,9 +1332,7 @@ function PaymentMethodDialog({
   const submit = async () => {
     if (method === PaymentMethod.CASH) {
       // Cash is admin-recorded. No doctor endpoint either way.
-      toast.info(
-        'Cash payments are recorded by the clinic admin once they receive the funds.',
-      );
+      toast.info(t('quoteUi.payDialog.cashToast'));
       close();
       return;
     }
@@ -1354,8 +1386,10 @@ function PaymentMethodDialog({
   // forcing the doctor to re-read the header.
   const scopeLabel =
     scope === 'all'
-      ? `${payable.length} remaining tranches`
-      : `Tranche #${installment.installmentNumber}`;
+      ? t('quoteUi.payDialog.scopeAllLabel', { count: payable.length })
+      : t('quoteUi.payDialog.scopeSingleLabel', {
+          n: installment.installmentNumber,
+        });
 
   return (
     <Dialog
@@ -1371,12 +1405,16 @@ function PaymentMethodDialog({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
               <DialogTitle className="text-lg font-semibold sm:text-xl">
-                Pay {total.toFixed(3)} {quote.currency}
+                {t('quoteUi.payDialog.title', {
+                  amount: `${total.toFixed(3)} ${quote.currency}`,
+                })}
               </DialogTitle>
               <DialogDescription>
                 {scope === 'all'
-                  ? `Settle all ${payable.length} remaining tranches in one flow.`
-                  : `Settle installment #${installment.installmentNumber} of your treatment plan.`}
+                  ? t('quoteUi.payDialog.descAll', { count: payable.length })
+                  : t('quoteUi.payDialog.descSingle', {
+                      n: installment.installmentNumber,
+                    })}
               </DialogDescription>
             </div>
             <Badge
@@ -1384,7 +1422,7 @@ function PaymentMethodDialog({
               className="shrink-0 gap-1.5 border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700"
             >
               <Clock className="h-3 w-3" />
-              Payment due
+              {t('quoteUi.payDialog.dueBadge')}
             </Badge>
           </div>
         </DialogHeader>
@@ -1398,58 +1436,60 @@ function PaymentMethodDialog({
           {/* Amount and order context */}
           <aside className="flex flex-col border-b bg-muted/30 p-5 sm:p-6 lg:min-h-0 lg:overflow-y-auto lg:border-b-0 lg:border-r lg:p-7">
             <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Amount due
+              {t('quoteUi.payDialog.amountDue')}
             </p>
             <p className="mt-1.5 text-3xl font-bold tabular-nums text-foreground sm:text-4xl">
               {total.toFixed(3)} {quote.currency}
             </p>
             <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
               {scope === 'all'
-                ? `Complete all ${payable.length} remaining installments in this payment flow.`
-                : `Settle installment #${installment.installmentNumber} to keep the treatment plan moving.`}
+                ? t('quoteUi.payDialog.asideAll', { count: payable.length })
+                : t('quoteUi.payDialog.asideSingle', {
+                    n: installment.installmentNumber,
+                  })}
             </p>
 
             <h3 className="mb-4 mt-7 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Payment summary
+              {t('quoteUi.payDialog.summary')}
             </h3>
             <dl className="space-y-4">
               <DetailRow
                 icon={<Hash className="h-3.5 w-3.5" />}
-                label="Scope"
+                label={t('quoteUi.payDialog.scope')}
                 value={scopeLabel}
               />
               {scope === 'single' && installment.dueDate ? (
                 <DetailRow
                   icon={<Calendar className="h-3.5 w-3.5" />}
-                  label="Due date"
+                  label={t('quoteUi.payDialog.dueDate')}
                   value={format(new Date(installment.dueDate), 'MMM d, yyyy')}
                 />
               ) : null}
               {quote.packName ? (
                 <DetailRow
                   icon={<Package className="h-3.5 w-3.5" />}
-                  label="Pack"
+                  label={t('quoteUi.payDialog.pack')}
                   value={quote.packName}
                 />
               ) : null}
               {patientName ? (
                 <DetailRow
                   icon={<UserIcon className="h-3.5 w-3.5" />}
-                  label="Patient"
+                  label={t('quoteUi.payDialog.patient')}
                   value={patientName}
                 />
               ) : null}
               {doctorName ? (
                 <DetailRow
                   icon={<Stethoscope className="h-3.5 w-3.5" />}
-                  label="Doctor"
+                  label={t('quoteUi.payDialog.doctor')}
                   value={`Dr. ${doctorName}`}
                 />
               ) : null}
               {orderCode ? (
                 <DetailRow
                   icon={<FileText className="h-3.5 w-3.5" />}
-                  label="Order"
+                  label={t('quoteUi.payDialog.order')}
                   value={
                     <span
                       className="block truncate font-mono text-[11px]"
@@ -1465,17 +1505,17 @@ function PaymentMethodDialog({
             <div className="mt-auto pt-6">
               <p className="rounded-lg border bg-card p-3 text-xs leading-relaxed text-muted-foreground">
                 {method === PaymentMethod.CARD
-                  ? 'Card payments are processed immediately. The next batch of treatment steps unlocks once the payment is confirmed.'
+                  ? t('quoteUi.payDialog.footCard')
                   : method === PaymentMethod.BANK_TRANSFER
-                    ? 'After you submit, the clinic admin verifies the wire and confirms the payment. You will be notified once it lands.'
-                  : 'Cash payments are recorded by the clinic admin when they physically receive the funds.'}
+                    ? t('quoteUi.payDialog.footBank')
+                  : t('quoteUi.payDialog.footCash')}
               </p>
             </div>
           </aside>
 
           {/* Payment workspace */}
           <section
-            aria-label="Installment payment details"
+            aria-label={t('quoteUi.payDialog.sectionAria')}
             tabIndex={0}
             className="min-w-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:[scrollbar-gutter:stable]"
           >
@@ -1483,7 +1523,7 @@ function PaymentMethodDialog({
               {canPickAll ? (
                 <div>
                   <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Payment scope
+                    {t('quoteUi.payDialog.scopeHeading')}
                   </h3>
                   <div className="grid grid-cols-2 gap-1 rounded-lg border bg-muted/30 p-1">
                     <button
@@ -1498,7 +1538,9 @@ function PaymentMethodDialog({
                           : 'text-muted-foreground hover:bg-card/60',
                       )}
                     >
-                      <span className="block font-semibold">This installment</span>
+                      <span className="block font-semibold">
+                        {t('quoteUi.payDialog.thisInstallment')}
+                      </span>
                       <span className="mt-0.5 block truncate text-[11px] opacity-80">
                         #{installment.installmentNumber} ·{' '}
                         {money(installment.amount, quote.currency)}
@@ -1516,11 +1558,16 @@ function PaymentMethodDialog({
                           : 'text-muted-foreground hover:bg-card/60',
                       )}
                     >
-                      <span className="block font-semibold">All remaining</span>
+                      <span className="block font-semibold">
+                        {t('quoteUi.payDialog.allRemaining')}
+                      </span>
                       <span className="mt-0.5 block truncate text-[11px] opacity-80">
-                        {payable.length} installments ·{' '}
+                        {t('quoteUi.payDialog.installmentsCount', {
+                          count: payable.length,
+                        })}{' '}
+                        ·{' '}
                         {payable
-                          .reduce((acc, t) => acc + toDec(t.amount), 0)
+                          .reduce((acc, r) => acc + toDec(r.amount), 0)
                           .toFixed(3)}{' '}
                         {quote.currency}
                       </span>
@@ -1531,7 +1578,7 @@ function PaymentMethodDialog({
 
               <div>
                 <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Payment method
+                  {t('quoteUi.payDialog.methodHeading')}
                 </h3>
                 <div className="grid gap-2 sm:grid-cols-3">
                   {METHODS.map((m) => {
@@ -1544,10 +1591,10 @@ function PaymentMethodDialog({
                           : Wallet;
                     const description =
                       m === PaymentMethod.CARD
-                        ? 'Instant confirmation'
+                        ? t('quoteUi.payDialog.methodCardDesc')
                         : m === PaymentMethod.BANK_TRANSFER
-                          ? 'Upload your receipt'
-                          : 'Recorded by the clinic';
+                          ? t('quoteUi.payDialog.methodBankDesc')
+                          : t('quoteUi.payDialog.methodCashDesc');
                     return (
                       <button
                         key={m}
@@ -1571,8 +1618,8 @@ function PaymentMethodDialog({
                           <Icon className="h-4 w-4" />
                         </span>
                         <span className="min-w-0">
-                          <span className="block text-xs font-semibold capitalize">
-                            {m.replace('_', ' ')}
+                          <span className="block text-xs font-semibold">
+                            {t(`paymentsCommon.method.${m}`)}
                           </span>
                           <span className="mt-0.5 block text-[10px] leading-snug text-muted-foreground">
                             {description}
@@ -1590,12 +1637,12 @@ function PaymentMethodDialog({
                     <CreditCard className="mt-0.5 h-4 w-4 shrink-0 text-blue-700" />
                     <div>
                       <p className="text-sm font-semibold text-blue-950">
-                        Secure card payment
+                        {t('quoteUi.payDialog.cardTitle')}
                       </p>
                       <p className="mt-1 text-xs leading-relaxed text-blue-900/80">
                         {scope === 'all'
-                          ? 'The remaining installments are processed securely in sequence. If one fails, completed payments remain recorded.'
-                          : 'This installment is confirmed immediately after the payment succeeds.'}
+                          ? t('quoteUi.payDialog.cardAllDesc')
+                          : t('quoteUi.payDialog.cardSingleDesc')}
                       </p>
                     </div>
                   </div>
@@ -1609,11 +1656,10 @@ function PaymentMethodDialog({
                       </span>
                       <div>
                         <p className="text-sm font-semibold">
-                          Bank-transfer declaration
+                          {t('quoteUi.payDialog.btTitle')}
                         </p>
                         <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-                          Add the bank reference and receipt so the clinic can
-                          identify and confirm your transfer.
+                          {t('quoteUi.payDialog.btDesc')}
                         </p>
                       </div>
                     </div>
@@ -1623,16 +1669,16 @@ function PaymentMethodDialog({
                         htmlFor="installment-bank-reference"
                         className="text-xs font-medium"
                       >
-                        Bank reference{' '}
+                        {t('quoteUi.payDialog.bankRefLabel')}{' '}
                         <span className="font-normal text-muted-foreground">
-                          (optional)
+                          {t('quoteUi.payDialog.optionalSuffix')}
                         </span>
                       </Label>
                       <Input
                         id="installment-bank-reference"
                         value={bankReference}
                         onChange={(e) => setBankReference(e.target.value)}
-                        placeholder="SWIFT, transfer reference, or memo"
+                        placeholder={t('quoteUi.payDialog.bankRefPlaceholder')}
                         disabled={isPending}
                       />
                     </div>
@@ -1640,10 +1686,10 @@ function PaymentMethodDialog({
                     <div className="space-y-2">
                       <div>
                         <p className="text-xs font-medium">
-                          Upload bank-transfer receipt
+                          {t('quoteUi.payDialog.uploadReceiptTitle')}
                         </p>
                         <p className="text-[11px] text-muted-foreground">
-                          PDF, PNG, JPG, WEBP or HEIC · maximum 5 MB
+                          {t('quoteUi.payDialog.uploadReceiptHint')}
                         </p>
                       </div>
                       <div className="flex items-center gap-2 rounded-lg border border-dashed bg-muted/30 p-2">
@@ -1658,7 +1704,7 @@ function PaymentMethodDialog({
                           <span className="truncate text-sm">
                             {proofFile
                               ? proofFile.name
-                              : 'Click to choose a receipt'}
+                              : t('quoteUi.payDialog.chooseReceipt')}
                           </span>
                         </label>
                         {proofFile ? (
@@ -1666,7 +1712,7 @@ function PaymentMethodDialog({
                             type="button"
                             variant="ghost"
                             size="icon"
-                            aria-label="Remove receipt"
+                            aria-label={t('quoteUi.payDialog.removeReceiptAria')}
                             disabled={isPending}
                             onClick={() => setProofFile(null)}
                             className="h-8 w-8 shrink-0"
@@ -1690,7 +1736,7 @@ function PaymentMethodDialog({
                     {proofFile ? (
                       <div className="space-y-2">
                         <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                          Receipt preview
+                          {t('quoteUi.payDialog.receiptPreview')}
                         </p>
                         {proofPreview &&
                         ['image/png', 'image/jpeg', 'image/webp'].includes(
@@ -1699,13 +1745,13 @@ function PaymentMethodDialog({
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
                             src={proofPreview}
-                            alt="Selected bank-transfer receipt"
+                            alt={t('quoteUi.payDialog.receiptAlt')}
                             className="max-h-[280px] w-full rounded-lg border bg-muted/30 object-contain"
                           />
                         ) : proofPreview &&
                           proofFile.type === 'application/pdf' ? (
                           <iframe
-                            title="Selected bank-transfer receipt"
+                            title={t('quoteUi.payDialog.receiptAlt')}
                             src={proofPreview}
                             className="h-[320px] w-full rounded-lg border bg-white"
                           />
@@ -1720,8 +1766,10 @@ function PaymentMethodDialog({
 
                     <p className="rounded-lg border border-blue-100 bg-blue-50/60 p-3 text-xs leading-relaxed text-blue-900/85">
                       {scope === 'all'
-                        ? `The same reference and receipt will be attached to all ${payable.length} installment declarations.`
-                        : 'The clinic admin will review the receipt before confirming this installment.'}
+                        ? t('quoteUi.payDialog.btNoteAll', {
+                            count: payable.length,
+                          })
+                        : t('quoteUi.payDialog.btNoteSingle')}
                     </p>
                   </CardContent>
                 </Card>
@@ -1731,11 +1779,10 @@ function PaymentMethodDialog({
                     <Wallet className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
                     <div>
                       <p className="text-sm font-semibold text-amber-950">
-                        Pay at the clinic
+                        {t('quoteUi.payDialog.cashTitle')}
                       </p>
                       <p className="mt-1 text-xs leading-relaxed text-amber-900/80">
-                        Give the payment directly to the clinic. An admin will
-                        record it and unlock the related treatment steps.
+                        {t('quoteUi.payDialog.cashDesc')}
                       </p>
                     </div>
                   </div>
@@ -1748,7 +1795,10 @@ function PaymentMethodDialog({
                   className="flex items-center gap-2 rounded-lg border bg-card p-3 text-xs"
                 >
                   <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-                  Processing installment {progress.done}/{progress.total}…
+                  {t('quoteUi.payDialog.progress', {
+                    done: progress.done,
+                    total: progress.total,
+                  })}
                 </div>
               ) : null}
             </div>
@@ -1763,7 +1813,7 @@ function PaymentMethodDialog({
             disabled={isPending}
             className="w-full sm:w-auto"
           >
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button
             onClick={submit}
@@ -1781,13 +1831,15 @@ function PaymentMethodDialog({
             )}
             {method === PaymentMethod.CARD
               ? scope === 'all'
-                ? `Pay ${payable.length} tranches`
-                : 'Pay by card'
+                ? t('quoteUi.payDialog.payTranches', { count: payable.length })
+                : t('quoteUi.payDialog.payByCard')
               : method === PaymentMethod.BANK_TRANSFER
                 ? scope === 'all'
-                  ? `Submit ${payable.length} declarations`
-                  : 'Submit declaration'
-                : 'Got it'}
+                  ? t('quoteUi.payDialog.submitDeclarations', {
+                      count: payable.length,
+                    })
+                  : t('quoteUi.payDialog.submitDeclaration')
+                : t('quoteUi.payDialog.gotIt')}
           </Button>
         </div>
       </DialogContent>

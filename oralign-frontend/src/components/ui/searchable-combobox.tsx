@@ -12,6 +12,7 @@ import {
 import { createPortal } from 'react-dom';
 import { Check, ChevronsUpDown, Search, X } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+import { useT } from '@/lib/i18n/lang-context';
 import { cn } from '@/lib/utils';
 
 export interface ComboboxItem {
@@ -57,14 +58,19 @@ export function SearchableCombobox({
   value,
   onChange,
   items,
-  placeholder = 'Select…',
-  emptyLabel = 'No matches',
+  placeholder,
+  emptyLabel,
   disabled,
   isInvalid,
   className,
   hint,
   clearable = true,
 }: SearchableComboboxProps) {
+  const { t } = useT();
+  // Language-aware defaults — resolved here (not as parameter defaults)
+  // because hooks can't run in the destructuring position.
+  const effectivePlaceholder = placeholder ?? t('uiBits.select');
+  const effectiveEmptyLabel = emptyLabel ?? t('uiBits.noMatches');
   const triggerId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -203,7 +209,7 @@ export function SearchableCombobox({
             </span>
           )}
           <span className="truncate">
-            {selected ? selected.label : placeholder}
+            {selected ? selected.label : effectivePlaceholder}
           </span>
           {selected?.hint && (
             <span className="ml-1 truncate text-xs text-muted-foreground">
@@ -259,7 +265,7 @@ export function SearchableCombobox({
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={handleKey}
-                  placeholder="Search…"
+                  placeholder={t('uiBits.search')}
                   className="h-8 bg-background pl-7 text-sm"
                 />
               </div>
@@ -273,7 +279,7 @@ export function SearchableCombobox({
             <div className="max-h-64 overflow-auto py-1">
               {filtered.length === 0 ? (
                 <p className="px-3 py-6 text-center text-sm text-muted-foreground">
-                  {emptyLabel}
+                  {effectiveEmptyLabel}
                 </p>
               ) : (
                 filtered.map((it, idx) => {

@@ -65,21 +65,23 @@ import { cn } from '@/lib/utils';
 import { ImageEditDialog } from './image-edit-dialog';
 import { ZipUploadDialog } from './zip-upload-dialog';
 
+// Category → dict key (resolved with t() at render time so the labels
+// flip with the language toggle).
 const categories = [
-  [OrderFileCategory.RIGHT_PHOTO, 'Right photo'],
-  [OrderFileCategory.FRONT_PHOTO, 'Front photo'],
-  [OrderFileCategory.LEFT_PHOTO, 'Left photo'],
-  [OrderFileCategory.UPPER_PHOTO, 'Upper photo'],
-  [OrderFileCategory.LOWER_PHOTO, 'Lower photo'],
-  [OrderFileCategory.ORTHOPANTOMOGRAPHY, 'Orthopantomography'],
-  [OrderFileCategory.STL, 'STL'],
-  [OrderFileCategory.PLY, 'PLY'],
-  [OrderFileCategory.OBJ, 'OBJ'],
-  [OrderFileCategory.ZIP, 'ZIP'],
-  [OrderFileCategory.PDF, 'PDF'],
-  [OrderFileCategory.IMAGE, 'Images'],
-  [OrderFileCategory.VIDEO, 'Videos'],
-  [OrderFileCategory.OTHER, 'Other'],
+  [OrderFileCategory.RIGHT_PHOTO, 'media.categories.rightPhoto'],
+  [OrderFileCategory.FRONT_PHOTO, 'media.categories.frontPhoto'],
+  [OrderFileCategory.LEFT_PHOTO, 'media.categories.leftPhoto'],
+  [OrderFileCategory.UPPER_PHOTO, 'media.categories.upperPhoto'],
+  [OrderFileCategory.LOWER_PHOTO, 'media.categories.lowerPhoto'],
+  [OrderFileCategory.ORTHOPANTOMOGRAPHY, 'media.categories.opg'],
+  [OrderFileCategory.STL, 'media.categories.stl'],
+  [OrderFileCategory.PLY, 'media.categories.ply'],
+  [OrderFileCategory.OBJ, 'media.categories.obj'],
+  [OrderFileCategory.ZIP, 'media.categories.zip'],
+  [OrderFileCategory.PDF, 'media.categories.pdf'],
+  [OrderFileCategory.IMAGE, 'media.categories.images'],
+  [OrderFileCategory.VIDEO, 'media.categories.videos'],
+  [OrderFileCategory.OTHER, 'media.categories.other'],
 ] as const;
 
 // Slot order is meaningful — on a 3-column grid the rows read as:
@@ -269,8 +271,8 @@ export function OrderFileUpload({
                 ZIP category — used for CBCT / DICOM bundles — gets the
                 1 GB ceiling; everything else stays at 50 MB. */}
             {category === OrderFileCategory.ZIP
-              ? 'Max 1 GB per ZIP bundle (CBCT / DICOM)'
-              : 'Max 50 MB per file'}
+              ? t('media.maxZipHint')
+              : t('media.maxFileHint')}
           </span>
         </div>
       )}
@@ -546,6 +548,8 @@ function FileGallery({
   compact?: boolean;
   onDelete: (fileId: string) => void;
 }) {
+  const { t } = useT();
+
   if (isLoading) {
     return (
       <div className="grid gap-3 md:grid-cols-2">
@@ -560,7 +564,7 @@ function FileGallery({
       <Card>
         <CardContent className="flex items-center gap-3 pt-6 text-sm text-red-600">
           <RotateCcw className="h-4 w-4" />
-          Failed to load files: {error.message}
+          {t('media.filesLoadFailed', { message: error.message })}
         </CardContent>
       </Card>
     );
@@ -571,7 +575,7 @@ function FileGallery({
       <Card>
         <CardContent className="flex min-h-28 flex-col items-center justify-center gap-2 pt-6 text-center text-sm text-muted-foreground">
           <FileArchive className="h-7 w-7" />
-          No files uploaded yet.
+          {t('media.noFilesYet')}
         </CardContent>
       </Card>
     );
@@ -644,6 +648,7 @@ function LegacyFileRow({
   readOnly?: boolean;
   onDelete: () => void;
 }) {
+  const { t } = useT();
   const previewType = getPreviewType(file);
   // Rows only ever fetch the lightweight thumbnail, and only for
   // images — PDFs/videos load lazily inside the fullscreen viewer the
@@ -660,7 +665,7 @@ function LegacyFileRow({
       <div className="min-w-0">
         <p className="truncate text-sm font-medium">{displayFileName(file)}</p>
         <p className="text-xs text-muted-foreground">
-          {labelForCategory(file.category)} · {formatBytes(file.size)}
+          {labelForCategory(file.category, t)} · {formatBytes(file.size)}
         </p>
       </div>
       <div className="flex flex-wrap gap-2">
@@ -678,7 +683,7 @@ function LegacyFileRow({
           onClick={() => downloadOrderFile(orderId, file)}
         >
           <Download className="mr-2 h-4 w-4" />
-          Download
+          {t('media.download')}
         </Button>
         {!readOnly && (
           <Button
@@ -689,7 +694,7 @@ function LegacyFileRow({
             onClick={onDelete}
           >
             <Trash2 className="mr-2 h-4 w-4" />
-            Delete
+            {t('common.delete')}
           </Button>
         )}
       </div>
@@ -736,7 +741,7 @@ function SecureFilePreviewCard({
         ) : error ? (
           <div className="grid place-items-center gap-2 text-center text-xs text-red-600">
             <RotateCcw className="h-5 w-5" />
-            Preview unavailable
+            {t('media.previewUnavailable')}
           </div>
         ) : (
           <PreviewSurface
@@ -751,7 +756,7 @@ function SecureFilePreviewCard({
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold">{displayFileName(file)}</p>
           <p className="text-xs text-muted-foreground">
-            {labelForCategory(file.category)} · {formatBytes(file.size)}
+            {labelForCategory(file.category, t)} · {formatBytes(file.size)}
             {isOptimizing && (
               <span className="ml-1 text-primary/80">
                 · {t('media.optimizing')}
@@ -775,12 +780,12 @@ function SecureFilePreviewCard({
             onClick={() => downloadOrderFile(orderId, file)}
           >
             <Download className="mr-2 h-4 w-4" />
-            Download
+            {t('media.download')}
           </Button>
           {error && (
             <Button type="button" variant="outline" size="sm" onClick={refresh}>
               <RotateCcw className="mr-2 h-4 w-4" />
-              Retry
+              {t('media.retry')}
             </Button>
           )}
           {!readOnly && (
@@ -792,7 +797,7 @@ function SecureFilePreviewCard({
               onClick={onDelete}
             >
               <Trash2 className="mr-2 h-4 w-4" />
-              Delete
+              {t('common.delete')}
             </Button>
           )}
         </div>
@@ -905,6 +910,7 @@ function PreviewDialog({
   type: PreviewType;
   disabled?: boolean;
 }) {
+  const { t } = useT();
   return (
     <FullscreenFileViewer
       orderId={orderId}
@@ -915,7 +921,7 @@ function PreviewDialog({
       trigger={
         <Button type="button" variant="outline" size="sm" disabled={disabled}>
           <Eye className="mr-2 h-4 w-4" />
-          View
+          {t('media.view')}
         </Button>
       }
     />
@@ -937,6 +943,7 @@ function FullscreenFileViewer({
   disabled?: boolean;
   trigger: ReactNode;
 }) {
+  const { t } = useT();
   const [open, setOpen] = useState(false);
 
   // Lazy high-res fetch — runs ONLY once the dialog opens. Images pull
@@ -988,12 +995,12 @@ function FullscreenFileViewer({
               {displayFileName(file)}
             </p>
             <p className="mt-0.5 hidden text-xs text-white/60 sm:block">
-              Click outside or press Esc to close
+              {t('media.closeHint')}
             </p>
           </div>
           <button
             type="button"
-            aria-label="Close preview"
+            aria-label={t('media.closePreview')}
             onClick={() => setOpen(false)}
             className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white/10 text-white shadow-lg transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white sm:h-11 sm:w-11"
           >
@@ -1127,7 +1134,7 @@ function SlotFilePreview({
           {/* Hover affordance — solid pill in the bottom-right corner so it
               never sits ON the patient photo full-width. */}
           <span className="pointer-events-none absolute bottom-2 right-2 rounded-full bg-foreground/85 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-background opacity-0 shadow transition group-hover:opacity-100">
-            {previewType === 'model' ? t('media.view3d') : 'View'}
+            {previewType === 'model' ? t('media.view3d') : t('media.view')}
           </span>
         </button>
       }
@@ -1165,6 +1172,7 @@ function ClinicalMediaSlot({
   /** Update the shared clipboard. Called from the Copy button. */
   onClipboard?: (entry: ImageClipboardEntry | null) => void;
 }) {
+  const { t } = useT();
   const inputId = useMemo(
     () => `upload-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
     [title],
@@ -1206,7 +1214,7 @@ function ClinicalMediaSlot({
   const handleEditExisting = async () => {
     if (!file) return;
     if (!isImage) {
-      toast.error('Only images can be rotated or flipped.');
+      toast.error(t('media.toasts.onlyImagesEditable'));
       return;
     }
     setReEditing(true);
@@ -1220,7 +1228,7 @@ function ClinicalMediaSlot({
       // Log the underlying error for diagnostics; surface a clean toast.
       // eslint-disable-next-line no-console
       console.error('[ClinicalMediaSlot] edit-existing failed:', err);
-      toast.error('Could not open the editor for this image.');
+      toast.error(t('media.toasts.editorOpenFailed'));
     } finally {
       setReEditing(false);
     }
@@ -1245,11 +1253,11 @@ function ClinicalMediaSlot({
         type: blob.type || file.mimeType || 'image/jpeg',
       });
       onClipboard({ file: reconstructed, sourceTitle: title });
-      toast.success(`Copied "${title}" — pick a slot and paste it.`);
+      toast.success(t('media.toasts.copied', { title }));
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error('[ClinicalMediaSlot] copy failed:', err);
-      toast.error('Could not copy this image.');
+      toast.error(t('media.toasts.copyFailed'));
     } finally {
       setCopying(false);
     }
@@ -1265,7 +1273,9 @@ function ClinicalMediaSlot({
       lastModified: Date.now(),
     });
     onSelect(pastedFile);
-    toast.success(`Pasted from "${clipboard.sourceTitle}" → "${title}".`);
+    toast.success(
+      t('media.toasts.pasted', { source: clipboard.sourceTitle, target: title }),
+    );
   };
 
   return (
@@ -1348,7 +1358,7 @@ function ClinicalMediaSlot({
         <Button type="button" variant="secondary" size="sm" asChild disabled={disabled}>
           <label htmlFor={inputId} className="cursor-pointer">
             <UploadCloud className="mr-2 h-4 w-4" />
-            {file ? 'Replace' : 'Upload'}
+            {file ? t('media.replace') : t('media.upload')}
           </label>
         </Button>
         {file && file.mimeType.startsWith('image/') && (
@@ -1358,14 +1368,14 @@ function ClinicalMediaSlot({
             size="sm"
             onClick={handleEditExisting}
             disabled={disabled || reEditing}
-            title="Rotate or flip the uploaded photo"
+            title={t('media.rotateTooltip')}
           >
             {reEditing ? (
               <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
             ) : (
               <Pencil className="mr-1.5 h-3.5 w-3.5" />
             )}
-            Edit
+            {t('common.edit')}
           </Button>
         )}
         {/* Copy — only when the slot has an image AND the parent wired
@@ -1378,14 +1388,14 @@ function ClinicalMediaSlot({
             size="sm"
             onClick={handleCopy}
             disabled={disabled || copying || !secureFile.objectUrl}
-            title={`Copy ${title} so you can paste it into another slot`}
+            title={t('media.copyTooltip', { title })}
           >
             {copying ? (
               <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
             ) : (
               <Copy className="mr-1.5 h-3.5 w-3.5" />
             )}
-            Copy
+            {t('media.copy')}
           </Button>
         )}
         {/* Paste — visible on EVERY slot whenever the shared clipboard
@@ -1400,11 +1410,11 @@ function ClinicalMediaSlot({
             size="sm"
             onClick={handlePaste}
             disabled={disabled}
-            title={`Paste the image copied from "${clipboard.sourceTitle}"`}
+            title={t('media.pasteTooltip', { source: clipboard.sourceTitle })}
             className="border-primary/40 text-primary"
           >
             <ClipboardPaste className="mr-1.5 h-3.5 w-3.5" />
-            {file ? 'Paste over' : 'Paste image'}
+            {file ? t('media.pasteOver') : t('media.pasteImage')}
           </Button>
         )}
       </div>
@@ -1448,6 +1458,7 @@ function StlUploadTile({
   onSelect: (file: File) => void;
   onDelete: (fileId: string) => void;
 }) {
+  const { t } = useT();
   const inputId = useMemo(
     () => `upload-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
     [title],
@@ -1477,7 +1488,7 @@ function StlUploadTile({
             <div>
               <p className="font-semibold">{title}</p>
               <p className="text-xs text-muted-foreground">
-                {file ? displayFileName(file) : 'No STL selected'}
+                {file ? displayFileName(file) : t('media.noStlSelected')}
               </p>
             </div>
           </div>
@@ -1491,7 +1502,7 @@ function StlUploadTile({
             >
               <label htmlFor={inputId} className="cursor-pointer">
                 <UploadCloud className="mr-2 h-4 w-4" />
-                {file ? 'Replace' : 'Upload'}
+                {file ? t('media.replace') : t('media.upload')}
               </label>
             </Button>
           )}
@@ -1516,7 +1527,7 @@ function StlUploadTile({
                 trigger={
                   <Button type="button" variant="outline" size="sm">
                     <Maximize2 className="mr-2 h-4 w-4" />
-                    Full View
+                    {t('media.fullView')}
                   </Button>
                 }
               />
@@ -1527,7 +1538,7 @@ function StlUploadTile({
                 onClick={() => downloadOrderFile(orderId, file)}
               >
                 <Download className="mr-2 h-4 w-4" />
-                Download
+                {t('media.download')}
               </Button>
               {!readOnly && (
                 <Button
@@ -1538,7 +1549,7 @@ function StlUploadTile({
                   onClick={() => onDelete(file.id)}
                 >
                   <Trash2 className="mr-2 h-4 w-4" />
-                  Delete
+                  {t('common.delete')}
                 </Button>
               )}
             </div>
@@ -1554,9 +1565,9 @@ function StlUploadTile({
             <span className="space-y-2 text-muted-foreground">
               <Box className="mx-auto h-9 w-9" />
               <span className="block text-sm font-medium text-foreground">
-                Upload this STL file
+                {t('media.uploadThisStl')}
               </span>
-              <span className="block text-xs">STL, PLY, or OBJ</span>
+              <span className="block text-xs">{t('media.stlFormats')}</span>
             </span>
           </label>
         )}
@@ -1574,6 +1585,7 @@ function StlModelViewer({
   file: OrderFile;
   large?: boolean;
 }) {
+  const { t } = useT();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [errorMessage, setErrorMessage] = useState<string>();
@@ -1801,9 +1813,9 @@ function StlModelViewer({
         // we want stack + cause available in DevTools for diagnostics.
         // eslint-disable-next-line no-console
         console.error('[StlModelViewer] load failed:', error);
-        setErrorMessage(
-          error instanceof Error ? error.message : 'Unable to load STL',
-        );
+        // undefined → the render falls back to the localized
+        // t('media.unableToLoadStl') message.
+        setErrorMessage(error instanceof Error ? error.message : undefined);
         setStatus('error');
       }
     };
@@ -1842,13 +1854,13 @@ function StlModelViewer({
       />
       {status === 'loading' && (
         <div className="absolute inset-0 grid place-items-center bg-background/70 text-sm text-muted-foreground">
-          Loading 3D STL…
+          {t('media.loading3d')}
         </div>
       )}
       {status === 'error' && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background/85 p-4 text-center">
           <p className="max-w-md text-sm font-medium text-red-600">
-            {errorMessage ?? 'Unable to load STL'}
+            {errorMessage ?? t('media.unableToLoadStl')}
           </p>
           <div className="flex flex-wrap items-center justify-center gap-2">
             <Button
@@ -1859,7 +1871,7 @@ function StlModelViewer({
               className="gap-2"
             >
               <RotateCcw className="h-3.5 w-3.5" />
-              Retry
+              {t('media.retry')}
             </Button>
             <Button
               type="button"
@@ -1869,14 +1881,14 @@ function StlModelViewer({
               className="gap-2"
             >
               <Download className="h-3.5 w-3.5" />
-              Download instead
+              {t('media.downloadInstead')}
             </Button>
           </div>
         </div>
       )}
       {status === 'ready' && (
         <div className="absolute bottom-3 left-3 rounded-full bg-background/85 px-3 py-1 text-xs font-medium shadow-sm">
-          Drag to rotate · Scroll to zoom
+          {t('media.dragHint')}
         </div>
       )}
     </div>
@@ -1884,6 +1896,7 @@ function StlModelViewer({
 }
 
 function ModelPlaceholder({ file, large }: { file: OrderFile; large?: boolean }) {
+  const { t } = useT();
   return (
     <div
       className={cn(
@@ -1905,7 +1918,9 @@ function ModelPlaceholder({ file, large }: { file: OrderFile; large?: boolean })
         />
       </div>
       <span className="absolute bottom-3 rounded-full bg-background/85 px-3 py-1 text-xs font-medium">
-        {extensionFor(file.originalName).toUpperCase()} model
+        {t('media.modelBadge', {
+          ext: extensionFor(file.originalName).toUpperCase(),
+        })}
       </span>
     </div>
   );
@@ -2147,6 +2162,8 @@ function ZipUploadAction({
 
   const [pendingDelete, setPendingDelete] = useState<OrderFile | null>(null);
 
+  const { t } = useT();
+
   // ── Live progress state ────────────────────────────────────────
   // CBCT / DICOM archives sit between 200 MB and 1 GB; the previous
   // UI just disabled the button and showed nothing, so a doctor would
@@ -2197,10 +2214,10 @@ function ZipUploadAction({
             <FileArchive className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
             <div className="min-w-0">
               <p className="text-sm font-semibold">
-                Uploaded bundle (.zip) or CBCT (.dcm)
+                {t('media.zipAction.uploadedBundleTitle')}
               </p>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                CBCT volumes and STL / DICOM bundles shipped with this order.
+                {t('media.zipAction.uploadedBundleDesc')}
               </p>
             </div>
           </div>
@@ -2224,7 +2241,7 @@ function ZipUploadAction({
             className="gap-2"
           >
             <UploadCloud className="h-4 w-4" />
-            Choose ZIP…
+            {t('media.zipAction.chooseZip')}
           </Button>
           {/* CBCT volumes sometimes ship as a single uncompressed .dcm
               file rather than an archive. Offering a direct uploader
@@ -2238,7 +2255,7 @@ function ZipUploadAction({
           >
             <label htmlFor={dicomInputId} className="cursor-pointer gap-2">
               <UploadCloud className="h-4 w-4" />
-              Single .dcm
+              {t('media.zipAction.singleDcm')}
             </label>
           </Button>
           <input
@@ -2268,7 +2285,7 @@ function ZipUploadAction({
             <div className="flex items-center gap-2 min-w-0">
               <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
               <p className="truncate text-sm font-medium">
-                Uploading {currentFile.name}
+                {t('media.zipAction.uploadingFile', { name: currentFile.name })}
               </p>
             </div>
             <span className="shrink-0 text-sm font-semibold tabular-nums text-primary">
@@ -2280,7 +2297,9 @@ function ZipUploadAction({
             {formatBytes(((progress ?? 0) / 100) * currentFile.size)} /{' '}
             {formatBytes(currentFile.size)}
             {progress === 100 && (
-              <span className="ml-2 text-primary">· finalising on server…</span>
+              <span className="ml-2 text-primary">
+                {t('media.zipAction.finalising')}
+              </span>
             )}
           </p>
         </div>
@@ -2296,8 +2315,11 @@ function ZipUploadAction({
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
             <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-            {bundleFiles.length} bundle file
-            {bundleFiles.length === 1 ? '' : 's'} uploaded
+            {bundleFiles.length === 1
+              ? t('media.zipAction.bundleCountOne')
+              : t('media.zipAction.bundleCountMany', {
+                  count: bundleFiles.length,
+                })}
           </div>
           <ul className="divide-y rounded-xl border bg-card">
             {bundleFiles.map((file) => {
@@ -2344,7 +2366,7 @@ function ZipUploadAction({
                         <>
                           <span className="mx-1.5 opacity-60">·</span>
                           <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
-                            {isDicom ? 'DICOM' : 'ZIP bundle'}
+                            {isDicom ? 'DICOM' : t('media.zipAction.zipBadge')}
                           </span>
                         </>
                       )}
@@ -2361,7 +2383,9 @@ function ZipUploadAction({
                     size="icon"
                     variant="ghost"
                     className="h-9 w-9 shrink-0 text-muted-foreground hover:bg-primary/10 hover:text-primary"
-                    aria-label={`Download ${file.originalName}`}
+                    aria-label={t('media.zipAction.downloadAria', {
+                      name: file.originalName,
+                    })}
                     onClick={() => downloadOrderFile(orderId, file)}
                   >
                     <Download className="h-4 w-4" />
@@ -2372,7 +2396,9 @@ function ZipUploadAction({
                       size="icon"
                       variant="ghost"
                       className="h-9 w-9 shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                      aria-label={`Delete ${file.originalName}`}
+                      aria-label={t('media.zipAction.deleteAria', {
+                        name: file.originalName,
+                      })}
                       disabled={uploadFiles.isPending}
                       onClick={() => setPendingDelete(file)}
                     >
@@ -2409,17 +2435,18 @@ function ZipUploadAction({
           >
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Delete this bundle?</AlertDialogTitle>
+                <AlertDialogTitle>
+                  {t('media.zipAction.deleteBundleTitle')}
+                </AlertDialogTitle>
                 <AlertDialogDescription>
                   <span className="font-medium">
                     {pendingDelete?.originalName}
                   </span>{' '}
-                  will be removed from this order. The file is soft-deleted
-                  on the server and can be restored by an admin if needed.
+                  {t('media.zipAction.deleteBundleDesc')}
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
                 <AlertDialogAction
                   variant="destructive"
                   onClick={() => {
@@ -2427,7 +2454,7 @@ function ZipUploadAction({
                     setPendingDelete(null);
                   }}
                 >
-                  Delete file
+                  {t('media.zipAction.deleteFile')}
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
@@ -2468,14 +2495,14 @@ function SectionIntro({
 }
 
 function SaveDraftNotice() {
+  const { t } = useT();
   return (
     <Card>
       <CardContent className="flex min-h-40 flex-col items-center justify-center gap-2 text-center">
         <FileUp className="h-8 w-8 text-muted-foreground" />
-        <p className="font-medium">Save the draft before uploading files</p>
+        <p className="font-medium">{t('media.saveDraftFirst')}</p>
         <p className="text-sm text-muted-foreground">
-          Files are stored after an order ID exists. Click Continue from the
-          patient step or use Save Draft.
+          {t('media.saveDraftFirstDetail')}
         </p>
       </CardContent>
     </Card>
@@ -2489,15 +2516,16 @@ function FileCategorySelect({
   value: OrderFileCategory;
   onChange: (value: OrderFileCategory) => void;
 }) {
+  const { t } = useT();
   return (
     <Select value={value} onValueChange={(next) => onChange(next as OrderFileCategory)}>
       <SelectTrigger id="order-file-category">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        {categories.map(([value, label]) => (
+        {categories.map(([value, labelKey]) => (
           <SelectItem key={value} value={value}>
-            {label}
+            {t(labelKey)}
           </SelectItem>
         ))}
       </SelectContent>
@@ -2698,8 +2726,14 @@ const modelCategories = new Set<OrderFileCategory>([
   OrderFileCategory.OBJ,
 ]);
 
-function labelForCategory(category: OrderFileCategory) {
-  return categories.find(([value]) => value === category)?.[1] ?? 'Other';
+function labelForCategory(
+  category: OrderFileCategory,
+  t: (path: string) => string,
+) {
+  const key =
+    categories.find(([value]) => value === category)?.[1] ??
+    'media.categories.other';
+  return t(key);
 }
 
 function extensionFor(fileName: string) {

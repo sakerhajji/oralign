@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Country, City } from 'country-state-city';
 import type { ICountry, ICity } from 'country-state-city';
 import { SearchableCombobox, type ComboboxItem } from './searchable-combobox';
+import { useT } from '@/lib/i18n/lang-context';
 
 export interface CountryCityValue {
   /** Country name, e.g. "Tunisia". Persisted in the dentist profile. */
@@ -46,6 +47,7 @@ export function CountryCityPicker({
   invalid,
   className,
 }: CountryCityPickerProps) {
+  const { t } = useT();
   // Reverse-lookup country by name (because the persisted value is the
   // human-readable country name, not the ISO code).
   const allCountries = useMemo(() => Country.getAllCountries(), []);
@@ -152,8 +154,8 @@ export function CountryCityPicker({
             value={countryCode ?? undefined}
             onChange={handleCountryChange}
             items={countryItems}
-            placeholder="Pick a country"
-            emptyLabel="No countries match"
+            placeholder={t('uiBits.pickCountry')}
+            emptyLabel={t('uiBits.noCountriesMatch')}
             disabled={disabled}
             isInvalid={invalid?.country}
           />
@@ -169,12 +171,14 @@ export function CountryCityPicker({
             onChange={handleCityChange}
             items={cityItems}
             placeholder={
-              countryCode ? 'Pick a city' : 'Choose a country first'
+              countryCode
+                ? t('uiBits.pickCity')
+                : t('uiBits.chooseCountryFirst')
             }
             emptyLabel={
               countryCode
-                ? 'No matching cities — try a different spelling'
-                : 'Pick a country to see cities'
+                ? t('uiBits.noCitiesMatch')
+                : t('uiBits.pickCountryToSeeCities')
             }
             disabled={disabled || !countryCode}
             isInvalid={invalid?.city}

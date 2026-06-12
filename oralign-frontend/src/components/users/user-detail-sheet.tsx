@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -44,6 +44,7 @@ import {
 import { usersService, extractApiErrorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/providers/auth-provider';
 import { getAvatarUrl, cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n/lang-context';
 import { optionalCountrySchema, optionalE164PhoneSchema } from '@/lib/schemas';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -62,37 +63,46 @@ import {
 } from 'lucide-react';
 
 // ─── Schemas ─────────────────────────────────────────────────────────────────
+// Validation messages are user-facing, so the schemas are factories
+// taking the translator — they're instantiated inside the component
+// (useMemo keyed on `t`, which changes identity per language).
 
-const profileSchema = z.object({
-  fullName: z.string().min(2, 'At least 2 characters'),
-  phone: optionalE164PhoneSchema,
-  country: optionalCountrySchema,
-  password: z
-    .string()
-    .refine((v) => !v || v.length >= 8, { message: 'At least 8 characters' })
-    .optional(),
-});
+type Translate = (path: string, vars?: Record<string, string | number>) => string;
+
+const makeProfileSchema = (t: Translate) =>
+  z.object({
+    fullName: z.string().min(2, t('usersUi.validation.min2')),
+    phone: optionalE164PhoneSchema,
+    country: optionalCountrySchema,
+    password: z
+      .string()
+      .refine((v) => !v || v.length >= 8, {
+        message: t('usersUi.validation.min8'),
+      })
+      .optional(),
+  });
 
 const accountSchema = z.object({
   role: z.nativeEnum(UserRole),
   isEmailVerified: z.boolean(),
 });
 
-const clinicSchema = z.object({
-  clinicName: z.string().min(1, 'Clinic name is required'),
-  clinicAddress: z.string().optional(),
-  city: z.string().optional(),
-  country: z.string().optional(),
-  clinicPhone: z.string().optional(),
-  clinicEmail: z.string().optional(),
-  description: z.string().optional(),
-  latitude: z.number().optional(),
-  longitude: z.number().optional(),
-});
+const makeClinicSchema = (t: Translate) =>
+  z.object({
+    clinicName: z.string().min(1, t('usersUi.validation.clinicNameRequired')),
+    clinicAddress: z.string().optional(),
+    city: z.string().optional(),
+    country: z.string().optional(),
+    clinicPhone: z.string().optional(),
+    clinicEmail: z.string().optional(),
+    description: z.string().optional(),
+    latitude: z.number().optional(),
+    longitude: z.number().optional(),
+  });
 
-type ProfileForm = z.infer<typeof profileSchema>;
+type ProfileForm = z.infer<ReturnType<typeof makeProfileSchema>>;
 type AccountForm = z.infer<typeof accountSchema>;
-type ClinicForm  = z.infer<typeof clinicSchema>;
+type ClinicForm  = z.infer<ReturnType<typeof makeClinicSchema>>;
 
 // ─── Working-hours helpers ───────────────────────────────────────────────────
 
@@ -104,14 +114,17 @@ interface DaySchedule {
   existingId?: string;
 }
 
-const DAYS: { key: DayOfWeek; label: string; short: string; isWeekend: boolean }[] = [
-  { key: DayOfWeek.MONDAY,    label: 'Monday',    short: 'Mon', isWeekend: false },
-  { key: DayOfWeek.TUESDAY,   label: 'Tuesday',   short: 'Tue', isWeekend: false },
-  { key: DayOfWeek.WEDNESDAY, label: 'Wednesday', short: 'Wed', isWeekend: false },
-  { key: DayOfWeek.THURSDAY,  label: 'Thursday',  short: 'Thu', isWeekend: false },
-  { key: DayOfWeek.FRIDAY,    label: 'Friday',    short: 'Fri', isWeekend: false },
-  { key: DayOfWeek.SATURDAY,  label: 'Saturday',  short: 'Sat', isWeekend: true  },
-  { key: DayOfWeek.SUNDAY,    label: 'Sunday',    short: 'Sun', isWeekend: true  },
+// Day labels live in the dictionary (`usersUi.days.<enum>.label/short`)
+// — the enum values double as the key path segment, so this constant
+// only keeps the ordering + weekend flag.
+const DAYS: { key: DayOfWeek; isWeekend: boolean }[] = [
+  { key: DayOfWeek.MONDAY,    isWeekend: false },
+  { key: DayOfWeek.TUESDAY,   isWeekend: false },
+  { key: DayOfWeek.WEDNESDAY, isWeekend: false },
+  { key: DayOfWeek.THURSDAY,  isWeekend: false },
+  { key: DayOfWeek.FRIDAY,    isWeekend: false },
+  { key: DayOfWeek.SATURDAY,  isWeekend: true  },
+  { key: DayOfWeek.SUNDAY,    isWeekend: true  },
 ];
 
 // ─── Props ───────────────────────────────────────────────────────────────────
@@ -131,6 +144,7 @@ export function UserDetailSheet({
   onOpenChange,
   initialTab = 'profile',
 }: UserDetailSheetProps) {
+  const { t } = useT();
   const queryClient = useQueryClient();
   // Surface the auth context so we can refresh the sidebar / header
   // avatar instantly when an admin opens their own row and uploads a
@@ -167,6 +181,12 @@ export function UserDetailSheet({
   const { data: workingHours } = useWorkingHoursByProfile(profileId ?? '');
 
   // ── Forms ──────────────────────────────────────────────────────────────────
+
+  // Schemas carry translated validation messages — rebuild when the
+  // language flips (t is stable per language). RHF reads the resolver
+  // from the latest props, so validation always uses the fresh schema.
+  const profileSchema = useMemo(() => makeProfileSchema(t), [t]);
+  const clinicSchema = useMemo(() => makeClinicSchema(t), [t]);
 
   const profileForm = useForm<ProfileForm>({
     resolver: zodResolver(profileSchema),
@@ -249,8 +269,10 @@ export function UserDetailSheet({
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith('image/')) return toast.error('Images only');
-    if (file.size > 5 * 1024 * 1024) return toast.error('Max 5 MB');
+    if (!file.type.startsWith('image/'))
+      return toast.error(t('usersUi.sheet.imagesOnly'));
+    if (file.size > 5 * 1024 * 1024)
+      return toast.error(t('usersUi.sheet.maxFive'));
     setAvatarFile(file);
     const reader = new FileReader();
     reader.onload = (ev) => setAvatarPreview(ev.target?.result as string);
@@ -286,7 +308,7 @@ export function UserDetailSheet({
       }
       if (data.password?.trim()) payload.password = data.password;
       await updateUser({ id: userId, data: payload as UpdateUserDto });
-      toast.success('Profile saved successfully.');
+      toast.success(t('usersUi.sheet.profileSaved'));
     } catch (err) {
       const msg = extractApiErrorMessage(err);
       setProfileError(msg);
@@ -300,7 +322,7 @@ export function UserDetailSheet({
     setAccountError(null);
     try {
       await updateUser({ id: userId, data });
-      toast.success('Account settings saved.');
+      toast.success(t('usersUi.sheet.accountSaved'));
     } catch (err) {
       const msg = extractApiErrorMessage(err);
       setAccountError(msg);
@@ -324,11 +346,11 @@ export function UserDetailSheet({
     try {
       if (user?.dentistProfile?.id) {
         await updateProfile({ id: user.dentistProfile.id, data: payload });
-        toast.success('Clinic info saved.');
+        toast.success(t('usersUi.sheet.clinicSaved'));
       } else {
         await createProfileForUser({ userId, data: payload });
         queryClient.invalidateQueries({ queryKey: userKeys.detail(userId) });
-        toast.success('Clinic profile created.');
+        toast.success(t('usersUi.sheet.clinicCreated'));
       }
     } catch (err) {
       const msg = extractApiErrorMessage(err);
@@ -358,7 +380,7 @@ export function UserDetailSheet({
               });
         }),
       );
-      toast.success('Schedule saved successfully.');
+      toast.success(t('usersUi.sheet.scheduleSaved'));
     } catch (err) {
       const msg = extractApiErrorMessage(err);
       setScheduleError(msg);
@@ -415,9 +437,9 @@ export function UserDetailSheet({
       >
         {/* ── Header ──────────────────────────────────────────────────────── */}
         <div className="shrink-0 border-b px-6 py-4 pr-14">
-          <SheetTitle className="sr-only">Edit User</SheetTitle>
+          <SheetTitle className="sr-only">{t('usersUi.sheet.srTitle')}</SheetTitle>
           <SheetDescription className="sr-only">
-            Edit user profile, account settings, clinic info and schedule
+            {t('usersUi.sheet.srDesc')}
           </SheetDescription>
 
           {isLoadingUser ? (
@@ -444,10 +466,12 @@ export function UserDetailSheet({
                     variant={user?.isActive ? 'default' : 'destructive'}
                     className="text-xs h-4 px-1.5 shrink-0"
                   >
-                    {user?.isActive ? 'Active' : 'Blocked'}
+                    {user?.isActive
+                      ? t('usersUi.statusActive')
+                      : t('usersUi.statusBlocked')}
                   </Badge>
                   <Badge variant="outline" className="text-xs h-4 px-1.5 shrink-0">
-                    {user?.role}
+                    {user?.role ? t(`usersUi.roles.${user.role}`) : null}
                   </Badge>
                 </div>
                 <div className="mt-1 text-xs text-muted-foreground">
@@ -466,15 +490,15 @@ export function UserDetailSheet({
         >
           <TabsList className="shrink-0 mx-6 mt-3 mb-0 w-auto justify-start rounded-lg bg-muted/60 h-9">
             <TabsTrigger value="profile" className="flex items-center gap-1.5 text-xs h-7">
-              <UserIcon className="h-3.5 w-3.5" /> Profile
+              <UserIcon className="h-3.5 w-3.5" /> {t('usersUi.sheet.tabProfile')}
             </TabsTrigger>
             <TabsTrigger value="account" className="flex items-center gap-1.5 text-xs h-7">
-              <Shield className="h-3.5 w-3.5" /> Account
+              <Shield className="h-3.5 w-3.5" /> {t('usersUi.sheet.tabAccount')}
             </TabsTrigger>
             {(isDentist || hasClinic) && (
               <TabsTrigger value="clinic" className="flex items-center gap-1.5 text-xs h-7">
                 <Building2 className="h-3.5 w-3.5" />
-                Clinic
+                {t('usersUi.sheet.tabClinic')}
                 {!hasClinic && isDentist && (
                   <span className="ml-1 h-1.5 w-1.5 rounded-full bg-amber-400" />
                 )}
@@ -482,7 +506,7 @@ export function UserDetailSheet({
             )}
             {hasClinic && (
               <TabsTrigger value="schedule" className="flex items-center gap-1.5 text-xs h-7">
-                <Clock className="h-3.5 w-3.5" /> Schedule
+                <Clock className="h-3.5 w-3.5" /> {t('usersUi.sheet.tabSchedule')}
               </TabsTrigger>
             )}
           </TabsList>
@@ -493,7 +517,7 @@ export function UserDetailSheet({
               <div className="px-6 py-5 space-y-6 max-w-2xl">
                 {/* Avatar */}
                 <section>
-                  <SectionTitle>Profile Picture</SectionTitle>
+                  <SectionTitle>{t('usersUi.sheet.profilePicture')}</SectionTitle>
                   <div className="flex items-center gap-5">
                     <Avatar className="h-20 w-20 border-2 border-muted shrink-0">
                       <AvatarImage src={avatarPreview} alt={user?.fullName} />
@@ -502,7 +526,9 @@ export function UserDetailSheet({
                       </AvatarFallback>
                     </Avatar>
                     <div className="space-y-1.5">
-                      <p className="text-xs text-muted-foreground">JPG, PNG or GIF · max 5 MB</p>
+                      <p className="text-xs text-muted-foreground">
+                        {t('usersUi.sheet.avatarHint')}
+                      </p>
                       <div className="flex gap-2">
                         <Button
                           type="button"
@@ -510,7 +536,8 @@ export function UserDetailSheet({
                           size="sm"
                           onClick={() => fileInputRef.current?.click()}
                         >
-                          <Upload className="h-3.5 w-3.5 mr-1.5" /> Upload
+                          <Upload className="h-3.5 w-3.5 mr-1.5" />{' '}
+                          {t('usersUi.sheet.upload')}
                         </Button>
                         {avatarFile && (
                           <Button
@@ -522,7 +549,7 @@ export function UserDetailSheet({
                               setAvatarPreview(getAvatarUrl(user?.avatarUrl));
                             }}
                           >
-                            Reset
+                            {t('usersUi.reset')}
                           </Button>
                         )}
                       </div>
@@ -541,16 +568,19 @@ export function UserDetailSheet({
 
                 {/* Identity */}
                 <section>
-                  <SectionTitle>Identity</SectionTitle>
+                  <SectionTitle>{t('usersUi.sheet.identity')}</SectionTitle>
                   <div className="space-y-3">
                     <Field
-                      label="Full Name *"
+                      label={t('usersUi.fullNameRequired')}
                       error={profileForm.formState.errors.fullName?.message}
                     >
-                      <Input {...profileForm.register('fullName')} placeholder="Full name" />
+                      <Input
+                        {...profileForm.register('fullName')}
+                        placeholder={t('usersUi.sheet.fullNamePh')}
+                      />
                     </Field>
                     <Field
-                      label="Phone"
+                      label={t('usersUi.phone')}
                       icon={<Phone className="h-3.5 w-3.5" />}
                       error={
                         profileForm.formState.errors.phone?.message ??
@@ -592,11 +622,11 @@ export function UserDetailSheet({
 
                 {/* Security */}
                 <section>
-                  <SectionTitle>Security</SectionTitle>
+                  <SectionTitle>{t('usersUi.sheet.security')}</SectionTitle>
                   <Field
-                    label="New Password"
+                    label={t('usersUi.newPassword')}
                     icon={<Key className="h-3.5 w-3.5" />}
-                    hint="Leave blank to keep current password"
+                    hint={t('usersUi.keepPasswordHint')}
                     error={profileForm.formState.errors.password?.message}
                   >
                     <Input
@@ -617,7 +647,9 @@ export function UserDetailSheet({
             <TabFooter>
               <Button onClick={saveProfile} disabled={isSavingProfile}>
                 {isSavingProfile && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                {isSavingProfile ? 'Saving…' : 'Save Profile'}
+                {isSavingProfile
+                  ? t('usersUi.sheet.saving')
+                  : t('usersUi.sheet.saveProfile')}
               </Button>
             </TabFooter>
           </TabsContent>
@@ -627,9 +659,9 @@ export function UserDetailSheet({
             <div className="flex-1 min-h-0 overflow-y-auto">
               <div className="px-6 py-5 space-y-6 max-w-2xl">
                 <section>
-                  <SectionTitle>Permissions</SectionTitle>
+                  <SectionTitle>{t('usersUi.sheet.permissions')}</SectionTitle>
                   <div className="space-y-3">
-                    <Field label="Role">
+                    <Field label={t('usersUi.role')}>
                       <Controller
                         name="role"
                         control={accountForm.control}
@@ -639,10 +671,18 @@ export function UserDetailSheet({
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value={UserRole.DENTIST}>Dentist</SelectItem>
-                              <SelectItem value={UserRole.ADMIN}>Administrator</SelectItem>
-                              <SelectItem value={UserRole.DESIGNER}>Designer</SelectItem>
-                              <SelectItem value={UserRole.SUPER_ADMIN}>Super Admin</SelectItem>
+                              <SelectItem value={UserRole.DENTIST}>
+                                {t('usersUi.roles.dentist')}
+                              </SelectItem>
+                              <SelectItem value={UserRole.ADMIN}>
+                                {t('usersUi.roles.admin')}
+                              </SelectItem>
+                              <SelectItem value={UserRole.DESIGNER}>
+                                {t('usersUi.roles.designer')}
+                              </SelectItem>
+                              <SelectItem value={UserRole.SUPER_ADMIN}>
+                                {t('usersUi.roles.super_admin')}
+                              </SelectItem>
                             </SelectContent>
                           </Select>
                         )}
@@ -652,10 +692,10 @@ export function UserDetailSheet({
                     <div className="flex items-center justify-between rounded-lg border p-3">
                       <div>
                         <Label className="flex items-center gap-1.5">
-                          <Mail className="h-3.5 w-3.5" /> Email Verified
+                          <Mail className="h-3.5 w-3.5" /> {t('usersUi.emailVerified')}
                         </Label>
                         <p className="text-xs text-muted-foreground mt-0.5">
-                          Grant access to email-verified features
+                          {t('usersUi.sheet.verifiedFeatures')}
                         </p>
                       </div>
                       <Controller
@@ -672,20 +712,28 @@ export function UserDetailSheet({
                 <Separator />
 
                 <section>
-                  <SectionTitle>Current Status</SectionTitle>
+                  <SectionTitle>{t('usersUi.sheet.currentStatus')}</SectionTitle>
                   <div className="grid grid-cols-2 gap-2">
                     {[
                       {
-                        label: 'Account',
+                        label: t('usersUi.sheet.account'),
                         value: (
                           <Badge variant={user?.isActive ? 'default' : 'destructive'}>
-                            {user?.isActive ? 'Active' : 'Blocked'}
+                            {user?.isActive
+                              ? t('usersUi.statusActive')
+                              : t('usersUi.statusBlocked')}
                           </Badge>
                         ),
                       },
                       {
-                        label: 'Verification',
-                        value: <Badge variant="outline">{user?.verificationStatus}</Badge>,
+                        label: t('usersUi.sheet.verificationLabel'),
+                        value: (
+                          <Badge variant="outline">
+                            {user?.verificationStatus
+                              ? t(`usersUi.verification.${user.verificationStatus}`)
+                              : '—'}
+                          </Badge>
+                        ),
                       },
                     ].map(({ label, value }) => (
                       <div key={label} className="rounded-lg bg-muted/40 px-3 py-2.5 space-y-1">
@@ -699,28 +747,28 @@ export function UserDetailSheet({
                 <Separator />
 
                 <section>
-                  <SectionTitle>Timeline</SectionTitle>
+                  <SectionTitle>{t('usersUi.sheet.timeline')}</SectionTitle>
                   <div className="space-y-0">
                     {[
                       {
-                        label: 'Member since',
+                        label: t('usersUi.memberSince'),
                         value: user?.createdAt
                           ? format(new Date(user.createdAt), 'MMM d, yyyy · HH:mm')
                           : '—',
                       },
                       {
-                        label: 'Last updated',
+                        label: t('usersUi.sheet.lastUpdated'),
                         value: user?.updatedAt
                           ? format(new Date(user.updatedAt), 'MMM d, yyyy · HH:mm')
                           : '—',
                       },
                       {
-                        label: 'Last login',
+                        label: t('usersUi.lastLogin'),
                         value: user?.lastLoginAt
                           ? format(new Date(user.lastLoginAt), 'MMM d, yyyy · HH:mm')
-                          : 'Never',
+                          : t('usersUi.never'),
                       },
-                      { label: 'User ID', value: user?.id ?? '—', mono: true },
+                      { label: t('usersUi.userId'), value: user?.id ?? '—', mono: true },
                     ].map(({ label, value, mono }) => (
                       <div
                         key={label}
@@ -750,7 +798,9 @@ export function UserDetailSheet({
             <TabFooter>
               <Button onClick={saveAccount} disabled={isUpdatingUser}>
                 {isUpdatingUser && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                {isUpdatingUser ? 'Saving…' : 'Save Account Settings'}
+                {isUpdatingUser
+                  ? t('usersUi.sheet.saving')
+                  : t('usersUi.sheet.saveAccount')}
               </Button>
             </TabFooter>
           </TabsContent>
@@ -765,38 +815,41 @@ export function UserDetailSheet({
                     <div className="flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800 dark:border-blue-800/40 dark:bg-blue-900/20 dark:text-blue-300">
                       <PlusCircle className="mt-0.5 h-4 w-4 shrink-0" />
                       <div>
-                        <p className="font-medium">No clinic profile yet</p>
+                        <p className="font-medium">{t('usersUi.sheet.noClinicTitle')}</p>
                         <p className="text-xs mt-0.5 opacity-80">
-                          Fill in the form below to create a clinic profile for this dentist.
+                          {t('usersUi.sheet.noClinicDesc')}
                         </p>
                       </div>
                     </div>
                   )}
 
                   <section>
-                    <SectionTitle>Clinic Information</SectionTitle>
+                    <SectionTitle>{t('usersUi.sheet.clinicInfo')}</SectionTitle>
                     <div className="space-y-3">
                       <Field
-                        label="Clinic Name *"
+                        label={t('usersUi.sheet.clinicNameRequired')}
                         error={clinicForm.formState.errors.clinicName?.message}
                       >
                         <Input
                           {...clinicForm.register('clinicName')}
-                          placeholder="Smile Dental Clinic"
+                          placeholder={t('usersUi.sheet.clinicNamePh')}
                         />
                       </Field>
-                      <Field label="Address">
+                      <Field label={t('usersUi.sheet.address')}>
                         <Input
                           {...clinicForm.register('clinicAddress')}
-                          placeholder="123 Main Street"
+                          placeholder={t('usersUi.sheet.addressPh')}
                         />
                       </Field>
                       <div className="grid grid-cols-2 gap-3">
-                        <Field label="City">
+                        <Field label={t('usersUi.sheet.city')}>
                           <Input {...clinicForm.register('city')} placeholder="Tunis" />
                         </Field>
-                        <Field label="Country">
-                          <Input {...clinicForm.register('country')} placeholder="Tunisia" />
+                        <Field label={t('usersUi.sheet.country')}>
+                          <Input
+                            {...clinicForm.register('country')}
+                            placeholder={t('usersUi.sheet.countryPh')}
+                          />
                         </Field>
                       </div>
                     </div>
@@ -805,9 +858,9 @@ export function UserDetailSheet({
                   <Separator />
 
                   <section>
-                    <SectionTitle>Contact</SectionTitle>
+                    <SectionTitle>{t('usersUi.sheet.contact')}</SectionTitle>
                     <div className="grid grid-cols-2 gap-3">
-                      <Field label="Phone" icon={<Phone className="h-3.5 w-3.5" />}>
+                      <Field label={t('usersUi.phone')} icon={<Phone className="h-3.5 w-3.5" />}>
                         <Controller
                           name="clinicPhone"
                           control={clinicForm.control}
@@ -825,14 +878,14 @@ export function UserDetailSheet({
                         />
                       </Field>
                       <Field
-                        label="Email"
+                        label={t('usersUi.email')}
                         icon={<Mail className="h-3.5 w-3.5" />}
                         error={clinicForm.formState.errors.clinicEmail?.message}
                       >
                         <Input
                           {...clinicForm.register('clinicEmail')}
                           type="email"
-                          placeholder="clinic@example.com"
+                          placeholder={t('usersUi.sheet.clinicEmailPh')}
                         />
                       </Field>
                     </div>
@@ -841,13 +894,13 @@ export function UserDetailSheet({
                   <Separator />
 
                   <section>
-                    <SectionTitle>About</SectionTitle>
+                    <SectionTitle>{t('usersUi.sheet.about')}</SectionTitle>
                     <div className="space-y-1.5">
-                      <Label className="text-sm">Description</Label>
+                      <Label className="text-sm">{t('usersUi.sheet.description')}</Label>
                       <textarea
                         {...clinicForm.register('description')}
                         rows={4}
-                        placeholder="Describe the clinic, specialties, services…"
+                        placeholder={t('usersUi.sheet.descriptionPh')}
                         className="w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                       />
                     </div>
@@ -856,10 +909,9 @@ export function UserDetailSheet({
                   <Separator />
 
                   <section>
-                    <SectionTitle>Location</SectionTitle>
+                    <SectionTitle>{t('usersUi.sheet.locationTitle')}</SectionTitle>
                     <p className="text-xs text-muted-foreground mb-3">
-                      Click &ldquo;Pick Location&rdquo; to open the map and select the clinic&apos;s
-                      exact GPS coordinates.
+                      {t('usersUi.sheet.locationHint')}
                     </p>
                     <LocationPicker
                       value={locationValue}
@@ -893,7 +945,11 @@ export function UserDetailSheet({
               <TabFooter>
                 <Button onClick={saveClinic} disabled={isSavingClinic}>
                   {isSavingClinic && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                  {isSavingClinic ? 'Saving…' : hasClinic ? 'Save Clinic Info' : 'Create Clinic'}
+                  {isSavingClinic
+                    ? t('usersUi.sheet.saving')
+                    : hasClinic
+                      ? t('usersUi.sheet.saveClinic')
+                      : t('usersUi.sheet.createClinic')}
                 </Button>
               </TabFooter>
             </TabsContent>
@@ -904,10 +960,9 @@ export function UserDetailSheet({
             <TabsContent value="schedule" className="flex-1 min-h-0 mt-0 flex flex-col">
               <div className="flex-1 min-h-0 overflow-y-auto">
                 <div className="px-6 py-5">
-                  <SectionTitle>Working Hours</SectionTitle>
+                  <SectionTitle>{t('usersUi.sheet.workingHours')}</SectionTitle>
                   <p className="text-xs text-muted-foreground mb-5">
-                    Set open &amp; close times for each day. Toggle the switch off to mark a day as
-                    closed.
+                    {t('usersUi.sheet.workingHoursHint')}
                   </p>
 
                   {/*
@@ -920,16 +975,16 @@ export function UserDetailSheet({
                   {/* Header row */}
                   <div className="grid grid-cols-[190px_1fr_1fr_52px] gap-x-3 px-4 pb-2 mb-1">
                     <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      Day
+                      {t('usersUi.sheet.day')}
                     </span>
                     <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      Opens
+                      {t('usersUi.sheet.opens')}
                     </span>
                     <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      Closes
+                      {t('usersUi.sheet.closes')}
                     </span>
                     <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground text-center">
-                      Open
+                      {t('usersUi.sheet.open')}
                     </span>
                   </div>
 
@@ -965,7 +1020,7 @@ export function UserDetailSheet({
                                   : 'bg-muted text-muted-foreground/50',
                               )}
                             >
-                              {meta.short.slice(0, 2)}
+                              {t(`usersUi.days.${meta.key}.short`)}
                             </span>
                             <div className="min-w-0">
                               <span
@@ -974,11 +1029,11 @@ export function UserDetailSheet({
                                   isOpen ? 'text-foreground' : 'text-muted-foreground/60',
                                 )}
                               >
-                                {meta.label}
+                                {t(`usersUi.days.${meta.key}.label`)}
                               </span>
                               {meta.isWeekend && (
                                 <span className="text-[10px] text-muted-foreground/40">
-                                  weekend
+                                  {t('usersUi.sheet.weekend')}
                                 </span>
                               )}
                             </div>
@@ -1017,7 +1072,7 @@ export function UserDetailSheet({
                           ) : (
                             <div className="col-span-2 flex items-center pl-1">
                               <span className="text-sm text-muted-foreground/50 font-medium italic">
-                                Rest day — closed
+                                {t('usersUi.sheet.restDay')}
                               </span>
                             </div>
                           )}
@@ -1050,7 +1105,9 @@ export function UserDetailSheet({
               <TabFooter>
                 <Button onClick={saveSchedule} disabled={isSavingSchedule}>
                   {isSavingSchedule && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                  {isSavingSchedule ? 'Saving…' : 'Save Schedule'}
+                  {isSavingSchedule
+                    ? t('usersUi.sheet.saving')
+                    : t('usersUi.sheet.saveSchedule')}
                 </Button>
               </TabFooter>
             </TabsContent>
@@ -1112,6 +1169,7 @@ function InlineError({
   message: string;
   onDismiss: () => void;
 }) {
+  const { t } = useT();
   return (
     <Alert variant="destructive" className="py-3">
       <AlertCircle className="h-4 w-4" />
@@ -1122,7 +1180,7 @@ function InlineError({
           onClick={onDismiss}
           className="shrink-0 text-xs underline underline-offset-2 opacity-70 hover:opacity-100"
         >
-          Dismiss
+          {t('usersUi.sheet.dismiss')}
         </button>
       </AlertDescription>
     </Alert>

@@ -3,6 +3,7 @@
 import React from 'react';
 import ReactPhoneInput from 'react-phone-input-2';
 import type { CountryData } from 'react-phone-input-2';
+import { useT } from '@/lib/i18n/lang-context';
 import { cn } from '@/lib/utils';
 
 const ISO2_REGEX = /^[A-Za-z]{2}$/;
@@ -52,6 +53,7 @@ export function PhoneInput({
   onChange,
   className,
 }: PhoneInputProps) {
+  const { t } = useT();
   const resolvedCountry = normalizeCountryCode(country, defaultCountry) ?? 'tn';
   const normalizedValue = normalizePhoneValue(value);
 
@@ -70,7 +72,7 @@ export function PhoneInput({
       enableSearch
       countryCodeEditable={false}
       disableSearchIcon
-      searchPlaceholder="Search country"
+      searchPlaceholder={t('uiBits.searchCountry')}
       containerClass={cn('phone-input', isInvalid && 'phone-input--invalid', className)}
       inputClass="phone-input__control"
       buttonClass="phone-input__button"

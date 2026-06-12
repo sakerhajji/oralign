@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { formatDistanceToNowStrict } from 'date-fns';
+import { fr as frLocale } from 'date-fns/locale';
 import { ArrowRight, Bell, CheckCheck, ChevronRight, Inbox } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -20,6 +21,7 @@ import {
   useUnreadNotificationCount,
 } from '@/lib/hooks';
 import { useAuth } from '@/lib/providers/auth-provider';
+import { useT } from '@/lib/i18n/lang-context';
 import type { Notification } from '@/lib/types';
 
 /**
@@ -37,6 +39,7 @@ import type { Notification } from '@/lib/types';
  *   • Marking invalidates both queries so badge + list stay aligned.
  */
 export function NotificationBell() {
+  const { t } = useT();
   const { isAuthenticated } = useAuth();
   const [open, setOpen] = useState(false);
 
@@ -67,7 +70,7 @@ export function NotificationBell() {
           // "primary inbox" affordance in the header rather than a
           // tiny side action.
           className="relative h-10 w-10"
-          aria-label={`Notifications (${unread} unread)`}
+          aria-label={t('notifBell.bellAria', { count: unread })}
         >
           <Bell className="!size-7" />
           {unread > 0 ? (
@@ -96,12 +99,14 @@ export function NotificationBell() {
             </span>
             <div className="min-w-0">
               <p className="text-sm font-semibold leading-none">
-                Notifications
+                {t('notifBell.title')}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
                 {unread > 0
-                  ? `${unread} unread update${unread > 1 ? 's' : ''}`
-                  : 'You are all caught up'}
+                  ? unread > 1
+                    ? t('notifBell.unreadMany', { count: unread })
+                    : t('notifBell.unreadOne')
+                  : t('notifBell.allCaughtUp')}
               </p>
             </div>
           </div>
@@ -114,17 +119,19 @@ export function NotificationBell() {
             onClick={() => markAll.mutate()}
           >
             <CheckCheck className="mr-1 size-3.5" />
-            Mark all
+            {t('notifBell.markAll')}
           </Button>
         </header>
 
         <div className="border-b px-4 py-2">
           <div className="flex items-center justify-between gap-2 text-xs">
             <p className="font-medium text-muted-foreground">
-              Recent activity
+              {t('notifBell.recentActivity')}
             </p>
             <p className="text-xs text-muted-foreground">
-              {items.length > 0 ? `${items.length} latest` : 'Inbox empty'}
+              {items.length > 0
+                ? t('notifBell.latestCount', { count: items.length })
+                : t('notifBell.inboxEmpty')}
             </p>
           </div>
         </div>
@@ -147,11 +154,10 @@ export function NotificationBell() {
                   <Inbox className="size-6 opacity-50" />
                 </span>
                 <p className="text-sm font-medium text-foreground">
-                  Nothing here yet.
+                  {t('notifBell.emptyTitle')}
                 </p>
                 <p className="max-w-64 text-xs leading-relaxed">
-                  You&apos;ll see new orders, payment updates, and
-                  treatment messages in this panel.
+                  {t('notifBell.emptyHint')}
                 </p>
               </div>
             ) : (
@@ -205,7 +211,7 @@ export function NotificationBell() {
         >
           <span className="flex items-center gap-2">
             <Inbox className="size-4" />
-            View all notifications
+            {t('notifBell.viewAll')}
           </span>
           <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5 group-focus-visible:translate-x-0.5" />
         </Link>
@@ -221,6 +227,7 @@ function NotificationRow({
   notification: Notification;
   onActivate: () => void;
 }) {
+  const { t, lang } = useT();
   const isUnread = !notification.readAt;
   const createdAt = new Date(notification.createdAt);
   // When the backend provided a deep link we render the whole row as a
@@ -258,7 +265,7 @@ function NotificationRow({
           </p>
           {isUnread ? (
             <span className="mt-0.5 shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold leading-none text-primary-foreground">
-              New
+              {t('notifBell.newBadge')}
             </span>
           ) : null}
         </div>
@@ -268,6 +275,7 @@ function NotificationRow({
         <p className="mt-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
           {formatDistanceToNowStrict(createdAt, {
             addSuffix: true,
+            locale: lang === 'fr' ? frLocale : undefined,
           })}
         </p>
       </div>

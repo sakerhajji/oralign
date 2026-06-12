@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n/lang-context';
 import type { DentistProfile } from '@/lib/types';
 import {
   Building2,
@@ -41,6 +42,7 @@ export function ClinicViewDialog({
   profile,
   dentistName,
 }: ClinicViewDialogProps) {
+  const { t } = useT();
   const hasLocation =
     profile.latitude != null &&
     profile.longitude != null &&
@@ -59,9 +61,11 @@ export function ClinicViewDialog({
         showCloseButton={false}
         className="flex flex-col gap-0 p-0 overflow-hidden w-[95vw] max-w-[680px] max-h-[90vh]"
       >
-        <DialogTitle className="sr-only">Clinic Details</DialogTitle>
+        <DialogTitle className="sr-only">
+          {t('usersUi.clinicView.srTitle')}
+        </DialogTitle>
         <DialogDescription className="sr-only">
-          Read-only view of {profile.clinicName}
+          {t('usersUi.clinicView.srDesc', { name: profile.clinicName })}
         </DialogDescription>
 
         {/* ── Header ──────────────────────────────────────────────────────── */}
@@ -91,7 +95,7 @@ export function ClinicViewDialog({
           <DialogClose asChild>
             <Button variant="ghost" size="icon-sm" className="shrink-0">
               <X className="h-4 w-4" />
-              <span className="sr-only">Close</span>
+              <span className="sr-only">{t('common.close')}</span>
             </Button>
           </DialogClose>
         </div>
@@ -103,22 +107,26 @@ export function ClinicViewDialog({
             {/* ── Contact info ──────────────────────────────────────────── */}
             {(profile.clinicPhone || profile.clinicEmail) && (
               <section>
-                <SectionLabel icon={<Phone className="h-3.5 w-3.5" />}>Contact</SectionLabel>
+                <SectionLabel icon={<Phone className="h-3.5 w-3.5" />}>
+                  {t('usersUi.clinicView.contact')}
+                </SectionLabel>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
                   {profile.clinicPhone && (
                     <InfoTile
                       icon={<Phone className="h-4 w-4 text-muted-foreground" />}
-                      label="Phone"
+                      label={t('usersUi.phone')}
                       value={profile.clinicPhone}
                       href={`tel:${profile.clinicPhone}`}
+                      actionLabel={t('usersUi.clinicView.call')}
                     />
                   )}
                   {profile.clinicEmail && (
                     <InfoTile
                       icon={<Mail className="h-4 w-4 text-muted-foreground" />}
-                      label="Email"
+                      label={t('usersUi.email')}
                       value={profile.clinicEmail}
                       href={`mailto:${profile.clinicEmail}`}
+                      actionLabel={t('usersUi.clinicView.sendEmail')}
                     />
                   )}
                 </div>
@@ -130,11 +138,15 @@ export function ClinicViewDialog({
               <>
                 <Separator />
                 <section>
-                  <SectionLabel icon={<Globe className="h-3.5 w-3.5" />}>Location</SectionLabel>
+                  <SectionLabel icon={<Globe className="h-3.5 w-3.5" />}>
+                    {t('usersUi.clinicView.location')}
+                  </SectionLabel>
                   <div className="mt-3 space-y-2">
                     {profile.city && (
                       <div className="flex items-center gap-2 text-sm">
-                        <span className="text-muted-foreground w-16 shrink-0">City</span>
+                        <span className="text-muted-foreground w-16 shrink-0">
+                          {t('usersUi.clinicView.city')}
+                        </span>
                         <span className="font-medium">{profile.city}</span>
                         {profile.country && (
                           <Badge variant="outline" className="text-xs h-5">
@@ -145,7 +157,9 @@ export function ClinicViewDialog({
                     )}
                     {hasLocation && mapsUrl && (
                       <div className="flex items-center gap-2 text-sm">
-                        <span className="text-muted-foreground w-16 shrink-0">GPS</span>
+                        <span className="text-muted-foreground w-16 shrink-0">
+                          {t('usersUi.clinicView.gps')}
+                        </span>
                         <span className="font-mono text-xs text-foreground">
                           {profile.latitude!.toFixed(5)}, {profile.longitude!.toFixed(5)}
                         </span>
@@ -156,7 +170,7 @@ export function ClinicViewDialog({
                           className="ml-auto flex items-center gap-1 text-xs text-primary hover:underline"
                         >
                           <ExternalLink className="h-3 w-3" />
-                          Open in Maps
+                          {t('usersUi.clinicView.openInMaps')}
                         </a>
                       </div>
                     )}
@@ -170,7 +184,9 @@ export function ClinicViewDialog({
               <>
                 <Separator />
                 <section>
-                  <SectionLabel icon={<FileText className="h-3.5 w-3.5" />}>About</SectionLabel>
+                  <SectionLabel icon={<FileText className="h-3.5 w-3.5" />}>
+                    {t('usersUi.clinicView.about')}
+                  </SectionLabel>
                   <p className="mt-3 text-sm text-foreground leading-relaxed whitespace-pre-wrap">
                     {profile.description}
                   </p>
@@ -183,7 +199,7 @@ export function ClinicViewDialog({
               !profile.country && !hasLocation && !profile.description && (
               <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
                 <Building2 className="h-10 w-10 mb-3 opacity-30" />
-                <p className="text-sm">No additional details available.</p>
+                <p className="text-sm">{t('usersUi.clinicView.noDetails')}</p>
               </div>
             )}
           </div>
@@ -193,10 +209,10 @@ export function ClinicViewDialog({
         <div className="shrink-0 border-t bg-muted/30 px-6 py-3 flex items-center justify-between gap-3">
           <span className="text-xs text-muted-foreground flex items-center gap-1.5">
             <Clock className="h-3 w-3" />
-            Read-only view
+            {t('usersUi.clinicView.readOnly')}
           </span>
           <DialogClose asChild>
-            <Button variant="outline" size="sm">Close</Button>
+            <Button variant="outline" size="sm">{t('common.close')}</Button>
           </DialogClose>
         </div>
       </DialogContent>
@@ -228,11 +244,14 @@ function InfoTile({
   label,
   value,
   href,
+  actionLabel,
 }: {
   icon: React.ReactNode;
   label: string;
   value: string;
   href?: string;
+  /** Translated link text (e.g. "Call" / "Send email"); falls back to the href. */
+  actionLabel?: string;
 }) {
   return (
     <div className={cn(
@@ -252,7 +271,7 @@ function InfoTile({
           className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
         >
           <ExternalLink className="h-3 w-3" />
-          {label === 'Phone' ? 'Call' : label === 'Email' ? 'Send email' : href}
+          {actionLabel ?? href}
         </a>
       )}
     </div>

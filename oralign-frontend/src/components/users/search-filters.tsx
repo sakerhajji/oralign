@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Search, Filter, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useT } from '@/lib/i18n/lang-context';
 
 interface SearchFiltersProps {
   onFiltersChange: (filters: {
@@ -17,7 +18,8 @@ interface SearchFiltersProps {
   placeholder?: string;
 }
 
-export function SearchFilters({ onFiltersChange, placeholder = "Search users..." }: SearchFiltersProps) {
+export function SearchFilters({ onFiltersChange, placeholder }: SearchFiltersProps) {
+  const { t } = useT();
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -110,11 +112,11 @@ export function SearchFilters({ onFiltersChange, placeholder = "Search users..."
         <div className="relative">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder={placeholder}
+            placeholder={placeholder ?? t('usersUi.filters.searchPh')}
             defaultValue={currentSearch}
             onChange={(e) => handleSearchChange(e.target.value)}
             className="pl-10 pr-4"
-            aria-label="Search users by name or email"
+            aria-label={t('usersUi.filters.searchAria')}
           />
         </div>
       </div>
@@ -123,24 +125,24 @@ export function SearchFilters({ onFiltersChange, placeholder = "Search users..."
         <Select value={currentRole} onValueChange={handleRoleChange}>
           <SelectTrigger className="w-[140px]">
             <Filter className="mr-2 h-4 w-4" />
-            <SelectValue placeholder="Role" />
+            <SelectValue placeholder={t('usersUi.filters.rolePh')} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Roles</SelectItem>
-            <SelectItem value="admin">Admin</SelectItem>
-            <SelectItem value="dentist">Dentist</SelectItem>
-            <SelectItem value="designer">Designer</SelectItem>
+            <SelectItem value="all">{t('usersUi.filters.allRoles')}</SelectItem>
+            <SelectItem value="admin">{t('usersUi.roles.admin')}</SelectItem>
+            <SelectItem value="dentist">{t('usersUi.roles.dentist')}</SelectItem>
+            <SelectItem value="designer">{t('usersUi.roles.designer')}</SelectItem>
           </SelectContent>
         </Select>
-        
+
         <Select value={currentStatus} onValueChange={handleStatusChange}>
           <SelectTrigger className="w-[140px]">
-            <SelectValue placeholder="Status" />
+            <SelectValue placeholder={t('usersUi.filters.statusPh')} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Status</SelectItem>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="blocked">Blocked</SelectItem>
+            <SelectItem value="all">{t('usersUi.filters.allStatus')}</SelectItem>
+            <SelectItem value="active">{t('usersUi.filters.active')}</SelectItem>
+            <SelectItem value="blocked">{t('usersUi.filters.blocked')}</SelectItem>
           </SelectContent>
         </Select>
 
@@ -150,10 +152,10 @@ export function SearchFilters({ onFiltersChange, placeholder = "Search users..."
             size="sm"
             onClick={clearAllFilters}
             className="h-9 px-2 lg:px-3"
-            aria-label="Clear all filters"
+            aria-label={t('usersUi.filters.clearAria')}
           >
             <X className="mr-1 h-4 w-4" />
-            Clear
+            {t('usersUi.filters.clear')}
           </Button>
         )}
       </div>

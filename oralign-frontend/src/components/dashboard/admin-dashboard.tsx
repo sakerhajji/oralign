@@ -54,6 +54,7 @@ import {
   useDashboardSocket,
 } from '@/lib/hooks';
 import { getAvatarUrl } from '@/lib/utils';
+import { useT } from '@/lib/i18n/lang-context';
 import type { DashboardRange } from '@/lib/types';
 
 const TND = (n: number, opts: Intl.NumberFormatOptions = {}) =>
@@ -92,8 +93,11 @@ function defaultRange(): DashboardRange {
  * resolves so the page never flashes empty.
  */
 export function AdminDashboard() {
+  const { t, lang } = useT();
   const [range, setRange] = useState<DashboardRange>(defaultRange);
   useDashboardSocket();
+  // Chart axis/tooltip dates follow the app language, not the browser.
+  const dateLocale = lang === 'fr' ? 'fr-FR' : 'en-US';
 
   const kpis = useAdminDashboardKpis(range);
   const topDoctors = useAdminTopDoctors({ ...range, limit: 5 });
@@ -123,10 +127,10 @@ export function AdminDashboard() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">
-            Admin dashboard
+            {t('adminDashboard.title')}
           </h1>
           <p className="text-sm text-muted-foreground">
-            Real-time platform metrics — revenue, orders, doctors, packs.
+            {t('adminDashboard.subtitle')}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -136,7 +140,7 @@ export function AdminDashboard() {
             size="icon"
             onClick={refetchAll}
             disabled={kpis.isFetching}
-            aria-label="Refresh dashboard"
+            aria-label={t('adminDashboard.refreshAria')}
           >
             <RefreshCwIcon
               className={kpis.isFetching ? 'size-4 animate-spin' : 'size-4'}
@@ -150,12 +154,12 @@ export function AdminDashboard() {
       {anyError && (
         <Alert variant="destructive">
           <AlertTriangleIcon className="size-4" />
-          <AlertTitle>Dashboard data could not load</AlertTitle>
+          <AlertTitle>{t('adminDashboard.errorTitle')}</AlertTitle>
           <AlertDescription className="space-y-2">
             <p>
               {firstError instanceof Error
                 ? firstError.message
-                : 'The backend did not respond. Make sure the API is running and your account has admin access.'}
+                : t('adminDashboard.errorGeneric')}
             </p>
             <Button
               size="sm"
@@ -163,7 +167,7 @@ export function AdminDashboard() {
               onClick={refetchAll}
               className="mt-2"
             >
-              Retry
+              {t('dashboard.retry')}
             </Button>
           </AlertDescription>
         </Alert>
@@ -172,7 +176,7 @@ export function AdminDashboard() {
       {/* Top KPIs — money first */}
       <KpiGrid>
         <KpiCard
-          label="Total revenue (range)"
+          label={t('adminDashboard.kpi.totalRevenueRange')}
           value={TND(d?.revenue.total ?? 0)}
           icon={CircleDollarSignIcon}
           delta={{
@@ -180,38 +184,55 @@ export function AdminDashboard() {
             direction:
               (d?.revenue.monthlyGrowthPct ?? 0) >= 0 ? 'up' : 'down',
           }}
-          footerLabel={`Collected: ${TND(d?.revenue.collected ?? 0)}`}
-          footerDetail={`Unpaid: ${TND(d?.revenue.unpaid ?? 0)}`}
+          footerLabel={t('dashboard.kpi.paidOrdersCollected', {
+            amount: TND(d?.revenue.collected ?? 0),
+          })}
+          footerDetail={t('adminDashboard.kpi.unpaidAmount', {
+            amount: TND(d?.revenue.unpaid ?? 0),
+          })}
           loading={loading}
         />
         <KpiCard
-          label="Revenue this month"
+          label={t('adminDashboard.kpi.revenueThisMonth')}
           value={TND(d?.revenue.thisMonth ?? 0)}
           icon={WalletIcon}
           delta={{
             value: d?.revenue.monthlyGrowthPct ?? 0,
             direction:
               (d?.revenue.monthlyGrowthPct ?? 0) >= 0 ? 'up' : 'down',
-            label: 'vs last month',
+            label: t('adminDashboard.kpi.vsLastMonth'),
           }}
-          footerLabel={`Today: ${TND(d?.revenue.today ?? 0)}`}
-          footerDetail={`Previous month: ${TND(d?.revenue.prevMonth ?? 0)}`}
+          footerLabel={t('adminDashboard.kpi.todayAmount', {
+            amount: TND(d?.revenue.today ?? 0),
+          })}
+          footerDetail={t('adminDashboard.kpi.prevMonthAmount', {
+            amount: TND(d?.revenue.prevMonth ?? 0),
+          })}
           loading={loading}
         />
         <KpiCard
-          label="Average order value"
+          label={t('adminDashboard.kpi.avgOrderValue')}
           value={TND(d?.packs.averageOrderValue ?? 0)}
           icon={TrendingUpIcon}
-          footerLabel={`Conversion ${d?.packs.conversionRatePct ?? 0}%`}
-          footerDetail="Paid quotations ÷ total quotations"
+          footerLabel={t('adminDashboard.kpi.conversion', {
+            pct: d?.packs.conversionRatePct ?? 0,
+          })}
+          footerDetail={t('adminDashboard.kpi.conversionDetail')}
           loading={loading}
         />
         <KpiCard
-          label="Pending payments"
-          value={N(d?.payments.pending ?? 0) + ' pending'}
+          label={t('dashboard.kpi.pendingPayments')}
+          value={t('adminDashboard.kpi.pendingCount', {
+            count: N(d?.payments.pending ?? 0),
+          })}
           icon={TimerIcon}
-          footerLabel={`Awaiting: ${N(d?.payments.awaitingConfirmation ?? 0)}`}
-          footerDetail={`Failed: ${N(d?.payments.failed ?? 0)} · Rejected: ${N(d?.payments.rejected ?? 0)}`}
+          footerLabel={t('dashboard.kpi.awaitingConfirmation', {
+            count: N(d?.payments.awaitingConfirmation ?? 0),
+          })}
+          footerDetail={t('adminDashboard.kpi.failedRejected', {
+            failed: N(d?.payments.failed ?? 0),
+            rejected: N(d?.payments.rejected ?? 0),
+          })}
           loading={loading}
         />
       </KpiGrid>
@@ -219,38 +240,50 @@ export function AdminDashboard() {
       {/* Doctors + Patients KPIs */}
       <KpiGrid>
         <KpiCard
-          label="Total doctors"
+          label={t('adminDashboard.kpi.totalDoctors')}
           value={N(d?.doctors.total ?? 0)}
           icon={UsersIcon}
-          footerLabel={`Active ${N(d?.doctors.active ?? 0)} · Inactive ${N(d?.doctors.inactive ?? 0)}`}
-          footerDetail={`+${N(d?.doctors.newInRange ?? 0)} new in range`}
+          footerLabel={t('adminDashboard.kpi.activeInactive', {
+            active: N(d?.doctors.active ?? 0),
+            inactive: N(d?.doctors.inactive ?? 0),
+          })}
+          footerDetail={t('adminDashboard.kpi.newInRange', {
+            count: N(d?.doctors.newInRange ?? 0),
+          })}
           loading={loading}
         />
         <KpiCard
-          label="New doctors (range)"
+          label={t('adminDashboard.kpi.newDoctorsRange')}
           value={N(d?.doctors.newInRange ?? 0)}
           icon={UserPlusIcon}
           loading={loading}
         />
         <KpiCard
-          label="Total patients"
+          label={t('dashboard.kpi.totalPatients')}
           value={N(d?.patients.total ?? 0)}
           icon={UserRoundIcon}
-          footerLabel={`+${N(d?.patients.newInRange ?? 0)} in range`}
+          footerLabel={t('adminDashboard.kpi.patientsInRange', {
+            count: N(d?.patients.newInRange ?? 0),
+          })}
           loading={loading}
         />
         <KpiCard
-          label="Active packs"
+          label={t('adminDashboard.kpi.activePacks')}
           value={N(d?.packs.active ?? 0)}
           icon={PackageIcon}
           footerLabel={
             d?.packs.bestSelling
-              ? `Top: ${d.packs.bestSelling.name}`
-              : 'No best-seller yet'
+              ? t('adminDashboard.kpi.topPack', {
+                  name: d.packs.bestSelling.name,
+                })
+              : t('adminDashboard.kpi.noBestSeller')
           }
           footerDetail={
             d?.packs.bestSelling
-              ? `${N(d.packs.bestSelling.soldCount)} sold · ${TND(d.packs.bestSelling.revenue)}`
+              ? t('adminDashboard.kpi.soldRevenue', {
+                  count: N(d.packs.bestSelling.soldCount),
+                  amount: TND(d.packs.bestSelling.revenue),
+                })
               : undefined
           }
           loading={loading}
@@ -260,33 +293,46 @@ export function AdminDashboard() {
       {/* Orders + Payments KPIs */}
       <KpiGrid>
         <KpiCard
-          label="Total orders"
+          label={t('dashboard.kpi.totalOrders')}
           value={N(d?.orders.total ?? 0)}
           icon={ClipboardListIcon}
-          footerLabel={`This month: ${N(d?.orders.thisMonth ?? 0)}`}
-          footerDetail={`Today: ${N(d?.orders.today ?? 0)} · In range: ${N(d?.orders.inRange ?? 0)}`}
+          footerLabel={t('dashboard.kpi.totalOrdersThisMonth', {
+            count: N(d?.orders.thisMonth ?? 0),
+          })}
+          footerDetail={t('adminDashboard.kpi.todayInRange', {
+            today: N(d?.orders.today ?? 0),
+            range: N(d?.orders.inRange ?? 0),
+          })}
           loading={loading}
         />
         <KpiCard
-          label="Paid orders"
+          label={t('dashboard.kpi.paidOrders')}
           value={N(d?.orders.paid ?? 0)}
           icon={BadgeCheckIcon}
-          footerLabel={`${TND(d?.revenue.total ?? 0)} collected`}
+          footerLabel={t('dashboard.kpi.paidOrdersCollected', {
+            amount: TND(d?.revenue.total ?? 0),
+          })}
           loading={loading}
         />
         <KpiCard
-          label="Unpaid orders"
+          label={t('dashboard.kpi.unpaidOrders')}
           value={N(d?.orders.unpaid ?? 0)}
           icon={BanIcon}
-          footerLabel={`Unpaid balance: ${TND(d?.revenue.unpaid ?? 0)}`}
+          footerLabel={t('adminDashboard.kpi.unpaidBalance', {
+            amount: TND(d?.revenue.unpaid ?? 0),
+          })}
           loading={loading}
         />
         <KpiCard
-          label="Completed payments"
+          label={t('adminDashboard.kpi.completedPayments')}
           value={N(d?.payments.completed ?? 0)}
           icon={ActivityIcon}
-          footerLabel={`Failed: ${N(d?.payments.failed ?? 0)}`}
-          footerDetail={`Pending: ${N(d?.payments.pending ?? 0)}`}
+          footerLabel={t('adminDashboard.kpi.failedCount', {
+            count: N(d?.payments.failed ?? 0),
+          })}
+          footerDetail={t('adminDashboard.kpi.pendingDetail', {
+            count: N(d?.payments.pending ?? 0),
+          })}
           loading={loading}
         />
       </KpiGrid>
@@ -294,9 +340,9 @@ export function AdminDashboard() {
       {/* Revenue + orders trend chart */}
       <Card className="@container/card">
         <CardHeader>
-          <CardTitle>Revenue & orders trend</CardTitle>
+          <CardTitle>{t('adminDashboard.trend.title')}</CardTitle>
           <CardDescription>
-            Daily buckets within the selected range.
+            {t('adminDashboard.trend.subtitle')}
           </CardDescription>
         </CardHeader>
         <CardContent className="px-2 sm:px-6">
@@ -304,7 +350,7 @@ export function AdminDashboard() {
             <Skeleton className="h-[260px] w-full" />
           ) : trends.data.points.length === 0 ? (
             <p className="grid h-[260px] place-items-center text-sm text-muted-foreground">
-              No data in this range.
+              {t('adminDashboard.trend.empty')}
             </p>
           ) : (
             <ResponsiveContainer width="100%" height={260}>
@@ -326,7 +372,7 @@ export function AdminDashboard() {
                   axisLine={false}
                   fontSize={11}
                   tickFormatter={(d: string) =>
-                    new Date(d).toLocaleDateString(undefined, {
+                    new Date(d).toLocaleDateString(dateLocale, {
                       month: 'short',
                       day: 'numeric',
                     })
@@ -343,14 +389,20 @@ export function AdminDashboard() {
                   formatter={(value, name) => {
                     const v = typeof value === 'number' ? value : Number(value ?? 0);
                     const key = String(name ?? '');
-                    return [key === 'revenue' ? TND(v) : N(v), key];
+                    const seriesLabel =
+                      key === 'revenue'
+                        ? t('adminDashboard.trend.seriesRevenue')
+                        : key === 'orders'
+                          ? t('adminDashboard.trend.seriesOrders')
+                          : key;
+                    return [key === 'revenue' ? TND(v) : N(v), seriesLabel];
                   }}
                   labelFormatter={(label) => {
                     const raw = typeof label === 'string' ? label : String(label ?? '');
                     if (!raw) return '';
                     const dt = new Date(raw);
                     if (Number.isNaN(dt.getTime())) return raw;
-                    return dt.toLocaleDateString(undefined, {
+                    return dt.toLocaleDateString(dateLocale, {
                       weekday: 'short',
                       month: 'short',
                       day: 'numeric',
@@ -391,9 +443,9 @@ export function AdminDashboard() {
       {/* Top doctors — tabbed list */}
       <Card>
         <CardHeader>
-          <CardTitle>Top performing doctors</CardTitle>
+          <CardTitle>{t('adminDashboard.topDoctors.title')}</CardTitle>
           <CardDescription>
-            Switch tabs to rank by orders, paid orders, or outstanding balance.
+            {t('adminDashboard.topDoctors.subtitle')}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -406,9 +458,15 @@ export function AdminDashboard() {
           ) : (
             <Tabs defaultValue="orders">
               <TabsList className="grid w-full grid-cols-3">
-                <TabsTrigger value="orders">By orders</TabsTrigger>
-                <TabsTrigger value="paid">By paid orders</TabsTrigger>
-                <TabsTrigger value="outstanding">Outstanding</TabsTrigger>
+                <TabsTrigger value="orders">
+                  {t('adminDashboard.topDoctors.tabOrders')}
+                </TabsTrigger>
+                <TabsTrigger value="paid">
+                  {t('adminDashboard.topDoctors.tabPaid')}
+                </TabsTrigger>
+                <TabsTrigger value="outstanding">
+                  {t('adminDashboard.topDoctors.tabOutstanding')}
+                </TabsTrigger>
               </TabsList>
               <TabsContent value="orders">
                 <DoctorList
@@ -436,9 +494,9 @@ export function AdminDashboard() {
       {/* Best-selling packs */}
       <Card>
         <CardHeader>
-          <CardTitle>Best-selling packs</CardTitle>
+          <CardTitle>{t('adminDashboard.bestPacks.title')}</CardTitle>
           <CardDescription>
-            Ranked by quotations sent in the selected range.
+            {t('adminDashboard.bestPacks.subtitle')}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -446,18 +504,28 @@ export function AdminDashboard() {
             <Skeleton className="h-32 w-full" />
           ) : (bestPacks.data?.length ?? 0) === 0 ? (
             <p className="grid h-24 place-items-center text-sm text-muted-foreground">
-              No pack activity in this range.
+              {t('adminDashboard.bestPacks.empty')}
             </p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-left text-muted-foreground">
-                    <th className="py-2 pr-3 font-medium">Pack</th>
-                    <th className="py-2 pr-3 text-right font-medium">Sold</th>
-                    <th className="py-2 pr-3 text-right font-medium">Revenue</th>
-                    <th className="py-2 pr-3 text-right font-medium">Collected</th>
-                    <th className="py-2 text-right font-medium">Current price</th>
+                    <th className="py-2 pr-3 font-medium">
+                      {t('adminDashboard.bestPacks.colPack')}
+                    </th>
+                    <th className="py-2 pr-3 text-right font-medium">
+                      {t('adminDashboard.bestPacks.colSold')}
+                    </th>
+                    <th className="py-2 pr-3 text-right font-medium">
+                      {t('adminDashboard.bestPacks.colRevenue')}
+                    </th>
+                    <th className="py-2 pr-3 text-right font-medium">
+                      {t('adminDashboard.bestPacks.colCollected')}
+                    </th>
+                    <th className="py-2 text-right font-medium">
+                      {t('adminDashboard.bestPacks.colCurrentPrice')}
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -468,7 +536,7 @@ export function AdminDashboard() {
                           <span className="font-medium">{row.name}</span>
                           {!row.isActive ? (
                             <Badge variant="outline" className="text-xs">
-                              inactive
+                              {t('adminDashboard.bestPacks.inactive')}
                             </Badge>
                           ) : null}
                         </div>
@@ -515,10 +583,11 @@ function DoctorList({
   }>;
   amountKey: 'orders' | 'paidOrders' | 'outstanding';
 }) {
+  const { t } = useT();
   if (rows.length === 0) {
     return (
       <p className="grid h-24 place-items-center text-sm text-muted-foreground">
-        Nothing to show in this range.
+        {t('adminDashboard.topDoctors.empty')}
       </p>
     );
   }
@@ -543,13 +612,21 @@ function DoctorList({
           <div className="text-right text-sm tabular-nums">
             {amountKey === 'orders' && (
               <>
-                <p className="font-semibold">{N(r.orders)} orders</p>
+                <p className="font-semibold">
+                  {t('adminDashboard.topDoctors.ordersCount', {
+                    count: N(r.orders),
+                  })}
+                </p>
                 <p className="text-xs text-muted-foreground">{TND(r.revenue)}</p>
               </>
             )}
             {amountKey === 'paidOrders' && (
               <>
-                <p className="font-semibold">{N(r.paidOrders)} paid</p>
+                <p className="font-semibold">
+                  {t('adminDashboard.topDoctors.paidCount', {
+                    count: N(r.paidOrders),
+                  })}
+                </p>
                 <p className="text-xs text-muted-foreground">{TND(r.revenue)}</p>
               </>
             )}
@@ -558,7 +635,9 @@ function DoctorList({
                 <p className="font-semibold text-destructive">
                   {TND(r.outstanding)}
                 </p>
-                <p className="text-xs text-muted-foreground">unpaid</p>
+                <p className="text-xs text-muted-foreground">
+                  {t('adminDashboard.topDoctors.unpaid')}
+                </p>
               </>
             )}
           </div>

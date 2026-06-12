@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { useT } from '@/lib/i18n/lang-context';
 import type { LocationPickerMapProps } from './location-picker-map';
 
 const LocationPickerMap = dynamic<LocationPickerMapProps>(
@@ -98,6 +99,7 @@ function mapReverseAddress(
 }
 
 export function LocationPicker({ value, onChange, className }: LocationPickerProps) {
+  const { t } = useT();
   const initialPosition = value ? [value.lat, value.lng] as [number, number] : DEFAULT_POSITION;
   const [position, setPosition] = useState<[number, number]>(initialPosition);
   const [flyTarget, setFlyTarget] = useState<[number, number] | null>(null);
@@ -151,7 +153,7 @@ export function LocationPicker({ value, onChange, className }: LocationPickerPro
       const next: [number, number] = [lat, lng];
       setPosition(next);
       setFlyTarget(next);
-      setStatusMessage('Location selected.');
+      setStatusMessage(t('uiBits.locationSelected'));
       setErrorMessage(null);
 
       if (shouldReverseGeocode) {
@@ -193,15 +195,15 @@ export function LocationPicker({ value, onChange, className }: LocationPickerPro
       const results = (await response.json()) as PlaceSearchResult[];
       setSearchResults(results);
       if (results.length === 0) {
-        setErrorMessage('No matching places found.');
+        setErrorMessage(t('uiBits.noPlacesFound'));
       }
     } catch {
       setSearchResults([]);
-      setErrorMessage('Unable to search places right now.');
+      setErrorMessage(t('uiBits.cantSearchNow'));
     } finally {
       setIsSearching(false);
     }
-  }, []);
+  }, [t]);
 
   const debouncedSearch = useDebouncedCallback(searchPlaces, 350);
 
@@ -226,7 +228,7 @@ export function LocationPicker({ value, onChange, className }: LocationPickerPro
       setFlyTarget(nextPosition);
       setSearchQuery(nextValue.address ?? place.display_name);
       setSearchResults([]);
-      setStatusMessage('Place selected.');
+      setStatusMessage(t('uiBits.placeSelected'));
       setErrorMessage(null);
       onChange(nextValue);
     },
@@ -259,7 +261,7 @@ export function LocationPicker({ value, onChange, className }: LocationPickerPro
 
     setIsLocating(true);
     setErrorMessage(null);
-    setStatusMessage('Requesting your location…');
+    setStatusMessage(t('uiBits.requestingLocation'));
 
     navigator.geolocation.getCurrentPosition(
       (pos) => {
@@ -337,7 +339,7 @@ export function LocationPicker({ value, onChange, className }: LocationPickerPro
             <Input
               value={searchQuery}
               onChange={(event) => handleSearchChange(event.target.value)}
-              placeholder="Search clinic address or place"
+              placeholder={t('uiBits.searchPlace')}
               className="bg-background pl-9 pr-10"
             />
             {isSearching && (

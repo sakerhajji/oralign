@@ -3,6 +3,7 @@
 import * as React from 'react';
 import { Dialog as DialogPrimitive } from 'radix-ui';
 import { X } from 'lucide-react';
+import { useT } from '@/lib/i18n/lang-context';
 import { cn } from '@/lib/utils';
 
 /**
@@ -55,6 +56,7 @@ export function ImageLightbox({
   caption,
   subCaption,
 }: ImageLightboxProps) {
+  const { t } = useT();
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
@@ -104,7 +106,7 @@ export function ImageLightbox({
               always visible against any image. */}
           <DialogPrimitive.Close
             className="absolute right-3 top-3 z-20 rounded-full bg-white/10 p-2 text-white outline-none transition hover:bg-white/20 focus-visible:ring-2 focus-visible:ring-white/60"
-            aria-label="Close image viewer"
+            aria-label={t('uiBits.closeImageViewer')}
           >
             <X className="h-5 w-5" />
           </DialogPrimitive.Close>

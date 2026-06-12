@@ -28,7 +28,17 @@ export const DEFAULT_LANG: Lang = 'fr';
 
 type T = Record<Lang, string>;
 
+// Domain dictionaries authored in their own files (one per translation
+// work package) and spread into the main object below — same shape,
+// just split so several namespaces could be written in parallel
+// without touching this file.
+import { chromeDomainDict } from './dict.chrome-domain';
+import { commerceDomainDict } from './dict.commerce-domain';
+
 export const dict = {
+  ...chromeDomainDict,
+  ...commerceDomainDict,
+
   // ─── Generic / cross-cutting ────────────────────────────────────
   common: {
     save: { en: 'Save', fr: 'Enregistrer' } as T,
@@ -2821,6 +2831,78 @@ export const dict = {
     previewTitle: { en: 'Invoice preview', fr: 'Aperçu de la facture' } as T,
   },
 
+  // ─── Shared UI primitives (pickers, combobox, lightbox) ─────────
+  uiBits: {
+    select: { en: 'Select…', fr: 'Sélectionner…' } as T,
+    search: { en: 'Search…', fr: 'Rechercher…' } as T,
+    noMatches: { en: 'No matches', fr: 'Aucun résultat' } as T,
+    pickCountry: { en: 'Pick a country', fr: 'Choisissez un pays' } as T,
+    noCountriesMatch: { en: 'No countries match', fr: 'Aucun pays ne correspond' } as T,
+    pickCity: { en: 'Pick a city', fr: 'Choisissez une ville' } as T,
+    chooseCountryFirst: {
+      en: 'Choose a country first',
+      fr: 'Choisissez d’abord un pays',
+    } as T,
+    noCitiesMatch: {
+      en: 'No matching cities — try a different spelling',
+      fr: 'Aucune ville ne correspond — essayez une autre orthographe',
+    } as T,
+    pickCountryToSeeCities: {
+      en: 'Pick a country to see cities',
+      fr: 'Choisissez un pays pour voir les villes',
+    } as T,
+    searchCountry: { en: 'Search country', fr: 'Rechercher un pays' } as T,
+    searchPlace: {
+      en: 'Search clinic address or place',
+      fr: 'Rechercher l’adresse du cabinet ou un lieu',
+    } as T,
+    noPlacesFound: {
+      en: 'No matching places found.',
+      fr: 'Aucun lieu correspondant trouvé.',
+    } as T,
+    cantSearchNow: {
+      en: 'Unable to search places right now.',
+      fr: 'Recherche de lieux momentanément indisponible.',
+    } as T,
+    locationSelected: { en: 'Location selected.', fr: 'Emplacement sélectionné.' } as T,
+    placeSelected: { en: 'Place selected.', fr: 'Lieu sélectionné.' } as T,
+    requestingLocation: {
+      en: 'Requesting your location…',
+      fr: 'Demande de votre position…',
+    } as T,
+    notProvided: { en: 'Not provided', fr: 'Non renseigné' } as T,
+    closeImageViewer: {
+      en: 'Close image viewer',
+      fr: 'Fermer la visionneuse d’images',
+    } as T,
+  },
+
+  // ─── App chrome: sidebar nav + user menu ────────────────────────
+  chrome: {
+    nav: {
+      dashboard: { en: 'Dashboard', fr: 'Tableau de bord' } as T,
+      users: { en: 'Users', fr: 'Utilisateurs' } as T,
+      patients: { en: 'Patients', fr: 'Patients' } as T,
+      orders: { en: 'Orders', fr: 'Commandes' } as T,
+      packs: { en: 'Packs', fr: 'Packs' } as T,
+      pendingPayments: { en: 'Pending payments', fr: 'Paiements en attente' } as T,
+      support: { en: 'Support', fr: 'Assistance' } as T,
+      mediaManagement: { en: 'Media Management', fr: 'Gestion des médias' } as T,
+      reports: { en: 'Reports', fr: 'Rapports' } as T,
+      settings: { en: 'Settings', fr: 'Paramètres' } as T,
+      paymentHistory: { en: 'Payment History', fr: 'Historique des paiements' } as T,
+      getHelp: { en: 'Get Help', fr: 'Obtenir de l’aide' } as T,
+      newOrder: { en: 'New Order', fr: 'Nouvelle commande' } as T,
+      newOrderAria: { en: 'Create a new order', fr: 'Créer une nouvelle commande' } as T,
+    },
+    userMenu: {
+      account: { en: 'Account', fr: 'Compte' } as T,
+      billing: { en: 'Billing', fr: 'Facturation' } as T,
+      notifications: { en: 'Notifications', fr: 'Notifications' } as T,
+      logOut: { en: 'Log out', fr: 'Se déconnecter' } as T,
+    },
+  },
+
   // ─── Optimized media (variants, ZIP metadata, 3D previews) ──────
   media: {
     view3d: { en: 'View 3D', fr: 'Voir en 3D' } as T,
@@ -2843,6 +2925,125 @@ export const dict = {
     } as T,
     stlModel: { en: '3D model', fr: 'Modèle 3D' } as T,
     stlTriangles: { en: '{count} triangles', fr: '{count} triangles' } as T,
+    // ── File card actions + states (order files) ────────────────────
+    view: { en: 'View', fr: 'Voir' } as T,
+    retry: { en: 'Retry', fr: 'Réessayer' } as T,
+    fullView: { en: 'Full View', fr: 'Plein écran' } as T,
+    replace: { en: 'Replace', fr: 'Remplacer' } as T,
+    upload: { en: 'Upload', fr: 'Téléverser' } as T,
+    previewUnavailable: { en: 'Preview unavailable', fr: 'Aperçu indisponible' } as T,
+    unableToLoadPreview: { en: 'Unable to load preview', fr: 'Impossible de charger l’aperçu' } as T,
+    unableToLoadStl: { en: 'Unable to load STL', fr: 'Impossible de charger le STL' } as T,
+    noFilesYet: { en: 'No files uploaded yet.', fr: 'Aucun fichier téléversé pour le moment.' } as T,
+    filesLoadFailed: { en: 'Failed to load files: {message}', fr: 'Échec du chargement des fichiers : {message}' } as T,
+    maxZipHint: {
+      en: 'Max 1 GB per ZIP bundle (CBCT / DICOM)',
+      fr: 'Max 1 Go par archive ZIP (CBCT / DICOM)',
+    } as T,
+    maxFileHint: { en: 'Max 50 MB per file', fr: 'Max 50 Mo par fichier' } as T,
+    pasteImage: { en: 'Paste image', fr: 'Coller l’image' } as T,
+    pasteOver: { en: 'Paste over', fr: 'Coller par-dessus' } as T,
+    copy: { en: 'Copy', fr: 'Copier' } as T,
+    rotateTooltip: {
+      en: 'Rotate or flip the uploaded photo',
+      fr: 'Pivoter ou retourner la photo téléversée',
+    } as T,
+    copyTooltip: {
+      en: 'Copy {title} so you can paste it into another slot',
+      fr: 'Copier {title} pour le coller dans un autre emplacement',
+    } as T,
+    pasteTooltip: {
+      en: 'Paste the image copied from "{source}"',
+      fr: 'Coller l’image copiée depuis « {source} »',
+    } as T,
+    noStlSelected: { en: 'No STL selected', fr: 'Aucun STL sélectionné' } as T,
+    uploadThisStl: { en: 'Upload this STL file', fr: 'Téléverser ce fichier STL' } as T,
+    stlFormats: { en: 'STL, PLY, or OBJ', fr: 'STL, PLY ou OBJ' } as T,
+    closeHint: {
+      en: 'Click outside or press Esc to close',
+      fr: 'Cliquez à l’extérieur ou appuyez sur Échap pour fermer',
+    } as T,
+    closePreview: { en: 'Close preview', fr: 'Fermer l’aperçu' } as T,
+    modelBadge: { en: '{ext} model', fr: 'Modèle {ext}' } as T,
+    saveDraftFirst: {
+      en: 'Save the draft before uploading files',
+      fr: 'Enregistrez le brouillon avant de téléverser des fichiers',
+    } as T,
+    saveDraftFirstDetail: {
+      en: 'Files are stored after an order ID exists. Click Continue from the patient step or use Save Draft.',
+      fr: 'Les fichiers sont enregistrés une fois la commande créée. Cliquez sur Continuer depuis l’étape patient ou utilisez Enregistrer le brouillon.',
+    } as T,
+    downloadInstead: { en: 'Download instead', fr: 'Télécharger à la place' } as T,
+    dragHint: {
+      en: 'Drag to rotate · Scroll to zoom',
+      fr: 'Faites glisser pour pivoter · Molette pour zoomer',
+    } as T,
+    zipAction: {
+      uploadedBundleTitle: {
+        en: 'Uploaded bundle (.zip) or CBCT (.dcm)',
+        fr: 'Archive téléversée (.zip) ou CBCT (.dcm)',
+      } as T,
+      uploadedBundleDesc: {
+        en: 'CBCT volumes and STL / DICOM bundles shipped with this order.',
+        fr: 'Volumes CBCT et archives STL / DICOM joints à cette commande.',
+      } as T,
+      chooseZip: { en: 'Choose ZIP…', fr: 'Choisir un ZIP…' } as T,
+      singleDcm: { en: 'Single .dcm', fr: 'Fichier .dcm seul' } as T,
+      uploadingFile: { en: 'Uploading {name}', fr: 'Téléversement de {name}' } as T,
+      finalising: { en: '· finalising on server…', fr: '· finalisation sur le serveur…' } as T,
+      bundleCountOne: { en: '1 bundle file uploaded', fr: '1 fichier d’archive téléversé' } as T,
+      bundleCountMany: {
+        en: '{count} bundle files uploaded',
+        fr: '{count} fichiers d’archive téléversés',
+      } as T,
+      zipBadge: { en: 'ZIP bundle', fr: 'Archive ZIP' } as T,
+      downloadAria: { en: 'Download {name}', fr: 'Télécharger {name}' } as T,
+      deleteAria: { en: 'Delete {name}', fr: 'Supprimer {name}' } as T,
+      deleteBundleTitle: { en: 'Delete this bundle?', fr: 'Supprimer cette archive ?' } as T,
+      deleteBundleDesc: {
+        en: 'will be removed from this order. The file is soft-deleted on the server and can be restored by an admin if needed.',
+        fr: 'sera retiré de cette commande. Le fichier est supprimé de façon réversible sur le serveur et peut être restauré par un administrateur si nécessaire.',
+      } as T,
+      deleteFile: { en: 'Delete file', fr: 'Supprimer le fichier' } as T,
+    },
+    categories: {
+      rightPhoto: { en: 'Right photo', fr: 'Photo droite' } as T,
+      frontPhoto: { en: 'Front photo', fr: 'Photo de face' } as T,
+      leftPhoto: { en: 'Left photo', fr: 'Photo gauche' } as T,
+      upperPhoto: { en: 'Upper photo', fr: 'Photo supérieure' } as T,
+      lowerPhoto: { en: 'Lower photo', fr: 'Photo inférieure' } as T,
+      opg: { en: 'Orthopantomography', fr: 'Orthopantomogramme' } as T,
+      stl: { en: 'STL', fr: 'STL' } as T,
+      ply: { en: 'PLY', fr: 'PLY' } as T,
+      obj: { en: 'OBJ', fr: 'OBJ' } as T,
+      zip: { en: 'ZIP', fr: 'ZIP' } as T,
+      pdf: { en: 'PDF', fr: 'PDF' } as T,
+      images: { en: 'Images', fr: 'Images' } as T,
+      videos: { en: 'Videos', fr: 'Vidéos' } as T,
+      other: { en: 'Other', fr: 'Autre' } as T,
+    },
+    toasts: {
+      onlyImagesEditable: {
+        en: 'Only images can be rotated or flipped.',
+        fr: 'Seules les images peuvent être pivotées ou retournées.',
+      } as T,
+      editorOpenFailed: {
+        en: 'Could not open the editor for this image.',
+        fr: 'Impossible d’ouvrir l’éditeur pour cette image.',
+      } as T,
+      copyFailed: {
+        en: 'Could not copy this image.',
+        fr: 'Impossible de copier cette image.',
+      } as T,
+      copied: {
+        en: 'Copied "{title}" — pick a slot and paste it.',
+        fr: '« {title} » copié — choisissez un emplacement et collez-le.',
+      } as T,
+      pasted: {
+        en: 'Pasted from "{source}" → "{target}".',
+        fr: 'Collé depuis « {source} » vers « {target} ».',
+      } as T,
+    },
   },
 
   // ─── Toast messages (src/lib/hooks/*) ───────────────────────────

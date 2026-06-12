@@ -19,6 +19,7 @@ import { useUpdateUser } from '@/lib/hooks/use-users';
 import { useAuth } from '@/lib/providers/auth-provider';
 import { updateUserSchema, UpdateUserFormData } from '@/lib/schemas';
 import { getAvatarUrl } from '@/lib/utils';
+import { useT } from '@/lib/i18n/lang-context';
 import { Upload, User as UserIcon, Shield, Mail, Phone, Key } from 'lucide-react';
 
 interface EditUserDialogProps {
@@ -66,6 +67,7 @@ const sectionVariants = {
 };
 
 export function EditUserDialog({ user, open, onOpenChange }: EditUserDialogProps) {
+  const { t } = useT();
   // `avatarPreview` may hold three kinds of value:
   //   • a backend-relative path like `/uploads/avatars/<uuid>.jpg`
   //     (we always wrap it through getAvatarUrl() before rendering)
@@ -209,9 +211,11 @@ export function EditUserDialog({ user, open, onOpenChange }: EditUserDialogProps
               className="flex flex-col h-full max-h-[90vh]"
             >
               <DialogHeader className="px-6 pt-6 pb-2 shrink-0 border-b">
-                <DialogTitle className="text-xl font-semibold">Edit User Profile</DialogTitle>
+                <DialogTitle className="text-xl font-semibold">
+                  {t('usersUi.editDialog.title')}
+                </DialogTitle>
                 <DialogDescription>
-                  Update user information, permissions, and settings
+                  {t('usersUi.editDialog.desc')}
                 </DialogDescription>
               </DialogHeader>
 
@@ -244,8 +248,12 @@ export function EditUserDialog({ user, open, onOpenChange }: EditUserDialogProps
                           </div>
                           <div className="flex-1 space-y-3">
                             <div>
-                              <Label className="text-sm font-medium">Profile Picture</Label>
-                              <p className="text-sm text-muted-foreground">Upload a new profile picture (max 5MB)</p>
+                              <Label className="text-sm font-medium">
+                                {t('usersUi.editDialog.profilePicture')}
+                              </Label>
+                              <p className="text-sm text-muted-foreground">
+                                {t('usersUi.editDialog.pictureHint')}
+                              </p>
                             </div>
                             <div className="flex space-x-2">
                               <Button
@@ -255,7 +263,7 @@ export function EditUserDialog({ user, open, onOpenChange }: EditUserDialogProps
                                 onClick={() => fileInputRef.current?.click()}
                               >
                                 <Upload className="w-4 h-4 mr-2" />
-                                Upload Image
+                                {t('usersUi.editDialog.uploadImage')}
                               </Button>
                               {avatarPreview && avatarPreview !== getAvatarUrl(user.avatarUrl) && (
                                 <Button
@@ -267,7 +275,7 @@ export function EditUserDialog({ user, open, onOpenChange }: EditUserDialogProps
                                     setAvatarFile(null);
                                   }}
                                 >
-                                  Reset
+                                  {t('usersUi.reset')}
                                 </Button>
                               )}
                               <input
@@ -295,16 +303,16 @@ export function EditUserDialog({ user, open, onOpenChange }: EditUserDialogProps
                       <CardContent className="pt-6">
                         <h4 className="font-semibold mb-4 flex items-center">
                           <UserIcon className="w-4 h-4 mr-2" />
-                          Identity Information
+                          {t('usersUi.editDialog.identity')}
                         </h4>
-                        
+
                         <div className="space-y-4">
                           <div className="space-y-2">
-                            <Label htmlFor="fullName">Full Name *</Label>
+                            <Label htmlFor="fullName">{t('usersUi.fullNameRequired')}</Label>
                             <Input
                               id="fullName"
                               {...register('fullName')}
-                              placeholder="Enter full name"
+                              placeholder={t('usersUi.editDialog.fullNamePh')}
                             />
                             {errors.fullName && (
                               <p className="text-sm text-red-500">{errors.fullName.message}</p>
@@ -314,7 +322,7 @@ export function EditUserDialog({ user, open, onOpenChange }: EditUserDialogProps
                         <div className="space-y-2">
                           <Label htmlFor="phone" className="flex items-center">
                             <Phone className="w-4 h-4 mr-2" />
-                            Phone Number
+                            {t('usersUi.editDialog.phoneNumber')}
                           </Label>
                           <Controller
                             name="phone"
@@ -363,19 +371,19 @@ export function EditUserDialog({ user, open, onOpenChange }: EditUserDialogProps
                         <CardContent className="pt-6">
                           <h4 className="font-semibold mb-4 flex items-center">
                             <Key className="w-4 h-4 mr-2" />
-                            Security Settings
+                            {t('usersUi.editDialog.security')}
                           </h4>
-                          
+
                           <div className="space-y-2">
-                            <Label htmlFor="password">New Password</Label>
+                            <Label htmlFor="password">{t('usersUi.newPassword')}</Label>
                             <Input
                               id="password"
                               type="password"
-                              placeholder="Leave blank to keep current password"
+                              placeholder={t('usersUi.keepPasswordHint')}
                               {...register('password')}
                             />
                             <p className="text-sm text-muted-foreground">
-                              Only enter a password if you want to change it
+                              {t('usersUi.editDialog.passwordHint')}
                             </p>
                             {errors.password && (
                               <p className="text-sm text-red-500">{errors.password.message}</p>
@@ -398,13 +406,13 @@ export function EditUserDialog({ user, open, onOpenChange }: EditUserDialogProps
                         <CardContent className="pt-6">
                           <h4 className="font-semibold mb-4 flex items-center">
                             <Shield className="w-4 h-4 mr-2" />
-                            Permissions & Access
+                            {t('usersUi.editDialog.permissions')}
                           </h4>
 
                           <div className="space-y-6">
                             {canEditRole && (
                               <div className="space-y-2">
-                                <Label htmlFor="role">User Role</Label>
+                                <Label htmlFor="role">{t('usersUi.editDialog.userRole')}</Label>
                                 <Controller
                                   name="role"
                                   control={control}
@@ -414,12 +422,18 @@ export function EditUserDialog({ user, open, onOpenChange }: EditUserDialogProps
                                       onValueChange={field.onChange}
                                     >
                                       <SelectTrigger>
-                                        <SelectValue placeholder="Select role" />
+                                        <SelectValue placeholder={t('usersUi.selectRole')} />
                                       </SelectTrigger>
                                       <SelectContent>
-                                        <SelectItem value={UserRole.ADMIN}>Administrator</SelectItem>
-                                        <SelectItem value={UserRole.DENTIST}>Dentist</SelectItem>
-                                        <SelectItem value={UserRole.DESIGNER}>Designer</SelectItem>
+                                        <SelectItem value={UserRole.ADMIN}>
+                                          {t('usersUi.roles.admin')}
+                                        </SelectItem>
+                                        <SelectItem value={UserRole.DENTIST}>
+                                          {t('usersUi.roles.dentist')}
+                                        </SelectItem>
+                                        <SelectItem value={UserRole.DESIGNER}>
+                                          {t('usersUi.roles.designer')}
+                                        </SelectItem>
                                       </SelectContent>
                                     </Select>
                                   )}
@@ -435,10 +449,10 @@ export function EditUserDialog({ user, open, onOpenChange }: EditUserDialogProps
                                 <div className="space-y-0.5">
                                   <Label className="flex items-center">
                                     <Mail className="w-4 h-4 mr-2" />
-                                    Email Verified
+                                    {t('usersUi.emailVerified')}
                                   </Label>
                                   <p className="text-sm text-muted-foreground">
-                                    Mark the user&apos;s email as verified
+                                    {t('usersUi.editDialog.markVerified')}
                                   </p>
                                 </div>
                                 <Controller
@@ -471,14 +485,16 @@ export function EditUserDialog({ user, open, onOpenChange }: EditUserDialogProps
                     onClick={handleClose}
                     disabled={isSubmitting}
                   >
-                    Cancel
+                    {t('common.cancel')}
                   </Button>
-                  <Button 
-                    type="submit" 
+                  <Button
+                    type="submit"
                     disabled={isSubmitting}
                     onClick={handleSubmit(onSubmit)}
                   >
-                    {isSubmitting ? 'Updating...' : 'Update Profile'}
+                    {isSubmitting
+                      ? t('usersUi.editDialog.updating')
+                      : t('usersUi.editDialog.updateProfile')}
                   </Button>
                 </div>
               </div>

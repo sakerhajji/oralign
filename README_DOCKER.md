@@ -17,18 +17,12 @@ This project includes a production-ready Docker setup with all services containe
 # Navigate to project root
 cd ~/Desktop/oraling
 
-# Copy environment file
-cp .env.docker .env
-
-# Build images
-.\docker.ps1 build
-
-# Start all services
-.\docker.ps1 up
-
-# View status
-.\docker.ps1 status
+# Build, start, and health-check every service
+.\docker.ps1
 ```
+
+On the first run, the launcher creates `.env` from
+`.env.docker.example`. Existing `.env` files are never overwritten.
 
 ## 🚀 Quick Start (macOS/Linux)
 
@@ -36,17 +30,8 @@ cp .env.docker .env
 # Navigate to project root
 cd ~/Desktop/oraling
 
-# Copy environment file
-cp .env.docker .env
-
-# Build images
-./docker.sh build
-
-# Start all services
-./docker.sh up
-
-# View status
-./docker.sh status
+# Build, start, and health-check every service
+bash docker.sh
 ```
 
 ## 📋 Service URLs
@@ -55,7 +40,7 @@ cp .env.docker .env
 |---------|-----|---------|
 | **Frontend** | http://localhost:3001 | React/Next.js UI |
 | **Backend API** | http://localhost:3000 | REST API |
-| **API Docs** | http://localhost:3000/api/docs | Swagger Documentation |
+| **API Docs** | http://localhost:3000/docs | Swagger Documentation |
 | **Database** | localhost:5432 | PostgreSQL |
 | **Cache** | localhost:6379 | Redis |
 
@@ -74,33 +59,33 @@ cp .env.docker .env
 
 ### Using Bash (macOS/Linux)
 ```bash
-./docker.sh up          # Start services
-./docker.sh down        # Stop services
-./docker.sh logs backend      # View backend logs
-./docker.sh shell backend     # Access backend container
-./docker.sh status      # Check all services
-./docker.sh migrate     # Run migrations
-./docker.sh reset       # Delete all data
+bash docker.sh up          # Start services
+bash docker.sh down        # Stop services
+bash docker.sh logs backend      # View backend logs
+bash docker.sh shell backend     # Access backend container
+bash docker.sh status      # Check all services
+bash docker.sh migrate     # Run migrations
+bash docker.sh reset       # Delete all data
 ```
 
 ### Direct Docker Commands
 ```bash
 # View all running containers
-docker-compose ps
+docker compose ps
 
 # View logs
-docker-compose logs -f backend
-docker-compose logs -f frontend
+docker compose logs -f backend
+docker compose logs -f frontend
 
 # Execute command in container
-docker-compose exec backend npx prisma studio
-docker-compose exec postgres psql -U oralign -d oralign_db
+docker compose exec backend npx prisma studio
+docker compose exec postgres psql -U oralign -d oralign_db
 
 # Stop all services
-docker-compose down
+docker compose down
 
 # Stop and remove all data
-docker-compose down -v
+docker compose down -v
 ```
 
 ## 🗄️ Database Setup
@@ -111,17 +96,17 @@ docker-compose down -v
 .\docker.ps1 migrate
 
 # Bash
-./docker.sh migrate
+bash docker.sh migrate
 ```
 
 ### Database Shell
 ```bash
-docker-compose exec postgres psql -U oralign -d oralign_db
+docker compose exec postgres psql -U oralign -d oralign_db
 ```
 
 ### Prisma Studio (Visual DB)
 ```bash
-docker-compose exec backend npx prisma studio
+docker compose exec backend npx prisma studio
 ```
 
 ## 💾 Environment Configuration
@@ -155,12 +140,12 @@ FRONTEND_URL=http://localhost:3001
 ### Services Won't Start
 ```bash
 # Check logs
-docker-compose logs
+docker compose logs
 
 # Rebuild everything
-docker-compose down -v
-docker-compose build --no-cache
-docker-compose up
+docker compose down -v
+docker compose build --no-cache
+docker compose up
 ```
 
 ### Port Already in Use
@@ -177,27 +162,27 @@ kill -9 <PID>
 ### Database Connection Error
 ```bash
 # Verify PostgreSQL is running
-docker-compose exec postgres psql -U oralign -d oralign_db -c "SELECT 1"
+docker compose exec postgres psql -U oralign -d oralign_db -c "SELECT 1"
 
 # View PostgreSQL logs
-docker-compose logs postgres
+docker compose logs postgres
 ```
 
 ### Redis Connection Error
 ```bash
 # Test Redis
-docker-compose exec redis redis-cli -a redis_secure_password ping
+docker compose exec redis redis-cli -a redis_secure_password ping
 
 # View Redis logs
-docker-compose logs redis
+docker compose logs redis
 ```
 
 ### Clear Everything and Start Fresh
 ```bash
-docker-compose down -v
+docker compose down -v
 docker system prune -f
-docker-compose build --no-cache
-docker-compose up -d
+docker compose build --no-cache
+docker compose up -d
 ```
 
 ## 📁 File Structure
@@ -304,21 +289,21 @@ See [DOCKER_SETUP.md](./DOCKER_SETUP.md) for comprehensive documentation includi
 ### Development Workflow
 1. Edit code locally
 2. Changes hot-reload in containers
-3. View logs with `docker-compose logs -f`
+3. View logs with `docker compose logs -f`
 4. Restart service if needed
 
 ### Quick Database Access
 ```bash
 # Open database UI
-docker-compose exec backend npx prisma studio
+docker compose exec backend npx prisma studio
 
 # Access database directly
-docker-compose exec postgres psql -U oralign -d oralign_db
+docker compose exec postgres psql -U oralign -d oralign_db
 ```
 
 ### Check Service Health
 ```bash
-docker-compose ps          # Container status
+docker compose ps          # Container status
 .\docker.ps1 status        # Detailed health check
 docker stats               # Resource usage
 ```
@@ -342,8 +327,8 @@ When making changes:
 ## 📞 Support
 
 For issues:
-1. Check logs: `docker-compose logs`
-2. Verify services: `docker-compose ps`
-3. Restart: `docker-compose restart`
-4. Reset: `docker-compose down -v && docker-compose up -d`
+1. Check logs: `docker compose logs`
+2. Verify services: `docker compose ps`
+3. Restart: `docker compose restart`
+4. Reset: `docker compose down -v && docker compose up -d`
 5. Check DOCKER_SETUP.md troubleshooting section

@@ -2,6 +2,7 @@
 
 import { Suspense } from 'react';
 import { useAuth } from '@/lib/providers/auth-provider';
+import { useT } from '@/lib/i18n/lang-context';
 import { UserRole } from '@/lib/types';
 import { AdminDashboard } from '@/components/dashboard/admin-dashboard';
 import { DoctorDashboard } from '@/components/dashboard/doctor-dashboard';
@@ -18,18 +19,21 @@ import { DoctorDashboard } from '@/components/dashboard/doctor-dashboard';
  * their data fetching + WS subscriptions.
  */
 export default function DashboardPage() {
+  const { t } = useT();
   const { user, isAdmin } = useAuth();
 
   return (
     <div className="@container/main flex flex-1 flex-col">
       <Suspense
         fallback={
-          <div className="p-6 text-sm text-muted-foreground">Loading…</div>
+          <div className="p-6 text-sm text-muted-foreground">
+            {t('common.loading')}
+          </div>
         }
       >
         {!user ? (
           <div className="p-6 text-sm text-muted-foreground">
-            Loading your dashboard…
+            {t('adminDashboard.pageLoading')}
           </div>
         ) : isAdmin ? (
           <AdminDashboard />
@@ -37,7 +41,7 @@ export default function DashboardPage() {
           <DoctorDashboard />
         ) : (
           <div className="p-6 text-sm text-muted-foreground">
-            No dashboard view is configured for your role yet.
+            {t('adminDashboard.noRoleView')}
           </div>
         )}
       </Suspense>

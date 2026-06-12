@@ -11,8 +11,8 @@
 #   • Postgres + Redis host port mappings are REPLACED with empty
 #     (using `!override`) so neither is reachable from the host;
 #     backend reaches them via Docker's internal network.
-#   • Backend `env_file` is REPLACED with empty so the dev-only
-#     .env.docker is not required in production. All env comes from
+#   • Backend `env_file` is REPLACED with empty so the local
+#     .env is not injected in production. All env comes from
 #     --env-file .env.production via ${...} substitution below.
 #   • Backend command runs `prisma migrate deploy` (idempotent,
 #     non-destructive) instead of the dev `db push --accept-data-loss`
@@ -38,7 +38,7 @@ services:
     ports: !override []
 
   backend:
-    # Replace the base's `env_file: - .env.docker` (file is dev-only).
+    # Replace the base's `env_file: - .env` (file is local-only).
     # All env is supplied via `--env-file .env.production` + the
     # `environment:` block below (which is merged with the base block).
     env_file: !override []
@@ -55,6 +55,7 @@ services:
     environment:
       NODE_ENV: production
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      ENABLE_SWAGGER: ${ENABLE_SWAGGER:-false}
       MAIL_HOST: ${MAIL_HOST}
       MAIL_PORT: ${MAIL_PORT}
       MAIL_USER: ${MAIL_USER}

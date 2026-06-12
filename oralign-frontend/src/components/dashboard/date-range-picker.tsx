@@ -12,18 +12,21 @@ import {
 } from '@/components/ui/select';
 import { CalendarIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n/lang-context';
 import type { DashboardRange } from '@/lib/types';
 
 type Preset = 'today' | '7d' | '30d' | '90d' | 'month' | 'year' | 'custom';
 
-const PRESETS: { value: Preset; label: string }[] = [
-  { value: 'today', label: 'Today' },
-  { value: '7d', label: 'Last 7 days' },
-  { value: '30d', label: 'Last 30 days' },
-  { value: '90d', label: 'Last 90 days' },
-  { value: 'month', label: 'This month' },
-  { value: 'year', label: 'This year' },
-  { value: 'custom', label: 'Custom' },
+// Labels resolve through t() at render time (labelKey pattern) so the
+// list reacts to language switches without re-creating the constant.
+const PRESETS: { value: Preset; labelKey: string }[] = [
+  { value: 'today', labelKey: 'widgets.rangePicker.presetToday' },
+  { value: '7d', labelKey: 'widgets.rangePicker.preset7d' },
+  { value: '30d', labelKey: 'widgets.rangePicker.preset30d' },
+  { value: '90d', labelKey: 'widgets.rangePicker.preset90d' },
+  { value: 'month', labelKey: 'widgets.rangePicker.presetMonth' },
+  { value: 'year', labelKey: 'widgets.rangePicker.presetYear' },
+  { value: 'custom', labelKey: 'widgets.rangePicker.presetCustom' },
 ];
 
 function computeRangeFromPreset(preset: Preset): DashboardRange {
@@ -84,6 +87,7 @@ export function DashboardRangePicker({
   onChange: (next: DashboardRange) => void;
   defaultPreset?: Preset;
 }) {
+  const { t } = useT();
   const [preset, setPreset] = useState<Preset>(defaultPreset);
 
   const inputFrom = useMemo(() => dateToInput(value.from), [value.from]);
@@ -118,7 +122,7 @@ export function DashboardRangePicker({
     <div className="flex flex-wrap items-center gap-2">
       <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
         <CalendarIcon className="size-4" />
-        <span className="hidden sm:inline">Range</span>
+        <span className="hidden sm:inline">{t('widgets.rangePicker.range')}</span>
       </div>
       <Select value={preset} onValueChange={(v) => onPresetChange(v as Preset)}>
         <SelectTrigger className="h-9 w-[160px]">
@@ -127,7 +131,7 @@ export function DashboardRangePicker({
         <SelectContent>
           {PRESETS.map((p) => (
             <SelectItem key={p.value} value={p.value}>
-              {p.label}
+              {t(p.labelKey)}
             </SelectItem>
           ))}
         </SelectContent>
@@ -139,7 +143,7 @@ export function DashboardRangePicker({
             className="h-9 w-[150px]"
             value={inputFrom}
             onChange={(e) => onFromChange(e.target.value)}
-            aria-label="From date"
+            aria-label={t('widgets.rangePicker.fromDate')}
           />
           <span className="text-muted-foreground">→</span>
           <Input
@@ -147,7 +151,7 @@ export function DashboardRangePicker({
             className="h-9 w-[150px]"
             value={inputTo}
             onChange={(e) => onToChange(e.target.value)}
-            aria-label="To date"
+            aria-label={t('widgets.rangePicker.toDate')}
           />
         </>
       ) : null}
@@ -163,7 +167,7 @@ export function DashboardRangePicker({
           onChange(computeRangeFromPreset('30d'));
         }}
       >
-        Reset
+        {t('widgets.rangePicker.reset')}
       </Button>
     </div>
   );

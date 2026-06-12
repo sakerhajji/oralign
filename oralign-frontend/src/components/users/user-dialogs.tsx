@@ -18,12 +18,14 @@ import { useCreateUser, useDeleteUser } from '@/lib/hooks';
 import { createUserSchema, CreateUserFormData } from '@/lib/schemas';
 import { User, UserRole } from '@/lib/types';
 import { getAvatarUrl } from '@/lib/utils';
+import { useT } from '@/lib/i18n/lang-context';
 import { EditUserDialog } from './edit-user-dialog';
 import { format } from 'date-fns';
 import { Mail, Phone, Shield, CheckCircle, XCircle, Calendar, User as UserIcon } from 'lucide-react';
 
 // Create User Dialog
 export function CreateUserDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  const { t } = useT();
   const { mutate: createUser, isPending } = useCreateUser();
   const {
     register,
@@ -62,27 +64,27 @@ export function CreateUserDialog({ open, onOpenChange }: { open: boolean; onOpen
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
-          <DialogTitle>Create New User</DialogTitle>
-          <DialogDescription>Add a new user to the system</DialogDescription>
+          <DialogTitle>{t('usersUi.createDialog.title')}</DialogTitle>
+          <DialogDescription>{t('usersUi.createDialog.desc')}</DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="email">Email *</Label>
+            <Label htmlFor="email">{t('usersUi.createDialog.emailRequired')}</Label>
             <Input id="email" type="email" {...register('email')} />
             {errors.email && <p className="text-sm text-red-500">{errors.email.message}</p>}
           </div>
           <div className="space-y-2">
-            <Label htmlFor="fullName">Full Name *</Label>
+            <Label htmlFor="fullName">{t('usersUi.fullNameRequired')}</Label>
             <Input id="fullName" {...register('fullName')} />
             {errors.fullName && <p className="text-sm text-red-500">{errors.fullName.message}</p>}
           </div>
           <div className="space-y-2">
-            <Label htmlFor="password">Password *</Label>
+            <Label htmlFor="password">{t('usersUi.createDialog.passwordRequired')}</Label>
             <Input id="password" type="password" {...register('password')} />
             {errors.password && <p className="text-sm text-red-500">{errors.password.message}</p>}
           </div>
           <div className="space-y-2">
-            <Label htmlFor="phone">Phone</Label>
+            <Label htmlFor="phone">{t('usersUi.phone')}</Label>
             <Controller
               name="phone"
               control={control}
@@ -111,21 +113,27 @@ export function CreateUserDialog({ open, onOpenChange }: { open: boolean; onOpen
             )}
           </div>
           <div className="space-y-2">
-            <Label htmlFor="role">Role</Label>
+            <Label htmlFor="role">{t('usersUi.role')}</Label>
             <Select onValueChange={(value) => setValue('role', value as UserRole)}>
               <SelectTrigger>
-                <SelectValue placeholder="Select role" />
+                <SelectValue placeholder={t('usersUi.selectRole')} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={UserRole.DENTIST}>Dentist</SelectItem>
-                <SelectItem value={UserRole.ADMIN}>Admin</SelectItem>
-                <SelectItem value={UserRole.DESIGNER}>Designer</SelectItem>
+                <SelectItem value={UserRole.DENTIST}>{t('usersUi.roles.dentist')}</SelectItem>
+                <SelectItem value={UserRole.ADMIN}>{t('usersUi.roles.admin')}</SelectItem>
+                <SelectItem value={UserRole.DESIGNER}>{t('usersUi.roles.designer')}</SelectItem>
               </SelectContent>
             </Select>
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button type="submit" disabled={isPending}>{isPending ? 'Creating...' : 'Create User'}</Button>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button type="submit" disabled={isPending}>
+              {isPending
+                ? t('usersUi.createDialog.creating')
+                : t('usersUi.createDialog.createBtn')}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -137,12 +145,15 @@ export function CreateUserDialog({ open, onOpenChange }: { open: boolean; onOpen
 
 // View User Details Dialog
 export function ViewUserDialog({ user, open, onOpenChange }: { user: User; open: boolean; onOpenChange: (open: boolean) => void }) {
+  const { t } = useT();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[900px] lg:max-w-[1100px] xl:max-w-[1200px] h-[90vh] max-h-[90vh] flex flex-col p-0">
         <DialogHeader className="shrink-0 border-b px-6 py-4">
-          <DialogTitle className="text-xl font-semibold">User Profile Details</DialogTitle>
-          <DialogDescription>Complete user information and account details</DialogDescription>
+          <DialogTitle className="text-xl font-semibold">
+            {t('usersUi.viewDialog.title')}
+          </DialogTitle>
+          <DialogDescription>{t('usersUi.viewDialog.desc')}</DialogDescription>
         </DialogHeader>
         
         <ScrollArea className="flex-1 h-[calc(90vh-140px)]">
@@ -172,11 +183,13 @@ export function ViewUserDialog({ user, open, onOpenChange }: { user: User; open:
                     </div>
                     <div className="flex items-center gap-3 mt-4">
                       <Badge variant={user.isActive ? 'default' : 'secondary'} className="text-xs">
-                        {user.isActive ? 'Active' : 'Inactive'}
+                        {user.isActive
+                          ? t('usersUi.statusActive')
+                          : t('usersUi.statusInactive')}
                       </Badge>
                       <Badge variant={user.role === UserRole.ADMIN ? 'destructive' : 'outline'} className="text-xs">
                         <Shield className="w-3 h-3 mr-1" />
-                        {user.role}
+                        {t(`usersUi.roles.${user.role}`)}
                       </Badge>
                       <Badge variant={user.isEmailVerified ? 'default' : 'outline'} className="text-xs">
                         {user.isEmailVerified ? (
@@ -184,7 +197,9 @@ export function ViewUserDialog({ user, open, onOpenChange }: { user: User; open:
                         ) : (
                           <XCircle className="w-3 h-3 mr-1" />
                         )}
-                        {user.isEmailVerified ? 'Verified' : 'Unverified'}
+                        {user.isEmailVerified
+                          ? t('usersUi.verified')
+                          : t('usersUi.unverified')}
                       </Badge>
                     </div>
                   </div>
@@ -197,24 +212,30 @@ export function ViewUserDialog({ user, open, onOpenChange }: { user: User; open:
               <CardContent className="pt-6">
                 <h4 className="font-semibold mb-4 flex items-center">
                   <UserIcon className="w-4 h-4 mr-2" />
-                  Contact Information
+                  {t('usersUi.viewDialog.contactInfo')}
                 </h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                   <div className="space-y-2">
-                    <Label className="text-sm font-medium text-muted-foreground">Email Address</Label>
+                    <Label className="text-sm font-medium text-muted-foreground">
+                      {t('usersUi.viewDialog.emailAddress')}
+                    </Label>
                     <div className="flex items-center space-x-2 p-3 bg-muted/50 rounded-md">
                       <Mail className="w-4 h-4 text-muted-foreground" />
                       <span className="font-medium">{user.email}</span>
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <Label className="text-sm font-medium text-muted-foreground">Full Name</Label>
+                    <Label className="text-sm font-medium text-muted-foreground">
+                      {t('usersUi.viewDialog.fullName')}
+                    </Label>
                     <div className="p-3 bg-muted/50 rounded-md">
                       <span className="font-medium">{user.fullName}</span>
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <Label className="text-sm font-medium text-muted-foreground">Phone</Label>
+                    <Label className="text-sm font-medium text-muted-foreground">
+                      {t('usersUi.phone')}
+                    </Label>
                     <div className="flex items-center space-x-2 p-3 bg-muted/50 rounded-md">
                       <Phone className="w-4 h-4 text-muted-foreground" />
                       <CountryPhoneDisplay phone={user.phone} country={user.country} />
@@ -229,42 +250,54 @@ export function ViewUserDialog({ user, open, onOpenChange }: { user: User; open:
               <CardContent className="pt-6">
                 <h4 className="font-semibold mb-4 flex items-center">
                   <Shield className="w-4 h-4 mr-2" />
-                  Account Status & Permissions
+                  {t('usersUi.viewDialog.statusPermissions')}
                 </h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                   <div className="space-y-2">
-                    <Label className="text-sm font-medium text-muted-foreground">Role</Label>
+                    <Label className="text-sm font-medium text-muted-foreground">
+                      {t('usersUi.role')}
+                    </Label>
                     <div className="p-3 bg-muted/50 rounded-md">
                       <Badge variant={user.role === UserRole.ADMIN ? 'destructive' : 'outline'}>
                         <Shield className="w-3 h-3 mr-1" />
-                        {user.role}
+                        {t(`usersUi.roles.${user.role}`)}
                       </Badge>
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <Label className="text-sm font-medium text-muted-foreground">Account Status</Label>
+                    <Label className="text-sm font-medium text-muted-foreground">
+                      {t('usersUi.viewDialog.accountStatus')}
+                    </Label>
                     <div className="p-3 bg-muted/50 rounded-md">
                       <Badge variant={user.isActive ? 'default' : 'secondary'}>
-                        {user.isActive ? 'Active' : 'Inactive'}
+                        {user.isActive
+                          ? t('usersUi.statusActive')
+                          : t('usersUi.statusInactive')}
                       </Badge>
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <Label className="text-sm font-medium text-muted-foreground">Email Verified</Label>
+                    <Label className="text-sm font-medium text-muted-foreground">
+                      {t('usersUi.emailVerified')}
+                    </Label>
                     <div className="p-3 bg-muted/50 rounded-md">
                       <Badge variant={user.isEmailVerified ? 'default' : 'outline'}>
                         {user.isEmailVerified ? (
-                          <><CheckCircle className="w-3 h-3 mr-1" />Verified</>
+                          <><CheckCircle className="w-3 h-3 mr-1" />{t('usersUi.verified')}</>
                         ) : (
-                          <><XCircle className="w-3 h-3 mr-1" />Unverified</>
+                          <><XCircle className="w-3 h-3 mr-1" />{t('usersUi.unverified')}</>
                         )}
                       </Badge>
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <Label className="text-sm font-medium text-muted-foreground">Verification Status</Label>
+                    <Label className="text-sm font-medium text-muted-foreground">
+                      {t('usersUi.viewDialog.verificationStatus')}
+                    </Label>
                     <div className="p-3 bg-muted/50 rounded-md">
-                      <Badge variant="outline">{user.verificationStatus}</Badge>
+                      <Badge variant="outline">
+                        {t(`usersUi.verification.${user.verificationStatus}`)}
+                      </Badge>
                     </div>
                   </div>
                 </div>
@@ -276,11 +309,13 @@ export function ViewUserDialog({ user, open, onOpenChange }: { user: User; open:
               <CardContent className="pt-6">
                 <h4 className="font-semibold mb-4 flex items-center">
                   <Calendar className="w-4 h-4 mr-2" />
-                  Account Activity & Timeline
+                  {t('usersUi.viewDialog.activityTimeline')}
                 </h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                   <div className="space-y-2">
-                    <Label className="text-sm font-medium text-muted-foreground">Member Since</Label>
+                    <Label className="text-sm font-medium text-muted-foreground">
+                      {t('usersUi.viewDialog.memberSince')}
+                    </Label>
                     <div className="flex items-center space-x-2 p-3 bg-muted/50 rounded-md">
                       <Calendar className="w-4 h-4 text-muted-foreground" />
                       <div>
@@ -290,7 +325,9 @@ export function ViewUserDialog({ user, open, onOpenChange }: { user: User; open:
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <Label className="text-sm font-medium text-muted-foreground">Profile Updated</Label>
+                    <Label className="text-sm font-medium text-muted-foreground">
+                      {t('usersUi.viewDialog.profileUpdated')}
+                    </Label>
                     <div className="flex items-center space-x-2 p-3 bg-muted/50 rounded-md">
                       <Calendar className="w-4 h-4 text-muted-foreground" />
                       <div>
@@ -300,15 +337,21 @@ export function ViewUserDialog({ user, open, onOpenChange }: { user: User; open:
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <Label className="text-sm font-medium text-muted-foreground">Last Login</Label>
+                    <Label className="text-sm font-medium text-muted-foreground">
+                      {t('usersUi.viewDialog.lastLogin')}
+                    </Label>
                     <div className="p-3 bg-muted/50 rounded-md">
                       <div className="font-medium">
-                        {user.lastLoginAt ? format(new Date(user.lastLoginAt), 'MMM d, yyyy HH:mm') : 'Never'}
+                        {user.lastLoginAt
+                          ? format(new Date(user.lastLoginAt), 'MMM d, yyyy HH:mm')
+                          : t('usersUi.never')}
                       </div>
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <Label className="text-sm font-medium text-muted-foreground">User ID</Label>
+                    <Label className="text-sm font-medium text-muted-foreground">
+                      {t('usersUi.userId')}
+                    </Label>
                     <div className="p-3 bg-muted/50 rounded-md">
                       <span className="font-mono text-xs text-muted-foreground break-all">{user.id}</span>
                     </div>
@@ -322,7 +365,7 @@ export function ViewUserDialog({ user, open, onOpenChange }: { user: User; open:
         <div className="border-t px-6 py-4 shrink-0 bg-background">
           <div className="flex justify-end">
             <Button variant="outline" onClick={() => onOpenChange(false)}>
-              Close
+              {t('common.close')}
             </Button>
           </div>
         </div>
@@ -336,6 +379,7 @@ export const UserDetailsDialog = ViewUserDialog;
 
 // Delete Confirmation Dialog
 export function DeleteUserDialog({ user, open, onOpenChange }: { user: User; open: boolean; onOpenChange: (open: boolean) => void }) {
+  const { t } = useT();
   const { mutate: deleteUser, isPending } = useDeleteUser();
 
   const handleDelete = () => {
@@ -350,22 +394,26 @@ export function DeleteUserDialog({ user, open, onOpenChange }: { user: User; ope
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete User</DialogTitle>
+          <DialogTitle>{t('usersUi.deleteDialog.title')}</DialogTitle>
           <DialogDescription>
-            Are you sure you want to delete this user? This action cannot be undone.
+            {t('usersUi.deleteDialog.desc')}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
-          <p><strong>User:</strong> {user.fullName}</p>
-          <p><strong>Email:</strong> {user.email}</p>
+          <p><strong>{t('usersUi.deleteDialog.userLabel')}</strong> {user.fullName}</p>
+          <p><strong>{t('usersUi.deleteDialog.emailLabel')}</strong> {user.email}</p>
           <p className="text-sm text-muted-foreground">
-            All associated data will be permanently deleted.
+            {t('usersUi.deleteDialog.permanent')}
           </p>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            {t('common.cancel')}
+          </Button>
           <Button variant="destructive" onClick={handleDelete} disabled={isPending}>
-            {isPending ? 'Deleting...' : 'Delete User'}
+            {isPending
+              ? t('usersUi.deleteDialog.deleting')
+              : t('usersUi.deleteDialog.deleteBtn')}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -16,6 +16,7 @@ import {
   useActiveSliderMedia,
   useDashboardSocket,
 } from '@/lib/hooks';
+import { useT } from '@/lib/i18n/lang-context';
 import { resolveSliderMediaUrl } from '@/lib/api/slider-media.service';
 
 const AUTOPLAY_MS = 6_000;
@@ -54,6 +55,7 @@ type SlideWithVariants = SliderMedia & {
  * just collapses to the packs section.
  */
 export function DashboardSlider() {
+  const { t } = useT();
   const isMobile = useIsMobileViewport();
   const device = isMobile
     ? SliderMediaDeviceTarget.MOBILE
@@ -169,7 +171,7 @@ export function DashboardSlider() {
                         className="hidden sm:inline-flex"
                       >
                         <a href={s.linkUrl} target="_blank" rel="noreferrer">
-                          Learn more
+                          {t('widgets.slider.learnMore')}
                         </a>
                       </Button>
                     ) : null}
@@ -212,7 +214,7 @@ export function DashboardSlider() {
             <button
               type="button"
               onClick={goPrev}
-              aria-label="Previous slide"
+              aria-label={t('widgets.slider.prevSlide')}
               className="absolute left-2 top-1/2 grid size-9 -translate-y-1/2 place-items-center rounded-full bg-background/80 text-foreground shadow hover:bg-background"
             >
               <ChevronLeftIcon className="size-5" />
@@ -220,7 +222,7 @@ export function DashboardSlider() {
             <button
               type="button"
               onClick={goNext}
-              aria-label="Next slide"
+              aria-label={t('widgets.slider.nextSlide')}
               className="absolute right-2 top-1/2 grid size-9 -translate-y-1/2 place-items-center rounded-full bg-background/80 text-foreground shadow hover:bg-background"
             >
               <ChevronRightIcon className="size-5" />

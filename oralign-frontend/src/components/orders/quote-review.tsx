@@ -32,6 +32,7 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n/lang-context';
 import { quotationsService } from '@/lib/api/quotations.service';
 // Approve / Reject hooks were removed alongside the doctor's Approve
 // / Reject card — paying the first installment now implicitly
@@ -72,12 +73,14 @@ const STATUS_TONE: Record<QuotationStatus, string> = {
   [QuotationStatus.CANCELED]: 'border-slate-200 bg-slate-50 text-slate-500',
 };
 
-const STATUS_LABEL: Record<QuotationStatus, string> = {
-  [QuotationStatus.DRAFT]:    'Draft',
-  [QuotationStatus.SENT]:     'Sent — awaiting doctor',
-  [QuotationStatus.APPROVED]: 'Approved',
-  [QuotationStatus.REJECTED]: 'Rejected',
-  [QuotationStatus.CANCELED]: 'Canceled',
+// Status enum → dictionary key (label text resolved with t() inside
+// the components — see quoteUi.review.status in the dictionary).
+const STATUS_LABEL_KEY: Record<QuotationStatus, string> = {
+  [QuotationStatus.DRAFT]:    'quoteUi.review.status.draft',
+  [QuotationStatus.SENT]:     'quoteUi.review.status.sent',
+  [QuotationStatus.APPROVED]: 'quoteUi.review.status.approved',
+  [QuotationStatus.REJECTED]: 'quoteUi.review.status.rejected',
+  [QuotationStatus.CANCELED]: 'quoteUi.review.status.canceled',
 };
 
 const LANG_LABEL: Record<DevisLanguage, string> = {
@@ -103,6 +106,7 @@ const dateOrDash = (iso?: string | null) =>
 // ─────────────────────────────────────────────────────────────────────────
 
 export function QuoteReview({ orderId, role }: Props) {
+  const { t } = useT();
   const isAdmin = role === UserRole.ADMIN || role === UserRole.SUPER_ADMIN;
   const isDoctor = role === UserRole.DENTIST;
 
@@ -118,7 +122,7 @@ export function QuoteReview({ orderId, role }: Props) {
     return (
       <Card>
         <CardContent className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">
-          The quotation tab is not part of the design workflow.
+          {t('quoteUi.review.notPartOfWorkflow')}
         </CardContent>
       </Card>
     );
@@ -129,7 +133,7 @@ export function QuoteReview({ orderId, role }: Props) {
       <Card>
         <CardContent className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">
           <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-          Loading quotation…
+          {t('quoteUi.review.loading')}
         </CardContent>
       </Card>
     );
@@ -148,13 +152,14 @@ export function QuoteReview({ orderId, role }: Props) {
     return (
       <Card>
         <CardContent className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">
-          No quotation has been issued yet. Please check back soon.
+          {t('quoteUi.review.noQuoteYet')}
         </CardContent>
       </Card>
     );
   }
 
-  const patientName = order?.patient?.fullName ?? 'Patient';
+  const patientName =
+    order?.patient?.fullName ?? t('quoteUi.review.patientFallback');
   const orderCode = order?.orderCode ?? '';
 
   // Both roles get the same header → controls → pack panel → footer
@@ -191,6 +196,7 @@ function QuoteHeader({
   orderCode: string;
   rightSlot?: React.ReactNode;
 }) {
+  const { t } = useT();
   return (
     <Card className="overflow-hidden">
       <div className="bg-gradient-to-r from-primary/8 via-primary/4 to-transparent">
@@ -198,7 +204,7 @@ function QuoteHeader({
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
               <UserIcon className="h-3 w-3" />
-              Patient
+              {t('quoteUi.review.patient')}
             </div>
             <h2 className="mt-0.5 truncate text-2xl font-semibold tracking-tight">
               {patientName}
@@ -207,21 +213,35 @@ function QuoteHeader({
               {orderCode ? (
                 <span className="flex items-center gap-1">
                   <FileText className="h-3 w-3" />
-                  Order #{orderCode}
+                  {t('quoteUi.review.orderNum', { code: orderCode })}
                 </span>
               ) : null}
               <span className="flex items-center gap-1">
                 <Calendar className="h-3 w-3" />
-                Created {dateOrDash(quote.createdAt)}
+                {t('quoteUi.review.createdDate', {
+                  date: dateOrDash(quote.createdAt),
+                })}
               </span>
               {quote.sentAt ? (
-                <span>Sent {dateOrDash(quote.sentAt)}</span>
+                <span>
+                  {t('quoteUi.review.sentDate', {
+                    date: dateOrDash(quote.sentAt),
+                  })}
+                </span>
               ) : null}
               {quote.approvedAt ? (
-                <span>Approved {dateOrDash(quote.approvedAt)}</span>
+                <span>
+                  {t('quoteUi.review.approvedDate', {
+                    date: dateOrDash(quote.approvedAt),
+                  })}
+                </span>
               ) : null}
               {quote.rejectedAt ? (
-                <span>Rejected {dateOrDash(quote.rejectedAt)}</span>
+                <span>
+                  {t('quoteUi.review.rejectedDate', {
+                    date: dateOrDash(quote.rejectedAt),
+                  })}
+                </span>
               ) : null}
             </div>
           </div>
@@ -230,7 +250,7 @@ function QuoteHeader({
               variant="outline"
               className={cn('text-xs', STATUS_TONE[quote.status])}
             >
-              {STATUS_LABEL[quote.status]}
+              {t(STATUS_LABEL_KEY[quote.status])}
             </Badge>
             <Badge variant="outline" className="text-xs">
               <Globe className="mr-1 h-3 w-3" />
@@ -255,6 +275,7 @@ function AdminCreate({
   orderId: string;
   defaultCurrency: string;
 }) {
+  const { t } = useT();
   const create = useCreateQuotation();
   const [language, setLanguage] = useState<DevisLanguage>(DevisLanguage.FR);
 
@@ -263,16 +284,15 @@ function AdminCreate({
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <FileText className="h-4 w-4 text-primary" />
-          New quotation
+          {t('quoteUi.review.newQuote')}
         </CardTitle>
         <p className="text-sm text-muted-foreground">
-          Pick a language and start a draft. You&apos;ll attach a pack
-          and split the total into tranches on the next screen.
+          {t('quoteUi.review.newQuoteDesc')}
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-2 sm:max-w-xs">
-          <Label>Language</Label>
+          <Label>{t('language.label')}</Label>
           <Select
             value={language}
             onValueChange={(v) => setLanguage(v as DevisLanguage)}
@@ -309,7 +329,7 @@ function AdminCreate({
           ) : (
             <Sparkles className="h-4 w-4" />
           )}
-          Start quotation
+          {t('quoteUi.review.startQuote')}
         </Button>
       </CardContent>
     </Card>
@@ -331,6 +351,7 @@ function AdminLayout({
   patientName: string;
   orderCode: string;
 }) {
+  const { t } = useT();
   const update = useUpdateQuotation();
   const generate = useGenerateQuotationPdf();
   const send = useSendQuotation();
@@ -440,7 +461,7 @@ function AdminLayout({
       toast.error(
         err instanceof Error
           ? err.message
-          : 'Could not download the PDF — please try again.',
+          : t('quoteUi.review.pdfError'),
       );
     }
   };
@@ -483,17 +504,19 @@ function AdminLayout({
         <Card>
           <CardContent className="space-y-4 p-5">
             <div>
-              <h3 className="text-sm font-semibold">Pricing adjustments</h3>
+              <h3 className="text-sm font-semibold">
+                {t('quoteUi.review.pricingTitle')}
+              </h3>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                Optional delivery fee and discount, applied on top of the
-                pack price. Save before building the plan so the tranches
-                split the right total.
+                {t('quoteUi.review.pricingDesc')}
               </p>
             </div>
             <div className="grid gap-4 sm:grid-cols-3">
               <div className="grid gap-1.5">
                 <Label className="text-sm font-medium">
-                  Delivery fees ({quote.currency})
+                  {t('quoteUi.review.deliveryFees', {
+                    currency: quote.currency,
+                  })}
                 </Label>
                 <Input
                   type="number"
@@ -512,7 +535,7 @@ function AdminLayout({
               </div>
               <div className="grid gap-1.5">
                 <Label className="text-sm font-medium">
-                  Discount ({quote.currency})
+                  {t('quoteUi.review.discount', { currency: quote.currency })}
                 </Label>
                 <Input
                   type="number"
@@ -530,7 +553,9 @@ function AdminLayout({
                 />
               </div>
               <div className="grid gap-1.5">
-                <Label className="text-sm font-medium">Net to bill</Label>
+                <Label className="text-sm font-medium">
+                  {t('quoteUi.review.netToBill')}
+                </Label>
                 <div className="flex h-9 items-center rounded-md border bg-muted/40 px-3 text-sm font-semibold tabular-nums">
                   {formatMoney(netAfter, quote.currency)}
                 </div>
@@ -557,7 +582,9 @@ function AdminLayout({
         <CardContent className="space-y-4 p-5">
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-1.5">
-              <Label className="text-sm font-medium">Document language</Label>
+              <Label className="text-sm font-medium">
+                {t('quoteUi.review.docLanguage')}
+              </Label>
               {/* Always interactive — once sent the rest of the form
                   locks, but the language pick stays live so admins can
                   issue a translated copy of the SAME quote on demand.
@@ -580,8 +607,9 @@ function AdminLayout({
               </Select>
               {!isEditable ? (
                 <p className="text-xs leading-tight text-muted-foreground">
-                  Pick another language and click <b>Regenerate PDF</b> to
-                  send the doctor a translated copy.
+                  {t('quoteUi.review.regenHintBefore')}{' '}
+                  <b>{t('quoteUi.review.regeneratePdf')}</b>{' '}
+                  {t('quoteUi.review.regenHintAfter')}
                 </p>
               ) : null}
             </div>
@@ -599,16 +627,18 @@ function AdminLayout({
             ) : (
               <ChevronDown className="h-4 w-4" />
             )}
-            Notes &amp; admin message
+            {t('quoteUi.review.notesToggle')}
             {(form.notes || form.adminMessage) && !notesOpen ? (
-              <span className="text-xs text-amber-700">· has content</span>
+              <span className="text-xs text-amber-700">
+                {t('quoteUi.review.hasContent')}
+              </span>
             ) : null}
           </button>
           {notesOpen ? (
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="grid gap-1.5">
                 <Label className="text-sm font-medium">
-                  Notes (visible to doctor)
+                  {t('quoteUi.review.notesDoctor')}
                 </Label>
                 <Textarea
                   rows={3}
@@ -621,7 +651,7 @@ function AdminLayout({
               </div>
               <div className="grid gap-1.5">
                 <Label className="text-sm font-medium">
-                  Admin message (PDF, above totals)
+                  {t('quoteUi.review.adminMessage')}
                 </Label>
                 <Textarea
                   rows={3}
@@ -642,10 +672,10 @@ function AdminLayout({
         <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
           <div className="text-xs text-muted-foreground">
             {isEditable
-              ? 'Drafts stay editable until you send to the doctor.'
+              ? t('quoteUi.review.footerDraft')
               : quote.status === QuotationStatus.SENT
-                ? 'Sent — locked. Click "Recall to edit" to pull it back as a draft if anything is wrong.'
-                : 'This quotation is locked. Cancel it first to make changes.'}
+                ? t('quoteUi.review.footerSent')
+                : t('quoteUi.review.footerLocked')}
           </div>
           <div className="flex flex-wrap gap-2">
             {/* Recall — only shown on SENT quotes. Two-click: first
@@ -676,7 +706,9 @@ function AdminLayout({
                 ) : (
                   <RotateCcw className="h-4 w-4" />
                 )}
-                {confirmRecall ? 'Click again to confirm' : 'Recall to edit'}
+                {confirmRecall
+                  ? t('quoteUi.review.confirmRecall')
+                  : t('quoteUi.review.recallToEdit')}
               </Button>
             ) : null}
             {canCancel ? (
@@ -689,7 +721,7 @@ function AdminLayout({
                 className="gap-2 text-red-600"
               >
                 <Trash2 className="h-4 w-4" />
-                Cancel
+                {t('common.cancel')}
               </Button>
             ) : null}
             {isEditable ? (
@@ -706,7 +738,7 @@ function AdminLayout({
                 ) : (
                   <Check className="h-4 w-4" />
                 )}
-                Save
+                {t('common.save')}
               </Button>
             ) : null}
             <Button
@@ -722,7 +754,9 @@ function AdminLayout({
               ) : (
                 <FileText className="h-4 w-4" />
               )}
-              {hasPdf ? 'Regenerate PDF' : 'Generate PDF'}
+              {hasPdf
+                ? t('quoteUi.review.regeneratePdf')
+                : t('quoteUi.review.generatePdf')}
             </Button>
             {quote.status === QuotationStatus.DRAFT ? (() => {
               // Pack-based quotes can only ship after the admin has
@@ -744,7 +778,7 @@ function AdminLayout({
                   className="gap-2 bg-emerald-600 hover:bg-emerald-700"
                   title={
                     needsPlanConfig
-                      ? 'Configure the payment plan (installments + step ranges) before sending. Open the pack panel below to set it up.'
+                      ? t('quoteUi.review.planFirstTitle')
                       : undefined
                   }
                 >
@@ -754,8 +788,8 @@ function AdminLayout({
                     <Send className="h-4 w-4" />
                   )}
                   {needsPlanConfig
-                    ? 'Configure plan first'
-                    : 'Send to doctor'}
+                    ? t('quoteUi.review.planFirst')
+                    : t('quoteUi.review.sendToDoctor')}
                 </Button>
               );
             })() : null}
@@ -779,6 +813,7 @@ function DoctorLayout({
   patientName: string;
   orderCode: string;
 }) {
+  const { t } = useT();
   // `useApproveQuotation` / `useRejectQuotation` used to power the
   // doctor's Approve / Reject card here. That card is gone — the
   // backend auto-approves a SENT quote on first payment and there's
@@ -808,11 +843,10 @@ function DoctorLayout({
         <Card>
           <CardContent className="flex min-h-32 flex-col items-center justify-center gap-2 text-center">
             <p className="text-sm font-medium text-foreground">
-              Quotation pending
+              {t('quoteUi.review.pendingTitle')}
             </p>
             <p className="max-w-md text-xs text-muted-foreground">
-              The team is still finalising the pack for your treatment.
-              You&apos;ll be notified once it&apos;s ready to review.
+              {t('quoteUi.review.pendingDesc')}
             </p>
           </CardContent>
         </Card>
@@ -832,7 +866,7 @@ function DoctorLayout({
       toast.error(
         err instanceof Error
           ? err.message
-          : 'Could not download the PDF — please try again.',
+          : t('quoteUi.review.pdfError'),
       );
     }
   };
@@ -886,7 +920,7 @@ function DoctorLayout({
             <Globe className="h-4 w-4 text-muted-foreground" />
             <div className="flex flex-1 flex-wrap items-center gap-2">
               <Label className="text-xs font-medium text-muted-foreground">
-                Read this quote in
+                {t('quoteUi.review.readIn')}
               </Label>
               <Select
                 value={docLang}
@@ -903,7 +937,9 @@ function DoctorLayout({
                 </SelectContent>
               </Select>
               <span className="text-[10px] text-muted-foreground">
-                Currently: {LANG_LABEL[quote.language]}
+                {t('quoteUi.review.currently', {
+                  lang: LANG_LABEL[quote.language],
+                })}
               </span>
             </div>
             <Button
@@ -915,7 +951,7 @@ function DoctorLayout({
               className="gap-2"
               title={
                 docLang === quote.language
-                  ? 'Pick a different language to request another version.'
+                  ? t('quoteUi.review.pickDifferent')
                   : undefined
               }
             >
@@ -924,7 +960,7 @@ function DoctorLayout({
               ) : (
                 <Download className="h-4 w-4" />
               )}
-              Regenerate &amp; download
+              {t('quoteUi.review.regenDownload')}
             </Button>
           </CardContent>
         </Card>
@@ -934,7 +970,7 @@ function DoctorLayout({
         <Card className="border-amber-200/60 bg-amber-50/40">
           <CardContent className="p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-amber-900/70">
-              From the team
+              {t('quoteUi.review.fromTeam')}
             </p>
             <p className="mt-1 whitespace-pre-wrap text-sm text-amber-900">
               {quote.adminMessage}
@@ -954,7 +990,7 @@ function DoctorLayout({
         <Card>
           <CardContent className="p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Notes
+              {t('quoteUi.review.notes')}
             </p>
             <p className="mt-1 whitespace-pre-wrap text-sm">{quote.notes}</p>
           </CardContent>
@@ -982,7 +1018,7 @@ function DoctorLayout({
       {quote.status === QuotationStatus.REJECTED && quote.rejectionReason ? (
         <Card className="border-red-200 bg-red-50/40">
           <CardContent className="p-4 text-sm text-red-900">
-            <p className="font-semibold">You rejected this quotation</p>
+            <p className="font-semibold">{t('quoteUi.review.youRejected')}</p>
             <p className="mt-1 whitespace-pre-wrap text-xs text-red-900/80">
               {quote.rejectionReason}
             </p>

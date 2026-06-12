@@ -2,7 +2,7 @@
 
 param(
     [Parameter(Position = 0)]
-    [string]$Command = "help",
+    [string]$Command = "start",
     
     [Parameter(Position = 1)]
     [string]$Service = ""
@@ -41,17 +41,79 @@ function Print-Info {
     Write-Host "ℹ $Text" -ForegroundColor Cyan
 }
 
+function Ensure-LocalEnvironment {
+    if (Test-Path ".env") {
+        return
+    }
+
+    if (Test-Path ".env.docker") {
+        Copy-Item ".env.docker" ".env"
+        Print-Info "Created .env from the existing .env.docker file."
+        return
+    }
+
+    if (-not (Test-Path ".env.docker.example")) {
+        Print-Error "Missing .env.docker.example; cannot create local Docker settings."
+        exit 1
+    }
+
+    Copy-Item ".env.docker.example" ".env"
+    Print-Info "Created .env with local Docker defaults."
+}
+
+function Assert-Docker {
+    docker info *> $null
+    if ($LASTEXITCODE -ne 0) {
+        Print-Error "Docker Desktop is not running."
+        exit 1
+    }
+
+    docker compose version *> $null
+    if ($LASTEXITCODE -ne 0) {
+        Print-Error "Docker Compose is not available."
+        exit 1
+    }
+}
+
+function Show-ServiceUrls {
+    Write-Host ""
+    Write-Host "Frontend:  http://localhost:3001" -ForegroundColor Green
+    Write-Host "Backend:   http://localhost:3000/api" -ForegroundColor Green
+    Write-Host "Health:    http://localhost:3000/api/health" -ForegroundColor Green
+    Write-Host "API Docs:  http://localhost:3000/docs" -ForegroundColor Green
+}
+
+function Cmd-Start {
+    Ensure-LocalEnvironment
+    Assert-Docker
+    Print-Header "Starting Oralign"
+    Print-Info "Building changed images and starting PostgreSQL, Redis, backend, and frontend..."
+
+    docker compose up --build --detach --remove-orphans --wait --wait-timeout 240
+    if ($LASTEXITCODE -ne 0) {
+        Print-Error "The stack did not become healthy."
+        docker compose ps
+        Write-Host ""
+        Print-Info "Recent service logs:"
+        docker compose logs --tail 80
+        exit 1
+    }
+
+    docker compose ps
+    Print-Success "All Oralign services are healthy."
+    Show-ServiceUrls
+}
+
 function Cmd-Build {
+    Ensure-LocalEnvironment
+    Assert-Docker
     Print-Header "Building Docker Images"
-    docker-compose build
+    docker compose build
     Print-Success "Images built successfully"
 }
 
 function Cmd-Up {
-    Print-Header "Starting Services"
-    docker-compose up -d
-    Print-Success "Services started"
-    docker-compose ps
+    Cmd-Start
 }
 
 # Frees the host port from any leftover process (typically a stray
@@ -90,6 +152,7 @@ function Cmd-KillPorts {
 # One-shot full-stack rebuild: clears stale port holders, brings the stack
 # down, builds with --pull, brings it back up, then verifies health.
 function Cmd-Rebuild {
+    Assert-Docker
     Print-Header "Full-stack Rebuild"
 
     Print-Info "Step 1/5  Freeing project ports (3000, 3001, 5432, 6379)"
@@ -138,25 +201,22 @@ function Cmd-Rebuild {
         Print-Info "Tail logs with: .\docker.ps1 logs <service>"
     } else {
         Print-Success "All services healthy"
-        Write-Host ""
-        Write-Host "Frontend:  http://localhost:3001" -ForegroundColor Green
-        Write-Host "Backend:   http://localhost:3000/api/health" -ForegroundColor Green
-        Write-Host "API Docs:  http://localhost:3000/api/docs" -ForegroundColor Green
+        Show-ServiceUrls
     }
 }
 
 function Cmd-Down {
     Print-Header "Stopping Services"
-    docker-compose down
+    docker compose down
     Print-Success "Services stopped"
 }
 
 function Cmd-Logs {
     param([string]$Service)
     if ([string]::IsNullOrEmpty($Service)) {
-        docker-compose logs -f
+        docker compose logs -f
     } else {
-        docker-compose logs -f $Service
+        docker compose logs -f $Service
     }
 }
 
@@ -166,19 +226,19 @@ function Cmd-Shell {
         Print-Error "Please specify a service: backend, frontend, or postgres"
         return
     }
-    docker-compose exec $Service sh
+    docker compose exec $Service sh
 }
 
 function Cmd-Status {
     Print-Header "Service Status"
-    docker-compose ps
+    docker compose ps
     
     Print-Header "Service Health"
     Print-Info "Checking service health..."
     Write-Host ""
     
     try {
-        $response = Invoke-WebRequest -Uri "http://localhost:3000/health" -TimeoutSec 2 -ErrorAction SilentlyContinue
+        $response = Invoke-WebRequest -Uri "http://localhost:3000/api/health" -TimeoutSec 2 -ErrorAction SilentlyContinue
         if ($response.StatusCode -eq 200) {
             Print-Success "Backend is healthy"
         } else {
@@ -200,14 +260,14 @@ function Cmd-Status {
     }
     
     try {
-        $output = docker-compose exec postgres psql -U oralign -d oralign_db -c "SELECT 1" 2>&1
+        $output = docker compose exec postgres psql -U oralign -d oralign_db -c "SELECT 1" 2>&1
         Print-Success "PostgreSQL is healthy"
     } catch {
         Print-Error "PostgreSQL is not responding"
     }
     
     try {
-        $output = docker-compose exec redis redis-cli -a redis_secure_password ping 2>&1
+        $output = docker compose exec redis redis-cli -a redis_secure_password ping 2>&1
         Print-Success "Redis is healthy"
     } catch {
         Print-Error "Redis is not responding"
@@ -216,13 +276,13 @@ function Cmd-Status {
 
 function Cmd-Migrate {
     Print-Header "Running Migrations"
-    docker-compose exec backend npx prisma migrate deploy
+    docker compose exec backend npx prisma migrate deploy
     Print-Success "Migrations completed"
 }
 
 function Cmd-Seed {
     Print-Header "Seeding Database"
-    docker-compose exec backend npx prisma db seed
+    docker compose exec backend npx prisma db seed
     Print-Success "Database seeded"
 }
 
@@ -236,7 +296,7 @@ function Cmd-Reset {
         return
     }
     
-    docker-compose down -v
+    docker compose down -v
     Print-Success "All data removed"
     Print-Info "Run '.\docker.ps1 up' to start fresh"
 }
@@ -248,7 +308,7 @@ function Cmd-Clean {
 }
 
 function Cmd-Ps {
-    docker-compose ps
+    docker compose ps
 }
 
 function Cmd-Stats {
@@ -262,6 +322,7 @@ Oralign Docker CLI
 Usage: .\docker.ps1 [command] [options]
 
 Commands:
+  start              Build and start the complete stack, then wait for health
   rebuild            Full-stack rebuild: free ports, down, build, up, wait healthy
   kill-ports         Free 3000/3001/5432/6379/9229/9230 from stray processes
   build              Build Docker images
@@ -279,6 +340,8 @@ Commands:
   help               Show this help message
 
 Examples:
+  .\docker.ps1                    # One command: build + start all services
+  .\docker.ps1 start              # Explicit form of the same command
   .\docker.ps1 rebuild            # One-shot full-stack rebuild + start
   .\docker.ps1 kill-ports         # Free project ports from leftover node procs
   .\docker.ps1 build              # Build images
@@ -291,7 +354,7 @@ Examples:
 Service URLs:
   Frontend:  http://localhost:3001
   Backend:   http://localhost:3000
-  API Docs:  http://localhost:3000/api/docs
+  API Docs:  http://localhost:3000/docs
   Database:  localhost:5432 (user: oralign)
   Redis:     localhost:6379
 "@
@@ -300,6 +363,7 @@ Service URLs:
 
 # Main
 switch ($Command.ToLower()) {
+    "start" { Cmd-Start }
     "rebuild" { Cmd-Rebuild }
     "kill-ports" { Cmd-KillPorts }
     "killports" { Cmd-KillPorts }

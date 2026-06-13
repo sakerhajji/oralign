@@ -31,7 +31,14 @@ export function Footer() {
           <p style={{ fontSize: "0.6rem", color: "rgba(248,246,242,0.22)" }}>{dict.footer.rights[lang]}</p>
           <p style={{ fontSize: "0.6rem", color: "var(--sc-sun)" }}>{dict.footer.sub[lang]}</p>
         </div>
-        <div className="mt-6 flex">
+        <div className="mt-6 flex items-center gap-6">
+          <Link
+            href="/practitioner/blog"
+            className="text-[rgba(248,246,242,0.4)] hover:text-[var(--sc-sun)] no-underline"
+            style={{ fontSize: "0.6rem", letterSpacing: "0.28em", textTransform: "uppercase" }}
+          >
+            {dict.nav.blogs[lang]} →
+          </Link>
           <Link
             href="/login"
             className="text-[rgba(248,246,242,0.4)] hover:text-[var(--sc-sun)] no-underline"

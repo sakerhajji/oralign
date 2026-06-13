@@ -1191,6 +1191,7 @@ export class OrderService {
     for (const file of files) {
       this.validateFile(file, category);
       const saved = await this.saveFileToDisk(id, category, file, {
+        doctorName: order.doctor?.fullName,
         patientName: order.patient.fullName,
         seq: nextIndex,
       });
@@ -1612,17 +1613,24 @@ export class OrderService {
     orderId: string,
     category: OrderFileCategory,
     file: Express.Multer.File,
-    naming: { patientName: string | null | undefined; seq: number },
+    naming: {
+      doctorName?: string | null;
+      patientName: string | null | undefined;
+      seq: number;
+    },
   ): Promise<Prisma.OrderFileCreateManyInput> {
     const ext = path.extname(file.originalname).toLowerCase();
 
-    // Clean ordered name: `<Patient>_<category>_<NNN>.<ext>` (e.g.
-    // "Marie-Dupont_front-photo_003.jpg"). The client's original
-    // filename is preserved in `originalName`. These files live behind
-    // the RBAC'd download endpoint — never under a public URL — so a
-    // readable patient name here is a feature for the lab, not a leak.
+    // Clean ordered name: `<Doctor>_<Patient>_<category>_<NNN>.<ext>`
+    // (e.g. "Dr-Hajji_Marie-Dupont_front-photo_003.jpg"). This is the
+    // name the UI shows and the file downloads as — never the client's
+    // "image1.jpeg" (that's preserved in `originalName`). Empty/Arabic
+    // name parts are dropped by buildSequentialName, so a missing
+    // doctor or patient name simply collapses out. These files live
+    // behind the RBAC'd download endpoint, never a public URL, so the
+    // readable doctor/patient names are a feature for the lab.
     let fileName = buildSequentialName(
-      [naming.patientName || 'patient', category.replace(/_/g, '-')],
+      [naming.doctorName, naming.patientName, category.replace(/_/g, '-')],
       naming.seq,
       ext,
     );

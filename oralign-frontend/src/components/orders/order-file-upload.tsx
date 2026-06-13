@@ -2438,9 +2438,9 @@ function ZipUploadAction({
                   <div className="min-w-0 flex-1">
                     <p
                       className="truncate text-sm font-medium"
-                      title={file.originalName}
+                      title={displayFileName(file)}
                     >
-                      {file.originalName}
+                      {displayFileName(file)}
                     </p>
                     <p className="text-xs text-muted-foreground">
                       <span className="tabular-nums">
@@ -2476,7 +2476,7 @@ function ZipUploadAction({
                     variant="ghost"
                     className="h-9 w-9 shrink-0 text-muted-foreground hover:bg-primary/10 hover:text-primary"
                     aria-label={t('media.zipAction.downloadAria', {
-                      name: file.originalName,
+                      name: displayFileName(file),
                     })}
                     onClick={() => downloadOrderFile(orderId, file)}
                   >
@@ -2489,7 +2489,7 @@ function ZipUploadAction({
                       variant="ghost"
                       className="h-9 w-9 shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                       aria-label={t('media.zipAction.deleteAria', {
-                        name: file.originalName,
+                        name: displayFileName(file),
                       })}
                       disabled={uploadFiles.isPending}
                       onClick={() => setPendingDelete(file)}
@@ -2532,7 +2532,7 @@ function ZipUploadAction({
                 </AlertDialogTitle>
                 <AlertDialogDescription>
                   <span className="font-medium">
-                    {pendingDelete?.originalName}
+                    {pendingDelete ? displayFileName(pendingDelete) : ''}
                   </span>{' '}
                   {t('media.zipAction.deleteBundleDesc')}
                 </AlertDialogDescription>
@@ -2775,6 +2775,12 @@ function latestByCreatedAt(files: OrderFile[]) {
 }
 
 function displayFileName(file: OrderFile) {
+  // Show the clean, meaningful name the backend assigns
+  // (Doctor_Patient_category_NNN) everywhere — viewer caption, cards,
+  // labels, downloads — NEVER the client's "image1.jpeg". Legacy rows
+  // (no generatedName) fall back to the original with the slot prefix
+  // stripped.
+  if (file.generatedName) return file.generatedName;
   return file.originalName.replace(/^[a-z0-9-]+__/i, '');
 }
 

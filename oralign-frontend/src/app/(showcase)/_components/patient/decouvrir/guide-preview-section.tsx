@@ -62,33 +62,35 @@ export function GuidePreviewSection() {
       id="guide-preview"
       data-section-tone="light"
       aria-label={copy.cta}
-      className="overflow-hidden bg-[var(--sc-white)] text-[var(--sc-black)] lg:min-h-[80svh]"
+      className="min-h-[calc(100svh-4rem)] overflow-hidden bg-[var(--sc-white)] text-[var(--sc-black)] sm:min-h-[calc(100svh-4.5rem)] lg:min-h-[calc(100svh-5rem)]"
     >
-      <div className="grid w-full lg:min-h-[80svh] lg:grid-cols-2">
-        <div className="relative min-h-[440px] w-full overflow-hidden sm:min-h-[600px] lg:min-h-0">
-          <span
-            aria-hidden="true"
-            className="absolute left-0 top-0 z-10 h-2 w-28 bg-[var(--sc-sun)] sm:w-36"
-          />
-          <Image
-            src="/showcase/image123.jpeg"
-            alt={copy.imageAlt}
-            fill
-            sizes="(min-width: 1024px) 50vw, 100vw"
-            className="object-cover object-center"
-          />
-          <span
-            aria-hidden="true"
-            className="pointer-events-none absolute left-1/2 top-1/2 aspect-square w-[115%] -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/25"
-          />
-          <div
-            aria-hidden="true"
-            className="absolute inset-0 bg-[linear-gradient(180deg,rgba(20,14,8,0.04),transparent_55%,rgba(20,14,8,0.12))]"
-          />
-          <span
-            aria-hidden="true"
-            className="absolute bottom-0 right-0 z-10 h-2 w-40 bg-[var(--sc-sun)] sm:w-52"
-          />
+      <div className="grid min-h-[calc(100svh-4rem)] w-full sm:min-h-[calc(100svh-4.5rem)] lg:min-h-[calc(100svh-5rem)] lg:grid-cols-2">
+        <div className="min-h-[440px] w-full p-[15px] sm:min-h-[600px] lg:min-h-0">
+          <div className="relative h-full min-h-[410px] w-full overflow-hidden sm:min-h-[570px] lg:min-h-0">
+            <span
+              aria-hidden="true"
+              className="absolute left-0 top-0 z-10 h-2 w-28 bg-[var(--sc-sun)] sm:w-36"
+            />
+            <Image
+              src="/showcase/image123.jpeg"
+              alt={copy.imageAlt}
+              fill
+              sizes="(min-width: 1024px) 50vw, 100vw"
+              className="object-cover object-center"
+            />
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute left-1/2 top-1/2 aspect-square w-[115%] -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/25"
+            />
+            <div
+              aria-hidden="true"
+              className="absolute inset-0 bg-[linear-gradient(180deg,rgba(20,14,8,0.04),transparent_55%,rgba(20,14,8,0.12))]"
+            />
+            <span
+              aria-hidden="true"
+              className="absolute bottom-0 right-0 z-10 h-2 w-40 bg-[var(--sc-sun)] sm:w-52"
+            />
+          </div>
         </div>
 
         <div className="flex items-center px-5 py-14 sm:px-10 sm:py-16 lg:px-[clamp(3rem,5.5vw,6.5rem)] lg:py-16">

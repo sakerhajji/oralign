@@ -487,6 +487,7 @@ export function UsersPageContent() {
                     <th className="p-4 text-left font-medium">{t('usersAdmin.colStatus')}</th>
                     <th className="p-4 text-left font-medium">{t('usersAdmin.colEmailVerified')}</th>
                     <th className="p-4 text-left font-medium">{t('usersAdmin.colLastLogin')}</th>
+                    <th className="p-4 text-left font-medium">{t('usersAdmin.colCreatedAt')}</th>
                     <th className="p-4 text-right font-medium">{t('usersAdmin.colActions')}</th>
                   </tr>
                 </thead>
@@ -590,6 +591,13 @@ export function UsersPageContent() {
                               locale: lang === 'fr' ? frLocale : undefined,
                             })
                           : t('usersAdmin.never')}
+                      </td>
+                      <td className="p-4 text-sm text-muted-foreground">
+                        {user.createdAt
+                          ? format(new Date(user.createdAt), lang === 'fr' ? 'd MMM yyyy' : 'MMM d, yyyy', {
+                              locale: lang === 'fr' ? frLocale : undefined,
+                            })
+                          : '—'}
                       </td>
                       <td className="p-4">
                         <div className="flex justify-end">
@@ -766,7 +774,7 @@ export function UsersPageContent() {
                     })
                   ) : (
                     <tr>
-                      <td colSpan={9} className="p-8 text-center">
+                      <td colSpan={10} className="p-8 text-center">
                         <div className="flex flex-col items-center justify-center text-muted-foreground">
                           <UsersIcon className="h-12 w-12 mb-4 opacity-50" />
                           <p className="text-lg font-medium">

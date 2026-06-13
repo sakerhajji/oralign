@@ -2632,6 +2632,7 @@ export const dict = {
     colStatus: { en: 'Status', fr: 'Statut' } as T,
     colEmailVerified: { en: 'Email Verified', fr: 'E-mail vérifié' } as T,
     colLastLogin: { en: 'Last Login', fr: 'Dernière connexion' } as T,
+    colCreatedAt: { en: 'Created', fr: 'Date de création' } as T,
     colActions: { en: 'Actions', fr: 'Actions' } as T,
     approved: { en: 'Approved', fr: 'Approuvé' } as T,
     rejected: { en: 'Rejected', fr: 'Rejeté' } as T,

@@ -122,6 +122,16 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     return this.prisma.sliderMedia;
   }
 
+  // ─── Practitioner blog ─────────────────────────────────────────────
+
+  get blog() {
+    return this.prisma.blog;
+  }
+
+  get blogImage() {
+    return this.prisma.blogImage;
+  }
+
   // ─── Prisma utilities ─────────────────────────────────────────────────────
 
   /**

@@ -685,6 +685,42 @@ export const dict = {
     rights: { fr: "© 2026 Aura Aligners SARL — Tous droits réservés.", en: "© 2026 Aura Aligners SARL — All rights reserved.", ar: "© 2026 Aura Aligners SARL — جميع الحقوق محفوظة." } as T,
     sub: { fr: "Conçu en Allemagne · Fabriqué en Tunisie", en: "Designed in Germany · Manufactured in Tunisia", ar: "مصمَّم في ألمانيا · صُنع في تونس" } as T,
   },
+  blog: {
+    eyebrow: { fr: "Le journal ORALIGN", en: "The ORALIGN journal", ar: "مدوّنة ORALIGN" } as T,
+    indexTitle: {
+      fr: "Ressources & actualités praticiens",
+      en: "Practitioner resources & insights",
+      ar: "موارد وأخبار للأطباء",
+    } as T,
+    indexSubtitle: {
+      fr: "Guides cliniques, protocoles d'aligneurs et actualités ORALIGN® pour faire grandir votre pratique.",
+      en: "Clinical guides, aligner protocols and ORALIGN® news to grow your practice.",
+      ar: "أدلّة سريرية وبروتوكولات الأجهزة وأخبار ORALIGN® لتطوير عيادتك.",
+    } as T,
+    searchPlaceholder: {
+      fr: "Rechercher un article…",
+      en: "Search articles…",
+      ar: "ابحث عن مقال…",
+    } as T,
+    allCategories: { fr: "Toutes les catégories", en: "All categories", ar: "كل التصنيفات" } as T,
+    readMore: { fr: "Lire l'article", en: "Read more", ar: "اقرأ المزيد" } as T,
+    readingTime: { fr: "{n} min de lecture", en: "{n} min read", ar: "{n} دقيقة قراءة" } as T,
+    minRead: { fr: "{n} min", en: "{n} min", ar: "{n} دقيقة" } as T,
+    byAuthor: { fr: "Par {name}", en: "By {name}", ar: "بقلم {name}" } as T,
+    publishedOn: { fr: "Publié le {date}", en: "Published {date}", ar: "نُشر في {date}" } as T,
+    relatedTitle: { fr: "À lire également", en: "Keep reading", ar: "اقرأ أيضاً" } as T,
+    shareLabel: { fr: "Partager", en: "Share", ar: "مشاركة" } as T,
+    shareCopied: { fr: "Lien copié", en: "Link copied", ar: "تم نسخ الرابط" } as T,
+    emptyTitle: { fr: "Aucun article pour le moment", en: "No articles yet", ar: "لا توجد مقالات بعد" } as T,
+    emptyBody: {
+      fr: "Revenez bientôt : de nouveaux articles arrivent régulièrement.",
+      en: "Check back soon — new articles are published regularly.",
+      ar: "عُد قريباً — تُنشر مقالات جديدة بانتظام.",
+    } as T,
+    loadMore: { fr: "Voir plus d'articles", en: "Load more", ar: "عرض المزيد" } as T,
+    backToBlog: { fr: "Retour au blog", en: "Back to blog", ar: "العودة إلى المدوّنة" } as T,
+  },
+
   common: {
     skipToContent: { fr: "Aller au contenu", en: "Skip to content", ar: "تخطّي إلى المحتوى" } as T,
     imagePlaceholder: { fr: "Image à venir", en: "Image coming soon", ar: "صورة قريباً" } as T,

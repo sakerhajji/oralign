@@ -74,6 +74,8 @@ export const PRACTITIONER_NAV_ITEMS: readonly NavItem[] = [
   { id: "clinical", labelKey: "clinical", href: "#clinical" },
   { id: "platform-b2b", labelKey: "platformB2B", href: "#platform-b2b" },
   { id: "cta", labelKey: "challenge", href: "#cta" },
+  // Real route (no `#hash`) — renders as a plain link, not an anchor.
+  { id: "blog", labelKey: "blogs", href: "/practitioner/blog" },
 ] as const;
 
 export const NAV_ITEMS = PATIENT_NAV_ITEMS;

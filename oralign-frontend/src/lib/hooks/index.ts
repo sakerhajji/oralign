@@ -17,4 +17,5 @@ export * from './use-dashboard';
 export * from './use-dashboard-socket';
 export * from './use-slider-media';
 export * from './use-reports';
+export * from './use-blog';
 export * from './use-authed-image';

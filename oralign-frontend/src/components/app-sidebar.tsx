@@ -33,6 +33,7 @@ import {
   GalleryHorizontalIcon,
   LayoutDashboardIcon,
   MessageCircleIcon,
+  NewspaperIcon,
   PackageIcon,
   PlusIcon,
   Settings2Icon,
@@ -142,6 +143,13 @@ const NAV_MAIN: NavItemDef[] = [
     url: "/dashboard/media",
     icon: <GalleryHorizontalIcon />,
     // Admin-only — curates the doctor-dashboard slider gallery.
+    roles: [UserRole.ADMIN, UserRole.SUPER_ADMIN],
+  },
+  {
+    titleKey: "chrome.nav.blog",
+    url: "/dashboard/blog",
+    icon: <NewspaperIcon />,
+    // Admin-only — blog CMS (write / publish / manage public articles).
     roles: [UserRole.ADMIN, UserRole.SUPER_ADMIN],
   },
   {

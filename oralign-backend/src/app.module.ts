@@ -28,6 +28,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { SliderMediaModule } from './slider-media/slider-media.module';
 import { ReportsModule } from './reports/reports.module';
 import { MediaModule } from './media/media.module';
+import { BlogModule } from './blog/blog.module';
 
 // ─── Redis URL builder ──────────────────────────────────────────────────────
 // Compose injects REDIS_HOST / REDIS_PORT / REDIS_PASSWORD individually; this
@@ -119,6 +120,7 @@ function buildRedisUrl(): string {
     ReportsModule,
     StorageModule,
     MediaModule,
+    BlogModule,
   ],
   controllers: [AppController],
   providers: [

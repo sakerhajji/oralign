@@ -1634,3 +1634,174 @@ export interface ReportSummary {
   bestPacks: AdminBestPackRow[];
   trends: AdminTrendsResponse;
 }
+
+// ==========================================
+// BLOG (public showcase + admin CMS)
+// ==========================================
+// Wire values MUST stay identical to the backend Prisma `BlogStatus`
+// enum + the shared content-block contract. The dashboard CMS, the
+// block builder, and the public showcase renderer all import these
+// types — keep them the single source of truth.
+
+/**
+ * Publication lifecycle. Mirrors the backend Prisma `BlogStatus`
+ * enum exactly (lowercase wire values) — class-validator's `@IsEnum`
+ * rejects anything else.
+ */
+export enum BlogStatus {
+  DRAFT = 'draft',
+  PUBLISHED = 'published',
+  ARCHIVED = 'archived',
+}
+
+/**
+ * One structured content block stored inside `Blog.content` (a JSON
+ * array). Discriminated on `type`. Every block carries a
+ * client-generated string `id` so the CMS block builder can key,
+ * reorder, and target individual blocks without index churn.
+ *
+ * The public renderer switches EXHAUSTIVELY over `type` and renders
+ * each variant safely (React escapes text by default; the renderer
+ * only allows youtube/vimeo embeds for `video` and validates that
+ * `cta`/link hrefs start with '/' or 'https://').
+ */
+export type BlogBlock =
+  | { id: string; type: 'heading'; level: 2 | 3; content: string }
+  | { id: string; type: 'paragraph'; content: string }
+  | {
+      id: string;
+      type: 'image';
+      imageId?: string;
+      url: string;
+      alt?: string;
+      width?: number;
+      height?: number;
+      caption?: string;
+    }
+  | {
+      id: string;
+      type: 'gallery';
+      images: {
+        imageId?: string;
+        url: string;
+        alt?: string;
+        width?: number;
+        height?: number;
+      }[];
+    }
+  // YouTube / Vimeo watch URL — the renderer converts it to an embed
+  // iframe (and refuses anything that isn't youtube/vimeo).
+  | { id: string; type: 'video'; url: string }
+  | { id: string; type: 'quote'; content: string; cite?: string }
+  | { id: string; type: 'cta'; label: string; url: string }
+  | { id: string; type: 'divider' };
+
+/**
+ * Narrow string-literal union of every `BlogBlock` discriminant —
+ * handy for the CMS block-type picker and exhaustive switches.
+ */
+export type BlogBlockType = BlogBlock['type'];
+
+/**
+ * One uploaded blog image. Matches the backend `BlogImageDto`. The
+ * `*Url` variant fields are RELATIVE `/uploads/blog/...` paths —
+ * resolve them to absolute with `resolveBlogMediaUrl()` before
+ * handing them to <img>/<Image>. Fall back to `url` when a given
+ * variant is absent (legacy / not-yet-processed rows).
+ */
+export interface BlogImage {
+  id: string;
+  url: string;
+  thumbUrl: string;
+  mdUrl: string;
+  lgUrl: string;
+  width?: number;
+  height?: number;
+  processingStatus?: MediaProcessingStatus;
+}
+
+/**
+ * Card-level projection of a post — returned by the public list +
+ * the admin list rows + the `related` array on a detail page.
+ * Matches the backend `BlogSummaryDto`.
+ */
+export interface BlogSummary {
+  id: string;
+  slug: string;
+  title: string;
+  excerpt: string;
+  category: string;
+  authorName: string;
+  status: BlogStatus;
+  publishedAt: string | null;
+  readingTime: number;
+  cover: BlogImage | null;
+  coverImageAlt: string;
+}
+
+/**
+ * Public post detail — returned by `GET /api/blog/:slug`. Matches the
+ * backend `BlogDetailDto`. Each image/gallery block `url` is already
+ * REWRITTEN server-side to its best ready variant (lg) when the
+ * underlying BlogImage finished processing, else the original.
+ */
+export interface BlogDetail extends BlogSummary {
+  content: BlogBlock[];
+  seoTitle: string;
+  seoDescription: string;
+  seoKeywords: string[];
+  /** Up to 3 sibling posts (same category, else most-recent published). */
+  related: BlogSummary[];
+}
+
+/**
+ * Full admin row — returned by every `/api/admin/blog` endpoint.
+ * Matches the backend `BlogDto`. Superset of `BlogSummary` plus the
+ * editable content + SEO + audit fields the CMS form binds to.
+ */
+export interface Blog extends BlogSummary {
+  coverImageId: string | null;
+  content: BlogBlock[];
+  seoTitle: string;
+  seoDescription: string;
+  seoKeywords: string[];
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+}
+
+/**
+ * Create payload. `title` is the only required field — everything
+ * else the backend derives (slug, excerpt, readingTime, publishedAt)
+ * when omitted. Matches the backend `CreateBlogDto`.
+ */
+export interface CreateBlogDto {
+  title: string;
+  slug?: string;
+  excerpt?: string;
+  content?: BlogBlock[];
+  coverImageId?: string;
+  coverImageAlt?: string;
+  category?: string;
+  status?: BlogStatus;
+  seoTitle?: string;
+  seoDescription?: string;
+  seoKeywords?: string[];
+}
+
+/** Update payload — every create field is optional. */
+export type UpdateBlogDto = Partial<CreateBlogDto>;
+
+/**
+ * Admin list filters. Mirrors the backend `BlogFilterParams`. The
+ * service serialises `seoKeywords`-style arrays itself; scalar fields
+ * pass straight through as query params.
+ */
+export interface BlogFilterParams extends PaginationParams {
+  search?: string;
+  status?: BlogStatus;
+  category?: string;
+  sortBy?: 'createdAt' | 'publishedAt' | 'title';
+  sortOrder?: 'asc' | 'desc';
+  includeDeleted?: boolean;
+}

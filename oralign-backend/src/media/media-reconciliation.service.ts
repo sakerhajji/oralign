@@ -83,11 +83,27 @@ export class MediaReconciliationService implements OnApplicationBootstrap {
       enqueued += 1;
     }
 
+    const stuckBlogImages = await this.prisma.blogImage.findMany({
+      where: {
+        deletedAt: null,
+        processingStatus: {
+          in: [MediaProcessingStatus.pending, MediaProcessingStatus.processing],
+        },
+      },
+      select: { id: true },
+      take: RECONCILE_BACKFILL_BATCH,
+    });
+    for (const { id } of stuckBlogImages) {
+      this.processing.enqueue('blog-image', id);
+      enqueued += 1;
+    }
+
     // ── 2. Backfill: pre-pipeline rows ─────────────────────────────
     enqueued += await this.backfillOrderFiles();
     enqueued += await this.backfillTreatmentAttachments();
     enqueued += await this.backfillSupportMessages();
     enqueued += await this.backfillSliderMedia();
+    enqueued += await this.backfillBlogImages();
 
     if (enqueued > 0) {
       this.logger.log(`Media reconciliation enqueued ${enqueued} job(s)`);
@@ -168,5 +184,31 @@ export class MediaReconciliationService implements OnApplicationBootstrap {
     });
     for (const { id } of rows) this.processing.enqueue('slider-media', id);
     return rows.length;
+  }
+
+  private async backfillBlogImages(): Promise<number> {
+    // Null-status rows that classify as image (mime check) get marked
+    // pending + enqueued. We over-fetch then classify in JS so an
+    // accidental non-image row never starts the pipeline.
+    const candidates = await this.prisma.blogImage.findMany({
+      where: { deletedAt: null, processingStatus: null },
+      select: { id: true, mimeType: true, generatedName: true, url: true },
+      orderBy: { createdAt: 'desc' },
+      take: RECONCILE_BACKFILL_BATCH * 2,
+    });
+    const eligible = candidates
+      .filter(
+        (c) =>
+          classifyMedia(c.mimeType, c.generatedName ?? c.url) === 'image',
+      )
+      .slice(0, RECONCILE_BACKFILL_BATCH);
+    if (eligible.length === 0) return 0;
+
+    await this.prisma.blogImage.updateMany({
+      where: { id: { in: eligible.map((e) => e.id) } },
+      data: { processingStatus: MediaProcessingStatus.pending },
+    });
+    for (const { id } of eligible) this.processing.enqueue('blog-image', id);
+    return eligible.length;
   }
 }

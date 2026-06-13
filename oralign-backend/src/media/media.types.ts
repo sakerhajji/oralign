@@ -14,7 +14,8 @@ export type MediaJobKind =
   | 'order-file'
   | 'treatment-attachment'
   | 'support-message'
-  | 'slider-media';
+  | 'slider-media'
+  | 'blog-image';
 
 export interface MediaJob {
   kind: MediaJobKind;

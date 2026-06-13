@@ -36,12 +36,14 @@ import { chromeDomainDict } from './dict.chrome-domain';
 import { commerceDomainDict } from './dict.commerce-domain';
 import { authDomainDict } from './dict.auth-domain';
 import { treatmentDomainDict } from './dict.treatment-domain';
+import { blogDomainDict } from './dict.blog-domain';
 
 export const dict = {
   ...chromeDomainDict,
   ...commerceDomainDict,
   ...authDomainDict,
   ...treatmentDomainDict,
+  ...blogDomainDict,
 
   // ─── Generic / cross-cutting ────────────────────────────────────
   common: {
@@ -2913,6 +2915,7 @@ export const dict = {
       pendingPayments: { en: 'Pending payments', fr: 'Paiements en attente' } as T,
       support: { en: 'Support', fr: 'Assistance' } as T,
       mediaManagement: { en: 'Media Management', fr: 'Gestion des médias' } as T,
+      blog: { en: 'Blog', fr: 'Blog' } as T,
       reports: { en: 'Reports', fr: 'Rapports' } as T,
       settings: { en: 'Settings', fr: 'Paramètres' } as T,
       paymentHistory: { en: 'Payment History', fr: 'Historique des paiements' } as T,
@@ -3092,6 +3095,19 @@ export const dict = {
     account: {
       profileUpdated: { en: 'Profile updated successfully.', fr: 'Profil mis à jour.' } as T,
       clinicUpdated: { en: 'Clinic details updated.', fr: 'Informations du cabinet mises à jour.' } as T,
+    },
+    blog: {
+      created: { en: 'Article created.', fr: 'Article créé.' } as T,
+      updated: { en: 'Article updated.', fr: 'Article mis à jour.' } as T,
+      deleted: { en: 'Article deleted.', fr: 'Article supprimé.' } as T,
+      published: { en: 'Article published.', fr: 'Article publié.' } as T,
+      unpublished: { en: 'Article unpublished.', fr: 'Article dépublié.' } as T,
+      archived: { en: 'Article archived.', fr: 'Article archivé.' } as T,
+      imageUploaded: { en: 'Image uploaded.', fr: 'Image téléversée.' } as T,
+      error: {
+        en: 'Something went wrong with the article. Please try again.',
+        fr: 'Une erreur est survenue avec l’article. Veuillez réessayer.',
+      } as T,
     },
     auth: {
       accountCreated: {

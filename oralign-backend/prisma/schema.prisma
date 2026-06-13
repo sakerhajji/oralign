@@ -307,6 +307,13 @@ model User {
   // is removed.
   createdSliderMedia       SliderMedia[]       @relation("SliderMediaCreatedBy")
 
+  // Practitioner blog — posts authored by this admin + images they
+  // uploaded into the blog media library. SetNull on user delete so a
+  // removed admin doesn't take their published posts/images down with
+  // them; the row keeps `authorName`/`createdById = null` for audit.
+  blogPosts                Blog[]              @relation("BlogAuthor")
+  blogImages               BlogImage[]         @relation("BlogImageCreatedBy")
+
   @@index([email])
   @@index([role])
   @@index([verificationStatus])
@@ -1466,5 +1473,137 @@ model SliderMedia {
   //   • admin list with filter chips: status, deviceTargets, deletedAt
   @@index([status, deletedAt, displayOrder])
   @@index([deletedAt, displayOrder])
+}
+
+// ─────────────────────────────────────────
+// PRACTITIONER BLOG
+// ─────────────────────────────────────────
+//
+// A small CMS for the marketing/showcase blog. An admin authors posts
+// in the dashboard; the public showcase reads only `published`,
+// non-deleted posts. The body is a JSON array of typed content blocks
+// (heading / paragraph / image / gallery / video / quote / cta /
+// divider) — flexible enough to lay out a rich article without a
+// separate block table, and the renderer switches exhaustively over
+// the block `type`.
+
+// Lifecycle of a blog post. Mirrors the lowercase Prisma-enum style
+// used elsewhere; the frontend enum carries identical string values.
+enum BlogStatus {
+  draft
+  published
+  archived
+}
+
+// One image in the blog media library. Uploaded via the admin image
+// endpoint; the async media pipeline ('blog-image' job) fills width/
+// height + resized `variants`. `url` is ALWAYS a relative
+// `/uploads/blog/<uuid>.ext` path — the DTO mapper builds relative
+// variant URLs from it and NEVER exposes a raw disk path.
+model BlogImage {
+  id               String                 @id @default(uuid())
+
+  // The client-supplied filename (audit only) + the on-disk UUID name.
+  originalName     String?
+  generatedName    String?
+
+  // Relative static URL the frontend resolves to an absolute origin.
+  url              String
+
+  // Default alt text suggested at upload time; per-block alt overrides
+  // it in the content blocks.
+  alt              String?
+
+  mimeType         String?
+  sizeBytes        Int?
+
+  // Intrinsic pixel size of the ORIGINAL (filled by the pipeline).
+  width            Int?
+  height           Int?
+
+  // ── Media-optimization pipeline (same contract as OrderFile) ──────
+  processingStatus MediaProcessingStatus?
+  // Variant map: { thumb|md|lg|avif: { path, width?, height?, sizeBytes,
+  // format } }. Paths are uploads-root-relative, never exposed raw.
+  variants         Json?
+  mediaMetadata    Json?
+  processedAt      DateTime?
+
+  // Admin who uploaded the image. SetNull on user delete so the image
+  // (and any post referencing it) survives the author being removed.
+  createdById      String?
+  createdBy        User?                  @relation("BlogImageCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  // Back-relation for Blog.coverImage. Prisma requires both ends of a
+  // named relation to be declared; no foreign key lives here (the FK is
+  // on Blog.coverImageId), so this is purely a virtual back-reference.
+  blogCovers       Blog[]                 @relation("BlogCover")
+
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  deletedAt        DateTime?
+
+  @@index([processingStatus])
+  @@index([deletedAt])
+}
+
+model Blog {
+  id             String      @id @default(uuid())
+
+  title          String
+  // URL slug — unique across all posts. Derived from the title when the
+  // admin doesn't supply one; collisions get a -2/-3/… suffix.
+  slug           String      @unique
+  // Short summary for cards + SEO description fallback. Derived from the
+  // first paragraph block when blank.
+  excerpt        String?
+
+  // Ordered array of typed content blocks (see BlogBlock in the DTOs).
+  content        Json?
+
+  // Optional cover image (from the BlogImage library). SetNull so
+  // deleting the image doesn't take the post down — it just loses its
+  // cover.
+  coverImageId   String?
+  coverImage     BlogImage?  @relation("BlogCover", fields: [coverImageId], references: [id], onDelete: SetNull)
+  coverImageAlt  String?
+
+  // Free-text category used by the showcase filter + "related posts".
+  category       String?
+
+  // Author. SetNull on user delete; `authorName` is snapshotted at
+  // create time so the byline survives even after the account is gone.
+  authorId       String?
+  author         User?       @relation("BlogAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  authorName     String?
+
+  status         BlogStatus  @default(draft)
+
+  // SEO overrides — fall back to title/excerpt when blank.
+  seoTitle       String?
+  seoDescription String?
+  seoKeywords    String[]    @default([])
+
+  // Derived: ceil(words / 200), min 1.
+  readingTime    Int?
+
+  // Set once when the post first becomes `published`; left intact
+  // thereafter so the public ordering (newest published first) is
+  // stable across unpublish/republish cycles.
+  publishedAt    DateTime?
+
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  deletedAt      DateTime?
+
+  // Hot paths:
+  //   • public list: status=published AND deletedAt IS NULL, newest
+  //     publishedAt first (covered by the composite index).
+  //   • slug lookup, category filter, author filter, soft-delete scan.
+  @@index([status, deletedAt, publishedAt(sort: Desc)])
+  @@index([slug])
+  @@index([category])
+  @@index([authorId])
+  @@index([deletedAt])
 }
 

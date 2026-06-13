@@ -61,6 +61,8 @@ export class MediaProcessingService implements OnModuleInit {
         return this.processSupportMessage(job.id);
       case 'slider-media':
         return this.processSliderMedia(job.id);
+      case 'blog-image':
+        return this.processBlogImage(job.id);
     }
   }
 
@@ -259,6 +261,74 @@ export class MediaProcessingService implements OnModuleInit {
     if (Object.keys(data).length > 0) {
       await this.prisma.sliderMedia
         .update({ where: { id }, data })
+        .catch(() => undefined);
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────────────
+  // BlogImage — practitioner-blog media library (images only)
+  // ──────────────────────────────────────────────────────────────────
+
+  private async processBlogImage(id: string): Promise<void> {
+    const row = await this.prisma.blogImage.findUnique({ where: { id } });
+    if (!row || row.deletedAt) return;
+
+    // Blog images store a relative `/uploads/blog/<uuid>.ext` URL rather
+    // than a `relativePath` column — resolve it before classifying.
+    const relative = this.uploadsUrlToRelative(row.url);
+    if (!relative) {
+      if (row.processingStatus === MediaProcessingStatus.pending) {
+        await this.prisma.blogImage
+          .update({
+            where: { id },
+            data: { processingStatus: MediaProcessingStatus.failed },
+          })
+          .catch(() => undefined);
+      }
+      return;
+    }
+
+    const kind = classifyMedia(row.mimeType, row.generatedName ?? relative);
+    if (kind !== 'image') {
+      // Only images get variants here. A mis-flagged / non-image row
+      // settles to `failed` so reconciliation stops re-enqueuing it.
+      if (row.processingStatus === MediaProcessingStatus.pending) {
+        await this.prisma.blogImage
+          .update({
+            where: { id },
+            data: { processingStatus: MediaProcessingStatus.failed },
+          })
+          .catch(() => undefined);
+      }
+      return;
+    }
+
+    await this.prisma.blogImage.update({
+      where: { id },
+      data: { processingStatus: MediaProcessingStatus.processing },
+    });
+
+    try {
+      const result = await this.runProcessors('image', relative);
+      await this.prisma.blogImage.update({
+        where: { id },
+        data: {
+          processingStatus: MediaProcessingStatus.completed,
+          processedAt: new Date(),
+          width: result.width ?? undefined,
+          height: result.height ?? undefined,
+          variants: result.variants as unknown as Prisma.InputJsonValue,
+        },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Blog image ${id} processing failed: ${(error as Error).message}`,
+      );
+      await this.prisma.blogImage
+        .update({
+          where: { id },
+          data: { processingStatus: MediaProcessingStatus.failed },
+        })
         .catch(() => undefined);
     }
   }

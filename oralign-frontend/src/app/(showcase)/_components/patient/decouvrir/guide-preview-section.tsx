@@ -62,11 +62,11 @@ export function GuidePreviewSection() {
       id="guide-preview"
       data-section-tone="light"
       aria-label={copy.cta}
-      className="min-h-[calc(100svh-4rem)] overflow-hidden bg-[var(--sc-white)] text-[var(--sc-black)] sm:min-h-[calc(100svh-4.5rem)] lg:min-h-[calc(100svh-5rem)]"
+      className="overflow-hidden bg-[var(--sc-white)] text-[var(--sc-black)] lg:min-h-[calc(100svh-5rem)]"
     >
-      <div className="grid min-h-[calc(100svh-4rem)] w-full sm:min-h-[calc(100svh-4.5rem)] lg:min-h-[calc(100svh-5rem)] lg:grid-cols-2">
-        <div className="min-h-[440px] w-full p-[15px] sm:min-h-[600px] lg:min-h-0">
-          <div className="relative h-full min-h-[410px] w-full overflow-hidden sm:min-h-[570px] lg:min-h-0">
+      <div className="grid w-full lg:min-h-[calc(100svh-5rem)] lg:grid-cols-2">
+        <div className="w-full p-[15px] lg:min-h-0">
+          <div className="relative aspect-[107/100] w-full overflow-hidden sm:aspect-[16/10] lg:h-full lg:min-h-0 lg:aspect-auto">
             <span
               aria-hidden="true"
               className="absolute left-0 top-0 z-10 h-2 w-28 bg-[var(--sc-sun)] sm:w-36"
@@ -93,37 +93,37 @@ export function GuidePreviewSection() {
           </div>
         </div>
 
-        <div className="flex items-center px-5 py-14 sm:px-10 sm:py-16 lg:px-[clamp(3rem,5.5vw,6.5rem)] lg:py-16">
+        <div className="flex items-center px-5 py-10 sm:px-10 sm:py-12 lg:px-[clamp(3rem,5.5vw,6.5rem)] lg:py-16">
           <div className="mx-auto w-full max-w-[620px]">
             <ul className="border-y border-[rgba(25,25,25,0.16)]">
               {copy.benefits.map((benefit, index) => (
-              <li
-                key={benefit}
-                  className="grid grid-cols-[2rem_1fr] gap-4 border-b border-[rgba(25,25,25,0.12)] py-5 last:border-b-0 sm:grid-cols-[2.5rem_1fr] sm:py-6"
-              >
-                <span
-                  aria-hidden="true"
+                <li
+                  key={benefit}
+                  className="grid grid-cols-[1.75rem_1fr] gap-3 border-b border-[rgba(25,25,25,0.12)] py-4 last:border-b-0 sm:grid-cols-[2.5rem_1fr] sm:gap-4 sm:py-5 lg:py-6"
+                >
+                  <span
+                    aria-hidden="true"
                     className="pt-0.5 text-[0.6rem] font-medium tracking-[0.18em] text-[var(--sc-sun-deep)]"
                   >
                     {String(index + 1).padStart(2, "0")}
                   </span>
-                  <span className="text-[0.96rem] leading-[1.65] text-[var(--sc-black)] sm:text-[1rem]">
+                  <span className="text-[0.94rem] leading-[1.6] text-[var(--sc-black)] sm:text-[1rem] sm:leading-[1.65]">
                     {benefit}
                   </span>
-              </li>
-            ))}
-          </ul>
+                </li>
+              ))}
+            </ul>
 
-            <div className="mt-10 border-s-2 border-[var(--sc-sun)] ps-5 sm:mt-12 sm:ps-7">
-              <p className="max-w-[510px] text-pretty text-[1rem] font-medium leading-[1.62] text-[var(--sc-black)] sm:text-[1.06rem]">
+            <div className="mt-8 border-s-2 border-[var(--sc-sun)] ps-4 sm:mt-10 sm:ps-6 lg:mt-12 lg:ps-7">
+              <p className="max-w-[510px] text-pretty text-[0.96rem] font-medium leading-[1.6] text-[var(--sc-black)] sm:text-[1.04rem] lg:text-[1.06rem]">
                 {copy.statement}
               </p>
             </div>
 
-            <div className="mt-8 flex">
+            <div className="mt-7 flex sm:mt-8">
               <Link
                 href="/patient/guide"
-                className="group inline-flex min-h-13 items-center justify-center gap-4 bg-[var(--sc-sun)] px-7 py-3.5 text-center text-[0.72rem] font-semibold text-[var(--sc-black)] no-underline transition-colors hover:bg-[var(--sc-sun-2)] focus-visible:outline-[var(--sc-black)]"
+                className="group inline-flex min-h-13 w-full items-center justify-center gap-4 bg-[var(--sc-sun)] px-7 py-3.5 text-center text-[0.72rem] font-semibold text-[var(--sc-black)] no-underline transition-colors hover:bg-[var(--sc-sun-2)] focus-visible:outline-[var(--sc-black)] sm:w-auto"
               >
                 {copy.cta}
                 <ArrowUpRight

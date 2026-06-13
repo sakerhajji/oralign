@@ -60,6 +60,21 @@ export class AuthService {
       throw new ConflictException('Email already registered', 'EMAIL_EXISTS');
     }
 
+    // Phone is unique when present — blank/whitespace is normalised to
+    // null so the constraint never trips on an empty string.
+    const phone = signUpDto.phone?.trim() || null;
+    if (phone) {
+      const phoneTaken = await this.prisma.user.findUnique({
+        where: { phone },
+      });
+      if (phoneTaken) {
+        throw new ConflictException(
+          'Phone number already registered',
+          'PHONE_EXISTS',
+        );
+      }
+    }
+
     const hashedPassword = await bcrypt.hash(signUpDto.password, BCRYPT_COST);
     const code = this.generateOtp();
     const codeExpiry = new Date(Date.now() + VERIFICATION_CODE_TTL_MS);
@@ -69,7 +84,7 @@ export class AuthService {
         email: signUpDto.email,
         fullName: signUpDto.fullName,
         passwordHash: hashedPassword,
-        phone: signUpDto.phone,
+        phone,
         country: signUpDto.country,
         role: UserRole.dentist,
         emailVerificationCode: code,
@@ -95,6 +110,18 @@ export class AuthService {
       role: user.role,
     });
 
+    // Also email every admin / super-admin so they review & approve the
+    // new account even when they're not looking at the dashboard. The bell
+    // (above) is in-app; this is the out-of-band nudge. Fire-and-forget —
+    // a flaky SMTP relay must never break a sign-up.
+    void this.notifyAdminsOfPendingUser({
+      fullName: user.fullName,
+      email: user.email,
+      role: user.role,
+    }).catch(() => {
+      /* already logged inside the helper */
+    });
+
     const authToken = this.generateTokens(user.id, user.email, user.role);
 
     return {
@@ -110,6 +137,51 @@ export class AuthService {
       preferredLanguage: user.preferredLanguage ?? undefined,
       authToken,
     };
+  }
+
+  /**
+   * Email every active admin / super-admin that a new account is waiting
+   * for approval. Each recipient gets the message in their own
+   * `preferredLanguage` (resolved inside MailService from the `to`
+   * address). Sends are individually wrapped so one bad address can't
+   * abort the rest, and the whole helper is fire-and-forget at the call
+   * site so it never blocks or breaks sign-up.
+   */
+  private async notifyAdminsOfPendingUser(newUser: {
+    fullName: string;
+    email: string;
+    role: string;
+  }): Promise<void> {
+    const frontendUrl = (
+      process.env.FRONTEND_URL ?? 'https://oralign.com.tn'
+    ).replace(/\/$/, '');
+    const dashboardUrl = `${frontendUrl}/dashboard/users`;
+
+    const admins = await this.prisma.user.findMany({
+      where: {
+        role: { in: [UserRole.admin, UserRole.super_admin] },
+        deletedAt: null,
+        isActive: true,
+      },
+      select: { fullName: true, email: true },
+    });
+
+    await Promise.all(
+      admins.map((admin) =>
+        this.mailService
+          .sendNewUserPendingForAdminEmail({
+            to: admin.email,
+            adminName: admin.fullName,
+            newUserName: newUser.fullName,
+            newUserEmail: newUser.email,
+            role: newUser.role,
+            dashboardUrl,
+          })
+          .catch(() => {
+            /* already logged inside MailService */
+          }),
+      ),
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────────

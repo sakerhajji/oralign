@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import {
   renderApprovalGrantedEmail,
   renderNewOrderForAdminEmail,
+  renderNewUserPendingForAdminEmail,
   renderNewOrderForDoctorEmail,
   renderPasswordResetEmail,
   renderQuoteDecisionForAdminEmail,
@@ -146,6 +147,22 @@ export class MailService {
     lang?: Lang;
   }): Promise<void> {
     const { html, subject } = renderNewOrderForAdminEmail(
+      args,
+      args.lang ?? (await this.resolveLang(args.to)),
+    );
+    await this.send({ to: args.to, subject, html });
+  }
+
+  async sendNewUserPendingForAdminEmail(args: {
+    to: string;
+    adminName: string;
+    newUserName: string;
+    newUserEmail: string;
+    role: string;
+    dashboardUrl: string;
+    lang?: Lang;
+  }): Promise<void> {
+    const { html, subject } = renderNewUserPendingForAdminEmail(
       args,
       args.lang ?? (await this.resolveLang(args.to)),
     );

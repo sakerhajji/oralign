@@ -38,6 +38,19 @@ export class UserRepository {
     });
   }
 
+  /**
+   * Look up a user by their (unique) phone number. Used to enforce phone
+   * uniqueness on create/update with a clean error instead of letting a
+   * raw Prisma P2002 surface. Returns null for blank/undefined input.
+   */
+  async findByPhone(phone: string): Promise<UserWithProfile | null> {
+    if (!phone) return null;
+    return this.prisma.user.findUnique({
+      where: { phone },
+      include: this.withProfile,
+    });
+  }
+
   async findAll(
     skip: number,
     take: number,

@@ -112,12 +112,12 @@ export class NotificationsListener {
       await this.notifications.broadcastToAdmins({
         type: NotificationType.user_registered,
         title: {
-          en: 'New user registered',
-          fr: 'Nouvel utilisateur inscrit',
+          en: 'New account awaiting approval',
+          fr: 'Nouveau compte en attente d’approbation',
         },
         message: {
-          en: `${payload.fullName} (${payload.email}) just signed up as ${payload.role}.`,
-          fr: `${payload.fullName} (${payload.email}) vient de s'inscrire en tant que ${payload.role}.`,
+          en: `${payload.fullName} (${payload.email}) just signed up and is awaiting approval — please review and approve the account.`,
+          fr: `${payload.fullName} (${payload.email}) vient de s'inscrire et attend une approbation — veuillez vérifier et approuver le compte.`,
         },
         link: `/dashboard/users`,
         metadata: {

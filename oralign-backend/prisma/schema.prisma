@@ -233,7 +233,9 @@ model User {
   id                  String             @id @default(uuid())
   fullName            String
   email               String             @unique
-  phone               String?
+  // Unique when present. Postgres treats NULLs as distinct, so multiple
+  // users may still have NO phone — only a *set* phone must be unique.
+  phone               String?            @unique
   passwordHash        String
 
   role                UserRole           @default(dentist)

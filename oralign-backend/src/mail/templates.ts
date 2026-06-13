@@ -569,6 +569,88 @@ export function renderNewOrderForAdminEmail(
 }
 
 /**
+ * Sent to every admin / super-admin when a new account signs up and is
+ * waiting for human approval. Mirrors the new-order admin email so the
+ * team has one consistent "something needs your review" visual language.
+ */
+export function renderNewUserPendingForAdminEmail(
+  args: {
+    adminName: string;
+    newUserName: string;
+    newUserEmail: string;
+    role: string;
+    dashboardUrl: string;
+  },
+  lang: Lang,
+): { html: string; subject: string } {
+  // Friendly, localised role label. Sign-ups are dentists today, but we
+  // map defensively so a future role still renders cleanly.
+  const roleLabels: Record<string, { en: string; fr: string }> = {
+    dentist: { en: 'Dentist', fr: 'Praticien' },
+    admin: { en: 'Admin', fr: 'Administrateur' },
+    super_admin: { en: 'Super admin', fr: 'Super administrateur' },
+  };
+  const roleLabel = roleLabels[args.role]?.[lang] ?? args.role;
+
+  const TEXTS = {
+    en: {
+      subject: `New sign-up: ${args.newUserName} is awaiting approval`,
+      title: `New account awaiting approval`,
+      preheader: `${args.newUserName} (${args.newUserEmail}) just signed up and needs your review.`,
+      lead:
+        `A new account has just been created and is waiting for ` +
+        `approval. Review the details below, then approve or reject ` +
+        `the account from the dashboard.`,
+      labels: {
+        name: `Name`,
+        email: `Email`,
+        role: `Role`,
+        status: `Status`,
+      },
+      statusValue: `Pending — needs review & approval`,
+      button: `Review & approve`,
+    },
+    fr: {
+      subject: `Nouvelle inscription : ${args.newUserName} en attente d'approbation`,
+      title: `Nouveau compte en attente d'approbation`,
+      preheader: `${args.newUserName} (${args.newUserEmail}) vient de s'inscrire et attend votre validation.`,
+      lead:
+        `Un nouveau compte vient d'être créé et attend une ` +
+        `approbation. Vérifiez les informations ci-dessous, puis ` +
+        `approuvez ou rejetez le compte depuis le tableau de bord.`,
+      labels: {
+        name: `Nom`,
+        email: `Email`,
+        role: `Rôle`,
+        status: `Statut`,
+      },
+      statusValue: `En attente — vérification et approbation requises`,
+      button: `Vérifier et approuver`,
+    },
+  };
+  const t = TEXTS[lang];
+  return {
+    subject: t.subject,
+    html: shell({
+      lang,
+      title: t.title,
+      preheader: t.preheader,
+      body: `
+        ${greeting(escape(args.adminName), lang)}
+        ${lead(t.lead)}
+        ${metaTable([
+          { label: t.labels.name, value: escape(args.newUserName) },
+          { label: t.labels.email, value: escape(args.newUserEmail) },
+          { label: t.labels.role, value: roleLabel },
+          { label: t.labels.status, value: t.statusValue },
+        ])}
+        ${button(args.dashboardUrl, t.button)}
+      `,
+    }),
+  };
+}
+
+/**
  * Sent to the doctor when admin / designer marks the treatment plan as
  * READY for the doctor's review.
  */

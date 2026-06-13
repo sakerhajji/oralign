@@ -38,13 +38,19 @@ export class UserService {
       throw new ConflictException('Email already exists');
     }
 
+    // Phone is unique when present — blank input becomes null (no clash).
+    const phone = createUserDto.phone?.trim() || undefined;
+    if (phone && (await this.userRepository.findByPhone(phone))) {
+      throw new ConflictException('Phone number already exists');
+    }
+
     const hashedPassword = await bcrypt.hash(createUserDto.password, 12);
 
     const user = await this.userRepository.create({
       email: createUserDto.email,
       fullName: createUserDto.fullName,
       passwordHash: hashedPassword,
-      phone: createUserDto.phone,
+      phone,
       country: createUserDto.country,
       avatarUrl: createUserDto.avatarUrl,
     });
@@ -121,8 +127,20 @@ export class UserService {
     // Basic fields that both admins and users can update
     if (updateUserDto.fullName !== undefined)
       updateData.fullName = updateUserDto.fullName;
-    if (updateUserDto.phone !== undefined)
-      updateData.phone = updateUserDto.phone;
+    if (updateUserDto.phone !== undefined) {
+      // Normalise blank → null, and reject a number already held by a
+      // DIFFERENT user (phone is unique when present).
+      const phone = updateUserDto.phone.trim();
+      if (phone) {
+        const owner = await this.userRepository.findByPhone(phone);
+        if (owner && owner.id !== id) {
+          throw new ConflictException('Phone number already exists');
+        }
+        updateData.phone = phone;
+      } else {
+        updateData.phone = undefined;
+      }
+    }
     if (updateUserDto.country !== undefined)
       updateData.country = updateUserDto.country;
     if (updateUserDto.avatarUrl !== undefined)

@@ -121,13 +121,25 @@ export function ImageEditDialog({
   useEffect(() => {
     const el = canvasRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
+    // Seed synchronously — the observer's first async callback can lag a
+    // frame, and (critically) this effect only re-runs when the dialog
+    // (re)opens [dep: file]; with empty deps it ran once before the Radix
+    // dialog had mounted its content, so `canvasRef` was null, the observer
+    // never attached, `canvasSize` stayed null and the cropper deadlocked
+    // on a spinner. Re-attaching on open + seeding here fixes that.
+    const rect = el.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      setCanvasSize({ w: rect.width, h: rect.height });
+    }
     const ro = new ResizeObserver((entries) => {
       const cr = entries[0]?.contentRect;
-      if (cr) setCanvasSize({ w: cr.width, h: cr.height });
+      if (cr && cr.width > 0 && cr.height > 0) {
+        setCanvasSize({ w: cr.width, h: cr.height });
+      }
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [file]);
 
   // Decode the working image's natural size as soon as the blob URL is
   // set — INDEPENDENT of react-image-crop's <img> onLoad. This is the
@@ -456,44 +468,42 @@ export function ImageEditDialog({
               ) : cropMode ? (
                 // Crop mode — react-image-crop drives the selection.
                 //
-                // The image is given an EXPLICIT pixel size (`cropFit`)
-                // that contain-fits the editor canvas at zoom 1 and
-                // scales up from there. We render the cropper ONLY once
-                // `cropFit` is known (natural size decoded + canvas
-                // measured) — never with a CSS `maxHeight` fallback,
-                // because that has no effect inside react-image-crop's
-                // auto-height wrapper and would let a tall photo render
-                // at full natural size (clipped → looks zoomed). The
-                // brief spinner is imperceptible since natural size is
-                // pre-decoded the moment the blob is set.
+                // Sizing: when the canvas + natural size are measured we
+                // hand the cropper an EXPLICIT contain-fit px size
+                // (`cropFit`), which also lets the zoom slider scale up.
+                // BEFORE measurement (or if it never lands) we fall back to
+                // a VIEWPORT-relative cap (`maxHeight: 60vh`, `maxWidth:
+                // 100%`) — NOT `maxHeight: 100%`, which has no effect inside
+                // react-image-crop's auto-height wrapper and would let a
+                // tall photo render at full natural size (clipped → looks
+                // zoomed). The vh cap is independent of any parent, so the
+                // WHOLE image is always contained and the cropper never
+                // deadlocks on a spinner.
                 //
-                // react-image-crop reports its rectangle in the display
-                // pixels of this sized image, and `applyCrop` converts
-                // the PERCENT crop to natural-pixel coords — so a real
-                // canvas crop is produced, never a CSS-only zoom.
-                cropFit ? (
-                  <ReactCrop
-                    crop={crop}
-                    // Store the selection in PERCENT — resolution- and
-                    // zoom-independent, and exactly what `applyCrop`
-                    // converts to natural pixels.
-                    onChange={(_, percentCrop) => setCrop(percentCrop)}
-                    keepSelection
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      ref={imageRef}
-                      src={workingBlobUrl}
-                      alt="Crop preview"
-                      onLoad={handleImageLoad}
-                      draggable={false}
-                      className="block select-none"
-                      style={{ width: cropFit.width, height: cropFit.height }}
-                    />
-                  </ReactCrop>
-                ) : (
-                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                )
+                // Correctness is independent of display size: the crop is
+                // stored in PERCENT and `applyCrop` converts it to
+                // natural-pixel coords, so the saved file always matches
+                // the selection regardless of how the image is sized here.
+                <ReactCrop
+                  crop={crop}
+                  onChange={(_, percentCrop) => setCrop(percentCrop)}
+                  keepSelection
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    ref={imageRef}
+                    src={workingBlobUrl}
+                    alt="Crop preview"
+                    onLoad={handleImageLoad}
+                    draggable={false}
+                    className="block select-none"
+                    style={
+                      cropFit
+                        ? { width: cropFit.width, height: cropFit.height }
+                        : { maxWidth: '100%', maxHeight: '60vh' }
+                    }
+                  />
+                </ReactCrop>
               ) : (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img

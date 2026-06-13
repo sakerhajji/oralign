@@ -2353,16 +2353,9 @@ function ReviewStep({
             label="CBCT requested"
             value={form.useCbctWithScans ? 'Yes' : 'No'}
           />
-          <ReviewInfo
-            label="Manufacturing"
-            value={form.wantsManufacturing ? 'Requested' : 'Not requested'}
-          />
-          <ReviewInfo
-            label="Materials"
-            value={
-              (form.materials ?? []).filter(Boolean).join(', ') || 'Not set'
-            }
-          />
+          {/* Manufacturing + Materials removed from the order review per
+              the clinic's flow — those are decided downstream, not by the
+              doctor at order time. */}
           <ReviewInfo
             label="Order code"
             value={savedOrder?.orderCode ?? 'Draft not saved'}

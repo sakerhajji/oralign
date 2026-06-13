@@ -41,6 +41,14 @@ function invalidateAll(queryClient: ReturnType<typeof useQueryClient>) {
   queryClient.invalidateQueries({ queryKey: blogKeys.all });
 }
 
+/**
+ * Admin blog list. `params` is the full `BlogFilterParams` — including
+ * the v2 `audience` filter (patient | practitioner) and `status` — and
+ * `blogKeys.list(params)` keys on the whole object, so adding an
+ * audience/status filter refetches + caches independently with no
+ * extra wiring. Public reads + the view beacon are handled by the
+ * showcase pages directly (plain fetch), not through these hooks.
+ */
 export function useBlogPosts(
   params?: BlogFilterParams,
 ): UseQueryResult<PaginatedResponse<Blog>, Error> {

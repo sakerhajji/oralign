@@ -159,6 +159,16 @@ function isSupportedVideoUrl(url: string): boolean {
 export interface BlockBuilderProps {
   value: BlogBlock[];
   onChange: (next: BlogBlock[]) => void;
+  /**
+   * Optional namespace for the builder's file-input element ids. The
+   * bilingual editor mounts TWO builders (one per language tab) bound to
+   * `content.en` / `content.fr`; without a per-instance prefix the
+   * image-block `<input id>`s (`blog-block-image-0`) would collide
+   * between the two trees, so a label click on the FR tab could focus
+   * the EN tab's hidden file input. Defaults to a stable fallback so the
+   * single-instance / legacy call sites keep working unchanged.
+   */
+  idPrefix?: string;
 }
 
 /**
@@ -172,7 +182,11 @@ export interface BlockBuilderProps {
  * `verticalListSortingStrategy`, and `arrayMove` inside `handleDragEnd`.
  * Move-up / move-down buttons provide a keyboard-accessible fallback.
  */
-export function BlockBuilder({ value, onChange }: BlockBuilderProps) {
+export function BlockBuilder({
+  value,
+  onChange,
+  idPrefix = 'blog',
+}: BlockBuilderProps) {
   const { t } = useT();
 
   const sensors = useSensors(
@@ -244,7 +258,7 @@ export function BlockBuilder({ value, onChange }: BlockBuilderProps) {
                 <SortableBlockCard
                   key={block.id}
                   block={block}
-                  index={index}
+                  idPrefix={idPrefix}
                   isFirst={index === 0}
                   isLast={index === value.length - 1}
                   onChange={(next) => updateBlock(block.id, next)}
@@ -299,7 +313,7 @@ function AddBlockMenu({ onAdd }: { onAdd: (type: BlogBlockType) => void }) {
 
 function SortableBlockCard({
   block,
-  index,
+  idPrefix,
   isFirst,
   isLast,
   onChange,
@@ -308,7 +322,7 @@ function SortableBlockCard({
   onMoveDown,
 }: {
   block: BlogBlock;
-  index: number;
+  idPrefix: string;
   isFirst: boolean;
   isLast: boolean;
   onChange: (next: BlogBlock) => void;
@@ -388,7 +402,7 @@ function SortableBlockCard({
 
       {/* Body: per-type editor */}
       <div className="p-3">
-        <BlockEditor block={block} index={index} onChange={onChange} />
+        <BlockEditor block={block} idPrefix={idPrefix} onChange={onChange} />
       </div>
     </div>
   );
@@ -399,11 +413,11 @@ function SortableBlockCard({
 
 function BlockEditor({
   block,
-  index,
+  idPrefix,
   onChange,
 }: {
   block: BlogBlock;
-  index: number;
+  idPrefix: string;
   onChange: (next: BlogBlock) => void;
 }) {
   const { t } = useT();
@@ -465,7 +479,7 @@ function BlockEditor({
       return (
         <ImageBlockEditor
           block={block}
-          fieldKey={`image-${index}`}
+          fieldKey={`${idPrefix}-image-${block.id}`}
           onChange={onChange}
         />
       );

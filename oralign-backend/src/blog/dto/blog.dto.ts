@@ -1,17 +1,30 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
-import { BlogStatus } from '@prisma/client';
+import { BlogAudience, BlogStatus } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
   IsEnum,
   IsInt,
+  IsObject,
   IsOptional,
   IsString,
   MaxLength,
   Min,
-  MinLength,
+  ValidateNested,
 } from 'class-validator';
+
+// ─────────────────────────────────────────────────────────────────────
+// Localized<T> — the SHARED bilingual contract (identical on the
+// frontend). Every reader-facing text field is an { en, fr } bag so a
+// single post carries both languages and the client/CMS resolves one
+// at render time.
+// ─────────────────────────────────────────────────────────────────────
+
+export interface Localized<T> {
+  en: T;
+  fr: T;
+}
 
 // ─────────────────────────────────────────────────────────────────────
 // Content blocks — the SHARED blog contract (identical on the frontend)
@@ -123,6 +136,15 @@ export type BlogBlock =
 export const BLOG_MAX_BLOCKS = 200;
 export const BLOG_MAX_GALLERY_IMAGES = 24;
 
+// Per-language content payload. Each language holds its own permissive
+// BlogBlock[] (validated/sanitized server-side in BlogService). Kept as
+// Record<string, unknown>[] on the wire for the same reason as v1 — see
+// the validation-strategy note above.
+export interface LocalizedContent {
+  en: BlogBlock[];
+  fr: BlogBlock[];
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Coercion helpers (mirrors the pattern used by the other filter DTOs)
 // ─────────────────────────────────────────────────────────────────────
@@ -140,21 +162,75 @@ const coerceBool = ({ value }: { value: unknown }): boolean | unknown => {
 };
 
 // ─────────────────────────────────────────────────────────────────────
+// Localized nested DTOs
+// ─────────────────────────────────────────────────────────────────────
+//
+// A Localized<string> field arrives as `{ en?, fr? }`. Both languages
+// are optional at the wire level — the service fills the missing one
+// (derives an excerpt, mirrors a blank language, etc.) and, for `title`,
+// enforces that at least one language is non-empty. We validate the
+// nested shape (object with optional string en/fr) and trim each value;
+// the ValidationPipe's whitelist strips any other key.
+
+export class LocalizedTextDto {
+  @ApiPropertyOptional({ description: 'English text.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  @Transform(({ value }) => normalizeOptionalString(value))
+  en?: string;
+
+  @ApiPropertyOptional({ description: 'French text.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  @Transform(({ value }) => normalizeOptionalString(value))
+  fr?: string;
+}
+
+export class LocalizedKeywordsDto {
+  @ApiPropertyOptional({ type: [String], description: 'English keywords.' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(30)
+  @IsString({ each: true })
+  en?: string[];
+
+  @ApiPropertyOptional({ type: [String], description: 'French keywords.' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(30)
+  @IsString({ each: true })
+  fr?: string[];
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Request DTOs
 // ─────────────────────────────────────────────────────────────────────
 
 export class CreateBlogDto {
-  @ApiProperty({ example: 'Why aligners beat brackets in 2026' })
-  @IsString()
-  @MinLength(1)
-  @MaxLength(200)
-  @Transform(({ value }) => normalizeOptionalString(value))
-  title!: string;
+  @ApiProperty({
+    enum: BlogAudience,
+    description: 'Which showcase surface the post targets.',
+  })
+  @IsEnum(BlogAudience)
+  audience!: BlogAudience;
+
+  @ApiProperty({
+    type: () => LocalizedTextDto,
+    description:
+      'Bilingual title { en?, fr? }. The service requires at least one ' +
+      'language non-empty and derives the slug from (fr || en).',
+  })
+  @IsObject()
+  @ValidateNested()
+  @Type(() => LocalizedTextDto)
+  title!: LocalizedTextDto;
 
   @ApiPropertyOptional({
     description:
-      'Optional URL slug. Derived from the title when omitted; ' +
-      'normalised + made unique by the service either way.',
+      'Optional URL slug. Derived from (title.fr || title.en) when ' +
+      'omitted; normalised + made unique by the service either way.',
   })
   @IsOptional()
   @IsString()
@@ -162,23 +238,27 @@ export class CreateBlogDto {
   @Transform(({ value }) => normalizeOptionalString(value))
   slug?: string;
 
-  @ApiPropertyOptional({ description: 'Card/SEO summary; derived when blank.' })
-  @IsOptional()
-  @IsString()
-  @MaxLength(500)
-  @Transform(({ value }) => normalizeOptionalString(value))
-  excerpt?: string;
-
   @ApiPropertyOptional({
-    type: 'array',
-    description:
-      'Ordered BlogBlock[] (heading/paragraph/image/gallery/video/' +
-      'quote/cta/divider). Validated + sanitized server-side.',
+    type: () => LocalizedTextDto,
+    description: 'Bilingual card/SEO summary; derived per language when blank.',
   })
   @IsOptional()
-  @IsArray()
-  @ArrayMaxSize(BLOG_MAX_BLOCKS)
-  content?: Record<string, unknown>[];
+  @IsObject()
+  @ValidateNested()
+  @Type(() => LocalizedTextDto)
+  excerpt?: LocalizedTextDto;
+
+  @ApiPropertyOptional({
+    type: 'object',
+    additionalProperties: true,
+    description:
+      'Per-language content { en: BlogBlock[]; fr: BlogBlock[] }. Each ' +
+      'block array (heading/paragraph/image/gallery/video/quote/cta/' +
+      'divider) is validated + sanitized server-side.',
+  })
+  @IsOptional()
+  @IsObject()
+  content?: { en?: Record<string, unknown>[]; fr?: Record<string, unknown>[] };
 
   @ApiPropertyOptional({ description: 'BlogImage id used as the cover.' })
   @IsOptional()
@@ -186,12 +266,15 @@ export class CreateBlogDto {
   @Transform(({ value }) => normalizeOptionalString(value))
   coverImageId?: string;
 
-  @ApiPropertyOptional({ description: 'Alt text override for the cover.' })
+  @ApiPropertyOptional({
+    type: () => LocalizedTextDto,
+    description: 'Bilingual alt text override for the cover.',
+  })
   @IsOptional()
-  @IsString()
-  @MaxLength(300)
-  @Transform(({ value }) => normalizeOptionalString(value))
-  coverImageAlt?: string;
+  @IsObject()
+  @ValidateNested()
+  @Type(() => LocalizedTextDto)
+  coverImageAlt?: LocalizedTextDto;
 
   @ApiPropertyOptional({ example: 'Orthodontics' })
   @IsOptional()
@@ -205,26 +288,35 @@ export class CreateBlogDto {
   @IsEnum(BlogStatus)
   status?: BlogStatus;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    type: () => LocalizedTextDto,
+    description: 'Bilingual SEO title override.',
+  })
   @IsOptional()
-  @IsString()
-  @MaxLength(200)
-  @Transform(({ value }) => normalizeOptionalString(value))
-  seoTitle?: string;
+  @IsObject()
+  @ValidateNested()
+  @Type(() => LocalizedTextDto)
+  seoTitle?: LocalizedTextDto;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    type: () => LocalizedTextDto,
+    description: 'Bilingual SEO description override.',
+  })
   @IsOptional()
-  @IsString()
-  @MaxLength(500)
-  @Transform(({ value }) => normalizeOptionalString(value))
-  seoDescription?: string;
+  @IsObject()
+  @ValidateNested()
+  @Type(() => LocalizedTextDto)
+  seoDescription?: LocalizedTextDto;
 
-  @ApiPropertyOptional({ type: [String] })
+  @ApiPropertyOptional({
+    type: () => LocalizedKeywordsDto,
+    description: 'Bilingual SEO keyword lists { en?: string[]; fr?: string[] }.',
+  })
   @IsOptional()
-  @IsArray()
-  @ArrayMaxSize(30)
-  @IsString({ each: true })
-  seoKeywords?: string[];
+  @IsObject()
+  @ValidateNested()
+  @Type(() => LocalizedKeywordsDto)
+  seoKeywords?: LocalizedKeywordsDto;
 }
 
 // Every field optional — the service patches only what's present and
@@ -256,6 +348,14 @@ export class BlogFilterDto {
   @IsOptional()
   @IsEnum(BlogStatus)
   status?: BlogStatus;
+
+  @ApiPropertyOptional({
+    enum: BlogAudience,
+    description: 'Narrow to one showcase surface (patient | practitioner).',
+  })
+  @IsOptional()
+  @IsEnum(BlogAudience)
+  audience?: BlogAudience;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -322,11 +422,25 @@ export class BlogSummaryDto {
   @ApiProperty()
   slug!: string;
 
-  @ApiProperty()
-  title!: string;
+  @ApiProperty({ enum: BlogAudience })
+  audience!: BlogAudience;
 
-  @ApiPropertyOptional()
-  excerpt?: string | null;
+  @ApiProperty({ description: 'Lifetime public view count.' })
+  views!: number;
+
+  @ApiProperty({
+    type: 'object',
+    description: 'Bilingual title { en, fr }.',
+    additionalProperties: { type: 'string' },
+  })
+  title!: Localized<string>;
+
+  @ApiProperty({
+    type: 'object',
+    description: 'Bilingual excerpt { en, fr } (derived per language).',
+    additionalProperties: { type: 'string' },
+  })
+  excerpt!: Localized<string>;
 
   @ApiPropertyOptional()
   category?: string | null;
@@ -340,31 +454,55 @@ export class BlogSummaryDto {
   @ApiPropertyOptional()
   publishedAt?: Date | null;
 
-  @ApiProperty({ description: 'Estimated reading time in minutes.' })
-  readingTime!: number;
+  @ApiProperty({
+    type: 'object',
+    description: 'Per-language reading time in minutes { en, fr }.',
+    additionalProperties: { type: 'number' },
+  })
+  readingTime!: Localized<number>;
 
   @ApiPropertyOptional({ type: () => BlogImageDto, nullable: true })
   cover!: BlogImageDto | null;
 
-  @ApiPropertyOptional()
-  coverImageAlt?: string | null;
+  @ApiProperty({
+    type: 'object',
+    description: 'Bilingual cover alt text { en, fr }.',
+    additionalProperties: { type: 'string' },
+  })
+  coverImageAlt!: Localized<string>;
 }
 
 export class BlogDto extends BlogSummaryDto {
   @ApiPropertyOptional()
   coverImageId?: string | null;
 
-  @ApiProperty({ type: 'array', description: 'BlogBlock[]' })
-  content!: BlogBlock[];
+  @ApiProperty({
+    type: 'object',
+    additionalProperties: true,
+    description: 'Per-language content { en: BlogBlock[]; fr: BlogBlock[] }.',
+  })
+  content!: LocalizedContent;
 
-  @ApiPropertyOptional()
-  seoTitle?: string | null;
+  @ApiProperty({
+    type: 'object',
+    description: 'Bilingual SEO title { en, fr }.',
+    additionalProperties: { type: 'string' },
+  })
+  seoTitle!: Localized<string>;
 
-  @ApiPropertyOptional()
-  seoDescription?: string | null;
+  @ApiProperty({
+    type: 'object',
+    description: 'Bilingual SEO description { en, fr }.',
+    additionalProperties: { type: 'string' },
+  })
+  seoDescription!: Localized<string>;
 
-  @ApiProperty({ type: [String] })
-  seoKeywords!: string[];
+  @ApiProperty({
+    type: 'object',
+    additionalProperties: { type: 'array', items: { type: 'string' } },
+    description: 'Bilingual SEO keyword lists { en: string[]; fr: string[] }.',
+  })
+  seoKeywords!: Localized<string[]>;
 
   @ApiProperty()
   createdAt!: Date;
@@ -378,21 +516,35 @@ export class BlogDto extends BlogSummaryDto {
 
 export class BlogDetailDto extends BlogSummaryDto {
   @ApiProperty({
-    type: 'array',
+    type: 'object',
+    additionalProperties: true,
     description:
-      'BlogBlock[] with image/gallery urls rewritten to the best ready ' +
-      '(lg) variant when available.',
+      'Per-language content { en: BlogBlock[]; fr: BlogBlock[] } with ' +
+      'image/gallery urls rewritten to the best ready (lg) variant when ' +
+      'available — in BOTH languages.',
   })
-  content!: BlogBlock[];
+  content!: LocalizedContent;
 
-  @ApiPropertyOptional()
-  seoTitle?: string | null;
+  @ApiProperty({
+    type: 'object',
+    description: 'Bilingual SEO title { en, fr }.',
+    additionalProperties: { type: 'string' },
+  })
+  seoTitle!: Localized<string>;
 
-  @ApiPropertyOptional()
-  seoDescription?: string | null;
+  @ApiProperty({
+    type: 'object',
+    description: 'Bilingual SEO description { en, fr }.',
+    additionalProperties: { type: 'string' },
+  })
+  seoDescription!: Localized<string>;
 
-  @ApiProperty({ type: [String] })
-  seoKeywords!: string[];
+  @ApiProperty({
+    type: 'object',
+    additionalProperties: { type: 'array', items: { type: 'string' } },
+    description: 'Bilingual SEO keyword lists { en: string[]; fr: string[] }.',
+  })
+  seoKeywords!: Localized<string[]>;
 
   @ApiProperty({ type: () => [BlogSummaryDto], description: 'Up to 3 related posts.' })
   related!: BlogSummaryDto[];

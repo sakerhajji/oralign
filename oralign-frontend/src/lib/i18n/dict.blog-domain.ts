@@ -51,6 +51,48 @@ export const blogDomainDict = {
       removeCover: { en: 'Remove cover', fr: 'Supprimer la couverture' } as T,
       uploadImage: { en: 'Upload image', fr: 'Téléverser une image' } as T,
       addImage: { en: 'Add image', fr: 'Ajouter une image' } as T,
+      // ── v2: open the published post on the public showcase ──
+      viewOnSite: { en: 'View on site', fr: 'Voir sur le site' } as T,
+    },
+
+    // ─── v2: audience (which showcase surface a post targets) ────────
+    // Wire values are 'patient' | 'practitioner' (BlogAudience). The
+    // form binds a required select; the list shows an "all audiences"
+    // option to clear the filter.
+    audience: {
+      label: { en: 'Audience', fr: 'Audience' } as T,
+      help: {
+        en: 'Choose which public blog this article appears on — the patient site or the practitioner site.',
+        fr: 'Choisissez sur quel blog public cet article apparaît — le site patient ou le site praticien.',
+      } as T,
+      placeholder: { en: 'Select an audience…', fr: 'Sélectionnez une audience…' } as T,
+      options: {
+        patient: { en: 'Patient', fr: 'Patient' } as T,
+        practitioner: { en: 'Practitioner', fr: 'Praticien' } as T,
+      },
+      // Filter-strip "no audience filter" option (admin list).
+      all: { en: 'All audiences', fr: 'Toutes les audiences' } as T,
+    },
+
+    // ─── v2: language tabs (the editor edits EN + FR side by side) ───
+    // Each bilingual text field is edited per language; these label the
+    // language switcher tabs inside the editor.
+    languageTabs: {
+      en: { en: 'English', fr: 'Anglais' } as T,
+      fr: { en: 'French', fr: 'Français' } as T,
+      // Shown near the language tabs to explain what they do.
+      contentLanguageHint: {
+        en: 'Each article carries both languages. Switch tabs to edit the English and French versions.',
+        fr: 'Chaque article comporte les deux langues. Changez d’onglet pour modifier les versions anglaise et française.',
+      } as T,
+      // Small per-field reminder of which language is being edited.
+      editingInEn: { en: 'Editing English', fr: 'Modification en anglais' } as T,
+      editingInFr: { en: 'Editing French', fr: 'Modification en français' } as T,
+      // Inline badge when a language has no copy yet.
+      emptyLanguage: {
+        en: 'No content in this language yet.',
+        fr: 'Aucun contenu dans cette langue pour l’instant.',
+      } as T,
     },
 
     // ─── Dialog titles ──────────────────────────────────────────────
@@ -134,6 +176,23 @@ export const blogDomainDict = {
         en: 'Separate each keyword with a comma.',
         fr: 'Séparez chaque mot-clé par une virgule.',
       } as T,
+      // ── v2: per-language field hints ──
+      titleHelpPerLang: {
+        en: 'Enter the title for the selected language. At least one language is required.',
+        fr: 'Saisissez le titre pour la langue sélectionnée. Au moins une langue est requise.',
+      } as T,
+      excerptHelpPerLang: {
+        en: 'Per-language summary. Leave a language blank to auto-generate it from that language’s first paragraph.',
+        fr: 'Résumé par langue. Laissez une langue vide pour le générer automatiquement à partir du premier paragraphe de cette langue.',
+      } as T,
+      contentHelpPerLang: {
+        en: 'Content is per language. The block layout of English and French are independent.',
+        fr: 'Le contenu est par langue. La mise en page des blocs en anglais et en français est indépendante.',
+      } as T,
+      seoHelpPerLang: {
+        en: 'SEO fields are per language and fall back to the title/excerpt of the same language when blank.',
+        fr: 'Les champs SEO sont par langue et utilisent par défaut le titre/extrait de la même langue lorsqu’ils sont vides.',
+      } as T,
     },
 
     // ─── Status tabs (filter strip) ─────────────────────────────────
@@ -142,6 +201,14 @@ export const blogDomainDict = {
       draft: { en: 'Drafts', fr: 'Brouillons' } as T,
       published: { en: 'Published', fr: 'Publiés' } as T,
       archived: { en: 'Archived', fr: 'Archivés' } as T,
+    },
+
+    // ─── v2: audience filter strip (admin list) ─────────────────────
+    audienceFilter: {
+      label: { en: 'Audience', fr: 'Audience' } as T,
+      all: { en: 'All audiences', fr: 'Toutes les audiences' } as T,
+      patient: { en: 'Patient', fr: 'Patient' } as T,
+      practitioner: { en: 'Practitioner', fr: 'Praticien' } as T,
     },
 
     // ─── Status badges (single row badge) ───────────────────────────
@@ -154,12 +221,26 @@ export const blogDomainDict = {
     // ─── Table column headers ───────────────────────────────────────
     columns: {
       title: { en: 'Title', fr: 'Titre' } as T,
+      audience: { en: 'Audience', fr: 'Audience' } as T,
       category: { en: 'Category', fr: 'Catégorie' } as T,
       author: { en: 'Author', fr: 'Auteur' } as T,
       status: { en: 'Status', fr: 'Statut' } as T,
       publishedAt: { en: 'Published', fr: 'Publié le' } as T,
       readingTime: { en: 'Reading time', fr: 'Temps de lecture' } as T,
+      views: { en: 'Views', fr: 'Vues' } as T,
       actions: { en: 'Actions', fr: 'Actions' } as T,
+    },
+
+    // ─── v2: views ──────────────────────────────────────────────────
+    // `viewsCount` is a {count}-interpolated form for "N views" labels;
+    // `viewsHelp` explains the counter in the editor/detail panel.
+    views: {
+      label: { en: 'Views', fr: 'Vues' } as T,
+      viewsCount: { en: '{count} views', fr: '{count} vues' } as T,
+      help: {
+        en: 'Total times this published article has been opened on the public site.',
+        fr: 'Nombre total d’ouvertures de cet article publié sur le site public.',
+      } as T,
     },
 
     // ─── Block-type picker + builder labels ─────────────────────────
@@ -279,6 +360,31 @@ export const blogDomainDict = {
       en: '{count} min read',
       fr: '{count} min de lecture',
     } as T,
+
+    // ─── v2: "view on site" affordance (published posts only) ───────
+    viewOnSite: {
+      label: { en: 'View on site', fr: 'Voir sur le site' } as T,
+      tooltip: {
+        en: 'Open this published article on the public showcase in a new tab.',
+        fr: 'Ouvrir cet article publié sur le site vitrine dans un nouvel onglet.',
+      } as T,
+      disabledTooltip: {
+        en: 'Publish the article first to view it on the public site.',
+        fr: 'Publiez d’abord l’article pour le voir sur le site public.',
+      } as T,
+    },
+
+    // ─── v2: client-side validation messages ────────────────────────
+    validation: {
+      audienceRequired: {
+        en: 'Select an audience.',
+        fr: 'Sélectionnez une audience.',
+      } as T,
+      titleRequired: {
+        en: 'Enter a title in at least one language.',
+        fr: 'Saisissez un titre dans au moins une langue.',
+      } as T,
+    },
 
     // ─── Delete confirmation ────────────────────────────────────────
     deleteConfirm: {

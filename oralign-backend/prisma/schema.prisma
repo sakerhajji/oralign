@@ -1495,6 +1495,15 @@ enum BlogStatus {
   archived
 }
 
+// Which showcase audience a post targets. The public showcase has two
+// distinct surfaces (a patient-facing blog and a practitioner-facing
+// blog); a post belongs to exactly one. The frontend enum carries
+// identical lowercase string values.
+enum BlogAudience {
+  patient
+  practitioner
+}
+
 // One image in the blog media library. Uploaded via the admin image
 // endpoint; the async media pipeline ('blog-image' job) fills width/
 // height + resized `variants`. `url` is ALWAYS a relative
@@ -1550,23 +1559,40 @@ model BlogImage {
 model Blog {
   id             String      @id @default(uuid())
 
-  title          String
-  // URL slug — unique across all posts. Derived from the title when the
-  // admin doesn't supply one; collisions get a -2/-3/… suffix.
+  // ── Bilingual content (v2) ───────────────────────────────────────
+  // Every reader-facing text field is a Localized<T> JSON bag —
+  // `{ en, fr }` — so a single post carries both languages and the
+  // client/CMS picks one at render time. The service enforces that at
+  // least one language of `title` is non-empty on create; the read
+  // mappers defensively coerce a legacy plain string `s` → `{en:s,fr:s}`.
+  title          Json        // Localized<string>
+  // URL slug — unique across all posts. Derived from (title.fr ||
+  // title.en) when the admin doesn't supply one; collisions get a
+  // -2/-3/… suffix.
   slug           String      @unique
-  // Short summary for cards + SEO description fallback. Derived from the
-  // first paragraph block when blank.
-  excerpt        String?
+  // Short summary for cards + SEO description fallback. Per language;
+  // a blank language is derived from that language's first paragraph.
+  excerpt        Json?       // Localized<string>
 
-  // Ordered array of typed content blocks (see BlogBlock in the DTOs).
-  content        Json?
+  // Per-language ordered arrays of typed content blocks (see BlogBlock
+  // in the DTOs): { en: BlogBlock[]; fr: BlogBlock[] }. Image/gallery
+  // blocks in BOTH languages may reference the same shared BlogImage.
+  content        Json?       // { en: BlogBlock[]; fr: BlogBlock[] }
+
+  // Which showcase surface this post targets (patient vs practitioner).
+  // Required on create; defaults keep legacy/partial rows valid.
+  audience       BlogAudience @default(practitioner)
+
+  // Lifetime public view count — best-effort incremented on each public
+  // detail render via POST /blog/:slug/view.
+  views          Int          @default(0)
 
   // Optional cover image (from the BlogImage library). SetNull so
   // deleting the image doesn't take the post down — it just loses its
-  // cover.
+  // cover. Images are shared across both languages.
   coverImageId   String?
   coverImage     BlogImage?  @relation("BlogCover", fields: [coverImageId], references: [id], onDelete: SetNull)
-  coverImageAlt  String?
+  coverImageAlt  Json?       // Localized<string>
 
   // Free-text category used by the showcase filter + "related posts".
   category       String?
@@ -1579,13 +1605,13 @@ model Blog {
 
   status         BlogStatus  @default(draft)
 
-  // SEO overrides — fall back to title/excerpt when blank.
-  seoTitle       String?
-  seoDescription String?
-  seoKeywords    String[]    @default([])
+  // SEO overrides — per language; fall back to title/excerpt when blank.
+  seoTitle       Json?       // Localized<string>
+  seoDescription Json?       // Localized<string>
+  seoKeywords    Json?       // Localized<string[]>
 
-  // Derived: ceil(words / 200), min 1.
-  readingTime    Int?
+  // Derived per language: ceil(words / 200), min 1.
+  readingTime    Json?       // Localized<number>
 
   // Set once when the post first becomes `published`; left intact
   // thereafter so the public ordering (newest published first) is
@@ -1597,13 +1623,15 @@ model Blog {
   deletedAt      DateTime?
 
   // Hot paths:
-  //   • public list: status=published AND deletedAt IS NULL, newest
-  //     publishedAt first (covered by the composite index).
+  //   • public list: audience=X AND status=published AND deletedAt IS
+  //     NULL, newest publishedAt first (covered by the composite index).
   //   • slug lookup, category filter, author filter, soft-delete scan.
-  @@index([status, deletedAt, publishedAt(sort: Desc)])
+  //   • admin status-narrowed list (kept from v1).
+  @@index([audience, status, deletedAt, publishedAt(sort: Desc)])
   @@index([slug])
   @@index([category])
   @@index([authorId])
   @@index([deletedAt])
+  @@index([status, deletedAt, publishedAt(sort: Desc)])
 }
 

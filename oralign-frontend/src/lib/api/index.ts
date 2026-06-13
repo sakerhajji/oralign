@@ -11,5 +11,10 @@ export { paymentsService } from './payments.service';
 export { invoicesService } from './invoices.service';
 export { notificationsService } from './notifications.service';
 export { reportsService } from './reports.service';
-export { blogService, resolveBlogMediaUrl } from './blog.service';
+export {
+  blogService,
+  resolveBlogMediaUrl,
+  pickLocalized,
+  blogShowcaseUrl,
+} from './blog.service';
 export { default as apiClient, getAccessToken, getRefreshToken, setTokens, clearTokens } from './client';

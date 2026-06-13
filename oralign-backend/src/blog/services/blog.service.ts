@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { Blog, BlogImage, BlogStatus, Prisma } from '@prisma/client';
+import { Blog, BlogAudience, BlogImage, BlogStatus, Prisma } from '@prisma/client';
 import {
   BadRequestException,
   NotFoundException,
@@ -20,12 +20,17 @@ import {
   BlogImageDto,
   BlogSummaryDto,
   CreateBlogDto,
+  Localized,
+  LocalizedContent,
   UpdateBlogDto,
 } from '../dto/blog.dto';
 import { slugify } from '../utils/slug.util';
 
 const WORDS_PER_MINUTE = 200;
 const EXCERPT_MAX_CHARS = 160;
+
+/** The two languages every Localized<T> bag carries. */
+const LANGS = ['en', 'fr'] as const;
 
 @Injectable()
 export class BlogService {
@@ -46,12 +51,12 @@ export class BlogService {
     const where: Prisma.BlogWhereInput = {};
     if (!filters.includeDeleted) where.deletedAt = null;
     if (filters.status) where.status = filters.status;
+    if (filters.audience) where.audience = filters.audience;
     if (filters.category) where.category = filters.category;
     if (filters.search) {
-      where.OR = [
-        { title: { contains: filters.search, mode: 'insensitive' } },
-        { excerpt: { contains: filters.search, mode: 'insensitive' } },
-      ];
+      // title/excerpt are JSON bags — match the search term inside either
+      // language's value with a case-insensitive JSON path filter.
+      where.OR = this.searchClauses(filters.search);
     }
 
     const sortBy = filters.sortBy ?? 'createdAt';
@@ -95,8 +100,18 @@ export class BlogService {
   // ── Admin: create / update / delete ─────────────────────────────────
 
   async create(dto: CreateBlogDto, authorId: string): Promise<BlogDto> {
-    const content = this.sanitizeContent(dto.content);
-    const slug = await this.resolveUniqueSlug(dto.slug ?? dto.title);
+    const title = this.normalizeLocalizedText(dto.title);
+    if (!title.en.trim() && !title.fr.trim()) {
+      throw new BadRequestException(
+        'A blog title is required in at least one language.',
+      );
+    }
+
+    const content = this.sanitizeLocalizedContent(dto.content);
+    // Slug from the French title first (showcase default locale), then EN.
+    const slug = await this.resolveUniqueSlug(
+      dto.slug ?? title.fr ?? title.en,
+    );
     const status = dto.status ?? BlogStatus.draft;
 
     // Snapshot the author's display name so the byline survives the
@@ -113,20 +128,34 @@ export class BlogService {
 
     const row = await this.prisma.blog.create({
       data: {
-        title: dto.title,
+        audience: dto.audience,
+        title: title as unknown as Prisma.InputJsonValue,
         slug,
-        excerpt: this.resolveExcerpt(dto.excerpt, content),
+        excerpt: this.resolveExcerpt(
+          dto.excerpt,
+          content,
+        ) as unknown as Prisma.InputJsonValue,
         content: content as unknown as Prisma.InputJsonValue,
         coverImageId: dto.coverImageId ?? null,
-        coverImageAlt: dto.coverImageAlt ?? null,
+        coverImageAlt: this.normalizeLocalizedText(
+          dto.coverImageAlt,
+        ) as unknown as Prisma.InputJsonValue,
         category: dto.category ?? null,
         authorId,
         authorName,
         status,
-        seoTitle: dto.seoTitle ?? null,
-        seoDescription: dto.seoDescription ?? null,
-        seoKeywords: dto.seoKeywords ?? [],
-        readingTime: this.computeReadingTime(content),
+        seoTitle: this.normalizeLocalizedText(
+          dto.seoTitle,
+        ) as unknown as Prisma.InputJsonValue,
+        seoDescription: this.normalizeLocalizedText(
+          dto.seoDescription,
+        ) as unknown as Prisma.InputJsonValue,
+        seoKeywords: this.normalizeLocalizedKeywords(
+          dto.seoKeywords,
+        ) as unknown as Prisma.InputJsonValue,
+        readingTime: this.computeReadingTime(
+          content,
+        ) as unknown as Prisma.InputJsonValue,
         publishedAt: status === BlogStatus.published ? new Date() : null,
       },
       include: { coverImage: true },
@@ -144,7 +173,17 @@ export class BlogService {
 
     const data: Prisma.BlogUpdateInput = {};
 
-    if (dto.title !== undefined) data.title = dto.title;
+    if (dto.audience !== undefined) data.audience = dto.audience;
+
+    if (dto.title !== undefined) {
+      const title = this.normalizeLocalizedText(dto.title);
+      if (!title.en.trim() && !title.fr.trim()) {
+        throw new BadRequestException(
+          'A blog title is required in at least one language.',
+        );
+      }
+      data.title = title as unknown as Prisma.InputJsonValue;
+    }
 
     // Slug: an explicit slug is normalised + made unique; if only the
     // title changed we leave the slug alone (renaming a URL silently
@@ -155,18 +194,24 @@ export class BlogService {
 
     // Content drives both excerpt + reading-time derivations, so resolve
     // it first when present.
-    let nextContent: BlogBlock[] | undefined;
+    let nextContent: LocalizedContent | undefined;
     if (dto.content !== undefined) {
-      nextContent = this.sanitizeContent(dto.content);
+      nextContent = this.sanitizeLocalizedContent(dto.content);
       data.content = nextContent as unknown as Prisma.InputJsonValue;
-      data.readingTime = this.computeReadingTime(nextContent);
+      data.readingTime = this.computeReadingTime(
+        nextContent,
+      ) as unknown as Prisma.InputJsonValue;
     }
 
     if (dto.excerpt !== undefined) {
-      // Re-derive from the (new or existing) content when cleared.
+      // Re-derive per language from the (new or existing) content when a
+      // language's excerpt is cleared.
       const contentForExcerpt =
-        nextContent ?? this.asBlocks(current.content);
-      data.excerpt = this.resolveExcerpt(dto.excerpt, contentForExcerpt);
+        nextContent ?? this.asLocalizedContent(current.content);
+      data.excerpt = this.resolveExcerpt(
+        dto.excerpt,
+        contentForExcerpt,
+      ) as unknown as Prisma.InputJsonValue;
     }
 
     if (dto.coverImageId !== undefined) {
@@ -176,14 +221,26 @@ export class BlogService {
         : { disconnect: true };
     }
     if (dto.coverImageAlt !== undefined) {
-      data.coverImageAlt = dto.coverImageAlt ?? null;
+      data.coverImageAlt = this.normalizeLocalizedText(
+        dto.coverImageAlt,
+      ) as unknown as Prisma.InputJsonValue;
     }
     if (dto.category !== undefined) data.category = dto.category ?? null;
-    if (dto.seoTitle !== undefined) data.seoTitle = dto.seoTitle ?? null;
-    if (dto.seoDescription !== undefined) {
-      data.seoDescription = dto.seoDescription ?? null;
+    if (dto.seoTitle !== undefined) {
+      data.seoTitle = this.normalizeLocalizedText(
+        dto.seoTitle,
+      ) as unknown as Prisma.InputJsonValue;
     }
-    if (dto.seoKeywords !== undefined) data.seoKeywords = dto.seoKeywords;
+    if (dto.seoDescription !== undefined) {
+      data.seoDescription = this.normalizeLocalizedText(
+        dto.seoDescription,
+      ) as unknown as Prisma.InputJsonValue;
+    }
+    if (dto.seoKeywords !== undefined) {
+      data.seoKeywords = this.normalizeLocalizedKeywords(
+        dto.seoKeywords,
+      ) as unknown as Prisma.InputJsonValue;
+    }
 
     // Status transitions go through the dedicated methods, but allow a
     // direct status patch too — set publishedAt the first time it
@@ -273,12 +330,10 @@ export class BlogService {
       status: BlogStatus.published,
       deletedAt: null,
     };
+    if (filters.audience) where.audience = filters.audience;
     if (filters.category) where.category = filters.category;
     if (filters.search) {
-      where.OR = [
-        { title: { contains: filters.search, mode: 'insensitive' } },
-        { excerpt: { contains: filters.search, mode: 'insensitive' } },
-      ];
+      where.OR = this.searchClauses(filters.search);
     }
 
     const [rows, total] = await Promise.all([
@@ -302,12 +357,13 @@ export class BlogService {
     );
   }
 
-  async listCategories(): Promise<string[]> {
+  async listCategories(audience?: BlogAudience): Promise<string[]> {
     const rows = await this.prisma.blog.findMany({
       where: {
         status: BlogStatus.published,
         deletedAt: null,
         category: { not: null },
+        ...(audience ? { audience } : {}),
       },
       select: { category: true },
       distinct: ['category'],
@@ -318,7 +374,10 @@ export class BlogService {
       .filter((c): c is string => !!c && c.trim() !== '');
   }
 
-  async getPublicBySlug(slug: string): Promise<BlogDetailDto> {
+  async getPublicBySlug(
+    slug: string,
+    audience?: BlogAudience,
+  ): Promise<BlogDetailDto> {
     const row = await this.prisma.blog.findUnique({
       where: { slug },
       include: { coverImage: true },
@@ -326,19 +385,23 @@ export class BlogService {
     if (
       !row ||
       row.deletedAt ||
-      row.status !== BlogStatus.published
+      row.status !== BlogStatus.published ||
+      (audience && row.audience !== audience)
     ) {
       throw new NotFoundException('Blog post not found');
     }
 
-    const content = this.asBlocks(row.content);
+    const content = this.asLocalizedContent(row.content);
 
-    // Collect imageIds referenced in image/gallery blocks, load the rows
-    // once, then rewrite each block's url to its best ready variant (lg)
-    // when the image processed successfully.
+    // Collect imageIds referenced in image/gallery blocks across BOTH
+    // languages, load the rows once, then rewrite each block's url to its
+    // best ready variant (lg) per language when the image processed.
     const referencedIds = this.collectImageIds(content);
     const imageById = await this.loadImagesById(referencedIds);
-    const rewrittenContent = this.rewriteContentUrls(content, imageById);
+    const rewrittenContent: LocalizedContent = {
+      en: this.rewriteContentUrls(content.en, imageById),
+      fr: this.rewriteContentUrls(content.fr, imageById),
+    };
 
     const summary = this.mapToSummary(row, row.coverImage);
     const related = await this.findRelated(row);
@@ -346,11 +409,45 @@ export class BlogService {
     return {
       ...summary,
       content: rewrittenContent,
-      seoTitle: row.seoTitle,
-      seoDescription: row.seoDescription,
-      seoKeywords: row.seoKeywords ?? [],
+      seoTitle: this.asLocalizedText(row.seoTitle),
+      seoDescription: this.asLocalizedText(row.seoDescription),
+      seoKeywords: this.asLocalizedKeywords(row.seoKeywords),
       related,
     };
+  }
+
+  /**
+   * Best-effort increment of a published post's view counter. A missing
+   * published post is a NotFound (the controller surfaces it); the
+   * increment itself never throws a 500 to the caller — failures are
+   * swallowed and the last-known count is returned.
+   */
+  async recordView(slug: string): Promise<{ views: number }> {
+    const existing = await this.prisma.blog.findUnique({
+      where: { slug },
+      select: { status: true, deletedAt: true, views: true },
+    });
+    if (!existing || existing.deletedAt || existing.status !== BlogStatus.published) {
+      throw new NotFoundException('Blog post not found');
+    }
+
+    try {
+      const updated = await this.prisma.blog.update({
+        where: { slug },
+        data: { views: { increment: 1 } },
+        select: { views: true },
+      });
+      return { views: updated.views };
+    } catch (err) {
+      // Never let a view-count write surface as a 500 — the post render
+      // already succeeded. Log and return the pre-increment count.
+      this.logger.warn(
+        `recordView failed for slug=${slug}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return { views: existing.views };
+    }
   }
 
   // ── Image upload ────────────────────────────────────────────────────
@@ -384,6 +481,27 @@ export class BlogService {
     return this.mapImageToDto(row);
   }
 
+  // ── Search ──────────────────────────────────────────────────────────
+
+  /**
+   * Build the OR clauses matching a search term inside either language of
+   * the JSON `title`/`excerpt` bags (case-insensitive).
+   */
+  private searchClauses(search: string): Prisma.BlogWhereInput[] {
+    const clauses: Prisma.BlogWhereInput[] = [];
+    for (const field of ['title', 'excerpt'] as const) {
+      for (const lang of LANGS) {
+        clauses.push({
+          [field]: {
+            path: [lang],
+            string_contains: search,
+          },
+        } as Prisma.BlogWhereInput);
+      }
+    }
+    return clauses;
+  }
+
   // ── Derivations ─────────────────────────────────────────────────────
 
   private async resolveUniqueSlug(
@@ -413,10 +531,18 @@ export class BlogService {
   }
 
   /**
-   * Reading time in whole minutes: sum the words across heading,
-   * paragraph + quote text, ceil(words / 200), floor of 1.
+   * Per-language reading time in whole minutes: sum the words across
+   * heading, paragraph + quote text of that language's blocks,
+   * ceil(words / 200), floor of 1.
    */
-  private computeReadingTime(blocks: BlogBlock[]): number {
+  private computeReadingTime(content: LocalizedContent): Localized<number> {
+    return {
+      en: this.readingTimeForBlocks(content.en),
+      fr: this.readingTimeForBlocks(content.fr),
+    };
+  }
+
+  private readingTimeForBlocks(blocks: BlogBlock[]): number {
     let words = 0;
     for (const block of blocks) {
       let text = '';
@@ -433,20 +559,32 @@ export class BlogService {
   }
 
   /**
-   * Use the supplied excerpt when present; otherwise derive a word-safe
-   * ~160-char snippet from the first paragraph block.
+   * Per language: use the supplied excerpt when present; otherwise derive
+   * a word-safe ~160-char snippet from that language's first paragraph
+   * block. Returns a Localized<string> (empty string when nothing to
+   * derive).
    */
   private resolveExcerpt(
+    provided: { en?: string; fr?: string } | undefined,
+    content: LocalizedContent,
+  ): Localized<string> {
+    return {
+      en: this.excerptForLang(provided?.en, content.en),
+      fr: this.excerptForLang(provided?.fr, content.fr),
+    };
+  }
+
+  private excerptForLang(
     provided: string | undefined,
     blocks: BlogBlock[],
-  ): string | null {
+  ): string {
     if (provided && provided.trim()) return provided.trim();
 
     const firstParagraph = blocks.find(
       (b): b is Extract<BlogBlock, { type: 'paragraph' }> =>
         b.type === 'paragraph',
     );
-    if (!firstParagraph?.content) return null;
+    if (!firstParagraph?.content) return '';
 
     const text = firstParagraph.content.trim().replace(/\s+/g, ' ');
     if (text.length <= EXCERPT_MAX_CHARS) return text;
@@ -458,6 +596,22 @@ export class BlogService {
   }
 
   // ── Content sanitization ────────────────────────────────────────────
+
+  /**
+   * Sanitize a per-language content payload independently into a
+   * well-formed LocalizedContent ({ en, fr }). Each side runs the same
+   * block-level sanitizer as v1.
+   */
+  private sanitizeLocalizedContent(
+    raw:
+      | { en?: Record<string, unknown>[]; fr?: Record<string, unknown>[] }
+      | undefined,
+  ): LocalizedContent {
+    return {
+      en: this.sanitizeContent(raw?.en),
+      fr: this.sanitizeContent(raw?.fr),
+    };
+  }
 
   /**
    * Turn the permissive wire payload into a well-formed BlogBlock[]:
@@ -582,22 +736,18 @@ export class BlogService {
     return Number.isFinite(n) && n > 0 ? Math.round(n) : undefined;
   }
 
-  /** Read the JSON content column back into a typed (re-sanitized) array. */
-  private asBlocks(value: Prisma.JsonValue | null): BlogBlock[] {
-    if (!Array.isArray(value)) return [];
-    return this.sanitizeContent(value as unknown as Record<string, unknown>[]);
-  }
-
   // ── Public-detail url rewriting ─────────────────────────────────────
 
-  private collectImageIds(blocks: BlogBlock[]): string[] {
+  private collectImageIds(content: LocalizedContent): string[] {
     const ids = new Set<string>();
-    for (const block of blocks) {
-      if (block.type === 'image' && block.imageId) {
-        ids.add(block.imageId);
-      } else if (block.type === 'gallery') {
-        for (const img of block.images) {
-          if (img.imageId) ids.add(img.imageId);
+    for (const blocks of [content.en, content.fr]) {
+      for (const block of blocks) {
+        if (block.type === 'image' && block.imageId) {
+          ids.add(block.imageId);
+        } else if (block.type === 'gallery') {
+          for (const img of block.images) {
+            if (img.imageId) ids.add(img.imageId);
+          }
         }
       }
     }
@@ -673,16 +823,132 @@ export class BlogService {
     };
   }
 
+  // ── Localized read coercion (defensive) ─────────────────────────────
+  //
+  // No real data exists yet, but the mappers stay defensive: a JSON value
+  // that is a plain string `s` (legacy plain-String column) is coerced to
+  // `{ en: s, fr: s }`. A `{ en?, fr? }` object fills the missing side
+  // from the present one. Anything else falls back to empty defaults.
+
+  private asLocalizedText(value: Prisma.JsonValue | null): Localized<string> {
+    if (typeof value === 'string') {
+      const s = value;
+      return { en: s, fr: s };
+    }
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const obj = value as Record<string, unknown>;
+      const en = typeof obj.en === 'string' ? obj.en : '';
+      const fr = typeof obj.fr === 'string' ? obj.fr : '';
+      // Mirror a present language into a blank one so consumers always
+      // get something to render.
+      return {
+        en: en || fr,
+        fr: fr || en,
+      };
+    }
+    return { en: '', fr: '' };
+  }
+
+  private asLocalizedKeywords(
+    value: Prisma.JsonValue | null,
+  ): Localized<string[]> {
+    const toStringArray = (v: unknown): string[] =>
+      Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+
+    if (Array.isArray(value)) {
+      // Legacy plain String[] — mirror into both languages.
+      const arr = toStringArray(value);
+      return { en: arr, fr: arr };
+    }
+    if (value && typeof value === 'object') {
+      const obj = value as Record<string, unknown>;
+      return { en: toStringArray(obj.en), fr: toStringArray(obj.fr) };
+    }
+    return { en: [], fr: [] };
+  }
+
+  private asLocalizedReadingTime(
+    value: Prisma.JsonValue | null,
+  ): Localized<number> {
+    const toMinutes = (v: unknown): number => {
+      const n = typeof v === 'number' ? v : Number(v);
+      return Number.isFinite(n) && n >= 1 ? Math.round(n) : 1;
+    };
+    if (typeof value === 'number') {
+      const n = toMinutes(value);
+      return { en: n, fr: n };
+    }
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const obj = value as Record<string, unknown>;
+      return { en: toMinutes(obj.en), fr: toMinutes(obj.fr) };
+    }
+    return { en: 1, fr: 1 };
+  }
+
+  /**
+   * Read the JSON content column back into a per-language (re-sanitized)
+   * LocalizedContent. Defensive against a legacy plain BlogBlock[] (no
+   * en/fr split) — that array is treated as the FR side (showcase
+   * default) with an empty EN side.
+   */
+  private asLocalizedContent(value: Prisma.JsonValue | null): LocalizedContent {
+    if (Array.isArray(value)) {
+      // Legacy: a flat block array. Treat it as the default-locale (fr).
+      return {
+        en: [],
+        fr: this.sanitizeContent(value as unknown as Record<string, unknown>[]),
+      };
+    }
+    if (value && typeof value === 'object') {
+      const obj = value as Record<string, unknown>;
+      return {
+        en: this.sanitizeContent(
+          Array.isArray(obj.en)
+            ? (obj.en as Record<string, unknown>[])
+            : undefined,
+        ),
+        fr: this.sanitizeContent(
+          Array.isArray(obj.fr)
+            ? (obj.fr as Record<string, unknown>[])
+            : undefined,
+        ),
+      };
+    }
+    return { en: [], fr: [] };
+  }
+
+  // ── Localized write normalization ───────────────────────────────────
+
+  /** Coerce a LocalizedTextDto-ish input into a full { en, fr } string bag. */
+  private normalizeLocalizedText(
+    value: { en?: string; fr?: string } | undefined,
+  ): Localized<string> {
+    return {
+      en: (value?.en ?? '').trim(),
+      fr: (value?.fr ?? '').trim(),
+    };
+  }
+
+  private normalizeLocalizedKeywords(
+    value: { en?: string[]; fr?: string[] } | undefined,
+  ): Localized<string[]> {
+    const clean = (arr: string[] | undefined): string[] =>
+      (arr ?? [])
+        .map((s) => (typeof s === 'string' ? s.trim() : ''))
+        .filter((s) => s !== '');
+    return { en: clean(value?.en), fr: clean(value?.fr) };
+  }
+
   // ── Mappers ─────────────────────────────────────────────────────────
 
   private mapToDto(row: Blog, cover: BlogImage | null): BlogDto {
     return {
       ...this.mapToSummary(row, cover),
       coverImageId: row.coverImageId,
-      content: this.asBlocks(row.content),
-      seoTitle: row.seoTitle,
-      seoDescription: row.seoDescription,
-      seoKeywords: row.seoKeywords ?? [],
+      content: this.asLocalizedContent(row.content),
+      seoTitle: this.asLocalizedText(row.seoTitle),
+      seoDescription: this.asLocalizedText(row.seoDescription),
+      seoKeywords: this.asLocalizedKeywords(row.seoKeywords),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       deletedAt: row.deletedAt,
@@ -693,15 +959,17 @@ export class BlogService {
     return {
       id: row.id,
       slug: row.slug,
-      title: row.title,
-      excerpt: row.excerpt,
+      audience: row.audience,
+      views: row.views,
+      title: this.asLocalizedText(row.title),
+      excerpt: this.asLocalizedText(row.excerpt),
       category: row.category,
       authorName: row.authorName,
       status: row.status,
       publishedAt: row.publishedAt,
-      readingTime: row.readingTime ?? 1,
+      readingTime: this.asLocalizedReadingTime(row.readingTime),
       cover: cover ? this.mapImageToDto(cover) : null,
-      coverImageAlt: row.coverImageAlt,
+      coverImageAlt: this.asLocalizedText(row.coverImageAlt),
     };
   }
 
@@ -757,8 +1025,9 @@ export class BlogService {
   }
 
   /**
-   * Up to 3 related posts: same category first, topped up with the most
-   * recent published posts, always excluding the post itself.
+   * Up to 3 related posts of the SAME audience: same category first,
+   * topped up with the most recent published posts of that audience,
+   * always excluding the post itself.
    */
   private async findRelated(post: Blog): Promise<BlogSummaryDto[]> {
     const LIMIT = 3;
@@ -770,6 +1039,7 @@ export class BlogService {
         where: {
           status: BlogStatus.published,
           deletedAt: null,
+          audience: post.audience,
           category: post.category,
           NOT: { id: post.id },
         },
@@ -790,6 +1060,7 @@ export class BlogService {
         where: {
           status: BlogStatus.published,
           deletedAt: null,
+          audience: post.audience,
           NOT: { id: { in: [...seen] } },
         },
         orderBy: { publishedAt: 'desc' },

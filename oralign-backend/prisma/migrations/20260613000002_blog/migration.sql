@@ -1,16 +1,27 @@
 -- ────────────────────────────────────────────────────────────────
--- Practitioner blog — a small CMS for the marketing showcase.
+-- Practitioner / patient blog (v2) — a small bilingual CMS for the
+-- marketing showcase.
 --
--- Two tables (BlogImage media library + Blog posts) and one enum
--- (BlogStatus). The post body is a JSONB array of typed content
--- blocks; BlogImage mirrors the OrderFile media-optimization columns
--- so the async pipeline ('blog-image' job) can fill variants.
+-- Two tables (BlogImage media library + Blog posts) and two enums
+-- (BlogStatus + BlogAudience). v2 changes vs the first cut:
+--   • every reader-facing text field is a JSONB Localized<T> bag
+--     ({ en, fr }) instead of a scalar String/String[]/Int, so a post
+--     carries both languages at once;
+--   • `audience` (patient | practitioner) picks which showcase surface
+--     the post belongs to;
+--   • `views` counts public detail renders.
+--
+-- The post body is a JSONB object { en: BlogBlock[]; fr: BlogBlock[] };
+-- BlogImage mirrors the OrderFile media-optimization columns so the
+-- async pipeline ('blog-image' job) can fill variants. Images are
+-- shared across both languages.
 --
 -- NOTE: this project applies schema via `prisma db push` on container
 -- start; this file exists so fresh environments + reviewers see the
--- exact DDL, and so prod `migrate deploy` works. Every statement is
--- idempotent (IF NOT EXISTS / DO-block guard) so a re-run on a
--- partially-applied DB doesn't error.
+-- exact DDL, and so prod `migrate deploy` works. There is no real blog
+-- data yet, so this migration is the FINAL v2 shape (no in-place
+-- column conversion). Every statement is idempotent (IF NOT EXISTS /
+-- DO-block guard) so a re-run on a partially-applied DB doesn't error.
 -- ────────────────────────────────────────────────────────────────
 
 DO $$
@@ -20,7 +31,14 @@ EXCEPTION
   WHEN duplicate_object THEN NULL;
 END $$;
 
--- ── BlogImage media library ──────────────────────────────────────
+DO $$
+BEGIN
+  CREATE TYPE "BlogAudience" AS ENUM ('patient', 'practitioner');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+-- ── BlogImage media library (unchanged from v1) ──────────────────
 CREATE TABLE IF NOT EXISTS "BlogImage" (
   "id"               TEXT NOT NULL,
   "originalName"     TEXT,
@@ -42,23 +60,25 @@ CREATE TABLE IF NOT EXISTS "BlogImage" (
   CONSTRAINT "BlogImage_pkey" PRIMARY KEY ("id")
 );
 
--- ── Blog posts ───────────────────────────────────────────────────
+-- ── Blog posts (v2 — bilingual JSONB text fields + audience + views) ─
 CREATE TABLE IF NOT EXISTS "Blog" (
   "id"             TEXT NOT NULL,
-  "title"          TEXT NOT NULL,
+  "title"          JSONB NOT NULL,                 -- Localized<string>
   "slug"           TEXT NOT NULL,
-  "excerpt"        TEXT,
-  "content"        JSONB,
+  "excerpt"        JSONB,                           -- Localized<string>
+  "content"        JSONB,                           -- { en: BlogBlock[]; fr: BlogBlock[] }
+  "audience"       "BlogAudience" NOT NULL DEFAULT 'practitioner',
+  "views"          INTEGER NOT NULL DEFAULT 0,
   "coverImageId"   TEXT,
-  "coverImageAlt"  TEXT,
+  "coverImageAlt"  JSONB,                           -- Localized<string>
   "category"       TEXT,
   "authorId"       TEXT,
   "authorName"     TEXT,
   "status"         "BlogStatus" NOT NULL DEFAULT 'draft',
-  "seoTitle"       TEXT,
-  "seoDescription" TEXT,
-  "seoKeywords"    TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
-  "readingTime"    INTEGER,
+  "seoTitle"       JSONB,                           -- Localized<string>
+  "seoDescription" JSONB,                           -- Localized<string>
+  "seoKeywords"    JSONB,                           -- Localized<string[]>
+  "readingTime"    JSONB,                           -- Localized<number>
   "publishedAt"    TIMESTAMP(3),
   "createdAt"      TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updatedAt"      TIMESTAMP(3) NOT NULL,
@@ -91,6 +111,10 @@ CREATE INDEX IF NOT EXISTS "BlogImage_processingStatus_idx"
 CREATE INDEX IF NOT EXISTS "BlogImage_deletedAt_idx"
   ON "BlogImage" ("deletedAt");
 
+-- Public list (newest first), narrowed by audience + status + soft-delete.
+CREATE INDEX IF NOT EXISTS "Blog_audience_status_deletedAt_publishedAt_idx"
+  ON "Blog" ("audience", "status", "deletedAt", "publishedAt" DESC);
+-- Admin status-narrowed list (kept from v1).
 CREATE INDEX IF NOT EXISTS "Blog_status_deletedAt_publishedAt_idx"
   ON "Blog" ("status", "deletedAt", "publishedAt" DESC);
 CREATE INDEX IF NOT EXISTS "Blog_slug_idx" ON "Blog" ("slug");

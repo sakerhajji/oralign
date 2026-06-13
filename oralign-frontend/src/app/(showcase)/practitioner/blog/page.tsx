@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
+import { BlogAudience } from "@/lib/types";
 import { dict, DEFAULT_LANG } from "../../_lib/i18n/dict";
 import { Reveal } from "../../_components/shared/reveal";
 import { getCategories, getPublishedPosts } from "./_lib/fetch";
 import { BlogIndex } from "./_components/blog-index";
+
+const AUDIENCE = BlogAudience.PRACTITIONER;
 
 export const metadata: Metadata = {
   title: "Blog praticiens — Ressources cliniques aligneurs | ORALIGN®",
@@ -24,8 +27,8 @@ export const revalidate = 60;
 
 export default async function PractitionerBlogPage() {
   const [{ posts }, categories] = await Promise.all([
-    getPublishedPosts({ page: 1, limit: 24 }),
-    getCategories(),
+    getPublishedPosts({ audience: AUDIENCE, page: 1, limit: 24 }),
+    getCategories(AUDIENCE),
   ]);
 
   // The H1 + intro are server-rendered for SEO. They use the default
@@ -71,7 +74,11 @@ export default async function PractitionerBlogPage() {
         </Reveal>
 
         <div className="mt-12">
-          <BlogIndex initialPosts={posts} categories={categories} />
+          <BlogIndex
+            audience={AUDIENCE}
+            initialPosts={posts}
+            categories={categories}
+          />
         </div>
       </div>
     </section>

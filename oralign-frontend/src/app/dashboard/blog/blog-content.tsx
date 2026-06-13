@@ -12,6 +12,8 @@ import {
   ArrowDownToLineIcon,
   ArrowUpFromLineIcon,
   ClockIcon,
+  ExternalLinkIcon,
+  EyeIcon,
   FileTextIcon,
   NewspaperIcon,
   PencilIcon,
@@ -25,7 +27,11 @@ import {
 import { useT } from '@/lib/i18n/lang-context';
 import type { Lang } from '@/lib/i18n/dict';
 import { useAuth } from '@/lib/providers/auth-provider';
-import { resolveBlogMediaUrl } from '@/lib/api/blog.service';
+import {
+  blogShowcaseUrl,
+  pickLocalized,
+  resolveBlogMediaUrl,
+} from '@/lib/api/blog.service';
 import {
   useArchiveBlog,
   useBlogPosts,
@@ -34,6 +40,7 @@ import {
   useUnpublishBlog,
 } from '@/lib/hooks/use-blog';
 import {
+  BlogAudience,
   BlogStatus,
   type Blog,
   type BlogFilterParams,
@@ -95,6 +102,16 @@ const STATUS_TABS = [
   { key: BlogStatus.ARCHIVED, labelKey: 'blogAdmin.tabs.archived' },
 ] as const;
 
+// v2: audience filter (segmented). 'all' clears the params.audience filter.
+const AUDIENCE_TABS = [
+  { key: 'all' as const, labelKey: 'blogAdmin.audienceFilter.all' },
+  { key: BlogAudience.PATIENT, labelKey: 'blogAdmin.audienceFilter.patient' },
+  {
+    key: BlogAudience.PRACTITIONER,
+    labelKey: 'blogAdmin.audienceFilter.practitioner',
+  },
+] as const;
+
 const dateLocale = (lang: Lang): Locale | undefined =>
   lang === 'fr' ? frLocale : undefined;
 const dateFormat = (lang: Lang) => (lang === 'fr' ? 'd MMM yyyy' : 'MMM d, yyyy');
@@ -123,6 +140,9 @@ export function BlogPageContent() {
   const [searchInput, setSearchInput] = React.useState('');
   const [debouncedSearch] = useDebounce(searchInput, 300);
   const [statusTab, setStatusTab] = React.useState<BlogStatus | 'all'>('all');
+  const [audienceTab, setAudienceTab] = React.useState<BlogAudience | 'all'>(
+    'all',
+  );
   const [category, setCategory] = React.useState<string>('all');
 
   const params = React.useMemo<BlogFilterParams>(() => {
@@ -134,9 +154,10 @@ export function BlogPageContent() {
     };
     if (debouncedSearch.trim()) next.search = debouncedSearch.trim();
     if (statusTab !== 'all') next.status = statusTab;
+    if (audienceTab !== 'all') next.audience = audienceTab;
     if (category !== 'all') next.category = category;
     return next;
-  }, [page, debouncedSearch, statusTab, category]);
+  }, [page, debouncedSearch, statusTab, audienceTab, category]);
 
   const list = useBlogPosts(params);
   const posts = list.data?.data ?? [];
@@ -172,6 +193,17 @@ export function BlogPageContent() {
   const openEdit = (post: Blog) => {
     setEditingPost(post);
     setEditorOpen(true);
+  };
+  // Open the post on the public showcase (audience → route) in a new tab.
+  // Works for any status (drafts resolve to a 404 on the public site, but
+  // the affordance is always available — primary styling signals when the
+  // post is actually live).
+  const openOnSite = (post: Blog) => {
+    window.open(
+      blogShowcaseUrl(post.audience, post.slug),
+      '_blank',
+      'noopener',
+    );
   };
 
   // Don't render the page chrome for non-admins while the redirect
@@ -209,22 +241,42 @@ export function BlogPageContent() {
         </div>
       </div>
 
-      {/* ── Status tabs ── */}
-      <Tabs
-        value={statusTab}
-        onValueChange={(v) => {
-          setStatusTab(v as BlogStatus | 'all');
-          setPage(1);
-        }}
-      >
-        <TabsList className="w-full justify-start overflow-x-auto sm:w-auto">
-          {STATUS_TABS.map((tab) => (
-            <TabsTrigger key={tab.key} value={tab.key}>
-              {t(tab.labelKey)}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-      </Tabs>
+      {/* ── Status + audience tab strips ── */}
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        {/* Status tabs (lifecycle) */}
+        <Tabs
+          value={statusTab}
+          onValueChange={(v) => {
+            setStatusTab(v as BlogStatus | 'all');
+            setPage(1);
+          }}
+        >
+          <TabsList className="w-full justify-start overflow-x-auto sm:w-auto">
+            {STATUS_TABS.map((tab) => (
+              <TabsTrigger key={tab.key} value={tab.key}>
+                {t(tab.labelKey)}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+
+        {/* Audience filter (which showcase surface) */}
+        <Tabs
+          value={audienceTab}
+          onValueChange={(v) => {
+            setAudienceTab(v as BlogAudience | 'all');
+            setPage(1);
+          }}
+        >
+          <TabsList className="w-full justify-start overflow-x-auto sm:w-auto">
+            {AUDIENCE_TABS.map((tab) => (
+              <TabsTrigger key={tab.key} value={tab.key}>
+                {t(tab.labelKey)}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+      </div>
 
       {/* ── Toolbar: search + category ── */}
       <div className="flex flex-wrap items-center gap-2">
@@ -286,11 +338,19 @@ export function BlogPageContent() {
             <div className="flex flex-col items-center gap-3 p-10 text-center">
               <NewspaperIcon className="size-8 opacity-40" />
               <p className="text-sm text-muted-foreground">
-                {debouncedSearch || statusTab !== 'all' || category !== 'all'
+                {debouncedSearch ||
+                statusTab !== 'all' ||
+                audienceTab !== 'all' ||
+                category !== 'all'
                   ? t('blogAdmin.emptyFiltered')
                   : t('blogAdmin.empty')}
               </p>
-              {!(debouncedSearch || statusTab !== 'all' || category !== 'all') ? (
+              {!(
+                debouncedSearch ||
+                statusTab !== 'all' ||
+                audienceTab !== 'all' ||
+                category !== 'all'
+              ) ? (
                 <>
                   <p className="text-xs text-muted-foreground">
                     {t('blogAdmin.emptyHint')}
@@ -310,9 +370,13 @@ export function BlogPageContent() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>{t('blogAdmin.columns.title')}</TableHead>
+                      <TableHead>{t('blogAdmin.columns.audience')}</TableHead>
                       <TableHead>{t('blogAdmin.columns.category')}</TableHead>
                       <TableHead>{t('blogAdmin.columns.status')}</TableHead>
                       <TableHead>{t('blogAdmin.columns.author')}</TableHead>
+                      <TableHead className="text-right">
+                        {t('blogAdmin.columns.views')}
+                      </TableHead>
                       <TableHead>{t('blogAdmin.columns.readingTime')}</TableHead>
                       <TableHead className="w-12" />
                     </TableRow>
@@ -325,13 +389,16 @@ export function BlogPageContent() {
                             <CoverThumb post={post} />
                             <div className="min-w-0">
                               <p className="truncate font-medium">
-                                {post.title}
+                                {pickLocalized(post.title, lang)}
                               </p>
                               <p className="truncate text-xs text-muted-foreground">
                                 /{post.slug}
                               </p>
                             </div>
                           </div>
+                        </TableCell>
+                        <TableCell>
+                          <AudienceBadge audience={post.audience} />
                         </TableCell>
                         <TableCell className="text-sm">
                           {post.category ? (
@@ -346,11 +413,20 @@ export function BlogPageContent() {
                         <TableCell className="text-sm text-muted-foreground">
                           {post.authorName}
                         </TableCell>
+                        <TableCell className="text-right text-sm text-muted-foreground">
+                          <span className="inline-flex items-center gap-1">
+                            <EyeIcon className="size-3.5" />
+                            {post.views}
+                          </span>
+                        </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
                           <span className="inline-flex items-center gap-1">
                             <ClockIcon className="size-3.5" />
                             {t('blogAdmin.readingTime', {
-                              count: post.readingTime,
+                              count: pickLocalized<number>(
+                                post.readingTime,
+                                lang,
+                              ),
                             })}
                           </span>
                           <span className="mt-0.5 block text-xs">
@@ -369,6 +445,7 @@ export function BlogPageContent() {
                             onUnpublish={() => unpublish.mutate(post.id)}
                             onArchive={() => archive.mutate(post.id)}
                             onDelete={() => setConfirmDelete(post)}
+                            onViewOnSite={() => openOnSite(post)}
                           />
                         </TableCell>
                       </TableRow>
@@ -387,12 +464,15 @@ export function BlogPageContent() {
                     <div className="flex items-start gap-3">
                       <CoverThumb post={post} />
                       <div className="min-w-0 flex-1">
-                        <p className="truncate font-semibold">{post.title}</p>
+                        <p className="truncate font-semibold">
+                          {pickLocalized(post.title, lang)}
+                        </p>
                         <p className="truncate text-xs text-muted-foreground">
                           /{post.slug}
                         </p>
                         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                           <StatusBadge status={post.status} />
+                          <AudienceBadge audience={post.audience} />
                           {post.category ? (
                             <Badge variant="secondary">{post.category}</Badge>
                           ) : null}
@@ -405,14 +485,23 @@ export function BlogPageContent() {
                         onUnpublish={() => unpublish.mutate(post.id)}
                         onArchive={() => archive.mutate(post.id)}
                         onDelete={() => setConfirmDelete(post)}
+                        onViewOnSite={() => openOnSite(post)}
                       />
                     </div>
                     <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
                       <span>{post.authorName}</span>
-                      <span className="inline-flex items-center gap-1">
-                        <ClockIcon className="size-3.5" />
-                        {t('blogAdmin.readingTime', { count: post.readingTime })}
-                      </span>
+                      <div className="flex items-center gap-3">
+                        <span className="inline-flex items-center gap-1">
+                          <EyeIcon className="size-3.5" />
+                          {post.views}
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <ClockIcon className="size-3.5" />
+                          {t('blogAdmin.readingTime', {
+                            count: pickLocalized<number>(post.readingTime, lang),
+                          })}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -494,14 +583,16 @@ export function BlogPageContent() {
 // Cover thumbnail
 
 function CoverThumb({ post }: { post: Blog }) {
-  const { t } = useT();
+  const { t, lang } = useT();
   const src = resolveBlogMediaUrl(post.cover?.thumbUrl ?? post.cover?.url ?? null);
+  const alt =
+    pickLocalized(post.coverImageAlt, lang) || pickLocalized(post.title, lang);
   return (
     <div className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-md border bg-muted/40">
       {src ? (
         <Image
           src={src}
-          alt={post.coverImageAlt || post.title}
+          alt={alt}
           width={48}
           height={48}
           unoptimized
@@ -537,6 +628,22 @@ function StatusBadge({ status }: { status: BlogStatus }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// Audience badge
+
+function AudienceBadge({ audience }: { audience: BlogAudience }) {
+  const { t } = useT();
+  return audience === BlogAudience.PATIENT ? (
+    <Badge className="border-sky-300/60 bg-sky-100 text-sky-800 dark:bg-sky-950/40 dark:text-sky-300">
+      {t('blogAdmin.audience.options.patient')}
+    </Badge>
+  ) : (
+    <Badge className="border-violet-300/60 bg-violet-100 text-violet-800 dark:bg-violet-950/40 dark:text-violet-300">
+      {t('blogAdmin.audience.options.practitioner')}
+    </Badge>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Row-action dropdown — shared by table + mobile cards.
 
 function RowActions({
@@ -546,6 +653,7 @@ function RowActions({
   onUnpublish,
   onArchive,
   onDelete,
+  onViewOnSite,
 }: {
   post: Blog;
   onEdit: () => void;
@@ -553,8 +661,10 @@ function RowActions({
   onUnpublish: () => void;
   onArchive: () => void;
   onDelete: () => void;
+  onViewOnSite: () => void;
 }) {
   const { t } = useT();
+  const isPublished = post.status === BlogStatus.PUBLISHED;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -562,7 +672,19 @@ function RowActions({
           <MoreVertical className="size-4" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-48">
+      <DropdownMenuContent align="end" className="w-52">
+        {/* View on site — always enabled, visually primary when live. */}
+        <DropdownMenuItem
+          onClick={onViewOnSite}
+          className={cn(
+            'gap-2',
+            isPublished && 'text-primary focus:text-primary',
+          )}
+        >
+          <ExternalLinkIcon className="size-4" />
+          {t('blogAdmin.viewOnSite.label')}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
         <DropdownMenuItem onClick={onEdit} className="gap-2">
           <PencilIcon className="size-4" />
           {t('blogAdmin.buttons.edit')}

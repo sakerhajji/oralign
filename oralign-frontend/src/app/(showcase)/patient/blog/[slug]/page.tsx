@@ -4,21 +4,17 @@ import { notFound } from "next/navigation";
 import { resolveBlogMediaUrl } from "@/lib/api/blog.service";
 import { BlogAudience } from "@/lib/types";
 import type { BlogDetail } from "@/lib/types";
-import { getPostBySlug } from "../_lib/fetch";
-import { BlogArticle } from "../_components/blog-article";
+import { getPostBySlug } from "../../../practitioner/blog/_lib/fetch";
+import { BlogArticle } from "../../../practitioner/blog/_components/blog-article";
 
 // Mirrors the SITE_URL constant in the (showcase) layout. Kept in sync by
 // hand because the layout doesn't export it; the canonical / OG / JSON-LD
 // absolute URLs all derive from this.
 const SITE_URL = "https://oralign.com.tn";
 
-// This page belongs to the practitioner surface; every read + the
-// notFound() audience guard pin to it.
-const AUDIENCE = BlogAudience.PRACTITIONER;
-
-// Server metadata + JSON-LD are rendered in the showcase default locale
-// (FR) for stable, crawlable SEO; the visible body reacts to the live
-// language toggle inside <BlogArticle> (via the FR-preferring `pickFr`).
+// This page belongs to the patient surface; every read + the notFound()
+// audience guard pin to it.
+const AUDIENCE = BlogAudience.PATIENT;
 
 export const revalidate = 60;
 
@@ -40,8 +36,6 @@ function pickFr<T>(
 /** Absolute URL for the post's best-available cover (lg variant first). */
 function coverAbsoluteUrl(post: BlogDetail): string | null {
   const rel = post.cover?.lgUrl ?? post.cover?.mdUrl ?? post.cover?.url ?? null;
-  // resolveBlogMediaUrl prefixes the API origin for relative paths and
-  // passes absolute http(s) URLs through — either way it's fully-qualified.
   return resolveBlogMediaUrl(rel);
 }
 
@@ -60,7 +54,7 @@ export async function generateMetadata({
   const description =
     pickFr(post.seoDescription) || pickFr(post.excerpt) || undefined;
   const keywords = pickFr<string[]>(post.seoKeywords);
-  const canonical = `/practitioner/blog/${post.slug}`;
+  const canonical = `/patient/blog/${post.slug}`;
   const cover = coverAbsoluteUrl(post);
 
   return {
@@ -85,7 +79,7 @@ export async function generateMetadata({
   };
 }
 
-export default async function PractitionerBlogPostPage({
+export default async function PatientBlogPostPage({
   params,
 }: {
   params: Promise<Params>;
@@ -94,7 +88,7 @@ export default async function PractitionerBlogPostPage({
   const post = await getPostBySlug(slug, AUDIENCE);
   if (!post || post.audience !== AUDIENCE) notFound();
 
-  const canonicalPath = `/practitioner/blog/${post.slug}`;
+  const canonicalPath = `/patient/blog/${post.slug}`;
   const canonicalUrl = `${SITE_URL}${canonicalPath}`;
   const cover = coverAbsoluteUrl(post);
 

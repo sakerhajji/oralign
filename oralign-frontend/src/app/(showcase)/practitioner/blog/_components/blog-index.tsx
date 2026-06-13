@@ -5,14 +5,33 @@ import Link from "next/link";
 import Image from "next/image";
 import { Search } from "lucide-react";
 import { resolveBlogMediaUrl } from "@/lib/api/blog.service";
-import type { BlogSummary } from "@/lib/types";
+import type { BlogAudience, BlogSummary, Localized } from "@/lib/types";
 import { dict, type Lang } from "../../../_lib/i18n/dict";
 import { useShowcaseLang } from "../../../_lib/i18n/lang-context";
 import { Reveal } from "../../../_components/shared/reveal";
 
 const PAGE_SIZE = 9;
 
+/**
+ * Resolve a `Localized<T>` bag (or a bare/legacy value) for the active
+ * showcase language. AR has no blog copy, so it resolves through the FR
+ * fallback — matching the showcase default. Mirrors `pickLocalized` in
+ * blog.service.ts but kept local so this client component carries no
+ * server import.
+ */
+function pick<T>(
+  value: Localized<T> | Partial<Localized<T>> | T | null | undefined,
+  lang: Lang,
+): T {
+  if (value == null) return "" as unknown as T;
+  if (typeof value !== "object" || Array.isArray(value)) return value as T;
+  const bag = value as Partial<Localized<T>>;
+  const key = lang === "en" ? "en" : "fr";
+  return (bag[key] ?? bag.fr ?? bag.en ?? ("" as unknown as T)) as T;
+}
+
 type Props = {
+  audience: BlogAudience;
   initialPosts: BlogSummary[];
   categories: string[];
 };
@@ -24,7 +43,7 @@ type Props = {
  * (no extra round-trips) and degrades gracefully — the server already
  * rendered the cards, this just narrows / paginates them.
  */
-export function BlogIndex({ initialPosts, categories }: Props) {
+export function BlogIndex({ audience, initialPosts, categories }: Props) {
   const { lang } = useShowcaseLang();
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string>("");
@@ -35,14 +54,18 @@ export function BlogIndex({ initialPosts, categories }: Props) {
     return initialPosts.filter((post) => {
       if (category && post.category !== category) return false;
       if (!q) return true;
+      // Search the ACTIVE language's resolved title/excerpt (plus the
+      // language-agnostic category + author).
+      const title = pick(post.title, lang).toLowerCase();
+      const excerpt = pick(post.excerpt, lang).toLowerCase();
       return (
-        post.title.toLowerCase().includes(q) ||
-        post.excerpt.toLowerCase().includes(q) ||
-        post.category.toLowerCase().includes(q) ||
-        post.authorName.toLowerCase().includes(q)
+        title.includes(q) ||
+        excerpt.includes(q) ||
+        (post.category ?? "").toLowerCase().includes(q) ||
+        (post.authorName ?? "").toLowerCase().includes(q)
       );
     });
-  }, [initialPosts, query, category]);
+  }, [initialPosts, query, category, lang]);
 
   const shown = filtered.slice(0, visible);
   const hasMore = filtered.length > visible;
@@ -115,7 +138,7 @@ export function BlogIndex({ initialPosts, categories }: Props) {
             {shown.map((post, i) => (
               <li key={post.id}>
                 <Reveal delay={i % 3 === 2}>
-                  <BlogCard post={post} lang={lang} />
+                  <BlogCard post={post} lang={lang} audience={audience} />
                 </Reveal>
               </li>
             ))}
@@ -164,19 +187,30 @@ function CategoryChip({
   );
 }
 
-function BlogCard({ post, lang }: { post: BlogSummary; lang: Lang }) {
+function BlogCard({
+  post,
+  lang,
+  audience,
+}: {
+  post: BlogSummary;
+  lang: Lang;
+  audience: BlogAudience;
+}) {
   const cover =
     resolveBlogMediaUrl(post.cover?.mdUrl ?? post.cover?.thumbUrl ?? null) ??
     resolveBlogMediaUrl(post.cover?.url ?? null);
   const date = formatDate(post.publishedAt, lang);
+  const title = pick(post.title, lang);
+  const excerpt = pick(post.excerpt, lang);
+  const coverAlt = pick(post.coverImageAlt, lang) || title;
   const reading = dict.blog.minRead[lang].replace(
     "{n}",
-    String(post.readingTime),
+    String(pick(post.readingTime, lang)),
   );
 
   return (
     <Link
-      href={`/practitioner/blog/${post.slug}`}
+      href={`/${audience}/blog/${post.slug}`}
       className="group block no-underline outline-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--sc-sun)]"
     >
       <article className="flex h-full flex-col">
@@ -184,7 +218,7 @@ function BlogCard({ post, lang }: { post: BlogSummary; lang: Lang }) {
           {cover ? (
             <Image
               src={cover}
-              alt={post.coverImageAlt || post.title}
+              alt={coverAlt}
               fill
               unoptimized
               loading="lazy"
@@ -212,12 +246,12 @@ function BlogCard({ post, lang }: { post: BlogSummary; lang: Lang }) {
           </div>
 
           <h2 className="sc-serif mt-3 text-[1.3rem] leading-[1.25] text-[var(--sc-black)] transition-colors group-hover:text-[var(--sc-sun-deep)]">
-            {post.title}
+            {title}
           </h2>
 
-          {post.excerpt ? (
+          {excerpt ? (
             <p className="mt-3 line-clamp-3 text-[0.92rem] leading-7 text-[var(--sc-text-mid)]">
-              {post.excerpt}
+              {excerpt}
             </p>
           ) : null}
 

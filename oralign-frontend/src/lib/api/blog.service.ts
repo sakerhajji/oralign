@@ -1,4 +1,5 @@
 import apiClient from './client';
+import { BlogAudience } from '@/lib/types';
 import type {
   Blog,
   BlogDetail,
@@ -6,10 +7,55 @@ import type {
   BlogImage,
   BlogSummary,
   CreateBlogDto,
+  Localized,
   MessageResponse,
   PaginatedResponse,
   UpdateBlogDto,
 } from '@/lib/types';
+
+/**
+ * Resolve a bilingual `Localized<T>` bag to the value for `lang`,
+ * falling back to FR then EN then a typed empty value. The blog API
+ * (v2) returns every reader-facing text field as `{ en, fr }`; the
+ * dashboard CMS (`useT()` → 'en' | 'fr') and the public showcase
+ * (`useShowcaseLang()` → 'fr' | 'en' | 'ar') both pick a language with
+ * this helper. AR (showcase-only) has no blog copy of its own, so it
+ * resolves through the FR fallback — matching the showcase default.
+ *
+ * Defensive about partial/legacy shapes: a missing bag, a missing
+ * leaf, or even a bare string/array coerces sensibly so a render never
+ * throws on half-translated data.
+ */
+export function pickLocalized<T = string>(
+  value: Localized<T> | Partial<Localized<T>> | T | null | undefined,
+  lang: string,
+): T {
+  // Bare value (legacy plain string/array) — return as-is.
+  if (value == null) return '' as unknown as T;
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    return value as T;
+  }
+  const bag = value as Partial<Localized<T>>;
+  const key = lang === 'en' ? 'en' : 'fr';
+  return (bag[key as 'en' | 'fr'] ??
+    bag.fr ??
+    bag.en ??
+    ('' as unknown as T)) as T;
+}
+
+/**
+ * Build the public showcase URL for a post given its audience + slug —
+ * `/${audience}/blog/${slug}`. The CMS "view on site" button + any
+ * cross-link uses this so the audience→route mapping lives in one
+ * place. `audience` is the `BlogAudience` wire value ('patient' |
+ * 'practitioner'), which is exactly the showcase path segment.
+ */
+export function blogShowcaseUrl(
+  audience: BlogAudience | string,
+  slug: string,
+): string {
+  return `/${audience}/blog/${encodeURIComponent(slug)}`;
+}
 
 /**
  * Turn a backend-stored `/uploads/blog/<file>` (or any other relative
@@ -127,8 +173,13 @@ export const blogService = {
   // axios client. Kept tiny + typed so a server component can import
   // one helper instead of re-deriving the URL.
 
-  /** Public: paginated published posts. */
+  /**
+   * Public: paginated published posts. `audience` narrows the list to
+   * one showcase surface (patient vs practitioner) — the public blog
+   * pages always pass it.
+   */
   listPublished: async (params?: {
+    audience?: BlogAudience;
     page?: number;
     limit?: number;
     search?: string;
@@ -141,16 +192,29 @@ export const blogService = {
     return response.data;
   },
 
-  /** Public: distinct categories among published posts. */
-  listCategories: async (): Promise<string[]> => {
-    const response = await apiClient.get<string[]>('/blog/categories');
+  /**
+   * Public: distinct categories among published posts. Pass `audience`
+   * to scope the list to one showcase surface.
+   */
+  listCategories: async (audience?: BlogAudience): Promise<string[]> => {
+    const response = await apiClient.get<string[]>('/blog/categories', {
+      params: audience ? { audience } : undefined,
+    });
     return response.data;
   },
 
-  /** Public: a single published post by slug (404 if not published). */
-  getPublishedBySlug: async (slug: string): Promise<BlogDetail> => {
+  /**
+   * Public: a single published post by slug (404 if not published, or
+   * if `audience` is provided and the post belongs to the other
+   * surface).
+   */
+  getPublishedBySlug: async (
+    slug: string,
+    audience?: BlogAudience,
+  ): Promise<BlogDetail> => {
     const response = await apiClient.get<BlogDetail>(
       `/blog/${encodeURIComponent(slug)}`,
+      { params: audience ? { audience } : undefined },
     );
     return response.data;
   },

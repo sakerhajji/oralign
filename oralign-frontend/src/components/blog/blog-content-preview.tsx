@@ -14,6 +14,12 @@ import type { BlogBlock } from '@/lib/types';
  * the dashboard's shadcn tokens — it deliberately does NOT import the
  * showcase renderer (different i18n + --sc-* token system).
  *
+ * v2 (bilingual): a post carries one `BlogBlock[]` PER language, so the
+ * caller picks the active language's array and passes it as `blocks`.
+ * The optional `lang` prop is informational (and reserved for any
+ * future direction handling) — the block array is already the resolved
+ * language, so rendering is language-agnostic here.
+ *
  * Safety contract (identical to the public renderer):
  *   • Text content is rendered as plain children — React escapes it.
  *   • `video` blocks only embed YouTube / Vimeo; anything else falls
@@ -21,7 +27,14 @@ import type { BlogBlock } from '@/lib/types';
  *   • `cta` hrefs are only honoured when they start with '/' or
  *     'https://' (otherwise the button renders disabled).
  */
-export function BlogContentPreview({ blocks }: { blocks: BlogBlock[] }) {
+export function BlogContentPreview({
+  blocks,
+}: {
+  blocks: BlogBlock[];
+  /** Active editing language ('en' | 'fr'). Informational — the blocks
+   *  array is already the resolved language. */
+  lang?: 'en' | 'fr';
+}) {
   const { t } = useT();
 
   if (!blocks || blocks.length === 0) {

@@ -1,4 +1,5 @@
 import type { MetadataRoute } from 'next';
+import { BlogAudience } from '@/lib/types';
 import { getPublishedPosts } from './(showcase)/practitioner/blog/_lib/fetch';
 
 const SITE_URL =
@@ -45,6 +46,12 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 0.8,
     },
     {
+      url: `${SITE_URL}/patient/blog`,
+      lastModified: now,
+      changeFrequency: 'daily',
+      priority: 0.7,
+    },
+    {
       url: `${SITE_URL}/practitioner/blog`,
       lastModified: now,
       changeFrequency: 'daily',
@@ -64,15 +71,31 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     },
   ];
 
-  // Pull as many published posts as one page allows; the helper already
-  // returns an empty list on any failure, so this never throws.
-  const { posts } = await getPublishedPosts({ page: 1, limit: 1000 });
-  const blogRoutes: MetadataRoute.Sitemap = posts.map((post) => ({
-    url: `${SITE_URL}/practitioner/blog/${post.slug}`,
-    lastModified: post.publishedAt ? new Date(post.publishedAt) : now,
-    changeFrequency: 'weekly',
-    priority: 0.6,
-  }));
+  // Pull published posts for BOTH audiences (each helper call fails soft to
+  // an empty list, so a flaky API never throws here) and emit each slug
+  // under its own audience-scoped path.
+  const [patient, practitioner] = await Promise.all([
+    getPublishedPosts({ audience: BlogAudience.PATIENT, page: 1, limit: 1000 }),
+    getPublishedPosts({
+      audience: BlogAudience.PRACTITIONER,
+      page: 1,
+      limit: 1000,
+    }),
+  ]);
+
+  const toRoute =
+    (audience: BlogAudience) =>
+    (post: { slug: string; publishedAt: string | null }): MetadataRoute.Sitemap[number] => ({
+      url: `${SITE_URL}/${audience}/blog/${post.slug}`,
+      lastModified: post.publishedAt ? new Date(post.publishedAt) : now,
+      changeFrequency: 'weekly',
+      priority: 0.6,
+    });
+
+  const blogRoutes: MetadataRoute.Sitemap = [
+    ...patient.posts.map(toRoute(BlogAudience.PATIENT)),
+    ...practitioner.posts.map(toRoute(BlogAudience.PRACTITIONER)),
+  ];
 
   return [...staticRoutes, ...blogRoutes];
 }

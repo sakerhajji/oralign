@@ -697,6 +697,19 @@ export const dict = {
       en: "Clinical guides, aligner protocols and ORALIGN® news to grow your practice.",
       ar: "أدلّة سريرية وبروتوكولات الأجهزة وأخبار ORALIGN® لتطوير عيادتك.",
     } as T,
+    // ── Patient-surface index header (the practitioner keys above keep
+    //    their clinical wording; the patient blog uses these) ──
+    eyebrowPatient: { fr: "Le journal ORALIGN", en: "The ORALIGN journal", ar: "مدوّنة ORALIGN" } as T,
+    indexTitlePatient: {
+      fr: "Conseils sourire & orthodontie",
+      en: "Smile tips & orthodontics",
+      ar: "نصائح الابتسامة وتقويم الأسنان",
+    } as T,
+    indexSubtitlePatient: {
+      fr: "Conseils, actualités et guides sur les aligneurs invisibles et le sourire, par ORALIGN®.",
+      en: "Tips, news and guides on invisible aligners and your smile, by ORALIGN®.",
+      ar: "نصائح وأخبار وأدلّة حول الأجهزة الشفافة والابتسامة، من ORALIGN®.",
+    } as T,
     searchPlaceholder: {
       fr: "Rechercher un article…",
       en: "Search articles…",

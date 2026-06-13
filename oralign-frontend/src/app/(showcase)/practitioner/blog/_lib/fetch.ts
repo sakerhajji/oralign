@@ -1,7 +1,16 @@
-import type { BlogDetail, BlogSummary, PaginatedResponse } from "@/lib/types";
+import type {
+  BlogAudience,
+  BlogDetail,
+  BlogSummary,
+  PaginatedResponse,
+} from "@/lib/types";
 
 /**
- * Server-side blog fetch helpers for the PUBLIC practitioner blog.
+ * Server-side blog fetch helpers for the PUBLIC showcase blog — SHARED
+ * across both audiences (patient + practitioner). The audience is always
+ * passed in by the caller so this module stays surface-agnostic; it lives
+ * under `practitioner/blog/_lib` for historical reasons but both audiences'
+ * pages import it (a cross-route-group import is fine in the app router).
  *
  * These run only in React Server Components — never import the authed
  * axios `apiClient` here. We hit the public `/blog/...` routes with the
@@ -70,10 +79,13 @@ export type PublishedPostsResult = {
 };
 
 /**
- * First (or nth) page of published posts, newest first. Returns an empty
- * result on any failure so the caller can render its empty state.
+ * First (or nth) page of published posts for one audience, newest first.
+ * Returns an empty result on any failure so the caller can render its
+ * empty state. `audience` narrows the list to the patient or practitioner
+ * surface; it's always supplied by the page.
  */
 export async function getPublishedPosts(params?: {
+  audience?: BlogAudience;
   page?: number;
   limit?: number;
   search?: string;
@@ -83,6 +95,7 @@ export async function getPublishedPosts(params?: {
   const limit = params?.limit ?? 12;
   const data = await fetchJson<PaginatedResponse<BlogSummary>>(
     blogUrl("/published", {
+      audience: params?.audience,
       page,
       limit,
       search: params?.search,
@@ -100,18 +113,49 @@ export async function getPublishedPosts(params?: {
   };
 }
 
-/** Distinct categories among published posts. Empty array on failure. */
-export async function getCategories(): Promise<string[]> {
-  const data = await fetchJson<string[]>(blogUrl("/categories"));
+/**
+ * Distinct categories among published posts of one audience. Empty array
+ * on failure.
+ */
+export async function getCategories(
+  audience?: BlogAudience,
+): Promise<string[]> {
+  const data = await fetchJson<string[]>(blogUrl("/categories", { audience }));
   return Array.isArray(data) ? data : [];
 }
 
 /**
- * A single published post by slug. `null` when the post is missing,
- * unpublished, soft-deleted, or the API is unreachable — the page maps
- * that to `notFound()`.
+ * A single published post by slug, scoped to an audience. `null` when the
+ * post is missing, unpublished, soft-deleted, of the OTHER audience, or
+ * the API is unreachable — the page maps that to `notFound()`.
  */
-export async function getPostBySlug(slug: string): Promise<BlogDetail | null> {
+export async function getPostBySlug(
+  slug: string,
+  audience?: BlogAudience,
+): Promise<BlogDetail | null> {
   if (!slug) return null;
-  return fetchJson<BlogDetail>(blogUrl(`/${encodeURIComponent(slug)}`));
+  return fetchJson<BlogDetail>(
+    blogUrl(`/${encodeURIComponent(slug)}`, { audience }),
+  );
+}
+
+/**
+ * Fire-and-forget public view-count increment. Plain POST with the
+ * built-in `fetch` (no auth, no apiClient) — the article body already
+ * rendered, so a failure here is silently ignored. Called once per
+ * mount from the client `<BlogArticle>`.
+ */
+export async function recordView(slug: string): Promise<void> {
+  if (!slug) return;
+  try {
+    await fetch(blogUrl(`/${encodeURIComponent(slug)}/view`), {
+      method: "POST",
+      headers: { Accept: "application/json" },
+      // Never cache a mutation; this is a best-effort counter bump.
+      cache: "no-store",
+      keepalive: true,
+    });
+  } catch {
+    // Swallow — the view counter is non-critical telemetry.
+  }
 }

@@ -3,17 +3,36 @@
 import Link from "next/link";
 import Image from "next/image";
 import { resolveBlogMediaUrl } from "@/lib/api/blog.service";
-import type { BlogSummary } from "@/lib/types";
+import type { BlogAudience, BlogSummary, Localized } from "@/lib/types";
 import { dict, type Lang } from "../../../_lib/i18n/dict";
 import { useShowcaseLang } from "../../../_lib/i18n/lang-context";
 import { Reveal } from "../../../_components/shared/reveal";
 
+/** Resolve a Localized<T> bag for the active showcase lang (ar → fr). */
+function pick<T>(
+  value: Localized<T> | Partial<Localized<T>> | T | null | undefined,
+  lang: Lang,
+): T {
+  if (value == null) return "" as unknown as T;
+  if (typeof value !== "object" || Array.isArray(value)) return value as T;
+  const bag = value as Partial<Localized<T>>;
+  const key = lang === "en" ? "en" : "fr";
+  return (bag[key] ?? bag.fr ?? bag.en ?? ("" as unknown as T)) as T;
+}
+
 /**
  * "Keep reading" rail under an article. Client component so dates + the
  * section heading follow the live language selection. Renders nothing when
- * the backend returned no siblings.
+ * the backend returned no siblings. `audience` keeps the card links on the
+ * same showcase surface.
  */
-export function RelatedPosts({ posts }: { posts: BlogSummary[] }) {
+export function RelatedPosts({
+  posts,
+  audience,
+}: {
+  posts: BlogSummary[];
+  audience: BlogAudience;
+}) {
   const { lang } = useShowcaseLang();
   if (!posts || posts.length === 0) return null;
 
@@ -38,7 +57,7 @@ export function RelatedPosts({ posts }: { posts: BlogSummary[] }) {
           {posts.map((post, i) => (
             <li key={post.id}>
               <Reveal delay={i % 3 === 2}>
-                <RelatedCard post={post} lang={lang} />
+                <RelatedCard post={post} lang={lang} audience={audience} />
               </Reveal>
             </li>
           ))}
@@ -48,15 +67,25 @@ export function RelatedPosts({ posts }: { posts: BlogSummary[] }) {
   );
 }
 
-function RelatedCard({ post, lang }: { post: BlogSummary; lang: Lang }) {
+function RelatedCard({
+  post,
+  lang,
+  audience,
+}: {
+  post: BlogSummary;
+  lang: Lang;
+  audience: BlogAudience;
+}) {
   const cover =
     resolveBlogMediaUrl(post.cover?.thumbUrl ?? post.cover?.mdUrl ?? null) ??
     resolveBlogMediaUrl(post.cover?.url ?? null);
   const date = formatDate(post.publishedAt, lang);
+  const title = pick(post.title, lang);
+  const coverAlt = pick(post.coverImageAlt, lang) || title;
 
   return (
     <Link
-      href={`/practitioner/blog/${post.slug}`}
+      href={`/${audience}/blog/${post.slug}`}
       className="group block no-underline outline-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--sc-sun)]"
     >
       <article className="flex h-full flex-col">
@@ -64,7 +93,7 @@ function RelatedCard({ post, lang }: { post: BlogSummary; lang: Lang }) {
           {cover ? (
             <Image
               src={cover}
-              alt={post.coverImageAlt || post.title}
+              alt={coverAlt}
               fill
               unoptimized
               loading="lazy"
@@ -85,7 +114,7 @@ function RelatedCard({ post, lang }: { post: BlogSummary; lang: Lang }) {
           </span>
         ) : null}
         <h3 className="sc-serif mt-2 text-[1.1rem] leading-[1.3] text-[var(--sc-black)] transition-colors group-hover:text-[var(--sc-sun-deep)]">
-          {post.title}
+          {title}
         </h3>
         {date ? (
           <span className="mt-2 text-[0.76rem] text-[var(--sc-mid-grey)]">

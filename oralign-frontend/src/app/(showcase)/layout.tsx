@@ -85,7 +85,7 @@ const ldOrg = {
   name: "ORALIGN by Aura Aligners",
   alternateName: "ORALIGN",
   url: SITE_URL,
-  logo: `${SITE_URL}/ORALIGN%20BLACK.png`,
+  logo: `${SITE_URL}/mainlogo.svg`,
   description:
     "Aligneurs orthodontiques invisibles ORALIGN® — conçus en Allemagne, fabriqués en Tunisie.",
   address: {

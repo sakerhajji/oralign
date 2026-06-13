@@ -16,7 +16,7 @@ function LoginContent() {
         <div className="flex justify-center gap-2 md:justify-start">
           <Link href="/" className="flex items-center gap-2 font-medium">
             <Image
-              src="/ORALIGN BLACK.png"
+              src="/mainlogo.svg"
               alt={t('authPages.common.logoAlt')}
               width={100}
               height={100}

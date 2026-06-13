@@ -62,7 +62,7 @@ export function DailyLifeSection() {
 
       <div className="relative min-h-[520px] w-full flex-1 overflow-hidden sm:min-h-[600px] lg:min-h-0">
         <Image
-          src="/showcase/image123456.jpeg"
+          src="/showcase/image123456.png"
           alt={copy.imageAlt}
           fill
           sizes="100vw"

@@ -114,7 +114,7 @@ export function Header() {
           className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 lg:static lg:translate-x-0 lg:translate-y-0 flex shrink-0 items-center outline-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--sc-sun)]"
         >
           <Image
-            src="/ORALIGN BLACK.png"
+            src="/mainlogo.svg"
             alt="Oralign"
             width={1240}
             height={880}

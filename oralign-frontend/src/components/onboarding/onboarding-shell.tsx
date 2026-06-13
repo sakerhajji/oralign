@@ -56,7 +56,7 @@ export function OnboardingShell({
           aria-label={t('onboardingPages.shell.homeAria')}
         >
           <Image
-            src="/ORALIGN BLACK.png"
+            src="/mainlogo.svg"
             alt={t('onboardingPages.shell.logoAlt')}
             width={120}
             height={36}

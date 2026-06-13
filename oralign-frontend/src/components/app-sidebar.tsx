@@ -369,7 +369,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                         Keep them roughly 4× of the rendered height
                         so the PNG stays sharp on retina screens. */}
                 <Image
-                  src="/ORALIGN BLACK.png"
+                  src="/mainlogo.svg"
                   alt="Oralign"
                   width={360}
                   height={96}

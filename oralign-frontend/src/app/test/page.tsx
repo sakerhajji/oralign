@@ -10,7 +10,7 @@ import { cn } from '@/lib/utils';
 const DEFAULT_URL =
   'https://www.hirschdynamics.com/onyxwebview/Hirsch.html?mlink=https://www.hirschdynamics.com/onyxwebview/Client3406/AOMNVP/298E758F4355477A8B95DC23E25CFAEA.iiwgl&p=OTEAUB';
 
-const LOGO_PATH = '/ORALIGN BLACK.png';
+const LOGO_PATH = '/mainlogo.svg';
 
 export default function TestWebViewPage() {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);

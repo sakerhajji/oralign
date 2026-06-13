@@ -74,7 +74,7 @@ export function SmileFreedomSection() {
       <div className="grid min-h-[calc(100svh-4rem)] sm:min-h-[calc(100svh-4.5rem)] lg:min-h-[calc(100svh-5rem)] lg:grid-cols-2">
         <div className="relative min-h-[70svh] overflow-hidden sm:min-h-[760px] lg:min-h-0">
           <Image
-            src="/showcase/womenBornToshine.jpeg"
+            src="/showcase/womenBornToshine.png"
             alt={copy.imageAlt}
             fill
             sizes="(min-width: 1024px) 50vw, 100vw"

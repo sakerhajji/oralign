@@ -48,7 +48,7 @@ const KNOWN_SHELLS: Array<{
   },
 ];
 
-const LOGO_PATH = '/ORALIGN BLACK.png';
+const LOGO_PATH = '/mainlogo.svg';
 
 /**
  * Parse the `#external` / `#internal` mode hash from a stored URL. New

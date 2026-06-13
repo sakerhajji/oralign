@@ -325,6 +325,14 @@ export function ClinicalOrderFiles({
   // null when nothing has been copied yet.
   const [clipboard, setClipboard] = useState<ImageClipboardEntry | null>(null);
 
+  // Which slot is currently uploading + its live progress (0-100).
+  // Only one upload runs at a time (every slot is disabled while a
+  // sibling uploads), so a single record drives the right slot's bar.
+  const [activeUpload, setActiveUpload] = useState<{
+    key: string;
+    progress: number;
+  } | null>(null);
+
   if (!orderId) {
     return <SaveDraftNotice />;
   }
@@ -353,11 +361,24 @@ export function ClinicalOrderFiles({
   });
 
   const uploadSlot = (slot: UploadSlotDefinition, file: File) => {
-    uploadFiles.mutate({
-      id: orderId,
-      files: [withSlotName(slot.key, file)],
-      category: slot.category,
-    });
+    setActiveUpload({ key: slot.key, progress: 0 });
+    uploadFiles.mutate(
+      {
+        id: orderId,
+        files: [withSlotName(slot.key, file)],
+        category: slot.category,
+        onProgress: (percent) =>
+          setActiveUpload((cur) =>
+            cur && cur.key === slot.key ? { ...cur, progress: percent } : cur,
+          ),
+      },
+      {
+        // Brief hold so the user sees 100% before the bar disappears,
+        // then clear (server flush + DB insert happen after transfer).
+        onSettled: () =>
+          window.setTimeout(() => setActiveUpload(null), 500),
+      },
+    );
   };
 
   if (section === 'patient-images') {
@@ -390,6 +411,9 @@ export function ClinicalOrderFiles({
               accept={slot.accept}
               referenceImage={slot.referenceImage}
               disabled={readOnly || uploadFiles.isPending}
+              readOnly={readOnly}
+              uploading={activeUpload?.key === slot.key}
+              progress={activeUpload?.key === slot.key ? activeUpload.progress : null}
               file={fileForSlot(files, slot, patientImageSlots)}
               onSelect={(file) => uploadSlot(slot, file)}
               clipboard={clipboard}
@@ -411,6 +435,9 @@ export function ClinicalOrderFiles({
                   accept={slot.accept}
                   referenceImage={slot.referenceImage}
                   disabled={readOnly || uploadFiles.isPending}
+                  readOnly={readOnly}
+                  uploading={activeUpload?.key === slot.key}
+                  progress={activeUpload?.key === slot.key ? activeUpload.progress : null}
                   file={fileForSlot(files, slot, patientImageSlots)}
                   onSelect={(file) => uploadSlot(slot, file)}
                   clipboard={clipboard}
@@ -470,6 +497,9 @@ export function ClinicalOrderFiles({
               accept={slot.accept}
               referenceImage={slot.referenceImage}
               disabled={readOnly || uploadFiles.isPending}
+              readOnly={readOnly}
+              uploading={activeUpload?.key === slot.key}
+              progress={activeUpload?.key === slot.key ? activeUpload.progress : null}
               file={fileForSlot(files, slot, radiographySlots)}
               onSelect={(file) => uploadSlot(slot, file)}
               clipboard={clipboard}
@@ -493,6 +523,8 @@ export function ClinicalOrderFiles({
               orderId={orderId}
               title={t(slot.titleKey)}
               disabled={readOnly || uploadFiles.isPending}
+              uploading={activeUpload?.key === slot.key}
+              progress={activeUpload?.key === slot.key ? activeUpload.progress : null}
               file={fileForSlot(files, slot, stlSlots)}
               readOnly={readOnly}
               onSelect={(file) => uploadSlot(slot, file)}
@@ -1149,6 +1181,9 @@ function ClinicalMediaSlot({
   accept,
   referenceImage,
   disabled,
+  readOnly,
+  uploading,
+  progress,
   file,
   onSelect,
   clipboard,
@@ -1161,6 +1196,17 @@ function ClinicalMediaSlot({
   /** Optional placeholder image showing the expected view orientation. */
   referenceImage?: string;
   disabled?: boolean;
+  /**
+   * Pure VIEW mode (order-detail page). Hides every upload affordance —
+   * the picker label, the Replace/Edit/Copy/Paste row — leaving only a
+   * clean, tappable preview. Distinct from `disabled`, which is also
+   * true transiently while a sibling slot is mid-upload.
+   */
+  readOnly?: boolean;
+  /** This slot's file is currently uploading — drives the progress bar. */
+  uploading?: boolean;
+  /** Upload progress 0-100 (null when not uploading). */
+  progress?: number | null;
   file?: OrderFile;
   onSelect: (file: File) => void;
   /**
@@ -1288,6 +1334,15 @@ function ClinicalMediaSlot({
           file={file}
           secureFile={secureFile}
         />
+      ) : readOnly ? (
+        // VIEW mode, empty slot — no picker affordance, just a calm
+        // "not provided" placeholder so the order detail reads clean.
+        <div className="grid aspect-[4/3] w-full max-w-[320px] place-items-center rounded-xl border border-dashed bg-muted/20 text-center sm:max-w-[260px]">
+          <span className="flex flex-col items-center gap-1.5 text-xs text-muted-foreground">
+            <Icon className="h-7 w-7 opacity-40" />
+            {t('media.notProvided')}
+          </span>
+        </div>
       ) : (
         <label
           htmlFor={inputId}
@@ -1354,6 +1409,21 @@ function ClinicalMediaSlot({
         }}
       />
 
+      {/* Live upload progress — visible while THIS slot's file transfers.
+          CBCT-grade photos are small, but a real bar reassures the user
+          the save is in flight rather than stalled. */}
+      {uploading && (
+        <div className="w-full max-w-[320px] space-y-1 sm:max-w-[260px]">
+          <Progress value={progress ?? 0} className="h-1.5" />
+          <p className="text-[10px] font-semibold tabular-nums text-primary">
+            {t('media.uploadingPct', { pct: String(progress ?? 0) })}
+          </p>
+        </div>
+      )}
+
+      {/* Action row — hidden entirely in VIEW mode so the order detail
+          stays clean (no greyed-out Upload/Replace buttons). */}
+      {!readOnly && (
       <div className="flex flex-wrap items-center justify-center gap-2">
         <Button type="button" variant="secondary" size="sm" asChild disabled={disabled}>
           <label htmlFor={inputId} className="cursor-pointer">
@@ -1418,6 +1488,7 @@ function ClinicalMediaSlot({
           </Button>
         )}
       </div>
+      )}
 
       {file && (
         <p className="max-w-48 truncate text-xs text-muted-foreground">
@@ -1445,6 +1516,8 @@ function StlUploadTile({
   orderId,
   title,
   disabled,
+  uploading,
+  progress,
   file,
   readOnly,
   onSelect,
@@ -1453,6 +1526,8 @@ function StlUploadTile({
   orderId: string;
   title: string;
   disabled?: boolean;
+  uploading?: boolean;
+  progress?: number | null;
   file?: OrderFile;
   readOnly?: boolean;
   onSelect: (file: File) => void;
@@ -1480,6 +1555,14 @@ function StlUploadTile({
         }}
       />
       <div className="flex flex-col gap-4">
+        {uploading && (
+          <div className="space-y-1">
+            <Progress value={progress ?? 0} className="h-1.5" />
+            <p className="text-[10px] font-semibold tabular-nums text-primary">
+              {t('media.uploadingPct', { pct: String(progress ?? 0) })}
+            </p>
+          </div>
+        )}
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <span className="grid h-10 w-10 place-items-center rounded-full bg-muted">
@@ -1511,11 +1594,12 @@ function StlUploadTile({
         {file ? (
           <div className="space-y-3">
             {extensionFor(file.originalName) === 'stl' ? (
-              // Static thumbnail card — the WebGL viewer used to mount
-              // here on page load for every STL slot (multi-MB fetch +
-              // GL context × 4 slots). It now lives exclusively behind
-              // the Full View dialog below.
-              <StlStaticPreview orderId={orderId} file={file} tall />
+              // Live interactive 3D viewer, inline. It dynamically imports
+              // three.js and prefers the pipeline's optimized GLB variant
+              // (≈half the bytes of the raw STL, normals computed in the
+              // browser), so the model loads fast while still being fully
+              // rotatable/zoomable right in the slot — no extra click.
+              <StlModelViewer orderId={orderId} file={file} />
             ) : (
               <ModelPlaceholder file={file} />
             )}
@@ -1553,6 +1637,14 @@ function StlUploadTile({
                 </Button>
               )}
             </div>
+          </div>
+        ) : readOnly ? (
+          // VIEW mode, empty STL slot — calm placeholder, no picker.
+          <div className="grid min-h-44 place-items-center rounded-md border border-dashed bg-muted/20 p-6 text-center">
+            <span className="space-y-2 text-muted-foreground">
+              <Box className="mx-auto h-9 w-9 opacity-40" />
+              <span className="block text-xs">{t('media.notProvided')}</span>
+            </span>
           </div>
         ) : (
           <label

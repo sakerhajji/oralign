@@ -129,6 +129,36 @@ export function ImageEditDialog({
     return () => ro.disconnect();
   }, []);
 
+  // Decode the working image's natural size as soon as the blob URL is
+  // set — INDEPENDENT of react-image-crop's <img> onLoad. This is the
+  // fix for the "crop view shows the photo zoomed-in" bug: previously
+  // `naturalSize` was only captured from the cropper image's onLoad,
+  // which a browser may NOT re-fire for an already-cached blob when the
+  // element remounts on entering crop mode. With `naturalSize` missing,
+  // `cropFit` was null and the image fell back to `maxHeight: 100%` —
+  // which has no effect inside react-image-crop's auto-height wrapper,
+  // so the photo rendered at full natural size and got clipped by the
+  // canvas (looking like an extreme zoom). Decoding here guarantees
+  // `cropFit` is ready the instant crop mode opens, so the whole image
+  // is always contain-fitted and visible.
+  useEffect(() => {
+    if (!workingBlobUrl) {
+      setNaturalSize(null);
+      return;
+    }
+    let cancelled = false;
+    const img = new Image();
+    img.onload = () => {
+      if (!cancelled) {
+        setNaturalSize({ w: img.naturalWidth, h: img.naturalHeight });
+      }
+    };
+    img.src = workingBlobUrl;
+    return () => {
+      cancelled = true;
+    };
+  }, [workingBlobUrl]);
+
   // CONTAIN-fit dimensions for the crop image: the largest size that
   // fits inside the editor canvas while preserving the image's aspect
   // ratio, multiplied by the zoom factor. `baseScale` is capped at 1×
@@ -421,23 +451,27 @@ export function ImageEditDialog({
                 cropMode && zoom > 1 ? 'overflow-auto' : 'overflow-hidden',
               )}
             >
-              {workingBlobUrl ? (
-                cropMode ? (
-                  // Crop mode — react-image-crop drives the selection.
-                  //
-                  // The image is given an EXPLICIT pixel size (`cropFit`)
-                  // that contain-fits the editor canvas at zoom 1 and
-                  // scales up from there. This is the fix for the
-                  // "portrait photo looks zoomed into the face" bug: the
-                  // previous `w-full` forced tall images past the canvas
-                  // height so only their middle slice was visible. Now
-                  // every orientation is shown whole, and what the user
-                  // selects is exactly what gets baked.
-                  //
-                  // react-image-crop reports its rectangle in the display
-                  // pixels of this sized image, and `applyCrop` divides by
-                  // `element.width` to recover natural-pixel coords — so a
-                  // real canvas crop is produced, never a CSS-only zoom.
+              {!workingBlobUrl ? (
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              ) : cropMode ? (
+                // Crop mode — react-image-crop drives the selection.
+                //
+                // The image is given an EXPLICIT pixel size (`cropFit`)
+                // that contain-fits the editor canvas at zoom 1 and
+                // scales up from there. We render the cropper ONLY once
+                // `cropFit` is known (natural size decoded + canvas
+                // measured) — never with a CSS `maxHeight` fallback,
+                // because that has no effect inside react-image-crop's
+                // auto-height wrapper and would let a tall photo render
+                // at full natural size (clipped → looks zoomed). The
+                // brief spinner is imperceptible since natural size is
+                // pre-decoded the moment the blob is set.
+                //
+                // react-image-crop reports its rectangle in the display
+                // pixels of this sized image, and `applyCrop` converts
+                // the PERCENT crop to natural-pixel coords — so a real
+                // canvas crop is produced, never a CSS-only zoom.
+                cropFit ? (
                   <ReactCrop
                     crop={crop}
                     // Store the selection in PERCENT — resolution- and
@@ -454,27 +488,21 @@ export function ImageEditDialog({
                       onLoad={handleImageLoad}
                       draggable={false}
                       className="block select-none"
-                      style={
-                        cropFit
-                          ? { width: cropFit.width, height: cropFit.height }
-                          : // Until the canvas is measured, contain-fit via
-                            // CSS so there's no flash of an oversized image.
-                            { maxWidth: '100%', maxHeight: '100%' }
-                      }
+                      style={{ width: cropFit.width, height: cropFit.height }}
                     />
                   </ReactCrop>
                 ) : (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={workingBlobUrl}
-                    alt="Editing preview"
-                    draggable={false}
-                    className="max-h-full max-w-full select-none object-contain transition-transform duration-200"
-                    style={{ transform: previewTransform }}
-                  />
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                 )
               ) : (
-                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={workingBlobUrl}
+                  alt="Editing preview"
+                  draggable={false}
+                  className="max-h-full max-w-full select-none object-contain transition-transform duration-200"
+                  style={{ transform: previewTransform }}
+                />
               )}
             </div>
 

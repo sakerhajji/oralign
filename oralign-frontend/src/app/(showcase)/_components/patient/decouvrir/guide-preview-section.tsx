@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { ArrowUpRight } from "lucide-react";
 import type { Lang } from "../../../_lib/i18n/dict";
 import { useShowcaseLang } from "../../../_lib/i18n/lang-context";
 
@@ -61,60 +62,74 @@ export function GuidePreviewSection() {
       id="guide-preview"
       data-section-tone="light"
       aria-label={copy.cta}
-      className="flex min-h-[calc(100svh-4rem)] items-center bg-[var(--sc-white)] px-5 py-16 text-[var(--sc-black)] sm:min-h-[calc(100svh-4.5rem)] sm:px-8 sm:py-20 lg:min-h-[calc(100svh-5rem)] lg:px-12 lg:py-24"
+      className="overflow-hidden bg-[var(--sc-white)] text-[var(--sc-black)] lg:min-h-[80svh]"
     >
-      <div className="mx-auto grid w-full max-w-[1240px] items-center gap-12 lg:grid-cols-[0.92fr_1.08fr] lg:gap-16 xl:gap-20">
-        <div className="relative mx-auto w-full max-w-[560px]">
+      <div className="grid w-full lg:min-h-[80svh] lg:grid-cols-2">
+        <div className="relative min-h-[440px] w-full overflow-hidden sm:min-h-[600px] lg:min-h-0">
           <span
             aria-hidden="true"
-            className="absolute -left-1 -top-2 z-10 h-2 w-24 bg-[var(--sc-sun)] sm:w-32"
+            className="absolute left-0 top-0 z-10 h-2 w-28 bg-[var(--sc-sun)] sm:w-36"
           />
-          <div className="relative aspect-[107/100] overflow-hidden bg-[#b98755]">
-            <Image
-              src="/showcase/image123.jpeg"
-              alt={copy.imageAlt}
-              fill
-              sizes="(min-width: 1024px) 44vw, 100vw"
-              className="object-cover object-center"
-            />
-            <span
-              aria-hidden="true"
-              className="pointer-events-none absolute left-1/2 top-1/2 aspect-square w-[118%] -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/30"
-            />
-          </div>
+          <Image
+            src="/showcase/image123.jpeg"
+            alt={copy.imageAlt}
+            fill
+            sizes="(min-width: 1024px) 50vw, 100vw"
+            className="object-cover object-center"
+          />
           <span
             aria-hidden="true"
-            className="absolute -bottom-2 right-0 z-10 h-2 w-36 bg-[var(--sc-sun)] sm:w-48"
+            className="pointer-events-none absolute left-1/2 top-1/2 aspect-square w-[115%] -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/25"
+          />
+          <div
+            aria-hidden="true"
+            className="absolute inset-0 bg-[linear-gradient(180deg,rgba(20,14,8,0.04),transparent_55%,rgba(20,14,8,0.12))]"
+          />
+          <span
+            aria-hidden="true"
+            className="absolute bottom-0 right-0 z-10 h-2 w-40 bg-[var(--sc-sun)] sm:w-52"
           />
         </div>
 
-        <div className="mx-auto w-full max-w-[650px] lg:mx-0">
-          <ul className="space-y-7 sm:space-y-8">
-            {copy.benefits.map((benefit) => (
+        <div className="flex items-center px-5 py-14 sm:px-10 sm:py-16 lg:px-[clamp(3rem,5.5vw,6.5rem)] lg:py-16">
+          <div className="mx-auto w-full max-w-[620px]">
+            <ul className="border-y border-[rgba(25,25,25,0.16)]">
+              {copy.benefits.map((benefit, index) => (
               <li
                 key={benefit}
-                className="flex items-start gap-4 text-[0.98rem] leading-[1.65] text-[var(--sc-black)] sm:text-[1.03rem]"
+                  className="grid grid-cols-[2rem_1fr] gap-4 border-b border-[rgba(25,25,25,0.12)] py-5 last:border-b-0 sm:grid-cols-[2.5rem_1fr] sm:py-6"
               >
                 <span
                   aria-hidden="true"
-                  className="mt-[0.72em] h-1.5 w-1.5 shrink-0 bg-[var(--sc-black)]"
-                />
-                <span>{benefit}</span>
+                    className="pt-0.5 text-[0.6rem] font-medium tracking-[0.18em] text-[var(--sc-sun-deep)]"
+                  >
+                    {String(index + 1).padStart(2, "0")}
+                  </span>
+                  <span className="text-[0.96rem] leading-[1.65] text-[var(--sc-black)] sm:text-[1rem]">
+                    {benefit}
+                  </span>
               </li>
             ))}
           </ul>
 
-          <p className="mx-auto mt-12 max-w-[590px] text-center text-[1rem] font-medium leading-[1.55] text-[var(--sc-black)] sm:mt-14 sm:text-[1.08rem]">
-            {copy.statement}
-          </p>
+            <div className="mt-10 border-s-2 border-[var(--sc-sun)] ps-5 sm:mt-12 sm:ps-7">
+              <p className="max-w-[510px] text-pretty text-[1rem] font-medium leading-[1.62] text-[var(--sc-black)] sm:text-[1.06rem]">
+                {copy.statement}
+              </p>
+            </div>
 
-          <div className="mt-8 flex justify-center">
-            <Link
-              href="/patient/guide"
-              className="inline-flex min-h-13 items-center justify-center bg-[var(--sc-sun)] px-8 py-3.5 text-center text-[0.72rem] font-medium text-[var(--sc-black)] no-underline transition-colors hover:bg-[var(--sc-sun-2)] focus-visible:outline-[var(--sc-black)]"
-            >
-              {copy.cta}
-            </Link>
+            <div className="mt-8 flex">
+              <Link
+                href="/patient/guide"
+                className="group inline-flex min-h-13 items-center justify-center gap-4 bg-[var(--sc-sun)] px-7 py-3.5 text-center text-[0.72rem] font-semibold text-[var(--sc-black)] no-underline transition-colors hover:bg-[var(--sc-sun-2)] focus-visible:outline-[var(--sc-black)]"
+              >
+                {copy.cta}
+                <ArrowUpRight
+                  aria-hidden="true"
+                  className="h-4 w-4 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5"
+                />
+              </Link>
+            </div>
           </div>
         </div>
       </div>

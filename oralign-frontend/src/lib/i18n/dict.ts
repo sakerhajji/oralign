@@ -2936,6 +2936,8 @@ export const dict = {
     view3d: { en: 'View 3D', fr: 'Voir en 3D' } as T,
     loading3d: { en: 'Loading 3D viewer…', fr: 'Chargement de la vue 3D…' } as T,
     optimizing: { en: 'Optimizing…', fr: 'Optimisation…' } as T,
+    notProvided: { en: 'Not provided', fr: 'Non fourni' } as T,
+    uploadingPct: { en: 'Uploading… {pct}%', fr: 'Téléversement… {pct} %' } as T,
     preview: { en: 'Preview', fr: 'Aperçu' } as T,
     download: { en: 'Download', fr: 'Télécharger' } as T,
     zipArchive: { en: 'ZIP archive', fr: 'Archive ZIP' } as T,

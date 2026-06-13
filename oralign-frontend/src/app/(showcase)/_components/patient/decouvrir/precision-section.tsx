@@ -123,7 +123,7 @@ export function PrecisionSection() {
     >
       <div className="relative hidden min-h-[calc(100svh-5rem)] lg:block">
         <Image
-          src="/showcase/image.jpeg"
+          src="/showcase/invisaligne.png"
           alt={copy.imageAlt}
           fill
           sizes="100vw"
@@ -177,7 +177,7 @@ export function PrecisionSection() {
 
         <div className="relative aspect-[4/5] overflow-hidden sm:aspect-[16/10]">
           <Image
-            src="/showcase/image.jpeg"
+            src="/showcase/invisaligne.png"
             alt={copy.imageAlt}
             fill
             sizes="100vw"

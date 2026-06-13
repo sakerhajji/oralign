@@ -31,6 +31,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ImageLightbox } from '@/components/ui/image-lightbox';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n/lang-context';
 import { getAccessToken } from '@/lib/api';
 import { ordersService } from '@/lib/api/orders.service';
 import { treatmentPlansService } from '@/lib/api/treatment-plans.service';
@@ -62,6 +63,17 @@ import {
 
 // Defer the odontogram (its sprite payload is heavy) — same pattern as the
 // order-detail page, so React only loads the SVG sprite once per session.
+// The loading fallback is its own client component so the placeholder text
+// can flip with the language toggle (can't call a hook at module scope).
+function OdontogramLoading() {
+  const { t } = useT();
+  return (
+    <div className="flex h-48 items-center justify-center text-sm text-muted-foreground">
+      {t('orderDetail.loadingOdontogram')}
+    </div>
+  );
+}
+
 const OdontogramSelector = dynamic(
   () =>
     import('@/components/orders/odontogram-selector').then((m) => ({
@@ -69,11 +81,7 @@ const OdontogramSelector = dynamic(
     })),
   {
     ssr: false,
-    loading: () => (
-      <div className="flex h-48 items-center justify-center text-sm text-muted-foreground">
-        Loading odontogram…
-      </div>
-    ),
+    loading: () => <OdontogramLoading />,
   },
 );
 
@@ -142,6 +150,7 @@ export function TreatmentPlanReview({
   role,
   socketConnected = false,
 }: Props) {
+  const { t } = useT();
   const reviewQuery = useTreatmentPlanReview(treatmentPlanId);
   const review = reviewQuery.data;
   const { user } = useAuth();
@@ -149,7 +158,9 @@ export function TreatmentPlanReview({
   if (reviewQuery.isLoading || !review) {
     return (
       <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
-        {reviewQuery.error ? 'Failed to load treatment plan.' : 'Loading…'}
+        {reviewQuery.error
+          ? t('treatmentReview.loadFailed')
+          : t('treatmentReview.loading')}
       </div>
     );
   }
@@ -178,13 +189,17 @@ export function TreatmentPlanReview({
               <Check className="h-4 w-4" />
             </span>
             <div>
-              <p className="font-semibold">Treatment plan approved</p>
+              <p className="font-semibold">
+                {t('treatmentReview.approvedBanner.title')}
+              </p>
               <p className="text-xs text-emerald-900/80">
-                Approved
+                {t('treatmentReview.approvedBanner.approvedPrefix')}
                 {review.approvedAt
-                  ? ` on ${format(new Date(review.approvedAt), 'MMM d, yyyy')}`
+                  ? ` ${t('treatmentReview.approvedBanner.approvedOn', {
+                      date: format(new Date(review.approvedAt), 'MMM d, yyyy'),
+                    })}`
                   : ''}
-                . The order is now in manufacturing.
+                . {t('treatmentReview.approvedBanner.inManufacturing')}
               </p>
             </div>
           </CardContent>
@@ -219,7 +234,7 @@ export function TreatmentPlanReview({
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Send className="h-4 w-4 text-primary" />
-            Treatment Conversation
+            {t('treatmentReview.conversationCardTitle')}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -254,6 +269,7 @@ function ReadyAction({
 }: {
   review: NonNullable<ReturnType<typeof useTreatmentPlanReview>['data']>;
 }) {
+  const { t } = useT();
   const markReady = useMarkTreatmentPlanReady();
   const isResend = review.status === TreatmentPlanStatus.REJECTED;
   return (
@@ -266,16 +282,15 @@ function ReadyAction({
         <div>
           <p className="text-sm font-semibold">
             {isResend
-              ? 'Resend treatment plan'
-              : 'Send for doctor review'}
+              ? t('treatmentReview.ready.resendTitle')
+              : t('treatmentReview.ready.sendTitle')}
           </p>
           <p className="text-xs text-muted-foreground">
             {isResend
-              ? 'The doctor rejected this version. Clicking below creates a new versioned plan ' +
-                "(v" +
-                (review.version + 1) +
-                ") and marks it ready for the doctor — the rejected plan stays in history for the audit trail."
-              : 'Mark this plan as ready once the viewer URL, movement table, and any result files are in place. The doctor is then unblocked to approve or reject.'}
+              ? `${t('treatmentReview.ready.resendDescBefore')} (v${
+                  review.version + 1
+                }) ${t('treatmentReview.ready.resendDescAfter')}`
+              : t('treatmentReview.ready.sendDesc')}
           </p>
         </div>
         <Button
@@ -289,7 +304,9 @@ function ReadyAction({
           ) : (
             <Check className="h-4 w-4" />
           )}
-          {isResend ? 'Create new version & resend' : 'Mark as ready for review'}
+          {isResend
+            ? t('treatmentReview.ready.createNewVersion')
+            : t('treatmentReview.ready.markReady')}
         </Button>
       </CardContent>
     </Card>
@@ -309,6 +326,7 @@ function PlanHeader({
    *  it. Currently unused. */
   isDoctor: boolean;
 }) {
+  const { t } = useT();
   const generate = useGeneratePublicLink();
   // Public-link generation is now also available to doctors (the order
   // owner) so they can hand the link directly to their patient without
@@ -335,11 +353,12 @@ function PlanHeader({
             <StatusBadge status={review.status} />
           </CardTitle>
           <p className="text-xs text-muted-foreground">
-            Created {format(new Date(review.createdAt), 'MMM d, yyyy HH:mm')}
+            {t('treatmentReview.header.createdLabel')}{' '}
+            {format(new Date(review.createdAt), 'MMM d, yyyy HH:mm')}
             {review.approvedAt &&
-              ` · Approved ${format(new Date(review.approvedAt), 'MMM d, yyyy')}`}
+              ` · ${t('treatmentReview.header.approvedLabel')} ${format(new Date(review.approvedAt), 'MMM d, yyyy')}`}
             {review.rejectedAt &&
-              ` · Rejected ${format(new Date(review.rejectedAt), 'MMM d, yyyy')}`}
+              ` · ${t('treatmentReview.header.rejectedLabel')} ${format(new Date(review.rejectedAt), 'MMM d, yyyy')}`}
           </p>
         </div>
 
@@ -357,7 +376,7 @@ function PlanHeader({
                 title={publicUrl}
               >
                 <Link2 className="h-4 w-4" />
-                Copy patient link
+                {t('treatmentReview.header.copyPatientLink')}
               </Button>
             )}
             <Button
@@ -374,8 +393,8 @@ function PlanHeader({
                 <Link2 className="h-4 w-4" />
               )}
               {review.publicToken
-                ? 'Rotate patient link'
-                : 'Generate patient link'}
+                ? t('treatmentReview.header.rotatePatientLink')
+                : t('treatmentReview.header.generatePatientLink')}
             </Button>
           </div>
         )}
@@ -385,11 +404,24 @@ function PlanHeader({
 }
 
 function StatusBadge({ status }: { status: TreatmentPlanStatus }) {
+  const { t } = useT();
   const variants: Record<TreatmentPlanStatus, [string, string]> = {
-    [TreatmentPlanStatus.PENDING]: ['Pending', 'bg-amber-100 text-amber-800 border-amber-200'],
-    [TreatmentPlanStatus.READY]: ['Ready for review', 'bg-blue-100 text-blue-800 border-blue-200'],
-    [TreatmentPlanStatus.APPROVED]: ['Approved', 'bg-emerald-100 text-emerald-800 border-emerald-200'],
-    [TreatmentPlanStatus.REJECTED]: ['Rejected', 'bg-red-100 text-red-800 border-red-200'],
+    [TreatmentPlanStatus.PENDING]: [
+      t('treatmentReview.status.pending'),
+      'bg-amber-100 text-amber-800 border-amber-200',
+    ],
+    [TreatmentPlanStatus.READY]: [
+      t('treatmentReview.status.ready'),
+      'bg-blue-100 text-blue-800 border-blue-200',
+    ],
+    [TreatmentPlanStatus.APPROVED]: [
+      t('treatmentReview.status.approved'),
+      'bg-emerald-100 text-emerald-800 border-emerald-200',
+    ],
+    [TreatmentPlanStatus.REJECTED]: [
+      t('treatmentReview.status.rejected'),
+      'bg-red-100 text-red-800 border-red-200',
+    ],
   };
   const [label, className] = variants[status];
   return (
@@ -413,6 +445,7 @@ function TreatmentViewerCard({
    *  hide the badge + mode toggle for them. */
   isDoctor: boolean;
 }) {
+  const { t } = useT();
   // Saved URL → derive both the displayable URL (hash stripped) and the
   // viewer mode (internal vs external smart-shell) from the hash.
   const savedMode = parseViewerMode(review.resultViewUrl);
@@ -458,7 +491,7 @@ function TreatmentViewerCard({
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          Treatment Viewer
+          {t('treatmentReview.viewer.title')}
           {/* Internal/External is a planner concept — never shown to
               doctors. They see the branded viewer regardless of mode. */}
           {review.resultViewUrl && !isDoctor && (
@@ -476,7 +509,9 @@ function TreatmentViewerCard({
               ) : (
                 <Lock className="mr-1 h-3 w-3" />
               )}
-              {savedMode === 'external' ? 'External viewer' : 'Internal viewer'}
+              {savedMode === 'external'
+                ? t('treatmentReview.viewer.externalBadge')
+                : t('treatmentReview.viewer.internalBadge')}
             </Badge>
           )}
         </CardTitle>
@@ -495,7 +530,7 @@ function TreatmentViewerCard({
                   key={`${savedCleanUrl}::${savedMode}`}
                   src={srcDoc ? undefined : directSrc || undefined}
                   srcDoc={srcDoc || undefined}
-                  title="Treatment Viewer"
+                  title={t('treatmentReview.viewer.iframeTitle')}
                   className="absolute inset-0 h-full w-full"
                   // Internal trusted viewers can keep allow-same-origin (they
                   // run on our infrastructure). External smart-shells live
@@ -508,7 +543,7 @@ function TreatmentViewerCard({
                 />
               ) : (
                 <div className="grid h-full place-items-center p-6 text-center text-sm text-muted-foreground">
-                  The viewer cannot be embedded.
+                  {t('treatmentReview.viewer.cannotEmbed')}
                 </div>
               )}
             </div>
@@ -518,7 +553,7 @@ function TreatmentViewerCard({
           </>
         ) : (
           <div className="rounded-md border border-dashed bg-muted/30 p-6 text-center text-sm text-muted-foreground">
-            Treatment viewer is not available yet.
+            {t('treatmentReview.viewer.notAvailable')}
           </div>
         )}
 
@@ -529,7 +564,7 @@ function TreatmentViewerCard({
                 htmlFor={`viewer-url-${review.id}`}
                 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
               >
-                Viewer URL
+                {t('treatmentReview.viewer.urlLabel')}
               </label>
               <div className="flex flex-col gap-2 sm:flex-row">
                 <Input
@@ -545,21 +580,21 @@ function TreatmentViewerCard({
 
             <fieldset className="space-y-2">
               <legend className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Viewer type
+                {t('treatmentReview.viewer.typeLabel')}
               </legend>
               <div className="grid gap-2 sm:grid-cols-2">
                 <ViewerModeOption
                   selected={modeDraft === 'internal'}
                   icon={<Lock className="h-4 w-4 text-emerald-600" />}
-                  title="Internal viewer"
-                  description="Trusted viewer hosted by you. Plain iframe, no logo injection."
+                  title={t('treatmentReview.viewer.internalTitle')}
+                  description={t('treatmentReview.viewer.internalDesc')}
                   onSelect={() => setModeDraft('internal')}
                 />
                 <ViewerModeOption
                   selected={modeDraft === 'external'}
                   icon={<Globe className="h-4 w-4 text-amber-600" />}
-                  title="External viewer"
-                  description="Wrap in Oralign-branded shell with smart logo injection. Use for Hirsch and other third-party 3D viewers."
+                  title={t('treatmentReview.viewer.externalTitle')}
+                  description={t('treatmentReview.viewer.externalDesc')}
                   onSelect={() => setModeDraft('external')}
                 />
               </div>
@@ -577,7 +612,7 @@ function TreatmentViewerCard({
                 ) : (
                   <Check className="h-4 w-4" />
                 )}
-                Save viewer
+                {t('treatmentReview.viewer.saveViewer')}
               </Button>
             </div>
           </div>
@@ -671,12 +706,31 @@ const PLANNER_TREATMENT_COLOR_TYPES = new Set<string>([
   ToothInstructionType.ATTACHMENT,
 ]);
 
+// Each slot carries an i18n LABEL KEY (not a raw title string) so the
+// label flips with the language toggle — resolved with t() inside the
+// component (see ClinicalImagesSection's useMemo). Mirrors the
+// `titleKey` pattern in order-file-upload.tsx; no t() at module scope.
 const TREATMENT_CLINICAL_IMAGE_SLOTS = [
-  { category: OrderFileCategory.LEFT_PHOTO, label: 'Left lateral view' },
-  { category: OrderFileCategory.FRONT_PHOTO, label: 'Frontal occlusion view' },
-  { category: OrderFileCategory.RIGHT_PHOTO, label: 'Right lateral view' },
-  { category: OrderFileCategory.UPPER_PHOTO, label: 'Upper occlusal view' },
-  { category: OrderFileCategory.LOWER_PHOTO, label: 'Lower occlusal view' },
+  {
+    category: OrderFileCategory.LEFT_PHOTO,
+    labelKey: 'treatmentReview.clinical.slots.leftLateral',
+  },
+  {
+    category: OrderFileCategory.FRONT_PHOTO,
+    labelKey: 'treatmentReview.clinical.slots.frontalOcclusion',
+  },
+  {
+    category: OrderFileCategory.RIGHT_PHOTO,
+    labelKey: 'treatmentReview.clinical.slots.rightLateral',
+  },
+  {
+    category: OrderFileCategory.UPPER_PHOTO,
+    labelKey: 'treatmentReview.clinical.slots.upperOcclusal',
+  },
+  {
+    category: OrderFileCategory.LOWER_PHOTO,
+    labelKey: 'treatmentReview.clinical.slots.lowerOcclusal',
+  },
 ] as const;
 
 function isDoctorOrderColorType(type: string): type is ToothInstructionType {
@@ -755,6 +809,7 @@ function MovementTableSection({
   canEdit: boolean;
   treatmentPlanId: string;
 }) {
+  const { t } = useT();
   const upload = useUploadMovementTableImage();
   const remove = useDeleteMovementTableImage();
   const updateInstructions = useUpdateToothInstructions();
@@ -935,7 +990,7 @@ function MovementTableSection({
       <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <CardTitle className="flex items-center gap-2">
           <Stethoscope className="h-4 w-4 text-primary" />
-          Treatment odontogram &amp; IPR
+          {t('treatmentReview.odontogram.cardTitle')}
         </CardTitle>
         {canEdit && (
           <IprModeToggle value={iprMode} onChange={setIprMode} />
@@ -973,8 +1028,8 @@ function MovementTableSection({
           onIprChange={
             iprMode === 'per-tooth' && canEdit ? handleIprChange : undefined
           }
-          title="Treatment odontogram"
-          subtitle="The doctor's order colours are shown as a background reference. Add pink ATTACHMENT marks on individual teeth, and click the dotted contacts between teeth to set IPR (mm) and Step values."
+          title={t('treatmentReview.odontogram.selectorTitle')}
+          subtitle={t('treatmentReview.odontogram.selectorSubtitle')}
         />
 
         {/* Editor instructions — only relevant when the planner is in
@@ -985,11 +1040,11 @@ function MovementTableSection({
               <Stethoscope className="h-4 w-4" />
             </div>
             <div>
-              <p className="font-semibold">Per-tooth IPR and STEP</p>
+              <p className="font-semibold">
+                {t('treatmentReview.odontogram.perToothTitle')}
+              </p>
               <p className="text-purple-900/80">
-                Click the dotted contact between two teeth to add an IPR amount
-                in millimetres. Use the STEP field for the aligner step
-                reference; both values save together.
+                {t('treatmentReview.odontogram.perToothDesc')}
               </p>
             </div>
           </div>
@@ -1005,11 +1060,11 @@ function MovementTableSection({
           <div className="rounded-2xl border bg-card p-4 shadow-sm">
             <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h3 className="text-base font-semibold">IPR reference image</h3>
+                <h3 className="text-base font-semibold">
+                  {t('treatmentReview.iprImage.title')}
+                </h3>
                 <p className="text-xs text-muted-foreground">
-                  Upload an IPR map exported from your CAD software. The
-                  doctor and public viewer will see this image alongside the
-                  odontogram.
+                  {t('treatmentReview.iprImage.desc')}
                 </p>
               </div>
               {canEdit && iprMode === 'image' && (
@@ -1027,7 +1082,9 @@ function MovementTableSection({
                     ) : (
                       <Upload className="h-4 w-4" />
                     )}
-                    {imageUrl ? 'Replace image' : 'Upload image'}
+                    {imageUrl
+                      ? t('treatmentReview.iprImage.replaceImage')
+                      : t('treatmentReview.iprImage.uploadImage')}
                   </Button>
                   {imageUrl && (
                     <Button
@@ -1039,7 +1096,7 @@ function MovementTableSection({
                       className="gap-2 text-red-600"
                     >
                       <Trash2 className="h-4 w-4" />
-                      Remove
+                      {t('treatmentReview.iprImage.remove')}
                     </Button>
                   )}
                 </div>
@@ -1052,20 +1109,20 @@ function MovementTableSection({
                   {iprImage.loading ? (
                     <div className="flex h-48 items-center justify-center text-sm text-muted-foreground">
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Loading image…
+                      {t('treatmentReview.iprImage.loadingImage')}
                     </div>
                   ) : iprImage.objectUrl ? (
                     <>
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={iprImage.objectUrl}
-                        alt="IPR reference image"
+                        alt={t('treatmentReview.iprImage.alt')}
                         className="block max-h-[480px] w-full object-contain"
                       />
                     </>
                   ) : (
                     <div className="flex h-48 items-center justify-center text-sm text-red-600">
-                      {iprImage.error ?? 'Unable to load image preview.'}
+                      {iprImage.error ?? t('treatmentReview.iprImage.loadError')}
                     </div>
                   )}
                 </div>
@@ -1079,14 +1136,14 @@ function MovementTableSection({
                     className="gap-2"
                   >
                     <Maximize2 className="h-4 w-4" />
-                    View full size
+                    {t('treatmentReview.iprImage.viewFullSize')}
                   </Button>
                 </div>
               </>
             ) : (
               <div className="rounded-md border border-dashed bg-muted/30 p-4 text-center text-sm text-muted-foreground">
                 <ImageIcon className="mx-auto mb-1 h-4 w-4 opacity-50" />
-                No IPR image uploaded.
+                {t('treatmentReview.iprImage.noImage')}
               </div>
             )}
           </div>
@@ -1117,8 +1174,8 @@ function MovementTableSection({
           open={fullView}
           onOpenChange={setFullView}
           src={iprImage.objectUrl}
-          alt="IPR reference image — full size"
-          caption="IPR reference image"
+          alt={t('treatmentReview.iprImage.lightboxAlt')}
+          caption={t('treatmentReview.iprImage.lightboxCaption')}
         />
 
         {/* The clinical-image preview Dialog moved with the gallery —
@@ -1145,6 +1202,7 @@ function ClinicalImagesSection({
 }: {
   review: NonNullable<ReturnType<typeof useTreatmentPlanReview>['data']>;
 }) {
+  const { t } = useT();
   const [clinicalPreview, setClinicalPreview] = useState<{
     src: string;
     label: string;
@@ -1172,10 +1230,11 @@ function ClinicalImagesSection({
       }
     }
     return TREATMENT_CLINICAL_IMAGE_SLOTS.map((slot) => ({
-      ...slot,
+      category: slot.category,
+      label: t(slot.labelKey),
       file: latestByCategory.get(slot.category),
     }));
-  }, [review.clinicalImages]);
+  }, [review.clinicalImages, t]);
 
   return (
     <>
@@ -1193,7 +1252,7 @@ function ClinicalImagesSection({
           if (!next) setClinicalPreview(null);
         }}
         src={clinicalPreview?.src}
-        alt={clinicalPreview?.label ?? 'Clinical image'}
+        alt={clinicalPreview?.label ?? t('treatmentReview.clinical.fallbackAlt')}
         caption={clinicalPreview?.label}
         subCaption={clinicalPreview?.name}
       />
@@ -1216,19 +1275,25 @@ function ClinicalImageGallery({
   getImageUrl: (file: OrderFile) => string;
   onPreview: (preview: { src: string; label: string; name?: string }) => void;
 }) {
+  const { t } = useT();
   const uploadedCount = slots.filter((slot) => slot.file).length;
 
   return (
     <div className="rounded-2xl border bg-card p-4 shadow-sm">
       <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h3 className="text-base font-semibold">Clinical image views</h3>
+          <h3 className="text-base font-semibold">
+            {t('treatmentReview.clinical.galleryTitle')}
+          </h3>
           <p className="text-xs text-muted-foreground">
-            Order photos sent with the case, shown here for treatment review.
+            {t('treatmentReview.clinical.galleryDesc')}
           </p>
         </div>
         <Badge variant="secondary" className="w-fit rounded-full">
-          {uploadedCount}/{slots.length} uploaded
+          {t('treatmentReview.clinical.uploadedBadge', {
+            n: uploadedCount,
+            total: slots.length,
+          })}
         </Badge>
       </div>
 
@@ -1255,6 +1320,7 @@ function ClinicalImageCard({
   imageUrl: string | null;
   onPreview: (preview: { src: string; label: string; name?: string }) => void;
 }) {
+  const { t } = useT();
   const preview = useAuthenticatedObjectUrl(imageUrl);
   const file = slot.file;
 
@@ -1283,7 +1349,7 @@ function ClinicalImageCard({
             {preview.loading ? (
               <span className="flex items-center text-xs text-muted-foreground">
                 <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-                Loading…
+                {t('treatmentReview.clinical.loading')}
               </span>
             ) : preview.objectUrl ? (
               <>
@@ -1295,12 +1361,12 @@ function ClinicalImageCard({
                 />
                 <span className="absolute inset-x-3 bottom-3 flex items-center justify-center gap-1.5 rounded-full bg-black/70 px-3 py-1.5 text-xs font-medium text-white opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100">
                   <Maximize2 className="h-3.5 w-3.5" />
-                  View
+                  {t('treatmentReview.clinical.view')}
                 </span>
               </>
             ) : (
               <span className="px-3 text-center text-xs text-red-600">
-                {preview.error ?? 'Unable to load preview.'}
+                {preview.error ?? t('treatmentReview.clinical.loadError')}
               </span>
             )}
           </button>
@@ -1314,7 +1380,7 @@ function ClinicalImageCard({
       ) : (
         <div className="flex h-40 flex-col items-center justify-center rounded-lg border border-dashed bg-muted/20 text-center text-xs text-muted-foreground sm:h-44">
           <ImageIcon className="mb-2 h-5 w-5 opacity-50" />
-          Not uploaded
+          {t('treatmentReview.clinical.notUploaded')}
         </div>
       )}
     </div>
@@ -1334,10 +1400,11 @@ function IprModeToggle({
   value: IprMode;
   onChange: (mode: IprMode) => void;
 }) {
+  const { t } = useT();
   return (
     <div
       role="tablist"
-      aria-label="IPR input mode"
+      aria-label={t('treatmentReview.iprToggle.ariaLabel')}
       className="inline-flex items-center rounded-lg border bg-muted p-1"
     >
       <button
@@ -1353,7 +1420,7 @@ function IprModeToggle({
         )}
       >
         <Stethoscope className="h-3.5 w-3.5" />
-        Per-tooth
+        {t('treatmentReview.iprToggle.perTooth')}
       </button>
       <button
         type="button"
@@ -1368,7 +1435,7 @@ function IprModeToggle({
         )}
       >
         <ImageIcon className="h-3.5 w-3.5" />
-        By image
+        {t('treatmentReview.iprToggle.byImage')}
       </button>
     </div>
   );
@@ -1393,6 +1460,7 @@ function DentalTreatmentTableSection({
   canEdit: boolean;
   treatmentPlanId: string;
 }) {
+  const { t } = useT();
   const upload = useUploadDentalTreatmentTableImage();
   const remove = useDeleteDentalTreatmentTableImage();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1440,11 +1508,11 @@ function DentalTreatmentTableSection({
 
   const handlePastedFile = (file: File) => {
     if (!file.type.startsWith('image/')) {
-      toast.error('Pasted content is not an image.');
+      toast.error(t('treatmentReview.dentalTable.toasts.notImage'));
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
-      toast.error('Image must be 10 MB or smaller.');
+      toast.error(t('treatmentReview.dentalTable.toasts.tooLarge'));
       return;
     }
     upload.mutate({ id: treatmentPlanId, file });
@@ -1493,7 +1561,7 @@ function DentalTreatmentTableSection({
             return;
           }
         }
-        toast.error('No image found on the clipboard.');
+        toast.error(t('treatmentReview.dentalTable.toasts.noImageOnClipboard'));
         return;
       } catch (err) {
         // Permission denied, no clipboard data, or browser doesn't
@@ -1502,14 +1570,14 @@ function DentalTreatmentTableSection({
         const message =
           err instanceof Error && err.message
             ? err.message
-            : 'Clipboard read failed';
-        toast.error(`${message}. Tip: click the upload area and press Ctrl-V.`);
+            : t('treatmentReview.dentalTable.toasts.clipboardReadFailed');
+        toast.error(
+          `${message}. ${t('treatmentReview.dentalTable.toasts.clipboardReadTip')}`,
+        );
         return;
       }
     }
-    toast.error(
-      'Your browser does not allow programmatic clipboard reads. Click the upload area and press Ctrl-V instead.',
-    );
+    toast.error(t('treatmentReview.dentalTable.toasts.noProgrammaticRead'));
   };
 
   return (
@@ -1517,9 +1585,9 @@ function DentalTreatmentTableSection({
       <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <CardTitle className="flex items-center gap-2">
           <ImageIcon className="h-4 w-4 text-primary" />
-          Dental treatment table
+          {t('treatmentReview.dentalTable.cardTitle')}
           <span className="text-xs font-normal text-muted-foreground">
-            (Traitement dentaire)
+            {t('treatmentReview.dentalTable.cardSubtitle')}
           </span>
         </CardTitle>
         {canEdit && imageUrl && (
@@ -1537,7 +1605,7 @@ function DentalTreatmentTableSection({
               ) : (
                 <Upload className="h-4 w-4" />
               )}
-              Replace
+              {t('treatmentReview.dentalTable.replace')}
             </Button>
             <Button
               type="button"
@@ -1548,7 +1616,7 @@ function DentalTreatmentTableSection({
               className="gap-2"
             >
               <ClipboardPaste className="h-4 w-4" />
-              Paste
+              {t('treatmentReview.dentalTable.paste')}
             </Button>
             <Button
               type="button"
@@ -1563,17 +1631,14 @@ function DentalTreatmentTableSection({
               ) : (
                 <Trash2 className="h-4 w-4" />
               )}
-              Remove
+              {t('treatmentReview.dentalTable.remove')}
             </Button>
           </div>
         )}
       </CardHeader>
       <CardContent className="space-y-3">
         <p className="text-sm text-muted-foreground">
-          Per-tooth restorative / endodontic / extraction plan. Separate
-          from the orthodontic movement table above — upload it as an image
-          (PNG, JPG or WebP, max 10 MB) so the doctor sees the full plan
-          alongside the odontogram.
+          {t('treatmentReview.dentalTable.desc')}
         </p>
 
         {imageUrl ? (
@@ -1587,14 +1652,14 @@ function DentalTreatmentTableSection({
             className="overflow-hidden rounded-2xl border bg-card shadow-sm outline-none transition focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/40"
             aria-label={
               canEdit
-                ? 'Dental treatment table — click then press Ctrl-V to paste a new image'
+                ? t('treatmentReview.dentalTable.pasteAriaExisting')
                 : undefined
             }
           >
             {imageBlob.loading ? (
               <div className="flex h-40 items-center justify-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Loading image…
+                {t('treatmentReview.dentalTable.loadingImage')}
               </div>
             ) : imageBlob.error ? (
               <div className="flex h-40 items-center justify-center text-sm text-destructive">
@@ -1605,13 +1670,13 @@ function DentalTreatmentTableSection({
                 type="button"
                 onClick={() => setFullView(true)}
                 className="group block w-full"
-                aria-label="View dental treatment table full size"
+                aria-label={t('treatmentReview.dentalTable.viewFullAria')}
               >
                 {imageBlob.objectUrl && (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={imageBlob.objectUrl}
-                    alt="Dental treatment table"
+                    alt={t('treatmentReview.dentalTable.imageAlt')}
                     className="max-h-[640px] w-full object-contain transition group-hover:scale-[1.005]"
                   />
                 )}
@@ -1628,7 +1693,7 @@ function DentalTreatmentTableSection({
                   className="flex items-center gap-1 hover:text-foreground"
                 >
                   <Maximize2 className="h-3 w-3" />
-                  Open full view
+                  {t('treatmentReview.dentalTable.openFullView')}
                 </button>
               </div>
             )}
@@ -1642,15 +1707,16 @@ function DentalTreatmentTableSection({
             tabIndex={0}
             onPaste={handleClipboardEventPaste}
             className="rounded-2xl border-2 border-dashed bg-muted/20 p-6 outline-none transition focus-visible:border-primary focus-visible:bg-primary/5 focus-visible:ring-2 focus-visible:ring-primary/40"
-            aria-label="Dental treatment table upload dropzone — click then press Ctrl-V to paste an image"
+            aria-label={t('treatmentReview.dentalTable.dropzoneAria')}
           >
             <div className="flex flex-col items-center justify-center gap-3 text-center">
               <ImageIcon className="h-8 w-8 text-muted-foreground" />
               <div>
-                <p className="text-sm font-medium">No image uploaded yet</p>
+                <p className="text-sm font-medium">
+                  {t('treatmentReview.dentalTable.noImageYet')}
+                </p>
                 <p className="text-xs text-muted-foreground">
-                  Upload the dental treatment table as PNG, JPG or WebP, or
-                  click this area and press{' '}
+                  {t('treatmentReview.dentalTable.dropHintBefore')}{' '}
                   <kbd className="rounded border bg-background px-1 font-mono text-[10px]">
                     Ctrl
                   </kbd>{' '}
@@ -1658,7 +1724,7 @@ function DentalTreatmentTableSection({
                   <kbd className="rounded border bg-background px-1 font-mono text-[10px]">
                     V
                   </kbd>{' '}
-                  to paste a screenshot.
+                  {t('treatmentReview.dentalTable.dropHintAfter')}
                 </p>
               </div>
               <div className="flex flex-wrap items-center justify-center gap-2">
@@ -1674,7 +1740,7 @@ function DentalTreatmentTableSection({
                   ) : (
                     <Upload className="h-4 w-4" />
                   )}
-                  Upload image
+                  {t('treatmentReview.dentalTable.uploadImage')}
                 </Button>
                 <Button
                   type="button"
@@ -1684,15 +1750,14 @@ function DentalTreatmentTableSection({
                   className="gap-2"
                 >
                   <ClipboardPaste className="h-4 w-4" />
-                  Paste from clipboard
+                  {t('treatmentReview.dentalTable.pasteFromClipboard')}
                 </Button>
               </div>
             </div>
           </div>
         ) : (
           <div className="rounded-2xl border bg-muted/10 p-6 text-center text-sm text-muted-foreground">
-            The dental treatment table will appear here once the planner
-            uploads it.
+            {t('treatmentReview.dentalTable.readonlyEmpty')}
           </div>
         )}
 
@@ -1717,8 +1782,8 @@ function DentalTreatmentTableSection({
         open={fullView}
         onOpenChange={setFullView}
         src={imageBlob.objectUrl}
-        alt="Dental treatment table — full view"
-        caption="Dental treatment table"
+        alt={t('treatmentReview.dentalTable.lightboxAlt')}
+        caption={t('treatmentReview.dentalTable.lightboxCaption')}
         subCaption={review.dentalTreatmentTableImageName ?? undefined}
       />
     </Card>
@@ -1745,6 +1810,7 @@ function ApprovalActions({
 }: {
   review: NonNullable<ReturnType<typeof useTreatmentPlanReview>['data']>;
 }) {
+  const { t } = useT();
   const approve = useApproveTreatmentPlan();
   const reject = useRejectTreatmentPlan();
   const isReady = review.status === TreatmentPlanStatus.READY;
@@ -1754,11 +1820,11 @@ function ApprovalActions({
   const disabled = !isReady || busy;
 
   const statusHint = isApproved
-    ? 'This plan has already been approved.'
+    ? t('treatmentReview.approval.alreadyApproved')
     : isRejected
-      ? 'This plan was rejected — the designer will send a new version.'
+      ? t('treatmentReview.approval.wasRejected')
       : !isReady
-        ? 'Awaiting the designer — buttons unlock once the plan is marked ready.'
+        ? t('treatmentReview.approval.awaitingDesigner')
         : null;
 
   return (
@@ -1782,7 +1848,7 @@ function ApprovalActions({
           ) : (
             <X className="h-5 w-5" />
           )}
-          Reject
+          {t('treatmentReview.approval.reject')}
         </Button>
         <Button
           type="button"
@@ -1796,7 +1862,7 @@ function ApprovalActions({
           ) : (
             <Check className="h-5 w-5" />
           )}
-          Approve
+          {t('treatmentReview.approval.approve')}
         </Button>
       </div>
     </div>

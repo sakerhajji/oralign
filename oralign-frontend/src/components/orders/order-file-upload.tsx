@@ -513,8 +513,8 @@ export function ClinicalOrderFiles({
             see the CBCT / ZIP volumes shipped with this order. */}
         <ZipUploadAction
           orderId={orderId}
-          title="Upload bundle (.zip) or CBCT (.dcm)"
-          description="Ship a single ZIP archive (e.g. a CBCT DICOM volume, or a multi-file STL export). We audit it client-side for executables and unsafe filenames before saving. Single .dcm DICOM files are also accepted."
+          title={t('media.zipAction.freeformTitle')}
+          description={t('media.zipAction.freeformDesc')}
           category={OrderFileCategory.ZIP}
           files={files}
           onDelete={

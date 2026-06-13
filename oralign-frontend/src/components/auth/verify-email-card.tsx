@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
@@ -17,15 +18,25 @@ import {
 } from '@/components/ui/card';
 import { Form } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
-import { verifyEmailSchema, type VerifyEmailFormData } from '@/lib/schemas';
+import { type VerifyEmailFormData } from '@/lib/schemas';
 import { useVerifyEmail, useResendVerification } from '@/lib/hooks';
 import { getApiErrorMessage } from '@/lib/hooks/use-auth';
 import { useAuth } from '@/lib/providers';
 import { userKeys } from '@/lib/hooks/use-users';
+import { useT } from '@/lib/i18n/lang-context';
 
 const RESEND_COOLDOWN_SECONDS = 60;
 
+type Translate = (path: string, vars?: Record<string, string | number>) => string;
+
+const makeVerifyEmailSchema = (t: Translate) =>
+  z.object({
+    email: z.string().email(t('authPages.validation.emailInvalid')).toLowerCase().trim(),
+    verificationCode: z.string().min(1, t('authPages.validation.codeRequired')),
+  });
+
 export function VerifyEmailCard() {
+  const { t } = useT();
   const router = useRouter();
   const queryClient = useQueryClient();
   const { user } = useAuth();
@@ -33,6 +44,8 @@ export function VerifyEmailCard() {
   const { mutate: resendCode, isPending: isResending } = useResendVerification();
   const [cooldown, setCooldown] = useState(0);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const verifyEmailSchema = useMemo(() => makeVerifyEmailSchema(t), [t]);
 
   const form = useForm<VerifyEmailFormData>({
     resolver: zodResolver(verifyEmailSchema),
@@ -61,7 +74,7 @@ export function VerifyEmailCard() {
   const handleResend = () => {
     const email = form.getValues('email');
     if (!email) {
-      toast.error('Please enter your email address first.');
+      toast.error(t('authPages.verify.emailRequiredToast'));
       return;
     }
     setSubmitError(null);
@@ -88,7 +101,7 @@ export function VerifyEmailCard() {
       // Surface the actual backend reason in the form, not just a toast.
       // Common causes: "Invalid verification code", "Verification code has
       // expired", "No verification code found".
-      setSubmitError(getApiErrorMessage(error, 'Failed to verify email'));
+      setSubmitError(getApiErrorMessage(error, t('authPages.verify.verifyFailedFallback')));
     }
   });
 
@@ -99,15 +112,15 @@ export function VerifyEmailCard() {
           <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-primary/10">
             <MailIcon className="size-7 text-primary" />
           </div>
-          <CardTitle className="text-2xl">Check your inbox</CardTitle>
+          <CardTitle className="text-2xl">{t('authPages.verify.title')}</CardTitle>
           <CardDescription className="text-balance">
-            We sent a 6-digit verification code to{' '}
+            {t('authPages.verify.descBefore')}{' '}
             {user?.email ? (
               <span className="font-medium text-foreground">{user.email}</span>
             ) : (
-              'your email address'
+              t('authPages.verify.descFallbackEmail')
             )}
-            . Enter it below to continue.
+            {t('authPages.verify.descAfter')}
           </CardDescription>
         </CardHeader>
 
@@ -117,12 +130,12 @@ export function VerifyEmailCard() {
             {!user?.email && (
               <div className="space-y-1.5">
                 <label className="text-sm font-medium" htmlFor="email">
-                  Email
+                  {t('authPages.verify.emailLabel')}
                 </label>
                 <Input
                   id="email"
                   type="email"
-                  placeholder="you@example.com"
+                  placeholder={t('authPages.verify.emailPlaceholder')}
                   {...form.register('email')}
                 />
                 {form.formState.errors.email && (
@@ -135,14 +148,14 @@ export function VerifyEmailCard() {
 
             <div className="space-y-1.5">
               <label className="text-sm font-medium" htmlFor="verificationCode">
-                Verification code
+                {t('authPages.verify.codeLabel')}
               </label>
               <Input
                 id="verificationCode"
                 type="text"
                 inputMode="numeric"
                 autoComplete="one-time-code"
-                placeholder="123456"
+                placeholder={t('authPages.verify.codePlaceholder')}
                 maxLength={6}
                 className="text-center text-2xl font-bold tracking-[0.5em]"
                 aria-invalid={!!submitError}
@@ -163,8 +176,7 @@ export function VerifyEmailCard() {
                 <div className="min-w-0">
                   <p className="font-medium">{submitError}</p>
                   <p className="mt-0.5 text-xs text-destructive/80">
-                    If your code expired or you can't find the email, click
-                    "Resend code" below to get a fresh one.
+                    {t('authPages.verify.errorHint')}
                   </p>
                 </div>
               </div>
@@ -176,14 +188,14 @@ export function VerifyEmailCard() {
               disabled={isVerifying}
               size="lg"
             >
-              {isVerifying ? 'Verifying…' : 'Verify email'}
+              {isVerifying ? t('authPages.verify.submitting') : t('authPages.verify.submit')}
             </Button>
           </Form>
 
           {/* Resend */}
           <div className="flex flex-col items-center gap-2 pt-1">
             <p className="text-sm text-muted-foreground">
-              Didn&apos;t receive the code?
+              {t('authPages.verify.noCode')}
             </p>
             <Button
               type="button"
@@ -197,10 +209,10 @@ export function VerifyEmailCard() {
                 className={`size-3.5 ${isResending ? 'animate-spin' : ''}`}
               />
               {cooldown > 0
-                ? `Resend in ${cooldown}s`
+                ? t('authPages.verify.resendIn', { n: cooldown })
                 : isResending
-                  ? 'Sending…'
-                  : 'Resend code'}
+                  ? t('authPages.verify.resending')
+                  : t('authPages.verify.resend')}
             </Button>
           </div>
         </CardContent>

@@ -3,6 +3,7 @@
 import { useEffect, useMemo } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowRight, Loader2 } from 'lucide-react';
@@ -20,15 +21,66 @@ import {
 import { dentistProfileService, extractApiErrorMessage } from '@/lib/api';
 import { userKeys } from '@/lib/hooks/use-users';
 import { workingHoursKeys } from '@/lib/hooks/use-working-hours';
-import {
-  onboardingClinicSchema,
-  type OnboardingClinicFormData,
-} from '@/lib/schemas';
+import { type OnboardingClinicFormData } from '@/lib/schemas';
+import { DayOfWeek } from '@/lib/types';
+import { useT } from '@/lib/i18n/lang-context';
 import type {
   DentistProfile,
   SetupClinicDto,
   WorkingHours,
 } from '@/lib/types';
+
+const HHMM = /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/;
+
+// Validation messages are user-facing, so the onboarding clinic schema
+// is a factory taking the translator — instantiated inside the
+// component via useMemo (keyed on `t`, which changes per language).
+type Translate = (path: string, vars?: Record<string, string | number>) => string;
+
+const makeOnboardingClinicSchema = (t: Translate) =>
+  z
+    .object({
+      clinicName: z.string().min(2, t('onboardingPages.clinicForm.vClinicNameRequired')),
+      clinicAddress: z.string().min(2, t('onboardingPages.clinicForm.vClinicAddressRequired')),
+      clinicPhone: z
+        .string()
+        .regex(/^\+[1-9]\d{6,14}$/, t('onboardingPages.clinicForm.vClinicPhoneFormat')),
+      city: z.string().min(1, t('onboardingPages.clinicForm.vCityRequired')),
+      country: z.string().min(1, t('onboardingPages.clinicForm.vCountryRequired')),
+      latitude: z
+        .number({ message: t('onboardingPages.clinicForm.vPickLocation') })
+        .gt(-90, t('onboardingPages.clinicForm.vPickLocation'))
+        .lt(90, t('onboardingPages.clinicForm.vPickLocation'))
+        .refine((v) => v !== 0, t('onboardingPages.clinicForm.vPickLocation')),
+      longitude: z
+        .number({ message: t('onboardingPages.clinicForm.vPickLocation') })
+        .gt(-180, t('onboardingPages.clinicForm.vPickLocation'))
+        .lt(180, t('onboardingPages.clinicForm.vPickLocation'))
+        .refine((v) => v !== 0, t('onboardingPages.clinicForm.vPickLocation')),
+      description: z.string().optional(),
+      workingHours: z
+        .array(
+          z.object({
+            dayOfWeek: z.nativeEnum(DayOfWeek),
+            openTime: z.string().regex(HHMM, t('onboardingPages.clinicForm.vTimeFormat')),
+            closeTime: z.string().regex(HHMM, t('onboardingPages.clinicForm.vTimeFormat')),
+            isClosed: z.boolean(),
+          }),
+        )
+        .min(1, t('onboardingPages.clinicForm.vSetAtLeastOneDay')),
+    })
+    .refine((data) => data.workingHours.some((d) => !d.isClosed), {
+      message: t('onboardingPages.clinicForm.vOneOpenDay'),
+      path: ['workingHours'],
+    })
+    .refine(
+      (data) =>
+        data.workingHours.every((d) => d.isClosed || d.openTime < d.closeTime),
+      {
+        message: t('onboardingPages.clinicForm.vOpenBeforeClose'),
+        path: ['workingHours'],
+      },
+    );
 
 interface Props {
   profile: DentistProfile | null;
@@ -43,11 +95,17 @@ interface Props {
  * then maybe click Continue" dance that left the gate flags out of sync.
  */
 export function OnboardingClinicForm({ profile, workingHours, onSaved }: Props) {
+  const { t } = useT();
   const queryClient = useQueryClient();
 
   const defaultSchedule = useMemo<DaySchedule[]>(
     () => buildScheduleFromHours(workingHours ?? null),
     [workingHours],
+  );
+
+  const onboardingClinicSchema = useMemo(
+    () => makeOnboardingClinicSchema(t),
+    [t],
   );
 
   const form = useForm<OnboardingClinicFormData>({
@@ -88,7 +146,7 @@ export function OnboardingClinicForm({ profile, workingHours, onSaved }: Props) 
       // The two query trees that drive `clinicComplete` / `scheduleComplete`:
       void queryClient.invalidateQueries({ queryKey: userKeys.currentUser() });
       void queryClient.invalidateQueries({ queryKey: workingHoursKeys.all });
-      toast.success('Clinic setup saved.');
+      toast.success(t('onboardingPages.clinicForm.savedToast'));
       onSaved();
     },
     onError: (error) => {
@@ -138,10 +196,9 @@ export function OnboardingClinicForm({ profile, workingHours, onSaved }: Props) 
           a verification + edit surface, not an entry surface. */}
       <section className="space-y-3">
         <header>
-          <h2 className="text-base font-semibold">Map location</h2>
+          <h2 className="text-base font-semibold">{t('onboardingPages.clinicForm.mapSectionTitle')}</h2>
           <p className="text-sm text-muted-foreground">
-            Drop a pin on the map (or tap "Use My Location") — we&apos;ll
-            auto-fill the address, city, and country below.
+            {t('onboardingPages.clinicForm.mapSectionDesc')}
           </p>
         </header>
         <LocationPicker
@@ -183,22 +240,20 @@ export function OnboardingClinicForm({ profile, workingHours, onSaved }: Props) 
       {/* ─── Clinic details (auto-filled from map, editable) ────────────── */}
       <section className="space-y-4">
         <header>
-          <h2 className="text-base font-semibold">Clinic details</h2>
+          <h2 className="text-base font-semibold">{t('onboardingPages.clinicForm.detailsSectionTitle')}</h2>
           <p className="text-sm text-muted-foreground">
-            Information patients will see when they look up your clinic.
-            Address, city, and country are pre-filled from the map above —
-            edit them if anything needs to be more precise.
+            {t('onboardingPages.clinicForm.detailsSectionDesc')}
           </p>
         </header>
 
         <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-1">
             <label className="text-sm font-medium" htmlFor="clinicName">
-              Clinic name
+              {t('onboardingPages.clinicForm.clinicNameLabel')}
             </label>
             <Input
               id="clinicName"
-              placeholder="Bright Smiles Dental Clinic"
+              placeholder={t('onboardingPages.clinicForm.clinicNamePlaceholder')}
               {...form.register('clinicName')}
               aria-invalid={!!errors.clinicName}
             />
@@ -211,7 +266,7 @@ export function OnboardingClinicForm({ profile, workingHours, onSaved }: Props) 
 
           <div className="space-y-1">
             <label className="text-sm font-medium" htmlFor="clinicPhone">
-              Clinic phone
+              {t('onboardingPages.clinicForm.clinicPhoneLabel')}
             </label>
             <Controller
               name="clinicPhone"
@@ -238,11 +293,11 @@ export function OnboardingClinicForm({ profile, workingHours, onSaved }: Props) 
 
           <div className="space-y-1 md:col-span-2">
             <label className="text-sm font-medium" htmlFor="clinicAddress">
-              Clinic address
+              {t('onboardingPages.clinicForm.clinicAddressLabel')}
             </label>
             <Input
               id="clinicAddress"
-              placeholder="123 Main Street, suite 4"
+              placeholder={t('onboardingPages.clinicForm.clinicAddressPlaceholder')}
               {...form.register('clinicAddress')}
               aria-invalid={!!errors.clinicAddress}
             />
@@ -281,12 +336,12 @@ export function OnboardingClinicForm({ profile, workingHours, onSaved }: Props) 
 
           <div className="space-y-1 md:col-span-2">
             <label className="text-sm font-medium" htmlFor="description">
-              Short description{' '}
-              <span className="text-muted-foreground">(optional)</span>
+              {t('onboardingPages.clinicForm.descriptionLabel')}{' '}
+              <span className="text-muted-foreground">{t('onboardingPages.clinicForm.descriptionOptional')}</span>
             </label>
             <Input
               id="description"
-              placeholder="A few words patients will see in your profile"
+              placeholder={t('onboardingPages.clinicForm.descriptionPlaceholder')}
               {...form.register('description')}
             />
           </div>
@@ -296,9 +351,9 @@ export function OnboardingClinicForm({ profile, workingHours, onSaved }: Props) 
       {/* ─── Working hours ──────────────────────────────────────────────── */}
       <section className="space-y-3">
         <header>
-          <h2 className="text-base font-semibold">Working hours</h2>
+          <h2 className="text-base font-semibold">{t('onboardingPages.clinicForm.hoursSectionTitle')}</h2>
           <p className="text-sm text-muted-foreground">
-            Toggle each day on or off. At least one open day is required.
+            {t('onboardingPages.clinicForm.hoursSectionDesc')}
           </p>
         </header>
         <Controller
@@ -330,11 +385,11 @@ export function OnboardingClinicForm({ profile, workingHours, onSaved }: Props) 
           {mutation.isPending ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin" />
-              Saving…
+              {t('onboardingPages.clinicForm.submitting')}
             </>
           ) : (
             <>
-              Save & continue
+              {t('onboardingPages.clinicForm.submit')}
               <ArrowRight className="h-4 w-4" />
             </>
           )}

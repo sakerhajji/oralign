@@ -6,15 +6,18 @@ import { LogOut, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/providers';
+import { useT } from '@/lib/i18n/lang-context';
 import type { ReactNode } from 'react';
 
 export type OnboardingStepKey = 'verify' | 'profile' | 'clinic' | 'approval';
 
-const STEPS: Array<{ key: OnboardingStepKey; label: string }> = [
-  { key: 'verify', label: 'Verify email' },
-  { key: 'profile', label: 'Profile' },
-  { key: 'clinic', label: 'Clinic' },
-  { key: 'approval', label: 'Approval' },
+// Labels are resolved at render time via `t` (keyed on the step's i18n
+// key); module scope can't call the translator hook.
+const STEPS: Array<{ key: OnboardingStepKey; labelKey: string }> = [
+  { key: 'verify', labelKey: 'onboardingPages.shell.stepVerify' },
+  { key: 'profile', labelKey: 'onboardingPages.shell.stepProfile' },
+  { key: 'clinic', labelKey: 'onboardingPages.shell.stepClinic' },
+  { key: 'approval', labelKey: 'onboardingPages.shell.stepApproval' },
 ];
 
 /**
@@ -37,6 +40,7 @@ export function OnboardingShell({
   hideStepper?: boolean;
 }) {
   const router = useRouter();
+  const { t } = useT();
   const { logout, user } = useAuth();
 
   const currentIndex = STEPS.findIndex((s) => s.key === current);
@@ -49,11 +53,11 @@ export function OnboardingShell({
           type="button"
           onClick={() => router.push('/')}
           className="flex items-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-md"
-          aria-label="Oralign home"
+          aria-label={t('onboardingPages.shell.homeAria')}
         >
           <Image
             src="/ORALIGN BLACK.png"
-            alt="Oralign"
+            alt={t('onboardingPages.shell.logoAlt')}
             width={120}
             height={36}
             priority
@@ -74,7 +78,7 @@ export function OnboardingShell({
             className="gap-2"
           >
             <LogOut className="h-4 w-4" />
-            <span className="hidden sm:inline">Sign out</span>
+            <span className="hidden sm:inline">{t('onboardingPages.shell.signOut')}</span>
           </Button>
         </div>
       </header>
@@ -83,7 +87,7 @@ export function OnboardingShell({
         {!hideStepper && (
           <ol
             className="mb-8 grid grid-cols-4 gap-2 sm:gap-3"
-            aria-label="Onboarding steps"
+            aria-label={t('onboardingPages.shell.stepsAria')}
           >
             {STEPS.map((step, idx) => {
               const isDone = idx < currentIndex;
@@ -111,7 +115,7 @@ export function OnboardingShell({
                         : 'text-muted-foreground',
                     )}
                   >
-                    {step.label}
+                    {t(step.labelKey)}
                   </span>
                 </li>
               );

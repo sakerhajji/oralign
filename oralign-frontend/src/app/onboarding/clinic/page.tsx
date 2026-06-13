@@ -6,8 +6,10 @@ import { Loader2 } from 'lucide-react';
 import { OnboardingShell } from '@/components/onboarding/onboarding-shell';
 import { OnboardingClinicForm } from '@/components/onboarding/onboarding-clinic-form';
 import { useAccountData, useOnboardingStatus } from '@/lib/hooks';
+import { useT } from '@/lib/i18n/lang-context';
 
 export default function OnboardingClinicPage() {
+  const { t } = useT();
   const router = useRouter();
   const { user, dentistProfile, workingHours, isLoading, isDentist } =
     useAccountData();
@@ -44,8 +46,8 @@ export default function OnboardingClinicPage() {
   return (
     <OnboardingShell
       current="clinic"
-      title="Set up your clinic"
-      description="Tell us about your clinic and when it's open. Everything is saved in one step — click Save & continue when you're done."
+      title={t('onboardingPages.clinic.title')}
+      description={t('onboardingPages.clinic.description')}
     >
       {isLoading || !user ? (
         <div className="flex h-40 items-center justify-center">
@@ -53,7 +55,7 @@ export default function OnboardingClinicPage() {
         </div>
       ) : !isDentist ? (
         <p className="text-sm text-muted-foreground">
-          Clinic setup is only required for dentist accounts.
+          {t('onboardingPages.clinic.dentistOnly')}
         </p>
       ) : (
         <OnboardingClinicForm

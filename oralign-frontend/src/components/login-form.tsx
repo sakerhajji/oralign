@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import Link from 'next/link';
 import { AlertCircle, Eye, EyeOff, WifiOff } from 'lucide-react';
 import { cn } from "@/lib/utils";
@@ -11,12 +12,25 @@ import { Button } from "@/components/ui/button";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { getApiErrorMessage, useBackendHealth, useSignIn } from '@/lib/hooks';
-import { signInSchema, SignInFormData } from '@/lib/schemas';
+import { SignInFormData } from '@/lib/schemas';
+import { useT } from '@/lib/i18n/lang-context';
+
+// Validation messages are user-facing, so the sign-in schema is a
+// factory taking the translator — instantiated inside the component via
+// useMemo (keyed on `t`, which changes identity per language).
+type Translate = (path: string, vars?: Record<string, string | number>) => string;
+
+const makeSignInSchema = (t: Translate) =>
+  z.object({
+    email: z.string().email(t('authPages.validation.emailInvalid')).toLowerCase().trim(),
+    password: z.string().min(1, t('authPages.validation.passwordRequired')),
+  });
 
 export function LoginForm({
   className,
   ...props
 }: React.ComponentProps<"form">) {
+  const { t } = useT();
   const [showPassword, setShowPassword] = useState(false);
   const {
     mutate: signIn,
@@ -28,7 +42,9 @@ export function LoginForm({
   const isBackendUnavailable =
     backendHealth.isError ||
     (!backendHealth.isLoading && backendHealth.data?.status !== 'ok');
-  
+
+  const signInSchema = useMemo(() => makeSignInSchema(t), [t]);
+
   const {
     register,
     handleSubmit,
@@ -46,32 +62,31 @@ export function LoginForm({
     <form className={cn("flex flex-col gap-6", className)} onSubmit={handleSubmit(onSubmit)} {...props}>
       <FieldGroup>
         <div className="flex flex-col items-center gap-1 text-center">
-          <h1 className="text-2xl font-bold">Login to your account</h1>
+          <h1 className="text-2xl font-bold">{t('authPages.login.title')}</h1>
           <p className="text-sm text-balance text-muted-foreground">
-            Enter your email below to login to your account
+            {t('authPages.login.subtitle')}
           </p>
         </div>
         {isBackendUnavailable && !backendHealth.isLoading && (
           <Alert variant="destructive">
             <WifiOff className="h-4 w-4" />
-            <AlertTitle>Backend is not connected</AlertTitle>
+            <AlertTitle>{t('authPages.login.backendDownTitle')}</AlertTitle>
             <AlertDescription>
-              The app cannot reach the API server right now. Please make sure
-              the backend container is running, then try again.
+              {t('authPages.login.backendDownDesc')}
             </AlertDescription>
           </Alert>
         )}
         {Boolean(signInError) && (
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
-            <AlertTitle>Login failed</AlertTitle>
+            <AlertTitle>{t('authPages.login.failedTitle')}</AlertTitle>
             <AlertDescription>
-              {getApiErrorMessage(signInError, 'Email or password is incorrect.')}
+              {getApiErrorMessage(signInError, t('authPages.login.failedFallback'))}
             </AlertDescription>
           </Alert>
         )}
         <Field>
-          <FieldLabel htmlFor="email">Email</FieldLabel>
+          <FieldLabel htmlFor="email">{t('authPages.login.emailLabel')}</FieldLabel>
           <Input
             id="email"
             type="email"
@@ -85,12 +100,12 @@ export function LoginForm({
         </Field>
         <Field>
           <div className="flex items-center">
-            <FieldLabel htmlFor="password">Password</FieldLabel>
+            <FieldLabel htmlFor="password">{t('authPages.login.passwordLabel')}</FieldLabel>
             <Link
               href="/forgot-password"
               className="ml-auto text-sm underline-offset-4 hover:underline"
             >
-              Forgot your password?
+              {t('authPages.login.forgotLink')}
             </Link>
           </div>
           <div className="relative">
@@ -103,7 +118,7 @@ export function LoginForm({
             <button
               type="button"
               tabIndex={-1}
-              aria-label={showPassword ? 'Hide password' : 'Show password'}
+              aria-label={showPassword ? t('authPages.password.hide') : t('authPages.password.show')}
               onClick={() => setShowPassword((v) => !v)}
               className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground focus:outline-none"
             >
@@ -120,13 +135,13 @@ export function LoginForm({
         </Field>
         <Field>
           <Button type="submit" disabled={isPending || isBackendUnavailable}>
-            {isPending ? 'Logging in...' : 'Login'}
+            {isPending ? t('authPages.login.submitting') : t('authPages.login.submit')}
           </Button>
         </Field>
         <div className="text-center text-sm text-muted-foreground">
-          Don&apos;t have an account?{" "}
+          {t('authPages.login.noAccount')}{" "}
           <Link href="/signup" className="underline underline-offset-4">
-            Sign up
+            {t('authPages.login.signUpLink')}
           </Link>
         </div>
       </FieldGroup>

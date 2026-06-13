@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import Link from 'next/link';
 import { Eye, EyeOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -11,14 +12,66 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui
 import { Input } from '@/components/ui/input';
 import { PhoneInput } from '@/components/ui/phone-input';
 import { useSignUp } from '@/lib/hooks';
-import { signUpSchema, SignUpFormData } from '@/lib/schemas';
+import { SignUpFormData } from '@/lib/schemas';
+import { useT } from '@/lib/i18n/lang-context';
+
+const E164_PHONE_REGEX = /^\+[1-9]\d{1,14}$/;
+const ISO_COUNTRY_REGEX = /^[A-Z]{2}$/;
+
+/**
+ * Normalises a dentist's full name: trims, strips any leading "Dr"/"Dr."
+ * token (any casing), Title-Cases the rest, then prepends the canonical
+ * "Dr. " prefix. Mirrors the helper in `@/lib/schemas` (kept local here
+ * so the validation messages can be translated via the factory).
+ */
+function normalizeDoctorName(value: string): string {
+  const words = value.trim().split(/\s+/);
+  const nameWords =
+    words.length > 0 && /^dr\.?$/i.test(words[0]) ? words.slice(1) : words;
+  const titleCased = nameWords
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+  return `Dr. ${titleCased}`;
+}
+
+// Validation messages are user-facing, so the sign-up schema is a
+// factory taking the translator — instantiated inside the component via
+// useMemo (keyed on `t`, which changes identity per language).
+type Translate = (path: string, vars?: Record<string, string | number>) => string;
+
+const makeSignUpSchema = (t: Translate) =>
+  z.object({
+    email: z.string().email(t('authPages.validation.emailInvalid')).toLowerCase().trim(),
+    fullName: z
+      .string()
+      .min(2, t('authPages.validation.fullNameMin2'))
+      .transform((val) => normalizeDoctorName(val)),
+    password: z.string().min(8, t('authPages.validation.passwordMin8')),
+    phone: z.preprocess(
+      (val) => (typeof val === 'string' ? val.trim() : val),
+      z
+        .string()
+        .min(1, t('authPages.validation.phoneRequired'))
+        .regex(E164_PHONE_REGEX, t('authPages.validation.phoneFormat')),
+    ),
+    country: z.preprocess(
+      (val) => (typeof val === 'string' ? val.trim().toUpperCase() : val),
+      z
+        .string()
+        .min(1, t('authPages.validation.countryRequired'))
+        .regex(ISO_COUNTRY_REGEX, t('authPages.validation.countryFormat')),
+    ),
+  });
 
 export function SignupForm({
   className,
   ...props
 }: React.ComponentProps<'form'>) {
+  const { t } = useT();
   const { mutate: signUp, isPending } = useSignUp();
   const [showPassword, setShowPassword] = useState(false);
+
+  const signUpSchema = useMemo(() => makeSignUpSchema(t), [t]);
 
   const {
     register,
@@ -52,27 +105,27 @@ export function SignupForm({
       <FieldGroup>
         {/* Header */}
         <div className="flex flex-col items-center gap-1 text-center">
-          <h1 className="text-2xl font-bold">Create your account</h1>
+          <h1 className="text-2xl font-bold">{t('authPages.signup.title')}</h1>
           <p className="text-sm text-balance text-muted-foreground">
-            Oralign is for dental professionals.{' '}
+            {t('authPages.signup.subtitleBefore')}{' '}
             <span className="font-medium text-foreground">
-              Dentists only.
+              {t('authPages.signup.subtitleEmphasis')}
             </span>
           </p>
         </div>
 
         {/* Full Name */}
         <Field>
-          <FieldLabel htmlFor="fullName">Full Name</FieldLabel>
+          <FieldLabel htmlFor="fullName">{t('authPages.signup.fullNameLabel')}</FieldLabel>
           <Input
             id="fullName"
             type="text"
-            placeholder="Dr. Jane Smith"
+            placeholder={t('authPages.signup.fullNamePlaceholder')}
             {...register('fullName')}
             className="bg-background"
           />
           <FieldDescription>
-            &ldquo;Dr.&rdquo; will be added automatically if not included.
+            {t('authPages.signup.fullNameHelp')}
           </FieldDescription>
           {errors.fullName && (
             <p className="text-sm text-destructive">{errors.fullName.message}</p>
@@ -81,11 +134,11 @@ export function SignupForm({
 
         {/* Email */}
         <Field>
-          <FieldLabel htmlFor="email">Email</FieldLabel>
+          <FieldLabel htmlFor="email">{t('authPages.signup.emailLabel')}</FieldLabel>
           <Input
             id="email"
             type="email"
-            placeholder="jane@clinic.com"
+            placeholder={t('authPages.signup.emailPlaceholder')}
             {...register('email')}
             className="bg-background"
           />
@@ -96,7 +149,7 @@ export function SignupForm({
 
         {/* Password */}
         <Field>
-          <FieldLabel htmlFor="password">Password</FieldLabel>
+          <FieldLabel htmlFor="password">{t('authPages.signup.passwordLabel')}</FieldLabel>
           <div className="relative">
             <Input
               id="password"
@@ -107,7 +160,7 @@ export function SignupForm({
             <button
               type="button"
               tabIndex={-1}
-              aria-label={showPassword ? 'Hide password' : 'Show password'}
+              aria-label={showPassword ? t('authPages.password.hide') : t('authPages.password.show')}
               onClick={() => setShowPassword((v) => !v)}
               className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground focus:outline-none"
             >
@@ -118,7 +171,7 @@ export function SignupForm({
               )}
             </button>
           </div>
-          <FieldDescription>Must be at least 8 characters.</FieldDescription>
+          <FieldDescription>{t('authPages.signup.passwordHelp')}</FieldDescription>
           {errors.password && (
             <p className="text-sm text-destructive">{errors.password.message}</p>
           )}
@@ -126,7 +179,7 @@ export function SignupForm({
 
         {/* Phone (required) */}
         <Field>
-          <FieldLabel htmlFor="phone">Phone</FieldLabel>
+          <FieldLabel htmlFor="phone">{t('authPages.signup.phoneLabel')}</FieldLabel>
           <Controller
             name="phone"
             control={control}
@@ -161,14 +214,14 @@ export function SignupForm({
         {/* Submit */}
         <Field>
           <Button type="submit" className="w-full" disabled={isPending} size="lg">
-            {isPending ? 'Creating account…' : 'Create account'}
+            {isPending ? t('authPages.signup.submitting') : t('authPages.signup.submit')}
           </Button>
         </Field>
 
         <div className="text-center text-sm text-muted-foreground">
-          Already have an account?{' '}
+          {t('authPages.signup.hasAccount')}{' '}
           <Link href="/login" className="underline underline-offset-4">
-            Sign in
+            {t('authPages.signup.signInLink')}
           </Link>
         </div>
       </FieldGroup>

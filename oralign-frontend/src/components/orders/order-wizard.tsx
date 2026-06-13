@@ -819,7 +819,7 @@ function OrderStepper({
   // stepper always exactly fits its parent without a horizontal scroll.
 
   return (
-    <nav aria-label="Order wizard steps" className="space-y-3">
+    <nav aria-label={t('orderForm.advanced.wizardStepsAria')} className="space-y-3">
       {/* Mobile-only context line — shows the title clearly because the
           circles below are too small for inline labels at phone widths. */}
       <div className="flex items-center justify-between gap-3 sm:hidden">
@@ -1039,7 +1039,7 @@ function PatientSearchPicker({
           <button
             type="button"
             onClick={() => setQuery('')}
-            aria-label="Clear search"
+            aria-label={t('uiBits.clearSearch')}
             className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-muted-foreground hover:bg-muted"
           >
             <X className="h-4 w-4" />

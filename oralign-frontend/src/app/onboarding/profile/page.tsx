@@ -6,8 +6,10 @@ import { Loader2 } from 'lucide-react';
 import { OnboardingShell } from '@/components/onboarding/onboarding-shell';
 import { ProfileForm } from '@/components/account/profile-form';
 import { useAccountData, useOnboardingStatus } from '@/lib/hooks';
+import { useT } from '@/lib/i18n/lang-context';
 
 export default function OnboardingProfilePage() {
+  const { t } = useT();
   const router = useRouter();
   const { user, dentistProfile, workingHours, isLoading } = useAccountData();
   const status = useOnboardingStatus(user, dentistProfile, workingHours);
@@ -30,8 +32,8 @@ export default function OnboardingProfilePage() {
   return (
     <OnboardingShell
       current="profile"
-      title="Complete your profile"
-      description="Add your phone number and country so we can finish setting up your account."
+      title={t('onboardingPages.profile.title')}
+      description={t('onboardingPages.profile.description')}
     >
       {isLoading || !user ? (
         <div className="flex h-40 items-center justify-center">

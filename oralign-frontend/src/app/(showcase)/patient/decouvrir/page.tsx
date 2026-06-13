@@ -1,9 +1,15 @@
 import type { Metadata } from "next";
 import {
-  OralignSection,
+  DailyLifeSection,
+  GuidePreviewSection,
+  OralignHeroSection,
   OralignPrimeSection,
   ParcoursSection,
+  PrecisionSection,
   PraticiensSection,
+  SmileFreedomSection,
+  TreatmentDurationSection,
+  WearAlignersSection,
 } from "../../_components/patient/decouvrir-sections";
 
 export const metadata: Metadata = {
@@ -16,7 +22,13 @@ export const metadata: Metadata = {
 export default function DecouvrirPage() {
   return (
     <>
-      <OralignSection />
+      <OralignHeroSection />
+      <SmileFreedomSection />
+      <DailyLifeSection />
+      <GuidePreviewSection />
+      <PrecisionSection />
+      <TreatmentDurationSection />
+      <WearAlignersSection />
       <OralignPrimeSection />
       <ParcoursSection />
       <PraticiensSection />

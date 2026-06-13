@@ -1242,6 +1242,7 @@ const IprSlot = memo(function IprSlot({
   disabled,
   onClick,
 }: IprSlotProps) {
+  const { t } = useT();
   const handleClick = useCallback(
     (e: ReactMouseEvent<HTMLButtonElement>) => {
       // The slot is always rendered with an explicit `neighbour` from

@@ -18,29 +18,33 @@ import { useParams } from 'next/navigation';
 import { AlertCircle, Loader2, ShieldCheck, Sparkles } from 'lucide-react';
 import { treatmentPlansService } from '@/lib/api/treatment-plans.service';
 import { prepareViewer, stripViewerHash } from '@/lib/viewer/smart-shell';
+import { useT } from '@/lib/i18n/lang-context';
 import type { PublicTreatmentViewerPayload } from '@/lib/types';
+
+type Translate = (path: string, vars?: Record<string, string | number>) => string;
 
 /**
  * Build a warm, VIP-feeling salutation for the patient.
  *
- *   Dear Mr. John,        (male)
- *   Dear Ms. Sarah,       (female)
- *   Dear Alex,            (other / unknown)
- *   Hello and welcome,    (no first name on file)
+ *   Cher M. John,         (male)
+ *   Chère Mme Sarah,      (female)
+ *   Cher·e Alex,          (other / unknown)
+ *   Bonjour et bienvenue, (no first name on file)
  *
  * Patient first name comes from the doctor's CRM, so it's whatever they
  * typed — we just trim it. We deliberately don't fall back to the full
  * name to avoid leaking surnames to anyone who finds the share link.
  */
 function patientSalutation(
+  t: Translate,
   firstName: string | null | undefined,
   gender: 'male' | 'female' | 'other' | null | undefined,
 ): string {
   const name = (firstName ?? '').trim();
-  if (!name) return 'Hello and welcome';
-  if (gender === 'male') return `Dear Mr. ${name}`;
-  if (gender === 'female') return `Dear Ms. ${name}`;
-  return `Dear ${name}`;
+  if (!name) return t('publicCase.salutationHello');
+  if (gender === 'male') return t('publicCase.salutationMr', { name });
+  if (gender === 'female') return t('publicCase.salutationMs', { name });
+  return t('publicCase.salutationNeutral', { name });
 }
 
 /**
@@ -50,6 +54,7 @@ function patientSalutation(
  * deleted user, etc.).
  */
 function doctorByline(
+  t: Translate,
   fullName: string | null | undefined,
   clinicName: string | null | undefined,
 ): string {
@@ -57,7 +62,7 @@ function doctorByline(
   if (name) return name.toLowerCase().startsWith('dr') ? name : `Dr. ${name}`;
   const clinic = (clinicName ?? '').trim();
   if (clinic) return clinic;
-  return 'your dentist';
+  return t('publicCase.doctorFallback');
 }
 
 // Patient-facing viewers ALWAYS use the branded shell — they're the most
@@ -68,6 +73,7 @@ function doctorByline(
 // even hits the network, and everything else gets the Oralign overlay.
 
 export default function PublicTreatmentViewerPage() {
+  const { t } = useT();
   const params = useParams<{ token: string }>();
   const token = params?.token ?? '';
   const [payload, setPayload] = useState<PublicTreatmentViewerPayload | null>(null);
@@ -76,7 +82,7 @@ export default function PublicTreatmentViewerPage() {
 
   useEffect(() => {
     if (!token) {
-      setError('Invalid link.');
+      setError(t('publicCase.invalidLink'));
       return;
     }
     let active = true;
@@ -86,13 +92,12 @@ export default function PublicTreatmentViewerPage() {
         if (active) setPayload(res);
       })
       .catch(() => {
-        if (active)
-          setError('This treatment link is no longer available or has expired.');
+        if (active) setError(t('publicCase.expiredLink'));
       });
     return () => {
       active = false;
     };
-  }, [token]);
+  }, [token, t]);
 
   // Patient-facing viewer: ALWAYS use the branded shell, regardless of
   // the planner's internal/external setting on the plan. The patient is
@@ -109,10 +114,10 @@ export default function PublicTreatmentViewerPage() {
   const srcDoc = viewerSlot.srcDoc ?? '';
 
   const salutation = payload
-    ? patientSalutation(payload.patient?.firstName, payload.patient?.gender)
+    ? patientSalutation(t, payload.patient?.firstName, payload.patient?.gender)
     : '';
   const doctorName = payload
-    ? doctorByline(payload.doctor?.fullName, payload.doctor?.clinicName)
+    ? doctorByline(t, payload.doctor?.fullName, payload.doctor?.clinicName)
     : '';
 
   return (
@@ -122,24 +127,24 @@ export default function PublicTreatmentViewerPage() {
       <div className="mb-5 flex justify-center sm:mb-6">
         <span className="inline-flex items-center gap-1.5 rounded-full border bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
           <ShieldCheck className="h-3.5 w-3.5" />
-          Secure shared link
+          {t('publicCase.secureLink')}
         </span>
       </div>
 
       {!payload && !error && (
         <div className="flex h-72 items-center justify-center text-sm text-muted-foreground sm:h-96">
           <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-          Loading your treatment plan…
+          {t('publicCase.loading')}
         </div>
       )}
 
       {error && (
         <div className="mx-auto max-w-md rounded-xl border border-red-200 bg-red-50 p-5 text-center sm:p-6">
           <AlertCircle className="mx-auto mb-3 h-8 w-8 text-red-600" />
-          <p className="text-sm font-semibold text-red-700">Link unavailable</p>
+          <p className="text-sm font-semibold text-red-700">{t('publicCase.linkUnavailableTitle')}</p>
           <p className="mt-1 text-xs text-red-600/80">{error}</p>
           <p className="mt-3 text-xs text-muted-foreground">
-            Please contact your dentist to request a new link.
+            {t('publicCase.requestNewLink')}
           </p>
         </div>
       )}
@@ -153,17 +158,15 @@ export default function PublicTreatmentViewerPage() {
           <div className="mb-6 text-center sm:mb-8">
             <p className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-[0.62rem] font-semibold uppercase tracking-[0.25em] text-amber-800">
               <Sparkles className="h-3.5 w-3.5" />
-              Made for you
+              {t('publicCase.madeForYou')}
             </p>
             <h1 className="break-words text-3xl font-semibold tracking-tight text-foreground sm:text-4xl lg:text-5xl">
               {salutation},
             </h1>
             <p className="mx-auto mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground sm:text-base">
-              We&apos;ve designed this aligner plan especially for you,
-              crafted with care by{' '}
-              <span className="font-semibold text-foreground">{doctorName}</span>.
-              Take a moment to explore it — we hope you love the smile it
-              brings.
+              {t('publicCase.welcomeBefore')}{' '}
+              <span className="font-semibold text-foreground">{doctorName}</span>
+              {t('publicCase.welcomeAfter')}
             </p>
           </div>
 
@@ -186,7 +189,7 @@ export default function PublicTreatmentViewerPage() {
                     key={cleanUrl}
                     src={srcDoc ? undefined : viewerSlot.src}
                     srcDoc={srcDoc || undefined}
-                    title="Treatment viewer"
+                    title={t('publicCase.viewerTitle')}
                     className="absolute inset-0 h-full w-full"
                     sandbox="allow-scripts allow-same-origin allow-popups allow-presentation"
                     allow="fullscreen; xr-spatial-tracking; gyroscope; accelerometer; autoplay"
@@ -194,8 +197,7 @@ export default function PublicTreatmentViewerPage() {
                   />
                 ) : (
                   <div className="grid h-full place-items-center p-6 text-center text-sm text-muted-foreground sm:p-8">
-                    The viewer cannot be embedded here. Please contact your
-                    dentist for help opening this preview.
+                    {t('publicCase.iframeBlocked')}
                   </div>
                 )}
               </div>
@@ -203,15 +205,13 @@ export default function PublicTreatmentViewerPage() {
           ) : (
             <div className="mx-auto max-w-md rounded-xl border border-amber-200 bg-amber-50 p-6 text-center">
               <p className="text-sm font-medium text-amber-800">
-                Your treatment preview is being prepared. Please check
-                back shortly or contact your dentist.
+                {t('publicCase.previewPreparing')}
               </p>
             </div>
           )}
 
           <p className="mt-10 text-center text-xs text-muted-foreground">
-            This private link is meant just for you. No medical records or
-            payment details are shared on this page.
+            {t('publicCase.privacyNote')}
           </p>
         </>
       )}

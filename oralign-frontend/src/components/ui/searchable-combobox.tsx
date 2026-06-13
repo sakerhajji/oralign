@@ -222,7 +222,7 @@ export function SearchableCombobox({
             <span
               role="button"
               tabIndex={0}
-              aria-label="Clear selection"
+              aria-label={t('uiBits.clearSelection')}
               onClick={(e) => {
                 e.stopPropagation();
                 onChange(null);

@@ -4,8 +4,10 @@ import { Suspense } from 'react';
 import { SignupForm } from '@/components/signup-form';
 import Image from 'next/image';
 import Link from 'next/link';
+import { useT } from '@/lib/i18n/lang-context';
 
 function SignupContent() {
+  const { t } = useT();
   return (
     <div className="grid min-h-svh lg:grid-cols-2">
       <div className="flex flex-col gap-4 p-6 md:p-10">
@@ -13,7 +15,7 @@ function SignupContent() {
           <Link href="/" className="flex items-center gap-2 font-medium">
             <Image
               src="/ORALIGN BLACK.png"
-              alt="Oralign Logo"
+              alt={t('authPages.common.logoAlt')}
               width={100}
               height={100}
               className="object-contain"
@@ -29,7 +31,7 @@ function SignupContent() {
       <div className="relative hidden bg-muted lg:block">
         <Image
           src="/loginPicture.webp"
-          alt="Dental clinic"
+          alt={t('authPages.common.clinicImageAlt')}
           fill
           sizes="50vw"
           unoptimized

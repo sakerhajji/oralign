@@ -34,10 +34,14 @@ type T = Record<Lang, string>;
 // without touching this file.
 import { chromeDomainDict } from './dict.chrome-domain';
 import { commerceDomainDict } from './dict.commerce-domain';
+import { authDomainDict } from './dict.auth-domain';
+import { treatmentDomainDict } from './dict.treatment-domain';
 
 export const dict = {
   ...chromeDomainDict,
   ...commerceDomainDict,
+  ...authDomainDict,
+  ...treatmentDomainDict,
 
   // ─── Generic / cross-cutting ────────────────────────────────────
   common: {
@@ -664,6 +668,15 @@ export const dict = {
       specialInstructionsPh: {
         en: 'Anything we should be aware of (e.g. avoid attachments on front teeth, patient travels in 3 weeks…)',
         fr: 'Tout ce que nous devrions savoir (p. ex. éviter les taquets antérieurs, le patient voyage dans 3 semaines…)',
+      } as T,
+      wizardStepsAria: { en: 'Order wizard steps', fr: 'Étapes de l’assistant de commande' } as T,
+      addInstructionsPh: {
+        en: 'Add special clinical or lab instructions...',
+        fr: 'Ajoutez des instructions cliniques ou de laboratoire…',
+      } as T,
+      caseNotesPh: {
+        en: 'Add final case notes...',
+        fr: 'Ajoutez des notes finales sur le cas…',
       } as T,
 
       odontogramLoading: { en: 'Loading odontogram…', fr: 'Chargement de l’odontogramme…' } as T,
@@ -2875,6 +2888,17 @@ export const dict = {
       en: 'Close image viewer',
       fr: 'Fermer la visionneuse d’images',
     } as T,
+    toggleSidebar: { en: 'Toggle Sidebar', fr: 'Basculer la barre latérale' } as T,
+    close: { en: 'Close', fr: 'Fermer' } as T,
+    clearSelection: { en: 'Clear selection', fr: 'Effacer la sélection' } as T,
+    clearSearch: { en: 'Clear search', fr: 'Effacer la recherche' } as T,
+    sidebarSrTitle: { en: 'Sidebar', fr: 'Barre latérale' } as T,
+    sidebarSrDesc: {
+      en: 'Displays the mobile sidebar.',
+      fr: 'Affiche la barre latérale mobile.',
+    } as T,
+    // Odontogram IPR note — "Step" prefixes the aligner step number.
+    iprStep: { en: 'Step', fr: 'Étape' } as T,
   },
 
   // ─── App chrome: sidebar nav + user menu ────────────────────────
@@ -2894,6 +2918,10 @@ export const dict = {
       getHelp: { en: 'Get Help', fr: 'Obtenir de l’aide' } as T,
       newOrder: { en: 'New Order', fr: 'Nouvelle commande' } as T,
       newOrderAria: { en: 'Create a new order', fr: 'Créer une nouvelle commande' } as T,
+      dashboardHomeAria: {
+        en: 'Oralign — Dashboard home',
+        fr: 'Oralign — Accueil du tableau de bord',
+      } as T,
     },
     userMenu: {
       account: { en: 'Account', fr: 'Compte' } as T,
@@ -3005,6 +3033,16 @@ export const dict = {
         fr: 'sera retiré de cette commande. Le fichier est supprimé de façon réversible sur le serveur et peut être restauré par un administrateur si nécessaire.',
       } as T,
       deleteFile: { en: 'Delete file', fr: 'Supprimer le fichier' } as T,
+      // Freeform bundle uploader (the generic OrderFileUpload, distinct
+      // from the localized clinical slots which pass their own titleKey).
+      freeformTitle: {
+        en: 'Upload bundle (.zip) or CBCT (.dcm)',
+        fr: 'Téléverser une archive (.zip) ou un CBCT (.dcm)',
+      } as T,
+      freeformDesc: {
+        en: 'Ship a single ZIP archive (e.g. a CBCT DICOM volume, or a multi-file STL export). We audit it client-side for executables and unsafe filenames before saving. Single .dcm DICOM files are also accepted.',
+        fr: 'Envoyez une seule archive ZIP (p. ex. un volume CBCT DICOM ou un export STL multi-fichiers). Nous l’analysons côté client à la recherche d’exécutables et de noms de fichiers dangereux avant l’enregistrement. Les fichiers DICOM .dcm seuls sont également acceptés.',
+      } as T,
     },
     categories: {
       rightPhoto: { en: 'Right photo', fr: 'Photo droite' } as T,

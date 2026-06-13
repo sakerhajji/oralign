@@ -358,7 +358,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               <Link
                 href="/dashboard"
                 className="flex w-full items-center justify-center gap-2"
-                aria-label="Oralign — Dashboard home"
+                aria-label={t('chrome.nav.dashboardHomeAria')}
               >
                 {/* Expanded — full word mark, centered.
                     Step "make logo bigger" levers:

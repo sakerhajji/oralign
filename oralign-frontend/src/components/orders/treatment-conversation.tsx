@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { cn, getAvatarUrl } from '@/lib/utils';
+import { useT } from '@/lib/i18n/lang-context';
 import { treatmentPlansService } from '@/lib/api/treatment-plans.service';
 import { useSendTreatmentMessage } from '@/lib/hooks/use-treatment-plans';
 import { useAuthedImage } from '@/lib/hooks';
@@ -80,6 +81,7 @@ export function TreatmentConversation({
   currentUserId,
   connected,
 }: Props) {
+  const { t } = useT();
   const send = useSendTreatmentMessage();
   const [text, setText] = useState('');
   const [files, setFiles] = useState<File[]>([]);
@@ -205,7 +207,7 @@ export function TreatmentConversation({
       {/* Connection chip */}
       <div className="flex items-center justify-between border-b bg-muted/30 px-3 py-2 text-xs">
         <span className="font-medium uppercase tracking-wide text-muted-foreground">
-          Conversation
+          {t('treatmentChat.conversation')}
         </span>
         <span
           className={cn(
@@ -214,14 +216,18 @@ export function TreatmentConversation({
               ? 'bg-emerald-100 text-emerald-700'
               : 'bg-amber-100 text-amber-700',
           )}
-          title={connected ? 'Live updates connected' : 'Reconnecting…'}
+          title={
+            connected
+              ? t('treatmentChat.liveConnected')
+              : t('treatmentChat.reconnecting')
+          }
         >
           {connected ? (
             <Wifi className="h-3 w-3" />
           ) : (
             <WifiOff className="h-3 w-3" />
           )}
-          {connected ? 'Live' : 'Offline'}
+          {connected ? t('treatmentChat.live') : t('treatmentChat.offline')}
         </span>
       </div>
 
@@ -232,7 +238,7 @@ export function TreatmentConversation({
       >
         {items.length === 0 ? (
           <p className="grid h-full place-items-center text-sm text-muted-foreground">
-            No messages yet. Start the conversation below.
+            {t('treatmentChat.emptyState')}
           </p>
         ) : (
           <ol className="space-y-1.5">
@@ -283,7 +289,7 @@ export function TreatmentConversation({
             size="icon"
             onClick={() => fileInputRef.current?.click()}
             className="shrink-0"
-            title="Attach files"
+            title={t('treatmentChat.attachFiles')}
           >
             <Paperclip className="h-4 w-4" />
           </Button>
@@ -301,7 +307,7 @@ export function TreatmentConversation({
           />
 
           <Textarea
-            placeholder="Write a message…"
+            placeholder={t('treatmentChat.messagePlaceholder')}
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
@@ -322,7 +328,7 @@ export function TreatmentConversation({
             }
             size="icon"
             className="shrink-0"
-            title="Send (Enter)"
+            title={t('treatmentChat.sendTooltip')}
           >
             {send.isPending ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -334,7 +340,7 @@ export function TreatmentConversation({
 
         {isPlanner && files.length > 0 && (
           <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-            <span>Category for attached files:</span>
+            <span>{t('treatmentChat.categoryLabel')}</span>
             <Select
               value={category ?? ''}
               onValueChange={(v) =>
@@ -344,7 +350,7 @@ export function TreatmentConversation({
               }
             >
               <SelectTrigger className="h-7 w-[200px] text-xs">
-                <SelectValue placeholder="Auto-detect" />
+                <SelectValue placeholder={t('treatmentChat.autoDetect')} />
               </SelectTrigger>
               <SelectContent>
                 {Object.values(TreatmentAttachmentCategory).map((c) => (
@@ -367,7 +373,7 @@ export function TreatmentConversation({
           if (!open) setLightboxAttachment(null);
         }}
         src={lightboxImg.src}
-        alt={lightboxAttachment?.fileName ?? 'attachment'}
+        alt={lightboxAttachment?.fileName ?? t('treatmentChat.fallbackAttachmentName')}
         caption={lightboxAttachment?.fileName ?? undefined}
         subCaption={
           lightboxAttachment
@@ -554,6 +560,7 @@ function ChatAttachmentLink({
   attachment: ChatAttachment;
   isOwn: boolean;
 }) {
+  const { t } = useT();
   const [loading, setLoading] = useState(false);
 
   const handleOpen = async () => {
@@ -575,7 +582,9 @@ function ChatAttachmentLink({
       window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : 'Failed to open attachment';
+        err instanceof Error
+          ? err.message
+          : t('treatmentChat.failedToOpenAttachment');
       toast.error(message);
     } finally {
       setLoading(false);
@@ -642,6 +651,7 @@ function ChatAttachmentImage({
   isOwn: boolean;
   onOpen: () => void;
 }) {
+  const { t } = useT();
   // The inline bubble only needs the `thumb` optimized variant (server
   // falls back to the original when the variant isn't generated yet).
   const apiUrl =
@@ -654,7 +664,7 @@ function ChatAttachmentImage({
       type="button"
       onClick={onOpen}
       disabled={!src}
-      aria-label={`Open ${attachment.fileName} in full view`}
+      aria-label={t('treatmentChat.openInFullView', { name: attachment.fileName })}
       className={cn(
         'group relative block overflow-hidden rounded-lg border focus:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default',
         isOwn ? 'border-primary-foreground/30' : 'border-border',
@@ -673,7 +683,7 @@ function ChatAttachmentImage({
         />
       ) : (
         <div className="grid h-32 w-48 place-items-center bg-muted/40 text-[11px] text-muted-foreground">
-          Could not load image
+          {t('treatmentChat.couldNotLoadImage')}
         </div>
       )}
       {/* File-name strip — keeps the chat looking like Messenger while

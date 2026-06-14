@@ -234,14 +234,64 @@ export class AdminDashboardService {
         this.prisma.payment.count({ where: { status: PaymentRecordStatus.rejected } }),
       ]);
 
-    const totalRevenue = toNumber(paidQuoteAgg._sum.totalPrice);
+    // Treatment fees are billed INLINE on the order (separate from the
+    // quotation / installment flow), so the quote aggregates above never
+    // see them. Fold PAID treatment fees into the revenue totals so the
+    // headline reflects packs (already captured in quotation.totalPrice)
+    // PLUS the clinical treatment fee. Same date semantics as the quote
+    // sums: a fee counts in the period it was actually PAID.
+    const [tfRangeAgg, tfMonthAgg, tfPrevMonthAgg, tfTodayAgg] =
+      await this.prisma.$transaction([
+        this.prisma.dentalOrder.aggregate({
+          _sum: { treatmentFeeAmount: true },
+          where: {
+            deletedAt: null,
+            treatmentFeePaymentStatus: PaymentRecordStatus.success,
+            treatmentFeePaidAt: { gte: range.from, lte: range.to },
+          },
+        }),
+        this.prisma.dentalOrder.aggregate({
+          _sum: { treatmentFeeAmount: true },
+          where: {
+            deletedAt: null,
+            treatmentFeePaymentStatus: PaymentRecordStatus.success,
+            treatmentFeePaidAt: { gte: monthStart },
+          },
+        }),
+        this.prisma.dentalOrder.aggregate({
+          _sum: { treatmentFeeAmount: true },
+          where: {
+            deletedAt: null,
+            treatmentFeePaymentStatus: PaymentRecordStatus.success,
+            treatmentFeePaidAt: { gte: prevMonthStart, lt: monthStart },
+          },
+        }),
+        this.prisma.dentalOrder.aggregate({
+          _sum: { treatmentFeeAmount: true },
+          where: {
+            deletedAt: null,
+            treatmentFeePaymentStatus: PaymentRecordStatus.success,
+            treatmentFeePaidAt: { gte: dayStart },
+          },
+        }),
+      ]);
+    const treatmentFeeRange = toNumber(tfRangeAgg._sum.treatmentFeeAmount);
+    const treatmentFeeMonth = toNumber(tfMonthAgg._sum.treatmentFeeAmount);
+    const treatmentFeePrevMonth = toNumber(tfPrevMonthAgg._sum.treatmentFeeAmount);
+    const treatmentFeeToday = toNumber(tfTodayAgg._sum.treatmentFeeAmount);
+
+    // Quote-only revenue kept separate so averageOrderValue (an "average
+    // quote value") isn't skewed by the flat treatment fee.
+    const quoteTotalRevenue = toNumber(paidQuoteAgg._sum.totalPrice);
+    const totalRevenue = quoteTotalRevenue + treatmentFeeRange;
     const collectedAmount = toNumber(paidQuoteAgg._sum.paidAmount) +
-      toNumber(unpaidQuoteAgg._sum.paidAmount);
+      toNumber(unpaidQuoteAgg._sum.paidAmount) +
+      treatmentFeeRange;
     const unpaidAmount =
       Math.max(0, toNumber(unpaidQuoteAgg._sum.totalPrice) - toNumber(unpaidQuoteAgg._sum.paidAmount));
-    const revenueThisMonth = toNumber(monthQuoteAgg._sum.paidAmount);
-    const revenuePrevMonth = toNumber(prevMonthQuoteAgg._sum.paidAmount);
-    const revenueToday = toNumber(todayQuoteAgg._sum.paidAmount);
+    const revenueThisMonth = toNumber(monthQuoteAgg._sum.paidAmount) + treatmentFeeMonth;
+    const revenuePrevMonth = toNumber(prevMonthQuoteAgg._sum.paidAmount) + treatmentFeePrevMonth;
+    const revenueToday = toNumber(todayQuoteAgg._sum.paidAmount) + treatmentFeeToday;
     const monthlyGrowthPct =
       revenuePrevMonth === 0
         ? revenueThisMonth > 0 ? 100 : 0
@@ -257,7 +307,7 @@ export class AdminDashboardService {
     const averageOrderValue =
       paidQuotationsInRange === 0
         ? 0
-        : totalRevenue / paidQuotationsInRange;
+        : quoteTotalRevenue / paidQuotationsInRange;
 
     // Best-selling pack (by paid quotations in range).
     const bestPack = await this.prisma.quotation.groupBy({

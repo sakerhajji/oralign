@@ -332,4 +332,20 @@ export const ordersService = {
 
   getDownloadUrl: (id: string, fileId: string) =>
     `/orders/${id}/files/${fileId}/download`,
+
+  /**
+   * Admin / designer: download ALL of an order's files + its data as a
+   * single ZIP. Fetched as a blob through apiClient so the Bearer token
+   * is attached (a plain <a href> can't authenticate). The backend
+   * streams the archive, so we disable the axios timeout (`timeout: 0`)
+   * exactly like the large-file upload path — a CBCT-heavy order can be
+   * hundreds of MB and take minutes to compress + transfer.
+   */
+  downloadAllZip: async (id: string): Promise<Blob> => {
+    const response = await apiClient.get<Blob>(`/orders/${id}/download-all`, {
+      responseType: 'blob',
+      timeout: 0,
+    });
+    return response.data;
+  },
 };

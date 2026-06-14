@@ -11,7 +11,9 @@ import {
   Camera,
   ClipboardCheck,
   Edit,
+  FileArchive,
   ListChecks,
+  Loader2,
   ScanLine,
   ShieldCheck,
   ShieldX,
@@ -19,6 +21,7 @@ import {
   Trash2,
   UserRound,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -54,6 +57,8 @@ import {
   usePermanentDeleteOrder,
 } from '@/lib/hooks';
 import { useQuotationForOrder } from '@/lib/hooks/use-quotations';
+import { ordersService } from '@/lib/api/orders.service';
+import { extractApiErrorMessage } from '@/lib/api/error';
 import { TreatmentFeePaymentDialog } from '@/components/orders/treatment-fee-payment-dialog';
 import { TreatmentFeeReceiptDialog } from '@/components/orders/treatment-fee-receipt-dialog';
 import { useAuth } from '@/lib/providers/auth-provider';
@@ -121,6 +126,39 @@ export default function OrderDetailPage() {
     () => new Set(['order']),
   );
   const initializedOrderIdRef = useRef<string | null>(null);
+
+  // ── Admin / designer: download ALL files + data as one ZIP ──────────
+  // Fetches the archive as a blob through the authed apiClient (a plain
+  // <a href> can't carry the Bearer token), then triggers a browser
+  // save. State guards against a double-click while a large CBCT order
+  // is still streaming.
+  const [downloadingZip, setDownloadingZip] = useState(false);
+  const handleDownloadAllZip = async () => {
+    const current = orderQuery.data;
+    if (!current || downloadingZip) return;
+    setDownloadingZip(true);
+    const pendingToast = toast.loading(t('orderDetail.downloadAll.preparing'));
+    try {
+      const blob = await ordersService.downloadAllZip(current.id);
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      const safeCode = (current.orderCode || current.id).replace(
+        /[^\w.-]+/g,
+        '_',
+      );
+      link.download = `order-${safeCode}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(blobUrl);
+      toast.success(t('orderDetail.downloadAll.success'), { id: pendingToast });
+    } catch (error) {
+      toast.error(extractApiErrorMessage(error), { id: pendingToast });
+    } finally {
+      setDownloadingZip(false);
+    }
+  };
 
   const defaultTab = useMemo<OrderDetailTab>(() => {
     if (!orderQuery.data) return 'order';
@@ -242,6 +280,24 @@ export default function OrderDetailPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          {/* Admin / designer bulk export — pulls EVERY order file plus
+              an order-data.json into a single ZIP. Hidden from doctors:
+              the backend also rejects them (planner-only RBAC). */}
+          {(isAdmin || user?.role === UserRole.DESIGNER) && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleDownloadAllZip}
+              disabled={downloadingZip}
+            >
+              {downloadingZip ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <FileArchive className="mr-2 h-4 w-4" />
+              )}
+              {t('orderDetail.downloadAll.label')}
+            </Button>
+          )}
           {canManage && (
             <Button asChild>
               <Link href={`/dashboard/orders/${order.id}/edit`}>
@@ -403,6 +459,7 @@ export default function OrderDetailPage() {
           orderId={order.id}
           readOnly
           section="radiography-stl"
+          cbctRequested={!!order.useCbctWithScans}
         />
       </Section>
 

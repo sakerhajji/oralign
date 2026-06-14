@@ -658,11 +658,24 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
         )}
 
         {step === 2 && (
-          <ClinicalOrderFiles
-            orderId={savedOrder?.id}
-            readOnly={!canModify}
-            section="radiography-stl"
-          />
+          <div className="space-y-5">
+            {/* CBCT requested toggle — single source of truth for the
+                `useCbctWithScans` flag. Enabling it reveals the CBCT /
+                ZIP bundle upload inline inside ClinicalOrderFiles below. */}
+            <ToggleTile
+              label={t('orderForm.files.cbctRequested')}
+              description={t('orderForm.files.cbctRequestedHint')}
+              checked={!!form.useCbctWithScans}
+              disabled={!canModify}
+              onCheckedChange={(value) => updateField('useCbctWithScans', value)}
+            />
+            <ClinicalOrderFiles
+              orderId={savedOrder?.id}
+              readOnly={!canModify}
+              section="radiography-stl"
+              cbctRequested={!!form.useCbctWithScans}
+            />
+          </div>
         )}
 
         {step === 3 && (
@@ -2079,12 +2092,10 @@ function ManufacturingStep({
         onChange={(value) => updateField('specialInstructions', value)}
       />
 
-      <ToggleTile
-        label="USE CBCT WITH SCANS"
-        checked={!!form.useCbctWithScans}
-        disabled={disabled}
-        onCheckedChange={(value) => updateField('useCbctWithScans', value)}
-      />
+      {/* "USE CBCT WITH SCANS" toggle removed — the CBCT-requested flag
+          (`useCbctWithScans`) now has a single source of truth on the
+          clinical-files / radiography step, placed directly above the
+          CBCT bundle upload it gates (see step 2 in OrderWizard). */}
 
       <SectionDivider title="MANUFACTURE" />
 
@@ -2287,6 +2298,7 @@ function ReviewStep({
           orderId={savedOrder?.id}
           readOnly
           section="radiography-stl"
+          cbctRequested={!!form.useCbctWithScans}
         />
       </ReviewSection>
 
@@ -2616,18 +2628,26 @@ function TextAreaField({
 
 function ToggleTile({
   label,
+  description,
   checked,
   disabled,
   onCheckedChange,
 }: {
   label: string;
+  /** Optional helper line shown beneath the label. */
+  description?: string;
   checked: boolean;
   disabled?: boolean;
   onCheckedChange: (checked: boolean) => void;
 }) {
   return (
     <div className="flex h-full min-h-16 items-center justify-between gap-3 rounded-md border bg-background px-4 py-3">
-      <Label className="text-sm font-semibold">{label}</Label>
+      <div className="min-w-0">
+        <Label className="text-sm font-semibold">{label}</Label>
+        {description ? (
+          <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+        ) : null}
+      </div>
       <Switch checked={checked} disabled={disabled} onCheckedChange={onCheckedChange} />
     </div>
   );

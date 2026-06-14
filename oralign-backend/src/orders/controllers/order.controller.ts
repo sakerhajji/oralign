@@ -549,6 +549,57 @@ export class OrderController {
     });
   }
 
+  /**
+   * Stream a single .zip of EVERY file on the order (clinical photos,
+   * STL/scans, CBCT/ZIP bundles) organised into `<category>/` folders,
+   * plus `order-data.json` carrying the full order DTO.
+   *
+   * Planner-only (admin / super_admin / designer); doctors are excluded.
+   * @SkipThrottle for the same reason the per-file download skips it —
+   * it's a deliberate RBAC'd action, not anonymous traffic, and the
+   * archive can be large enough that the anti-abuse bucket would be a
+   * false positive.
+   */
+  @Get(':id/download-all')
+  @Roles(UserRole.admin, UserRole.super_admin, UserRole.designer)
+  @SkipThrottle()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Download ALL of an order’s files + its data as a single ZIP (planner-only)',
+  })
+  @ApiParam({ name: 'id', type: String })
+  async downloadAll(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @Res() response: Response,
+  ): Promise<void> {
+    const { archive, fileName, mimeType } =
+      await this.orderService.downloadAllAsZip(id, {
+        userId: user.sub,
+        role: user.role,
+      });
+
+    response.setHeader('Content-Type', mimeType);
+    response.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${fileName}"`,
+    );
+
+    // If the archive errors mid-stream, destroy the socket so the client
+    // sees a broken transfer rather than hanging on a truncated body
+    // that never reaches the end-of-zip marker.
+    archive.on('error', (err) => {
+      if (!response.headersSent) {
+        response.status(HttpStatus.INTERNAL_SERVER_ERROR);
+      }
+      response.destroy(err);
+    });
+
+    // The service already called finalize(); we just pump bytes out.
+    archive.pipe(response);
+  }
+
   @Delete(':id/files/:fileId')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Soft delete an order file' })

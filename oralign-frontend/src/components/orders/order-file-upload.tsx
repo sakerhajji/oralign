@@ -311,10 +311,20 @@ export function ClinicalOrderFiles({
   orderId,
   readOnly,
   section,
+  cbctRequested,
 }: {
   orderId?: string;
   readOnly?: boolean;
   section: ClinicalFileSection;
+  /**
+   * Whether this order is marked as using a CBCT / DICOM bundle. Gates
+   * the ZIP/CBCT upload block in the radiography-stl section:
+   *   • editable mode → show ONLY when this is true;
+   *   • read-only mode → also show when an uploaded ZIP bundle already
+   *     exists (so admins / patients can still see a shipped CBCT
+   *     volume even if the flag was later unset).
+   */
+  cbctRequested?: boolean;
 }) {
   const { t } = useT();
   const filesQuery = useOrderFiles(orderId);
@@ -480,6 +490,14 @@ export function ClinicalOrderFiles({
     (file) => modelCategories.has(file.category) && !assignedStlFileIds.has(file.id),
   );
 
+  // ── CBCT / ZIP bundle visibility ────────────────────────────────────
+  // The ZIP/CBCT upload is now gated on the order being marked as using a
+  // CBCT bundle. In read-only mode we ALSO surface it whenever a bundle
+  // was already uploaded — so admins / patients can still see a shipped
+  // CBCT volume even if the flag is off (or was never re-set).
+  const hasZipBundle = files.some((f) => f.category === OrderFileCategory.ZIP);
+  const showCbctUpload = cbctRequested || (readOnly && hasZipBundle);
+
   return (
     <div className="space-y-8">
       <section className="space-y-5">
@@ -539,23 +557,27 @@ export function ClinicalOrderFiles({
             ZipUploadDialog audits archive contents client-side before
             anything leaves the browser; CBCT .dcm files are also
             accepted as individual uploads. */}
-        {/* Always render — in read-only mode (order-detail page) the
-            component drops the upload action row + delete buttons but
-            keeps the uploaded-bundles list so admins / patients can
-            see the CBCT / ZIP volumes shipped with this order. */}
-        <ZipUploadAction
-          orderId={orderId}
-          title={t('media.zipAction.freeformTitle')}
-          description={t('media.zipAction.freeformDesc')}
-          category={OrderFileCategory.ZIP}
-          files={files}
-          onDelete={
-            readOnly
-              ? undefined
-              : (fileId) => deleteFile.mutate({ id: orderId, fileId })
-          }
-          readOnly={readOnly}
-        />
+        {/* Conditional — only rendered when CBCT was requested for this
+            order. In read-only mode (order-detail page) we keep showing
+            it whenever a bundle already exists so admins / patients can
+            still see the CBCT / ZIP volumes shipped with this order; the
+            read-only render drops the upload action row + delete buttons
+            and just lists the uploaded bundles. */}
+        {showCbctUpload && (
+          <ZipUploadAction
+            orderId={orderId}
+            title={t('media.zipAction.freeformTitle')}
+            description={t('media.zipAction.freeformDesc')}
+            category={OrderFileCategory.ZIP}
+            files={files}
+            onDelete={
+              readOnly
+                ? undefined
+                : (fileId) => deleteFile.mutate({ id: orderId, fileId })
+            }
+            readOnly={readOnly}
+          />
+        )}
         {/* Legacy "Other scan files" list removed for the same reason —
             keep the page focused on the structured slots. */}
       </section>

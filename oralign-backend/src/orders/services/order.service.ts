@@ -13,6 +13,14 @@ import {
 } from '@prisma/client';
 import * as fs from 'fs';
 import * as path from 'path';
+// `archiver`'s runtime export is the callable "vending" factory
+// (`archiver('zip', opts)`), but the bundled @types only declare the
+// named class exports — not the call signature. We import the `Archiver`
+// + options TYPES from the named exports and grab the callable factory
+// via a typed `require` (see `createArchive` below the imports) so
+// `archiver('zip', …)` stays the documented API while the return value
+// is strongly typed as an `Archiver` stream.
+import type { Archiver, ArchiverOptions } from 'archiver';
 import { v4 as uuidv4 } from 'uuid';
 import { PaginatedResponse } from '../../common/dto/response.dto';
 import {
@@ -40,6 +48,15 @@ import { MediaProcessingService } from '../../media/media-processing.service';
 import { classifyMedia } from '../../media/media.constants';
 import { buildSequentialName } from '../../media/naming';
 import { MediaVariantInfo } from '../../media/media.types';
+
+// Callable `archiver('zip', opts)` factory, typed via the named exports
+// (see the import note above). Kept out of the import block so the
+// `require` doesn't trip the `import/first` lint rule.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const createArchive: (
+  format: 'zip' | 'tar',
+  options?: ArchiverOptions,
+) => Archiver = require('archiver');
 
 type Caller = { userId: string; role: string };
 
@@ -1333,6 +1350,143 @@ export class OrderService {
       // Downloads land on disk with the clean generated name; legacy
       // rows (no generatedName) keep the original client filename.
       downloadName: file.generatedName ?? file.originalName,
+    };
+  }
+
+  /**
+   * Build a single ZIP archive of EVERY non-deleted file on the order
+   * (clinical photos, STL/scans, CBCT/ZIP bundles, …) organised into
+   * `<category>/` folders, plus an `order-data.json` carrying the full
+   * order DTO (clinical + patient + doctor data) for the lab.
+   *
+   * Returns the live `archiver` stream so the controller can pipe it
+   * straight to the HTTP response — nothing is buffered to disk. The
+   * caller MUST `finalize()` is already invoked here; the controller
+   * only pipes + handles transport errors.
+   *
+   * RBAC: planner-only (admin / super_admin / designer). Designers see
+   * the archive only for orders they're assigned to — `assertOrderReadable`
+   * (via findAccessibleOrder) already scopes that. Doctors are excluded
+   * on purpose: the bulk export is an internal lab/admin tool.
+   *
+   * Robustness: a file row whose blob is missing on disk is SKIPPED with
+   * a logged warning rather than aborting the whole archive — a half-
+   * migrated order should still yield a usable zip of what survives.
+   */
+  async downloadAllAsZip(
+    orderId: string,
+    caller: Caller,
+  ): Promise<{ archive: Archiver; fileName: string; mimeType: string }> {
+    // Planner gate. Designers are allowed but only for their assigned
+    // orders, which findAccessibleOrder enforces below via accessWhere.
+    const isPlanner =
+      ADMIN_ROLES.includes(caller.role) || caller.role === UserRole.designer;
+    if (!isPlanner) {
+      throw new ForbiddenException(
+        'Only admins and designers can download the full order archive.',
+      );
+    }
+
+    // Reuse the canonical accessible-order load: enforces RBAC + soft-
+    // delete + pulls the same relations mapToDto serialises, so the JSON
+    // we embed is the exact order DTO the detail page shows.
+    const order = await this.findAccessibleOrder(orderId, caller);
+    const dto = this.mapToDto(order);
+
+    const archive = createArchive('zip', { zlib: { level: 9 } });
+
+    // archiver emits `warning` for non-fatal issues (e.g. ENOENT on a
+    // file we add) and `error` for fatal ones. We pre-check existence
+    // below so warnings are rare, but log them rather than crash.
+    archive.on('warning', (err) => {
+      this.logger.warn(
+        `Zip archive warning for order ${orderId}: ${err.message}`,
+      );
+    });
+    archive.on('error', (err) => {
+      this.logger.error(
+        `Zip archive error for order ${orderId}: ${err.message}`,
+      );
+    });
+
+    // De-dupe identical entry names WITHIN a category folder — two files
+    // can share an originalName ("scan.stl"). A per-folder Set tracks
+    // taken names and we append a numeric suffix before the extension.
+    const takenByFolder = new Map<string, Set<string>>();
+    const uniqueName = (folder: string, name: string): string => {
+      let taken = takenByFolder.get(folder);
+      if (!taken) {
+        taken = new Set<string>();
+        takenByFolder.set(folder, taken);
+      }
+      if (!taken.has(name)) {
+        taken.add(name);
+        return name;
+      }
+      const ext = path.extname(name);
+      const stem = ext ? name.slice(0, -ext.length) : name;
+      let i = 2;
+      let candidate = `${stem}-${i}${ext}`;
+      while (taken.has(candidate)) {
+        i += 1;
+        candidate = `${stem}-${i}${ext}`;
+      }
+      taken.add(candidate);
+      return candidate;
+    };
+
+    let appended = 0;
+    for (const file of order.files) {
+      // order.files is already filtered to deletedAt: null by includeOrder.
+      let absolutePath: string;
+      try {
+        absolutePath = this.resolveUploadPath(file.relativePath);
+      } catch (err) {
+        // A path that fails the traversal guard is corrupt data, not a
+        // reason to fail the whole export — skip + log.
+        this.logger.warn(
+          `Skipping order file ${file.id} (bad path '${file.relativePath}'): ${(err as Error).message}`,
+        );
+        continue;
+      }
+
+      if (!fs.existsSync(absolutePath)) {
+        this.logger.warn(
+          `Skipping order file ${file.id} for order ${orderId}: blob missing at ${absolutePath}`,
+        );
+        continue;
+      }
+
+      const folder = file.category; // e.g. "front_photo", "stl", "zip"
+      const baseName =
+        file.originalName?.trim() ||
+        file.generatedName?.trim() ||
+        path.basename(file.relativePath);
+      const entryName = uniqueName(folder, baseName);
+
+      archive.file(absolutePath, { name: path.posix.join(folder, entryName) });
+      appended += 1;
+    }
+
+    // The "data of order all" payload — the full order DTO, pretty so a
+    // human can read it straight out of the zip.
+    archive.append(JSON.stringify(dto, null, 2), { name: 'order-data.json' });
+
+    this.logger.log(
+      `Prepared full ZIP for order ${order.orderCode} (${orderId}): ` +
+        `${appended}/${order.files.length} file(s) by user ${caller.userId}`,
+    );
+
+    // Kick off compression. We do NOT await — the controller pipes the
+    // stream and the response completes when archiver flushes its end.
+    void archive.finalize();
+
+    return {
+      archive,
+      // Sanitise the order code for a Content-Disposition filename:
+      // strip anything that isn't a safe filename char.
+      fileName: `order-${(order.orderCode || orderId).replace(/[^\w.-]+/g, '_')}.zip`,
+      mimeType: 'application/zip',
     };
   }
 

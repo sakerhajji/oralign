@@ -285,6 +285,10 @@ export const dict = {
         } as T,
       },
       cbctRequested: { en: 'CBCT requested', fr: 'CBCT demandé' } as T,
+      cbctRequestedHint: {
+        en: 'Turn on to attach a CBCT / DICOM bundle (ZIP) for this order.',
+        fr: 'Activez pour joindre un volume CBCT / DICOM (ZIP) à cette commande.',
+      } as T,
 
       // ── Section headers shown by ClinicalOrderFiles ──────────────
       // The order wizard renders three sub-sections that each have
@@ -739,6 +743,23 @@ export const dict = {
     deletePermanently: { en: 'Delete permanently', fr: 'Suppression définitive' } as T,
     restore: { en: 'Restore', fr: 'Restaurer' } as T,
     editOrder: { en: 'Edit order', fr: 'Modifier la commande' } as T,
+
+    // Admin / designer bulk export — one ZIP of every order file + data
+    downloadAll: {
+      label: { en: 'Download all (ZIP)', fr: 'Tout télécharger (ZIP)' } as T,
+      preparing: {
+        en: 'Preparing archive…',
+        fr: 'Préparation de l’archive…',
+      } as T,
+      success: {
+        en: 'Archive downloaded',
+        fr: 'Archive téléchargée',
+      } as T,
+      error: {
+        en: 'Could not download the archive',
+        fr: 'Échec du téléchargement de l’archive',
+      } as T,
+    },
 
     // Tabs
     tabs: {

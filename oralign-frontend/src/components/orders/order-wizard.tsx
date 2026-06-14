@@ -64,6 +64,7 @@ import { useAuth } from '@/lib/providers/auth-provider';
 import { useT } from '@/lib/i18n/lang-context';
 import { patientsService, usersService } from '@/lib/api';
 import {
+  patientKeys,
   useCreateOrder,
   useCreatePatient,
   useSubmitOrder,
@@ -77,6 +78,7 @@ import {
   Gender,
   OrderStatus,
   Patient,
+  PatientFilterParams,
   PatientStage,
   ToothInstruction,
   ToothInstructionType,
@@ -273,15 +275,23 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
     enabled: isAdmin,
   });
 
+  const patientParams: PatientFilterParams = {
+    page: 1,
+    limit: 100,
+    ...(isAdmin && form.doctorId ? { doctorId: form.doctorId } : {}),
+  };
   const patientsQuery = useQuery({
-    queryKey: ['order-patients', isAdmin ? form.doctorId : user?.id],
-    queryFn: () =>
-      patientsService.getPatients({
-        page: 1,
-        limit: 100,
-        ...(isAdmin && form.doctorId ? { doctorId: form.doctorId } : {}),
-      }),
+    // Use the shared `patientKeys` cache (not a private 'order-patients'
+    // key) so creating a patient — on the /dashboard/patients page OR
+    // inline in this wizard — invalidates this list too. Previously the
+    // new patient only appeared after a hard refresh.
+    queryKey: patientKeys.list(patientParams),
+    queryFn: () => patientsService.getPatients(patientParams),
     enabled: isDentist || (isAdmin && !!form.doctorId),
+    // Belt-and-suspenders: always refetch when the wizard mounts so a
+    // just-created patient is present immediately, even if a fresh-but-
+    // stale list happens to be cached.
+    refetchOnMount: 'always',
   });
 
   const selectedPatient = patientsQuery.data?.data.find(

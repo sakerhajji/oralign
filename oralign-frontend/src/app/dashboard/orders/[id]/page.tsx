@@ -222,6 +222,20 @@ export default function OrderDetailPage() {
   const hasQuotationSignal =
     !!quotationQuery.data || POST_QUOTE_STATUSES.has(order.status);
 
+  // Extractions summary — the doctor marks teeth for extraction on the
+  // odontogram (tooth instructions of type 'extract'); `order.extractions`
+  // is only the free-text note. Combine the flagged FDI teeth (sorted) with
+  // the note so the résumé reflects what was actually selected, not just the
+  // optional comment. Mirrors the wizard's ReviewStep summary.
+  const extractionTeeth = (order.toothInstructions ?? [])
+    .filter((i) => i.type === 'extract')
+    .map((i) => i.toothNumber)
+    .sort((a, b) => a - b);
+  const extractionsSummary =
+    [extractionTeeth.join(', '), (order.extractions ?? '').trim()]
+      .filter(Boolean)
+      .join(' · ') || undefined;
+
   // ── View-page section layout ────────────────────────────────────────────
   // Mirrors the order-creation wizard but flattened into a single scrollable
   // page (no step navigation). Order of sections mirrors the wizard:
@@ -515,7 +529,7 @@ export default function OrderDetailPage() {
               />
               <Info label={t('orderDetail.movement.crossbite')} value={order.crossbite} />
               <Info label={t('orderDetail.movement.spaces')} value={order.spaces} wide />
-              <Info label={t('orderDetail.movement.extractions')} value={order.extractions} wide />
+              <Info label={t('orderDetail.movement.extractions')} value={extractionsSummary} wide />
             </div>
           </div>
 

@@ -2232,6 +2232,20 @@ function ReviewStep({
     return map;
   }, [toothInstructions]);
 
+  // Teeth flagged for extraction in the odontogram (FDI, sorted). The
+  // résumé's "Extractions" row used to show only the free-text notes, so
+  // teeth picked WITHOUT a note appeared nowhere — fold the selected
+  // teeth into the displayed value too.
+  const extractionsSummary = useMemo(() => {
+    const teeth = toothInstructions
+      .filter((i) => i.type === ToothInstructionType.EXTRACT)
+      .map((i) => i.toothNumber)
+      .sort((a, b) => a - b);
+    return [teeth.join(', '), (form.extractions ?? '').trim()]
+      .filter(Boolean)
+      .join(' · ');
+  }, [toothInstructions, form.extractions]);
+
   const conditionsValue = formatClinicalConditions(
     patientClinicalConditions,
     patientClinicalConditionsOther,
@@ -2345,7 +2359,7 @@ function ReviewStep({
               <ReviewInfo label="Expansion" value={form.expansion} />
               <ReviewInfo label="Crossbite" value={form.crossbite} />
               <ReviewInfo label="Spaces" value={form.spaces} wide />
-              <ReviewInfo label="Extractions" value={form.extractions} wide />
+              <ReviewInfo label="Extractions" value={extractionsSummary} wide />
             </div>
           </div>
 

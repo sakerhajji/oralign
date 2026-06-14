@@ -248,8 +248,24 @@ export class TreatmentPlanService {
 
   async listForOrder(orderId: string, caller: Caller) {
     await this.assertOrderReadable(orderId, caller);
+    // Planners (admin / designer / super_admin) see every plan, including
+    // their own in-progress PENDING drafts. The DOCTOR only ever sees plans
+    // that have actually been SENT to them (ready / approved / rejected) —
+    // a PENDING draft is the planner's work-in-progress and must stay
+    // invisible, otherwise it surfaces as a phantom second "treatment" on
+    // the doctor's side the moment the planner starts (or duplicates) a draft.
+    const isPlanner =
+      caller.role === UserRole.admin ||
+      caller.role === UserRole.super_admin ||
+      caller.role === UserRole.designer;
     return this.prisma.treatmentPlan.findMany({
-      where: { orderId, deletedAt: null },
+      where: {
+        orderId,
+        deletedAt: null,
+        ...(isPlanner
+          ? {}
+          : { status: { not: TreatmentPlanStatus.pending } }),
+      },
       orderBy: { version: 'desc' },
     });
   }

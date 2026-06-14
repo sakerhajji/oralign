@@ -8,6 +8,7 @@ import {
   PaymentRecordStatus,
   Prisma,
   ToothInstructionType,
+  TreatmentPlanStatus,
   UserRole,
 } from '@prisma/client';
 import * as fs from 'fs';
@@ -58,15 +59,24 @@ const orderInclude = Prisma.validator<Prisma.DentalOrderInclude>()({
   // Used to compute notification badges in the orders list. `take: 1` keeps
   // the join tiny — Postgres only fetches one row per order, so this scales
   // with page size, not with plan-history size.
+  //
+  // PENDING plans are excluded: a pending plan is the planner's in-progress
+  // draft, not a plan that has been issued to the doctor. Counting / badging
+  // it would (a) leak a phantom "2nd treatment" to the doctor's tab and (b)
+  // raise a premature "action required" dot. Planners still see every plan
+  // (incl. drafts) via TreatmentPlanService.listForOrder + the always-on
+  // treatment-plans tab, so nothing is hidden from them.
   treatmentPlans: {
-    where: { deletedAt: null },
+    where: { deletedAt: null, status: { not: TreatmentPlanStatus.pending } },
     select: { id: true, status: true },
     orderBy: { version: 'desc' },
     take: 1,
   },
   _count: {
     select: {
-      treatmentPlans: { where: { deletedAt: null } },
+      treatmentPlans: {
+        where: { deletedAt: null, status: { not: TreatmentPlanStatus.pending } },
+      },
     },
   },
 });

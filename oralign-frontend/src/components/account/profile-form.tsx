@@ -314,7 +314,16 @@ export function ProfileForm({ user, onboarding = false, onSaved }: ProfileFormPr
           </div>
 
           <div className="flex justify-end">
-            <Button type="submit" disabled={!hasChanges || isSubmitting}>
+            {/* Onboarding pre-fills phone/country from sign-up, so the form
+                loads pristine — gating on `hasChanges` would trap the user
+                with a permanently-disabled button. In onboarding we only
+                block while submitting (validity is enforced by the schema
+                on submit). The /account page keeps the dirty-gate so "Save
+                changes" stays a no-op when nothing changed. */}
+            <Button
+              type="submit"
+              disabled={isSubmitting || (!onboarding && !hasChanges)}
+            >
               {isSubmitting
                 ? t('accountProfile.saving')
                 : onboarding

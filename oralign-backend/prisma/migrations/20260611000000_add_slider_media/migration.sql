@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS "SliderMedia" (
   "sourceType"    "SliderMediaSourceType" NOT NULL,
   "desktopUrl"    TEXT,
   "mobileUrl"     TEXT,
-  "deviceTargets" "SliderMediaDeviceTarget"[],
+  "deviceTargets" "SliderMediaDeviceTarget"[] NOT NULL,
   "status"        "SliderMediaStatus" NOT NULL DEFAULT 'active',
   "displayOrder"  INTEGER NOT NULL DEFAULT 0,
   "linkUrl"       TEXT,

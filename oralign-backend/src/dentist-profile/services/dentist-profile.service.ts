@@ -15,8 +15,10 @@ import {
   SetupClinicDto,
 } from '../dto/dentist-profile.dto';
 import { PaginatedResponse } from '../../common/dto/response.dto';
-import { UserRole } from '@prisma/client';
+import { UserRole, VerificationStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { NotificationEvents } from '../../notifications/events/notification-events';
 import { TTL, dpKey, whKey } from '../../common/cache/cache-keys';
 
 type ProfileWithUser = {
@@ -49,6 +51,7 @@ export class DentistProfileService {
   constructor(
     private profileRepository: DentistProfileRepository,
     private readonly prisma: PrismaService,
+    private readonly events: EventEmitter2,
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
   ) {}
 
@@ -78,10 +81,16 @@ export class DentistProfileService {
 
     const { workingHours, ...profileFields } = dto;
 
+    // True when this is the dentist's FIRST clinic setup — i.e. they just
+    // completed onboarding. Drives the one-time admin "ready to approve"
+    // notification below (so editing the clinic later never re-notifies).
+    let wasFirstSetup = false;
+
     const result = await this.prisma.$transaction(async (tx) => {
       const existing = await tx.dentistProfile.findUnique({
         where: { userId },
       });
+      wasFirstSetup = !existing || !!existing.deletedAt;
 
       const profile = existing
         ? await tx.dentistProfile.update({
@@ -124,7 +133,51 @@ export class DentistProfileService {
       this.safeDel(whKey.byProfile(result.id)),
     ]);
 
+    // First-time clinic setup == onboarding complete. Announce so admins
+    // get the "review & approve" bell + email. Fire-and-forget; a
+    // notification failure must never break clinic setup.
+    if (wasFirstSetup) {
+      void this.announcePendingApproval(userId, result.clinicName).catch(
+        () => undefined,
+      );
+    }
+
     return this.mapToDto(result as ProfileWithUser);
+  }
+
+  /**
+   * A dentist saved their clinic for the FIRST time → onboarding is
+   * complete and the (still-unapproved) account is ready for admin
+   * review. Emit the domain event so the notifications subsystem fans out
+   * the admin bell + "review & approve" email. We re-load the user to
+   * confirm they're a dentist still awaiting approval, so editing a clinic
+   * after approval (or an admin setting one up) never pings the team.
+   */
+  private async announcePendingApproval(
+    userId: string,
+    clinicName?: string | null,
+  ): Promise<void> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        role: true,
+        verificationStatus: true,
+      },
+    });
+    if (!user) return;
+    if (user.role !== UserRole.dentist) return;
+    if (user.verificationStatus === VerificationStatus.approved) return;
+
+    this.events.emit(NotificationEvents.DentistOnboardingCompleted, {
+      userId: user.id,
+      fullName: user.fullName,
+      email: user.email,
+      role: user.role,
+      clinicName: clinicName ?? null,
+    });
   }
 
   async createProfile(

@@ -2,8 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { NotificationType } from '@prisma/client';
 import { NotificationsService } from '../services/notifications.service';
+import { OrderNotificationService } from '../../mail/order-notification.service';
 import {
   BatchEvent,
+  DentistOnboardingCompletedEvent,
   NotificationEvents,
   OrderEvent,
   OrderStatusChangedEvent,
@@ -102,7 +104,10 @@ function languageLabel(lang?: string | null): string {
 export class NotificationsListener {
   private readonly logger = new Logger(NotificationsListener.name);
 
-  constructor(private readonly notifications: NotificationsService) {}
+  constructor(
+    private readonly notifications: NotificationsService,
+    private readonly orderNotifications: OrderNotificationService,
+  ) {}
 
   // ─── User lifecycle ─────────────────────────────────────────────────
 
@@ -124,6 +129,40 @@ export class NotificationsListener {
           userId: payload.userId,
           role: payload.role,
         },
+      });
+    });
+  }
+
+  /**
+   * A dentist finished onboarding (saved their clinic) → the account is now
+   * complete and genuinely ready for review. THIS is where admins get the
+   * out-of-band "review & approve" EMAIL (plus a sharper bell), rather than
+   * at sign-up when the profile is still empty.
+   */
+  @OnEvent(NotificationEvents.DentistOnboardingCompleted, { async: true })
+  async onDentistOnboardingCompleted(
+    payload: DentistOnboardingCompletedEvent,
+  ): Promise<void> {
+    await this.safe('dentist.onboardingCompleted', async () => {
+      const forClinic = payload.clinicName ? ` (${payload.clinicName})` : '';
+      await this.notifications.broadcastToAdmins({
+        type: NotificationType.user_registered,
+        title: {
+          en: 'Account awaiting approval',
+          fr: 'Compte en attente d’approbation',
+        },
+        message: {
+          en: `${payload.fullName}${forClinic} completed onboarding and is awaiting approval — please review and approve.`,
+          fr: `${payload.fullName}${forClinic} a terminé son inscription et attend une approbation — veuillez vérifier et approuver.`,
+        },
+        link: `/dashboard/users`,
+        metadata: { userId: payload.userId, role: payload.role },
+      });
+      // Out-of-band email to every admin / super-admin (best-effort).
+      await this.orderNotifications.notifyDentistPendingApproval({
+        fullName: payload.fullName,
+        email: payload.email,
+        role: payload.role,
       });
     });
   }

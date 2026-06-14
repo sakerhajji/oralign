@@ -20,6 +20,13 @@ import type { PaymentMethod, UserRole } from '@prisma/client';
 
 export const NotificationEvents = {
   UserRegistered: 'user.registered',
+  /**
+   * A dentist finished onboarding (saved their clinic) and is now a
+   * COMPLETE account awaiting admin approval. This — not UserRegistered —
+   * is the moment admins get the "please review & approve" email, because
+   * the profile is only worth reviewing once it's filled in.
+   */
+  DentistOnboardingCompleted: 'dentist.onboardingCompleted',
   OrderCreated: 'order.created',
   OrderSubmitted: 'order.submitted',
   OrderStatusChanged: 'order.statusChanged',
@@ -69,6 +76,15 @@ export interface UserRegisteredEvent {
   fullName: string;
   email: string;
   role: UserRole;
+}
+
+export interface DentistOnboardingCompletedEvent {
+  userId: string;
+  fullName: string;
+  email: string;
+  role: UserRole;
+  /** The clinic name they just saved — surfaced in the admin bell body. */
+  clinicName?: string | null;
 }
 
 export interface OrderEvent {

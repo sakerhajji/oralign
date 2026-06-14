@@ -253,6 +253,43 @@ export class OrderNotificationService {
     }
   }
 
+  /**
+   * A dentist finished onboarding (saved their clinic) and is awaiting
+   * admin approval → email every active admin / super-admin so they can
+   * review & approve even when they're not looking at the dashboard. Each
+   * send is wrapped so one bad address can't abort the rest; safe to call
+   * fire-and-forget.
+   */
+  async notifyDentistPendingApproval(args: {
+    fullName: string;
+    email: string;
+    role: string;
+  }): Promise<void> {
+    try {
+      const base = (
+        process.env.FRONTEND_URL ?? 'https://oralign.com.tn'
+      ).replace(/\/$/, '');
+      const dashboardUrl = `${base}/dashboard/users`;
+      const admins = await this.findAdmins();
+      for (const admin of admins) {
+        void this.safeSend(() =>
+          this.mail.sendNewUserPendingForAdminEmail({
+            to: admin.email,
+            adminName: admin.fullName,
+            newUserName: args.fullName,
+            newUserEmail: args.email,
+            role: args.role,
+            dashboardUrl,
+          }),
+        );
+      }
+    } catch (err) {
+      this.logger.warn(
+        `notifyDentistPendingApproval failed: ${(err as Error).message}`,
+      );
+    }
+  }
+
   // ─── Helpers ───────────────────────────────────────────────────────────────
 
   /** Active (non-soft-deleted) admin / super_admin users. */

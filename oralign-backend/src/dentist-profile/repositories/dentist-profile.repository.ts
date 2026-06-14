@@ -16,6 +16,7 @@ export class DentistProfileRepository {
     longitude?: number;
     clinicPhone?: string;
     clinicEmail?: string;
+    taxId?: string;
     description?: string;
     logoUrl?: string;
   }): Promise<DentistProfile> {
@@ -189,6 +190,7 @@ export class DentistProfileRepository {
       longitude?: number;
       clinicPhone?: string;
       clinicEmail?: string;
+      taxId?: string;
       description?: string;
       logoUrl?: string;
     }>,

@@ -42,6 +42,7 @@ export function ClinicForm({ profile }: { profile: DentistProfile | null }) {
       latitude: undefined,
       longitude: undefined,
       description: '',
+      taxId: '',
     },
   });
 
@@ -56,6 +57,7 @@ export function ClinicForm({ profile }: { profile: DentistProfile | null }) {
       latitude: profile.latitude ?? undefined,
       longitude: profile.longitude ?? undefined,
       description: profile.description ?? '',
+      taxId: profile.taxId ?? '',
     });
   }, [profile, form]);
 
@@ -86,6 +88,7 @@ export function ClinicForm({ profile }: { profile: DentistProfile | null }) {
       latitude: values.latitude,
       longitude: values.longitude,
       description: normalizeOptional(values.description),
+      taxId: normalizeOptional(values.taxId),
     };
 
     if (!activeProfileId) {
@@ -98,6 +101,7 @@ export function ClinicForm({ profile }: { profile: DentistProfile | null }) {
         latitude: values.latitude,
         longitude: values.longitude,
         description: normalizeOptional(values.description),
+        taxId: normalizeOptional(values.taxId),
       });
       setCreatedProfileId(created.id);
       queryClient.invalidateQueries({ queryKey: userKeys.currentUser() });
@@ -115,6 +119,7 @@ export function ClinicForm({ profile }: { profile: DentistProfile | null }) {
       latitude: values.latitude,
       longitude: values.longitude,
       description: values.description,
+      taxId: values.taxId,
     });
   });
 
@@ -227,6 +232,27 @@ export function ClinicForm({ profile }: { profile: DentistProfile | null }) {
                   {t('accountClinic.descriptionLabel')}
                 </label>
                 <Input id="description" {...form.register('description')} />
+              </div>
+
+              <div className="space-y-2 md:col-span-2">
+                <label className="text-sm font-medium" htmlFor="taxId">
+                  {t('accountClinic.taxIdLabel')}
+                </label>
+                <Input
+                  id="taxId"
+                  placeholder={t('accountClinic.taxIdPlaceholder')}
+                  {...form.register('taxId')}
+                  aria-invalid={!!form.formState.errors.taxId}
+                />
+                {form.formState.errors.taxId ? (
+                  <p className="text-sm text-destructive">
+                    {form.formState.errors.taxId.message}
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    {t('accountClinic.taxIdHelp')}
+                  </p>
+                )}
               </div>
             </div>
 

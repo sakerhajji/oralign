@@ -96,6 +96,8 @@ const makeClinicSchema = (t: Translate) =>
     clinicPhone: z.string().optional(),
     clinicEmail: z.string().optional(),
     description: z.string().optional(),
+    // Clinic "Matricule fiscal" (doctor tax id) — admin-editable.
+    taxId: z.string().max(60, t('usersUi.validation.taxIdMax')).optional(),
     latitude: z.number().optional(),
     longitude: z.number().optional(),
   });
@@ -202,7 +204,7 @@ export function UserDetailSheet({
     resolver: zodResolver(clinicSchema),
     defaultValues: {
       clinicName: '', clinicAddress: '', city: '', country: '',
-      clinicPhone: '', clinicEmail: '', description: '',
+      clinicPhone: '', clinicEmail: '', description: '', taxId: '',
       latitude: undefined, longitude: undefined,
     },
   });
@@ -236,6 +238,7 @@ export function UserDetailSheet({
       clinicPhone:   dp?.clinicPhone   ?? '',
       clinicEmail:   dp?.clinicEmail   ?? '',
       description:   dp?.description   ?? '',
+      taxId:         dp?.taxId         ?? '',
       latitude:      dp?.latitude      ?? undefined,
       longitude:     dp?.longitude     ?? undefined,
     });
@@ -340,6 +343,7 @@ export function UserDetailSheet({
       clinicPhone:   data.clinicPhone   || undefined,
       clinicEmail:   data.clinicEmail   || undefined,
       description:   data.description  || undefined,
+      taxId:         data.taxId?.trim() || undefined,
       latitude:      data.latitude,
       longitude:     data.longitude,
     };
@@ -852,6 +856,15 @@ export function UserDetailSheet({
                           />
                         </Field>
                       </div>
+                      <Field
+                        label={t('usersUi.sheet.taxId')}
+                        error={clinicForm.formState.errors.taxId?.message}
+                      >
+                        <Input
+                          {...clinicForm.register('taxId')}
+                          placeholder={t('usersUi.sheet.taxIdPh')}
+                        />
+                      </Field>
                     </div>
                   </section>
 

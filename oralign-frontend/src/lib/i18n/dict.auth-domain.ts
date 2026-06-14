@@ -253,6 +253,14 @@ export const authDomainDict = {
         en: 'A few words patients will see in your profile',
         fr: 'Quelques mots que les patients verront sur votre profil',
       } as T,
+      // Clinic "Matricule fiscal" (doctor tax id) — printed on invoices.
+      taxIdLabel: { en: 'Tax registration number', fr: 'Matricule fiscal' } as T,
+      taxIdOptional: { en: '(optional)', fr: '(facultatif)' } as T,
+      taxIdPlaceholder: { en: '1234567/A/M/000', fr: '1234567/A/M/000' } as T,
+      taxIdHelp: {
+        en: 'Your clinic tax id (“Matricule fiscal”). Shown on invoices issued to your clinic.',
+        fr: 'Le matricule fiscal de votre cabinet. Affiché sur les factures émises à votre cabinet.',
+      } as T,
       hoursSectionTitle: { en: 'Working hours', fr: 'Horaires d’ouverture' } as T,
       hoursSectionDesc: {
         en: 'Toggle each day on or off. At least one open day is required.',
@@ -272,6 +280,10 @@ export const authDomainDict = {
       vPickLocation: {
         en: 'Pick the clinic location on the map',
         fr: 'Sélectionnez l’emplacement du cabinet sur la carte',
+      } as T,
+      vTaxIdMax: {
+        en: 'Tax id must be 60 characters or fewer',
+        fr: 'Le matricule fiscal doit comporter au maximum 60 caractères',
       } as T,
       vTimeFormat: { en: 'Time must be HH:mm', fr: 'L’heure doit être au format HH:mm' } as T,
       vSetAtLeastOneDay: { en: 'Set at least one day', fr: 'Définissez au moins un jour' } as T,

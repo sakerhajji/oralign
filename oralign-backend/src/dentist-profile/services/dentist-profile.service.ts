@@ -32,6 +32,7 @@ type ProfileWithUser = {
   longitude: number | null;
   clinicPhone: string | null;
   clinicEmail: string | null;
+  taxId: string | null;
   description: string | null;
   logoUrl: string | null;
   createdAt: Date;
@@ -432,6 +433,7 @@ export class DentistProfileService {
       longitude: profile.longitude ?? undefined,
       clinicPhone: profile.clinicPhone ?? undefined,
       clinicEmail: profile.clinicEmail ?? undefined,
+      taxId: profile.taxId ?? undefined,
       description: profile.description ?? undefined,
       logoUrl: profile.logoUrl ?? undefined,
       userFullName: profile.user?.fullName,

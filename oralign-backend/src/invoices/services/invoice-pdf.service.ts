@@ -95,6 +95,7 @@ export interface InvoiceRenderPayload {
           country: string | null;
           clinicPhone: string | null;
           clinicEmail: string | null;
+          taxId: string | null;
         } | null;
       };
       patient: { fullName: string };
@@ -235,6 +236,7 @@ export class InvoicePdfService implements OnModuleDestroy {
                         country: true,
                         clinicPhone: true,
                         clinicEmail: true,
+                        taxId: true,
                       },
                     },
                   },
@@ -353,6 +355,7 @@ export class InvoicePdfService implements OnModuleDestroy {
                 country: true,
                 clinicPhone: true,
                 clinicEmail: true,
+                taxId: true,
               },
             },
           },
@@ -863,6 +866,11 @@ export class InvoicePdfService implements OnModuleDestroy {
             { text: clinic.clinicEmail ?? '' },
             { text: clinic.doctorEmail ?? '' },
             { text: clinic.doctorPhone ?? '' },
+            {
+              text: clinic.taxId
+                ? `${labels.taxNumber}: ${clinic.taxId}`
+                : '',
+            },
           ])}
         </article>
       </section>
@@ -973,6 +981,7 @@ export class InvoicePdfService implements OnModuleDestroy {
     country: string | null;
     clinicPhone: string | null;
     clinicEmail: string | null;
+    taxId: string | null;
   } {
     const fromSnap = (key: string): string | null => {
       const v = snapshot?.[key];
@@ -990,6 +999,9 @@ export class InvoicePdfService implements OnModuleDestroy {
       country: fromSnap('country') ?? profile?.country ?? null,
       clinicPhone: fromSnap('clinicPhone') ?? profile?.clinicPhone ?? null,
       clinicEmail: fromSnap('clinicEmail') ?? profile?.clinicEmail ?? null,
+      // Doctor's "Matricule fiscal" — snapshot wins (for historical
+      // quotes that locked it in) then the live dentist profile.
+      taxId: fromSnap('taxId') ?? profile?.taxId ?? null,
     };
   }
 
@@ -1028,9 +1040,16 @@ export class InvoicePdfService implements OnModuleDestroy {
     payload: InvoiceRenderPayload,
     labels: InvoiceLabels,
   ): InvoiceTotalLine[] {
-    const { payment, quotation, language } = payload;
+    const { payment, quotation, settings, language } = payload;
+    // The TTC the customer was billed for the line item itself.
     const total = this.toNumber(payment.amount);
     const tvaRate = this.toNumber(quotation.tvaRate);
+    // "Droit de timbre" — the configured fiscal stamp duty added to the
+    // invoice total. Clamp to >= 0 so a stray negative setting can't
+    // subtract from the total. When it's 0 the totals block is
+    // byte-identical to the pre-stamp-duty behaviour (backward compat).
+    const stampDuty = Math.max(0, this.toNumber(settings.stampDuty));
+    const grandTotal = total + stampDuty;
     // The line item we render is the payment amount only — for a
     // partial installment the quote-level TVA already factored into
     // the schedule, so we display a flat subtotal/total here. We still
@@ -1052,14 +1071,39 @@ export class InvoicePdfService implements OnModuleDestroy {
         value: this.formatMoney(tvaAmount, quotation.currency, language),
       });
     }
-    lines.push({
-      label: labels.totalTtc,
-      value: this.formatMoney(total, quotation.currency, language),
-      kind: 'final',
-    });
+
+    // Amount the paid row reflects — the grand total when a stamp duty
+    // applies, otherwise the bare TTC.
+    let amountPaid = total;
+    if (stampDuty > 0) {
+      // TTC + stamp duty + grand total breakdown.
+      lines.push({
+        label: labels.totalTtc,
+        value: this.formatMoney(total, quotation.currency, language),
+      });
+      lines.push({
+        label: labels.stampDuty,
+        value: this.formatMoney(stampDuty, quotation.currency, language),
+      });
+      lines.push({
+        label: labels.totalDue,
+        value: this.formatMoney(grandTotal, quotation.currency, language),
+        kind: 'final',
+      });
+      amountPaid = grandTotal;
+    } else {
+      // No stamp duty → keep the legacy single dark "Total TTC" row.
+      lines.push({
+        label: labels.totalTtc,
+        value: this.formatMoney(total, quotation.currency, language),
+        kind: 'final',
+      });
+      amountPaid = total;
+    }
+
     lines.push({
       label: labels.amountPaid,
-      value: this.formatMoney(total, quotation.currency, language),
+      value: this.formatMoney(amountPaid, quotation.currency, language),
       // Green-highlight the paid row only when the payment actually
       // landed — for a pending/rejected snapshot we still print the
       // neutral row so the document doesn't lie about the state.

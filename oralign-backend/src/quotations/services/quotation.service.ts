@@ -215,6 +215,11 @@ export class QuotationService {
       country: profile?.country ?? null,
       clinicPhone: profile?.clinicPhone ?? null,
       clinicEmail: profile?.clinicEmail ?? null,
+      // Doctor's "Matricule fiscal" — snapshotted so historical quotes
+      // lock in the tax id that was on file at send time. The invoice
+      // renderer reads this key first, then falls back to the live
+      // profile.
+      taxId: profile?.taxId ?? null,
       logoUrl: profile?.logoUrl ?? null,
       generatedAt: new Date().toISOString(),
     };

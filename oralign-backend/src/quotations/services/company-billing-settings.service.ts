@@ -77,6 +77,7 @@ export class CompanyBillingSettingsService {
           taxRegistrationNumber: dto.taxRegistrationNumber ?? null,
           defaultTvaRate: dto.defaultTvaRate ?? 19,
           defaultTreatmentFee: dto.defaultTreatmentFee ?? 0,
+          stampDuty: dto.stampDuty ?? 1,
           defaultCurrency: dto.defaultCurrency ?? 'TND',
           devisPrefix: dto.devisPrefix ?? 'DEV',
           devisNextNumber: dto.devisNextNumber ?? 1,
@@ -108,6 +109,7 @@ export class CompanyBillingSettingsService {
         defaultTvaRate: dto.defaultTvaRate ?? current.defaultTvaRate,
         defaultTreatmentFee:
           dto.defaultTreatmentFee ?? current.defaultTreatmentFee,
+        stampDuty: dto.stampDuty ?? current.stampDuty,
         defaultCurrency: dto.defaultCurrency ?? current.defaultCurrency,
         devisPrefix: dto.devisPrefix ?? current.devisPrefix,
         devisNextNumber: dto.devisNextNumber ?? current.devisNextNumber,
@@ -301,6 +303,10 @@ export class CompanyBillingSettingsService {
       // Decimal → Number at the API boundary; the frontend form uses
       // a plain number input and computeTotals() does Number arithmetic.
       defaultTreatmentFee: Number(settings.defaultTreatmentFee),
+      // Same Decimal → Number boundary treatment as defaultTreatmentFee
+      // so the admin form gets a plain number and the invoice total math
+      // is pure Number arithmetic.
+      stampDuty: Number(settings.stampDuty),
       defaultCurrency: settings.defaultCurrency,
       devisPrefix: settings.devisPrefix,
       devisNextNumber: settings.devisNextNumber,

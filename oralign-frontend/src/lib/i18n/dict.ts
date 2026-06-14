@@ -2143,6 +2143,13 @@ export const dict = {
     countryLabel: { en: 'Country', fr: 'Pays' } as T,
     locationLabel: { en: 'Location', fr: 'Emplacement' } as T,
     descriptionLabel: { en: 'Description', fr: 'Description' } as T,
+    // Clinic "Matricule fiscal" (doctor tax id) — printed on invoices.
+    taxIdLabel: { en: 'Tax registration number', fr: 'Matricule fiscal' } as T,
+    taxIdPlaceholder: { en: '1234567/A/M/000', fr: '1234567/A/M/000' } as T,
+    taxIdHelp: {
+      en: 'Your clinic tax id (“Matricule fiscal”). Shown on invoices issued to your clinic.',
+      fr: 'Le matricule fiscal de votre cabinet. Affiché sur les factures émises à votre cabinet.',
+    } as T,
     saving: { en: 'Saving...', fr: 'Enregistrement…' } as T,
     saveClinicDetails: { en: 'Save clinic details', fr: 'Enregistrer les informations du cabinet' } as T,
     toastClinicCreated: { en: 'Clinic profile created.', fr: 'Profil du cabinet créé.' } as T,
@@ -2203,6 +2210,17 @@ export const dict = {
     defaultTreatmentFeeLabel: {
       en: 'Default treatment fee ({currency})',
       fr: 'Honoraires de traitement par défaut ({currency})',
+    } as T,
+    // "Droit de timbre" — Tunisian fiscal stamp added to every invoice
+    // total (typically 1.000 TND). Configured here by the admin.
+    stampDutyLabel: {
+      en: 'Stamp duty ({currency})',
+      fr: 'Droit de timbre ({currency})',
+    } as T,
+    stampDutyPlaceholder: { en: '1.000', fr: '1.000' } as T,
+    stampDutyHelp: {
+      en: 'Fiscal stamp (“Droit de timbre”) added to every invoice total. Set to 0 to disable.',
+      fr: 'Droit de timbre fiscal ajouté au total de chaque facture. Mettez 0 pour le désactiver.',
     } as T,
     defaultCurrencyLabel: { en: 'Default currency', fr: 'Devise par défaut' } as T,
     devisPrefixLabel: { en: 'Devis prefix', fr: 'Préfixe du devis' } as T,

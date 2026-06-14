@@ -37,6 +37,7 @@ interface FormState extends UpsertCompanyBillingSettingsDto {
   companyName: string;
   defaultTvaRate: number;
   defaultTreatmentFee: number;
+  stampDuty: number;
   defaultCurrency: string;
   devisPrefix: string;
   devisNextNumber: number;
@@ -55,6 +56,9 @@ const emptyState: FormState = {
   taxRegistrationNumber: '',
   defaultTvaRate: 19,
   defaultTreatmentFee: 0,
+  // "Droit de timbre" — Tunisian fiscal stamp added to every invoice
+  // total. Backend column defaults to 1.000 TND.
+  stampDuty: 1,
   defaultCurrency: 'TND',
   devisPrefix: 'DEV',
   devisNextNumber: 1,
@@ -100,6 +104,7 @@ export function CompanyBillingSettingsForm() {
       taxRegistrationNumber: settings.taxRegistrationNumber ?? '',
       defaultTvaRate: settings.defaultTvaRate ?? 19,
       defaultTreatmentFee: settings.defaultTreatmentFee ?? 0,
+      stampDuty: settings.stampDuty ?? 1,
       defaultCurrency: settings.defaultCurrency ?? 'TND',
       devisPrefix: settings.devisPrefix ?? 'DEV',
       devisNextNumber: settings.devisNextNumber ?? 1,
@@ -155,6 +160,7 @@ export function CompanyBillingSettingsForm() {
       taxRegistrationNumber: form.taxRegistrationNumber?.trim() || undefined,
       defaultTvaRate: form.defaultTvaRate,
       defaultTreatmentFee: form.defaultTreatmentFee,
+      stampDuty: form.stampDuty,
       defaultCurrency: form.defaultCurrency.trim() || 'TND',
       devisPrefix: form.devisPrefix.trim() || 'DEV',
       devisNextNumber: form.devisNextNumber,
@@ -332,6 +338,23 @@ export function CompanyBillingSettingsForm() {
             onChange={(v) => updateField('defaultTreatmentFee', Number(v) || 0)}
             placeholder="0"
           />
+          {/* "Droit de timbre" — Tunisian fiscal stamp added to every
+              invoice total (typically 1.000 TND). Decimal(12,3) on the
+              backend, so the input steps in milli-units. Set to 0 to
+              disable it on invoices. Mirrors the defaultTreatmentFee
+              numeric field above. */}
+          <Field
+            label={t('accountBillingSettings.stampDutyLabel', {
+              currency: form.defaultCurrency || 'TND',
+            })}
+            value={String(form.stampDuty)}
+            type="number"
+            step="0.001"
+            min="0"
+            onChange={(v) => updateField('stampDuty', Number(v) || 0)}
+            placeholder={t('accountBillingSettings.stampDutyPlaceholder')}
+            helper={t('accountBillingSettings.stampDutyHelp')}
+          />
           <Field
             label={t('accountBillingSettings.defaultCurrencyLabel')}
             value={form.defaultCurrency}
@@ -496,6 +519,9 @@ function Field({
   type = 'text',
   required,
   wide,
+  step,
+  min,
+  helper,
 }: {
   label: string;
   value: string;
@@ -504,6 +530,9 @@ function Field({
   type?: string;
   required?: boolean;
   wide?: boolean;
+  step?: string;
+  min?: string;
+  helper?: string;
 }) {
   return (
     <div className={wide ? 'sm:col-span-2' : undefined}>
@@ -516,7 +545,10 @@ function Field({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
+        step={step}
+        min={min}
       />
+      {helper && <p className="mt-1 text-xs text-muted-foreground">{helper}</p>}
     </div>
   );
 }

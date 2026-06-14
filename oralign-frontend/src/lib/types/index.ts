@@ -287,6 +287,10 @@ export interface CompanyBillingSettings {
   // Professional/clinical fee auto-applied to new quotes. The admin
   // can still override per-quote — this is just the policy default.
   defaultTreatmentFee: number;
+  // "Droit de timbre" (Tunisian fiscal stamp, typically 1.000 TND).
+  // Added to the INVOICE total. Decimal on the backend, serialised as a
+  // number at the DTO boundary exactly like `defaultTreatmentFee`.
+  stampDuty: number;
   defaultCurrency: string;
   devisPrefix: string;
   devisNextNumber: number;
@@ -310,6 +314,8 @@ export interface UpsertCompanyBillingSettingsDto {
   taxRegistrationNumber?: string;
   defaultTvaRate?: number;
   defaultTreatmentFee?: number;
+  /** "Droit de timbre" — fiscal stamp added to the invoice total. */
+  stampDuty?: number;
   defaultCurrency?: string;
   devisPrefix?: string;
   devisNextNumber?: number;
@@ -730,6 +736,13 @@ export interface DentistProfile {
   clinicEmail?: string;
   description?: string;
   logoUrl?: string;
+  /**
+   * The DOCTOR's clinic "Matricule fiscal" (tax registration number).
+   * Distinct from the COMPANY's `CompanyBillingSettings.taxRegistrationNumber`
+   * (the Oralign header tax id). Editable by the doctor and admin; rendered
+   * in the invoice "Billed to" (doctor/clinic) block when present.
+   */
+  taxId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -1039,6 +1052,8 @@ export interface CreateDentistProfileDto {
   clinicEmail?: string;
   description?: string;
   logoUrl?: string;
+  /** Clinic "Matricule fiscal" (doctor tax registration number). */
+  taxId?: string;
 }
 
 export interface UpdateDentistProfileDto {
@@ -1052,6 +1067,8 @@ export interface UpdateDentistProfileDto {
   clinicEmail?: string;
   description?: string;
   logoUrl?: string;
+  /** Clinic "Matricule fiscal" (doctor tax registration number). */
+  taxId?: string;
 }
 
 /** Single-shot weekly schedule entry — used by SetupClinicDto. */

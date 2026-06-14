@@ -126,6 +126,21 @@ export class UpsertCompanyBillingSettingsDto {
   @Min(0)
   defaultTreatmentFee?: number;
 
+  // "Droit de timbre" — the Tunisian fiscal stamp duty (typically
+  // 1.000 TND) added to the invoice total. Decimal in the DB; carried
+  // as Number across the API so the admin form can use a plain number
+  // input (mirrors defaultTreatmentFee).
+  @ApiPropertyOptional({
+    minimum: 0,
+    default: 1,
+    description:
+      'Fiscal stamp duty (Droit de timbre) added to every invoice total.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @Min(0)
+  stampDuty?: number;
+
   @ApiPropertyOptional({
     default: 'TND',
     description: 'ISO 4217 currency code',
@@ -200,6 +215,7 @@ export class CompanyBillingSettingsResponseDto {
 
   @ApiProperty() defaultTvaRate!: number;
   @ApiProperty() defaultTreatmentFee!: number;
+  @ApiProperty() stampDuty!: number;
   @ApiProperty() defaultCurrency!: string;
   @ApiProperty() devisPrefix!: string;
   @ApiProperty() devisNextNumber!: number;

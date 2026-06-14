@@ -39,6 +39,8 @@ export interface InvoiceLabels {
   vatRate: string;
   vatAmount: string;
   totalTtc: string;
+  stampDuty: string;
+  totalDue: string;
   amountPaid: string;
   // Status
   status: string;
@@ -90,6 +92,8 @@ const FR: InvoiceLabels = {
   vatRate: 'TVA',
   vatAmount: 'Montant TVA',
   totalTtc: 'Total TTC',
+  stampDuty: 'Droit de timbre',
+  totalDue: 'Total à payer',
   amountPaid: 'Montant payé',
   status: 'Statut',
   statusPaid: 'Payé',
@@ -144,6 +148,8 @@ const EN: InvoiceLabels = {
   vatRate: 'TVA',
   vatAmount: 'TVA amount',
   totalTtc: 'Total incl. TVA',
+  stampDuty: 'Stamp duty',
+  totalDue: 'Total due',
   amountPaid: 'Amount paid',
   status: 'Status',
   statusPaid: 'Paid',

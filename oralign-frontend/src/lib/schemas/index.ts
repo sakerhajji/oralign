@@ -159,6 +159,13 @@ export const clinicSettingsSchema = z.object({
   latitude: z.number().min(-90).max(90).optional(),
   longitude: z.number().min(-180).max(180).optional(),
   description: z.string().optional(),
+  // Clinic "Matricule fiscal" (doctor tax id). Empty input coerces to
+  // undefined via `normalizeOptionalString`, matching the other
+  // optional clinic fields, so a cleared field never trips the max().
+  taxId: z.preprocess(
+    normalizeOptionalString,
+    z.string().max(60, 'Tax id must be 60 characters or fewer').optional(),
+  ),
 });
 
 // Stricter version used in the onboarding wizard: every field needed to flip
@@ -187,6 +194,11 @@ export const onboardingClinicSchema = z
       .lt(180, 'Pick the clinic location on the map')
       .refine((v) => v !== 0, 'Pick the clinic location on the map'),
     description: z.string().optional(),
+    // Clinic "Matricule fiscal" (doctor tax id) — optional during onboarding.
+    taxId: z.preprocess(
+      normalizeOptionalString,
+      z.string().max(60, 'Tax id must be 60 characters or fewer').optional(),
+    ),
     workingHours: z
       .array(
         z.object({
@@ -244,6 +256,11 @@ export const createDentistProfileSchema = z.object({
   clinicEmail: z.string().email('Invalid email').optional().or(z.literal('')),
   description: z.string().optional(),
   logoUrl: z.string().url('Invalid URL').optional().or(z.literal('')),
+  // Clinic "Matricule fiscal" (doctor tax id).
+  taxId: z.preprocess(
+    normalizeOptionalString,
+    z.string().max(60, 'Tax id must be 60 characters or fewer').optional(),
+  ),
 });
 
 export const updateDentistProfileSchema = z.object({
@@ -257,6 +274,41 @@ export const updateDentistProfileSchema = z.object({
   clinicEmail: z.string().email('Invalid email').optional().or(z.literal('')),
   description: z.string().optional(),
   logoUrl: z.string().url('Invalid URL').optional().or(z.literal('')),
+  // Clinic "Matricule fiscal" (doctor tax id).
+  taxId: z.preprocess(
+    normalizeOptionalString,
+    z.string().max(60, 'Tax id must be 60 characters or fewer').optional(),
+  ),
+});
+
+// ==========================================
+// COMPANY BILLING SETTINGS SCHEMA
+// ==========================================
+
+/**
+ * Validation for the admin company-billing-settings singleton (mirrors
+ * `UpsertCompanyBillingSettingsDto`). Money/rate fields are coerced from
+ * the numeric `<Input type="number">` value. `stampDuty` ("Droit de
+ * timbre") is a non-negative number, mirroring `defaultTreatmentFee`'s
+ * zod — both default to 0/1 server-side and are added to invoice totals.
+ */
+export const companyBillingSettingsSchema = z.object({
+  companyName: z.string().min(1, 'Company name is required'),
+  companyAddress: z.string().optional(),
+  companyCity: z.string().optional(),
+  companyCountry: z.string().optional(),
+  companyPhone: z.string().optional(),
+  companyEmail: z.string().email('Invalid email').optional().or(z.literal('')),
+  taxRegistrationNumber: z.string().max(60).optional().or(z.literal('')),
+  defaultTvaRate: z.number().min(0, 'TVA rate must be 0 or greater'),
+  defaultTreatmentFee: z
+    .number()
+    .min(0, 'Treatment fee must be 0 or greater'),
+  // "Droit de timbre" — fiscal stamp added to the invoice total.
+  stampDuty: z.number().min(0, 'Stamp duty must be 0 or greater'),
+  defaultCurrency: z.string().min(1, 'Currency is required'),
+  devisPrefix: z.string().min(1, 'Devis prefix is required'),
+  devisNextNumber: z.number().int().min(1, 'Next number must be at least 1'),
 });
 
 // ==========================================
@@ -400,6 +452,7 @@ export type ClinicSettingsFormData = z.infer<typeof clinicSettingsSchema>;
 export type SecuritySettingsFormData = z.infer<typeof securitySettingsSchema>;
 export type CreateDentistProfileFormData = z.infer<typeof createDentistProfileSchema>;
 export type UpdateDentistProfileFormData = z.infer<typeof updateDentistProfileSchema>;
+export type CompanyBillingSettingsFormData = z.infer<typeof companyBillingSettingsSchema>;
 export type CreateWorkingHoursFormData = z.infer<typeof createWorkingHoursSchema>;
 export type UpdateWorkingHoursFormData = z.infer<typeof updateWorkingHoursSchema>;
 export type CreatePatientFormData = z.infer<typeof createPatientSchema>;

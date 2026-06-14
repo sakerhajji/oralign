@@ -745,6 +745,12 @@ model DentistProfile {
   clinicPhone    String?
   clinicEmail    String?        @unique   // one email per clinic
 
+  // Doctor's clinic tax registration number ("Matricule fiscal"). This
+  // is the DOCTOR/clinic tax id shown in the invoice "Billed to" block —
+  // distinct from CompanyBillingSettings.taxRegistrationNumber, which is
+  // the Oralign (company) header tax id.
+  taxId          String?
+
   description    String?
   logoUrl        String?        // validated path only, no raw URLs
 
@@ -832,6 +838,12 @@ model CompanyBillingSettings {
   // DTO boundary — the Quotation row itself still stores Float fees
   // until a wider migration moves them to Decimal across the board.
   defaultTreatmentFee     Decimal       @default(0) @db.Decimal(12, 3)
+
+  // "Droit de timbre" — the Tunisian fiscal stamp duty (typically
+  // 1.000 TND) added to the INVOICE total. Configured by the admin in
+  // the billing settings. Decimal(12,3) mirrors defaultTreatmentFee so
+  // it rounds identically; cast back to Number at the DTO boundary.
+  stampDuty               Decimal       @default(1) @db.Decimal(12, 3)
 
   // Devis numbering. Incremented inside a transaction when each quote
   // is first assigned a number, so two concurrent quote-creations can't

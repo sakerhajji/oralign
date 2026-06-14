@@ -12,6 +12,7 @@ import {
   IsBoolean,
   Matches,
   ArrayMaxSize,
+  MaxLength,
 } from 'class-validator';
 import { DayOfWeek } from '@prisma/client';
 
@@ -89,6 +90,18 @@ export class CreateDentistProfileDto {
   @IsOptional()
   @IsString()
   clinicEmail?: string;
+
+  @ApiProperty({
+    example: '1234567/A/M/000',
+    description:
+      "The clinic's tax registration number (Matricule fiscal). Shown on " +
+      'the invoice "Billed to" block. Distinct from the company tax id.',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  taxId?: string;
 
   @ApiProperty({
     description: 'A brief description of the clinic and its services',
@@ -173,6 +186,8 @@ export class DentistProfileResponseDto {
   clinicPhone?: string;
   @ApiProperty({ required: false })
   clinicEmail?: string;
+  @ApiProperty({ required: false })
+  taxId?: string;
   @ApiProperty({ required: false })
   description?: string;
   @ApiProperty({ required: false })

@@ -58,6 +58,7 @@ const makeOnboardingClinicSchema = (t: Translate) =>
         .lt(180, t('onboardingPages.clinicForm.vPickLocation'))
         .refine((v) => v !== 0, t('onboardingPages.clinicForm.vPickLocation')),
       description: z.string().optional(),
+      taxId: z.string().max(60, t('onboardingPages.clinicForm.vTaxIdMax')).optional(),
       workingHours: z
         .array(
           z.object({
@@ -120,6 +121,7 @@ export function OnboardingClinicForm({ profile, workingHours, onSaved }: Props) 
       latitude: 0,
       longitude: 0,
       description: '',
+      taxId: '',
       workingHours: defaultSchedule,
     },
   });
@@ -135,6 +137,7 @@ export function OnboardingClinicForm({ profile, workingHours, onSaved }: Props) 
       latitude: profile?.latitude ?? 0,
       longitude: profile?.longitude ?? 0,
       description: profile?.description ?? '',
+      taxId: profile?.taxId ?? '',
       workingHours: defaultSchedule,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -164,6 +167,7 @@ export function OnboardingClinicForm({ profile, workingHours, onSaved }: Props) 
       latitude: values.latitude,
       longitude: values.longitude,
       description: values.description?.trim() || undefined,
+      taxId: values.taxId?.trim() || undefined,
       workingHours: values.workingHours.map((d) => ({
         dayOfWeek: d.dayOfWeek,
         openTime: d.openTime,
@@ -330,6 +334,26 @@ export function OnboardingClinicForm({ profile, workingHours, onSaved }: Props) 
             {(errors.country || errors.city) && (
               <p className="mt-1 text-sm text-destructive">
                 {errors.country?.message ?? errors.city?.message}
+              </p>
+            )}
+          </div>
+
+          <div className="space-y-1 md:col-span-2">
+            <label className="text-sm font-medium" htmlFor="taxId">
+              {t('onboardingPages.clinicForm.taxIdLabel')}{' '}
+              <span className="text-muted-foreground">{t('onboardingPages.clinicForm.taxIdOptional')}</span>
+            </label>
+            <Input
+              id="taxId"
+              placeholder={t('onboardingPages.clinicForm.taxIdPlaceholder')}
+              {...form.register('taxId')}
+              aria-invalid={!!errors.taxId}
+            />
+            {errors.taxId ? (
+              <p className="text-sm text-destructive">{errors.taxId.message}</p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                {t('onboardingPages.clinicForm.taxIdHelp')}
               </p>
             )}
           </div>

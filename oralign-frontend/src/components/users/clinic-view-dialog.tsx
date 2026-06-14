@@ -105,7 +105,7 @@ export function ClinicViewDialog({
           <div className="px-6 py-5 space-y-5">
 
             {/* ── Contact info ──────────────────────────────────────────── */}
-            {(profile.clinicPhone || profile.clinicEmail) && (
+            {(profile.clinicPhone || profile.clinicEmail || profile.taxId) && (
               <section>
                 <SectionLabel icon={<Phone className="h-3.5 w-3.5" />}>
                   {t('usersUi.clinicView.contact')}
@@ -127,6 +127,13 @@ export function ClinicViewDialog({
                       value={profile.clinicEmail}
                       href={`mailto:${profile.clinicEmail}`}
                       actionLabel={t('usersUi.clinicView.sendEmail')}
+                    />
+                  )}
+                  {profile.taxId && (
+                    <InfoTile
+                      icon={<FileText className="h-4 w-4 text-muted-foreground" />}
+                      label={t('usersUi.clinicView.taxId')}
+                      value={profile.taxId}
                     />
                   )}
                 </div>
@@ -195,7 +202,7 @@ export function ClinicViewDialog({
             )}
 
             {/* Empty state */}
-            {!profile.clinicPhone && !profile.clinicEmail && !profile.city &&
+            {!profile.clinicPhone && !profile.clinicEmail && !profile.taxId && !profile.city &&
               !profile.country && !hasLocation && !profile.description && (
               <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
                 <Building2 className="h-10 w-10 mb-3 opacity-30" />

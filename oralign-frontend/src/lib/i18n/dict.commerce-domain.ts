@@ -709,6 +709,8 @@ export const commerceDomainDict = {
         fr: 'Vue en lecture seule de {name}',
       } as T,
       contact: { en: 'Contact', fr: 'Contact' } as T,
+      // Clinic "Matricule fiscal" (doctor tax id) — shown on invoices.
+      taxId: { en: 'Tax registration number', fr: 'Matricule fiscal' } as T,
       location: { en: 'Location', fr: 'Localisation' } as T,
       city: { en: 'City', fr: 'Ville' } as T,
       gps: { en: 'GPS', fr: 'GPS' } as T,
@@ -800,6 +802,9 @@ export const commerceDomainDict = {
       city: { en: 'City', fr: 'Ville' } as T,
       country: { en: 'Country', fr: 'Pays' } as T,
       countryPh: { en: 'Tunisia', fr: 'Tunisie' } as T,
+      // Clinic "Matricule fiscal" (doctor tax id) — admin-editable; on invoices.
+      taxId: { en: 'Tax registration number', fr: 'Matricule fiscal' } as T,
+      taxIdPh: { en: '1234567/A/M/000', fr: '1234567/A/M/000' } as T,
       contact: { en: 'Contact', fr: 'Contact' } as T,
       clinicEmailPh: { en: 'clinic@example.com', fr: 'cabinet@exemple.com' } as T,
       about: { en: 'About', fr: 'À propos' } as T,
@@ -845,6 +850,10 @@ export const commerceDomainDict = {
       clinicNameRequired: {
         en: 'Clinic name is required',
         fr: 'Le nom du cabinet est obligatoire',
+      } as T,
+      taxIdMax: {
+        en: 'Tax id must be 60 characters or fewer',
+        fr: 'Le matricule fiscal doit comporter au maximum 60 caractères',
       } as T,
     },
 

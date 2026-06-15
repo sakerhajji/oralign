@@ -1612,11 +1612,17 @@ type ElasticType = (typeof elasticTypeOptions)[number];
  * "No elastics" packs to just "No elastics" (no trailing notes).
  */
 function packElastics(type: ElasticType | null, notes: string): string {
-  const trimmed = notes.trim();
-  if (!type && !trimmed) return '';
+  // Only the emptiness decision is trimmed — the note text itself is stored
+  // VERBATIM so a controlled-input round-trip never swallows a space the
+  // doctor just typed (every space is momentarily trailing while typing, so
+  // trimming here made the spacebar feel broken). Same principle the Spaces
+  // field below already uses.
+  const hasNotes = notes.trim().length > 0;
+  if (!type && !hasNotes) return '';
   if (type === 'No elastics') return 'No elastics';
-  if (type && trimmed) return `${type} — ${trimmed}`;
-  return type ?? trimmed;
+  if (type && hasNotes) return `${type} — ${notes}`;
+  if (type) return type;
+  return notes;
 }
 
 /**
@@ -1628,14 +1634,39 @@ function unpackElastics(value: string | undefined): {
   type: ElasticType | null;
   notes: string;
 } {
-  const raw = (value ?? '').trim();
-  if (!raw) return { type: null, notes: '' };
-  // Split on the first em-dash we use as separator between type list and
-  // notes. Anything before is the (possibly comma-separated) type list,
-  // anything after is notes.
+  const raw = value ?? '';
+  if (!raw.trim()) return { type: null, notes: '' };
+
+  // Split on the first em-dash we use as separator between the type list and
+  // the notes. Anything before is the (possibly comma-separated) type list;
+  // anything after is the note — kept VERBATIM (only the single leading
+  // space of our " — " glue is dropped) so the doctor's spaces survive the
+  // controlled-input round-trip.
   const dashIdx = raw.indexOf('—');
-  const head = dashIdx >= 0 ? raw.slice(0, dashIdx).trim() : raw;
-  const tail = dashIdx >= 0 ? raw.slice(dashIdx + 1).trim() : '';
+  if (dashIdx < 0) {
+    // No separator: a bare type, a legacy comma-list of types, or pure
+    // free-text notes. Tokenise only to detect a known type; if none
+    // matches, the whole value is the note and is returned verbatim (no
+    // re-join — that would rewrite the user's spacing/commas).
+    const tokens = raw.split(',').map((p) => p.trim()).filter(Boolean);
+    let chosen: ElasticType | null = null;
+    const leftover: string[] = [];
+    for (const tok of tokens) {
+      const hit = elasticTypeOptions.find(
+        (opt) => opt.toLowerCase() === tok.toLowerCase(),
+      );
+      if (hit && !chosen) chosen = hit;
+      else if (hit) leftover.push(hit);
+      else leftover.push(tok);
+    }
+    return chosen
+      ? { type: chosen, notes: leftover.join(', ') }
+      : { type: null, notes: raw };
+  }
+
+  const head = raw.slice(0, dashIdx).trim();
+  let tail = raw.slice(dashIdx + 1);
+  if (tail.startsWith(' ')) tail = tail.slice(1); // drop the separator space only
   const tokens = head
     .split(',')
     .map((part) => part.trim())
@@ -1650,7 +1681,8 @@ function unpackElastics(value: string | undefined): {
     else if (hit) unmatched.push(hit);
     else unmatched.push(tok);
   }
-  const notes = [unmatched.join(', '), tail].filter(Boolean).join(' — ');
+  const prefix = unmatched.join(', ');
+  const notes = prefix ? (tail ? `${prefix} — ${tail}` : prefix) : tail;
   return { type: chosen, notes };
 }
 

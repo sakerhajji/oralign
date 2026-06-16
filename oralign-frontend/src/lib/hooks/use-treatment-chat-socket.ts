@@ -41,7 +41,16 @@ export function useTreatmentChatSocket(orderId: string | null) {
     const origin = apiBase.replace(/\/api\/?$/, '');
 
     const socket = io(`${origin}/treatment-chat`, {
-      auth: { token },
+      // Pass auth as a FUNCTION, not a frozen `{ token }` object: socket.io
+      // re-sends whatever is here on every (re)connect, and the access token
+      // expires after 15 min. A captured token would be dead on the first
+      // reconnect after expiry (server redeploy, nginx reload, laptop sleep,
+      // network blip), the gateway rejects the handshake, and the client
+      // retries forever with the same stale token — realtime silently dead
+      // until a full page reload. Re-reading live localStorage here means
+      // every reconnect carries a fresh token (the axios refresh interceptor
+      // keeps it current).
+      auth: (cb) => cb({ token: getAccessToken() ?? '' }),
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionDelay: 1_000,

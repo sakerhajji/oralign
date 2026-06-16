@@ -1151,6 +1151,19 @@ function SlotFilePreview({
         <button
           type="button"
           disabled={loading || (!!error && previewType !== 'model')}
+          // Prefetch the fullscreen `lg` variant the moment the user hovers
+          // or tabs to the thumbnail, so the picture is already loaded (or
+          // in flight) by the time they click — the open feels instant.
+          onMouseEnter={
+            previewType === 'image'
+              ? () => prefetchSecureFile(orderId, file.id, 'lg')
+              : undefined
+          }
+          onFocus={
+            previewType === 'image'
+              ? () => prefetchSecureFile(orderId, file.id, 'lg')
+              : undefined
+          }
           className="group relative aspect-[4/3] w-full max-w-[320px] overflow-hidden rounded-xl border bg-muted/30 shadow-sm transition hover:border-primary hover:ring-4 hover:ring-primary/10 sm:max-w-[260px]"
         >
           {loading ? (
@@ -2656,6 +2669,82 @@ export interface SecureFileResult {
   refresh: () => void;
 }
 
+// ── Module-level blob cache for order-file previews ──────────────────────
+// Clinical photos are multi-MB. Without a cache, the fullscreen viewer
+// re-fetched the `lg` variant on EVERY open (and cards re-fetched their
+// thumb on every remount), so opening a picture always paid a fresh
+// network round-trip — the "takes time to open" lag. We keep one in-memory
+// map URL → blob URL (+ in-flight promise dedupe + LRU eviction) so each
+// variant downloads at most once per session, re-opens are instant, and we
+// can PREFETCH on hover so even the first open is instant. Mirrors the
+// proven cache in use-authed-image.ts.
+const SECURE_FILE_CACHE_MAX = 60;
+type SecureBlobEntry = { promise: Promise<string>; blobUrl?: string };
+const secureFileCache = new Map<string, SecureBlobEntry>();
+
+function touchSecureKey(key: string): void {
+  const entry = secureFileCache.get(key);
+  if (!entry) return;
+  secureFileCache.delete(key);
+  secureFileCache.set(key, entry); // re-insert → most-recently-used
+}
+
+function evictSecureCache(): void {
+  while (secureFileCache.size > SECURE_FILE_CACHE_MAX) {
+    const oldest = secureFileCache.keys().next().value;
+    if (!oldest) break;
+    const entry = secureFileCache.get(oldest);
+    if (entry?.blobUrl) URL.revokeObjectURL(entry.blobUrl);
+    secureFileCache.delete(oldest);
+  }
+}
+
+function fetchSecureBlobUrl(url: string): Promise<string> {
+  const existing = secureFileCache.get(url);
+  if (existing) {
+    touchSecureKey(url);
+    return existing.promise;
+  }
+  const token = getAccessToken();
+  const promise = fetch(url, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+    .then((response) => {
+      if (!response.ok) throw new Error('Unable to load preview');
+      return response.blob();
+    })
+    .then((blob) => {
+      const objectUrl = URL.createObjectURL(blob);
+      const entry = secureFileCache.get(url);
+      if (entry) entry.blobUrl = objectUrl;
+      return objectUrl;
+    })
+    .catch((err: Error) => {
+      // Don't poison the cache on failure — drop so the next call retries.
+      secureFileCache.delete(url);
+      throw err;
+    });
+  secureFileCache.set(url, { promise });
+  evictSecureCache();
+  return promise;
+}
+
+/**
+ * Warm the cache for a file variant before the user opens it — call on
+ * hover/focus of a thumbnail so the fullscreen `lg` image is already in
+ * flight (usually ready) by the time the click lands.
+ */
+export function prefetchSecureFile(
+  orderId: string,
+  fileId: string,
+  variant?: string,
+): void {
+  if (typeof window === 'undefined' || !getAccessToken()) return;
+  void fetchSecureBlobUrl(buildDownloadUrl(orderId, fileId, variant)).catch(
+    () => undefined,
+  );
+}
+
 function useSecureFileUrl(
   orderId: string,
   fileId: string,
@@ -2668,61 +2757,62 @@ function useSecureFileUrl(
    */
   variant?: string,
 ): SecureFileResult {
+  const url = buildDownloadUrl(orderId, fileId, variant);
   const [version, setVersion] = useState(0);
   const [state, setState] = useState<{
     objectUrl?: string;
     loading: boolean;
     error?: string;
-  }>(() => ({ loading: enabled }));
-  const objectUrlRef = useRef<string | undefined>(undefined);
+  }>(() => {
+    // Synchronous cache hit → no skeleton flash on remount / re-open.
+    if (!enabled) return { loading: false };
+    const entry = secureFileCache.get(url);
+    if (entry?.blobUrl) {
+      touchSecureKey(url);
+      return { objectUrl: entry.blobUrl, loading: false };
+    }
+    return { loading: true };
+  });
 
   useEffect(() => {
     if (!enabled) {
+      setState({ loading: false });
       return undefined;
     }
-
     let active = true;
-    const token = getAccessToken();
-    const url = buildDownloadUrl(orderId, fileId, variant);
-
-    fetch(url, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
-      .then((response) => {
-        if (!response.ok) throw new Error('Unable to load preview');
-        return response.blob();
-      })
-      .then((blob) => {
-        if (!active) return;
-        if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
-        const objectUrl = URL.createObjectURL(blob);
-        objectUrlRef.current = objectUrl;
-        setState({ objectUrl, loading: false });
+    const entry = secureFileCache.get(url);
+    if (entry?.blobUrl) {
+      touchSecureKey(url);
+      setState({ objectUrl: entry.blobUrl, loading: false });
+      return undefined;
+    }
+    setState((prev) => ({ ...prev, loading: true, error: undefined }));
+    fetchSecureBlobUrl(url)
+      .then((objectUrl) => {
+        if (active) setState({ objectUrl, loading: false });
       })
       .catch((error: Error) => {
-        if (!active) return;
-        setState({ loading: false, error: error.message });
+        if (active) setState({ loading: false, error: error.message });
       });
-
     return () => {
       active = false;
     };
-  }, [enabled, fileId, orderId, variant, version]);
+    // `version` lets refresh() force a re-fetch after eviction.
+  }, [enabled, url, version]);
 
-  useEffect(
-    () => () => {
-      if (objectUrlRef.current) {
-        URL.revokeObjectURL(objectUrlRef.current);
-      }
-    },
-    [],
-  );
+  // No per-unmount revocation: blob URLs live in the shared module cache
+  // and may still be in use by another mount. Eviction revokes them.
 
   return {
     objectUrl: state.objectUrl,
     loading: state.loading,
     error: state.error,
-    refresh: () => setVersion((current) => current + 1),
+    refresh: () => {
+      const entry = secureFileCache.get(url);
+      if (entry?.blobUrl) URL.revokeObjectURL(entry.blobUrl);
+      secureFileCache.delete(url);
+      setVersion((current) => current + 1);
+    },
   };
 }
 

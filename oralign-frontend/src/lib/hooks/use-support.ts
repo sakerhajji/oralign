@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import { supportService } from '@/lib/api/support.service';
 import { extractApiErrorMessage } from '@/lib/api/error';
 import { useT } from '@/lib/i18n/lang-context';
+import { useAuth } from '@/lib/providers/auth-provider';
 import type {
   PaginatedResponse,
   SupportConversation,
@@ -19,6 +20,11 @@ import type {
   SupportMessage,
   SupportPriority,
 } from '@/lib/types';
+
+type ConversationDetail = {
+  conversation: SupportConversation;
+  messages: SupportMessage[];
+};
 
 export const supportKeys = {
   all: ['support'] as const,
@@ -110,15 +116,78 @@ export function useCreateSupportConversation(): UseMutationResult<
 export function useSendSupportMessage(): UseMutationResult<
   SupportMessage,
   Error,
-  { conversationId: string; body?: string; attachment?: File | Blob }
+  { conversationId: string; body?: string; attachment?: File | Blob },
+  { key: readonly unknown[]; previous?: ConversationDetail; tempId: string }
 > {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   return useMutation({
     mutationFn: (args) => supportService.sendMessage(args),
-    onSuccess: (_data, vars) => {
-      invalidateConversation(queryClient, vars.conversationId);
+    // Optimistically append the message so the sender sees it INSTANTLY,
+    // instead of waiting for the POST and then a second detail-refetch
+    // round-trip (the old onSuccess invalidate → refetch was the lag).
+    onMutate: async (vars) => {
+      const key = supportKeys.detail(vars.conversationId);
+      // Random suffix so two sends in the same millisecond can't collide on
+      // the React key or the onSuccess de-dupe filter.
+      const tempId = `optimistic-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2)}`;
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData<ConversationDetail>(key);
+      // Only optimistically render text sends — an attachment-only message
+      // can't preview its image before upload, so we skip the placeholder
+      // (it still lands via the no-refetch onSuccess below, one round-trip).
+      if (previous && user && vars.body?.trim()) {
+        const optimistic: SupportMessage = {
+          id: tempId,
+          conversationId: vars.conversationId,
+          senderId: user.id,
+          senderRole: user.role,
+          body: vars.body,
+          attachmentRelativePath: null,
+          attachmentMime: null,
+          attachmentName: null,
+          attachmentSize: null,
+          readAt: null,
+          createdAt: new Date().toISOString(),
+          sender: null,
+        };
+        queryClient.setQueryData<ConversationDetail>(key, {
+          ...previous,
+          messages: [...previous.messages, optimistic],
+        });
+      }
+      return { key, previous, tempId };
     },
-    onError: (err) => toast.error(extractApiErrorMessage(err)),
+    onError: (err, _vars, ctx) => {
+      if (ctx?.previous) queryClient.setQueryData(ctx.key, ctx.previous);
+      toast.error(extractApiErrorMessage(err));
+    },
+    onSuccess: (data, vars, ctx) => {
+      // Swap the placeholder for the real server message (correct id,
+      // attachment path, timestamps) directly in the cache — NO detail
+      // refetch, so nothing blocks the message from showing.
+      const key = supportKeys.detail(vars.conversationId);
+      queryClient.setQueryData<ConversationDetail>(key, (old) => {
+        if (!old) return old;
+        const withoutDupes = old.messages.filter(
+          (m) => m.id !== ctx?.tempId && m.id !== data.id,
+        );
+        // Insert by createdAt rather than blindly appending: if the OTHER
+        // party's message arrived (via socket refetch) while our POST was
+        // in flight, a blind append would render our older message BELOW
+        // their newer one. ISO timestamps sort chronologically.
+        const merged = [...withoutDupes, data].sort((a, b) =>
+          a.createdAt.localeCompare(b.createdAt),
+        );
+        return { ...old, messages: merged };
+      });
+      // Refresh the queue list preview + unread badge (cheap; the open
+      // thread is already up to date from the cache write above).
+      queryClient.invalidateQueries({ queryKey: supportKeys.conversations() });
+      queryClient.invalidateQueries({ queryKey: supportKeys.unread() });
+    },
   });
 }
 

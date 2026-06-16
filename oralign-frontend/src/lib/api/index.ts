@@ -17,4 +17,12 @@ export {
   pickLocalized,
   blogShowcaseUrl,
 } from './blog.service';
-export { default as apiClient, getAccessToken, getRefreshToken, setTokens, clearTokens } from './client';
+export {
+  default as apiClient,
+  getAccessToken,
+  getRefreshToken,
+  setTokens,
+  clearTokens,
+  refreshAccessToken,
+  ensureValidAccessToken,
+} from './client';

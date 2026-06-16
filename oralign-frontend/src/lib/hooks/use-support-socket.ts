@@ -3,9 +3,9 @@
 import { useEffect, useRef } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { useQueryClient } from '@tanstack/react-query';
-import { getAccessToken } from '@/lib/api/client';
+import { ensureValidAccessToken, getAccessToken } from '@/lib/api/client';
 import { supportKeys } from './use-support';
-import type { SupportMessage } from '@/lib/types';
+import type { SupportConversation, SupportMessage } from '@/lib/types';
 
 /**
  * Lazy singleton socket connection to /support-chat. We keep one
@@ -54,15 +54,19 @@ function acquireSocket(): Socket | null {
   if (sharedSocket) return sharedSocket;
 
   const socket = io(`${getNamespaceUrl()}/support-chat`, {
-    // Pass auth as a FUNCTION, not a frozen `{ token }` object: socket.io
-    // re-sends whatever is here on every (re)connect, and the access token
-    // expires after 15 min. A captured token would be dead on the first
-    // reconnect after expiry, the gateway would reject the handshake, and
-    // (with reconnection on) the client would retry forever with the same
-    // stale token — realtime silently dead until a full page reload.
-    // Re-reading live localStorage here means every reconnect carries a
-    // fresh token (the axios refresh interceptor keeps it current).
-    auth: (cb) => cb({ token: getAccessToken() ?? '' }),
+    // Pass auth as a FUNCTION so socket.io re-invokes it before EVERY
+    // (re)connect. The gateway verifies the JWT on every handshake, and
+    // the access token expires after 15 min — a frozen/stale token would
+    // be rejected ("jwt expired"), and since a failed socket handshake
+    // never hits the axios 401 interceptor, the client would reconnect
+    // forever with the dead token (realtime silently dead until reload).
+    // ensureValidAccessToken() refreshes a missing/expired token via the
+    // refresh token first, so every (re)connect carries a VALID token.
+    auth: (cb: (data: { token: string }) => void) => {
+      ensureValidAccessToken()
+        .then((token) => cb({ token: token ?? '' }))
+        .catch(() => cb({ token: getAccessToken() ?? '' }));
+    },
     // Keep the websocket transport first for low latency, but ALWAYS
     // allow the long-polling fallback so the chat still works when the
     // WS upgrade is blocked (strict proxies, some corporate networks).
@@ -155,11 +159,23 @@ export function useSupportSocket(opts: {
     if (!socket) return;
 
     const onMessageNew = (msg: SupportMessage) => {
-      // Always invalidate caches — both the conversation thread + the
-      // list + the unread count.
-      queryClient.invalidateQueries({
-        queryKey: supportKeys.detail(msg.conversationId),
+      // Append the incoming message straight into the open thread so the
+      // RECEIVER sees it INSTANTLY — no detail refetch round-trip. De-dupe
+      // by id (covers the sender's own echo + any optimistic placeholder
+      // already reconciled) and keep chronological order.
+      queryClient.setQueryData<{
+        conversation: SupportConversation;
+        messages: SupportMessage[];
+      }>(supportKeys.detail(msg.conversationId), (old) => {
+        if (!old) return old;
+        if (old.messages.some((m) => m.id === msg.id)) return old;
+        const merged = [...old.messages, msg].sort((a, b) =>
+          a.createdAt.localeCompare(b.createdAt),
+        );
+        return { ...old, messages: merged };
       });
+      // Refresh the queue list preview + unread badge (the open thread is
+      // already updated above).
       queryClient.invalidateQueries({
         queryKey: supportKeys.conversations(),
       });

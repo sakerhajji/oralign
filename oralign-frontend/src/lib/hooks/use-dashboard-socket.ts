@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { useQueryClient } from '@tanstack/react-query';
-import { getAccessToken } from '@/lib/api/client';
+import { ensureValidAccessToken, getAccessToken } from '@/lib/api/client';
 import { dashboardKeys } from './use-dashboard';
 import { sliderMediaKeys } from './use-slider-media';
 
@@ -25,27 +25,31 @@ function acquireSocket(): Socket | null {
   }
   if (!sharedSocket) {
     sharedSocket = io(`${getNamespaceUrl()}/dashboard`, {
-      // Pass auth as a FUNCTION, not a frozen `{ token }` object: socket.io
-      // re-sends whatever is here on every (re)connect, and the access token
-      // expires after 15 min. A captured token would be dead on the first
-      // reconnect after expiry (server redeploy, nginx reload, laptop sleep,
-      // network blip), the gateway rejects the handshake, and the client
-      // retries forever with the same stale token — realtime silently dead
-      // until a full page reload. Re-reading live localStorage here means
-      // every reconnect carries a fresh token (the axios refresh interceptor
-      // keeps it current). The dashboard rooms (`admins:all` / per-doctor) are
-      // joined server-side in the gateway's handleConnection, so they
-      // re-subscribe automatically on every reconnect — no client-side
-      // re-join needed here.
-      auth: (cb) => cb({ token: getAccessToken() ?? '' }),
+      // Async auth re-invoked before every (re)connect. The gateway verifies
+      // the JWT on each handshake and the access token expires after 15 min;
+      // a stale token is rejected ("jwt expired") and — since a failed socket
+      // handshake never hits the axios 401 interceptor — the client would
+      // reconnect forever with the dead token (realtime silently dead until
+      // reload). ensureValidAccessToken() refreshes an expired token via the
+      // refresh token first, so every (re)connect carries a VALID token. The
+      // dashboard rooms (`admins:all` / per-doctor) are joined server-side in
+      // the gateway's handleConnection, so they re-subscribe automatically on
+      // every reconnect — no client-side re-join needed here.
+      auth: (cb: (data: { token: string }) => void) => {
+        ensureValidAccessToken()
+          .then((token) => cb({ token: token ?? '' }))
+          .catch(() => cb({ token: getAccessToken() ?? '' }));
+      },
+      // No reconnection cap — recover from transient outages indefinitely
+      // (a fresh token is fetched on each attempt via the async auth above).
       // Always allow the long-polling fallback so the dashboard still gets
       // realtime invalidations when the WS upgrade is blocked (strict
       // proxies, some corporate networks) instead of silently never
       // connecting.
       transports: ['websocket', 'polling'],
       reconnection: true,
-      reconnectionAttempts: 5,
       reconnectionDelay: 1500,
+      reconnectionDelayMax: 8_000,
     });
   }
   refCount += 1;

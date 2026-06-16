@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { io, type Socket } from 'socket.io-client';
-import { getAccessToken } from '@/lib/api';
+import { ensureValidAccessToken, getAccessToken } from '@/lib/api';
 import { treatmentPlanKeys } from './use-treatment-plans';
 import { orderKeys } from './use-orders';
 import type { TreatmentMessage } from '@/lib/types';
@@ -41,16 +41,18 @@ export function useTreatmentChatSocket(orderId: string | null) {
     const origin = apiBase.replace(/\/api\/?$/, '');
 
     const socket = io(`${origin}/treatment-chat`, {
-      // Pass auth as a FUNCTION, not a frozen `{ token }` object: socket.io
-      // re-sends whatever is here on every (re)connect, and the access token
-      // expires after 15 min. A captured token would be dead on the first
-      // reconnect after expiry (server redeploy, nginx reload, laptop sleep,
-      // network blip), the gateway rejects the handshake, and the client
-      // retries forever with the same stale token — realtime silently dead
-      // until a full page reload. Re-reading live localStorage here means
-      // every reconnect carries a fresh token (the axios refresh interceptor
-      // keeps it current).
-      auth: (cb) => cb({ token: getAccessToken() ?? '' }),
+      // Async auth re-invoked before every (re)connect. The gateway verifies
+      // the JWT on each handshake and the access token expires after 15 min;
+      // a stale token is rejected ("jwt expired") and — since a failed socket
+      // handshake never hits the axios 401 interceptor — the client would
+      // reconnect forever with the dead token (realtime silently dead until
+      // reload). ensureValidAccessToken() refreshes an expired token via the
+      // refresh token first, so every (re)connect carries a VALID token.
+      auth: (cb: (data: { token: string }) => void) => {
+        ensureValidAccessToken()
+          .then((token) => cb({ token: token ?? '' }))
+          .catch(() => cb({ token: getAccessToken() ?? '' }));
+      },
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionDelay: 1_000,

@@ -95,6 +95,91 @@ const processQueue = (error: Error | null, token: string | null = null): void =>
   failedQueue = [];
 };
 
+/**
+ * Exchange the refresh token for a fresh access token, coalescing
+ * concurrent callers onto ONE network request via the same
+ * `isRefreshing` + `failedQueue` lock the response interceptor uses.
+ *
+ * This single source of truth matters because the refresh token is
+ * ROTATED on every call (the endpoint returns a new one); two parallel
+ * refreshes — e.g. a REST 401 retry and a WebSocket (re)connect both
+ * noticing an expired token at once — would spend the rotating token
+ * twice and one would fail. Routing every refresh through here means
+ * the second caller awaits the first instead of racing it.
+ *
+ * Resolves with the new access token, or rejects when there is no
+ * refresh token / the refresh call fails (tokens are cleared in that
+ * case; the caller decides whether to redirect).
+ */
+export function refreshAccessToken(): Promise<string> {
+  if (isRefreshing) {
+    return new Promise<string>((resolve, reject) => {
+      failedQueue.push({ resolve, reject });
+    });
+  }
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) {
+    clearTokens();
+    return Promise.reject(new Error('No refresh token available'));
+  }
+  isRefreshing = true;
+  return axios
+    .post(`${API_URL}/auth/refresh-token`, { refreshToken })
+    .then((response) => {
+      const { accessToken, refreshToken: newRefreshToken } = response.data;
+      setTokens(accessToken, newRefreshToken);
+      processQueue(null, accessToken);
+      return accessToken as string;
+    })
+    .catch((error: Error) => {
+      processQueue(error, null);
+      clearTokens();
+      throw error;
+    })
+    .finally(() => {
+      isRefreshing = false;
+    });
+}
+
+/** Read the `exp` (seconds since epoch) from a JWT without verifying it. */
+function getTokenExp(token: string): number | null {
+  try {
+    const part = token.split('.')[1];
+    if (!part) return null;
+    const b64 = part.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+    const payload = JSON.parse(atob(padded)) as { exp?: number };
+    return typeof payload.exp === 'number' ? payload.exp : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Return a usable access token, refreshing it first if it is missing,
+ * expired, or within 30 s of expiry. Used by the WebSocket clients,
+ * whose handshake auth is the ONE place a stale token isn't caught by
+ * the axios 401 interceptor — a rejected socket handshake never hits
+ * that interceptor, so without this the socket would reconnect forever
+ * with a dead token and real-time would silently stop after ~15 min.
+ * Returns null when no valid token can be obtained (logged out).
+ */
+export async function ensureValidAccessToken(): Promise<string | null> {
+  const token = getAccessToken();
+  if (token) {
+    const exp = getTokenExp(token);
+    // No exp claim → assume valid; otherwise require ≥30 s of life left.
+    if (exp === null || Date.now() < exp * 1000 - 30_000) {
+      return token;
+    }
+  }
+  try {
+    return await refreshAccessToken();
+  } catch {
+    return null;
+  }
+}
+
 // Request interceptor - Add auth token + content language to requests
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
@@ -179,80 +264,27 @@ apiClient.interceptors.response.use(
       return Promise.reject(error);
     }
 
-    // If error is 401 and we haven't retried yet
+    // If error is 401 and we haven't retried yet, refresh once and retry.
+    // The shared refreshAccessToken() owns the in-flight lock + queue, so
+    // concurrent 401s (and the WebSocket auth path) coalesce onto a single
+    // refresh and never double-spend the rotating refresh token.
     if (error.response?.status === 401 && !originalRequest._retry) {
-      if (isRefreshing) {
-        // If already refreshing, queue this request
-        return new Promise((resolve, reject) => {
-          failedQueue.push({ resolve, reject });
-        })
-          .then((token) => {
-            if (originalRequest.headers) {
-              originalRequest.headers.Authorization = `Bearer ${token}`;
-            }
-            return apiClient(originalRequest);
-          })
-          .catch((err) => {
-            return Promise.reject(err);
-          });
-      }
-
       originalRequest._retry = true;
-      isRefreshing = true;
-
-      // Single `finally` cleanup so every exit path resets the lock.
-      // Previously the `if (!refreshToken)` early-return skipped the
-      // try/finally entirely and left `isRefreshing = true` forever —
-      // the next 401 then queued indefinitely on `failedQueue`.
       try {
-        const refreshToken = getRefreshToken();
-
-        if (!refreshToken) {
-          // No refresh token. Only redirect to /login when the user is
-          // actually inside the authenticated dashboard area — otherwise
-          // visiting a public page (e.g. /created_for_you/<token> as a
-          // patient with stale localStorage tokens) would bounce them
-          // out of a page they were entitled to see.
-          processQueue(error as Error, null);
-          clearTokens();
-          if (typeof window !== 'undefined' && isOnAuthedPath()) {
-            window.location.href = '/login';
-          }
-          return Promise.reject(error);
-        }
-
-        // Call refresh token endpoint
-        const response = await axios.post(`${API_URL}/auth/refresh-token`, {
-          refreshToken,
-        });
-
-        const { accessToken, refreshToken: newRefreshToken } = response.data;
-
-        // Save new tokens
-        setTokens(accessToken, newRefreshToken);
-
-        // Update the authorization header
+        const accessToken = await refreshAccessToken();
         if (originalRequest.headers) {
           originalRequest.headers.Authorization = `Bearer ${accessToken}`;
         }
-
-        // Process queued requests
-        processQueue(null, accessToken);
-
-        // Retry the original request
         return apiClient(originalRequest);
       } catch (refreshError) {
-        // Refresh failed. As above, only bounce to /login if we're
-        // actually on an authed path — public pages should stay where
-        // they are even if a stale localStorage token failed to refresh.
-        processQueue(refreshError as Error, null);
-        clearTokens();
+        // Refresh failed (or no refresh token — tokens already cleared in
+        // refreshAccessToken). Only bounce to /login when actually inside
+        // the authenticated dashboard area, so a public page with a stale
+        // localStorage token isn't kicked out.
         if (typeof window !== 'undefined' && isOnAuthedPath()) {
           window.location.href = '/login';
         }
         return Promise.reject(refreshError);
-      } finally {
-        isRefreshing = false;
       }
     }
 

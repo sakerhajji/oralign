@@ -204,7 +204,11 @@ export class SupportService {
     // Real-time fan-out: the new conversation goes to ALL admins, the
     // doctor joins their own room automatically when the bubble opens.
     this.gateway.broadcastConversationCreated(conversation);
-    this.gateway.broadcastNewMessage(conversation.id, firstMessage);
+    this.gateway.broadcastNewMessage(
+      conversation.id,
+      firstMessage,
+      conversation.doctorId,
+    );
     return { conversation, firstMessage };
   }
 
@@ -279,8 +283,8 @@ export class SupportService {
 
     this.enqueueAttachmentProcessing(message);
 
-    this.gateway.broadcastNewMessage(conv.id, message);
-    this.gateway.broadcastConversationUpdated(conv.id);
+    this.gateway.broadcastNewMessage(conv.id, message, conv.doctorId);
+    this.gateway.broadcastConversationUpdated(conv.id, conv.doctorId);
     return message;
   }
 
@@ -422,7 +426,7 @@ export class SupportService {
           nextStatus === SupportConversationStatus.closed ? new Date() : null,
       },
     });
-    this.gateway.broadcastConversationUpdated(updated.id);
+    this.gateway.broadcastConversationUpdated(updated.id, updated.doctorId);
     return updated;
   }
 
@@ -441,7 +445,7 @@ export class SupportService {
       where: { id: conv.id },
       data: { priority },
     });
-    this.gateway.broadcastConversationUpdated(updated.id);
+    this.gateway.broadcastConversationUpdated(updated.id, updated.doctorId);
     return updated;
   }
 
@@ -471,7 +475,7 @@ export class SupportService {
       where: { id: conv.id },
       data: { assignedAdminId },
     });
-    this.gateway.broadcastConversationUpdated(updated.id);
+    this.gateway.broadcastConversationUpdated(updated.id, updated.doctorId);
     return updated;
   }
 
@@ -505,7 +509,7 @@ export class SupportService {
         closedAt: new Date(),
       },
     });
-    this.gateway.broadcastConversationDeleted(conv.id);
+    this.gateway.broadcastConversationDeleted(conv.id, conv.doctorId);
     return { id: conv.id };
   }
 
@@ -527,7 +531,7 @@ export class SupportService {
         closedAt: null,
       },
     });
-    this.gateway.broadcastConversationUpdated(restored.id);
+    this.gateway.broadcastConversationUpdated(restored.id, restored.doctorId);
     return restored;
   }
 

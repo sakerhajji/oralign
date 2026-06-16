@@ -71,8 +71,16 @@ export class SupportChatGateway
       const user: SocketUser = { userId: payload.sub, role: payload.role };
       client.data.user = user;
 
-      // Admins auto-join the global admin room so they get the
-      // conversation:new + conversation:updated broadcasts.
+      // Every user joins their own room so a doctor receives queue-level
+      // pings (unread badge + conversation list) in real time even when
+      // they aren't viewing a specific thread — without it, the doctor's
+      // always-on socket was in NO room and only `admins:all` got the
+      // `conversation:touched` ping, so the doctor badge/list only
+      // refreshed via the slow fallback poll.
+      await client.join(this.userRoom(user.userId));
+
+      // Admins additionally join the global admin room so they get the
+      // conversation:new + conversation:updated broadcasts for the queue.
       if (user.role === UserRole.admin || user.role === UserRole.super_admin) {
         await client.join('admins:all');
       }
@@ -124,13 +132,23 @@ export class SupportChatGateway
 
   // ─── Server-side broadcast API ──────────────────────────────────
 
-  broadcastNewMessage(conversationId: string, message: unknown): void {
+  broadcastNewMessage(
+    conversationId: string,
+    message: unknown,
+    doctorId?: string,
+  ): void {
     this.server.to(this.convRoom(conversationId)).emit('message:new', message);
-    // Also notify the admin queue so unread badge + last-message
-    // preview refresh without reloading the page.
+    // Also notify the admin queue + the owning doctor so the unread badge
+    // and last-message preview refresh without reloading the page — even
+    // when that side isn't currently viewing the thread.
     this.server.to('admins:all').emit('conversation:touched', {
       conversationId,
     });
+    if (doctorId) {
+      this.server
+        .to(this.userRoom(doctorId))
+        .emit('conversation:touched', { conversationId });
+    }
   }
 
   broadcastConversationCreated(conv: SupportConversation): void {
@@ -140,16 +158,21 @@ export class SupportChatGateway
     // the conv room on bubble-open. No additional ping here.
   }
 
-  broadcastConversationUpdated(conversationId: string): void {
+  broadcastConversationUpdated(conversationId: string, doctorId?: string): void {
     this.server
       .to(this.convRoom(conversationId))
       .emit('conversation:updated', { conversationId });
     this.server.to('admins:all').emit('conversation:updated', {
       conversationId,
     });
+    if (doctorId) {
+      this.server
+        .to(this.userRoom(doctorId))
+        .emit('conversation:updated', { conversationId });
+    }
   }
 
-  broadcastConversationDeleted(conversationId: string): void {
+  broadcastConversationDeleted(conversationId: string, doctorId?: string): void {
     // Doctor side gets a hard "this thread is gone" signal so the
     // open chat panel can close itself gracefully.
     this.server
@@ -158,6 +181,11 @@ export class SupportChatGateway
     this.server.to('admins:all').emit('conversation:deleted', {
       conversationId,
     });
+    if (doctorId) {
+      this.server
+        .to(this.userRoom(doctorId))
+        .emit('conversation:deleted', { conversationId });
+    }
   }
 
   broadcastReadBy(
@@ -173,6 +201,10 @@ export class SupportChatGateway
 
   private convRoom(id: string): string {
     return `conv:${id}`;
+  }
+
+  private userRoom(id: string): string {
+    return `user:${id}`;
   }
 
   private tokenFromHeader(auth?: string): string | undefined {

@@ -32,6 +32,22 @@ const ZOOM_MIN = 1;
 const ZOOM_MAX = 4;
 const ZOOM_STEP = 0.25;
 
+// In crop mode the image is contain-fitted to the editor canvas MINUS this
+// inset (px) on every side. react-image-crop renders its edge & corner drag
+// handles centred ON the selection boundary, so when a full-frame selection
+// sits flush against the canvas edge the top/bottom/corner handles land on
+// (and get clipped by) the canvas border — only the left/right mid handles
+// stay grabbable. The inset keeps the whole image (and therefore every
+// handle) clear of the border so the user can trim ANY side.
+const CROP_CANVAS_INSET = 28;
+
+// A small source photo is allowed to scale UP to fill the inset canvas so its
+// crop surface and handles are a comfortable size to drag. The crop is stored
+// in PERCENT and converted to natural pixels on apply, so scaling the DISPLAY
+// never changes the saved pixels — this cap is purely about display ergonomics
+// (it stops a tiny thumbnail from being blown up into a blurry wall).
+const CROP_MAX_DISPLAY_UPSCALE = 6;
+
 export interface ImageEditDialogProps {
   /** The image File the user just picked from the OS file dialog. */
   file: File | null;
@@ -172,11 +188,14 @@ export function ImageEditDialog({
   }, [workingBlobUrl]);
 
   // CONTAIN-fit dimensions for the crop image: the largest size that
-  // fits inside the editor canvas while preserving the image's aspect
-  // ratio, multiplied by the zoom factor. `baseScale` is capped at 1×
-  // so a small source photo renders crisp at its natural size (no
-  // upscaling blur) rather than being stretched to fill the canvas;
-  // large photos shrink to fit. The zoom slider scales from there.
+  // fits inside the editor canvas (minus the handle-clearance inset)
+  // while preserving the image's aspect ratio, multiplied by the zoom
+  // factor. `baseScale` is the contain-fit scale, then capped at
+  // CROP_MAX_DISPLAY_UPSCALE (6×): large photos shrink to fit, small ones
+  // grow enough to give comfortable drag handles without being blown up
+  // into a blurry wall. The zoom slider scales from there. (Pathological
+  // slivers — e.g. a 1px-wide source — render one axis ~1px; that axis is
+  // hard to grab but bakes correctly. Real clinical photos never hit it.)
   //
   // Because we hand the cropper an explicit px width/height that
   // matches what the user sees, react-image-crop reports its rectangle
@@ -187,17 +206,34 @@ export function ImageEditDialog({
   const cropFit = useMemo(() => {
     if (!canvasSize || !naturalSize) return null;
     if (canvasSize.w <= 0 || canvasSize.h <= 0) return null;
-    const containScale = Math.min(
-      canvasSize.w / naturalSize.w,
-      canvasSize.h / naturalSize.h,
-    );
-    const baseScale = Math.min(containScale, 1);
+    // Fit inside the canvas minus the handle-clearance inset on every side,
+    // so a full-frame selection never pushes its handles onto the border.
+    const availW = Math.max(1, canvasSize.w - CROP_CANVAS_INSET * 2);
+    const availH = Math.max(1, canvasSize.h - CROP_CANVAS_INSET * 2);
+    const containScale = Math.min(availW / naturalSize.w, availH / naturalSize.h);
+    // contain-FILL the inset canvas: shrink large photos to fit, modestly
+    // grow small ones (capped) — so EVERY image, portrait / landscape /
+    // square / tiny / huge, presents the same comfortable, fully-visible
+    // crop surface. Percent-based crop math keeps the saved pixels exact
+    // regardless of this display scale.
+    const baseScale = Math.min(containScale, CROP_MAX_DISPLAY_UPSCALE);
     const scale = baseScale * zoom;
     return {
       width: Math.max(1, Math.round(naturalSize.w * scale)),
       height: Math.max(1, Math.round(naturalSize.h * scale)),
     };
   }, [canvasSize, naturalSize, zoom]);
+
+  // When the user changes zoom in crop mode, re-centre the scroll viewport on
+  // the middle of the photo. Without this a zoom-in throws the view to the
+  // top-left corner (auto-margin centring collapses once the image overflows),
+  // which feels like the image "jumped". Centring keeps the focus stable.
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el || !cropMode) return;
+    el.scrollLeft = Math.max(0, (el.scrollWidth - el.clientWidth) / 2);
+    el.scrollTop = Math.max(0, (el.scrollHeight - el.clientHeight) / 2);
+  }, [zoom, cropMode, cropFit]);
 
   // First mount of a new file → seed working state from the source file.
   useEffect(() => {
@@ -268,6 +304,7 @@ export function ImageEditDialog({
     setCrop(undefined);
     setCropMode(false);
     setZoom(1);
+    setError(null);
     // Restore the working buffer to the ORIGINAL file — so reset also
     // un-does a previously-applied crop.
     const url = URL.createObjectURL(file);
@@ -282,15 +319,18 @@ export function ImageEditDialog({
     setCropMode(true);
     setCrop(undefined); // re-initialised by handleImageLoad
     setZoom(1);
+    setError(null);
   };
 
   const cancelCropMode = () => {
     setCropMode(false);
     setCrop(undefined);
     setZoom(1);
+    setError(null);
   };
 
   const applyCrop = async () => {
+    setError(null);
     if (!workingBlobUrl || !workingFile) {
       setError(t('orderForm.files.imageEdit.errorNotReady'));
       return;
@@ -451,16 +491,24 @@ export function ImageEditDialog({
             {/* Editor canvas — shrinks aggressively on phones so the
                 toolbar stays on-screen without scrolling. The checker
                 pattern provides a neutral, ignore-the-background frame.
-                In crop mode this becomes `overflow-auto` so a zoomed-in
-                image can be panned by scrolling. */}
+                In crop mode this is `overflow-auto` so a zoomed-in image
+                can be panned by scrolling (the `m-auto` cropper below
+                stays reachable in every corner). */}
             <div
               ref={canvasRef}
               className={cn(
-                'relative flex h-[42vh] min-h-[220px] items-center justify-center rounded-lg border bg-[linear-gradient(135deg,_#f8fafc_25%,_#f1f5f9_25%,_#f1f5f9_50%,_#f8fafc_50%,_#f8fafc_75%,_#f1f5f9_75%)] bg-[length:24px_24px] sm:h-[55vh]',
-                // Zoomed-in images can exceed the canvas — let the user pan
-                // by scrolling. At the contain-fit baseline (zoom 1) the
-                // whole image is visible so we clip the checker overflow.
-                cropMode && zoom > 1 ? 'overflow-auto' : 'overflow-hidden',
+                'oralign-crop-canvas relative flex h-[42vh] min-h-[220px] items-center rounded-lg border bg-[linear-gradient(135deg,_#f8fafc_25%,_#f1f5f9_25%,_#f1f5f9_50%,_#f8fafc_50%,_#f8fafc_75%,_#f1f5f9_75%)] bg-[length:24px_24px] sm:h-[55vh]',
+                // Crop mode scrolls so a zoomed-in image can be panned to any
+                // edge. We must NOT use plain `justify-center` here: on the
+                // main axis it keeps an overflowing flex item centred, pushing
+                // its start edge to a negative offset `scrollLeft` can never
+                // reach (the left side of a zoomed wide photo gets stranded).
+                // `safe center` centres while the image fits but falls back to
+                // start-alignment once it overflows, so every edge stays
+                // scrollable. Transform mode just contains the preview.
+                cropMode
+                  ? 'overflow-auto [justify-content:safe_center]'
+                  : 'justify-center overflow-hidden',
               )}
             >
               {!workingBlobUrl ? (
@@ -488,6 +536,13 @@ export function ImageEditDialog({
                   crop={crop}
                   onChange={(_, percentCrop) => setCrop(percentCrop)}
                   keepSelection
+                  ruleOfThirds
+                  // `m-auto` (not the parent's justify/items-center) centres
+                  // the cropper when it fits AND keeps it fully scrollable to
+                  // every corner once zoom makes it overflow — auto margins
+                  // collapse to 0 on overflow instead of clipping the start,
+                  // which the flexbox `justify-center` alone would do.
+                  className="m-auto"
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
@@ -554,7 +609,7 @@ export function ImageEditDialog({
                 <Button
                   type="button"
                   onClick={applyCrop}
-                  disabled={busy || !crop || crop.width < 1}
+                  disabled={busy || !crop || crop.width < 1 || crop.height < 1}
                   className="gap-1.5"
                 >
                   {busy ? (

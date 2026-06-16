@@ -23,6 +23,15 @@ export class AdminDashboardController {
     return this.service.getKpis(range);
   }
 
+  @Get('sidebar-badges')
+  @ApiOperation({
+    summary:
+      'Lightweight attention counts for the sidebar (new submitted orders + dentists awaiting approval).',
+  })
+  async sidebarBadges() {
+    return this.service.getSidebarBadges();
+  }
+
   @Get('top-doctors')
   @ApiOperation({ summary: 'Top doctors by orders / paid orders / outstanding balance.' })
   async topDoctors(@Query() filter: AdminAnalyticsLimitDto) {

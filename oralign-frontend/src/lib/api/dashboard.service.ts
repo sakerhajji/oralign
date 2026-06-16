@@ -9,6 +9,14 @@ import type {
   DoctorDashboardKpis,
 } from '@/lib/types';
 
+/** Lightweight attention counts for the admin sidebar badges. */
+export interface AdminSidebarBadges {
+  /** Orders a doctor submitted that the admin hasn't triaged yet. */
+  newOrders: number;
+  /** Dentists awaiting admin approval (verificationStatus = pending). */
+  pendingApprovals: number;
+}
+
 /**
  * Serialise the range filter. Backend DTO parses ISO strings via
  * class-transformer; we send them as `from` / `to` query params and
@@ -54,6 +62,12 @@ export const adminDashboardService = {
     const res = await apiClient.get<AdminTrendsResponse>(
       '/admin/dashboard/trends',
       { params: serialiseRange(range) },
+    );
+    return res.data;
+  },
+  async sidebarBadges(): Promise<AdminSidebarBadges> {
+    const res = await apiClient.get<AdminSidebarBadges>(
+      '/admin/dashboard/sidebar-badges',
     );
     return res.data;
   },

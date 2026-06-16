@@ -66,6 +66,36 @@ export class AdminDashboardService {
   ) {}
 
   /**
+   * Lightweight attention counts for the admin sidebar badges. Kept
+   * deliberately separate from the heavy `getKpis` rollup so the sidebar
+   * (rendered on every dashboard page) pays only two cheap COUNTs and is
+   * polled cheaply — never the full Redis-cached KPI aggregate.
+   *
+   *   • newOrders        — orders a doctor has SUBMITTED and the admin has
+   *                        not yet started triaging (status = submitted).
+   *   • pendingApprovals — dentists who signed up and are awaiting admin
+   *                        approval (verificationStatus = pending).
+   */
+  async getSidebarBadges(): Promise<{
+    newOrders: number;
+    pendingApprovals: number;
+  }> {
+    const [newOrders, pendingApprovals] = await this.prisma.$transaction([
+      this.prisma.dentalOrder.count({
+        where: { deletedAt: null, status: OrderStatus.submitted },
+      }),
+      this.prisma.user.count({
+        where: {
+          role: UserRole.dentist,
+          deletedAt: null,
+          verificationStatus: VerificationStatus.pending,
+        },
+      }),
+    ]);
+    return { newOrders, pendingApprovals };
+  }
+
+  /**
    * Materialise the date range. When no range was supplied, default to
    * the last 30 days so the dashboard always has something to render.
    */

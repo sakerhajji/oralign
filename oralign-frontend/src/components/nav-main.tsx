@@ -76,7 +76,16 @@ function NavMainImpl({
                 >
                   <Link href={item.url}>
                     {item.icon}
-                    <span>{item.title}</span>
+                    {/* Hide the label in the collapsed icon-rail explicitly.
+                        The primitive only truncates the LAST child span
+                        (`[&>span:last-child]:truncate`); when a badge pill
+                        follows, the title span is no longer last, loses the
+                        truncation, and its text leaks out the 32px rail (the
+                        "Ass…" bug). `truncate` keeps long labels tidy when
+                        expanded. */}
+                    <span className="truncate group-data-[collapsible=icon]:hidden">
+                      {item.title}
+                    </span>
                     {/* Inline pill — only visible while the sidebar
                         is expanded. `ml-auto` shoves it to the right
                         edge of the row. */}

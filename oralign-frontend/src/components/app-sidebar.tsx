@@ -4,7 +4,11 @@ import Image from "next/image"
 import Link from "next/link"
 import * as React from "react"
 import { useAuth } from "@/lib/providers/auth-provider"
-import { useSupportSocket, useSupportUnreadCount } from "@/lib/hooks"
+import {
+  useAdminSidebarBadges,
+  useSupportSocket,
+  useSupportUnreadCount,
+} from "@/lib/hooks"
 import { UserRole } from "@/lib/types"
 
 import { getAvatarUrl } from "@/lib/utils"
@@ -211,6 +215,14 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   // SupportBubble owns the socket lifecycle.
   useSupportSocket({ enabled: isAdmin })
 
+  // Admin-only attention counts for the Orders + Users nav badges:
+  //   • newOrders        — orders a doctor just submitted, awaiting triage.
+  //   • pendingApprovals — dentists who signed up and need approval.
+  // Lightweight endpoint, polled every 30 s (low-frequency events).
+  const sidebarBadgesQuery = useAdminSidebarBadges(isAdmin)
+  const newOrdersBadge = sidebarBadgesQuery.data?.newOrders ?? 0
+  const pendingApprovalsBadge = sidebarBadgesQuery.data?.pendingApprovals ?? 0
+
   // Filter nav items by role. Items without a `roles` constraint are visible
   // to everyone; items with `roles` are only shown to matching users.
   // We also inject the live `badge` count into the Support entry here so
@@ -229,9 +241,20 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         // Resolve the language-aware label here so NavMain stays a
         // dumb renderer (it just prints `title`).
         title: t(item.titleKey),
-        badge: item.url === "/dashboard/support" ? supportUnread : undefined,
+        // Live attention badge per nav item. Support = unread messages;
+        // Orders = new submitted orders; Users = dentists awaiting
+        // approval. Order/Users counts are admin-only (the query only
+        // runs for admins, so they're 0 for everyone else).
+        badge:
+          item.url === "/dashboard/support"
+            ? supportUnread
+            : item.url === "/dashboard/orders"
+              ? newOrdersBadge
+              : item.url === "/dashboard/users"
+                ? pendingApprovalsBadge
+                : undefined,
       })),
-    [user, isAdmin, supportUnread, t],
+    [user, isAdmin, supportUnread, newOrdersBadge, pendingApprovalsBadge, t],
   )
 
   const secondaryNav = React.useMemo(

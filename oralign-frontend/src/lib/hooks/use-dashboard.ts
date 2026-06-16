@@ -4,6 +4,7 @@ import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import {
   adminDashboardService,
   doctorDashboardService,
+  type AdminSidebarBadges,
 } from '@/lib/api/dashboard.service';
 import type {
   AdminBestPackRow,
@@ -25,6 +26,8 @@ export const dashboardKeys = {
     [...dashboardKeys.all, 'admin', 'best-packs', range ?? {}] as const,
   adminTrends: (range?: DashboardRange) =>
     [...dashboardKeys.all, 'admin', 'trends', range ?? {}] as const,
+  adminSidebarBadges: () =>
+    [...dashboardKeys.all, 'admin', 'sidebar-badges'] as const,
   doctorKpis: () => [...dashboardKeys.all, 'doctor', 'kpis'] as const,
   doctorPacks: () => [...dashboardKeys.all, 'doctor', 'packs'] as const,
   doctorOutstanding: () => [...dashboardKeys.all, 'doctor', 'outstanding'] as const,
@@ -42,6 +45,24 @@ export function useAdminDashboardKpis(
   return useQuery({
     queryKey: dashboardKeys.adminKpis(range),
     queryFn: () => adminDashboardService.kpis(range),
+    enabled,
+    staleTime: 15_000,
+    refetchInterval: POLL_MS,
+    refetchOnWindowFocus: true,
+  });
+}
+
+/**
+ * Lightweight sidebar attention counts (new orders + pending approvals).
+ * Polls every 30 s — these are low-frequency events, so a poll is the
+ * right, cheap choice (no need for a dedicated socket channel). Admin-only.
+ */
+export function useAdminSidebarBadges(
+  enabled = true,
+): UseQueryResult<AdminSidebarBadges, Error> {
+  return useQuery({
+    queryKey: dashboardKeys.adminSidebarBadges(),
+    queryFn: () => adminDashboardService.sidebarBadges(),
     enabled,
     staleTime: 15_000,
     refetchInterval: POLL_MS,

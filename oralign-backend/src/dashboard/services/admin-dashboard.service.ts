@@ -82,7 +82,14 @@ export class AdminDashboardService {
   }> {
     const [newOrders, pendingApprovals] = await this.prisma.$transaction([
       this.prisma.dentalOrder.count({
-        where: { deletedAt: null, status: OrderStatus.submitted },
+        // NEW = submitted by a doctor AND not yet opened by an admin.
+        // `adminSeenAt` is stamped the first time an admin views the
+        // order, so the badge clears once it has been checked.
+        where: {
+          deletedAt: null,
+          status: OrderStatus.submitted,
+          adminSeenAt: null,
+        },
       }),
       this.prisma.user.count({
         where: {

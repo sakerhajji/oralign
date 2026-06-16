@@ -324,6 +324,22 @@ export class OrderService {
   }
 
   /**
+   * Stamp `adminSeenAt` the first time an admin opens an order's detail.
+   * This clears the sidebar "new orders" badge once the order has been
+   * checked. Idempotent — the `adminSeenAt: null` filter makes a repeat
+   * call a no-op, so the detail page can fire it on every mount. Only
+   * admins drive the badge, so non-admins are a harmless no-op.
+   */
+  async markSeenByAdmin(id: string, caller: Caller): Promise<{ seen: boolean }> {
+    if (!ADMIN_ROLES.includes(caller.role)) return { seen: false };
+    const res = await this.prisma.dentalOrder.updateMany({
+      where: { id, deletedAt: null, adminSeenAt: null },
+      data: { adminSeenAt: new Date() },
+    });
+    return { seen: res.count > 0 };
+  }
+
+  /**
    * Restore a soft-deleted order. Admin-only — clearing `deletedAt`
    * makes the row visible to all the standard list/detail queries
    * again. Idempotent: an already-live order returns the same shape

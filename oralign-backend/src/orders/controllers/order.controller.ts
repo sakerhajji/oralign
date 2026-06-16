@@ -196,6 +196,25 @@ export class OrderController {
     });
   }
 
+  @Post(':id/mark-seen')
+  @Roles(UserRole.admin, UserRole.super_admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Mark an order as seen by an admin (stamps adminSeenAt). Clears the sidebar "new orders" badge. Idempotent. Admin-only.',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiResponse({ status: 200, description: 'Order marked seen' })
+  async markSeen(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<{ seen: boolean }> {
+    return this.orderService.markSeenByAdmin(id, {
+      userId: user.sub,
+      role: user.role,
+    });
+  }
+
   @Post(':id/submit')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Submit a draft order' })

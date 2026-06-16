@@ -107,6 +107,18 @@ export const ordersService = {
   },
 
   /**
+   * Mark an order as seen by an admin (clears the sidebar "new orders"
+   * badge). Admin-only on the backend; idempotent. Returns `{ seen }`
+   * where `seen` is true only when this call was the one that stamped it.
+   */
+  markSeen: async (id: string): Promise<{ seen: boolean }> => {
+    const response = await apiClient.post<{ seen: boolean }>(
+      `/orders/${id}/mark-seen`,
+    );
+    return response.data;
+  },
+
+  /**
    * Pay the treatment fee on an order. The backend routes by method:
    *   • card / cash         → instant success, stamps treatmentFeePaidAt
    *   • bank_transfer       → records `awaiting_confirmation`; the

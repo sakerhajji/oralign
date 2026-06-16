@@ -49,6 +49,7 @@ import { useTreatmentChatSocket } from '@/lib/hooks/use-treatment-chat-socket';
 import { FileText, Plus, Sparkles } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
+  dashboardKeys,
   useBillingPublicDefaults,
   useConfirmTreatmentFeePayment,
   useDeleteOrder,
@@ -56,6 +57,7 @@ import {
   usePatient,
   usePermanentDeleteOrder,
 } from '@/lib/hooks';
+import { useQueryClient } from '@tanstack/react-query';
 import { useQuotationForOrder } from '@/lib/hooks/use-quotations';
 import { ordersService } from '@/lib/api/orders.service';
 import { extractApiErrorMessage } from '@/lib/api/error';
@@ -126,6 +128,33 @@ export default function OrderDetailPage() {
     () => new Set(['order']),
   );
   const initializedOrderIdRef = useRef<string | null>(null);
+
+  // ── Admin "seen" marker ─────────────────────────────────────────────
+  // The first time an admin opens an order, stamp `adminSeenAt` server-
+  // side so the sidebar "new orders" badge clears once the order has been
+  // checked. Idempotent on the backend; the ref limits it to one call per
+  // order id, and on a fresh stamp we refresh the badge immediately rather
+  // than waiting for the 30s poll. Non-admins are skipped entirely.
+  const queryClient = useQueryClient();
+  const seenMarkedForRef = useRef<string | null>(null);
+  useEffect(() => {
+    const id = orderQuery.data?.id;
+    if (!id || !isAdmin || seenMarkedForRef.current === id) return;
+    seenMarkedForRef.current = id;
+    ordersService
+      .markSeen(id)
+      .then((res) => {
+        if (res.seen) {
+          queryClient.invalidateQueries({
+            queryKey: dashboardKeys.adminSidebarBadges(),
+          });
+        }
+      })
+      .catch(() => {
+        // Non-critical — the badge's 30s poll reconciles regardless.
+        seenMarkedForRef.current = null;
+      });
+  }, [orderQuery.data?.id, isAdmin, queryClient]);
 
   // ── Admin / designer: download ALL files + data as one ZIP ──────────
   // Fetches the archive as a blob through the authed apiClient (a plain

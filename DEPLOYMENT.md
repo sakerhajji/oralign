@@ -355,6 +355,66 @@ docker compose -p oralign-app -f docker-compose.yml -f docker-compose.production
 
 > **Security:** Never paste secrets into chat, screenshots, or commit messages. Rotating `JWT_*` invalidates every issued token — which is the desired behavior on rotation.
 
+### 5.9 Email deliverability (why mail goes to spam, and the fix)
+
+Spam placement is almost always a **DMARC alignment** failure: the `From:`
+domain must be authenticated (SPF + DKIM) for the SMTP provider that
+actually sends the message. Two supported setups:
+
+**A. Gmail SMTP (current / simplest)**
+
+`MAIL_FROM` **must equal** `MAIL_USER` (the authenticated Gmail account) —
+Gmail only DKIM-signs for the account itself (or a Gmail-verified alias).
+Set a display name instead of a custom From-domain:
+
+```dotenv
+MAIL_HOST=smtp.gmail.com
+MAIL_PORT=587
+MAIL_USER=you@gmail.com
+MAIL_PASSWORD=<app password>
+MAIL_FROM=you@gmail.com        # SAME as MAIL_USER — never a custom domain
+MAIL_FROM_NAME=Oralign
+```
+
+Limits: ~500 recipients/day, and the sender shows as @gmail.com. Fine for
+transactional volume while starting out.
+
+**B. Branded domain (`no-reply@oralign.com.tn`) — the professional setup**
+
+1. Pick a transactional provider (Brevo free 300/day, SMTP2GO, Mailgun,
+   Resend, or Google Workspace) and add `oralign.com.tn` as a verified
+   sender domain there.
+2. Publish the DNS records the provider gives you on `oralign.com.tn`:
+   * **SPF** (TXT on `@`): `v=spf1 include:<provider-spf> ~all`
+     — only ONE SPF record per domain; merge includes if one exists.
+   * **DKIM**: the provider's CNAME/TXT selector records (e.g.
+     `s1._domainkey`, `s2._domainkey`).
+   * **DMARC** (TXT on `_dmarc`):
+     `v=DMARC1; p=quarantine; rua=mailto:dmarc@oralign.com.tn; fo=1`
+     (start with `p=none` to observe, tighten to `quarantine`/`reject`).
+3. Point the backend at the provider's SMTP and switch the From:
+
+```dotenv
+MAIL_HOST=smtp-relay.brevo.com     # per provider
+MAIL_PORT=587
+MAIL_USER=<provider smtp login>
+MAIL_PASSWORD=<provider smtp key>
+MAIL_FROM=no-reply@oralign.com.tn
+MAIL_FROM_NAME=Oralign
+MAIL_REPLY_TO=contact@oralign.com.tn
+```
+
+4. Restart the backend (env-only change): see §5.8.
+
+**Verify**: send any app email to a Gmail inbox → open it → ⋮ →
+*Show original* → all three of `SPF: PASS`, `DKIM: PASS`, `DMARC: PASS`
+must show. For a full spam-score audit, send one email to the address
+shown at [mail-tester.com](https://www.mail-tester.com) and aim for ≥ 9/10.
+
+The backend also logs a startup **warning** if `MAIL_FROM`'s domain differs
+from the authenticated account's domain — if you see it, the config is in
+the misaligned (spam-prone) state.
+
 ---
 
 ## 6. Common errors & fixes

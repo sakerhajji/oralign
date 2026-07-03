@@ -45,10 +45,42 @@ export class MailService {
       secure: process.env.MAIL_PORT === '465',
       auth: { user, pass },
     });
+
+    // ── Deliverability guard ─────────────────────────────────────────
+    // Sending "From: someone@other-domain" through an SMTP account of a
+    // different domain fails DMARC alignment (the From-domain has no
+    // SPF/DKIM covering this sender), which is THE classic reason mail
+    // lands in spam. Gmail in particular only signs for the
+    // authenticated account (or its verified aliases). Warn loudly so a
+    // misconfigured MAIL_FROM never ships silently.
+    const fromAddr = this.fromAddress;
+    const fromDomain = fromAddr.split('@')[1]?.toLowerCase();
+    const userDomain = user.split('@')[1]?.toLowerCase();
+    if (fromDomain && userDomain && fromDomain !== userDomain) {
+      this.logger.warn(
+        `MAIL_FROM domain "${fromDomain}" differs from the authenticated ` +
+          `account domain "${userDomain}". Unless "${fromDomain}" publishes ` +
+          `SPF/DKIM for this SMTP provider (and the account is a verified ` +
+          `alias), DMARC alignment FAILS and mail goes to spam. Either set ` +
+          `MAIL_FROM to the authenticated address or move to a provider ` +
+          `with the domain properly authenticated.`,
+      );
+    }
   }
 
-  private get from(): string {
-    return process.env.MAIL_FROM || 'noreply@oralign.com';
+  /** Bare From address — defaults to the AUTHENTICATED mailbox (never a
+   *  foreign domain: an unaligned From is what triggers spam filters). */
+  private get fromAddress(): string {
+    return process.env.MAIL_FROM || process.env.MAIL_USER || '';
+  }
+
+  /** Full From header with a human display name — "Oralign <addr>". A
+   *  recognisable sender name improves open rates and filter reputation. */
+  private get from(): { name: string; address: string } {
+    return {
+      name: process.env.MAIL_FROM_NAME || 'Oralign',
+      address: this.fromAddress,
+    };
   }
 
   /**
@@ -267,6 +299,14 @@ export class MailService {
         to: options.to,
         subject: options.subject,
         html: options.html,
+        // Multipart/alternative: HTML-only mail is a classic spam-score
+        // penalty (SpamAssassin MIME_HTML_ONLY) and breaks text-only
+        // clients. Derive the text part from the HTML so templates don't
+        // need to maintain two bodies.
+        text: htmlToPlainText(options.html),
+        // Give recipients a real mailbox to answer to (a From that can't
+        // be replied to is another spam signal). Optional override.
+        replyTo: process.env.MAIL_REPLY_TO || this.fromAddress,
       });
       this.logger.log(`Email sent to ${options.to}: "${options.subject}"`);
     } catch (error) {
@@ -276,4 +316,45 @@ export class MailService {
       throw error;
     }
   }
+}
+
+/**
+ * Down-convert an HTML email body to a readable plain-text alternative.
+ * Not a full renderer — good enough for the transactional templates this
+ * app sends (paragraph-ish blocks, links, a button or two).
+ */
+function htmlToPlainText(html: string): string {
+  return (
+    html
+      // Drop non-content blocks entirely.
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<head[\s\S]*?<\/head>/gi, '')
+      // Keep link targets: "label (url)" — but skip anchors whose label IS
+      // the url to avoid "url (url)".
+      .replace(
+        /<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi,
+        (_m, href: string, label: string) => {
+          const cleanLabel = label.replace(/<[^>]+>/g, '').trim();
+          if (!cleanLabel || cleanLabel === href) return href;
+          return `${cleanLabel} (${href})`;
+        },
+      )
+      // Block-level tags become line breaks.
+      .replace(/<(?:br|\/p|\/div|\/tr|\/h[1-6]|\/li)[^>]*>/gi, '\n')
+      // Strip every remaining tag.
+      .replace(/<[^>]+>/g, '')
+      // Decode the entities our templates actually use.
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&#39;|&apos;/g, "'")
+      .replace(/&quot;/g, '"')
+      // Collapse the whitespace soup HTML leaves behind.
+      .replace(/[ \t]+/g, ' ')
+      .replace(/\s*\n\s*/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+  );
 }

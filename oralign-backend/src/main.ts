@@ -93,7 +93,29 @@ async function bootstrap(): Promise<void> {
         'http://localhost:3000',
         'http://localhost:5173',
       ];
-  const allowedOrigins = Array.from(new Set([...envOrigins, ...devOrigins]));
+
+  // Loopback equivalence: `localhost`, `127.0.0.1` and `[::1]` are the
+  // same machine, but CORS matches the Origin STRING — so allowing only
+  // http://localhost:3001 silently rejected http://127.0.0.1:3001 and
+  // every API call (login included) died in the browser with an opaque
+  // network error. Expanding a loopback origin to all three hosts keeps
+  // local setups working regardless of which alias the browser uses.
+  // Non-loopback origins (real domains in production) pass through
+  // untouched, so the production allowlist stays exactly as configured.
+  const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
+  const expandLoopback = (origin: string): string[] => {
+    try {
+      const u = new URL(origin);
+      if (!LOOPBACK_HOSTS.includes(u.hostname)) return [origin];
+      const port = u.port ? `:${u.port}` : '';
+      return LOOPBACK_HOSTS.map((host) => `${u.protocol}//${host}${port}`);
+    } catch {
+      return [origin];
+    }
+  };
+  const allowedOrigins = Array.from(
+    new Set([...envOrigins, ...devOrigins].flatMap(expandLoopback)),
+  );
 
   if (allowedOrigins.length === 0 && isProd) {
     throw new Error(

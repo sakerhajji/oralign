@@ -43,6 +43,10 @@ function NavSecondaryImpl({
               <SidebarMenuButton
                 asChild
                 isActive={isItemActive(item.url)}
+                // Tooltip only renders while the rail is collapsed — same
+                // affordance NavMain items already had; without it the
+                // footer icons were unlabeled mysteries in icon mode.
+                tooltip={item.title}
                 className="group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:justify-center"
               >
                 {/* Use next/link for client-side navigation. Plain
@@ -51,7 +55,17 @@ function NavSecondaryImpl({
                     state (open dialogs, dirty forms). */}
                 <Link href={item.url}>
                   {item.icon}
-                  <span>{item.title}</span>
+                  {/* `sr-only` (not truncate-to-zero) in icon mode: a
+                      0-width span still keeps the flex `gap-2` alive,
+                      which pushed the icon 4px off-centre and misaligned
+                      the footer icons with the main nav column. sr-only
+                      is absolutely positioned — out of the flex flow (no
+                      phantom gap) — while keeping the link's accessible
+                      name (display:none would strip it; the lucide icon
+                      is aria-hidden). */}
+                  <span className="truncate group-data-[collapsible=icon]:sr-only">
+                    {item.title}
+                  </span>
                 </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>

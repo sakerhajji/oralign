@@ -71,7 +71,14 @@ export function NavUser({
               //     icons above it.
               //   • The base `data-[state=open]:…` keeps the dropdown
               //     open-state highlight from the original UI.
-              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:!h-12 group-data-[collapsible=icon]:!w-12 group-data-[collapsible=icon]:!p-0"
+              // Collapsed geometry (inset variant, 3.5rem icon rail): the
+              // footer slot is 42px wide (74px container − container p-2 −
+              // footer p-2). The old forced 48px tile OVERFLOWED that slot
+              // (auto margins resolve to 0 on an over-wide child), so the
+              // avatar sat visibly off the nav-icon axis. A 40px (`!h-10
+              // !w-10`) tile auto-centres in the 42px slot — dead on the
+              // same axis as every rail icon.
+              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:!h-10 group-data-[collapsible=icon]:!w-10 group-data-[collapsible=icon]:!p-0"
             >
               {/* Avatar — `rounded-full` always, so it reads as a
                   proper profile chip both expanded and collapsed.

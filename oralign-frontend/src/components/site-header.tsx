@@ -13,10 +13,17 @@ export function SiteHeader() {
   return (
     <header className="flex h-(--header-height) shrink-0 items-center gap-2 border-b transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-(--header-height)">
       <div className="flex w-full items-center gap-1 px-4 lg:gap-2 lg:px-6">
-        <SidebarTrigger className="-ml-1" />
+        {/* Mobile-only: on desktop the sidebar hover-expands, and the
+            trigger actively misbehaved there — the expanded sidebar is a
+            fixed overlay that COVERS the trigger, so it couldn't be
+            re-clicked to close, and a second click on the same spot hit
+            the header logo link underneath and navigated to /dashboard.
+            On mobile the sidebar is a Sheet and this button is the only
+            way to open it, so it stays for < md. */}
+        <SidebarTrigger className="-ml-1 md:hidden" />
         <Separator
           orientation="vertical"
-          className="mx-2 data-[orientation=vertical]:h-4"
+          className="mx-2 data-[orientation=vertical]:h-4 md:hidden"
         />
 
         {/* Spacer — pushes the trailing actions to the right edge

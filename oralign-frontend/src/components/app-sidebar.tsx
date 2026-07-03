@@ -371,7 +371,18 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           <SidebarMenuItem>
             <SidebarMenuButton
               asChild
-              className="data-[slot=sidebar-menu-button]:h-auto data-[slot=sidebar-menu-button]:py-4 hover:bg-transparent active:bg-transparent group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:!h-12 group-data-[collapsible=icon]:!w-12 group-data-[collapsible=icon]:!min-w-12 group-data-[collapsible=icon]:!p-0 group-data-[collapsible=icon]:!overflow-visible"
+              // Collapsed geometry (inset variant, 3.5rem icon rail): the
+              // header slot is 42px wide, so the tile is `!w-10` (40px) and
+              // auto-centres on the same axis as the rail icons (the old
+              // forced 48px overflowed the slot and sat off-axis).
+              //
+              // `!h-28` (112px) deliberately matches the EXPANDED header
+              // height (h-20 logo + py-4×2): hover-expand used to change
+              // the header from 48px to 112px, shoving every nav row 64px
+              // down mid-hover — the row under the cursor changed while
+              // the user was aiming, so clicks landed on the wrong item.
+              // Equal heights in both states keep the rows pinned.
+              className="data-[slot=sidebar-menu-button]:h-auto data-[slot=sidebar-menu-button]:py-4 hover:bg-transparent active:bg-transparent group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:!h-28 group-data-[collapsible=icon]:!w-10 group-data-[collapsible=icon]:!min-w-10 group-data-[collapsible=icon]:!p-0 group-data-[collapsible=icon]:!overflow-visible"
             >
               {/* Sidebar header logo — two variants swapped via the
                   shadcn sidebar's `data-[collapsible=icon]` group attr:
@@ -408,16 +419,16 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   priority
                 />
                 {/* Collapsed — standalone brand mark. SVG so it stays
-                    crisp at any DPR; `h-12 w-12` (48 px) + object-
-                    contain keeps the natural aspect ratio centred
-                    inside the icon rail. It stays larger than the nav
-                    icons, but no longer dominates the sidebar. */}
+                    crisp at any DPR; `h-10 w-10` (40 px) fills the 40px
+                    tile and keeps the mark on the rail-icon axis. It
+                    stays larger than the nav icons without overflowing
+                    the slot. */}
                 <Image
                   src="/iconLogo.svg"
                   alt="Oralign"
                   width={64}
                   height={56}
-                  className="mx-auto hidden h-12 w-12 object-contain group-data-[collapsible=icon]:block"
+                  className="mx-auto hidden h-10 w-10 object-contain group-data-[collapsible=icon]:block"
                   priority
                 />
               </Link>
@@ -437,7 +448,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           <SidebarGroup className="py-1">
             <Button
               asChild
-              className="h-10 w-full justify-start gap-2 bg-foreground text-background shadow-sm hover:bg-foreground/90 group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:h-8 group-data-[collapsible=icon]:w-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
+              // Collapsed tile stays h-10 (same as the expanded row): a
+              // height delta here shifts every nav row during hover-expand
+              // (see the header comment above) — the old h-8 added 8px of
+              // drift. w-10 auto-centres in the 42px slot on the icon axis.
+              className="h-10 w-full justify-start gap-2 bg-foreground text-background shadow-sm hover:bg-foreground/90 group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:h-10 group-data-[collapsible=icon]:w-10 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
             >
               <Link
                 href="/dashboard/orders/new"

@@ -80,10 +80,13 @@ function NavMainImpl({
                         The primitive only truncates the LAST child span
                         (`[&>span:last-child]:truncate`); when a badge pill
                         follows, the title span is no longer last, loses the
-                        truncation, and its text leaks out the 32px rail (the
-                        "Ass…" bug). `truncate` keeps long labels tidy when
-                        expanded. */}
-                    <span className="truncate group-data-[collapsible=icon]:hidden">
+                        truncation, and its text leaks out the icon rail (the
+                        "Ass…" bug). `sr-only` (not `hidden`): display:none
+                        would strip the link's accessible name (the lucide
+                        icon is aria-hidden), while sr-only is absolutely
+                        positioned — out of the flex flow (no phantom gap),
+                        still read by screen readers. */}
+                    <span className="truncate group-data-[collapsible=icon]:sr-only">
                       {item.title}
                     </span>
                     {/* Inline pill — only visible while the sidebar
@@ -100,18 +103,27 @@ function NavMainImpl({
                   </Link>
                 </SidebarMenuButton>
                 {/* Collapsed (icon-rail) badge — absolutely-positioned
-                    red dot anchored to the menu button's top-right
-                    corner so it stays visible even when the title
-                    text is hidden. `ring-background` lifts it off
-                    the icon visually. Pointer-events-none so it
-                    can't intercept the menu-button click. */}
+                    marker on the button's top-right corner so it stays
+                    visible while the title is hidden. Single digits show
+                    the count; from 10 up we degrade to a plain dot — a
+                    2–3 digit pill grew wide enough to cover most of the
+                    20px icon, hiding WHICH item was flagged (the exact
+                    count still shows in the expanded pill + tooltip).
+                    Pointer-events-none so it can't steal the click. */}
                 {hasBadge ? (
-                  <span
-                    aria-hidden
-                    className="pointer-events-none absolute right-1 top-1 hidden min-h-4 min-w-4 place-items-center rounded-full bg-destructive px-1 text-[9px] font-bold leading-none text-white ring-2 ring-background group-data-[collapsible=icon]:grid"
-                  >
-                    {badgeLabel}
-                  </span>
+                  badgeCount > 9 ? (
+                    <span
+                      aria-hidden
+                      className="pointer-events-none absolute right-1.5 top-1.5 hidden size-2.5 rounded-full bg-destructive ring-2 ring-background group-data-[collapsible=icon]:block"
+                    />
+                  ) : (
+                    <span
+                      aria-hidden
+                      className="pointer-events-none absolute right-1 top-1 hidden min-h-4 min-w-4 place-items-center rounded-full bg-destructive px-1 text-[9px] font-bold leading-none text-white ring-2 ring-background group-data-[collapsible=icon]:grid"
+                    >
+                      {badgeCount}
+                    </span>
+                  )
                 ) : null}
               </SidebarMenuItem>
             )

@@ -17,7 +17,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { AlertCircle, Loader2, ShieldCheck, Sparkles } from 'lucide-react';
 import { treatmentPlansService } from '@/lib/api/treatment-plans.service';
-import { prepareViewer, stripViewerHash } from '@/lib/viewer/smart-shell';
+import {
+  parseViewerMode,
+  prepareViewer,
+  stripViewerHash,
+} from '@/lib/viewer/smart-shell';
 import { useT } from '@/lib/i18n/lang-context';
 import type { PublicTreatmentViewerPayload } from '@/lib/types';
 
@@ -65,12 +69,13 @@ function doctorByline(
   return t('publicCase.doctorFallback');
 }
 
-// Patient-facing viewers ALWAYS use the branded shell — they're the most
-// important place for our logo to be visible, since this is what the
-// patient is sharing with friends/family. The shared `prepareViewer`
-// helper handles everything: known third-party shells (Hirsch.html) are
-// REWRITTEN to their unbranded inner viewer so the wrapper logo never
-// even hits the network, and everything else gets the Oralign overlay.
+// Patient-facing viewers honour the planner's "Type de visualiseur"
+// choice, exactly like the doctor-side review screen: the mode saved on
+// the plan (#internal / #external hash on the URL) decides whether the
+// client gets the plain direct viewer (internal) or the Oralign-branded
+// shell (external). The shared `prepareViewer` helper handles the rest:
+// known third-party shells (Hirsch.html) are REWRITTEN to their unbranded
+// inner viewer so the wrapper logo never even hits the network.
 
 export default function PublicTreatmentViewerPage() {
   const { t } = useT();
@@ -99,18 +104,21 @@ export default function PublicTreatmentViewerPage() {
     };
   }, [token, t]);
 
-  // Patient-facing viewer: ALWAYS use the branded shell, regardless of
-  // the planner's internal/external setting on the plan. The patient is
-  // sharing this link with family / friends — Oralign branding must be
-  // present even if the planner happened to flag it as "internal".
-  // prepareViewer also rewrites Hirsch.html → Viewer/main.html so the
+  // Respect the planner's saved viewer type ("Type de visualiseur"):
+  // the mode travels in the stored URL's #internal / #external hash.
+  //   • internal → plain direct iframe, no shell (same as admin preview)
+  //   • external → Oralign-branded smart shell (default)
+  // This used to hardcode 'external', so a plan flagged "interne" still
+  // showed the branded shell to the client — the choice was ignored.
+  // prepareViewer still rewrites Hirsch.html → Viewer/main.html so the
   // third-party logo never even loads.
   const rawUrl = payload?.treatmentPlan.resultViewUrl ?? null;
+  const savedMode = parseViewerMode(rawUrl);
   const cleanUrl = rawUrl ? stripViewerHash(rawUrl) : '';
   const viewerSlot = useMemo(() => {
     if (!cleanUrl) return { src: undefined, srcDoc: undefined };
-    return prepareViewer(cleanUrl, 'external');
-  }, [cleanUrl]);
+    return prepareViewer(cleanUrl, savedMode);
+  }, [cleanUrl, savedMode]);
   const srcDoc = viewerSlot.srcDoc ?? '';
 
   const salutation = payload
@@ -186,7 +194,9 @@ export default function PublicTreatmentViewerPage() {
               >
                 {!iframeBlocked ? (
                   <iframe
-                    key={cleanUrl}
+                    // Re-key on URL + mode so a viewer-type change on the
+                    // plan actually swaps the iframe content.
+                    key={`${cleanUrl}#${savedMode}`}
                     src={srcDoc ? undefined : viewerSlot.src}
                     srcDoc={srcDoc || undefined}
                     title={t('publicCase.viewerTitle')}

@@ -371,10 +371,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           <SidebarMenuItem>
             <SidebarMenuButton
               asChild
-              // Collapsed geometry (inset variant, 3.5rem icon rail): the
-              // header slot is 42px wide, so the tile is `!w-10` (40px) and
-              // auto-centres on the same axis as the rail icons (the old
-              // forced 48px overflowed the slot and sat off-axis).
+              // Collapsed geometry (flush `sidebar` variant, 3.5rem/56px
+              // icon rail): the header slot is 40px wide (56px rail − the
+              // header's p-2), so the tile is `!w-10` (40px) and lines up
+              // on the same axis as the rail icons (the old forced 48px
+              // overflowed the slot and sat off-axis).
               //
               // `!h-28` (112px) deliberately matches the EXPANDED header
               // height (h-20 logo + py-4×2): hover-expand used to change
@@ -451,7 +452,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               // Collapsed tile stays h-10 (same as the expanded row): a
               // height delta here shifts every nav row during hover-expand
               // (see the header comment above) — the old h-8 added 8px of
-              // drift. w-10 auto-centres in the 42px slot on the icon axis.
+              // drift. w-10 fills the 40px flush-rail slot on the icon axis.
               className="h-10 w-full justify-start gap-2 bg-foreground text-background shadow-sm hover:bg-foreground/90 group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:h-10 group-data-[collapsible=icon]:w-10 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
             >
               <Link

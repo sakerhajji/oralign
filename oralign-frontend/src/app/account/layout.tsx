@@ -16,7 +16,10 @@ export default function AccountLayout({ children }: { children: ReactNode }) {
         } as React.CSSProperties
       }
     >
-      <AppSidebar variant="inset" />
+      {/* Flush `sidebar` variant — see dashboard/layout.tsx: `inset`
+          floated the rail and left a transparent strip overlapping the
+          content. Keep both layouts on the same flush variant. */}
+      <AppSidebar variant="sidebar" />
       <SidebarInset>
         <SiteHeader />
         <div className="px-4 pt-4 lg:px-6">

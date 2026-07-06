@@ -35,7 +35,13 @@ export default function DashboardLayout({
       {/* Silently redirects dentists who haven't finished onboarding */}
       <OnboardingGuard />
 
-      <AppSidebar variant="inset" />
+      {/* Flush `sidebar` variant (not `inset`): the inset variant floats
+          the rail with p-2 padding + gives the content an m-2 margin,
+          which left a ~14px transparent `bg-sidebar` strip along the
+          right edge of the rail overlapping the content, plus a frame
+          around the page. `sidebar` renders a solid rail with a clean
+          border-r and full-width, flush content — no strip, no frame. */}
+      <AppSidebar variant="sidebar" />
       <SidebarInset>
         <SiteHeader />
         <div className="flex flex-1 flex-col">{children}</div>

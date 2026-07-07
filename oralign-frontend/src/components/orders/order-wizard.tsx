@@ -611,9 +611,26 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
     // editor. Declare the scope explicitly so the backend's REPLACE-
     // ALL never wipes planner-set attachment rows when the doctor
     // re-saves her odontogram.
+    //
+    // Extract is exclusive: never persist EXTRACT together with another
+    // doctor mark on the same tooth. Non-extraction marks combine freely.
+    const extractTeeth = new Set(
+      toothInstructions
+        .filter((i) => i.type === ToothInstructionType.EXTRACT)
+        .map((i) => i.toothNumber),
+    );
+    const OTHER_DOCTOR_MARKS = new Set<ToothInstructionType>([
+      ToothInstructionType.NO_ATTACHMENTS,
+      ToothInstructionType.DO_NOT_MOVE,
+      ToothInstructionType.NO_IPR,
+    ]);
+    const sanitizedInstructions = toothInstructions.filter(
+      (i) =>
+        !(extractTeeth.has(i.toothNumber) && OTHER_DOCTOR_MARKS.has(i.type)),
+    );
     await updateTeeth.mutateAsync({
       id: nextOrder.id,
-      instructions: toothInstructions,
+      instructions: sanitizedInstructions,
       replaceTypes: [
         ToothInstructionType.NO_ATTACHMENTS,
         ToothInstructionType.DO_NOT_MOVE,

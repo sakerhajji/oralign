@@ -172,6 +172,74 @@ const COLOR_BY_TYPE = new Map<ToothInstructionType, ColorEntry>(
   COLORS.map((c) => [c.type, c]),
 );
 
+/**
+ * The four order-level doctor instruction types among which EXTRACT is
+ * exclusive. Non-extraction marks combine freely; EXTRACT stands alone.
+ */
+const DOCTOR_MARK_TYPES = new Set<ToothInstructionType>([
+  ToothInstructionType.NO_ATTACHMENTS,
+  ToothInstructionType.DO_NOT_MOVE,
+  ToothInstructionType.NO_IPR,
+  ToothInstructionType.EXTRACT,
+]);
+
+/**
+ * Build the tooth → marks[] map for one instruction list, restricted to
+ * `visibleTypes`. A tooth can carry SEVERAL non-extraction marks; EXTRACT
+ * is exclusive, so an extract-bearing tooth is collapsed to `[EXTRACT]`
+ * (defends against legacy rows where extract co-existed with a mark).
+ * Marks are ordered by the canonical COLORS sequence for stable render.
+ */
+function buildMarkMap(
+  items: ToothInstruction[],
+  visibleTypes: Set<ToothInstructionType>,
+): Map<number, ToothInstructionType[]> {
+  const map = new Map<number, ToothInstructionType[]>();
+  for (const item of items) {
+    if (!visibleTypes.has(item.type)) continue;
+    const arr = map.get(item.toothNumber);
+    if (arr) {
+      if (!arr.includes(item.type)) arr.push(item.type);
+    } else {
+      map.set(item.toothNumber, [item.type]);
+    }
+  }
+  for (const [tooth, arr] of map) {
+    if (arr.includes(ToothInstructionType.EXTRACT)) {
+      map.set(tooth, [ToothInstructionType.EXTRACT]);
+    } else {
+      map.set(
+        tooth,
+        COLORS.filter((c) => arr.includes(c.type)).map((c) => c.type),
+      );
+    }
+  }
+  return map;
+}
+
+/**
+ * Enforce "Extract is exclusive" on a raw instruction list: for any tooth
+ * flagged EXTRACT, drop the other doctor marks (No Attachments / Do Not
+ * Move / No IPR) while leaving unrelated instructions (IPR values,
+ * attachments) intact. Call this before persisting an order's tooth
+ * instructions so an invalid extract-plus-mark combination never saves.
+ */
+export function enforceExtractExclusiveInstructions(
+  items: ToothInstruction[],
+): ToothInstruction[] {
+  const extractTeeth = new Set(
+    items
+      .filter((i) => i.type === ToothInstructionType.EXTRACT)
+      .map((i) => i.toothNumber),
+  );
+  if (extractTeeth.size === 0) return items;
+  return items.filter((i) => {
+    if (!extractTeeth.has(i.toothNumber)) return true;
+    if (i.type === ToothInstructionType.EXTRACT) return true;
+    return !DOCTOR_MARK_TYPES.has(i.type);
+  });
+}
+
 // ── Component ──────────────────────────────────────────────────────────────
 
 export function OdontogramSelector({
@@ -282,15 +350,10 @@ export function OdontogramSelector({
   const iprEditable = !!onIprChange && !disabled;
 
   // Palette by context:
-  // - movement: order-facing surface — EXTRACTION only. The doctor asked
-  //   that the order odontogram highlight extractions and nothing else, so
-  //   No-Attachments / Do-Not-Move / No-IPR are no longer colorable here.
-  //   Because `visibleTypes` is derived from this list, the restriction is
-  //   enforced at the DATA level too: `setTooth` can only write EXTRACT and
-  //   `assignments` only paints EXTRACT teeth — no CSS-only trick, and no
-  //   invalid colored state can be created. Legacy rows of the other three
-  //   types are preserved untouched (setTooth rewrites only visible types)
-  //   but simply don't render a fill.
+  // - movement: order-facing surface — the four doctor instructions
+  //   (No Attachments / Do Not Move / No IPR / Extract). A tooth may carry
+  //   SEVERAL of the non-extraction marks at once; EXTRACT is the only
+  //   exclusive one (see `toggleMark`).
   // - attachments: focused planner surface for pink attachment marks.
   // - treatment: the full lab/planner odontogram, including attachment.
   const visibleColors = useMemo<readonly ColorEntry[]>(
@@ -299,33 +362,34 @@ export function OdontogramSelector({
         return COLORS.filter((c) => c.type === ToothInstructionType.ATTACHMENT);
       }
       if (mode === 'treatment') return COLORS;
-      return COLORS.filter((c) => c.type === ToothInstructionType.EXTRACT);
+      return COLORS.filter((c) => c.type !== ToothInstructionType.ATTACHMENT);
     },
     [mode],
   );
 
-  // One instruction per tooth — restricted to the modes-current
+  // MULTIPLE instructions per tooth — restricted to the mode's current
   // palette so types that don't belong on this surface stay invisible.
+  //
+  // A tooth can carry several non-extraction marks at once (No IPR + No
+  // Attachments + Do Not Move). EXTRACT is exclusive, so the normaliser
+  // below collapses any extract-bearing tooth to `[EXTRACT]` for display
+  // (defends against legacy data where extract co-existed with another
+  // mark). Marks are ordered by the canonical COLORS sequence so the
+  // dominant fill + dot order stay stable across renders.
   //
   // Example: when the order detail page renders the odontogram in
   // 'movement' mode, the value array may STILL contain ATTACHMENT
-  // entries written by the planner via the treatment-plan editor.
-  // We must NOT paint those teeth pink on the order page — the user
-  // explicitly wants attachments to live only in the treatment view.
-  // The filter below skips any tooth-instruction whose type isn't
+  // entries written by the planner via the treatment-plan editor. The
+  // visibleTypes filter skips any tooth-instruction whose type isn't
   // part of the current mode's palette.
   const visibleTypes = useMemo(
     () => new Set(visibleColors.map((c) => c.type)),
     [visibleColors],
   );
-  const assignments = useMemo(() => {
-    const map = new Map<number, ToothInstructionType>();
-    for (const item of value) {
-      if (!visibleTypes.has(item.type)) continue;
-      if (!map.has(item.toothNumber)) map.set(item.toothNumber, item.type);
-    }
-    return map;
-  }, [value, visibleTypes]);
+  const assignments = useMemo(
+    () => buildMarkMap(value, visibleTypes),
+    [value, visibleTypes],
+  );
 
   // Read-only doctor instructions painted as a background layer.
   // Filtered to types that are NOT in the picker's palette so we
@@ -333,19 +397,14 @@ export function OdontogramSelector({
   // Stable Map structure → memoised so a parent passing an array
   // literal each render doesn't churn the ToothButton tree.
   const readonlyAssignments = useMemo(() => {
-    const map = new Map<number, ToothInstructionType>();
-    if (!readonlyValue) return map;
-    for (const item of readonlyValue) {
-      // Skip any type that's ALSO part of the editable palette — the
-      // editable assignments take precedence for those. Doctor colours
-      // (no_attachments / do_not_move / no_ipr / extract) never overlap
-      // with the attachment-only editable layer, so this filter is a
-      // defensive no-op in practice; included so a future caller that
-      // passes a mixed `readonlyValue` doesn't silently double-paint.
-      if (visibleTypes.has(item.type)) continue;
-      if (!map.has(item.toothNumber)) map.set(item.toothNumber, item.type);
-    }
-    return map;
+    if (!readonlyValue) return new Map<number, ToothInstructionType[]>();
+    // The read-only doctor layer shows the types NOT in the editable
+    // palette (so the treatment editor doesn't double-paint its own
+    // attachment marks). Multiple doctor marks per tooth are supported.
+    const notEditable = new Set<ToothInstructionType>(
+      COLORS.map((c) => c.type).filter((tp) => !visibleTypes.has(tp)),
+    );
+    return buildMarkMap(readonlyValue, notEditable);
   }, [readonlyValue, visibleTypes]);
 
   // Keep onChange / value / disabled reachable from stable callbacks so
@@ -364,18 +423,53 @@ export function OdontogramSelector({
     visibleTypesRef.current = visibleTypes;
   }, [value, onChange, disabled, onIprChange, visibleTypes]);
 
-  const setTooth = useCallback(
-    (toothNumber: number, type: ToothInstructionType | null) => {
+  // Toggle one mark on a tooth. Non-extraction marks combine freely;
+  // EXTRACT is exclusive — selecting it clears the other marks, and while
+  // a tooth is flagged EXTRACT no other mark can be added (the popover
+  // disables them; this guard is the data-level backstop).
+  const toggleMark = useCallback(
+    (toothNumber: number, type: ToothInstructionType) => {
       const editableTypes = visibleTypesRef.current;
-      const without = valueRef.current.filter(
+      const current = valueRef.current;
+      // Preserve everything that isn't an editable mark on this tooth
+      // (other teeth, IPR values, attachments in other modes, …).
+      const others = current.filter(
         (i) => i.toothNumber !== toothNumber || !editableTypes.has(i.type),
       );
-      onChangeRef.current(
-        type ? [...without, { toothNumber, type }] : without,
-      );
+      const toothMarks = current
+        .filter((i) => i.toothNumber === toothNumber && editableTypes.has(i.type))
+        .map((i) => i.type);
+      const hasExtract = toothMarks.includes(ToothInstructionType.EXTRACT);
+
+      let next: ToothInstructionType[];
+      if (type === ToothInstructionType.EXTRACT) {
+        // Toggle extraction. Turning it ON replaces every other mark.
+        next = hasExtract ? [] : [ToothInstructionType.EXTRACT];
+      } else if (hasExtract) {
+        // Blocked — extraction must be removed first.
+        return;
+      } else {
+        next = toothMarks.includes(type)
+          ? toothMarks.filter((t) => t !== type)
+          : [...toothMarks, type];
+      }
+      onChangeRef.current([
+        ...others,
+        ...next.map((t) => ({ toothNumber, type: t })),
+      ]);
     },
     [],
   );
+
+  // Remove every editable mark from a tooth (keeps non-editable data).
+  const clearTooth = useCallback((toothNumber: number) => {
+    const editableTypes = visibleTypesRef.current;
+    onChangeRef.current(
+      valueRef.current.filter(
+        (i) => i.toothNumber !== toothNumber || !editableTypes.has(i.type),
+      ),
+    );
+  }, []);
 
   const openIprPopup = useCallback(
     (
@@ -532,55 +626,34 @@ export function OdontogramSelector({
           </div>
         </div>
 
-        <p className="px-3 pb-3 text-center text-xs text-muted-foreground sm:px-5">
-          {/*
-            The hint reads "FDI numbering · Press <Esc> to close the
-            picker." but we need the <kbd> element rendered as JSX
-            mid-sentence, so we hand-split the translated string at
-            its `{esc}` placeholder and inject the kbd in between.
-            Keeps the i18n simple while preserving the keyboard hint
-            affordance.
-           */}
-          {t('orderForm.files.tooth.fdiHint', { esc: '__ESC__' })
-            .split('__ESC__')
-            .flatMap((chunk, i) =>
-              i === 0
-                ? [chunk]
-                : [
-                    <kbd
-                      key="kbd"
-                      className="rounded border bg-muted px-1.5 py-0.5 text-[10px] font-medium"
-                    >
-                      Esc
-                    </kbd>,
-                    chunk,
-                  ],
-            )}
-        </p>
       </div>
 
       {assignments.size > 0 ? (
         <div className="flex flex-wrap gap-2">
           {[...assignments.entries()]
             .sort(([a], [b]) => a - b)
-            .map(([toothNumber, type]) => {
-              const c = COLOR_BY_TYPE.get(type);
-              return (
-                <Badge
-                  key={`${toothNumber}-${type}`}
-                  variant="secondary"
-                  className="gap-1.5 rounded-full px-3 py-1"
-                >
-                  <span
-                    className="h-2 w-2 rounded-full"
-                    style={{ background: c?.hex }}
-                    aria-hidden
-                  />
-                  <span>{t('orderForm.files.tooth.toothBadge', { n: toothNumber })}</span>
-                  <span className="text-muted-foreground">{c?.label}</span>
-                </Badge>
-              );
-            })}
+            .flatMap(([toothNumber, types]) =>
+              types.map((type) => {
+                const c = COLOR_BY_TYPE.get(type);
+                return (
+                  <Badge
+                    key={`${toothNumber}-${type}`}
+                    variant="secondary"
+                    className="gap-1.5 rounded-full px-3 py-1"
+                  >
+                    <span
+                      className="h-2 w-2 rounded-full"
+                      style={{ background: c?.hex }}
+                      aria-hidden
+                    />
+                    <span>
+                      {t('orderForm.files.tooth.toothBadge', { n: toothNumber })}
+                    </span>
+                    <span className="text-muted-foreground">{c?.label}</span>
+                  </Badge>
+                );
+              }),
+            )}
         </div>
       ) : (
         <div className="flex items-center gap-2 rounded-md border border-dashed p-4 text-sm text-muted-foreground">
@@ -594,12 +667,15 @@ export function OdontogramSelector({
           tooth={popup.tooth}
           anchorX={popup.x}
           anchorY={popup.y}
-          currentType={assignments.get(popup.tooth)}
+          currentTypes={assignments.get(popup.tooth) ?? []}
           colors={visibleColors}
-          onPick={(type) => {
-            // flushSync commits the color in the same frame as the click —
-            // no popup-close animation can mask the change.
-            flushSync(() => setTooth(popup.tooth, type));
+          extractMessage={t('orderForm.files.tooth.extractExclusive')}
+          // Toggling a mark keeps the popover OPEN so several non-extraction
+          // marks can be added in one go. flushSync commits in the same
+          // frame as the click. Clearing / Esc / outside-click closes it.
+          onToggle={(type) => flushSync(() => toggleMark(popup.tooth, type))}
+          onClear={() => {
+            flushSync(() => clearTooth(popup.tooth));
             closePopup();
           }}
           onClose={closePopup}
@@ -697,13 +773,13 @@ function ColorLegend({
   iprValues,
   iprNotes,
 }: {
-  assignments: Map<number, ToothInstructionType>;
+  assignments: Map<number, ToothInstructionType[]>;
   /**
    * Treatment-plan editor draws the doctor's order marks as a read-only
    * background. The legend lists those too so the planner doesn't have
    * to remember which orange tooth is "the doctor's" vs "their own".
    */
-  readonlyAssignments?: Map<number, ToothInstructionType>;
+  readonlyAssignments?: Map<number, ToothInstructionType[]>;
   /**
    * Restricted palette — only iterate over the colours that are valid
    * for the current mode. Otherwise the order-page legend would list
@@ -735,8 +811,8 @@ function ColorLegend({
     ? COLORS.filter((c) => c.type !== ToothInstructionType.ATTACHMENT)
         .map((c) => {
           const teeth: number[] = [];
-          readonlyAssignments!.forEach((type, tooth) => {
-            if (type === c.type) teeth.push(tooth);
+          readonlyAssignments!.forEach((types, tooth) => {
+            if (types.includes(c.type)) teeth.push(tooth);
           });
           teeth.sort((a, b) => a - b);
           return { entry: c, teeth };
@@ -754,8 +830,8 @@ function ColorLegend({
         <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           {colors.map((c) => {
             const teeth: number[] = [];
-            assignments.forEach((type, tooth) => {
-              if (type === c.type) teeth.push(tooth);
+            assignments.forEach((types, tooth) => {
+              if (types.includes(c.type)) teeth.push(tooth);
             });
             teeth.sort((a, b) => a - b);
             return (
@@ -910,12 +986,12 @@ function Arch({
   row: 'upper' | 'lower';
   left: readonly number[];
   right: readonly number[];
-  assignments: Map<number, ToothInstructionType>;
+  assignments: Map<number, ToothInstructionType[]>;
   /**
    * Doctor's order-level instructions painted as a background layer.
    * Empty Map when the caller has no readonly context to pass.
    */
-  readonlyAssignments: Map<number, ToothInstructionType>;
+  readonlyAssignments: Map<number, ToothInstructionType[]>;
   activeTooth: number | null;
   activeIpr: number | null;
   spriteReady: boolean;
@@ -992,8 +1068,8 @@ function Arch({
               toothNumber={n}
               row={row}
               mirrored={MIRRORED.has(n)}
-              type={assignments.get(n)}
-              readonlyType={readonlyAssignments.get(n)}
+              types={assignments.get(n)}
+              readonlyTypes={readonlyAssignments.get(n)}
               active={activeTooth === n}
               spriteReady={spriteReady}
               preferEditableFill={preferEditableFill}
@@ -1061,19 +1137,18 @@ type ToothButtonProps = {
   row: 'upper' | 'lower';
   mirrored: boolean;
   /**
-   * Active / editable instruction — drives the OVERLAY indicator
-   * (small corner dot) when also `readonlyType` is set, otherwise the
-   * tooth's main fill colour. Owned by the editable layer.
+   * Editable instructions on this tooth (already normalised: EXTRACT is
+   * exclusive). The FIRST drives the tooth's dominant fill; the rest
+   * render as small colour dots so several non-extraction marks stay
+   * visible at once. Owned by the editable layer.
    */
-  type?: ToothInstructionType;
+  types?: ToothInstructionType[];
   /**
-   * Doctor's read-only instruction. When set, this drives the tooth's
-   * main FILL colour even if `type` is also set — the doctor's
-   * prescription wins for the dominant visual, while the editable
-   * `type` becomes a small corner indicator. Owned by the read-only
-   * background layer.
+   * Doctor's read-only instructions (treatment/attachments view). Painted
+   * as the fill when `preferEditableFill` is false, otherwise surfaced as
+   * reference dots alongside the editable marks.
    */
-  readonlyType?: ToothInstructionType;
+  readonlyTypes?: ToothInstructionType[];
   active?: boolean;
   spriteReady: boolean;
   preferEditableFill?: boolean;
@@ -1089,35 +1164,39 @@ const ToothButton = memo(
     toothNumber,
     row,
     mirrored,
-    type,
-    readonlyType,
+    types,
+    readonlyTypes,
     active,
     spriteReady,
     preferEditableFill,
     disabled,
     onClick,
   }: ToothButtonProps) {
-    // Resolution:
-    // - Order/prescription surfaces: doctor readonly instruction wins the fill.
-    // - Treatment attachment editor: editable ATTACHMENT wins the fill so the
-    //   selected tooth visibly turns pink. The doctor color remains as the
-    //   small overlay reference marker.
-    const editableColor = type ? COLOR_BY_TYPE.get(type) : undefined;
-    const readonlyColor = readonlyType
-      ? COLOR_BY_TYPE.get(readonlyType)
-      : undefined;
-    const fillColor = preferEditableFill
-      ? editableColor ?? readonlyColor
-      : readonlyColor ?? editableColor;
-    // Overlay only appears when both layers paint the tooth. It displays the
-    // non-fill layer so both clinical signals stay visible.
-    const overlayColor =
-      readonlyColor && editableColor
-        ? preferEditableFill
-          ? readonlyColor
-          : editableColor
-        : undefined;
-    const color = fillColor;
+    // Resolve the ordered list of colours to represent. `preferEditableFill`
+    // decides which layer leads (and thus owns the dominant fill): the
+    // treatment attachment editor wants its editable ATTACHMENT to win;
+    // order surfaces want the doctor marks to lead.
+    const editableColors = (types ?? [])
+      .map((tp) => COLOR_BY_TYPE.get(tp))
+      .filter((c): c is ColorEntry => !!c);
+    const readonlyColors = (readonlyTypes ?? [])
+      .map((tp) => COLOR_BY_TYPE.get(tp))
+      .filter((c): c is ColorEntry => !!c);
+    const orderedColors = preferEditableFill
+      ? [...editableColors, ...readonlyColors]
+      : [...readonlyColors, ...editableColors];
+    // De-dupe by type, preserving order.
+    const seenTypes = new Set<ToothInstructionType>();
+    const marks = orderedColors.filter((c) => {
+      if (seenTypes.has(c.type)) return false;
+      seenTypes.add(c.type);
+      return true;
+    });
+    // The FIRST mark is the dominant fill; the rest render as small dots so
+    // several non-extraction instructions stay visible together. (EXTRACT
+    // is normalised to a lone mark upstream, so it never shows dots.)
+    const color = marks[0];
+    const dotColors = marks.slice(1);
     // Normalise the host viewBox to "0 0 w h" — some source teeth (17, 27,
     // 37, 47) have content drawn far from the SVG origin (min-x ≈ 22.5).
     // Keeping the raw viewBox would push the <use> at (0, 0) outside the
@@ -1168,7 +1247,7 @@ const ToothButton = memo(
         type="button"
         disabled={disabled}
         onClick={handleClick}
-        aria-label={`Tooth ${toothNumber}${color ? ` — ${color.label}` : ''}`}
+        aria-label={`Tooth ${toothNumber}${marks.length ? ` — ${marks.map((c) => c.label).join(', ')}` : ''}`}
         aria-pressed={active}
         data-tooth={toothNumber}
         data-active={active ? 'true' : undefined}
@@ -1192,18 +1271,22 @@ const ToothButton = memo(
           <use href={spriteHref} xlinkHref={spriteHref} />
         </svg>
 
-        {/* Overlay dot — visible ONLY when both layers paint the tooth.
-            Example: doctor prescribed "Extract" (orange fill) AND the
-            planner placed an attachment → orange tooth + small pink
-            corner dot. Single-layer teeth render without this dot
-            because their colour already lives on the fill. */}
-        {overlayColor && (
-          <span
-            className="odo-tooth-overlay"
-            style={{ background: overlayColor.hex }}
-            title={overlayColor.label}
-            aria-label={`Also: ${overlayColor.label}`}
-          />
+        {/* Extra-mark dots — one per instruction beyond the dominant fill,
+            so a tooth carrying several non-extraction marks (e.g. No IPR +
+            No Attachments + Do Not Move) shows every colour at once instead
+            of hiding all but one. Also surfaces read-only doctor marks as
+            reference dots in the treatment/attachments editors. */}
+        {dotColors.length > 0 && (
+          <span className="odo-tooth-marks" aria-hidden>
+            {dotColors.map((c) => (
+              <span
+                key={c.type}
+                className="odo-tooth-mark-dot"
+                style={{ background: c.hex }}
+                title={c.label}
+              />
+            ))}
+          </span>
         )}
 
         {row === 'lower' && labelChip}
@@ -1354,18 +1437,26 @@ function ColorPopover({
   tooth,
   anchorX,
   anchorY,
-  currentType,
+  currentTypes,
   colors,
-  onPick,
+  extractMessage,
+  onToggle,
+  onClear,
   onClose,
 }: {
   tooth: number;
   anchorX: number;
   anchorY: number;
-  currentType?: ToothInstructionType;
+  /** Marks currently on this tooth (multi-select; EXTRACT is exclusive). */
+  currentTypes: ToothInstructionType[];
   /** Subset of COLORS to show — controls movement vs. attachments-only. */
   colors: readonly ColorEntry[];
-  onPick: (type: ToothInstructionType | null) => void;
+  /** Localized "extraction blocks other marks" notice. */
+  extractMessage: string;
+  /** Toggle a single mark on/off (parent enforces the extract rules). */
+  onToggle: (type: ToothInstructionType) => void;
+  /** Remove every mark from this tooth. */
+  onClear: () => void;
   onClose: () => void;
 }) {
   const popupRef = useRef<HTMLDivElement>(null);
@@ -1416,9 +1507,9 @@ function ColorPopover({
         <span>
           Tooth <span className="text-foreground">{tooth}</span>
         </span>
-        {currentType && (
+        {currentTypes.length > 0 && (
           <span className="text-muted-foreground">
-            {COLOR_BY_TYPE.get(currentType)?.label}
+            {currentTypes.length}
           </span>
         )}
       </div>
@@ -1432,16 +1523,30 @@ function ColorPopover({
         )}
       >
         {colors.map((c) => {
-          const active = c.type === currentType;
+          const active = currentTypes.includes(c.type);
+          const isExtract = c.type === ToothInstructionType.EXTRACT;
+          const extractActive = currentTypes.includes(
+            ToothInstructionType.EXTRACT,
+          );
+          // While a tooth is flagged EXTRACT, the other marks are locked
+          // (extraction is exclusive). The EXTRACT swatch itself stays
+          // interactive so it can be toggled back off.
+          const locked = extractActive && !isExtract;
           return (
             <button
               key={c.type}
               type="button"
+              disabled={locked}
               onMouseDown={(e) => e.preventDefault()}
-              onClick={() => onPick(c.type)}
+              onClick={() => onToggle(c.type)}
               title={c.label}
               aria-label={c.label}
-              className={cn('odo-swatch', active && 'odo-swatch-active')}
+              aria-pressed={active}
+              className={cn(
+                'odo-swatch',
+                active && 'odo-swatch-active',
+                locked && 'cursor-not-allowed opacity-40',
+              )}
               style={{ background: c.hex }}
             >
               {active && <Check className="h-4 w-4 text-white drop-shadow" />}
@@ -1450,11 +1555,16 @@ function ColorPopover({
           );
         })}
       </div>
+      {currentTypes.includes(ToothInstructionType.EXTRACT) && (
+        <p className="mt-2 rounded-md bg-amber-50 px-2 py-1.5 text-[11px] leading-snug text-amber-800">
+          {extractMessage}
+        </p>
+      )}
       <button
         type="button"
         onMouseDown={(e) => e.preventDefault()}
-        onClick={() => onPick(null)}
-        disabled={!currentType}
+        onClick={onClear}
+        disabled={currentTypes.length === 0}
         className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border bg-background px-2 py-1.5 text-xs font-medium text-muted-foreground transition hover:border-primary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
       >
         <RotateCcw className="h-3 w-3" />
@@ -1753,6 +1863,37 @@ const ODONTOGRAM_CSS = /* css */ `
      should still read clearly on the same corner of the card. */
   right: auto;
   left: 4px;
+}
+
+/* Multi-mark dots — a small row of coloured dots for the instructions
+   BEYOND the dominant fill, so a tooth carrying several non-extraction
+   marks (No IPR + No Attachments + Do Not Move) shows every colour at
+   once. Anchored on the same corner as the legacy overlay dot. */
+.odo-tooth-marks {
+  position: absolute;
+  display: flex;
+  gap: 2px;
+  pointer-events: none;
+  z-index: 2;
+}
+.odo-tooth-upper .odo-tooth-marks {
+  bottom: 18px;
+  right: 4px;
+}
+.odo-tooth-lower .odo-tooth-marks {
+  top: 18px;
+  right: 4px;
+}
+.odo-tooth-mirrored .odo-tooth-marks {
+  right: auto;
+  left: 4px;
+}
+.odo-tooth-mark-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  border: 1.5px solid #ffffff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.35);
 }
 
 /* The label chip: number is ALWAYS visible; colour state is communicated

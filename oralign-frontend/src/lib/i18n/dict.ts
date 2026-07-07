@@ -394,6 +394,10 @@ export const dict = {
           en: 'No tooth-level instructions selected yet.',
           fr: 'Aucune instruction par dent sélectionnée pour le moment.',
         } as T,
+        extractExclusive: {
+          en: 'This tooth is marked for extraction. Remove the extraction before adding another instruction.',
+          fr: 'Cette dent est marquée comme extraction. Retirez l’extraction avant d’ajouter une autre instruction.',
+        } as T,
       },
 
       // ── Image-edit dialog (crop / rotate / flip) ────────────────

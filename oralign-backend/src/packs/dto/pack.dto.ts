@@ -12,6 +12,7 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
 
 /**
@@ -25,13 +26,50 @@ const normalizeOptionalString = (value: unknown): unknown => {
   return trimmed === '' ? undefined : trimmed;
 };
 
+/**
+ * A bilingual text bag — `Localized<string>` = { fr, en? }. Stored as a
+ * JSONB column (same shape the Blog model uses). Both leaves are optional
+ * at the validation layer; the service enforces "FR name required" for
+ * the pack name specifically. English is always optional — when absent
+ * the UI falls back to French.
+ */
+export class LocalizedTextDto {
+  @ApiPropertyOptional({ example: 'Forfait Express' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(280)
+  @Transform(({ value }) => normalizeOptionalString(value))
+  fr?: string;
+
+  @ApiPropertyOptional({ example: 'Express Pack' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(280)
+  @Transform(({ value }) => normalizeOptionalString(value))
+  en?: string;
+}
+
 export class CreatePackDto {
-  @ApiProperty({ example: 'SMART' })
+  // Legacy single-language name — kept OPTIONAL for backward-compat. New
+  // clients send `nameI18n` instead; the service derives the effective
+  // French name from `nameI18n.fr ?? name` and requires it to be present.
+  @ApiPropertyOptional({ example: 'SMART' })
+  @IsOptional()
   @IsString()
   @MinLength(1)
   @MaxLength(60)
   @Transform(({ value }) => normalizeOptionalString(value))
-  name!: string;
+  name?: string;
+
+  @ApiPropertyOptional({
+    type: LocalizedTextDto,
+    description:
+      'Localized product name { fr, en? }. FR is required (falls back to the legacy `name`).',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => LocalizedTextDto)
+  nameI18n?: LocalizedTextDto;
 
   @ApiPropertyOptional({ example: '24 steps · 2 included corrections' })
   @IsOptional()
@@ -39,6 +77,30 @@ export class CreatePackDto {
   @MaxLength(280)
   @Transform(({ value }) => normalizeOptionalString(value))
   description?: string;
+
+  @ApiPropertyOptional({ type: LocalizedTextDto, description: 'Localized description { fr?, en? }.' })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => LocalizedTextDto)
+  descriptionI18n?: LocalizedTextDto;
+
+  @ApiPropertyOptional({
+    type: LocalizedTextDto,
+    description: 'Treatment expiration / duration label { fr?, en? }.',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => LocalizedTextDto)
+  treatmentExpirationLabel?: LocalizedTextDto;
+
+  @ApiPropertyOptional({
+    type: LocalizedTextDto,
+    description: 'Finishing-included label { fr?, en? }.',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => LocalizedTextDto)
+  finishingIncludedLabel?: LocalizedTextDto;
 
   // `maxStepsPerArch` MUST be null when `isUnlimitedSteps` is true.
   // The service enforces that — class-validator can't express the
@@ -89,13 +151,37 @@ export class CreatePackDto {
   @ApiPropertyOptional({
     example: '2100.000',
     description:
-      'Optional inline price. When set, the service creates an ACTIVE PackPrice with archType=two_arches atomically with the pack.',
+      'Legacy inline price → creates an ACTIVE two_arches PackPrice. Prefer `priceTwoArches`; kept for backward-compat.',
   })
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 3 })
   @IsPositive()
   @Type(() => Number)
   price?: number;
+
+  // ─── Arch-specific prices (table-style pricing) ─────────────────
+  // When set, the service creates the ACTIVE PackPrice for that arch
+  // atomically with the pack. At least one price (priceTwoArches,
+  // priceSingleArch, or legacy `price`) is required — enforced in the
+  // service. Both share the single `currency`.
+  @ApiPropertyOptional({ example: 2100, description: 'Price for TWO arches.' })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 3 })
+  @IsPositive()
+  @Type(() => Number)
+  priceTwoArches?: number;
+
+  @ApiPropertyOptional({
+    example: 1300,
+    description:
+      'Price for a SINGLE arch. Omit (or null) to not offer single-arch — orders then disable "Arcade unique" for this pack.',
+    nullable: true,
+  })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 3 })
+  @IsPositive()
+  @Type(() => Number)
+  priceSingleArch?: number | null;
 
   @ApiPropertyOptional({ example: 'TND', default: 'TND' })
   @IsOptional()
@@ -113,12 +199,36 @@ export class UpdatePackDto {
   @Transform(({ value }) => normalizeOptionalString(value))
   name?: string;
 
+  @ApiPropertyOptional({ type: LocalizedTextDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => LocalizedTextDto)
+  nameI18n?: LocalizedTextDto;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
   @MaxLength(280)
   @Transform(({ value }) => normalizeOptionalString(value))
   description?: string;
+
+  @ApiPropertyOptional({ type: LocalizedTextDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => LocalizedTextDto)
+  descriptionI18n?: LocalizedTextDto;
+
+  @ApiPropertyOptional({ type: LocalizedTextDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => LocalizedTextDto)
+  treatmentExpirationLabel?: LocalizedTextDto;
+
+  @ApiPropertyOptional({ type: LocalizedTextDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => LocalizedTextDto)
+  finishingIncludedLabel?: LocalizedTextDto;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -162,13 +272,32 @@ export class UpdatePackDto {
   // the snapshot — only the catalogue row).
   @ApiPropertyOptional({
     description:
-      'Inline price update. Updates (or creates) the ACTIVE PackPrice row for archType=two_arches.',
+      'Legacy inline price update → updates/creates the ACTIVE two_arches price. Prefer `priceTwoArches`.',
   })
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 3 })
   @IsPositive()
   @Type(() => Number)
   price?: number;
+
+  @ApiPropertyOptional({ example: 2100, description: 'Price for TWO arches.' })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 3 })
+  @IsPositive()
+  @Type(() => Number)
+  priceTwoArches?: number;
+
+  @ApiPropertyOptional({
+    example: 1300,
+    description:
+      'Price for a SINGLE arch. Pass null to archive (stop offering) single-arch pricing.',
+    nullable: true,
+  })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 3 })
+  @IsPositive()
+  @Type(() => Number)
+  priceSingleArch?: number | null;
 
   @ApiPropertyOptional({ example: 'TND' })
   @IsOptional()

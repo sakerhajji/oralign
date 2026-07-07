@@ -37,6 +37,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ClinicalOrderFiles } from '@/components/orders/order-file-upload';
+import { formatChiefComplaint } from '@/lib/chief-complaint';
 import { OrderStatusBadge } from '@/components/orders/order-status-badge';
 import { OrderStatusChangeDialog } from '@/components/orders/order-status-change-dialog';
 import { TreatmentPlanReview } from '@/components/orders/treatment-plan-review';
@@ -509,7 +510,7 @@ export default function OrderDetailPage() {
       {/* ─── 4 · Treatment plan ───────────────────────────────────────── */}
       <Section icon={Target} title={t('orderDetail.sections.clinicalObjective')}>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Info label={t('orderForm.treatment.chiefComplaint')} value={order.chiefComplaint} wide />
+          <Info label={t('orderForm.treatment.chiefComplaint')} value={formatChiefComplaint(order.chiefComplaint, t)} wide />
           <Info label={t('orderForm.steps.treatment')} value={order.treatmentPlan} wide />
           <Info label={t('orderForm.treatment.apRelationship')} value={order.apRelationship} />
         </div>

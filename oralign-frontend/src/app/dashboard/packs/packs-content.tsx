@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useT } from '@/lib/i18n/lang-context';
 import {
   usePacks,
@@ -10,7 +10,14 @@ import {
   useActivatePack,
   useDeactivatePack,
 } from '@/lib/hooks';
-import { ArchType, type Pack, type PackPrice } from '@/lib/types';
+import { useBillingPublicDefaults } from '@/lib/hooks/use-company-billing';
+import { pickLocalized } from '@/lib/api/blog.service';
+import {
+  ArchType,
+  type CreatePackDto,
+  type Pack,
+  type PackPrice,
+} from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -85,17 +92,36 @@ function activePriceFor(pack: Pack): PackPrice | null {
   return twoArches ?? active[0]!;
 }
 
+/** Active price for a specific arch, or null when not offered. */
+function priceForArch(pack: Pack, arch: ArchType): PackPrice | null {
+  return (
+    (pack.prices ?? []).find((p) => p.isActive && p.archType === arch) ?? null
+  );
+}
+
 function formatMoney(p: PackPrice): string {
   // Decimal-as-string on the wire — render with a thin space + the
   // currency code so the columns line up cleanly in tabular nums.
   return `${p.price} ${p.currency}`;
 }
 
+/**
+ * Localized pack name / description with FR fallback. Old packs whose
+ * `*I18n` bags are null resolve through the legacy plain string. Never
+ * returns empty for the name (falls back to the plain `name`).
+ */
+function packName(pack: Pack, lang: string): string {
+  return pickLocalized(pack.nameI18n ?? pack.name, lang) || pack.name;
+}
+function packDescription(pack: Pack, lang: string): string {
+  return pickLocalized(pack.descriptionI18n ?? pack.description ?? '', lang);
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Page
 
 export function PacksPageContent() {
-  const { t } = useT();
+  const { t, lang } = useT();
   const [includeInactive, setIncludeInactive] = useState(false);
   const { data: packsResponse, isLoading } = usePacks({
     includeInactive,
@@ -180,14 +206,23 @@ export function PacksPageContent() {
                   </TableHeader>
                   <TableBody>
                     {packs.map((pack) => {
-                      const price = activePriceFor(pack);
+                      const twoArch = priceForArch(pack, ArchType.TWO_ARCHES);
+                      const singleArch = priceForArch(
+                        pack,
+                        ArchType.ONE_ARCH,
+                      );
+                      const primaryPrice =
+                        twoArch ?? singleArch ?? activePriceFor(pack);
+                      const desc = packDescription(pack, lang);
                       return (
                         <TableRow key={pack.id}>
                           <TableCell>
-                            <div className="font-medium">{pack.name}</div>
-                            {pack.description ? (
+                            <div className="font-medium">
+                              {packName(pack, lang)}
+                            </div>
+                            {desc ? (
                               <div className="line-clamp-2 max-w-md text-xs text-muted-foreground">
-                                {pack.description}
+                                {desc}
                               </div>
                             ) : null}
                           </TableCell>
@@ -205,9 +240,32 @@ export function PacksPageContent() {
                                 })}
                           </TableCell>
                           <TableCell>
-                            {price ? (
+                            {twoArch || singleArch ? (
+                              <div className="space-y-0.5 text-sm tabular-nums">
+                                {twoArch ? (
+                                  <div>
+                                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                                      {t('packsAdmin.priceTwoArchShort')}
+                                    </span>{' '}
+                                    <span className="font-semibold">
+                                      {formatMoney(twoArch)}
+                                    </span>
+                                  </div>
+                                ) : null}
+                                {singleArch ? (
+                                  <div>
+                                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                                      {t('packsAdmin.priceSingleArchShort')}
+                                    </span>{' '}
+                                    <span className="font-medium">
+                                      {formatMoney(singleArch)}
+                                    </span>
+                                  </div>
+                                ) : null}
+                              </div>
+                            ) : primaryPrice ? (
                               <span className="text-sm font-semibold tabular-nums">
-                                {formatMoney(price)}
+                                {formatMoney(primaryPrice)}
                               </span>
                             ) : (
                               <span className="text-xs text-muted-foreground">
@@ -246,7 +304,11 @@ export function PacksPageContent() {
                   viewport. */}
               <div className="flex flex-col gap-3 p-3 sm:hidden">
                 {packs.map((pack) => {
-                  const price = activePriceFor(pack);
+                  const twoArch = priceForArch(pack, ArchType.TWO_ARCHES);
+                  const singleArch = priceForArch(pack, ArchType.ONE_ARCH);
+                  const primaryPrice =
+                    twoArch ?? singleArch ?? activePriceFor(pack);
+                  const desc = packDescription(pack, lang);
                   return (
                     <div
                       key={pack.id}
@@ -255,16 +317,18 @@ export function PacksPageContent() {
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className="font-semibold">{pack.name}</span>
+                            <span className="font-semibold">
+                              {packName(pack, lang)}
+                            </span>
                             {pack.isActive ? (
                               <Badge>{t('packsAdmin.active')}</Badge>
                             ) : (
                               <Badge variant="outline">{t('packsAdmin.inactive')}</Badge>
                             )}
                           </div>
-                          {pack.description ? (
+                          {desc ? (
                             <p className="mt-1 text-xs text-muted-foreground">
-                              {pack.description}
+                              {desc}
                             </p>
                           ) : null}
                         </div>
@@ -303,8 +367,37 @@ export function PacksPageContent() {
                           <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">
                             {t('packsAdmin.cardPrice')}
                           </dt>
-                          <dd className="mt-0.5 font-semibold tabular-nums">
-                            {price ? formatMoney(price) : t('packsAdmin.cardNoPrice')}
+                          <dd className="mt-0.5 space-y-0.5 text-sm tabular-nums">
+                            {twoArch || singleArch ? (
+                              <>
+                                {twoArch ? (
+                                  <div>
+                                    <span className="text-muted-foreground">
+                                      {t('packsAdmin.priceTwoArchShort')}:{' '}
+                                    </span>
+                                    <span className="font-semibold">
+                                      {formatMoney(twoArch)}
+                                    </span>
+                                  </div>
+                                ) : null}
+                                {singleArch ? (
+                                  <div>
+                                    <span className="text-muted-foreground">
+                                      {t('packsAdmin.priceSingleArchShort')}:{' '}
+                                    </span>
+                                    <span className="font-medium">
+                                      {formatMoney(singleArch)}
+                                    </span>
+                                  </div>
+                                ) : null}
+                              </>
+                            ) : primaryPrice ? (
+                              <span className="font-semibold">
+                                {formatMoney(primaryPrice)}
+                              </span>
+                            ) : (
+                              t('packsAdmin.cardNoPrice')
+                            )}
                           </dd>
                         </div>
                       </dl>
@@ -337,7 +430,9 @@ export function PacksPageContent() {
           <AlertDialogHeader>
             <AlertDialogTitle>{t('packsAdmin.deleteTitle')}</AlertDialogTitle>
             <AlertDialogDescription>
-              {t('packsAdmin.deleteBody', { name: confirmDelete?.name ?? '' })}
+              {t('packsAdmin.deleteBody', {
+                name: confirmDelete ? packName(confirmDelete, lang) : '',
+              })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -415,9 +510,102 @@ function RowActions({
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Unified pack form — Pack-row fields + inline price + currency in
-// one place. The backend creates / updates the PackPrice atomically
-// with the Pack so the admin only saves once.
+// Bilingual (FR / EN) field — one labelled row with a French input and
+// an English input side-by-side on desktop, stacked on mobile. FR can be
+// marked required; EN is always optional (falls back to FR at display).
+
+function BilingualField({
+  label,
+  required,
+  textarea,
+  frValue,
+  enValue,
+  onFr,
+  onEn,
+  frPlaceholder,
+  enPlaceholder,
+}: {
+  label: string;
+  required?: boolean;
+  textarea?: boolean;
+  frValue: string;
+  enValue: string;
+  onFr: (v: string) => void;
+  onEn: (v: string) => void;
+  frPlaceholder?: string;
+  enPlaceholder?: string;
+}) {
+  return (
+    <div className="grid gap-2">
+      <Label>
+        {label}
+        {required ? <span className="text-destructive"> *</span> : null}
+      </Label>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-1">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Français
+          </span>
+          {textarea ? (
+            <Textarea
+              rows={2}
+              value={frValue}
+              onChange={(e) => onFr(e.target.value)}
+              placeholder={frPlaceholder}
+            />
+          ) : (
+            <Input
+              value={frValue}
+              onChange={(e) => onFr(e.target.value)}
+              placeholder={frPlaceholder}
+            />
+          )}
+        </div>
+        <div className="grid gap-1">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            English
+          </span>
+          {textarea ? (
+            <Textarea
+              rows={2}
+              value={enValue}
+              onChange={(e) => onEn(e.target.value)}
+              placeholder={enPlaceholder}
+            />
+          ) : (
+            <Input
+              value={enValue}
+              onChange={(e) => onEn(e.target.value)}
+              placeholder={enPlaceholder}
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Small titled section wrapper used inside the pack modal body. */
+function FormSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="grid gap-4 rounded-lg border bg-card p-4">
+      <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+      {children}
+    </section>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Pack form — wide, responsive, sectioned. Multilingual (FR/EN) content
+// + arch-based pricing (two arches / single arch) + currency. The
+// backend persists the localized bags and the matching PackPrice rows
+// atomically, so the admin saves once.
 
 function PackFormDialog({
   open,
@@ -432,267 +620,316 @@ function PackFormDialog({
   const editing = !!pack;
   const create = useCreatePack();
   const update = useUpdatePack();
+  const billing = useBillingPublicDefaults();
+  const defaultCurrency = billing.data?.defaultCurrency ?? 'TND';
 
-  const currentPrice = useMemo(() => (pack ? activePriceFor(pack) : null), [
-    pack,
-  ]);
+  // Multilingual text
+  const [nameFr, setNameFr] = useState('');
+  const [nameEn, setNameEn] = useState('');
+  const [descFr, setDescFr] = useState('');
+  const [descEn, setDescEn] = useState('');
+  const [expFr, setExpFr] = useState('');
+  const [expEn, setExpEn] = useState('');
+  const [finFr, setFinFr] = useState('');
+  const [finEn, setFinEn] = useState('');
+  // Treatment
+  const [maxSteps, setMaxSteps] = useState('');
+  const [isUnlimitedSteps, setIsUnlimitedSteps] = useState(false);
+  const [includedCorrections, setIncludedCorrections] = useState('');
+  const [isUnlimitedCorrections, setIsUnlimitedCorrections] = useState(false);
+  // Pricing
+  const [priceTwo, setPriceTwo] = useState('');
+  const [priceSingle, setPriceSingle] = useState('');
+  const [currency, setCurrency] = useState('TND');
+  // Visibility
+  const [isActive, setIsActive] = useState(true);
 
-  const [name, setName] = useState(pack?.name ?? '');
-  const [description, setDescription] = useState(pack?.description ?? '');
-  const [maxSteps, setMaxSteps] = useState<string>(
-    pack?.maxStepsPerArch != null ? String(pack.maxStepsPerArch) : '',
-  );
-  const [includedCorrections, setIncludedCorrections] = useState<string>(
-    pack?.includedCorrections != null
-      ? String(pack.includedCorrections)
-      : '',
-  );
-  const [isUnlimitedSteps, setIsUnlimitedSteps] = useState(
-    pack?.isUnlimitedSteps ?? false,
-  );
-  const [isUnlimitedCorrections, setIsUnlimitedCorrections] = useState(
-    pack?.isUnlimitedCorrections ?? false,
-  );
-  const [isActive, setIsActive] = useState(pack?.isActive ?? true);
-  // Inline price + currency — empty string = "no change" on edit;
-  // empty on create = "create the pack without a price (you can add
-  // it later via Edit)".
-  const [priceInput, setPriceInput] = useState<string>(
-    currentPrice ? String(currentPrice.price) : '',
-  );
-  const [currency, setCurrency] = useState<string>(
-    currentPrice?.currency ?? 'TND',
-  );
-
-  // Keep the form synced with whichever pack the parent selected. We
-  // use useEffect (not useMemo — that was a bug — useMemo's body is
-  // computed, not for side effects) so the resets actually fire on
-  // open + pack change. Stale state was the cause of "I edited PRO,
-  // closed the dialog, opened ESSENTIAL, and saw PRO's name".
+  // Reset the form whenever the dialog opens or the target pack changes.
   useEffect(() => {
     if (!open) return;
-    setName(pack?.name ?? '');
-    setDescription(pack?.description ?? '');
-    setMaxSteps(
-      pack?.maxStepsPerArch != null ? String(pack.maxStepsPerArch) : '',
-    );
-    setIncludedCorrections(
-      pack?.includedCorrections != null
-        ? String(pack.includedCorrections)
-        : '',
-    );
+    setNameFr(pack?.nameI18n?.fr ?? pack?.name ?? '');
+    setNameEn(pack?.nameI18n?.en ?? '');
+    setDescFr(pack?.descriptionI18n?.fr ?? pack?.description ?? '');
+    setDescEn(pack?.descriptionI18n?.en ?? '');
+    setExpFr(pack?.treatmentExpirationLabel?.fr ?? '');
+    setExpEn(pack?.treatmentExpirationLabel?.en ?? '');
+    setFinFr(pack?.finishingIncludedLabel?.fr ?? '');
+    setFinEn(pack?.finishingIncludedLabel?.en ?? '');
+    setMaxSteps(pack?.maxStepsPerArch != null ? String(pack.maxStepsPerArch) : '');
     setIsUnlimitedSteps(pack?.isUnlimitedSteps ?? false);
+    setIncludedCorrections(
+      pack?.includedCorrections != null ? String(pack.includedCorrections) : '',
+    );
     setIsUnlimitedCorrections(pack?.isUnlimitedCorrections ?? false);
+    const two = pack ? priceForArch(pack, ArchType.TWO_ARCHES) : null;
+    const single = pack ? priceForArch(pack, ArchType.ONE_ARCH) : null;
+    setPriceTwo(two ? String(two.price) : '');
+    setPriceSingle(single ? String(single.price) : '');
+    setCurrency(two?.currency ?? single?.currency ?? defaultCurrency);
     setIsActive(pack?.isActive ?? true);
-    const p = pack ? activePriceFor(pack) : null;
-    setPriceInput(p ? String(p.price) : '');
-    setCurrency(p?.currency ?? 'TND');
-  }, [open, pack]);
+  }, [open, pack, defaultCurrency]);
 
-  const priceTouched =
-    priceInput.trim() !== '' &&
-    (!currentPrice || String(currentPrice.price) !== priceInput.trim());
-  const currencyTouched =
-    !!currentPrice && currency !== currentPrice.currency;
+  // ── Derived validation ──
+  const twoNum = priceTwo.trim() === '' ? undefined : Number(priceTwo);
+  const singleNum = priceSingle.trim() === '' ? undefined : Number(priceSingle);
+  const twoInvalid =
+    priceTwo.trim() !== '' && (!Number.isFinite(twoNum) || (twoNum as number) <= 0);
+  const singleInvalid =
+    priceSingle.trim() !== '' &&
+    (!Number.isFinite(singleNum) || (singleNum as number) <= 0);
+  const hasAnyPrice =
+    (twoNum !== undefined && twoNum > 0) ||
+    (singleNum !== undefined && singleNum > 0);
+  const nameValid = nameFr.trim() !== '';
+  const stepsValid =
+    isUnlimitedSteps || (maxSteps.trim() !== '' && Number(maxSteps) >= 1);
+  const submitting = create.isPending || update.isPending;
+  const canSubmit =
+    nameValid &&
+    hasAnyPrice &&
+    stepsValid &&
+    !twoInvalid &&
+    !singleInvalid &&
+    !submitting;
+
+  const bag = (fr: string, en: string): { fr?: string; en?: string } | undefined => {
+    const o: { fr?: string; en?: string } = {};
+    if (fr.trim()) o.fr = fr.trim();
+    if (en.trim()) o.en = en.trim();
+    return Object.keys(o).length ? o : undefined;
+  };
 
   const submit = () => {
-    const numericPrice =
-      priceInput.trim() === '' ? undefined : Number(priceInput);
-    const priceIsValid =
-      numericPrice === undefined ||
-      (Number.isFinite(numericPrice) && numericPrice > 0);
-    if (!priceIsValid) return;
-
-    const dto = {
-      name: name.trim(),
-      description: description.trim() || undefined,
-      maxStepsPerArch: isUnlimitedSteps
-        ? undefined
-        : Number(maxSteps) || undefined,
+    if (!canSubmit) return;
+    const dto: CreatePackDto = {
+      nameI18n: {
+        fr: nameFr.trim(),
+        ...(nameEn.trim() ? { en: nameEn.trim() } : {}),
+      },
+      descriptionI18n: bag(descFr, descEn),
+      // On edit, send an empty bag when cleared so the backend can null
+      // the column; on create just omit an empty label.
+      treatmentExpirationLabel: editing ? bag(expFr, expEn) ?? {} : bag(expFr, expEn),
+      finishingIncludedLabel: editing ? bag(finFr, finEn) ?? {} : bag(finFr, finEn),
+      maxStepsPerArch: isUnlimitedSteps ? undefined : Number(maxSteps) || undefined,
       includedCorrections: isUnlimitedCorrections
         ? undefined
-        : Number(includedCorrections) || undefined,
+        : includedCorrections.trim() === ''
+          ? undefined
+          : Number(includedCorrections),
       isUnlimitedSteps,
       isUnlimitedCorrections,
       isActive,
-      // Audience flag is no longer surfaced in the UI — every pack is
-      // available to every practitioner. Sending `false` keeps the
-      // backend column in sync with the new business rule even on
-      // edits of legacy rows that were previously flagged true.
+      // Retired flag — always send false so legacy `true` rows normalize.
       isForOrthodontists: false,
-      // Inline price — only send when the admin actually entered a
-      // value. On edit we also send when currency changed; the
-      // service skips no-op writes so a re-submit doesn't churn the
-      // PackPrice row.
-      ...(numericPrice !== undefined &&
-      (!editing || priceTouched || currencyTouched)
-        ? { price: numericPrice, currency: currency || 'TND' }
-        : {}),
+      priceTwoArches: twoNum !== undefined && twoNum > 0 ? twoNum : undefined,
+      // On edit, an empty single-arch field clears (archives) the price;
+      // on create it just means "single arch not offered".
+      priceSingleArch:
+        singleNum !== undefined && singleNum > 0
+          ? singleNum
+          : editing
+            ? null
+            : undefined,
+      currency: currency.trim() || 'TND',
     };
     if (editing && pack) {
-      update.mutate(
-        { id: pack.id, dto },
-        { onSuccess: onClose },
-      );
+      update.mutate({ id: pack.id, dto }, { onSuccess: onClose });
     } else {
       create.mutate(dto, { onSuccess: onClose });
     }
   };
 
-  const submitting = create.isPending || update.isPending;
-  const priceNumeric = Number(priceInput);
-  const priceInvalid =
-    priceInput.trim() !== '' &&
-    (!Number.isFinite(priceNumeric) || priceNumeric <= 0);
-
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      {/* max-h on the content so very tall forms scroll inside the
-          dialog instead of pushing off-screen on small phones. */}
-      <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
-        <DialogHeader>
+      {/* Wide on desktop (base DialogContent caps at sm:max-w-sm, so the
+          sm:/lg: overrides are required), single-column + 95vw on mobile.
+          The body scrolls between a sticky header and a sticky footer so
+          the modal never exceeds the viewport height. */}
+      <DialogContent className="flex max-h-[90vh] max-w-[95vw] flex-col gap-0 p-0 sm:max-w-2xl lg:max-w-4xl">
+        <DialogHeader className="border-b px-6 pb-4 pt-6">
           <DialogTitle>
-            {editing ? t('packsAdmin.dialogEditTitle') : t('packsAdmin.dialogNewTitle')}
+            {editing
+              ? t('packsAdmin.dialogEditTitle')
+              : t('packsAdmin.dialogNewTitle')}
           </DialogTitle>
           <DialogDescription>
             {t('packsAdmin.dialogDescription')}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-4 py-2">
-          <div className="grid gap-2">
-            <Label htmlFor="pack-name">{t('packsAdmin.nameLabel')}</Label>
-            <Input
-              id="pack-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={t('packsAdmin.namePlaceholder')}
+        <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
+          {/* 1 · General info */}
+          <FormSection title={t('packsAdmin.sectionGeneral')}>
+            <BilingualField
+              label={t('packsAdmin.nameLabel')}
+              required
+              frValue={nameFr}
+              enValue={nameEn}
+              onFr={setNameFr}
+              onEn={setNameEn}
+              frPlaceholder={t('packsAdmin.namePlaceholder')}
+              enPlaceholder={t('packsAdmin.namePlaceholderEn')}
             />
-          </div>
-
-          <div className="grid gap-2">
-            <Label htmlFor="pack-description">{t('packsAdmin.descriptionLabel')}</Label>
-            <Textarea
-              id="pack-description"
-              rows={2}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder={t('packsAdmin.descriptionPlaceholder')}
+            <BilingualField
+              label={t('packsAdmin.descriptionLabel')}
+              textarea
+              frValue={descFr}
+              enValue={descEn}
+              onFr={setDescFr}
+              onEn={setDescEn}
+              frPlaceholder={t('packsAdmin.descriptionPlaceholder')}
             />
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="grid gap-2">
-              <Label htmlFor="pack-steps">{t('packsAdmin.maxStepsLabel')}</Label>
-              <Input
-                id="pack-steps"
-                type="number"
-                min={1}
-                disabled={isUnlimitedSteps}
-                value={maxSteps}
-                onChange={(e) => setMaxSteps(e.target.value)}
-              />
-              <label className="flex items-center gap-2 text-xs">
-                <Checkbox
-                  checked={isUnlimitedSteps}
-                  onCheckedChange={(v) => setIsUnlimitedSteps(!!v)}
-                />
-                {t('packsAdmin.unlimitedStepsCb')}
-              </label>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="pack-corrections">{t('packsAdmin.includedCorrectionsLabel')}</Label>
-              <Input
-                id="pack-corrections"
-                type="number"
-                min={0}
-                disabled={isUnlimitedCorrections}
-                value={includedCorrections}
-                onChange={(e) => setIncludedCorrections(e.target.value)}
-              />
-              <label className="flex items-center gap-2 text-xs">
-                <Checkbox
-                  checked={isUnlimitedCorrections}
-                  onCheckedChange={(v) => setIsUnlimitedCorrections(!!v)}
-                />
-                {t('packsAdmin.unlimitedCorrectionsCb')}
-              </label>
-            </div>
-          </div>
-
-          {/* Inline price block — the admin's "one source of truth"
-              for catalogue pricing. Backend creates/updates the
-              underlying PackPrice atomically. Currency stays in TND
-              for now but the field is editable for future markets. */}
-          <div className="grid gap-2 rounded-md border bg-muted/30 p-3">
-            <Label className="text-sm font-medium">{t('packsAdmin.packPriceLabel')}</Label>
-            <div className="grid grid-cols-[1fr_auto] gap-2 sm:grid-cols-[2fr_1fr]">
-              <Input
-                type="number"
-                step="0.001"
-                min={0.001}
-                value={priceInput}
-                onChange={(e) => setPriceInput(e.target.value)}
-                placeholder={
-                  editing
-                    ? currentPrice
-                      ? String(currentPrice.price)
-                      : t('packsAdmin.pricePlaceholder')
-                    : t('packsAdmin.pricePlaceholder')
-                }
-                aria-invalid={priceInvalid}
-              />
-              <Input
-                value={currency}
-                maxLength={8}
-                onChange={(e) =>
-                  setCurrency(e.target.value.toUpperCase())
-                }
-                className="uppercase"
-              />
-            </div>
-            <p className="text-[11px] leading-snug text-muted-foreground">
-              {editing
-                ? currentPrice
-                  ? t('packsAdmin.priceHelpEdited')
-                  : t('packsAdmin.priceHelpNoneYet')
-                : t('packsAdmin.priceHelpCreate')}
-            </p>
-            {priceInvalid ? (
-              <p className="text-[11px] text-destructive">
-                {t('packsAdmin.priceInvalid')}
-              </p>
-            ) : null}
-          </div>
-
-          {/* Catalogue visibility — flipping this OFF hides the pack
-              from the public practitioner showcase and from the
-              quote-creation picker. Existing quotations that
-              snapshotted this pack are unaffected. */}
-          <div className="grid gap-2 rounded-md border bg-muted/30 p-3">
             <label className="flex items-center gap-2 text-sm font-medium">
               <Checkbox
                 checked={isActive}
                 onCheckedChange={(v) => setIsActive(!!v)}
               />
               {t('packsAdmin.activeInCatalogue')}
+              <span className="text-xs font-normal text-muted-foreground">
+                {isActive ? t('packsAdmin.activeYes') : t('packsAdmin.activeNo')}
+              </span>
             </label>
-            <p className="text-xs text-muted-foreground">
-              {isActive
-                ? t('packsAdmin.activeYes')
-                : t('packsAdmin.activeNo')}
+          </FormSection>
+
+          {/* 2 · Treatment */}
+          <FormSection title={t('packsAdmin.sectionTreatment')}>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-2">
+                <Label htmlFor="pack-steps">{t('packsAdmin.alignersLabel')}</Label>
+                <Input
+                  id="pack-steps"
+                  type="number"
+                  min={1}
+                  disabled={isUnlimitedSteps}
+                  value={isUnlimitedSteps ? '' : maxSteps}
+                  onChange={(e) => setMaxSteps(e.target.value)}
+                  placeholder={t('packsAdmin.alignersPlaceholder')}
+                />
+                <label className="flex items-center gap-2 text-xs">
+                  <Checkbox
+                    checked={isUnlimitedSteps}
+                    onCheckedChange={(v) => {
+                      setIsUnlimitedSteps(!!v);
+                      if (v) setMaxSteps('');
+                    }}
+                  />
+                  {t('packsAdmin.unlimitedStepsCb')}
+                </label>
+                {!stepsValid ? (
+                  <p className="text-[11px] text-destructive">
+                    {t('packsAdmin.alignersRequired')}
+                  </p>
+                ) : null}
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="pack-corrections">
+                  {t('packsAdmin.includedCorrectionsLabel')}
+                </Label>
+                <Input
+                  id="pack-corrections"
+                  type="number"
+                  min={0}
+                  disabled={isUnlimitedCorrections}
+                  value={isUnlimitedCorrections ? '' : includedCorrections}
+                  onChange={(e) => setIncludedCorrections(e.target.value)}
+                />
+                <label className="flex items-center gap-2 text-xs">
+                  <Checkbox
+                    checked={isUnlimitedCorrections}
+                    onCheckedChange={(v) => {
+                      setIsUnlimitedCorrections(!!v);
+                      if (v) setIncludedCorrections('');
+                    }}
+                  />
+                  {t('packsAdmin.unlimitedCorrectionsCb')}
+                </label>
+              </div>
+            </div>
+            <BilingualField
+              label={t('packsAdmin.expirationLabel')}
+              frValue={expFr}
+              enValue={expEn}
+              onFr={setExpFr}
+              onEn={setExpEn}
+              frPlaceholder={t('packsAdmin.expirationPlaceholder')}
+            />
+          </FormSection>
+
+          {/* 3 · Pricing */}
+          <FormSection title={t('packsAdmin.sectionPricing')}>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div className="grid gap-2">
+                <Label htmlFor="price-two">
+                  {t('packsAdmin.priceTwoArchesLabel')}
+                </Label>
+                <Input
+                  id="price-two"
+                  type="number"
+                  step="0.001"
+                  min={0.001}
+                  value={priceTwo}
+                  onChange={(e) => setPriceTwo(e.target.value)}
+                  placeholder={t('packsAdmin.pricePlaceholder')}
+                  aria-invalid={twoInvalid}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="price-single">
+                  {t('packsAdmin.priceSingleArchLabel')}
+                </Label>
+                <Input
+                  id="price-single"
+                  type="number"
+                  step="0.001"
+                  min={0.001}
+                  value={priceSingle}
+                  onChange={(e) => setPriceSingle(e.target.value)}
+                  placeholder={t('packsAdmin.priceSingleArchPlaceholder')}
+                  aria-invalid={singleInvalid}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="pack-currency">
+                  {t('packsAdmin.currencyLabel')}
+                </Label>
+                <Input
+                  id="pack-currency"
+                  value={currency}
+                  maxLength={8}
+                  onChange={(e) => setCurrency(e.target.value.toUpperCase())}
+                  className="uppercase"
+                />
+              </div>
+            </div>
+            <p className="text-[11px] leading-snug text-muted-foreground">
+              {t('packsAdmin.singleArchOptionalHint')}
             </p>
-          </div>
+            {!hasAnyPrice ? (
+              <p className="text-[11px] text-destructive">
+                {t('packsAdmin.atLeastOnePrice')}
+              </p>
+            ) : null}
+          </FormSection>
+
+          {/* 4 · Finishing */}
+          <FormSection title={t('packsAdmin.sectionFinishing')}>
+            <BilingualField
+              label={t('packsAdmin.finishingLabel')}
+              frValue={finFr}
+              enValue={finEn}
+              onFr={setFinFr}
+              onEn={setFinEn}
+              frPlaceholder={t('packsAdmin.finishingPlaceholder')}
+            />
+          </FormSection>
         </div>
 
-        <DialogFooter className="gap-2 sm:gap-0">
+        <DialogFooter className="gap-2 border-t px-6 py-4 sm:gap-2">
           <Button variant="ghost" onClick={onClose} disabled={submitting}>
             {t('packsAdmin.cancel')}
           </Button>
-          <Button
-            onClick={submit}
-            disabled={!name.trim() || submitting || priceInvalid}
-          >
+          <Button onClick={submit} disabled={!canSubmit}>
             {editing ? t('packsAdmin.saveChanges') : t('packsAdmin.createPack')}
           </Button>
         </DialogFooter>

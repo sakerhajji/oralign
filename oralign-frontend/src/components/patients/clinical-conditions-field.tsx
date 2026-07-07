@@ -3,37 +3,12 @@
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { useT } from '@/lib/i18n/lang-context';
+import { conditionLabel } from '@/lib/chief-complaint';
 import {
   CLINICAL_CONDITION_OPTIONS,
   CLINICAL_CONDITION_OTHER,
   type ClinicalCondition,
 } from '@/lib/types';
-
-/**
- * Map every canonical (English) clinical-condition value to its dict
- * key. The storage value sent to the backend stays English so existing
- * filters / search / analytics keep working — only the visible label
- * is translated. Each entry mirrors the order in
- * `CLINICAL_CONDITION_OPTIONS` so a translator can scan the two
- * side-by-side and spot drift.
- */
-const CONDITION_DICT_KEY: Record<string, string> = {
-  Crowding: 'orderForm.patient.condCrowding',
-  Spacing: 'orderForm.patient.condSpacing',
-  'Class II Division 1': 'orderForm.patient.condClassII1',
-  'Class II Division 2': 'orderForm.patient.condClassII2',
-  'Class III': 'orderForm.patient.condClassIII',
-  'Open bite': 'orderForm.patient.condOpenBite',
-  'Anterior crossbite': 'orderForm.patient.condAnteriorCrossbite',
-  'Posterior crossbite': 'orderForm.patient.condPosteriorCrossbite',
-  'Deep bite': 'orderForm.patient.condDeepBite',
-  'Narrow arch': 'orderForm.patient.condNarrowArch',
-  Proclination: 'orderForm.patient.condProclination',
-  'Increased overjet': 'orderForm.patient.condIncreasedOverjet',
-  'Unesthetic smile': 'orderForm.patient.condUnestheticSmile',
-  'Dental shape anomaly': 'orderForm.patient.condDentalShapeAnomaly',
-  Other: 'orderForm.patient.condOther',
-};
 
 /**
  * Multi-select checkbox grid for the patient's clinical conditions
@@ -134,7 +109,7 @@ export function ClinicalConditionsField({
           // Storage stays English; only the displayed label flips. If
           // the option ever drifts away from the dict map we fall back
           // to the raw English label so the row still renders.
-          const label = CONDITION_DICT_KEY[opt] ? t(CONDITION_DICT_KEY[opt]) : opt;
+          const label = conditionLabel(opt, t);
           return (
             <label
               key={opt}

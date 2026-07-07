@@ -1003,12 +1003,27 @@ model Quotation {
 
 model Pack {
   id                       String      @id @default(uuid())
+  // `name` / `description` stay as the FRENCH fallback + backward-compat
+  // columns (older packs and any non-i18n reader keep working). The
+  // localized bags below are the source of truth for display; the
+  // service always mirrors the FR value into these plain columns.
   name                     String
   description              String?
 
+  // Localized content bags — Localized<string> = { fr, en? }. Stored as
+  // Json (same pattern the Blog model uses) so no per-language columns.
+  // Null on legacy rows → the UI falls back to `name` / `description`.
+  nameI18n                 Json?
+  descriptionI18n          Json?
+  // Table-style multilingual labels. No legacy plain-string counterpart
+  // (these fields are new), so they live only as localized bags.
+  treatmentExpirationLabel Json?       // Localized<string>
+  finishingIncludedLabel   Json?       // Localized<string>
+
   // null + the matching unlimited flag = pack covers unlimited steps /
   // corrections. The two boolean flags are the source of truth — the
-  // numeric fields are NULL when unlimited.
+  // numeric fields are NULL when unlimited. `maxStepsPerArch` doubles as
+  // the "number of aligners per arch" business field.
   maxStepsPerArch          Int?
   includedCorrections      Int?
   isUnlimitedSteps         Boolean     @default(false)

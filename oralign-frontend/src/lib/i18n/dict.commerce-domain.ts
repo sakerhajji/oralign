@@ -25,11 +25,19 @@ export const commerceDomainDict = {
         fr: 'Aucun prix actif configuré',
       } as T,
       attachBtn: { en: 'Attach pack', fr: 'Associer le pack' } as T,
+      archModeLabel: { en: 'Arcade mode', fr: 'Mode d’arcade' } as T,
+      twoArches: { en: 'Two arches', fr: 'Deux arcades' } as T,
+      singleArch: { en: 'Single arch', fr: 'Arcade unique' } as T,
+      singleArchUnavailable: {
+        en: 'Single arch is not available for this pack.',
+        fr: 'Arcade unique non disponible pour ce forfait.',
+      } as T,
     },
 
     // quote-pack-panel.tsx — pack snapshot summary
     snapshot: {
       packFallback: { en: 'Pack', fr: 'Pack' } as T,
+      twoArches: { en: 'Two arches', fr: 'Deux arcades' } as T,
       singleArch: { en: 'Single arch', fr: 'Arcade unique' } as T,
       unlimitedSteps: { en: 'Unlimited steps', fr: 'Étapes illimitées' } as T,
       maxSteps: { en: 'Max {n} steps', fr: '{n} étapes max' } as T,

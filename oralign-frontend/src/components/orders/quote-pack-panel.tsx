@@ -19,6 +19,7 @@ import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { useT } from '@/lib/i18n/lang-context';
+import { pickLocalized } from '@/lib/api/blog.service';
 import {
   ArchType,
   BatchStatus,
@@ -207,42 +208,43 @@ export function QuotePackPanel({
 // ═══════════════════════════════════════════════════════════════════════
 
 function AttachPackCard({ quote }: { quote: Quotation }) {
-  const { t } = useT();
+  const { t, lang } = useT();
   const packsQ = usePacks({ limit: 100 });
   const attach = useAttachPackToQuotation();
   const [packId, setPackId] = useState<string>('');
+  const [archMode, setArchMode] = useState<ArchType>(ArchType.TWO_ARCHES);
 
   const activePacks = (packsQ.data?.data ?? []).filter((p) => p.isActive);
-  // Default the selection to the FIRST active pack so the admin lands on
-  // a sensible choice and the price preview shows immediately. Deriving
-  // it (rather than syncing via an effect after the fetch) keeps the
-  // picker controlled without a render-after-fetch state write.
   const effectiveId = packId || activePacks[0]?.id || '';
   const selectedPack = activePacks.find((p) => p.id === effectiveId);
 
-  // Single-price-per-pack model — every pack has ONE active price
-  // (archType=two_arches as the canonical pricing unit on the
-  // backend). The admin doesn't pick arch here anymore; the
-  // catalogue exposes one price per pack and that's what we
-  // snapshot.
+  // Arch-based pricing: the admin picks the arcade mode; each mode maps to
+  // its own active PackPrice. "Single arch" is only available when the
+  // pack actually has an active single-arch price.
   const activePrices = (selectedPack?.prices ?? []).filter((p) => p.isActive);
+  const twoPrice =
+    activePrices.find((p) => p.archType === ArchType.TWO_ARCHES) ?? null;
+  const singlePrice =
+    activePrices.find((p) => p.archType === ArchType.ONE_ARCH) ?? null;
+  const hasTwo = !!twoPrice;
+  const hasSingle = !!singlePrice;
+
+  // If the selected mode isn't offered by this pack, fall back to the one
+  // that is (defaulting to two arches).
+  const effectiveArch =
+    archMode === ArchType.ONE_ARCH && !hasSingle
+      ? ArchType.TWO_ARCHES
+      : archMode === ArchType.TWO_ARCHES && !hasTwo && hasSingle
+        ? ArchType.ONE_ARCH
+        : archMode;
   const activePrice =
-    activePrices.find((p) => p.archType === ArchType.TWO_ARCHES) ??
-    activePrices[0] ??
-    null;
+    effectiveArch === ArchType.ONE_ARCH ? singlePrice : twoPrice;
 
   const submit = () => {
-    if (!effectiveId) return;
-    // Always send `archType: TWO_ARCHES` explicitly — even though the
-    // refactored backend defaults to two_arches when omitted, the
-    // running container may still be the older build that REQUIRES
-    // a value. Passing the canonical pricing unit keeps the call
-    // working in both versions without a forced redeploy. The
-    // catalogue is single-price-per-pack now, so two_arches is the
-    // only valid value the admin would pick anyway.
+    if (!effectiveId || !activePrice) return;
     attach.mutate({
       quotationId: quote.id,
-      dto: { packId: effectiveId, archType: ArchType.TWO_ARCHES },
+      dto: { packId: effectiveId, archType: effectiveArch },
     });
   };
 
@@ -272,7 +274,7 @@ function AttachPackCard({ quote }: { quote: Quotation }) {
               ) : (
                 activePacks.map((p) => (
                   <SelectItem key={p.id} value={p.id}>
-                    {p.name}
+                    {pickLocalized(p.nameI18n ?? p.name, lang) || p.name}
                   </SelectItem>
                 ))
               )}
@@ -295,6 +297,46 @@ function AttachPackCard({ quote }: { quote: Quotation }) {
             )}
           </div>
         </div>
+
+        {/* Arcade mode — single vs two arches. Single is disabled when the
+            pack has no active single-arch price. */}
+        <div className="grid gap-2 md:col-span-3">
+          <Label>{t('quoteUi.attachPack.archModeLabel')}</Label>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant={
+                effectiveArch === ArchType.TWO_ARCHES ? 'default' : 'outline'
+              }
+              disabled={!hasTwo}
+              onClick={() => setArchMode(ArchType.TWO_ARCHES)}
+            >
+              {t('quoteUi.attachPack.twoArches')}
+              {twoPrice ? ` · ${money(twoPrice.price, twoPrice.currency)}` : ''}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={
+                effectiveArch === ArchType.ONE_ARCH ? 'default' : 'outline'
+              }
+              disabled={!hasSingle}
+              onClick={() => hasSingle && setArchMode(ArchType.ONE_ARCH)}
+            >
+              {t('quoteUi.attachPack.singleArch')}
+              {singlePrice
+                ? ` · ${money(singlePrice.price, singlePrice.currency)}`
+                : ''}
+            </Button>
+          </div>
+          {selectedPack && !hasSingle ? (
+            <p className="text-xs text-muted-foreground">
+              {t('quoteUi.attachPack.singleArchUnavailable')}
+            </p>
+          ) : null}
+        </div>
+
         <div className="md:col-span-3 flex justify-end">
           <Button
             onClick={submit}
@@ -313,38 +355,53 @@ function AttachPackCard({ quote }: { quote: Quotation }) {
 // ═══════════════════════════════════════════════════════════════════════
 
 function PackSnapshotCard({ quote }: { quote: Quotation }) {
-  const { t } = useT();
+  const { t, lang } = useT();
+  // Localized name resolves from the live pack (joined on the read),
+  // falling back to the stable `packName` snapshot when the pack was
+  // deleted. Expiration + finishing are display-only localized labels.
+  const name = quote.pack
+    ? pickLocalized(quote.pack.nameI18n ?? quote.pack.name, lang) ||
+      quote.pack.name
+    : quote.packName ?? t('quoteUi.snapshot.packFallback');
+  const expiration = quote.pack?.treatmentExpirationLabel
+    ? pickLocalized(quote.pack.treatmentExpirationLabel, lang)
+    : '';
+  const finishing = quote.pack?.finishingIncludedLabel
+    ? pickLocalized(quote.pack.finishingIncludedLabel, lang)
+    : '';
+  const isSingle = quote.archType === ArchType.ONE_ARCH;
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <div>
-          <CardTitle className="flex items-center gap-2 text-base">
+      <CardHeader className="flex flex-row items-start justify-between gap-3">
+        <div className="space-y-1">
+          <CardTitle className="flex flex-wrap items-center gap-2 text-base">
             <Package className="h-4 w-4 text-primary" />
-            {quote.packName ?? t('quoteUi.snapshot.packFallback')}
-            {/* Arch badge only surfaces on legacy single-arch quotes
-                — the consolidated model only uses two_arches and the
-                badge is redundant there. Kept for historical
-                quotations that were attached when the picker still
-                existed. */}
-            {quote.archType && quote.archType !== ArchType.TWO_ARCHES ? (
-              <Badge variant="secondary" className="font-normal">
-                {t('quoteUi.snapshot.singleArch')}
-              </Badge>
-            ) : null}
+            {name}
+            <Badge variant="secondary" className="font-normal">
+              {isSingle
+                ? t('quoteUi.snapshot.singleArch')
+                : t('quoteUi.snapshot.twoArches')}
+            </Badge>
           </CardTitle>
-          <CardDescription>
-            {quote.isUnlimitedSteps
-              ? t('quoteUi.snapshot.unlimitedSteps')
-              : t('quoteUi.snapshot.maxSteps', { n: quote.maxStepsPerArch ?? 0 })}
-            {' · '}
-            {quote.isUnlimitedCorrections
-              ? t('quoteUi.snapshot.unlimitedCorrections')
-              : t('quoteUi.snapshot.correctionsCount', {
-                  n: quote.includedCorrections ?? 0,
-                })}
+          <CardDescription className="space-y-0.5">
+            <span className="block">
+              {quote.isUnlimitedSteps
+                ? t('quoteUi.snapshot.unlimitedSteps')
+                : t('quoteUi.snapshot.maxSteps', {
+                    n: quote.maxStepsPerArch ?? 0,
+                  })}
+              {' · '}
+              {quote.isUnlimitedCorrections
+                ? t('quoteUi.snapshot.unlimitedCorrections')
+                : t('quoteUi.snapshot.correctionsCount', {
+                    n: quote.includedCorrections ?? 0,
+                  })}
+            </span>
+            {expiration ? <span className="block">{expiration}</span> : null}
+            {finishing ? <span className="block">{finishing}</span> : null}
           </CardDescription>
         </div>
-        <div className="text-right">
+        <div className="shrink-0 text-right">
           <div className="text-xs text-muted-foreground">
             {t('quoteUi.snapshot.totalPrice')}
           </div>
@@ -1285,7 +1342,7 @@ function PaymentMethodDialog({
   doctorName?: string | null;
   orderCode?: string | null;
 }) {
-  const { t } = useT();
+  const { t, lang } = useT();
   // Backend currently allows all three methods. If the project later
   // adds `allowedPaymentMethods` on the quote, swap this constant for
   // `quote.allowedPaymentMethods ?? METHODS`.
@@ -1465,11 +1522,18 @@ function PaymentMethodDialog({
                   value={format(new Date(installment.dueDate), 'MMM d, yyyy')}
                 />
               ) : null}
-              {quote.packName ? (
+              {quote.pack || quote.packName ? (
                 <DetailRow
                   icon={<Package className="h-3.5 w-3.5" />}
                   label={t('quoteUi.payDialog.pack')}
-                  value={quote.packName}
+                  value={
+                    quote.pack
+                      ? pickLocalized(
+                          quote.pack.nameI18n ?? quote.pack.name,
+                          lang,
+                        ) || quote.pack.name
+                      : (quote.packName as string)
+                  }
                 />
               ) : null}
               {patientName ? (

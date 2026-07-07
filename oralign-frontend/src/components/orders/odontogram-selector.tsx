@@ -242,8 +242,9 @@ export function OdontogramSelector({
    */
   readonlyValue?: ToothInstruction[];
   /**
-   * 'movement'   — order-wizard context: shows all 4 instruction colors
-   *                (No Attachments / Do Not Move / No IPR / Extract).
+   * 'movement'   — order-wizard / order-detail context: EXTRACTION only.
+   *                Only teeth flagged for extraction are colored; the other
+   *                doctor instructions are not selectable on this surface.
    * 'attachments' — focused treatment attachment context: a single attachment
    *                colour, the rest of the picker is hidden.
    * 'treatment'   — full treatment-planning context: movement flags,
@@ -281,7 +282,15 @@ export function OdontogramSelector({
   const iprEditable = !!onIprChange && !disabled;
 
   // Palette by context:
-  // - movement: order-facing prescription colors only.
+  // - movement: order-facing surface — EXTRACTION only. The doctor asked
+  //   that the order odontogram highlight extractions and nothing else, so
+  //   No-Attachments / Do-Not-Move / No-IPR are no longer colorable here.
+  //   Because `visibleTypes` is derived from this list, the restriction is
+  //   enforced at the DATA level too: `setTooth` can only write EXTRACT and
+  //   `assignments` only paints EXTRACT teeth — no CSS-only trick, and no
+  //   invalid colored state can be created. Legacy rows of the other three
+  //   types are preserved untouched (setTooth rewrites only visible types)
+  //   but simply don't render a fill.
   // - attachments: focused planner surface for pink attachment marks.
   // - treatment: the full lab/planner odontogram, including attachment.
   const visibleColors = useMemo<readonly ColorEntry[]>(
@@ -290,7 +299,7 @@ export function OdontogramSelector({
         return COLORS.filter((c) => c.type === ToothInstructionType.ATTACHMENT);
       }
       if (mode === 'treatment') return COLORS;
-      return COLORS.filter((c) => c.type !== ToothInstructionType.ATTACHMENT);
+      return COLORS.filter((c) => c.type === ToothInstructionType.EXTRACT);
     },
     [mode],
   );

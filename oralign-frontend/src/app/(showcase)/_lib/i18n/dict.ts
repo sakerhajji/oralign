@@ -716,6 +716,9 @@ export const dict = {
       ar: "ابحث عن مقال…",
     } as T,
     allCategories: { fr: "Toutes les catégories", en: "All categories", ar: "كل التصنيفات" } as T,
+    // Fallback "type" shown on a card whose post has no category set, so
+    // every card always displays a type badge.
+    defaultCategory: { fr: "Article", en: "Article", ar: "مقال" } as T,
     readMore: { fr: "Lire l'article", en: "Read more", ar: "اقرأ المزيد" } as T,
     readingTime: { fr: "{n} min de lecture", en: "{n} min read", ar: "{n} دقيقة قراءة" } as T,
     minRead: { fr: "{n} min", en: "{n} min", ar: "{n} دقيقة" } as T,

@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -73,6 +73,8 @@ import {
 } from '@/lib/hooks';
 import {
   ArchTreatment,
+  CLINICAL_CONDITION_OPTIONS,
+  CLINICAL_CONDITION_OTHER,
   CreateOrderDto,
   DentalOrder,
   Gender,
@@ -84,6 +86,11 @@ import {
   ToothInstructionType,
   UserRole,
 } from '@/lib/types';
+import {
+  packChiefComplaint,
+  unpackChiefComplaint,
+  formatChiefComplaint,
+} from '@/lib/chief-complaint';
 import { createOrderSchema } from '@/lib/schemas';
 import { cn } from '@/lib/utils';
 
@@ -302,6 +309,84 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
   );
   const activeStep = steps[step];
   const ActiveIcon = activeStep.icon;
+
+  // ── Chief complaint (order "Reason for consultation") ──────────────
+  // Edited as a checkbox multi-select (shared CLINICAL_CONDITION_OPTIONS)
+  // + an optional "Other" free-text. The order still stores ONE string
+  // (`form.chiefComplaint`) — we pack/unpack around it so no backend
+  // schema change is needed, and it stays SEPARATE from the patient's
+  // own clinicalConditions (editing here never rewrites the patient).
+  const [chiefConditions, setChiefConditions] = useState<string[]>(
+    () => unpackChiefComplaint(initialOrder?.chiefComplaint).conditions,
+  );
+  const [chiefOther, setChiefOther] = useState<string>(
+    () => unpackChiefComplaint(initialOrder?.chiefComplaint).other,
+  );
+  // Once the planner touches the chief-complaint field we stop auto-
+  // mirroring the patient's reasons into it (their edit wins).
+  const chiefTouchedRef = useRef(false);
+  // Track which existing patient we've already seeded from, so switching
+  // patients re-seeds but re-renders don't clobber edits.
+  const seededPatientRef = useRef<string | null>(null);
+
+  const handleChiefConditions = (next: string[]) => {
+    chiefTouchedRef.current = true;
+    setChiefConditions(next);
+    updateField('chiefComplaint', packChiefComplaint(next, chiefOther));
+  };
+  const handleChiefOther = (next: string) => {
+    chiefTouchedRef.current = true;
+    setChiefOther(next);
+    updateField('chiefComplaint', packChiefComplaint(chiefConditions, next));
+  };
+
+  // Seed the chief complaint from the chosen EXISTING patient's reasons
+  // (once per patient, and only while untouched). Never runs when editing
+  // an existing order — that already carries its own saved value.
+  useEffect(() => {
+    if (initialOrder) return;
+    if (patientMode !== 'existing') return;
+    const pid = form.patientId;
+    if (!pid || seededPatientRef.current === pid) return;
+    if (!selectedPatient) return;
+    if (chiefTouchedRef.current) return;
+    seededPatientRef.current = pid;
+    const conds = CLINICAL_CONDITION_OPTIONS.filter(
+      (o) =>
+        o !== CLINICAL_CONDITION_OTHER &&
+        (selectedPatient.clinicalConditions ?? []).includes(o),
+    );
+    const other = (selectedPatient.clinicalConditionsOther ?? '').trim();
+    const ordered = other ? [...conds, CLINICAL_CONDITION_OTHER] : conds;
+    setChiefConditions(ordered);
+    setChiefOther(other);
+    updateField('chiefComplaint', packChiefComplaint(ordered, other));
+    // updateField is intentionally omitted — it's stable enough and the
+    // seededPatientRef guard makes re-runs no-ops.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.patientId, patientMode, selectedPatient, initialOrder]);
+
+  // Mirror the NEW-patient conditions (entered in step 1) into the chief
+  // complaint until the planner overrides it — preserves the previous
+  // "reason auto-fills from conditions" behaviour for new patients.
+  useEffect(() => {
+    if (initialOrder) return;
+    if (patientMode !== 'new') return;
+    if (chiefTouchedRef.current) return;
+    const conds = CLINICAL_CONDITION_OPTIONS.filter((o) =>
+      newPatient.clinicalConditions.includes(o),
+    );
+    const other = newPatient.clinicalConditionsOther.trim();
+    setChiefConditions(conds);
+    setChiefOther(other);
+    updateField('chiefComplaint', packChiefComplaint(conds, other));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    patientMode,
+    newPatient.clinicalConditions,
+    newPatient.clinicalConditionsOther,
+    initialOrder,
+  ]);
   const canModify = true;
   const canSubmit = !savedOrder || savedOrder.status === OrderStatus.DRAFT;
   const isSaving =
@@ -392,54 +477,6 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
           ? newPatient.clinicalConditionsOther.trim() || undefined
           : undefined;
 
-        // Auto-derive the order's chief complaint from the conditions:
-        // the standard labels first, with the free-text "Other" detail
-        // appended after an em-dash separator. Clipped at 240 chars to
-        // stay within the column's reasonable size.
-        //
-        // Saved in the DOCTOR'S CURRENT LANGUAGE — the conditions array
-        // itself still holds the canonical English values (e.g.
-        // 'Crowding') for stable filtering / aggregation, but the
-        // free-text chief-complaint snapshot reflects what the doctor
-        // saw on the wizard at submit time. A French clinician gets
-        // "Encombrement, Béance" persisted; an English one gets
-        // "Crowding, Open bite". This matches the user-requested
-        // "save the answer in the doctor's language" behaviour for
-        // the only place where the wizard derives prose from the
-        // selected checkboxes.
-        const conditionLabel = (canonical: string): string => {
-          // Map canonical → dict key suffix. Aligns with the keys
-          // already defined under `orderForm.patient.cond*`.
-          const map: Record<string, string> = {
-            Crowding: 'condCrowding',
-            Spacing: 'condSpacing',
-            'Class II Division 1': 'condClassII1',
-            'Class II Division 2': 'condClassII2',
-            'Class III': 'condClassIII',
-            'Open bite': 'condOpenBite',
-            'Anterior crossbite': 'condAnteriorCrossbite',
-            'Posterior crossbite': 'condPosteriorCrossbite',
-            'Deep bite': 'condDeepBite',
-            'Narrow arch': 'condNarrowArch',
-            Proclination: 'condProclination',
-            'Increased overjet': 'condIncreasedOverjet',
-            'Unesthetic smile': 'condUnestheticSmile',
-            'Dental shape anomaly': 'condDentalShapeAnomaly',
-          };
-          const key = map[canonical];
-          return key ? t(`orderForm.patient.${key}`) : canonical;
-        };
-        const standardLabels = conditions
-          .filter((c) => c !== 'Other')
-          .map(conditionLabel);
-        const derivedChiefComplaint = [
-          standardLabels.join(', '),
-          otherDetail ?? '',
-        ]
-          .filter(Boolean)
-          .join(' — ')
-          .slice(0, 240);
-
         pending = createPatient
           .mutateAsync({
             fullName: newPatient.fullName.trim(),
@@ -454,13 +491,12 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
             doctorId: isAdmin ? form.doctorId : undefined,
           })
           .then((createdPatient) => {
+            // The order's chiefComplaint is driven by the chief-complaint
+            // multi-select (see handleChiefConditions / the mirror effect),
+            // so we only need to bind the freshly-created patient id here.
             setForm((current) => ({
               ...current,
               patientId: createdPatient.id,
-              chiefComplaint:
-                current.chiefComplaint?.trim() ||
-                derivedChiefComplaint ||
-                undefined,
             }));
             return createdPatient.id;
           });
@@ -544,25 +580,13 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
     const patientId = await ensurePatientReady();
     if (!patientId) return undefined;
 
-    // The order's `chiefComplaint` falls back to a string derived from
-    // the new patient's clinical-conditions selection — the merged
-    // "Reason for consultation" concept. `ensurePatientReady` above
-    // already wrote this into `form.chiefComplaint` when the planner
-    // is creating a new patient, but we re-derive defensively in case
-    // the form was reset.
-    const derivedFromConditions = (() => {
-      const conditions = newPatient.clinicalConditions.filter(Boolean);
-      const standard = conditions.filter((c) => c !== 'Other');
-      const other = conditions.includes('Other')
-        ? newPatient.clinicalConditionsOther.trim()
-        : '';
-      return [standard.join(', '), other].filter(Boolean).join(' — ').slice(0, 240);
-    })();
-
+    // `chiefComplaint` is the packed chief-complaint multi-select value
+    // (kept in sync by handleChiefConditions / the mirror effect). Trim
+    // to `undefined` when nothing is selected.
     const draftPayload = {
       ...form,
       patientId,
-      chiefComplaint: form.chiefComplaint?.trim() || derivedFromConditions || undefined,
+      chiefComplaint: form.chiefComplaint?.trim() || undefined,
       materials: (form.materials ?? []).filter(Boolean),
       toothInstructions,
     };
@@ -641,6 +665,7 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
             newPatient={newPatient}
             selectedPatientName={selectedPatient?.fullName ?? savedOrder?.patient?.fullName}
             dentists={dentistsQuery.data?.data ?? []}
+            dentistsLoading={dentistsQuery.isLoading}
             patients={patientsQuery.data?.data ?? []}
             patientsLoading={patientsQuery.isLoading}
             errors={fieldErrors}
@@ -659,21 +684,28 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
 
         {step === 2 && (
           <div className="space-y-5">
-            {/* CBCT requested toggle — single source of truth for the
-                `useCbctWithScans` flag. Enabling it reveals the CBCT /
-                ZIP bundle upload inline inside ClinicalOrderFiles below. */}
-            <ToggleTile
-              label={t('orderForm.files.cbctRequested')}
-              description={t('orderForm.files.cbctRequestedHint')}
-              checked={!!form.useCbctWithScans}
-              disabled={!canModify}
-              onCheckedChange={(value) => updateField('useCbctWithScans', value)}
-            />
+            {/* CBCT toggle is now rendered INSIDE ClinicalOrderFiles,
+                between the radiography slots and the STL section, so the
+                reading order is Imagerie → panoramic → profile → CBCT →
+                STL → ZIP/DCM. It stays the single source of truth for the
+                `useCbctWithScans` flag; enabling it reveals the CBCT / ZIP
+                bundle upload inline below the STL slots. */}
             <ClinicalOrderFiles
               orderId={savedOrder?.id}
               readOnly={!canModify}
               section="radiography-stl"
               cbctRequested={!!form.useCbctWithScans}
+              cbctToggle={
+                <ToggleTile
+                  label={t('orderForm.files.cbctRequested')}
+                  description={t('orderForm.files.cbctRequestedHint')}
+                  checked={!!form.useCbctWithScans}
+                  disabled={!canModify}
+                  onCheckedChange={(value) =>
+                    updateField('useCbctWithScans', value)
+                  }
+                />
+              }
             />
           </div>
         )}
@@ -684,6 +716,10 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
             disabled={!canModify}
             errors={fieldErrors}
             updateField={updateField}
+            chiefConditions={chiefConditions}
+            chiefOther={chiefOther}
+            onChiefConditionsChange={handleChiefConditions}
+            onChiefOtherChange={handleChiefOther}
           />
         )}
 
@@ -945,6 +981,204 @@ function OrderStepper({
 //   • Empty state copy when filter returns nothing tells the user
 //     the search came up dry rather than implying no patients exist.
 // ──────────────────────────────────────────────────────────────────
+/**
+ * Admin-only searchable practitioner picker. Mirrors PatientSearchPicker's
+ * UX (search input → scrollable results → collapsed chip once chosen) so the
+ * admin can find a doctor by name / email / phone instead of scrolling a
+ * plain dropdown. Filters the already-fetched dentist list client-side —
+ * same approach as the patient picker (no debounce, list capped server-side).
+ */
+function DoctorSearchPicker({
+  doctors,
+  loading,
+  selectedId,
+  errorMessage,
+  disabled,
+  onSelect,
+}: {
+  doctors: {
+    id: string;
+    fullName: string;
+    phone?: string | null;
+    email?: string | null;
+  }[];
+  loading: boolean;
+  selectedId: string | undefined;
+  errorMessage?: string;
+  disabled?: boolean;
+  onSelect: (id: string) => void;
+}) {
+  const { t } = useT();
+  const [query, setQuery] = useState('');
+  const [expanded, setExpanded] = useState(false);
+
+  const selected = useMemo(
+    () => doctors.find((d) => d.id === selectedId),
+    [doctors, selectedId],
+  );
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return doctors;
+    const qDigits = q.replace(/\D/g, '');
+    return doctors.filter((d) => {
+      const name = d.fullName.toLowerCase();
+      const email = (d.email ?? '').toLowerCase();
+      const phone = (d.phone ?? '').toLowerCase();
+      const phoneDigits = phone.replace(/\D/g, '');
+      return (
+        name.includes(q) ||
+        email.includes(q) ||
+        (qDigits.length >= 2 && phoneDigits.includes(qDigits))
+      );
+    });
+  }, [doctors, query]);
+
+  // Selected-mode: tidy chip + Change button.
+  if (selected && !expanded) {
+    return (
+      <div className="space-y-2">
+        <div
+          className={cn(
+            'flex items-center justify-between gap-3 rounded-md border bg-card px-3 py-2.5 shadow-sm transition',
+            errorMessage && 'border-red-500',
+          )}
+        >
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
+              {(selected.fullName.trim().charAt(0) || '?').toUpperCase()}
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium">{selected.fullName}</p>
+              <p className="truncate text-xs text-muted-foreground">
+                {selected.email || selected.phone || (
+                  <span className="italic">
+                    {t('orderForm.patient.doctorPickerSelected')}
+                  </span>
+                )}
+              </p>
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 shrink-0"
+            disabled={disabled}
+            onClick={() => {
+              setExpanded(true);
+              setQuery('');
+            }}
+          >
+            {t('orderForm.patient.pickerChange')}
+          </Button>
+        </div>
+        {errorMessage ? <FieldError message={errorMessage} /> : null}
+      </div>
+    );
+  }
+
+  // Search-mode: input + scrollable list.
+  return (
+    <div className="space-y-2">
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          autoFocus={expanded}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={t('orderForm.patient.doctorPickerPlaceholder')}
+          disabled={disabled || loading}
+          className={cn('h-11 pl-10 pr-9', errorMessage && 'border-red-500')}
+        />
+        {query ? (
+          <button
+            type="button"
+            onClick={() => setQuery('')}
+            aria-label={t('uiBits.clearSearch')}
+            className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-muted-foreground hover:bg-muted"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        ) : null}
+      </div>
+
+      <div className="overflow-hidden rounded-md border bg-card">
+        {loading ? (
+          <p className="px-3 py-4 text-sm text-muted-foreground">
+            {t('orderForm.patient.doctorPickerLoading')}
+          </p>
+        ) : filtered.length === 0 ? (
+          <p className="px-3 py-4 text-sm text-muted-foreground">
+            {t('orderForm.patient.doctorPickerEmpty')}
+          </p>
+        ) : (
+          <ul
+            role="listbox"
+            aria-label={t('orderForm.patient.doctorPickerLabel')}
+            className="max-h-64 overflow-y-auto"
+          >
+            {filtered.map((d) => {
+              const isActive = d.id === selectedId;
+              return (
+                <li key={d.id}>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={isActive}
+                    disabled={disabled}
+                    onClick={() => {
+                      onSelect(d.id);
+                      setExpanded(false);
+                      setQuery('');
+                    }}
+                    className={cn(
+                      'flex w-full items-center justify-between gap-3 border-b px-3 py-2.5 text-left transition last:border-0 hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-none',
+                      isActive && 'bg-primary/5',
+                    )}
+                  >
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
+                        {(d.fullName.trim().charAt(0) || '?').toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">
+                          {d.fullName}
+                        </p>
+                        {d.email ? (
+                          <p className="truncate text-xs text-muted-foreground">
+                            {d.email}
+                          </p>
+                        ) : d.phone ? (
+                          <p className="truncate font-mono text-xs tabular-nums text-muted-foreground">
+                            <Phone className="me-1 inline h-3 w-3" />
+                            {d.phone}
+                          </p>
+                        ) : null}
+                      </div>
+                    </div>
+                    {isActive ? (
+                      <Check className="h-4 w-4 shrink-0 text-primary" />
+                    ) : null}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
+      {!loading && query && filtered.length > 0 ? (
+        <p className="text-[11px] text-muted-foreground">
+          {t('orderForm.patient.pickerResults', { count: filtered.length })}
+        </p>
+      ) : null}
+
+      {errorMessage ? <FieldError message={errorMessage} /> : null}
+    </div>
+  );
+}
+
 function PatientSearchPicker({
   patients,
   loading,
@@ -1162,6 +1396,7 @@ function PatientStep({
   newPatient,
   selectedPatientName,
   dentists,
+  dentistsLoading,
   patients,
   patientsLoading,
   errors,
@@ -1175,7 +1410,15 @@ function PatientStep({
   form: CreateOrderDto;
   newPatient: NewPatientDraft;
   selectedPatientName?: string;
-  dentists: { id: string; fullName: string }[];
+  // Practitioner picker (admin-only) searches by name / email / phone,
+  // so it needs those fields on each dentist row.
+  dentists: {
+    id: string;
+    fullName: string;
+    email?: string | null;
+    phone?: string | null;
+  }[];
+  dentistsLoading: boolean;
   // Picker needs `phone` (and optionally `email`) so the user can
   // search by anything they remember about the patient — most of our
   // doctors store phone numbers more reliably than email, so phone is
@@ -1215,23 +1458,17 @@ function PatientStep({
       {isAdmin && (
         <div className="grid gap-2">
           <Label>{t('orderForm.patient.dentistLabel')}</Label>
-          <Select
-            value={form.doctorId}
-            onValueChange={(doctorId) => updateField('doctorId', doctorId)}
+          {/* Searchable practitioner picker (same UX as the patient picker
+              below) — a plain dropdown is unusable once a clinic has many
+              doctors. Doctors are picked by name / email / phone. */}
+          <DoctorSearchPicker
+            doctors={dentists}
+            loading={dentistsLoading}
+            selectedId={form.doctorId}
+            errorMessage={errors.doctorId}
             disabled={!canModify}
-          >
-            <SelectTrigger className={cn('h-11', errors.doctorId && 'border-red-500')}>
-              <SelectValue placeholder={t('orderForm.patient.selectDentistPh')} />
-            </SelectTrigger>
-            <SelectContent>
-              {dentists.map((doctor) => (
-                <SelectItem key={doctor.id} value={doctor.id}>
-                  {doctor.fullName}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <FieldError message={errors.doctorId} />
+            onSelect={(doctorId) => updateField('doctorId', doctorId)}
+          />
         </div>
       )}
 
@@ -1364,11 +1601,19 @@ function TreatmentStep({
   disabled,
   errors,
   updateField,
+  chiefConditions,
+  chiefOther,
+  onChiefConditionsChange,
+  onChiefOtherChange,
 }: {
   form: CreateOrderDto;
   disabled?: boolean;
   errors: FieldErrors;
   updateField: <K extends keyof CreateOrderDto>(key: K, value: CreateOrderDto[K]) => void;
+  chiefConditions: string[];
+  chiefOther: string;
+  onChiefConditionsChange: (next: string[]) => void;
+  onChiefOtherChange: (next: string) => void;
 }) {
   const { t } = useT();
 
@@ -1472,24 +1717,24 @@ function TreatmentStep({
         <FieldError message={errors.archTreatment} />
       </fieldset>
 
-      {/* ─── Chief complaint ──────────────────────────────────────────── */}
-      <fieldset className="space-y-3 rounded-lg border bg-card p-4">
-        <legend className="px-1 text-sm font-semibold">{t('orderForm.treatment.chiefComplaintLegend')}</legend>
-        <p className="text-xs text-muted-foreground">
-          {t('orderForm.treatment.chiefComplaintHint')}
-        </p>
-        {/* Inline <Input> rather than the TextInput helper because the
-            fieldset legend already supplies the field label. */}
-        <Input
-          type="text"
-          value={form.chiefComplaint ?? ''}
-          placeholder={t('orderForm.treatment.chiefComplaintInputPh')}
+      {/* ─── Chief complaint (multi-select "Reason for consultation") ───
+          Same checkbox field the patient form uses, so the two surfaces
+          stay 1:1. Stored on the ORDER (packed into chiefComplaint) — it
+          prefills from the patient's reasons but is edited independently
+          per order. */}
+      <div className="space-y-2">
+        <ClinicalConditionsField
+          conditions={chiefConditions}
+          otherDetail={chiefOther}
           disabled={disabled}
-          onChange={(event) => updateField('chiefComplaint', event.target.value)}
-          className={cn('h-11', errors.chiefComplaint && 'border-red-500')}
+          idPrefix="chief-complaint"
+          legendLabel={t('orderForm.treatment.chiefComplaintLegend')}
+          descriptionText={t('orderForm.treatment.chiefComplaintHint')}
+          onConditionsChange={onChiefConditionsChange}
+          onOtherDetailChange={onChiefOtherChange}
         />
         <FieldError message={errors.chiefComplaint} />
-      </fieldset>
+      </div>
 
       {/* ─── Treatment plan ───────────────────────────────────────────── */}
       <fieldset className="space-y-3 rounded-lg border bg-card p-4">
@@ -1553,7 +1798,10 @@ type Segment = (typeof segmentOptions)[number];
 // the occlusal-stop + tooth-group set the planners actually use:
 // "Cale occlusale" plus the three tooth groups. Storage values are
 // the stable English keys; FR labels resolve through the dict.
-const biteRampOptions = ['Occlusal stop', 'Incisors', 'Canines', 'Molars'] as const;
+// Order matches the four bite-plane locations the clinic requested (labels
+// resolve via BITE_RAMPS_KEY → dict). Storage values stay the stable English
+// keys so existing saved orders keep working; only display order + labels changed.
+const biteRampOptions = ['Occlusal stop', 'Incisors', 'Molars', 'Canines'] as const;
 const expansionOptions = ['No expansion', 'Anterior', 'Posterior', 'Both'] as const;
 
 /**
@@ -2352,8 +2600,8 @@ function ReviewStep({
       <ReviewSection icon={Target} title={t('orderForm.review.treatmentObjective')}>
         <div className="grid gap-4 sm:grid-cols-2">
           <ReviewInfo
-            label="Chief complaint"
-            value={form.chiefComplaint}
+            label={t('orderForm.treatment.chiefComplaint')}
+            value={formatChiefComplaint(form.chiefComplaint, t)}
             wide
           />
           <ReviewInfo

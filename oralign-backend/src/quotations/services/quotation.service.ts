@@ -233,8 +233,29 @@ export class QuotationService {
     caller: Caller,
   ): Promise<Quotation | null> {
     await this.assertOrderReadable(orderId, caller);
+    // Include the attached pack's LOCALIZED display fields (read-only) so
+    // the order summary can render the pack name / expiration / finishing
+    // in the current UI language for BOTH admin and doctor, without
+    // storing translated labels on the quote. Price/identity stay driven
+    // by the stable snapshot (packId, archType, totalPrice, currency).
     return this.prisma.quotation.findFirst({
       where: { orderId, deletedAt: null },
+      include: {
+        pack: {
+          select: {
+            id: true,
+            name: true,
+            nameI18n: true,
+            descriptionI18n: true,
+            treatmentExpirationLabel: true,
+            finishingIncludedLabel: true,
+            maxStepsPerArch: true,
+            includedCorrections: true,
+            isUnlimitedSteps: true,
+            isUnlimitedCorrections: true,
+          },
+        },
+      },
     });
   }
 

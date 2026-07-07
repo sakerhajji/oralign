@@ -241,6 +241,24 @@ export const dict = {
         en: '{count} result{s}',
         fr: '{count} résultat(s)',
       } as T,
+      // Admin practitioner search picker (reuses pickerChange/pickerResults).
+      doctorPickerLabel: { en: 'Pick a practitioner', fr: 'Choisir un praticien' } as T,
+      doctorPickerPlaceholder: {
+        en: 'Search by name, email or phone…',
+        fr: 'Rechercher par nom, e-mail ou téléphone…',
+      } as T,
+      doctorPickerEmpty: {
+        en: 'No practitioner matches your search.',
+        fr: 'Aucun praticien ne correspond à votre recherche.',
+      } as T,
+      doctorPickerLoading: {
+        en: 'Loading practitioners…',
+        fr: 'Chargement des praticiens…',
+      } as T,
+      doctorPickerSelected: {
+        en: 'Selected practitioner',
+        fr: 'Praticien sélectionné',
+      } as T,
 
       // Fields
       fullName: { en: 'Full name', fr: 'Nom complet' } as T,
@@ -260,7 +278,9 @@ export const dict = {
       sexOther: { en: 'Other', fr: 'Autre' } as T,
       patientStage: { en: 'Patient stage', fr: 'Phase du patient' } as T,
       stageInitial: { en: 'Initial', fr: 'Initiale' } as T,
-      stageRefinement: { en: 'Refinement', fr: 'Affinage' } as T,
+      // Display label only — the stored enum value stays PatientStage.REFINEMENT
+      // ('refinement'); the clinic simply calls this phase "Finition"/"Finishing".
+      stageRefinement: { en: 'Finishing', fr: 'Finition' } as T,
       stageRetainer: { en: 'Retainer', fr: 'Contention' } as T,
       notes: { en: 'Patient notes', fr: 'Notes patient' } as T,
       notesPh: { en: 'Any clinical context the team should know about…', fr: 'Tout contexte clinique utile à l’équipe…' } as T,
@@ -562,13 +582,26 @@ export const dict = {
         en: 'Where should the planner place bite ramps, if any?',
         fr: 'Où le planificateur doit-il placer des plans de morsure, si nécessaire ?',
       } as T,
-      // Bite-ramp placement options — re-spec'd to the occlusal-stop +
-      // tooth-group set the clinic uses ("Cale occlusale" + Incisives /
-      // Canines / Molaires).
-      biteRampsOcclusalStop: { en: 'Occlusal stop', fr: 'Cale occlusale' } as T,
-      biteRampsIncisors: { en: 'Incisors', fr: 'Incisives' } as T,
-      biteRampsCanines: { en: 'Canines', fr: 'Canines' } as T,
-      biteRampsMolars: { en: 'Molars', fr: 'Molaires' } as T,
+      // Bite-plane placement options. Labels only — the STORED values stay
+      // the stable English keys (Occlusal stop / Incisors / Molars / Canines)
+      // so existing saved orders keep working; only the displayed FR/EN text
+      // is remapped to the clinic's four bite-plane locations.
+      biteRampsOcclusalStop: {
+        en: 'Occlusal molar stop',
+        fr: 'Cale molaire occlusale',
+      } as T,
+      biteRampsIncisors: {
+        en: 'Maxillary retro-incisor 12–22',
+        fr: 'Rétro-incisive maxillaire de 12 à 22',
+      } as T,
+      biteRampsMolars: {
+        en: 'Maxillary retro-incisor 11, 21',
+        fr: 'Rétro-incisive maxillaire 11,21',
+      } as T,
+      biteRampsCanines: {
+        en: 'Palatal surface of the upper canine',
+        fr: 'Face palatine de la canine supérieure',
+      } as T,
 
       expansionHint: {
         en: 'Select the segment that needs expansion, or “No expansion” if the arches are well-developed.',
@@ -2428,8 +2461,8 @@ export const dict = {
     loading: { en: 'Loading packs…', fr: 'Chargement des forfaits…' } as T,
     title: { en: 'Pack catalogue', fr: 'Catalogue des forfaits' } as T,
     intro: {
-      en: 'Commercial bundles attached to quotations. Each pack carries one price — edit it inline alongside the rest of the pack details.',
-      fr: 'Forfaits commerciaux liés aux devis. Chaque forfait porte un seul prix — modifiez-le directement avec les autres détails du forfait.',
+      en: 'Commercial bundles attached to quotations. Each pack supports French / English content and pricing per arcade (two arches / single arch).',
+      fr: 'Forfaits commerciaux liés aux devis. Chaque forfait gère un contenu français / anglais et une tarification par arcade (deux arcades / arcade unique).',
     } as T,
     showInactive: { en: 'Show inactive', fr: 'Afficher les inactifs' } as T,
     newPack: { en: 'New pack', fr: 'Nouveau forfait' } as T,
@@ -2469,11 +2502,46 @@ export const dict = {
     dialogEditTitle: { en: 'Edit pack', fr: 'Modifier le forfait' } as T,
     dialogNewTitle: { en: 'New pack', fr: 'Nouveau forfait' } as T,
     dialogDescription: {
-      en: 'Pack name is the only user-visible identifier — pick something short and consistent (LITE, ESSENTIAL, SMART, PRO, PRO+). Price is edited inline below — leave the field empty to keep the current price (or create the pack without one).',
-      fr: 'Le nom du forfait est le seul identifiant visible par l’utilisateur — choisissez quelque chose de court et cohérent (LITE, ESSENTIAL, SMART, PRO, PRO+). Le prix se modifie en ligne ci-dessous — laissez le champ vide pour conserver le prix actuel (ou créez le forfait sans prix).',
+      en: 'Enter the French content (English is optional — it falls back to French when missing). Set the two-arch and/or single-arch price. Everything is saved together.',
+      fr: 'Renseignez le contenu en français (l’anglais est facultatif — il bascule vers le français si absent). Définissez le prix deux arcades et/ou arcade unique. Tout est enregistré ensemble.',
     } as T,
-    nameLabel: { en: 'Name *', fr: 'Nom *' } as T,
-    namePlaceholder: { en: 'e.g. ESSENTIAL', fr: 'p. ex. ESSENTIAL' } as T,
+    sectionGeneral: { en: 'General information', fr: 'Informations générales' } as T,
+    sectionTreatment: { en: 'Treatment', fr: 'Traitement' } as T,
+    sectionPricing: { en: 'Pricing', fr: 'Tarification' } as T,
+    sectionFinishing: { en: 'Finishing', fr: 'Finition' } as T,
+    nameLabel: { en: 'Product name', fr: 'Nom du produit' } as T,
+    namePlaceholder: { en: 'e.g. Express Pack', fr: 'p. ex. Forfait Express' } as T,
+    namePlaceholderEn: { en: 'e.g. Express Pack', fr: 'p. ex. Express Pack' } as T,
+    alignersLabel: { en: 'Aligners per arch', fr: 'Nombre d’aligneurs par arcade' } as T,
+    alignersPlaceholder: { en: 'e.g. 24', fr: 'p. ex. 24' } as T,
+    alignersRequired: {
+      en: 'Enter a number of aligners, or check “Unlimited”.',
+      fr: 'Saisissez un nombre d’aligneurs, ou cochez « Illimité ».',
+    } as T,
+    expirationLabel: {
+      en: 'Treatment expiration / duration',
+      fr: 'Date d’expiration du traitement',
+    } as T,
+    expirationPlaceholder: { en: 'e.g. 24 months', fr: 'p. ex. 24 mois' } as T,
+    finishingLabel: { en: 'Finishing included', fr: 'Finition incluse' } as T,
+    finishingPlaceholder: {
+      en: 'e.g. 1 finishing session included',
+      fr: 'p. ex. 1 séance de finition incluse',
+    } as T,
+    priceTwoArchesLabel: { en: 'Two-arch price', fr: 'Prix deux arcades' } as T,
+    priceSingleArchLabel: { en: 'Single-arch price', fr: 'Prix arcade unique' } as T,
+    priceSingleArchPlaceholder: { en: 'Optional', fr: 'Facultatif' } as T,
+    currencyLabel: { en: 'Currency', fr: 'Devise' } as T,
+    singleArchOptionalHint: {
+      en: 'Leave the single-arch price empty if this pack is only offered for two arches — “Single arch” is then disabled on orders.',
+      fr: 'Laissez le prix arcade unique vide si ce forfait n’est proposé que pour deux arcades — « Arcade unique » est alors désactivée sur les commandes.',
+    } as T,
+    atLeastOnePrice: {
+      en: 'At least one price is required (two arches or single arch).',
+      fr: 'Au moins un prix est requis (deux arcades ou arcade unique).',
+    } as T,
+    priceTwoArchShort: { en: '2 arches', fr: '2 arcades' } as T,
+    priceSingleArchShort: { en: '1 arch', fr: '1 arcade' } as T,
     descriptionLabel: { en: 'Description', fr: 'Description' } as T,
     descriptionPlaceholder: {
       en: 'Optional — short note shown alongside the pack name.',
@@ -3087,6 +3155,44 @@ export const dict = {
       freeformDesc: {
         en: 'Ship a single ZIP archive (e.g. a CBCT DICOM volume, or a multi-file STL export). We audit it client-side for executables and unsafe filenames before saving. Single .dcm DICOM files are also accepted.',
         fr: 'Envoyez une seule archive ZIP (p. ex. un volume CBCT DICOM ou un export STL multi-fichiers). Nous l’analysons côté client à la recherche d’exécutables et de noms de fichiers dangereux avant l’enregistrement. Les fichiers DICOM .dcm seuls sont également acceptés.',
+      } as T,
+      // ── One-to-many staged uploader (one .zip OR several .dcm) ──────
+      chooseFiles: { en: 'Choose files…', fr: 'Choisir des fichiers…' } as T,
+      pickerHint: {
+        en: 'One ZIP archive, or one or more DICOM (.dcm) files — not both.',
+        fr: 'Une archive ZIP, ou un ou plusieurs fichiers DICOM (.dcm) — pas les deux.',
+      } as T,
+      stagedTitle: { en: 'Ready to upload', fr: 'Prêt à téléverser' } as T,
+      addMore: { en: 'Add more', fr: 'Ajouter' } as T,
+      upload: { en: 'Upload', fr: 'Téléverser' } as T,
+      uploadCount: {
+        en: 'Upload {count} file(s)',
+        fr: 'Téléverser {count} fichier(s)',
+      } as T,
+      clearStaged: { en: 'Clear', fr: 'Vider' } as T,
+      removeAria: { en: 'Remove {name}', fr: 'Retirer {name}' } as T,
+      statusQueued: { en: 'Queued', fr: 'En attente' } as T,
+      statusUploading: { en: 'Uploading…', fr: 'Téléversement…' } as T,
+      dicomBadge: { en: 'DICOM', fr: 'DICOM' } as T,
+      uploadingBatch: {
+        en: 'Uploading {count} file(s)…',
+        fr: 'Téléversement de {count} fichier(s)…',
+      } as T,
+      mixError: {
+        en: 'Upload either one ZIP archive or DICOM (.dcm) files — not both at once.',
+        fr: 'Téléversez soit une archive ZIP, soit des fichiers DICOM (.dcm) — pas les deux en même temps.',
+      } as T,
+      oneZipReplaced: {
+        en: 'Only one ZIP archive can be uploaded at a time — keeping the latest.',
+        fr: 'Une seule archive ZIP peut être téléversée à la fois — la plus récente est conservée.',
+      } as T,
+      removeZipFirst: {
+        en: 'Remove the staged ZIP archive first to add DICOM files.',
+        fr: 'Retirez d’abord l’archive ZIP en attente pour ajouter des fichiers DICOM.',
+      } as T,
+      invalidSkipped: {
+        en: 'Unsupported file(s) skipped: {names}. Only .zip and .dcm are allowed.',
+        fr: 'Fichier(s) non pris en charge ignoré(s) : {names}. Seuls .zip et .dcm sont autorisés.',
       } as T,
     },
     categories: {

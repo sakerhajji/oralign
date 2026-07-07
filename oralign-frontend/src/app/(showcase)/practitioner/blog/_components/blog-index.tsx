@@ -51,8 +51,13 @@ export function BlogIndex({ audience, initialPosts, categories }: Props) {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
+    const activeCat = category.trim().toLowerCase();
     return initialPosts.filter((post) => {
-      if (category && post.category !== category) return false;
+      // Case/space-tolerant category match so a chip picked from the
+      // server's category list always lines up with the post value even
+      // if one side carries stray casing or whitespace.
+      if (activeCat && (post.category ?? "").trim().toLowerCase() !== activeCat)
+        return false;
       if (!q) return true;
       // Search the ACTIVE language's resolved title/excerpt (plus the
       // language-agnostic category + author).
@@ -236,12 +241,13 @@ function BlogCard({
 
         <div className="mt-5 flex flex-1 flex-col">
           <div className="flex items-center gap-3 text-[0.6rem] uppercase tracking-[0.2em] text-[var(--sc-sun-deep)]">
-            {post.category ? <span>{post.category}</span> : null}
-            {post.category ? (
-              <span aria-hidden="true" className="text-[var(--sc-mid-grey)]">
-                ·
-              </span>
-            ) : null}
+            {/* Always render a type badge — fall back to a generic
+                "Article" label when the post has no category, so the card
+                never shows a bare reading-time with no type. */}
+            <span>{(post.category ?? "").trim() || dict.blog.defaultCategory[lang]}</span>
+            <span aria-hidden="true" className="text-[var(--sc-mid-grey)]">
+              ·
+            </span>
             <span className="text-[var(--sc-mid-grey)]">{reading}</span>
           </div>
 

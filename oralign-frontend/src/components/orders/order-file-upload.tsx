@@ -63,7 +63,6 @@ import { useT } from '@/lib/i18n/lang-context';
 import { OrderFile, OrderFileCategory } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { ImageEditDialog } from './image-edit-dialog';
-import { ZipUploadDialog } from './zip-upload-dialog';
 
 // Category → dict key (resolved with t() at render time so the labels
 // flip with the language toggle).
@@ -312,6 +311,7 @@ export function ClinicalOrderFiles({
   readOnly,
   section,
   cbctRequested,
+  cbctToggle,
 }: {
   orderId?: string;
   readOnly?: boolean;
@@ -325,6 +325,13 @@ export function ClinicalOrderFiles({
    *     volume even if the flag was later unset).
    */
   cbctRequested?: boolean;
+  /**
+   * Optional "CBCT requested" toggle, rendered by the wizard BETWEEN the
+   * radiography slots and the STL section so the reading order is
+   * Imagerie → panoramic → profile → CBCT toggle → STL → ZIP/DCM.
+   * Read-only surfaces (review / order detail) omit it.
+   */
+  cbctToggle?: ReactNode;
 }) {
   const { t } = useT();
   const filesQuery = useOrderFiles(orderId);
@@ -529,6 +536,12 @@ export function ClinicalOrderFiles({
             outside a tracked slot is intentionally hidden here. */}
       </section>
 
+      {/* CBCT-requested toggle sits BETWEEN radiography and STL so the
+          reading order is Imagerie → panoramic → profile → CBCT → STL →
+          ZIP/DCM. Editable surfaces (the wizard) pass the toggle node;
+          read-only surfaces omit it. */}
+      {cbctToggle ?? null}
+
       <section className="space-y-5">
         <SectionIntro
           title={t('orderForm.files.sections.stlTitle')}
@@ -567,7 +580,6 @@ export function ClinicalOrderFiles({
           <ZipUploadAction
             orderId={orderId}
             title={t('media.zipAction.freeformTitle')}
-            description={t('media.zipAction.freeformDesc')}
             category={OrderFileCategory.ZIP}
             files={files}
             onDelete={
@@ -2233,7 +2245,6 @@ function ZipMetaPanel({
 function ZipUploadAction({
   orderId,
   title,
-  description,
   category,
   files,
   onDelete,
@@ -2241,7 +2252,6 @@ function ZipUploadAction({
 }: {
   orderId: string;
   title: string;
-  description: string;
   category: OrderFileCategory;
   /**
    * Full file list for the order — we filter to ZIP-category items
@@ -2262,10 +2272,9 @@ function ZipUploadAction({
    */
   readOnly?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
   const uploadFiles = useUploadOrderFiles();
-  const dicomInputId = useMemo(
-    () => `dicom-upload-${orderId}-${category}`,
+  const fileInputId = useMemo(
+    () => `bundle-upload-${orderId}-${category}`,
     [orderId, category],
   );
 
@@ -2291,44 +2300,108 @@ function ZipUploadAction({
 
   const { t } = useT();
 
-  // ── Live progress state ────────────────────────────────────────
-  // CBCT / DICOM archives sit between 200 MB and 1 GB; the previous
-  // UI just disabled the button and showed nothing, so a doctor would
-  // alt-tab to check email and assume the upload had failed silently.
-  // We now drive a real progress bar from axios's onUploadProgress
-  // event, with the current file name + the percentage rendered
-  // inline so the upload's clearly in flight.
-  const [progress, setProgress] = useState<number | null>(null);
-  const [currentFile, setCurrentFile] = useState<{
-    name: string;
-    size: number;
-  } | null>(null);
+  // ── Staged (chosen-but-not-yet-uploaded) files ─────────────────
+  // The backend takes ONE category per multipart request, so a batch
+  // must be homogeneous: either a SINGLE .zip archive, OR one-or-more
+  // .dcm DICOM files — never mixed. We enforce that at selection time
+  // and surface a removable list so the user reviews the batch before
+  // it uploads.
+  const [staged, setStaged] = useState<File[]>([]);
+  const stagedKind: 'zip' | 'dicom' | null = staged.length
+    ? extOf(staged[0]) === 'zip'
+      ? 'zip'
+      : 'dicom'
+    : null;
 
-  const startUpload = (file: File, cat: OrderFileCategory) => {
-    setCurrentFile({ name: file.name, size: file.size });
+  // ── Live progress state ────────────────────────────────────────
+  // CBCT / DICOM archives sit between 200 MB and 1 GB; axios reports a
+  // single GLOBAL percentage for the whole multipart request (all files
+  // stream together), so we render ONE batch progress bar rather than a
+  // per-file bar the backend can't actually feed.
+  const [progress, setProgress] = useState<number | null>(null);
+  const [uploadingCount, setUploadingCount] = useState<number | null>(null);
+
+  const isUploading = uploadFiles.isPending || progress !== null;
+
+  // Validate + classify a fresh selection, then merge into `staged`
+  // under the "one zip OR many dcm" rule.
+  const onPickFiles = (picked: File[]) => {
+    if (picked.length === 0) return;
+    const valid: File[] = [];
+    const invalid: string[] = [];
+    for (const f of picked) {
+      const ext = extOf(f);
+      if (ext === 'zip' || ext === 'dcm') valid.push(f);
+      else invalid.push(f.name);
+    }
+    if (invalid.length) {
+      toast.error(
+        t('media.zipAction.invalidSkipped', { names: invalid.join(', ') }),
+      );
+    }
+    if (valid.length === 0) return;
+
+    const zips = valid.filter((f) => extOf(f) === 'zip');
+    const dcms = valid.filter((f) => extOf(f) === 'dcm');
+
+    // A single selection that mixes archive + DICOM can't map to one
+    // request category — reject the whole batch and explain why.
+    if (zips.length > 0 && dcms.length > 0) {
+      toast.error(t('media.zipAction.mixError'));
+      return;
+    }
+
+    if (zips.length > 0) {
+      // Only one ZIP at a time — a ZIP selection REPLACES the staged set.
+      if (zips.length > 1) toast.warning(t('media.zipAction.oneZipReplaced'));
+      setStaged([zips[zips.length - 1]]);
+      return;
+    }
+
+    // DICOM files — can't sit on top of a staged ZIP.
+    if (stagedKind === 'zip') {
+      toast.error(t('media.zipAction.removeZipFirst'));
+      return;
+    }
+    // Append, de-duplicating by name+size so re-picking a file is a no-op.
+    setStaged((cur) => {
+      const seen = new Set(cur.map((f) => `${f.name}:${f.size}`));
+      const additions = dcms.filter((f) => !seen.has(`${f.name}:${f.size}`));
+      return [...cur, ...additions];
+    });
+  };
+
+  const removeStaged = (index: number) =>
+    setStaged((cur) => cur.filter((_, i) => i !== index));
+
+  const startUploadBatch = () => {
+    if (staged.length === 0) return;
+    // ZIP → the caller's category (ZIP). DICOM → IMAGE, matching the
+    // existing single-.dcm routing so the files land in the same bucket.
+    const cat = stagedKind === 'dicom' ? OrderFileCategory.IMAGE : category;
+    setUploadingCount(staged.length);
     setProgress(0);
     uploadFiles.mutate(
       {
         id: orderId,
-        files: [file],
+        files: staged,
         category: cat,
         onProgress: (percent) => setProgress(percent),
       },
       {
+        onSuccess: () => setStaged([]),
         onSettled: () => {
           // Slight delay so the user sees "100%" before the bar disappears
-          // — masks the fact that "100% transferred" isn't quite "saved"
-          // (the server still needs to flush + DB insert).
+          // — "100% transferred" isn't quite "saved" (server flush + DB
+          // insert happen after the last byte lands).
           window.setTimeout(() => {
             setProgress(null);
-            setCurrentFile(null);
+            setUploadingCount(null);
           }, 600);
         },
       },
     );
   };
-
-  const isUploading = uploadFiles.isPending || progress !== null;
 
   return (
     <>
@@ -2350,69 +2423,158 @@ function ZipUploadAction({
           </div>
         ) : null
       ) : (
-      <div className="flex flex-col items-start gap-3 rounded-xl border border-dashed bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-start gap-3">
-          <FileArchive className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
-          <div className="min-w-0">
-            <p className="text-sm font-semibold">{title}</p>
-            <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+      <div className="space-y-3 rounded-xl border border-dashed bg-muted/20 p-4">
+        <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <FileArchive className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+            <div className="min-w-0">
+              <p className="text-sm font-semibold">{title}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {t('media.zipAction.pickerHint')}
+              </p>
+            </div>
           </div>
-        </div>
-        <div className="flex flex-col gap-2 self-stretch sm:flex-row sm:self-auto">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setOpen(true)}
-            disabled={isUploading}
-            className="gap-2"
-          >
-            <UploadCloud className="h-4 w-4" />
-            {t('media.zipAction.chooseZip')}
-          </Button>
-          {/* CBCT volumes sometimes ship as a single uncompressed .dcm
-              file rather than an archive. Offering a direct uploader
-              avoids forcing the dentist to zip a single file. */}
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            asChild
-            disabled={isUploading}
-          >
-            <label htmlFor={dicomInputId} className="cursor-pointer gap-2">
+          {/* One unified picker: `multiple` lets the dentist select a
+              whole DICOM series at once; the extension guard in
+              onPickFiles keeps a ZIP batch to a single archive. */}
+          <Button type="button" variant="outline" size="sm" asChild>
+            <label
+              htmlFor={fileInputId}
+              className={cn(
+                'cursor-pointer gap-2',
+                isUploading && 'pointer-events-none opacity-50',
+              )}
+            >
               <UploadCloud className="h-4 w-4" />
-              {t('media.zipAction.singleDcm')}
+              {staged.length
+                ? t('media.zipAction.addMore')
+                : t('media.zipAction.chooseFiles')}
             </label>
           </Button>
           <input
-            id={dicomInputId}
+            id={fileInputId}
             type="file"
-            accept=".dcm,application/dicom"
+            multiple
+            accept=".zip,.dcm,application/zip,application/x-zip-compressed,application/dicom"
             className="sr-only"
             disabled={isUploading}
             onChange={(event) => {
-              const picked = event.target.files?.[0];
+              const picked = Array.from(event.target.files ?? []);
               event.currentTarget.value = '';
-              if (!picked) return;
-              startUpload(picked, OrderFileCategory.IMAGE);
+              onPickFiles(picked);
             }}
           />
         </div>
+
+        {/* Staged list — review + remove before uploading. */}
+        {staged.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                {t('media.zipAction.stagedTitle')}
+              </p>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs"
+                disabled={isUploading}
+                onClick={() => setStaged([])}
+              >
+                {t('media.zipAction.clearStaged')}
+              </Button>
+            </div>
+            <ul className="divide-y rounded-lg border bg-card">
+              {staged.map((file, index) => {
+                const isDicom = extOf(file) === 'dcm';
+                const Icon = isDicom ? FileImage : FileArchive;
+                const iconTint = isDicom
+                  ? 'bg-violet-100 text-violet-700'
+                  : 'bg-primary/10 text-primary';
+                return (
+                  <li
+                    key={`${file.name}:${file.size}:${index}`}
+                    className="flex items-center gap-3 px-3 py-2.5"
+                  >
+                    <span
+                      className={cn(
+                        'grid h-9 w-9 shrink-0 place-items-center rounded-lg',
+                        iconTint,
+                      )}
+                    >
+                      <Icon className="h-4 w-4" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p
+                        className="truncate text-sm font-medium"
+                        title={file.name}
+                      >
+                        {file.name}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        <span className="tabular-nums">
+                          {formatBytes(file.size)}
+                        </span>
+                        <span className="mx-1.5 opacity-60">·</span>
+                        <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
+                          {isDicom
+                            ? t('media.zipAction.dicomBadge')
+                            : t('media.zipAction.zipBadge')}
+                        </span>
+                        <span className="mx-1.5 opacity-60">·</span>
+                        <span className={cn(isUploading && 'text-primary')}>
+                          {isUploading
+                            ? t('media.zipAction.statusUploading')
+                            : t('media.zipAction.statusQueued')}
+                        </span>
+                      </p>
+                    </div>
+                    {!isUploading && (
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                        aria-label={t('media.zipAction.removeAria', {
+                          name: file.name,
+                        })}
+                        onClick={() => removeStaged(index)}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+            <Button
+              type="button"
+              size="sm"
+              className="w-full gap-2 sm:w-auto"
+              disabled={isUploading || staged.length === 0}
+              onClick={startUploadBatch}
+            >
+              <UploadCloud className="h-4 w-4" />
+              {t('media.zipAction.uploadCount', { count: staged.length })}
+            </Button>
+          </div>
+        )}
       </div>
       )}
 
-      {/* ── Live progress bar ──────────────────────────────────────
+      {/* ── Batch progress bar ─────────────────────────────────────
           Visible only while an upload is in flight. Stays on screen
           for ~600 ms after the request settles so the user sees the
-          final 100% — important UX when the upload took minutes. */}
-      {isUploading && currentFile && (
+          final 100% — important UX when the upload took minutes. The
+          percentage is the GLOBAL transfer for the whole batch (all
+          files stream in a single multipart request). */}
+      {isUploading && uploadingCount && (
         <div className="space-y-2 rounded-xl border border-primary/30 bg-primary/5 p-4">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 min-w-0">
               <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
               <p className="truncate text-sm font-medium">
-                {t('media.zipAction.uploadingFile', { name: currentFile.name })}
+                {t('media.zipAction.uploadingBatch', { count: uploadingCount })}
               </p>
             </div>
             <span className="shrink-0 text-sm font-semibold tabular-nums text-primary">
@@ -2420,15 +2582,11 @@ function ZipUploadAction({
             </span>
           </div>
           <Progress value={progress ?? 0} className="h-2" />
-          <p className="text-xs text-muted-foreground">
-            {formatBytes(((progress ?? 0) / 100) * currentFile.size)} /{' '}
-            {formatBytes(currentFile.size)}
-            {progress === 100 && (
-              <span className="ml-2 text-primary">
-                {t('media.zipAction.finalising')}
-              </span>
-            )}
-          </p>
+          {progress === 100 && (
+            <p className="text-xs text-primary">
+              {t('media.zipAction.finalising')}
+            </p>
+          )}
         </div>
       )}
 
@@ -2539,23 +2697,11 @@ function ZipUploadAction({
         </div>
       )}
 
-      {/* Upload-only dialogs — never mount when the parent is rendering
-          a read-only view (order detail page). */}
+      {/* Destructive confirm — never mounts in read-only mode. CBCT
+          volumes are typically the single biggest asset on an order, so
+          an inline single-tap delete would be a foot-gun. */}
       {!readOnly && (
         <>
-          <ZipUploadDialog
-            open={open}
-            title={title}
-            onClose={() => setOpen(false)}
-            onConfirm={(file) => {
-              setOpen(false);
-              startUpload(file, category);
-            }}
-          />
-
-          {/* Destructive confirm — CBCT volumes are typically the
-              single biggest asset on an order, so an inline single-tap
-              delete would be a foot-gun. */}
           <AlertDialog
             open={!!pendingDelete}
             onOpenChange={(o) => !o && setPendingDelete(null)}
@@ -2590,6 +2736,11 @@ function ZipUploadAction({
       )}
     </>
   );
+}
+
+/** Lower-cased file extension (without the dot), or '' if none. */
+function extOf(file: File): string {
+  return file.name.split('.').pop()?.toLowerCase() ?? '';
 }
 
 /**

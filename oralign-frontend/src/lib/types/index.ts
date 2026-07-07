@@ -407,6 +407,25 @@ export interface Quotation {
   paymentMode?: PaymentMode | null;
   paymentStatus?: QuotationPaymentStatus | null;
   doctorApprovedAt?: string | null;
+  // Read-only LOCALIZED display fields for the attached pack, joined on
+  // the `getForOrder` read (NOT stored on the quote). Lets the order
+  // summary render the pack name / expiration / finishing in the current
+  // UI language. Null when no pack is attached (or it was deleted) — the
+  // UI falls back to the stable `packName` snapshot.
+  pack?: PackLocalizedSummary | null;
+}
+
+export interface PackLocalizedSummary {
+  id: string;
+  name: string;
+  nameI18n?: Partial<Localized<string>> | null;
+  descriptionI18n?: Partial<Localized<string>> | null;
+  treatmentExpirationLabel?: Partial<Localized<string>> | null;
+  finishingIncludedLabel?: Partial<Localized<string>> | null;
+  maxStepsPerArch?: number | null;
+  includedCorrections?: number | null;
+  isUnlimitedSteps?: boolean | null;
+  isUnlimitedCorrections?: boolean | null;
 }
 
 /** Create / update payload shared by admin form. */
@@ -487,8 +506,17 @@ export enum PaymentRecordStatus {
 
 export interface Pack {
   id: string;
+  // `name` / `description` are the FRENCH fallback + legacy columns; the
+  // localized `*I18n` bags below are the display source of truth. Old
+  // packs have null bags → the UI falls back to these plain strings.
   name: string;
+  nameI18n?: Partial<Localized<string>> | null;
   description?: string | null;
+  descriptionI18n?: Partial<Localized<string>> | null;
+  // Table-style multilingual labels (no legacy plain counterpart).
+  treatmentExpirationLabel?: Partial<Localized<string>> | null;
+  finishingIncludedLabel?: Partial<Localized<string>> | null;
+  // `maxStepsPerArch` doubles as "aligners per arch" (null when unlimited).
   maxStepsPerArch?: number | null;
   includedCorrections?: number | null;
   isUnlimitedSteps: boolean;
@@ -513,18 +541,27 @@ export interface PackPrice {
 }
 
 export interface CreatePackDto {
-  name: string;
+  // FR name required (sent via nameI18n.fr; legacy `name` still accepted).
+  name?: string;
+  nameI18n?: { fr?: string; en?: string };
   description?: string;
+  descriptionI18n?: { fr?: string; en?: string };
+  treatmentExpirationLabel?: { fr?: string; en?: string };
+  finishingIncludedLabel?: { fr?: string; en?: string };
   maxStepsPerArch?: number;
   includedCorrections?: number;
   isUnlimitedSteps?: boolean;
   isUnlimitedCorrections?: boolean;
   isForOrthodontists?: boolean;
   isActive?: boolean;
-  // Inline price — when set, the backend atomically creates a single
-  // ACTIVE PackPrice (archType=two_arches) alongside the pack so the
-  // admin form is the only place an admin has to touch.
+  // Legacy single inline price (→ two_arches). Prefer the arch-specific
+  // fields below; the backend atomically creates the matching PackPrice
+  // rows. At least one price is required.
   price?: number;
+  priceTwoArches?: number;
+  // null / omitted = single-arch not offered (orders disable "Arcade
+  // unique" for this pack).
+  priceSingleArch?: number | null;
   currency?: string;
 }
 

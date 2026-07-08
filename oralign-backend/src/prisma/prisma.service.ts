@@ -152,6 +152,19 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
       connectionTimeoutMillis: 2000,
     });
 
+    // A pooled client can emit 'error' asynchronously — the DB drops an
+    // idle connection, a network blip, or a query leaves the client in a
+    // bad state. A pg Pool with NO 'error' listener re-throws that as an
+    // unhandled exception and CRASHES the process. With this handler the
+    // broken client is logged and evicted, so the pool self-heals instead
+    // of leaking/poisoning connections over a long uptime (which otherwise
+    // exhausts the pool → later queries fail with 500s until a restart).
+    this.pool.on('error', (err) => {
+      this.logger.error(
+        `Idle Postgres client error (client evicted from pool): ${err.message}`,
+      );
+    });
+
     const adapter = new PrismaPg(this.pool);
     this.prisma = new PrismaClient({
       adapter,

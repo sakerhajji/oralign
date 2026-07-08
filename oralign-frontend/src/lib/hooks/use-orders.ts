@@ -169,12 +169,17 @@ export function useUpdateOrder(): UseMutationResult<
   });
 }
 
-export function useSubmitOrder(): UseMutationResult<DentalOrder, Error, string> {
+export function useSubmitOrder(): UseMutationResult<
+  DentalOrder,
+  Error,
+  { id: string; termsAccepted: boolean }
+> {
   const queryClient = useQueryClient();
   const { t } = useT();
   return useMutation({
-    mutationFn: ordersService.submitOrder,
-    onSuccess: (order, id) => {
+    mutationFn: ({ id, termsAccepted }) =>
+      ordersService.submitOrder(id, termsAccepted),
+    onSuccess: (order, { id }) => {
       syncOrderCaches(queryClient, order);
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });

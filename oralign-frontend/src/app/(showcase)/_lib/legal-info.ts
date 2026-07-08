@@ -49,6 +49,11 @@ export async function getLegalCompany(): Promise<LegalCompany> {
     const res = await fetch(`${apiBase()}/company-billing-settings/legal-info`, {
       headers: { Accept: "application/json" },
       next: { revalidate: REVALIDATE_SECONDS },
+      // Hard cap the wait so a slow/unreachable API can never stall the
+      // request — critically, this keeps `next build` static generation
+      // from hanging when the backend isn't up (it fast-fails to the
+      // placeholder company instead of timing out the whole build).
+      signal: AbortSignal.timeout(5000),
     });
     if (!res.ok) return EMPTY;
     const data = (await res.json()) as Partial<LegalCompany> | null;

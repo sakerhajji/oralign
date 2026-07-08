@@ -84,6 +84,18 @@ export class PackController {
     return this.packService.softDelete(id);
   }
 
+  @Delete(':id/permanent')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Permanently delete a pack (hard delete). Admin-only. Cascades ' +
+      'its prices and nulls the reference on historical quotations.',
+  })
+  @ApiParam({ name: 'id', type: String })
+  async permanentDelete(@Param('id') id: string) {
+    return this.packService.permanentDelete(id);
+  }
+
   @Patch(':id/activate')
   @HttpCode(HttpStatus.OK)
   @ApiParam({ name: 'id', type: String })

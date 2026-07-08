@@ -123,6 +123,27 @@ export function useDeletePatient(): UseMutationResult<
   });
 }
 
+/** Permanent (hard) delete — admin-only, irreversible. */
+export function usePermanentDeletePatient(): UseMutationResult<
+  MessageResponse,
+  Error,
+  string
+> {
+  const queryClient = useQueryClient();
+  const { t } = useT();
+
+  return useMutation<MessageResponse, Error, string>({
+    mutationFn: patientsService.permanentDeletePatient,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: patientKeys.lists() });
+      toast.success(t('toasts.patients.permanentlyDeleted'));
+    },
+    onError: (error) => {
+      toast.error(extractApiErrorMessage(error));
+    },
+  });
+}
+
 export function useBulkDeletePatients(): UseMutationResult<
   { message: string; deleted: number },
   Error,

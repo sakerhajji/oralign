@@ -243,6 +243,48 @@ export class PatientService {
   }
 
   /**
+   * Permanently remove a patient (hard delete). Admin-only.
+   *
+   * Refuses when the patient still has ANY order: `DentalOrder.patientId`
+   * cascades on delete, so purging a patient with orders would silently
+   * wipe their clinical orders AND orphan the (potentially GB-sized)
+   * uploaded files on disk. We require the admin to permanently delete
+   * those orders first (that path cleans the disk blobs), then the
+   * patient row can be removed safely.
+   */
+  async permanentDeletePatient(
+    id: string,
+    caller: Caller,
+  ): Promise<{ message: string }> {
+    this.ensureCanPermanentDelete(caller);
+
+    const patient = await this.prisma.patient.findUnique({
+      where: { id },
+      select: { id: true, _count: { select: { orders: true } } },
+    });
+    if (!patient) {
+      throw new NotFoundException('Patient not found');
+    }
+    if (patient._count.orders > 0) {
+      throw new BadRequestException(
+        'This patient still has orders. Permanently delete the patient’s orders first, then delete the patient.',
+      );
+    }
+
+    await this.prisma.patient.delete({ where: { id } });
+    return { message: 'Patient permanently deleted successfully' };
+  }
+
+  /** Admin-only gate for irreversible (hard) deletes. */
+  private ensureCanPermanentDelete(caller: Caller): void {
+    if (!ADMIN_ROLES.includes(caller.role)) {
+      throw new ForbiddenException(
+        'Only admins can permanently delete patients',
+      );
+    }
+  }
+
+  /**
    * Soft-delete multiple patients in parallel.
    * Patients the caller cannot access are silently skipped —
    * the count in the response reflects only those successfully deleted.

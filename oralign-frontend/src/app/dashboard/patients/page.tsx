@@ -26,6 +26,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  ShieldX,
   Trash2,
   UserRound,
   Users,
@@ -78,6 +79,7 @@ import {
   useBulkDeletePatients,
   useCreatePatient,
   useDeletePatient,
+  usePermanentDeletePatient,
   usePatientPrefetch,
   usePatients,
   useUpdatePatient,
@@ -176,6 +178,7 @@ export default function PatientsPage() {
   const createPatient = useCreatePatient();
   const updatePatient = useUpdatePatient();
   const removePatient = useDeletePatient();
+  const permanentRemovePatient = usePermanentDeletePatient();
   const bulkDelete = useBulkDeletePatients();
 
   const dentistsQuery = useQuery({
@@ -296,6 +299,20 @@ export default function PatientsPage() {
       });
     },
     [removePatient],
+  );
+
+  const handleRowPermanentDelete = useCallback(
+    (patient: Patient) => {
+      permanentRemovePatient.mutate(patient.id, {
+        onSuccess: () =>
+          setSelectedIds((prev) => {
+            const next = new Set(prev);
+            next.delete(patient.id);
+            return next;
+          }),
+      });
+    },
+    [permanentRemovePatient],
   );
 
   // Bulk delete
@@ -616,6 +633,7 @@ export default function PatientsPage() {
                     onToggle={toggleSelect}
                     onOpen={openEdit}
                     onDelete={handleRowDelete}
+                    onPermanentDelete={handleRowPermanentDelete}
                     onPrefetch={prefetchPatient}
                   />
                 ))}
@@ -634,6 +652,7 @@ export default function PatientsPage() {
                 onPrefetch={() => prefetchPatient(patient.id)}
                 onOpen={openEdit}
                 onDelete={handleRowDelete}
+                onPermanentDelete={handleRowPermanentDelete}
               />
             ))}
           </div>
@@ -828,6 +847,7 @@ const PatientRow = function PatientRow({
   onToggle,
   onOpen,
   onDelete,
+  onPermanentDelete,
   onPrefetch,
 }: {
   patient: Patient;
@@ -836,6 +856,7 @@ const PatientRow = function PatientRow({
   onToggle: (id: string) => void;
   onOpen: (patient: Patient) => void;
   onDelete: (patient: Patient) => void;
+  onPermanentDelete: (patient: Patient) => void;
   onPrefetch: (id: string) => void;
 }) {
   const { t, lang } = useT();
@@ -904,7 +925,13 @@ const PatientRow = function PatientRow({
         })}
       </TableCell>
       <TableCell className="text-right">
-        <PatientRowActions patient={patient} onOpen={onOpen} onDelete={onDelete} />
+        <PatientRowActions
+          patient={patient}
+          isAdmin={isAdmin}
+          onOpen={onOpen}
+          onDelete={onDelete}
+          onPermanentDelete={onPermanentDelete}
+        />
       </TableCell>
     </TableRow>
   );
@@ -912,15 +939,20 @@ const PatientRow = function PatientRow({
 
 function PatientRowActions({
   patient,
+  isAdmin,
   onOpen,
   onDelete,
+  onPermanentDelete,
 }: {
   patient: Patient;
+  isAdmin: boolean;
   onOpen: (patient: Patient) => void;
   onDelete: (patient: Patient) => void;
+  onPermanentDelete: (patient: Patient) => void;
 }) {
   const { t } = useT();
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmPermOpen, setConfirmPermOpen] = useState(false);
 
   return (
     <>
@@ -956,6 +988,16 @@ function PatientRowActions({
             <Trash2 className="h-4 w-4" />
             {t('patients.deletePatient')}
           </DropdownMenuItem>
+          {/* Irreversible hard delete — admins only. */}
+          {isAdmin && (
+            <DropdownMenuItem
+              onClick={(e) => { e.stopPropagation(); setConfirmPermOpen(true); }}
+              className="gap-2 text-destructive focus:text-destructive"
+            >
+              <ShieldX className="h-4 w-4" />
+              {t('patients.deletePermanently')}
+            </DropdownMenuItem>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -987,6 +1029,35 @@ function PatientRowActions({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Permanent (hard) delete — admin-only, irreversible. */}
+      <AlertDialog open={confirmPermOpen} onOpenChange={setConfirmPermOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <span className="grid h-9 w-9 place-items-center rounded-full bg-destructive/10 text-destructive">
+                <ShieldX className="h-4 w-4" />
+              </span>
+              {t('patients.deletePermanentlyTitle')}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('patients.deletePermanentlyBody', { name: patient.fullName })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('patients.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => {
+                onPermanentDelete(patient);
+                setConfirmPermOpen(false);
+              }}
+            >
+              {t('patients.deletePermanently')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
@@ -999,6 +1070,7 @@ function PatientMobileCard({
   onPrefetch,
   onOpen,
   onDelete,
+  onPermanentDelete,
 }: {
   patient: Patient;
   isAdmin: boolean;
@@ -1007,6 +1079,7 @@ function PatientMobileCard({
   onPrefetch: () => void;
   onOpen: (patient: Patient) => void;
   onDelete: (patient: Patient) => void;
+  onPermanentDelete: (patient: Patient) => void;
 }) {
   const { t, lang } = useT();
   return (
@@ -1040,7 +1113,13 @@ function PatientMobileCard({
               )}
             </div>
           </div>
-          <PatientRowActions patient={patient} onOpen={onOpen} onDelete={onDelete} />
+          <PatientRowActions
+            patient={patient}
+            isAdmin={isAdmin}
+            onOpen={onOpen}
+            onDelete={onDelete}
+            onPermanentDelete={onPermanentDelete}
+          />
         </div>
         <div className="mt-4 grid gap-2 text-sm text-muted-foreground">
           <span className="flex items-center gap-2">

@@ -407,6 +407,10 @@ model DentalOrder {
   createdAt                     DateTime                  @default(now())
   updatedAt                     DateTime                  @updatedAt
   submittedAt                   DateTime?
+  // Stamped when the doctor accepts the General Terms & Conditions on
+  // submit. Submitting without accepting is rejected at the service +
+  // DTO layer, so a submitted order always carries this timestamp.
+  termsAcceptedAt               DateTime?
   // Set the first time an admin opens this order's detail page. Drives the
   // sidebar "new orders" badge: a submitted order counts as NEW until an
   // admin has seen it (NULL = unseen). Like an unread marker.

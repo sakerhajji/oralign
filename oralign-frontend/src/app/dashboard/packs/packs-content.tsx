@@ -7,6 +7,7 @@ import {
   useCreatePack,
   useUpdatePack,
   useDeletePack,
+  usePermanentDeletePack,
   useActivatePack,
   useDeactivatePack,
 } from '@/lib/hooks';
@@ -67,6 +68,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import {
   MoreVertical,
+  ShieldX,
   Plus,
   PackageIcon,
   Trash2,
@@ -132,8 +134,11 @@ export function PacksPageContent() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editingPack, setEditingPack] = useState<Pack | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Pack | null>(null);
+  const [confirmPermanentDelete, setConfirmPermanentDelete] =
+    useState<Pack | null>(null);
 
   const deletePack = useDeletePack();
+  const permanentDeletePack = usePermanentDeletePack();
   const activatePack = useActivatePack();
   const deactivatePack = useDeactivatePack();
 
@@ -289,6 +294,9 @@ export function PacksPageContent() {
                                 deactivatePack.mutate(pack.id)
                               }
                               onDelete={() => setConfirmDelete(pack)}
+                              onPermanentDelete={() =>
+                                setConfirmPermanentDelete(pack)
+                              }
                             />
                           </TableCell>
                         </TableRow>
@@ -338,6 +346,9 @@ export function PacksPageContent() {
                           onActivate={() => activatePack.mutate(pack.id)}
                           onDeactivate={() => deactivatePack.mutate(pack.id)}
                           onDelete={() => setConfirmDelete(pack)}
+                          onPermanentDelete={() =>
+                            setConfirmPermanentDelete(pack)
+                          }
                         />
                       </div>
                       <dl className="mt-3 grid grid-cols-2 gap-2 text-xs">
@@ -450,6 +461,41 @@ export function PacksPageContent() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Permanent (hard) delete — irreversible, admin-only. */}
+      <AlertDialog
+        open={!!confirmPermanentDelete}
+        onOpenChange={(o) => !o && setConfirmPermanentDelete(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t('packsAdmin.deletePermanentlyTitle')}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('packsAdmin.deletePermanentlyBody', {
+                name: confirmPermanentDelete
+                  ? packName(confirmPermanentDelete, lang)
+                  : '',
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('packsAdmin.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-white hover:bg-destructive/90"
+              onClick={() => {
+                if (confirmPermanentDelete) {
+                  permanentDeletePack.mutate(confirmPermanentDelete.id);
+                  setConfirmPermanentDelete(null);
+                }
+              }}
+            >
+              {t('packsAdmin.deletePermanently')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -465,12 +511,14 @@ function RowActions({
   onActivate,
   onDeactivate,
   onDelete,
+  onPermanentDelete,
 }: {
   pack: Pack;
   onEdit: () => void;
   onActivate: () => void;
   onDeactivate: () => void;
   onDelete: () => void;
+  onPermanentDelete: () => void;
 }) {
   const { t } = useT();
   return (
@@ -503,6 +551,15 @@ function RowActions({
         >
           <Trash2 className="mr-2 size-4" />
           {t('packsAdmin.deletePack')}
+        </DropdownMenuItem>
+        {/* Admin-only irreversible hard delete. This whole page is gated
+            to admins, so no extra role check is needed here. */}
+        <DropdownMenuItem
+          className="text-destructive focus:text-destructive"
+          onClick={onPermanentDelete}
+        >
+          <ShieldX className="mr-2 size-4" />
+          {t('packsAdmin.deletePermanently')}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

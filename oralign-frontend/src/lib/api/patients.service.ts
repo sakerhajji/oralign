@@ -42,6 +42,14 @@ export const patientsService = {
     return response.data;
   },
 
+  /** Permanent (hard) delete — admin-only, irreversible. */
+  permanentDeletePatient: async (id: string): Promise<MessageResponse> => {
+    const response = await apiClient.delete<MessageResponse>(
+      `/patients/${id}/permanent`,
+    );
+    return response.data;
+  },
+
   bulkDeletePatients: async (
     ids: string[],
   ): Promise<{ message: string; deleted: number }> => {

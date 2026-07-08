@@ -14,6 +14,7 @@ import {
   Factory,
   Info,
   ListChecks,
+  Lock,
   Phone,
   Save,
   ScanLine,
@@ -27,6 +28,7 @@ import {
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -217,6 +219,9 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
   // pushes the user to /dashboard/orders/[id] on success/skip.
   const [payDialogOpen, setPayDialogOpen] = useState(false);
   const [submittedOrderId, setSubmittedOrderId] = useState<string | null>(null);
+  // Doctor's acceptance of the General Terms & Conditions — required to
+  // submit (checkbox on the final review step; the backend also enforces).
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const [savedOrder, setSavedOrder] = useState<DentalOrder | undefined>(
     initialOrder,
   );
@@ -387,8 +392,15 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
     newPatient.clinicalConditionsOther,
     initialOrder,
   ]);
-  const canModify = true;
-  const canSubmit = !savedOrder || savedOrder.status === OrderStatus.DRAFT;
+  // Once the treatment fee is paid, the owning doctor can no longer edit
+  // the order — only an admin can. Mirrors the backend guard
+  // (ensureOrderNotLockedByPayment). Admins are never locked.
+  const paidLocked = !!savedOrder?.treatmentFeePaidAt && !isAdmin;
+  const canModify = !paidLocked;
+  const isDraftForSubmit = !savedOrder || savedOrder.status === OrderStatus.DRAFT;
+  // The General T&C box must be checked before submit is allowed. Only
+  // shown/required on the final review step for a draft order.
+  const canSubmit = isDraftForSubmit && termsAccepted;
   const isSaving =
     createPatient.isPending ||
     createOrder.isPending ||
@@ -785,6 +797,45 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
         )}
       </main>
 
+      {/* Paid-order lock notice — once the treatment fee is settled, a
+          doctor can no longer edit the order (only an admin can). */}
+      {paidLocked && (
+        <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
+          <Lock className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{t('orderForm.paidLock.banner')}</span>
+        </div>
+      )}
+
+      {/* General Terms & Conditions — required to submit. Shown on the
+          final review step for a draft order; the button below stays
+          disabled until the box is ticked and the backend re-validates. */}
+      {step === steps.length - 1 && canModify && isDraftForSubmit && (
+        <label
+          htmlFor="order-terms"
+          className="flex cursor-pointer items-start gap-3 rounded-md border bg-card p-3 text-sm shadow-sm"
+        >
+          <Checkbox
+            id="order-terms"
+            checked={termsAccepted}
+            onCheckedChange={(v) => setTermsAccepted(v === true)}
+            className="mt-0.5"
+          />
+          <span className="text-muted-foreground">
+            {t('orderForm.terms.prefix')}{' '}
+            <a
+              href="/conditions-vente"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-primary underline underline-offset-2"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {t('orderForm.terms.link')}
+            </a>
+            {t('orderForm.terms.suffix')}
+          </span>
+        </label>
+      )}
+
       <footer className="flex flex-col gap-3 rounded-md border bg-card p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
         <Button
           type="button"
@@ -837,7 +888,10 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
                 if (!valid) return;
                 const order = await saveDraft();
                 if (!order) return;
-                const submitted = await submitOrder.mutateAsync(order.id);
+                const submitted = await submitOrder.mutateAsync({
+                  id: order.id,
+                  termsAccepted,
+                });
                 // If the order is already paid (admin pre-paid an
                 // older order, or no fee is configured) skip the
                 // dialog and go straight to the detail page.

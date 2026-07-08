@@ -52,6 +52,7 @@ import {
   CreateOrderDto,
   OrderFilterDto,
   OrderResponseDto,
+  SubmitOrderDto,
   UpdateOrderDto,
   UpdateOrderStatusDto,
   UpdateToothInstructionsDto,
@@ -222,9 +223,10 @@ export class OrderController {
   @ApiResponse({ status: 200, type: OrderResponseDto })
   async submitOrder(
     @Param('id') id: string,
+    @Body() submitOrderDto: SubmitOrderDto,
     @CurrentUser() user: JwtPayload,
   ): Promise<OrderResponseDto> {
-    return this.orderService.submitOrder(id, {
+    return this.orderService.submitOrder(id, submitOrderDto, {
       userId: user.sub,
       role: user.role,
     });

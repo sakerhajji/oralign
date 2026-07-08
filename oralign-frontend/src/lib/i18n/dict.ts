@@ -758,6 +758,24 @@ export const dict = {
       continueLater: { en: 'Continue later', fr: 'Continuer plus tard' } as T,
     },
 
+    // ── General Terms & Conditions (required before submit) ───────
+    terms: {
+      prefix: { en: 'I have read and accept the', fr: 'J’ai lu et j’accepte les' } as T,
+      link: {
+        en: 'General Terms & Conditions',
+        fr: 'Conditions générales de vente et d’utilisation',
+      } as T,
+      suffix: { en: '.', fr: '.' } as T,
+    },
+
+    // ── Paid-order lock notice ────────────────────────────────────
+    paidLock: {
+      banner: {
+        en: 'This order has been paid and can no longer be edited. Contact an administrator if a change is needed.',
+        fr: 'Cette commande a été payée et ne peut plus être modifiée. Contactez un administrateur si une modification est nécessaire.',
+      } as T,
+    },
+
     // ── Validation / errors ──────────────────────────────────────
     errors: {
       patientStageRequired: { en: 'Patient stage is required.', fr: 'La phase du patient est obligatoire.' } as T,
@@ -1299,6 +1317,15 @@ export const dict = {
     deletePatientConfirmBody: {
       en: 'This soft-deletes {name}. The record stays in the database but disappears from active patient lists. Existing orders remain visible.',
       fr: 'Cela supprime {name} en mode douce. La fiche reste en base mais disparaît des listes actives. Les commandes existantes restent visibles.',
+    } as T,
+    deletePermanently: { en: 'Delete permanently', fr: 'Supprimer définitivement' } as T,
+    deletePermanentlyTitle: {
+      en: 'Permanently delete patient?',
+      fr: 'Supprimer définitivement le patient ?',
+    } as T,
+    deletePermanentlyBody: {
+      en: 'This permanently removes {name} from the database. This cannot be undone. The patient must have no orders — delete their orders permanently first.',
+      fr: 'Cela supprime définitivement {name} de la base de données. Action irréversible. Le patient ne doit avoir aucune commande — supprimez d’abord ses commandes définitivement.',
     } as T,
 
     // Mobile card fallback strings
@@ -2517,6 +2544,15 @@ export const dict = {
     deactivate: { en: 'Deactivate', fr: 'Désactiver' } as T,
     activate: { en: 'Activate', fr: 'Activer' } as T,
     deletePack: { en: 'Delete pack', fr: 'Supprimer le forfait' } as T,
+    deletePermanently: { en: 'Delete permanently', fr: 'Supprimer définitivement' } as T,
+    deletePermanentlyTitle: {
+      en: 'Permanently delete this pack?',
+      fr: 'Supprimer définitivement ce forfait ?',
+    } as T,
+    deletePermanentlyBody: {
+      en: 'The pack "{name}" and its prices will be permanently removed. This cannot be undone. Historical quotations keep their saved snapshot.',
+      fr: 'Le forfait « {name} » et ses prix seront supprimés définitivement. Cette action est irréversible. Les devis existants conservent leur copie enregistrée.',
+    } as T,
     dialogEditTitle: { en: 'Edit pack', fr: 'Modifier le forfait' } as T,
     dialogNewTitle: { en: 'New pack', fr: 'Nouveau forfait' } as T,
     dialogDescription: {
@@ -3192,18 +3228,18 @@ export const dict = {
       // Freeform bundle uploader (the generic OrderFileUpload, distinct
       // from the localized clinical slots which pass their own titleKey).
       freeformTitle: {
-        en: 'Upload bundle (.zip) or CBCT (.dcm)',
-        fr: 'Téléverser une archive (.zip) ou un CBCT (.dcm)',
+        en: 'Upload a ZIP / CBCT bundle — or any file',
+        fr: 'Téléverser une archive ZIP / CBCT — ou tout fichier',
       } as T,
       freeformDesc: {
-        en: 'Ship a single ZIP archive (e.g. a CBCT DICOM volume, or a multi-file STL export). We audit it client-side for executables and unsafe filenames before saving. Single .dcm DICOM files are also accepted.',
-        fr: 'Envoyez une seule archive ZIP (p. ex. un volume CBCT DICOM ou un export STL multi-fichiers). Nous l’analysons côté client à la recherche d’exécutables et de noms de fichiers dangereux avant l’enregistrement. Les fichiers DICOM .dcm seuls sont également acceptés.',
+        en: 'Ship a single ZIP archive (e.g. a CBCT DICOM volume, or a multi-file STL export), or attach files of any type. Every file is scanned for scripts/executables and unsafe names before saving — those are refused.',
+        fr: 'Envoyez une seule archive ZIP (p. ex. un volume CBCT DICOM ou un export STL multi-fichiers), ou joignez des fichiers de tout type. Chaque fichier est analysé à la recherche de scripts/exécutables et de noms dangereux avant l’enregistrement — ceux-ci sont refusés.',
       } as T,
-      // ── One-to-many staged uploader (one .zip OR several .dcm) ──────
+      // ── One-to-many staged uploader (one .zip OR several loose files) ──
       chooseFiles: { en: 'Choose files…', fr: 'Choisir des fichiers…' } as T,
       pickerHint: {
-        en: 'One ZIP archive, or one or more DICOM (.dcm) files — not both.',
-        fr: 'Une archive ZIP, ou un ou plusieurs fichiers DICOM (.dcm) — pas les deux.',
+        en: 'One ZIP archive, or one or more files of any type. Scripts and programs are blocked.',
+        fr: 'Une archive ZIP, ou un ou plusieurs fichiers de tout type. Les scripts et programmes sont bloqués.',
       } as T,
       stagedTitle: { en: 'Ready to upload', fr: 'Prêt à téléverser' } as T,
       addMore: { en: 'Add more', fr: 'Ajouter' } as T,
@@ -3221,22 +3257,51 @@ export const dict = {
         en: 'Uploading {count} file(s)…',
         fr: 'Téléversement de {count} fichier(s)…',
       } as T,
+      fileBadge: { en: 'File', fr: 'Fichier' } as T,
       mixError: {
-        en: 'Upload either one ZIP archive or DICOM (.dcm) files — not both at once.',
-        fr: 'Téléversez soit une archive ZIP, soit des fichiers DICOM (.dcm) — pas les deux en même temps.',
+        en: 'Upload either one ZIP archive or loose files — not both at once.',
+        fr: 'Téléversez soit une archive ZIP, soit des fichiers individuels — pas les deux en même temps.',
       } as T,
       oneZipReplaced: {
         en: 'Only one ZIP archive can be uploaded at a time — keeping the latest.',
         fr: 'Une seule archive ZIP peut être téléversée à la fois — la plus récente est conservée.',
       } as T,
       removeZipFirst: {
-        en: 'Remove the staged ZIP archive first to add DICOM files.',
-        fr: 'Retirez d’abord l’archive ZIP en attente pour ajouter des fichiers DICOM.',
+        en: 'Remove the staged ZIP archive first to add other files.',
+        fr: 'Retirez d’abord l’archive ZIP en attente pour ajouter d’autres fichiers.',
       } as T,
       invalidSkipped: {
         en: 'Unsupported file(s) skipped: {names}. Only .zip and .dcm are allowed.',
         fr: 'Fichier(s) non pris en charge ignoré(s) : {names}. Seuls .zip et .dcm sont autorisés.',
       } as T,
+      // ── Content-security pre-check (client-side; the server re-validates) ──
+      security: {
+        checking: {
+          en: 'Checking files for security…',
+          fr: 'Vérification de sécurité des fichiers…',
+        } as T,
+        blockedTitle: {
+          en: 'Blocked for security',
+          fr: 'Bloqué pour raison de sécurité',
+        } as T,
+        executable: {
+          en: '"{name}" was blocked: it looks like a program/executable, not a scan.',
+          fr: '« {name} » a été bloqué : il ressemble à un programme/exécutable, pas à un examen.',
+        } as T,
+        script: {
+          en: '"{name}" was blocked: it contains script/code and cannot be uploaded.',
+          fr: '« {name} » a été bloqué : il contient du script/code et ne peut pas être téléversé.',
+        } as T,
+        mismatch: {
+          en: '"{name}" was blocked: its contents do not match a real ZIP archive.',
+          fr: '« {name} » a été bloqué : son contenu ne correspond pas à une véritable archive ZIP.',
+        } as T,
+        blockedType: {
+          en: '"{name}" was blocked: scripts and programs cannot be uploaded.',
+          fr: '« {name} » a été bloqué : les scripts et programmes ne peuvent pas être téléversés.',
+        } as T,
+        verifiedBadge: { en: 'Security-checked', fr: 'Vérifié' } as T,
+      },
     },
     categories: {
       rightPhoto: { en: 'Right photo', fr: 'Photo droite' } as T,
@@ -3410,6 +3475,7 @@ export const dict = {
       created: { en: 'Pack created.', fr: 'Forfait créé.' } as T,
       updated: { en: 'Pack updated.', fr: 'Forfait mis à jour.' } as T,
       deleted: { en: 'Pack deleted.', fr: 'Forfait supprimé.' } as T,
+      permanentlyDeleted: { en: 'Pack permanently deleted.', fr: 'Forfait supprimé définitivement.' } as T,
       activated: { en: 'Pack activated.', fr: 'Forfait activé.' } as T,
       deactivated: { en: 'Pack deactivated.', fr: 'Forfait désactivé.' } as T,
       priceAdded: { en: 'Price added.', fr: 'Tarif ajouté.' } as T,
@@ -3420,6 +3486,7 @@ export const dict = {
       created: { en: 'Patient created successfully', fr: 'Patient créé' } as T,
       updated: { en: 'Patient updated successfully', fr: 'Patient mis à jour' } as T,
       deleted: { en: 'Patient deleted successfully', fr: 'Patient supprimé' } as T,
+      permanentlyDeleted: { en: 'Patient permanently deleted', fr: 'Patient supprimé définitivement' } as T,
       bulkDeleted: { en: '{count} patient(s) deleted', fr: '{count} patient(s) supprimé(s)' } as T,
     },
     payments: {

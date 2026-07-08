@@ -263,6 +263,20 @@ export class CreateOrderDto {
 
 export class UpdateOrderDto extends PartialType(CreateOrderDto) {}
 
+/**
+ * Body for POST /orders/:id/submit. The doctor must accept the General
+ * Terms & Conditions before an order can leave the draft state — the
+ * service rejects the submit when this is anything other than `true`.
+ */
+export class SubmitOrderDto {
+  @ApiProperty({
+    description:
+      'The doctor accepted the General Terms & Conditions. Must be true.',
+  })
+  @IsBoolean()
+  termsAccepted!: boolean;
+}
+
 // ── Sort fields the list endpoint honours ────────────────────────
 // Tied to columns the orders list page surfaces — keeping the enum
 // narrow means a typo in the client falls through to the default

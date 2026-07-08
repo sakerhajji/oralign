@@ -67,6 +67,14 @@ export const packsService = {
     return res.data;
   },
 
+  /** Permanent (hard) delete — admin-only, irreversible. */
+  permanentRemove: async (id: string): Promise<{ id: string }> => {
+    const res = await apiClient.delete<{ id: string }>(
+      `/admin/packs/${id}/permanent`,
+    );
+    return res.data;
+  },
+
   activate: async (id: string): Promise<Pack> => {
     const res = await apiClient.patch<Pack>(`/admin/packs/${id}/activate`, {});
     return res.data;

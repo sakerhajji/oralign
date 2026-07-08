@@ -126,6 +126,24 @@ export function useDeletePack(): UseMutationResult<
   });
 }
 
+/** Permanent (hard) delete — admin-only, irreversible. */
+export function usePermanentDeletePack(): UseMutationResult<
+  { id: string },
+  Error,
+  string
+> {
+  const queryClient = useQueryClient();
+  const { t } = useT();
+  return useMutation({
+    mutationFn: (id) => packsService.permanentRemove(id),
+    onSuccess: () => {
+      invalidatePacks(queryClient);
+      toast.success(t('toasts.packs.permanentlyDeleted'));
+    },
+    onError: (err) => toast.error(extractApiErrorMessage(err)),
+  });
+}
+
 export function useActivatePack(): UseMutationResult<Pack, Error, string> {
   const queryClient = useQueryClient();
   const { t } = useT();

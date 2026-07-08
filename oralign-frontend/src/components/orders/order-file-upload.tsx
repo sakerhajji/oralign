@@ -19,6 +19,7 @@ import {
   Pencil,
   RotateCcw,
   ScanLine,
+  ShieldCheck,
   Trash2,
   UploadCloud,
   Video,
@@ -2288,14 +2289,16 @@ function ZipUploadAction({
     [orderId, category],
   );
 
-  // Pick the bundles that belong to THIS slot: anything in the ZIP
-  // category PLUS standalone .dcm uploads (which land in IMAGE
-  // category to keep them out of the photo-slot routing).
+  // Pick the files that belong to THIS control: ZIP archives, standalone
+  // .dcm uploads (which land in IMAGE category), and any other loose
+  // attachment (uploaded under the neutral OTHER category — never used by
+  // the structured photo / radiography / STL slots).
   const bundleFiles = useMemo(
     () =>
       files
         .filter((f) => {
           if (f.category === OrderFileCategory.ZIP) return true;
+          if (f.category === OrderFileCategory.OTHER) return true;
           const ext = f.originalName?.split('.').pop()?.toLowerCase();
           return ext === 'dcm';
         })
@@ -2317,10 +2320,10 @@ function ZipUploadAction({
   // and surface a removable list so the user reviews the batch before
   // it uploads.
   const [staged, setStaged] = useState<File[]>([]);
-  const stagedKind: 'zip' | 'dicom' | null = staged.length
+  const stagedKind: 'zip' | 'files' | null = staged.length
     ? extOf(staged[0]) === 'zip'
       ? 'zip'
-      : 'dicom'
+      : 'files'
     : null;
 
   // ── Live progress state ────────────────────────────────────────
@@ -2331,32 +2334,45 @@ function ZipUploadAction({
   const [progress, setProgress] = useState<number | null>(null);
   const [uploadingCount, setUploadingCount] = useState<number | null>(null);
 
+  // True while the client-side content-security pre-check reads file
+  // headers — normally a few ms, but gates the picker so a second pick
+  // can't race the first.
+  const [checking, setChecking] = useState(false);
+
   const isUploading = uploadFiles.isPending || progress !== null;
 
-  // Validate + classify a fresh selection, then merge into `staged`
-  // under the "one zip OR many dcm" rule.
-  const onPickFiles = (picked: File[]) => {
+  // Validate + classify a fresh selection, then merge into `staged` under
+  // the "one ZIP bundle OR any number of loose files" rule. ANY file type
+  // is accepted except scripts/executables (dropped by the security sniff).
+  const onPickFiles = async (picked: File[]) => {
     if (picked.length === 0) return;
-    const valid: File[] = [];
-    const invalid: string[] = [];
-    for (const f of picked) {
-      const ext = extOf(f);
-      if (ext === 'zip' || ext === 'dcm') valid.push(f);
-      else invalid.push(f.name);
-    }
-    if (invalid.length) {
-      toast.error(
-        t('media.zipAction.invalidSkipped', { names: invalid.join(', ') }),
-      );
-    }
-    if (valid.length === 0) return;
 
-    const zips = valid.filter((f) => extOf(f) === 'zip');
-    const dcms = valid.filter((f) => extOf(f) === 'dcm');
+    // Content-security pre-check — read each file's HEADER (and extension)
+    // and drop anything that is a script/executable or a fake container.
+    // The backend re-validates authoritatively; this just fails fast with a
+    // clear, localized reason so the doctor isn't left guessing.
+    setChecking(true);
+    const safe: File[] = [];
+    try {
+      for (const f of picked) {
+        const threat = await sniffClientThreat(f);
+        if (threat) {
+          toast.error(t(`media.zipAction.security.${threat}`, { name: f.name }));
+        } else {
+          safe.push(f);
+        }
+      }
+    } finally {
+      setChecking(false);
+    }
+    if (safe.length === 0) return;
 
-    // A single selection that mixes archive + DICOM can't map to one
-    // request category — reject the whole batch and explain why.
-    if (zips.length > 0 && dcms.length > 0) {
+    const zips = safe.filter((f) => extOf(f) === 'zip');
+    const others = safe.filter((f) => extOf(f) !== 'zip');
+
+    // A ZIP is an exclusive bundle — the backend takes one category per
+    // request, so it can't share a batch with loose files.
+    if (zips.length > 0 && others.length > 0) {
       toast.error(t('media.zipAction.mixError'));
       return;
     }
@@ -2368,7 +2384,7 @@ function ZipUploadAction({
       return;
     }
 
-    // DICOM files — can't sit on top of a staged ZIP.
+    // Loose files (any type) — can't sit on top of a staged ZIP.
     if (stagedKind === 'zip') {
       toast.error(t('media.zipAction.removeZipFirst'));
       return;
@@ -2376,7 +2392,7 @@ function ZipUploadAction({
     // Append, de-duplicating by name+size so re-picking a file is a no-op.
     setStaged((cur) => {
       const seen = new Set(cur.map((f) => `${f.name}:${f.size}`));
-      const additions = dcms.filter((f) => !seen.has(`${f.name}:${f.size}`));
+      const additions = others.filter((f) => !seen.has(`${f.name}:${f.size}`));
       return [...cur, ...additions];
     });
   };
@@ -2386,9 +2402,16 @@ function ZipUploadAction({
 
   const startUploadBatch = () => {
     if (staged.length === 0) return;
-    // ZIP → the caller's category (ZIP). DICOM → IMAGE, matching the
-    // existing single-.dcm routing so the files land in the same bucket.
-    const cat = stagedKind === 'dicom' ? OrderFileCategory.IMAGE : category;
+    // ZIP → the caller's category (ZIP). A pure DICOM batch → IMAGE (the
+    // existing single-.dcm routing). Any other loose file(s) → OTHER, so
+    // arbitrary attachments land in a neutral bucket and still surface in
+    // the uploaded-files list below.
+    const cat =
+      stagedKind === 'zip'
+        ? category
+        : staged.every((f) => extOf(f) === 'dcm')
+          ? OrderFileCategory.IMAGE
+          : OrderFileCategory.OTHER;
     setUploadingCount(staged.length);
     setProgress(0);
     uploadFiles.mutate(
@@ -2452,7 +2475,7 @@ function ZipUploadAction({
               htmlFor={fileInputId}
               className={cn(
                 'cursor-pointer gap-2',
-                isUploading && 'pointer-events-none opacity-50',
+                (isUploading || checking) && 'pointer-events-none opacity-50',
               )}
             >
               <UploadCloud className="h-4 w-4" />
@@ -2465,16 +2488,26 @@ function ZipUploadAction({
             id={fileInputId}
             type="file"
             multiple
-            accept=".zip,.dcm,application/zip,application/x-zip-compressed,application/dicom"
+            // No `accept` filter — the OS picker shows ALL file types. The
+            // security sniff + backend scan reject scripts/executables.
             className="sr-only"
-            disabled={isUploading}
+            disabled={isUploading || checking}
             onChange={(event) => {
               const picked = Array.from(event.target.files ?? []);
               event.currentTarget.value = '';
-              onPickFiles(picked);
+              void onPickFiles(picked);
             }}
           />
         </div>
+
+        {/* Content-security pre-check indicator — brief, shown while file
+            headers are read. Reassures the doctor uploads are scanned. */}
+        {checking && (
+          <p className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            {t('media.zipAction.security.checking')}
+          </p>
+        )}
 
         {/* Staged list — review + remove before uploading. */}
         {staged.length > 0 && (
@@ -2496,11 +2529,22 @@ function ZipUploadAction({
             </div>
             <ul className="divide-y rounded-lg border bg-card">
               {staged.map((file, index) => {
-                const isDicom = extOf(file) === 'dcm';
-                const Icon = isDicom ? FileImage : FileArchive;
+                const ext = extOf(file);
+                const isDicom = ext === 'dcm';
+                const isZip = ext === 'zip';
+                const Icon = isDicom ? FileImage : isZip ? FileArchive : FileText;
                 const iconTint = isDicom
                   ? 'bg-violet-100 text-violet-700'
-                  : 'bg-primary/10 text-primary';
+                  : isZip
+                    ? 'bg-primary/10 text-primary'
+                    : 'bg-muted text-muted-foreground';
+                const badgeLabel = isDicom
+                  ? t('media.zipAction.dicomBadge')
+                  : isZip
+                    ? t('media.zipAction.zipBadge')
+                    : ext
+                      ? ext.toUpperCase()
+                      : t('media.zipAction.fileBadge');
                 return (
                   <li
                     key={`${file.name}:${file.size}:${index}`}
@@ -2527,15 +2571,18 @@ function ZipUploadAction({
                         </span>
                         <span className="mx-1.5 opacity-60">·</span>
                         <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
-                          {isDicom
-                            ? t('media.zipAction.dicomBadge')
-                            : t('media.zipAction.zipBadge')}
+                          {badgeLabel}
                         </span>
                         <span className="mx-1.5 opacity-60">·</span>
                         <span className={cn(isUploading && 'text-primary')}>
                           {isUploading
                             ? t('media.zipAction.statusUploading')
                             : t('media.zipAction.statusQueued')}
+                        </span>
+                        <span className="mx-1.5 opacity-60">·</span>
+                        <span className="inline-flex items-center gap-1 font-medium text-emerald-600">
+                          <ShieldCheck className="h-3 w-3" />
+                          {t('media.zipAction.security.verifiedBadge')}
                         </span>
                       </p>
                     </div>
@@ -2624,7 +2671,16 @@ function ZipUploadAction({
               const Icon = isDicom ? FileImage : isZip ? FileArchive : FileText;
               const iconTint = isDicom
                 ? 'bg-violet-100 text-violet-700'
-                : 'bg-primary/10 text-primary';
+                : isZip
+                  ? 'bg-primary/10 text-primary'
+                  : 'bg-muted text-muted-foreground';
+              const badgeLabel = isDicom
+                ? 'DICOM'
+                : isZip
+                  ? t('media.zipAction.zipBadge')
+                  : ext
+                    ? ext.toUpperCase()
+                    : t('media.zipAction.fileBadge');
               return (
                 <li
                   key={file.id}
@@ -2657,14 +2713,10 @@ function ZipUploadAction({
                           addSuffix: true,
                         })}
                       </span>
-                      {(isDicom || isZip) && (
-                        <>
-                          <span className="mx-1.5 opacity-60">·</span>
-                          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
-                            {isDicom ? 'DICOM' : t('media.zipAction.zipBadge')}
-                          </span>
-                        </>
-                      )}
+                      <span className="mx-1.5 opacity-60">·</span>
+                      <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
+                        {badgeLabel}
+                      </span>
                     </p>
                   </div>
                   {/* Download — always visible (both modes). Uses the
@@ -2751,6 +2803,111 @@ function ZipUploadAction({
 /** Lower-cased file extension (without the dot), or '' if none. */
 function extOf(file: File): string {
   return file.name.split('.').pop()?.toLowerCase() ?? '';
+}
+
+// Script/executable extensions refused at pick time (mirrors the backend
+// `CODE_EXTENSIONS` denylist in file-security.ts). Any OTHER extension is
+// accepted — the policy is "any file type except scripts/executables".
+const CLIENT_CODE_EXTENSIONS = new Set<string>([
+  'exe', 'dll', 'so', 'dylib', 'bin', 'msi', 'msp', 'com', 'scr', 'cpl',
+  'sys', 'drv', 'ocx', 'efi', 'apk', 'app', 'dmg', 'pkg', 'deb', 'rpm',
+  'appimage', 'msix', 'sh', 'bash', 'zsh', 'ksh', 'csh', 'bat', 'cmd',
+  'ps1', 'psm1', 'psd1', 'vbs', 'vbe', 'js', 'mjs', 'cjs', 'jse', 'wsf',
+  'wsh', 'hta', 'ahk', 'py', 'pyc', 'pyo', 'pyw', 'rb', 'pl', 'pm', 'php',
+  'php3', 'php4', 'php5', 'php7', 'phtml', 'phar', 'lua', 'tcl', 'groovy',
+  'asp', 'aspx', 'ashx', 'asmx', 'jsp', 'jspx', 'cgi', 'htaccess', 'cshtml',
+  'vbhtml', 'html', 'htm', 'xhtml', 'shtml', 'svg', 'svgz', 'mht', 'mhtml',
+  'url', 'xml', 'xsl', 'xslt', 'jar', 'class', 'dex', 'war', 'ear', 'docm',
+  'xlsm', 'pptm', 'dotm', 'xltm', 'potm', 'xlam', 'ppam', 'sldm', 'xll',
+  'lnk', 'reg', 'scf', 'inf', 'sct', 'wsc', 'job', 'msc', 'gadget', 'chm',
+  'pif', 'application',
+]);
+
+/**
+ * Fast client-side content sniff — reads the file HEADER (not the whole
+ * file) and flags anything whose extension is a script/executable, whose
+ * bytes are a program/executable, that carries runnable script/markup, or
+ * (for a `.zip`) doesn't actually start like a ZIP. A UX courtesy so the
+ * doctor gets an instant, clear reason; the backend (`file-security.ts`)
+ * re-validates authoritatively and is the real gate. Returns an i18n reason
+ * code, or null when clean. Never throws — a read error resolves to null so
+ * the backend still decides.
+ */
+async function sniffClientThreat(
+  file: File,
+): Promise<'executable' | 'script' | 'mismatch' | 'blockedType' | null> {
+  // Extension denylist first — instant, no read needed.
+  if (CLIENT_CODE_EXTENSIONS.has(extOf(file))) return 'blockedType';
+  try {
+    // 64 KB header: enough for signatures, the DICOM preamble (@128), and
+    // any leading script markup — without reading a 1 GB CBCT into memory.
+    const headerLen = Math.min(file.size, 64 * 1024);
+    const bytes = new Uint8Array(await file.slice(0, headerLen).arrayBuffer());
+    const at = (sig: number[], off = 0) =>
+      sig.every((b, i) => bytes[off + i] === b);
+
+    // Executable / script binary signatures (offset 0).
+    if (
+      at([0x4d, 0x5a]) || // MZ (PE .exe/.dll)
+      at([0x7f, 0x45, 0x4c, 0x46]) || // ELF
+      at([0x23, 0x21]) || // #! shebang
+      at([0xca, 0xfe, 0xba, 0xbe]) || // Java class / Mach-O fat
+      at([0xfe, 0xed, 0xfa, 0xce]) ||
+      at([0xfe, 0xed, 0xfa, 0xcf]) ||
+      at([0xce, 0xfa, 0xed, 0xfe]) ||
+      at([0xcf, 0xfa, 0xed, 0xfe]) ||
+      at([0xd0, 0xcf, 0x11, 0xe0]) // OLE compound
+    ) {
+      return 'executable';
+    }
+
+    const ext = extOf(file);
+    if (ext === 'zip') {
+      const isZip =
+        at([0x50, 0x4b, 0x03, 0x04]) ||
+        at([0x50, 0x4b, 0x05, 0x06]) ||
+        at([0x50, 0x4b, 0x07, 0x08]);
+      if (!isZip) return 'mismatch';
+    }
+
+    // A DICOM with the standard preamble is trusted binary — skip the
+    // text-marker scan (medical volumes can contain arbitrary bytes).
+    const isDicom =
+      ext === 'dcm' &&
+      bytes.length >= 132 &&
+      at([0x44, 0x49, 0x43, 0x4d], 128); // "DICM"
+    if (!isDicom) {
+      const text = new TextDecoder('latin1').decode(bytes).toLowerCase();
+      const markers = [
+        '<?php',
+        '<script',
+        '#!/bin/',
+        '#!/usr/bin/',
+        '<!doctype html',
+        '<html',
+        '<svg',
+        'powershell',
+        'javascript:',
+        'createobject(',
+        'activexobject',
+        // high-signal code / command-execution tokens (mirror backend)
+        'os.popen',
+        'os.system',
+        'subprocess',
+        'child_process',
+        'require(',
+        'eval(',
+        'exec(',
+        'shell_exec',
+        '/bin/sh',
+      ];
+      if (markers.some((m) => text.includes(m))) return 'script';
+    }
+
+    return null;
+  } catch {
+    return null; // never block on a read error — the backend still validates
+  }
 }
 
 /**

@@ -293,6 +293,28 @@ export class PackService {
     return { id: updated.id, deletedAt: updated.deletedAt! };
   }
 
+  /**
+   * Permanently remove a pack (hard delete). Admin-only — the controller
+   * is class-gated to admins. Uses `findUnique` (not `get`, which 404s on
+   * soft-deleted rows) so an already soft-deleted pack can still be purged.
+   *
+   * Foreign keys make this safe without extra bookkeeping:
+   *   • PackPrice → onDelete: Cascade  → its prices are removed with it.
+   *   • Quotation.packId → onDelete: SetNull → historical quotes keep
+   *     their captured pack snapshot; only the dangling reference clears.
+   */
+  async permanentDelete(id: string): Promise<{ id: string }> {
+    const pack = await this.prisma.pack.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!pack) {
+      throw new NotFoundException('Pack not found');
+    }
+    await this.prisma.pack.delete({ where: { id } });
+    return { id };
+  }
+
   async setActive(id: string, active: boolean): Promise<PackWithPrices> {
     const current = await this.get(id);
     if (current.deletedAt && active) {

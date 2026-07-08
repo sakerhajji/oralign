@@ -249,6 +249,11 @@ export default function OrderDetailPage() {
   const order = orderQuery.data;
   const patient = patientQuery.data;
   const canManage = isAdmin || isDentist;
+  // Once the treatment fee is paid, a non-admin (the owning doctor) can no
+  // longer edit or delete the order — mirrors the backend guard. Admins
+  // keep full control.
+  const paidLocked = !!order.treatmentFeePaidAt && !isAdmin;
+  const canEditOrder = canManage && !paidLocked;
   const hasQuotationSignal =
     !!quotationQuery.data || POST_QUOTE_STATUSES.has(order.status);
 
@@ -342,7 +347,7 @@ export default function OrderDetailPage() {
               {t('orderDetail.downloadAll.label')}
             </Button>
           )}
-          {canManage && (
+          {canEditOrder && (
             <Button asChild>
               <Link href={`/dashboard/orders/${order.id}/edit`}>
                 <Edit className="mr-2 h-4 w-4" />
@@ -350,7 +355,7 @@ export default function OrderDetailPage() {
               </Link>
             </Button>
           )}
-          {canManage && (
+          {canEditOrder && (
             <OrderDeleteAction
               title={t('orderDetail.delete') + ' ?'}
               description={t('orderDetail.deleteDescription')}

@@ -169,4 +169,24 @@ export class PatientController {
       role: user.role,
     });
   }
+
+  @Delete(':id/permanent')
+  @Roles(UserRole.admin, UserRole.super_admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Permanently delete a patient (hard delete). Admin-only. Refuses ' +
+      'when the patient still has orders.',
+  })
+  @ApiParam({ name: 'id', type: String, description: 'Patient ID' })
+  @ApiResponse({ status: 200, description: 'Patient permanently deleted' })
+  async permanentDeletePatient(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<{ message: string }> {
+    return this.patientService.permanentDeletePatient(id, {
+      userId: user.sub,
+      role: user.role,
+    });
+  }
 }

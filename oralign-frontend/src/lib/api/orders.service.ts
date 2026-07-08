@@ -101,8 +101,16 @@ export const ordersService = {
     return response.data;
   },
 
-  submitOrder: async (id: string): Promise<DentalOrder> => {
-    const response = await apiClient.post<DentalOrder>(`/orders/${id}/submit`);
+  submitOrder: async (
+    id: string,
+    termsAccepted: boolean,
+  ): Promise<DentalOrder> => {
+    // The doctor must accept the General Terms & Conditions to submit;
+    // the backend rejects the call when `termsAccepted` isn't true.
+    const response = await apiClient.post<DentalOrder>(
+      `/orders/${id}/submit`,
+      { termsAccepted },
+    );
     return response.data;
   },
 

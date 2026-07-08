@@ -41,11 +41,16 @@ import {
   OrderFileResponseDto,
   OrderFilterDto,
   OrderResponseDto,
+  SubmitOrderDto,
   ToothInstructionDto,
   UpdateOrderDto,
 } from '../dto/order.dto';
 import { MediaProcessingService } from '../../media/media-processing.service';
 import { classifyMedia } from '../../media/media.constants';
+import {
+  scanUploadContent,
+  isDangerousUploadExtension,
+} from '../../media/file-security';
 import { buildSequentialName } from '../../media/naming';
 import { MediaVariantInfo } from '../../media/media.types';
 
@@ -148,28 +153,6 @@ const MAX_FILE_SIZE_DEFAULT_BYTES = 50 * 1024 * 1024;      //  50 MB
 const MAX_FILE_SIZE_ZIP_BUNDLE_BYTES = 1024 * 1024 * 1024; //   1 GB
 
 const UPLOAD_ROOT = path.join(process.cwd(), 'uploads');
-const ALLOWED_EXTENSIONS = new Set([
-  '.jpg',
-  '.jpeg',
-  '.png',
-  '.gif',
-  '.webp',
-  '.heic',
-  '.mp4',
-  '.mov',
-  '.avi',
-  '.stl',
-  '.ply',
-  '.obj',
-  '.zip',
-  '.pdf',
-  // DICOM single-volume files. The CBCT bundle path uses .zip, but
-  // some viewers export individual `.dcm` slices which the doctor
-  // wants to attach directly — kept in sync with the upload UI
-  // copy: "Single .dcm DICOM files are also accepted." (See
-  // order-file-upload.tsx → ZipUploadDialog description text.)
-  '.dcm',
-]);
 
 @Injectable()
 export class OrderService {
@@ -281,6 +264,7 @@ export class OrderService {
   ): Promise<OrderResponseDto> {
     this.ensureCanCreateOrModify(caller);
     const current = await this.findAccessibleOrder(id, caller);
+    this.ensureOrderNotLockedByPayment(current, caller);
 
     const doctorId = ADMIN_ROLES.includes(caller.role)
       ? updateOrderDto.doctorId
@@ -313,7 +297,8 @@ export class OrderService {
 
   async deleteOrder(id: string, caller: Caller): Promise<{ message: string }> {
     this.ensureCanCreateOrModify(caller);
-    await this.findAccessibleOrder(id, caller);
+    const current = await this.findAccessibleOrder(id, caller);
+    this.ensureOrderNotLockedByPayment(current, caller);
 
     await this.prisma.dentalOrder.update({
       where: { id },
@@ -408,7 +393,11 @@ export class OrderService {
     return { message: 'Order permanently deleted successfully' };
   }
 
-  async submitOrder(id: string, caller: Caller): Promise<OrderResponseDto> {
+  async submitOrder(
+    id: string,
+    dto: SubmitOrderDto,
+    caller: Caller,
+  ): Promise<OrderResponseDto> {
     this.ensureCanCreateOrModify(caller);
     const current = await this.findAccessibleOrder(id, caller);
 
@@ -416,9 +405,22 @@ export class OrderService {
       throw new BadRequestException('Only draft orders can be submitted');
     }
 
+    // Terms & Conditions gate — the doctor must accept the GTC before an
+    // order can be submitted. The frontend disables the button until the
+    // box is checked; this is the authoritative server-side guard.
+    if (dto?.termsAccepted !== true) {
+      throw new BadRequestException(
+        'You must accept the General Terms & Conditions to submit the order.',
+      );
+    }
+
     const order = await this.prisma.dentalOrder.update({
       where: { id },
-      data: { status: OrderStatus.submitted, submittedAt: new Date() },
+      data: {
+        status: OrderStatus.submitted,
+        submittedAt: new Date(),
+        termsAcceptedAt: new Date(),
+      },
       include: this.includeOrder,
     });
 
@@ -1103,7 +1105,8 @@ export class OrderService {
     // no_ipr / extract instructions) IS their job in the treatment plan
     // editor. assertCanEditOdontogram allows them when assigned.
     this.ensureCanEditOdontogram(caller);
-    await this.findAccessibleOrder(id, caller);
+    const target = await this.findAccessibleOrder(id, caller);
+    this.ensureOrderNotLockedByPayment(target, caller);
 
     // IPR / stripping moved to its own table (`TreatmentPlanIpr`).
     // Any client still trying to stuff `ipr_value` rows through this
@@ -1213,6 +1216,7 @@ export class OrderService {
   ): Promise<OrderFileResponseDto[]> {
     this.ensureCanCreateOrModify(caller);
     const order = await this.findAccessibleOrder(id, caller);
+    this.ensureOrderNotLockedByPayment(order, caller);
 
     if (!files?.length) {
       throw new BadRequestException('No files uploaded');
@@ -1233,6 +1237,16 @@ export class OrderService {
 
     for (const file of files) {
       this.validateFile(file, category);
+      // Content-security gate: never persist a file whose BYTES are a
+      // script or executable (or a ZIP carrying one) — the extension check
+      // above only trusts the attacker-supplied name. See file-security.ts.
+      const verdict = await scanUploadContent(file);
+      if (!verdict.safe) {
+        const suffix = verdict.detail ? `: ${verdict.detail.slice(0, 120)}` : '';
+        throw new BadRequestException(
+          `${verdict.reason ?? 'This file was rejected for security reasons.'}${suffix}`,
+        );
+      }
       const saved = await this.saveFileToDisk(id, category, file, {
         doctorName: order.doctor?.fullName,
         patientName: order.patient.fullName,
@@ -1281,7 +1295,8 @@ export class OrderService {
     caller: Caller,
   ): Promise<{ message: string }> {
     this.ensureCanCreateOrModify(caller);
-    await this.findAccessibleOrder(id, caller);
+    const parent = await this.findAccessibleOrder(id, caller);
+    this.ensureOrderNotLockedByPayment(parent, caller);
     const file = await this.findOrderFile(id, fileId);
 
     await this.prisma.orderFile.update({
@@ -1650,6 +1665,25 @@ export class OrderService {
     }
   }
 
+  /**
+   * Lock a paid order against edits by the DENTIST who owns it. Once the
+   * treatment fee is collected (`treatmentFeePaidAt` stamped), the doctor
+   * can no longer modify the order, upload/delete its files, or delete it —
+   * only an admin can still manage it. Designers (planning staff) and
+   * admins are NOT locked: the treatment-plan work legitimately happens
+   * after the fee is paid.
+   */
+  private ensureOrderNotLockedByPayment(
+    order: { treatmentFeePaidAt: Date | null },
+    caller: Caller,
+  ): void {
+    if (order.treatmentFeePaidAt && caller.role === UserRole.dentist) {
+      throw new ForbiddenException(
+        'This order has been paid and can no longer be modified. Please contact an administrator.',
+      );
+    }
+  }
+
   private async ensureDentistExists(doctorId: string): Promise<void> {
     const dentist = await this.prisma.user.findFirst({
       where: { id: doctorId, role: UserRole.dentist, deletedAt: null },
@@ -1779,9 +1813,14 @@ export class OrderService {
       throw new BadRequestException(`File size must be ${maxMb}MB or less`);
     }
 
-    const extension = path.extname(file.originalname).toLowerCase();
-    if (!ALLOWED_EXTENSIONS.has(extension)) {
-      throw new BadRequestException('File extension is not allowed');
+    // Policy: accept ANY file type EXCEPT scripts/executables. Rather than a
+    // strict allow-list, we reject only the dangerous "code" extensions
+    // (.exe/.js/.sh/.php/.html/.svg/…); the byte-level scanUploadContent()
+    // then catches disguised payloads. See file-security.ts.
+    if (isDangerousUploadExtension(file.originalname)) {
+      throw new BadRequestException(
+        'This file type is not allowed for security reasons.',
+      );
     }
 
     if (file.originalname.includes('..') || /[\\/]/.test(file.originalname)) {

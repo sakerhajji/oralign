@@ -666,6 +666,10 @@ export const dict = {
     product: { fr: "Découvrir", en: "Discover", ar: "اكتشف" } as T,
     company: { fr: "Société", en: "Company", ar: "الشركة" } as T,
     legal: { fr: "Mentions légales", en: "Legal", ar: "قانوني" } as T,
+    // Header for the compliance column (Qui sommes-nous, Réclamations,
+    // Mentions légales, Conditions de vente). Distinct from `legal` above
+    // so the column title doesn't collide with the "Mentions légales" item.
+    legalCol: { fr: "Informations légales", en: "Legal information", ar: "معلومات قانونية" } as T,
     productLinks: [
       { fr: "Pourquoi les aligneurs", en: "Why aligners", ar: "لماذا الأجهزة" },
       { fr: "Parcours de traitement", en: "Treatment journey", ar: "رحلة العلاج" },

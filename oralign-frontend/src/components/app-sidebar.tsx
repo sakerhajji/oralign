@@ -170,8 +170,8 @@ const NAV_MAIN: NavItemDef[] = [
 ]
 
 // Footer secondary nav — settings + support + finance.
-// Get Help stays even though it doesn't have a destination yet (kept on
-// purpose; the user asked for it).
+// "Obtenir de l'aide" opens the help/compliance hub at /dashboard/help
+// (About / Refunds / Legal notice / Terms of sale as tabs).
 const NAV_SECONDARY: NavItemDef[] = [
   { titleKey: "chrome.nav.settings",       url: "/account/profile",            icon: <Settings2Icon />    },
   // Payment History lives at /dashboard/payments/history (was
@@ -179,7 +179,7 @@ const NAV_SECONDARY: NavItemDef[] = [
   // page rather than nested under account-settings — same role-aware
   // logic (admin sees all, dentist sees their own).
   { titleKey: "chrome.nav.paymentHistory", url: "/dashboard/payments/history", icon: <CreditCardIcon />   },
-  { titleKey: "chrome.nav.getHelp",        url: "#",                           icon: <CircleHelpIcon />   },
+  { titleKey: "chrome.nav.getHelp",        url: "/dashboard/help",             icon: <CircleHelpIcon />   },
 ]
 
 // Roles that can create new orders. Designers can VIEW orders (read-only

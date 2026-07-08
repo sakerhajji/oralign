@@ -16,6 +16,7 @@ import { extractApiErrorMessage } from '@/lib/api/error';
 import { useT } from '@/lib/i18n/lang-context';
 import type {
   CompanyBillingSettings,
+  LegalInfo,
   UpsertCompanyBillingSettingsDto,
 } from '@/lib/types';
 
@@ -23,6 +24,7 @@ export const companyBillingKeys = {
   all: ['company-billing'] as const,
   active: () => [...companyBillingKeys.all, 'active'] as const,
   publicDefaults: () => [...companyBillingKeys.all, 'public-defaults'] as const,
+  legalInfo: () => [...companyBillingKeys.all, 'legal-info'] as const,
 };
 
 /** Read the singleton settings row (or null if not configured yet). */
@@ -65,6 +67,26 @@ export function useBillingPublicDefaults(
   });
 }
 
+/**
+ * Read the PUBLIC legal identity (mentions légales) — company name,
+ * legal form, tax id, RC, address, contact, hosting, domain, currency.
+ * Backs the dashboard help page. The showcase compliance pages fetch the
+ * same endpoint server-side (see `(showcase)/_lib/legal-info.ts`) so the
+ * legal content is fully server-rendered for the payment provider's
+ * review + SEO. No auth needed.
+ */
+export function useLegalInfo(
+  enabled = true,
+): UseQueryResult<LegalInfo, Error> {
+  return useQuery({
+    queryKey: companyBillingKeys.legalInfo(),
+    queryFn: () => companyBillingService.getLegalInfo(),
+    enabled,
+    staleTime: 1000 * 60 * 5,
+    refetchOnWindowFocus: false,
+  });
+}
+
 export function useUpsertCompanyBilling(): UseMutationResult<
   CompanyBillingSettings,
   Error,
@@ -81,6 +103,11 @@ export function useUpsertCompanyBilling(): UseMutationResult<
       // stale one we cached for 5 min.
       queryClient.invalidateQueries({
         queryKey: companyBillingKeys.publicDefaults(),
+      });
+      // Same for the public legal-info projection powering the
+      // compliance pages + dashboard help page.
+      queryClient.invalidateQueries({
+        queryKey: companyBillingKeys.legalInfo(),
       });
       toast.success(t('toasts.companyBilling.settingsSaved'));
     },

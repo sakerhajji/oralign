@@ -830,6 +830,17 @@ model CompanyBillingSettings {
   companyEmail            String?
   taxRegistrationNumber   String?
 
+  // ── Legal identity (Tunisian "Mentions légales" requirements) ──────────
+  // These back the public compliance pages (mentions légales, conditions
+  // de vente, etc.) so the merchant's legal identity is admin-editable and
+  // never hardcoded in the frontend. All nullable → additive, db-push-safe.
+  tradeName               String?       // Nom commercial (if different from companyName)
+  legalForm               String?       // Forme juridique — SUARL / SARL / personne physique…
+  registreDeCommerce      String?       // Registre de commerce (RC)
+  hostingProvider         String?       // Hébergeur — provider name
+  hostingProviderUrl      String?       // Hébergeur — provider website
+  websiteDomain           String?       // e.g. oralign.com.tn
+
   defaultTvaRate          Float         @default(19)
   defaultCurrency         String        @default("TND")
 

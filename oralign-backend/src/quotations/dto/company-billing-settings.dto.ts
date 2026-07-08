@@ -104,6 +104,43 @@ export class UpsertCompanyBillingSettingsDto {
   @MaxLength(120)
   taxRegistrationNumber?: string;
 
+  // ── Legal identity (mentions légales) ─────────────────────────────────
+  @ApiPropertyOptional({ description: 'Nom commercial / trade name' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  tradeName?: string;
+
+  @ApiPropertyOptional({ description: 'Forme juridique (SUARL, SARL, …)' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  legalForm?: string;
+
+  @ApiPropertyOptional({ description: 'Registre de commerce (RC)' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  registreDeCommerce?: string;
+
+  @ApiPropertyOptional({ description: 'Hosting provider name (hébergeur)' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  hostingProvider?: string;
+
+  @ApiPropertyOptional({ description: 'Hosting provider website URL' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  hostingProviderUrl?: string;
+
+  @ApiPropertyOptional({ description: 'Public website domain, e.g. oralign.com.tn' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  websiteDomain?: string;
+
   @ApiPropertyOptional({ minimum: 0, maximum: 100, default: 19 })
   @IsOptional()
   @Type(() => Number)
@@ -213,6 +250,13 @@ export class CompanyBillingSettingsResponseDto {
   @ApiPropertyOptional() companyEmail?: string | null;
   @ApiPropertyOptional() taxRegistrationNumber?: string | null;
 
+  @ApiPropertyOptional() tradeName?: string | null;
+  @ApiPropertyOptional() legalForm?: string | null;
+  @ApiPropertyOptional() registreDeCommerce?: string | null;
+  @ApiPropertyOptional() hostingProvider?: string | null;
+  @ApiPropertyOptional() hostingProviderUrl?: string | null;
+  @ApiPropertyOptional() websiteDomain?: string | null;
+
   @ApiProperty() defaultTvaRate!: number;
   @ApiProperty() defaultTreatmentFee!: number;
   @ApiProperty() stampDuty!: number;
@@ -236,4 +280,33 @@ export class CompanyBillingSettingsResponseDto {
   @ApiProperty() isActive!: boolean;
   @ApiProperty() createdAt!: Date;
   @ApiProperty() updatedAt!: Date;
+}
+
+/**
+ * PUBLIC legal identity projection — served WITHOUT auth so the public
+ * showcase compliance pages (mentions légales, qui sommes-nous,
+ * conditions de vente, réclamations) can render the merchant's real
+ * legal data instead of hardcoding it.
+ *
+ * Intentionally EXCLUDES bank details, invoice counters, TVA rate,
+ * treatment fee, logo path — nothing here is sensitive: it is the same
+ * information a Tunisian merchant is legally required to publish on its
+ * website footer. `currency` is included so public price displays can
+ * confirm they match the merchant-account currency.
+ */
+export class LegalInfoDto {
+  @ApiPropertyOptional() companyName?: string | null;
+  @ApiPropertyOptional() tradeName?: string | null;
+  @ApiPropertyOptional() legalForm?: string | null;
+  @ApiPropertyOptional() taxRegistrationNumber?: string | null;
+  @ApiPropertyOptional() registreDeCommerce?: string | null;
+  @ApiPropertyOptional() address?: string | null;
+  @ApiPropertyOptional() city?: string | null;
+  @ApiPropertyOptional() country?: string | null;
+  @ApiPropertyOptional() phone?: string | null;
+  @ApiPropertyOptional() email?: string | null;
+  @ApiPropertyOptional() hostingProvider?: string | null;
+  @ApiPropertyOptional() hostingProviderUrl?: string | null;
+  @ApiPropertyOptional() websiteDomain?: string | null;
+  @ApiPropertyOptional() currency?: string | null;
 }

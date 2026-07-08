@@ -5,6 +5,7 @@ import { StorageModule } from '../storage/storage.module';
 import {
   CompanyBillingSettingsController,
   PublicBillingDefaultsController,
+  PublicLegalInfoController,
 } from './controllers/company-billing-settings.controller';
 import { QuotationController } from './controllers/quotation.controller';
 import { QuotationPaymentPlanController } from './controllers/quotation-payment-plan.controller';
@@ -30,6 +31,7 @@ import { QuotationPdfService } from './services/quotation-pdf.service';
   controllers: [
     CompanyBillingSettingsController,
     PublicBillingDefaultsController,
+    PublicLegalInfoController,
     QuotationController,
     QuotationPaymentPlanController,
   ],

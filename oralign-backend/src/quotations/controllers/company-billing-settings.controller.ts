@@ -24,10 +24,12 @@ import { UserRole } from '@prisma/client';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { Public } from '../../common/decorators/public.decorator';
 import { BadRequestException } from '../../common/exceptions/app.exception';
 import { LocalStorageService } from '../../storage/local-storage.service';
 import {
   CompanyBillingSettingsResponseDto,
+  LegalInfoDto,
   UpsertCompanyBillingSettingsDto,
 } from '../dto/company-billing-settings.dto';
 import { CompanyBillingSettingsService } from '../services/company-billing-settings.service';
@@ -246,5 +248,41 @@ export class PublicBillingDefaultsController {
       companyCity: settings?.companyCity ?? null,
       bankDetails,
     };
+  }
+}
+
+/**
+ * PUBLIC (no-auth) legal-identity surface.
+ *
+ * Backs the unauthenticated showcase compliance pages — "Qui sommes-nous",
+ * "Mentions légales", "Conditions de vente", "Réclamations et
+ * remboursements" — and the dashboard help page. It returns ONLY the
+ * legal fields a Tunisian merchant must publish (raison sociale, forme
+ * juridique, matricule fiscal, RC, adresse, contact, hébergeur, domaine)
+ * plus the merchant currency. NO bank details, counters, fees, or logo.
+ *
+ * Kept in its own controller (mirroring PublicPackController) so the
+ * `@Public()` route never sits under a class-level RolesGuard — the
+ * showcase is browsed by anonymous visitors, so a role check here would
+ * produce a confusing 403.
+ */
+@ApiTags('company-billing-settings')
+@Controller('company-billing-settings')
+export class PublicLegalInfoController {
+  constructor(private readonly service: CompanyBillingSettingsService) {}
+
+  @Public()
+  @Get('legal-info')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Public legal identity (mentions légales) for the compliance pages: ' +
+      'company name, legal form, tax id, RC, address, contact, hosting, ' +
+      'domain and merchant currency. No auth required. Same source of ' +
+      'truth the admin manages at /account/billing-settings.',
+  })
+  @ApiResponse({ status: 200, type: LegalInfoDto })
+  async getLegalInfo(): Promise<LegalInfoDto> {
+    return this.service.getLegalInfo();
   }
 }

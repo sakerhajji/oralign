@@ -38,6 +38,10 @@ import {
 import { useAuth } from '@/lib/providers/auth-provider';
 import type { TreatmentFeeRow } from '@/lib/api/orders.service';
 import { PaymentMethod, PaymentRecordStatus } from '@/lib/types';
+import {
+  DEFAULT_MERCHANT_CURRENCY,
+  formatPrice,
+} from '@/lib/utils/currency';
 import { TreatmentFeeReceiptDialog } from '@/components/orders/treatment-fee-receipt-dialog';
 import { useT } from '@/lib/i18n/lang-context';
 
@@ -208,7 +212,7 @@ function TreatmentFeeTable({
               <StatusBadge status={row.status} />
             </TableCell>
             <TableCell className="text-right tabular-nums">
-              {row.amount !== null ? `${row.amount} TND` : '—'}
+              {row.amount !== null ? formatPrice(row.amount) : '—'}
             </TableCell>
             <TableCell className="text-xs text-muted-foreground">
               {row.paidAt
@@ -324,7 +328,7 @@ export function PendingTreatmentFeesSection() {
           orderCode={active.orderCode}
           proofPath={active.proofPath}
           amount={active.amount}
-          currency="TND"
+          currency={DEFAULT_MERCHANT_CURRENCY}
           doctorName={active.doctor?.fullName ?? null}
           patientName={active.patient?.fullName ?? null}
           method={active.method}
@@ -445,7 +449,7 @@ export function TreatmentFeesHistorySection() {
           orderCode={activeReceipt.orderCode}
           proofPath={activeReceipt.proofPath}
           amount={activeReceipt.amount}
-          currency="TND"
+          currency={DEFAULT_MERCHANT_CURRENCY}
           doctorName={activeReceipt.doctor?.fullName ?? null}
           patientName={activeReceipt.patient?.fullName ?? null}
           method={activeReceipt.method}

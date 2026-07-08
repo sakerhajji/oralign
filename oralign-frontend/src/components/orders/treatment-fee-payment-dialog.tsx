@@ -11,6 +11,7 @@ import {
   FileText,
   Landmark,
   Loader2,
+  ShieldCheck,
   Upload,
   X,
 } from 'lucide-react';
@@ -25,6 +26,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
+import { formatPrice } from '@/lib/utils/currency';
 import { useT } from '@/lib/i18n/lang-context';
 import {
   useBillingPublicDefaults,
@@ -211,11 +213,18 @@ export function TreatmentFeePaymentDialog({
               {t('feeUi.payDialog.amountDue')}
             </p>
             <p className="mt-1.5 text-3xl font-bold tabular-nums text-foreground sm:text-4xl">
-              {amount} {currency}
+              {formatPrice(amount, currency)}
             </p>
             <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
               {t('feeUi.payDialog.feeIntro')}
             </p>
+
+            {/* Secure-payment reassurance — visible next to the amount so
+                the payer sees it before choosing a method. */}
+            <div className="mt-4 flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs leading-relaxed text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300">
+              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{t('feeUi.payDialog.secureNote')}</span>
+            </div>
 
             <div className="mt-auto pt-6">
               <p className="rounded-lg border bg-card p-3 text-xs leading-relaxed text-muted-foreground">

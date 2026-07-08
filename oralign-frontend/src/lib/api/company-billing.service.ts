@@ -2,6 +2,7 @@ import apiClient from './client';
 import type {
   BankDetails,
   CompanyBillingSettings,
+  LegalInfo,
   UpsertCompanyBillingSettingsDto,
 } from '@/lib/types';
 
@@ -51,6 +52,20 @@ export const companyBillingService = {
   getPublicDefaults: async (): Promise<BillingPublicDefaults> => {
     const res = await apiClient.get<BillingPublicDefaults>(
       '/company-billing-settings/public-defaults',
+    );
+    return res.data;
+  },
+
+  /**
+   * PUBLIC (no-auth) legal identity — powers the compliance pages
+   * (mentions légales, qui sommes-nous, conditions de vente,
+   * réclamations) and the dashboard help page. Same source of truth the
+   * admin manages at /account/billing-settings; every field may be null
+   * until it's filled in, so callers render "à compléter" placeholders.
+   */
+  getLegalInfo: async (): Promise<LegalInfo> => {
+    const res = await apiClient.get<LegalInfo>(
+      '/company-billing-settings/legal-info',
     );
     return res.data;
   },

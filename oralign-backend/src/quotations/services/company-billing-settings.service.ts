@@ -37,6 +37,51 @@ export class CompanyBillingSettingsService {
   }
 
   /**
+   * PUBLIC legal identity projection for the unauthenticated showcase
+   * compliance pages. Returns every field a Tunisian merchant is legally
+   * required to publish (raison sociale, forme juridique, matricule
+   * fiscal, RC, adresse, contact, hébergeur, domaine) plus the merchant
+   * currency — and nothing sensitive (no bank details, counters, fees).
+   *
+   * When no settings row exists yet, every field is null; the frontend
+   * renders graceful "à compléter" placeholders so the page never breaks.
+   */
+  async getLegalInfo(): Promise<{
+    companyName: string | null;
+    tradeName: string | null;
+    legalForm: string | null;
+    taxRegistrationNumber: string | null;
+    registreDeCommerce: string | null;
+    address: string | null;
+    city: string | null;
+    country: string | null;
+    phone: string | null;
+    email: string | null;
+    hostingProvider: string | null;
+    hostingProviderUrl: string | null;
+    websiteDomain: string | null;
+    currency: string | null;
+  }> {
+    const s = await this.getActive();
+    return {
+      companyName: s?.companyName ?? null,
+      tradeName: s?.tradeName ?? null,
+      legalForm: s?.legalForm ?? null,
+      taxRegistrationNumber: s?.taxRegistrationNumber ?? null,
+      registreDeCommerce: s?.registreDeCommerce ?? null,
+      address: s?.companyAddress ?? null,
+      city: s?.companyCity ?? null,
+      country: s?.companyCountry ?? null,
+      phone: s?.companyPhone ?? null,
+      email: s?.companyEmail ?? null,
+      hostingProvider: s?.hostingProvider ?? null,
+      hostingProviderUrl: s?.hostingProviderUrl ?? null,
+      websiteDomain: s?.websiteDomain ?? null,
+      currency: s?.defaultCurrency ?? 'TND',
+    };
+  }
+
+  /**
    * Same as getActive() but throws when no active row exists. Used by
    * the Quote pipeline — refusing to generate a Quote without company
    * settings keeps every PDF self-consistent.
@@ -75,6 +120,12 @@ export class CompanyBillingSettingsService {
           companyPhone: dto.companyPhone ?? null,
           companyEmail: dto.companyEmail ?? null,
           taxRegistrationNumber: dto.taxRegistrationNumber ?? null,
+          tradeName: dto.tradeName ?? null,
+          legalForm: dto.legalForm ?? null,
+          registreDeCommerce: dto.registreDeCommerce ?? null,
+          hostingProvider: dto.hostingProvider ?? null,
+          hostingProviderUrl: dto.hostingProviderUrl ?? null,
+          websiteDomain: dto.websiteDomain ?? null,
           defaultTvaRate: dto.defaultTvaRate ?? 19,
           defaultTreatmentFee: dto.defaultTreatmentFee ?? 0,
           stampDuty: dto.stampDuty ?? 1,
@@ -106,6 +157,14 @@ export class CompanyBillingSettingsService {
         companyEmail: dto.companyEmail ?? current.companyEmail,
         taxRegistrationNumber:
           dto.taxRegistrationNumber ?? current.taxRegistrationNumber,
+        tradeName: dto.tradeName ?? current.tradeName,
+        legalForm: dto.legalForm ?? current.legalForm,
+        registreDeCommerce:
+          dto.registreDeCommerce ?? current.registreDeCommerce,
+        hostingProvider: dto.hostingProvider ?? current.hostingProvider,
+        hostingProviderUrl:
+          dto.hostingProviderUrl ?? current.hostingProviderUrl,
+        websiteDomain: dto.websiteDomain ?? current.websiteDomain,
         defaultTvaRate: dto.defaultTvaRate ?? current.defaultTvaRate,
         defaultTreatmentFee:
           dto.defaultTreatmentFee ?? current.defaultTreatmentFee,
@@ -299,6 +358,12 @@ export class CompanyBillingSettingsService {
       companyPhone: settings.companyPhone ?? null,
       companyEmail: settings.companyEmail ?? null,
       taxRegistrationNumber: settings.taxRegistrationNumber ?? null,
+      tradeName: settings.tradeName ?? null,
+      legalForm: settings.legalForm ?? null,
+      registreDeCommerce: settings.registreDeCommerce ?? null,
+      hostingProvider: settings.hostingProvider ?? null,
+      hostingProviderUrl: settings.hostingProviderUrl ?? null,
+      websiteDomain: settings.websiteDomain ?? null,
       defaultTvaRate: settings.defaultTvaRate,
       // Decimal → Number at the API boundary; the frontend form uses
       // a plain number input and computeTotals() does Number arithmetic.

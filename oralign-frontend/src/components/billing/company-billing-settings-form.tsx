@@ -54,6 +54,12 @@ const emptyState: FormState = {
   companyPhone: '',
   companyEmail: '',
   taxRegistrationNumber: '',
+  tradeName: '',
+  legalForm: '',
+  registreDeCommerce: '',
+  hostingProvider: '',
+  hostingProviderUrl: '',
+  websiteDomain: '',
   defaultTvaRate: 19,
   defaultTreatmentFee: 0,
   // "Droit de timbre" — Tunisian fiscal stamp added to every invoice
@@ -102,6 +108,12 @@ export function CompanyBillingSettingsForm() {
       companyPhone: settings.companyPhone ?? '',
       companyEmail: settings.companyEmail ?? '',
       taxRegistrationNumber: settings.taxRegistrationNumber ?? '',
+      tradeName: settings.tradeName ?? '',
+      legalForm: settings.legalForm ?? '',
+      registreDeCommerce: settings.registreDeCommerce ?? '',
+      hostingProvider: settings.hostingProvider ?? '',
+      hostingProviderUrl: settings.hostingProviderUrl ?? '',
+      websiteDomain: settings.websiteDomain ?? '',
       defaultTvaRate: settings.defaultTvaRate ?? 19,
       defaultTreatmentFee: settings.defaultTreatmentFee ?? 0,
       stampDuty: settings.stampDuty ?? 1,
@@ -158,6 +170,12 @@ export function CompanyBillingSettingsForm() {
       companyPhone: form.companyPhone?.trim() || undefined,
       companyEmail: form.companyEmail?.trim() || undefined,
       taxRegistrationNumber: form.taxRegistrationNumber?.trim() || undefined,
+      tradeName: form.tradeName?.trim() || undefined,
+      legalForm: form.legalForm?.trim() || undefined,
+      registreDeCommerce: form.registreDeCommerce?.trim() || undefined,
+      hostingProvider: form.hostingProvider?.trim() || undefined,
+      hostingProviderUrl: form.hostingProviderUrl?.trim() || undefined,
+      websiteDomain: form.websiteDomain?.trim() || undefined,
       defaultTvaRate: form.defaultTvaRate,
       defaultTreatmentFee: form.defaultTreatmentFee,
       stampDuty: form.stampDuty,
@@ -299,6 +317,62 @@ export function CompanyBillingSettingsForm() {
               />
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* ─── Legal identity (mentions légales) ──────────────────────────── */}
+      {/* These fields feed the public compliance pages (mentions légales,
+          conditions de vente, …) that the payment provider requires. They
+          are read via the public /company-billing-settings/legal-info
+          endpoint, so keeping them here means nothing is hardcoded in the
+          frontend — the admin controls the merchant's legal identity. */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Building2 className="h-4 w-4 text-primary" />
+            {t('accountBillingSettings.legalInfoTitle')}
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            {t('accountBillingSettings.legalInfoBody')}
+          </p>
+        </CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-2">
+          <Field
+            label={t('accountBillingSettings.tradeName')}
+            value={form.tradeName ?? ''}
+            onChange={(v) => updateField('tradeName', v)}
+            placeholder="Oralign"
+          />
+          <Field
+            label={t('accountBillingSettings.legalForm')}
+            value={form.legalForm ?? ''}
+            onChange={(v) => updateField('legalForm', v)}
+            placeholder="SUARL / SARL / …"
+          />
+          <Field
+            label={t('accountBillingSettings.registreDeCommerce')}
+            value={form.registreDeCommerce ?? ''}
+            onChange={(v) => updateField('registreDeCommerce', v)}
+            placeholder="B0000000000"
+          />
+          <Field
+            label={t('accountBillingSettings.websiteDomain')}
+            value={form.websiteDomain ?? ''}
+            onChange={(v) => updateField('websiteDomain', v)}
+            placeholder="oralign.com.tn"
+          />
+          <Field
+            label={t('accountBillingSettings.hostingProvider')}
+            value={form.hostingProvider ?? ''}
+            onChange={(v) => updateField('hostingProvider', v)}
+            placeholder="OVH, Vercel, …"
+          />
+          <Field
+            label={t('accountBillingSettings.hostingProviderUrl')}
+            value={form.hostingProviderUrl ?? ''}
+            onChange={(v) => updateField('hostingProviderUrl', v)}
+            placeholder="https://www.ovh.com"
+          />
         </CardContent>
       </Card>
 

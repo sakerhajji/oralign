@@ -283,6 +283,15 @@ export interface CompanyBillingSettings {
   companyEmail?: string | null;
   taxRegistrationNumber?: string | null;
 
+  // Legal identity (mentions légales) — sourced from billing settings so
+  // the public compliance pages never hardcode the merchant's data.
+  tradeName?: string | null;
+  legalForm?: string | null;
+  registreDeCommerce?: string | null;
+  hostingProvider?: string | null;
+  hostingProviderUrl?: string | null;
+  websiteDomain?: string | null;
+
   defaultTvaRate: number;
   // Professional/clinical fee auto-applied to new quotes. The admin
   // can still override per-quote — this is just the policy default.
@@ -312,6 +321,12 @@ export interface UpsertCompanyBillingSettingsDto {
   companyPhone?: string;
   companyEmail?: string;
   taxRegistrationNumber?: string;
+  tradeName?: string;
+  legalForm?: string;
+  registreDeCommerce?: string;
+  hostingProvider?: string;
+  hostingProviderUrl?: string;
+  websiteDomain?: string;
   defaultTvaRate?: number;
   defaultTreatmentFee?: number;
   /** "Droit de timbre" — fiscal stamp added to the invoice total. */
@@ -323,6 +338,30 @@ export interface UpsertCompanyBillingSettingsDto {
   footerTextTranslations?: TranslatedTexts;
   bankDetails?: BankDetails;
   isActive?: boolean;
+}
+
+/**
+ * PUBLIC legal identity projection (mentions légales) served WITHOUT auth
+ * from `/company-billing-settings/legal-info`. Powers the public showcase
+ * compliance pages + the dashboard help page. Every field can be null
+ * until the admin fills the billing settings — the UI renders graceful
+ * "à compléter" placeholders in that case.
+ */
+export interface LegalInfo {
+  companyName: string | null;
+  tradeName: string | null;
+  legalForm: string | null;
+  taxRegistrationNumber: string | null;
+  registreDeCommerce: string | null;
+  address: string | null;
+  city: string | null;
+  country: string | null;
+  phone: string | null;
+  email: string | null;
+  hostingProvider: string | null;
+  hostingProviderUrl: string | null;
+  websiteDomain: string | null;
+  currency: string | null;
 }
 
 /** Snapshot of the company-billing-settings row at quotation-issue time. */

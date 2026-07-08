@@ -25,6 +25,7 @@ export const commerceDomainDict = {
         fr: 'Aucun prix actif configuré',
       } as T,
       attachBtn: { en: 'Attach pack', fr: 'Associer le pack' } as T,
+      updateBtn: { en: 'Update pack', fr: 'Mettre à jour' } as T,
       archModeLabel: { en: 'Arcade mode', fr: 'Mode d’arcade' } as T,
       twoArches: { en: 'Two arches', fr: 'Deux arcades' } as T,
       singleArch: { en: 'Single arch', fr: 'Arcade unique' } as T,
@@ -37,6 +38,7 @@ export const commerceDomainDict = {
     // quote-pack-panel.tsx — pack snapshot summary
     snapshot: {
       packFallback: { en: 'Pack', fr: 'Pack' } as T,
+      changePack: { en: 'Change pack', fr: 'Changer le forfait' } as T,
       twoArches: { en: 'Two arches', fr: 'Deux arcades' } as T,
       singleArch: { en: 'Single arch', fr: 'Arcade unique' } as T,
       unlimitedSteps: { en: 'Unlimited steps', fr: 'Étapes illimitées' } as T,
@@ -210,6 +212,12 @@ export const commerceDomainDict = {
       patient: { en: 'Patient', fr: 'Patient' } as T,
       doctor: { en: 'Doctor', fr: 'Praticien' } as T,
       order: { en: 'Order', fr: 'Commande' } as T,
+      // Trust reassurance shown next to the payment action (requested
+      // exact wording for the payment-provider review).
+      secureNote: {
+        en: 'Secure payment. Banking details are not stored on our platform.',
+        fr: 'Paiement sécurisé. Les données bancaires ne sont pas stockées sur notre plateforme.',
+      } as T,
       footCard: {
         en: 'Card payments are processed immediately. The next batch of treatment steps unlocks once the payment is confirmed.',
         fr: 'Les paiements par carte sont traités immédiatement. Le prochain lot d’étapes de traitement se débloque dès que le paiement est confirmé.',
@@ -441,6 +449,12 @@ export const commerceDomainDict = {
       footnoteDefault: {
         en: 'Settling this fee unblocks the treatment plan for this order.',
         fr: 'Le règlement de ces honoraires débloque le plan de traitement de cette commande.',
+      } as T,
+      // Trust reassurance shown next to the payment action (requested
+      // exact wording for the payment-provider review).
+      secureNote: {
+        en: 'Secure payment. Banking details are not stored on our platform.',
+        fr: 'Paiement sécurisé. Les données bancaires ne sont pas stockées sur notre plateforme.',
       } as T,
       regionAria: { en: 'Payment details', fr: 'Détails du paiement' } as T,
       methodHeading: { en: 'Payment method', fr: 'Mode de paiement' } as T,

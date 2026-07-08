@@ -2256,6 +2256,20 @@ export const dict = {
     address: { en: 'Address', fr: 'Adresse' } as T,
     addressPlaceholder: { en: 'Street, suite…', fr: 'Rue, suite…' } as T,
 
+    // Legal identity (mentions légales) — powers the public compliance
+    // pages required for online-payment validation.
+    legalInfoTitle: { en: 'Legal information', fr: 'Informations légales' } as T,
+    legalInfoBody: {
+      en: 'Shown on the public compliance pages (legal notice, terms of sale). Required for online-payment validation.',
+      fr: 'Affichées sur les pages de conformité publiques (mentions légales, conditions de vente). Requises pour la validation du paiement en ligne.',
+    } as T,
+    tradeName: { en: 'Trade name', fr: 'Nom commercial' } as T,
+    legalForm: { en: 'Legal form', fr: 'Forme juridique' } as T,
+    registreDeCommerce: { en: 'Trade register (RC)', fr: 'Registre de commerce (RC)' } as T,
+    hostingProvider: { en: 'Hosting provider', fr: 'Hébergeur' } as T,
+    hostingProviderUrl: { en: 'Hosting provider website', fr: 'Site de l’hébergeur' } as T,
+    websiteDomain: { en: 'Website domain', fr: 'Domaine du site web' } as T,
+
     // Quote defaults
     quoteDefaultsTitle: { en: 'Quote defaults', fr: 'Valeurs par défaut du devis' } as T,
     quoteDefaultsBody: {
@@ -3043,6 +3057,31 @@ export const dict = {
       billing: { en: 'Billing', fr: 'Facturation' } as T,
       notifications: { en: 'Notifications', fr: 'Notifications' } as T,
       logOut: { en: 'Log out', fr: 'Se déconnecter' } as T,
+    },
+  },
+
+  // ─── Help / compliance hub (/dashboard/help) ────────────────────
+  // The four documents required for online-payment validation, shown
+  // as tabs. Company data is pulled from billing settings — never
+  // hardcoded — via the shared legal-content builder.
+  help: {
+    title: { en: 'Help & legal information', fr: 'Aide et informations légales' } as T,
+    subtitle: {
+      en: 'About us, complaints & refunds, legal notice and terms of sale. Company details are managed in Billing settings.',
+      fr: 'Qui sommes-nous, réclamations et remboursements, mentions légales et conditions de vente. Les informations société se gèrent dans les Paramètres de facturation.',
+    } as T,
+    loading: { en: 'Loading…', fr: 'Chargement…' } as T,
+    editInSettings: {
+      en: 'Edit company details in Billing settings',
+      fr: 'Modifier les informations société dans les Paramètres de facturation',
+    } as T,
+    tabs: {
+      about: { en: 'About us', fr: 'Qui sommes-nous' } as T,
+      refunds: { en: 'Complaints & refunds', fr: 'Réclamations & remboursements' } as T,
+      legal: { en: 'Legal notice', fr: 'Mentions légales' } as T,
+      privacy: { en: 'Privacy policy', fr: 'Confidentialité' } as T,
+      termsOfUse: { en: 'Terms of use', fr: 'CGU' } as T,
+      terms: { en: 'Order terms', fr: 'Conditions de commande' } as T,
     },
   },
 

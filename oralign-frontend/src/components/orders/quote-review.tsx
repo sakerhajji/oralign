@@ -200,7 +200,7 @@ function QuoteHeader({
   return (
     <Card className="overflow-hidden">
       <div className="bg-gradient-to-r from-primary/8 via-primary/4 to-transparent">
-        <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
               <UserIcon className="h-3 w-3" />
@@ -467,7 +467,7 @@ function AdminLayout({
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <QuoteHeader
         quote={quote}
         patientName={patientName}
@@ -501,8 +501,8 @@ function AdminLayout({
       {/* Step 2 — Pricing adjustments. Only meaningful once a pack is
           attached, so they sit directly under it. */}
       {quote.packId ? (
-        <Card>
-          <CardContent className="space-y-4 p-5">
+        <Card size="sm">
+          <CardContent className="space-y-3">
             <div>
               <h3 className="text-sm font-semibold">
                 {t('quoteUi.review.pricingTitle')}
@@ -511,9 +511,9 @@ function AdminLayout({
                 {t('quoteUi.review.pricingDesc')}
               </p>
             </div>
-            <div className="grid gap-4 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-3">
               <div className="grid gap-1.5">
-                <Label className="text-sm font-medium">
+                <Label className="text-xs font-medium text-muted-foreground">
                   {t('quoteUi.review.deliveryFees', {
                     currency: quote.currency,
                   })}
@@ -522,6 +522,7 @@ function AdminLayout({
                   type="number"
                   step="0.001"
                   min={0}
+                  className="h-10"
                   value={form.deliveryFees}
                   onChange={(e) =>
                     setForm((s) => ({
@@ -534,13 +535,14 @@ function AdminLayout({
                 />
               </div>
               <div className="grid gap-1.5">
-                <Label className="text-sm font-medium">
+                <Label className="text-xs font-medium text-muted-foreground">
                   {t('quoteUi.review.discount', { currency: quote.currency })}
                 </Label>
                 <Input
                   type="number"
                   step="0.001"
                   min={0}
+                  className="h-10"
                   value={form.discountAmount}
                   onChange={(e) =>
                     setForm((s) => ({
@@ -553,10 +555,10 @@ function AdminLayout({
                 />
               </div>
               <div className="grid gap-1.5">
-                <Label className="text-sm font-medium">
+                <Label className="text-xs font-medium text-muted-foreground">
                   {t('quoteUi.review.netToBill')}
                 </Label>
-                <div className="flex h-9 items-center rounded-md border bg-muted/40 px-3 text-sm font-semibold tabular-nums">
+                <div className="flex h-10 items-center rounded-md border bg-primary/5 px-3 text-base font-semibold tabular-nums">
                   {formatMoney(netAfter, quote.currency)}
                 </div>
               </div>
@@ -578,11 +580,13 @@ function AdminLayout({
 
       {/* Document settings — language + internal/PDF notes. Lower
           priority than the pack + plan, so they sit near the actions. */}
-      <Card>
-        <CardContent className="space-y-4 p-5">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="grid gap-1.5">
-              <Label className="text-sm font-medium">
+      <Card size="sm">
+        <CardContent className="space-y-3">
+          {/* Language + notes toggle share one row so the card never
+              leaves a big empty half. */}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="grid gap-1.5 sm:w-64">
+              <Label className="text-xs font-medium text-muted-foreground">
                 {t('quoteUi.review.docLanguage')}
               </Label>
               {/* Always interactive — once sent the rest of the form
@@ -596,7 +600,7 @@ function AdminLayout({
                   setForm((s) => ({ ...s, language: v as DevisLanguage }))
                 }
               >
-                <SelectTrigger>
+                <SelectTrigger className="h-10">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -613,27 +617,27 @@ function AdminLayout({
                 </p>
               ) : null}
             </div>
-          </div>
 
-          {/* Collapsible notes — keep the surface uncluttered until the
-              admin actually needs to write something. */}
-          <button
-            type="button"
-            onClick={() => setNotesOpen((v) => !v)}
-            className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
-          >
-            {notesOpen ? (
-              <ChevronUp className="h-4 w-4" />
-            ) : (
-              <ChevronDown className="h-4 w-4" />
-            )}
-            {t('quoteUi.review.notesToggle')}
-            {(form.notes || form.adminMessage) && !notesOpen ? (
-              <span className="text-xs text-amber-700">
-                {t('quoteUi.review.hasContent')}
-              </span>
-            ) : null}
-          </button>
+            {/* Collapsible notes toggle — keeps the surface uncluttered
+                until the admin actually needs to write something. */}
+            <button
+              type="button"
+              onClick={() => setNotesOpen((v) => !v)}
+              className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground sm:mt-6"
+            >
+              {notesOpen ? (
+                <ChevronUp className="h-4 w-4" />
+              ) : (
+                <ChevronDown className="h-4 w-4" />
+              )}
+              {t('quoteUi.review.notesToggle')}
+              {(form.notes || form.adminMessage) && !notesOpen ? (
+                <span className="text-xs text-amber-700">
+                  {t('quoteUi.review.hasContent')}
+                </span>
+              ) : null}
+            </button>
+          </div>
           {notesOpen ? (
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="grid gap-1.5">
@@ -667,9 +671,10 @@ function AdminLayout({
         </CardContent>
       </Card>
 
-      {/* Sticky-ish action bar at the bottom. */}
+      {/* Action bar — the four primary actions, aligned and comfortably
+          sized so they're easy to spot and tap. */}
       <Card>
-        <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+        <CardContent className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
           <div className="text-xs text-muted-foreground">
             {isEditable
               ? t('quoteUi.review.footerDraft')
@@ -677,7 +682,7 @@ function AdminLayout({
                 ? t('quoteUi.review.footerSent')
                 : t('quoteUi.review.footerLocked')}
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {/* Recall — only shown on SENT quotes. Two-click: first
                 click flips into confirm mode; second click fires the
                 mutation. We use the same button slot so the bar
@@ -687,7 +692,6 @@ function AdminLayout({
               <Button
                 type="button"
                 variant="outline"
-                size="sm"
                 onClick={() => {
                   if (confirmRecall) {
                     recall.mutate(quote.id, {
@@ -699,7 +703,7 @@ function AdminLayout({
                 }}
                 onBlur={() => setConfirmRecall(false)}
                 disabled={recall.isPending}
-                className="gap-2 border-amber-300 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
+                className="h-10 gap-2 border-amber-300 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
               >
                 {recall.isPending ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -715,10 +719,9 @@ function AdminLayout({
               <Button
                 type="button"
                 variant="outline"
-                size="sm"
                 onClick={() => cancel.mutate({ id: quote.id, orderId })}
                 disabled={cancel.isPending}
-                className="gap-2 text-red-600"
+                className="h-10 gap-2 text-red-600 hover:text-red-700"
               >
                 <Trash2 className="h-4 w-4" />
                 {t('common.cancel')}
@@ -728,10 +731,9 @@ function AdminLayout({
               <Button
                 type="button"
                 variant="outline"
-                size="sm"
                 onClick={handleSaveDraft}
                 disabled={update.isPending}
-                className="gap-2"
+                className="h-10 gap-2"
               >
                 {update.isPending ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -744,10 +746,9 @@ function AdminLayout({
             <Button
               type="button"
               variant="secondary"
-              size="sm"
               onClick={handleGeneratePdf}
               disabled={generate.isPending || update.isPending}
-              className="gap-2"
+              className="h-10 gap-2"
             >
               {generate.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -770,12 +771,11 @@ function AdminLayout({
               return (
                 <Button
                   type="button"
-                  size="sm"
                   onClick={handleSendToDoctor}
                   disabled={
                     send.isPending || update.isPending || needsPlanConfig
                   }
-                  className="gap-2 bg-emerald-600 hover:bg-emerald-700"
+                  className="h-10 min-w-[150px] gap-2 bg-emerald-600 hover:bg-emerald-700"
                   title={
                     needsPlanConfig
                       ? t('quoteUi.review.planFirstTitle')
@@ -834,7 +834,7 @@ function DoctorLayout({
   // Doctors only ever see a quote that's been sent. Draft = waiting.
   if (quote.status === QuotationStatus.DRAFT) {
     return (
-      <div className="space-y-4">
+      <div className="space-y-3">
         <QuoteHeader
           quote={quote}
           patientName={patientName}
@@ -887,7 +887,7 @@ function DoctorLayout({
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <QuoteHeader
         quote={quote}
         patientName={patientName}
@@ -915,8 +915,8 @@ function DoctorLayout({
           render is in flight; the chosen language persists on the
           row so subsequent default downloads also serve this lang. */}
       {hasPdf ? (
-        <Card>
-          <CardContent className="flex flex-wrap items-center gap-3 p-4">
+        <Card size="sm">
+          <CardContent className="flex flex-wrap items-center gap-3">
             <Globe className="h-4 w-4 text-muted-foreground" />
             <div className="flex flex-1 flex-wrap items-center gap-2">
               <Label className="text-xs font-medium text-muted-foreground">
@@ -927,7 +927,7 @@ function DoctorLayout({
                 onValueChange={(v) => setDocLang(v as DevisLanguage)}
                 disabled={generate.isPending}
               >
-                <SelectTrigger className="h-8 w-[160px]">
+                <SelectTrigger className="h-9 w-[160px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -945,10 +945,9 @@ function DoctorLayout({
             <Button
               type="button"
               variant="outline"
-              size="sm"
               onClick={handleRegenerateInLanguage}
               disabled={generate.isPending || docLang === quote.language}
-              className="gap-2"
+              className="h-9 gap-2"
               title={
                 docLang === quote.language
                   ? t('quoteUi.review.pickDifferent')

@@ -537,10 +537,32 @@ export function ClinicalOrderFiles({
       </section>
 
       {/* CBCT-requested toggle sits BETWEEN radiography and STL so the
-          reading order is Imagerie → panoramic → profile → CBCT → STL →
-          ZIP/DCM. Editable surfaces (the wizard) pass the toggle node;
-          read-only surfaces omit it. */}
+          reading order is Imagerie → panoramic → profile → CBCT toggle →
+          CBCT / ZIP bundle → STL. Editable surfaces (the wizard) pass the
+          toggle node; read-only surfaces omit it. */}
       {cbctToggle ?? null}
+
+      {/* CBCT / ZIP bundle upload — sits directly under the CBCT toggle
+          (the thing it belongs to), NOT at the bottom under the STL cards.
+          Conditional: rendered when CBCT was requested for this order; in
+          read-only mode (order detail / résumé) it also shows whenever a
+          bundle already exists so admins / doctors still see the shipped
+          CBCT / ZIP volume — that read-only render drops the upload row +
+          delete buttons and just lists the uploaded bundles. */}
+      {showCbctUpload && (
+        <ZipUploadAction
+          orderId={orderId}
+          title={t('media.zipAction.freeformTitle')}
+          category={OrderFileCategory.ZIP}
+          files={files}
+          onDelete={
+            readOnly
+              ? undefined
+              : (fileId) => deleteFile.mutate({ id: orderId, fileId })
+          }
+          readOnly={readOnly}
+        />
+      )}
 
       <section className="space-y-5">
         <SectionIntro
@@ -563,33 +585,6 @@ export function ClinicalOrderFiles({
             />
           ))}
         </div>
-
-        {/* ZIP / CBCT bundle upload — placed here because dentists who
-            upload a single archive almost always do so for radiology
-            (CBCT DICOM volumes) or to ship a multi-file STL export. The
-            ZipUploadDialog audits archive contents client-side before
-            anything leaves the browser; CBCT .dcm files are also
-            accepted as individual uploads. */}
-        {/* Conditional — only rendered when CBCT was requested for this
-            order. In read-only mode (order-detail page) we keep showing
-            it whenever a bundle already exists so admins / patients can
-            still see the CBCT / ZIP volumes shipped with this order; the
-            read-only render drops the upload action row + delete buttons
-            and just lists the uploaded bundles. */}
-        {showCbctUpload && (
-          <ZipUploadAction
-            orderId={orderId}
-            title={t('media.zipAction.freeformTitle')}
-            category={OrderFileCategory.ZIP}
-            files={files}
-            onDelete={
-              readOnly
-                ? undefined
-                : (fileId) => deleteFile.mutate({ id: orderId, fileId })
-            }
-            readOnly={readOnly}
-          />
-        )}
         {/* Legacy "Other scan files" list removed for the same reason —
             keep the page focused on the structured slots. */}
       </section>
@@ -1151,73 +1146,88 @@ function SlotFilePreview({
   const { t } = useT();
   const previewType = getPreviewType(file);
   const { objectUrl, loading, error } = secureFile;
+  const viewerDisabled = loading || (!!error && previewType !== 'model');
+  // Prefetch the fullscreen `lg` variant on hover/focus so the viewer opens
+  // instantly.
+  const prefetch =
+    previewType === 'image'
+      ? () => prefetchSecureFile(orderId, file.id, 'lg')
+      : undefined;
 
   return (
-    <FullscreenFileViewer
-      orderId={orderId}
-      objectUrl={objectUrl}
-      file={file}
-      type={previewType}
-      disabled={loading || (!!error && previewType !== 'model')}
-      trigger={
+    <div
+      onMouseEnter={prefetch}
+      className="group relative aspect-[4/3] w-full max-w-[320px] overflow-hidden rounded-xl border bg-muted/30 shadow-sm transition hover:border-primary hover:ring-4 hover:ring-primary/10 sm:max-w-[260px]"
+    >
+      {loading ? (
+        <Skeleton className="h-full w-full rounded-xl" />
+      ) : previewType === 'image' && objectUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={objectUrl}
+          alt={displayFileName(file)}
+          loading="lazy"
+          decoding="async"
+          // `object-contain` so the FULL image is visible inside the 4:3
+          // card (portrait / square shots don't get cropped).
+          className="h-full w-full object-contain bg-muted/40"
+        />
+      ) : previewType === 'model' ? (
+        // Static server-rendered thumbnail — the live 3D viewer only mounts
+        // when the user opens the fullscreen dialog.
+        <StlStaticPreview orderId={orderId} file={file} />
+      ) : (
+        <span className="grid h-full w-full place-items-center text-muted-foreground">
+          {previewType === 'pdf' ? (
+            <FileText className="h-10 w-10" />
+          ) : previewType === 'video' ? (
+            <Video className="h-10 w-10" />
+          ) : (
+            <ImageIcon className="h-10 w-10" />
+          )}
+        </span>
+      )}
+
+      {/* Hover overlay — two actions: open full screen + download. Appears
+          on hover / keyboard focus; the buttons are separate interactive
+          elements (the full-screen one drives the viewer, the download one
+          fetches the original bytes). */}
+      <div className="absolute inset-0 flex items-center justify-center gap-2 bg-foreground/45 opacity-0 backdrop-blur-[1px] transition group-hover:opacity-100 group-focus-within:opacity-100">
+        <FullscreenFileViewer
+          orderId={orderId}
+          objectUrl={objectUrl}
+          file={file}
+          type={previewType}
+          disabled={viewerDisabled}
+          trigger={
+            <button
+              type="button"
+              disabled={viewerDisabled}
+              // Warm the fullscreen `lg` variant as early as possible so
+              // the dialog opens on a cache hit instead of a fresh fetch:
+              // on focus (keyboard), on pointer-enter (mouse arriving at
+              // the button), and on pointer-down (the instant of a tap —
+              // covers touch, where there's no hover to pre-warm on).
+              onFocus={prefetch}
+              onPointerEnter={prefetch}
+              onPointerDown={prefetch}
+              className="inline-flex h-9 items-center gap-1.5 rounded-full bg-background px-3 text-xs font-semibold text-foreground shadow-md transition hover:bg-background/90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Maximize2 className="h-4 w-4" />
+              {previewType === 'model' ? t('media.view3d') : t('media.fullView')}
+            </button>
+          }
+        />
         <button
           type="button"
-          disabled={loading || (!!error && previewType !== 'model')}
-          // Prefetch the fullscreen `lg` variant the moment the user hovers
-          // or tabs to the thumbnail, so the picture is already loaded (or
-          // in flight) by the time they click — the open feels instant.
-          onMouseEnter={
-            previewType === 'image'
-              ? () => prefetchSecureFile(orderId, file.id, 'lg')
-              : undefined
-          }
-          onFocus={
-            previewType === 'image'
-              ? () => prefetchSecureFile(orderId, file.id, 'lg')
-              : undefined
-          }
-          className="group relative aspect-[4/3] w-full max-w-[320px] overflow-hidden rounded-xl border bg-muted/30 shadow-sm transition hover:border-primary hover:ring-4 hover:ring-primary/10 sm:max-w-[260px]"
+          onClick={() => downloadOrderFile(orderId, file)}
+          className="inline-flex h-9 items-center gap-1.5 rounded-full bg-background px-3 text-xs font-semibold text-foreground shadow-md transition hover:bg-background/90"
         >
-          {loading ? (
-            <Skeleton className="h-full w-full rounded-xl" />
-          ) : previewType === 'image' && objectUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={objectUrl}
-              alt={displayFileName(file)}
-              loading="lazy"
-              decoding="async"
-              // `object-contain` so the FULL image is visible inside the
-              // 4:3 thumbnail card — previously `object-cover` cropped
-              // anything that wasn't a 4:3 photo (portrait shots, square
-              // crops, screenshots) and the planner couldn't tell what
-              // they'd uploaded without clicking through to the full
-              // viewer. Background tint already provides the framing.
-              className="h-full w-full object-contain bg-muted/40"
-            />
-          ) : previewType === 'model' ? (
-            // Static server-rendered thumbnail — the live 3D viewer
-            // only mounts when the user opens the fullscreen dialog.
-            <StlStaticPreview orderId={orderId} file={file} />
-          ) : (
-            <span className="grid h-full w-full place-items-center text-muted-foreground">
-              {previewType === 'pdf' ? (
-                <FileText className="h-10 w-10" />
-              ) : previewType === 'video' ? (
-                <Video className="h-10 w-10" />
-              ) : (
-                <ImageIcon className="h-10 w-10" />
-              )}
-            </span>
-          )}
-          {/* Hover affordance — solid pill in the bottom-right corner so it
-              never sits ON the patient photo full-width. */}
-          <span className="pointer-events-none absolute bottom-2 right-2 rounded-full bg-foreground/85 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-background opacity-0 shadow transition group-hover:opacity-100">
-            {previewType === 'model' ? t('media.view3d') : t('media.view')}
-          </span>
+          <Download className="h-4 w-4" />
+          {t('media.download')}
         </button>
-      }
-    />
+      </div>
+    </div>
   );
 }
 

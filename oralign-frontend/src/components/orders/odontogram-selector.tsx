@@ -11,7 +11,11 @@ import {
   useState,
 } from 'react';
 import { createPortal, flushSync } from 'react-dom';
-import type { CSSProperties, MouseEvent as ReactMouseEvent } from 'react';
+import type {
+  CSSProperties,
+  MouseEvent as ReactMouseEvent,
+  RefObject,
+} from 'react';
 import { Check, Info, Palette, RotateCcw, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ToothInstruction, ToothInstructionType } from '@/lib/types';
@@ -240,6 +244,72 @@ export function enforceExtractExclusiveInstructions(
   });
 }
 
+// ── Settled-width hook ──────────────────────────────────────────────────────
+
+/**
+ * Pin the chart to its container's SETTLED width so layout-animating
+ * ancestors don't thrash it.
+ *
+ * Why: the dashboard sidebar collapse animates the main content's width
+ * for 200 ms (shadcn Sidebar transitions `width` on its gap element).
+ * With a fluid chart, EVERY frame of that animation reflowed the arch and
+ * re-rasterized all 32 tooth SVGs (up to 4 stacked glyphs per marked
+ * tooth) — the source of the sidebar jank on odontogram pages.
+ *
+ * How: observe the scroll container with a ResizeObserver and expose its
+ * content-box width, but only AFTER it has stopped changing for
+ * `SETTLE_MS`. The inner chart takes that value as a fixed pixel width:
+ * during the sidebar animation the chart keeps its previous geometry
+ * (the `overflow-x-auto` wrapper absorbs the temporary mismatch), then
+ * re-lays-out exactly once when the animation ends. The first observation
+ * is applied un-debounced; it may flush a frame after first paint, but the
+ * pixel value equals the fluid width so nothing visibly changes.
+ */
+const SETTLE_MS = 150;
+
+function useSettledWidth<T extends HTMLElement>(): [
+  RefObject<T | null>,
+  number | undefined,
+] {
+  const ref = useRef<T>(null);
+  const [width, setWidth] = useState<number | undefined>(undefined);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+
+    let timer: number | undefined;
+    let first = true;
+    const observer = new ResizeObserver((entries) => {
+      // contentRect excludes padding — exactly the width the inner
+      // chart would naturally take as a block child. FLOOR, not round:
+      // rounding up by half a pixel would make the pinned chart wider
+      // than its container, and on classic (Windows) scrollbars that
+      // sub-pixel overflow shows a persistent horizontal scrollbar.
+      // Flooring worst-cases as an invisible <1px centered gap.
+      const next = Math.floor(entries[0]?.contentRect.width ?? 0);
+      if (!next) return;
+      if (first) {
+        first = false;
+        setWidth(next);
+        return;
+      }
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        setWidth((prev) => (prev === next ? prev : next));
+      }, SETTLE_MS);
+    });
+
+    observer.observe(el);
+    return () => {
+      window.clearTimeout(timer);
+      observer.disconnect();
+    };
+  }, []);
+
+  return [ref, width];
+}
+
 // ── Component ──────────────────────────────────────────────────────────────
 
 export function OdontogramSelector({
@@ -348,6 +418,11 @@ export function OdontogramSelector({
   // benefit from seeing where IPR is planned. Clicking is gated separately.
   const iprVisible = !!iprValues;
   const iprEditable = !!onIprChange && !disabled;
+
+  // Freeze the chart's width between resize events so the sidebar
+  // collapse animation (which animates the content width for 200 ms)
+  // doesn't reflow + re-rasterize the tooth SVGs on every frame.
+  const [chartHostRef, chartWidth] = useSettledWidth<HTMLDivElement>();
 
   // Palette by context:
   // - movement: order-facing surface — the four doctor instructions
@@ -586,8 +661,18 @@ export function OdontogramSelector({
       )}
 
       <div className="rounded-2xl border bg-card shadow-sm">
-        <div className="odo-scroll overflow-x-auto px-2 pt-8 pb-6 sm:px-5">
-          <div className="mx-auto min-w-[560px] max-w-[1180px] sm:min-w-[640px]">
+        <div
+          ref={chartHostRef}
+          className="odo-scroll overflow-x-auto px-2 pt-8 pb-6 sm:px-5"
+        >
+          {/* Fixed pixel width (settled container width) instead of fluid —
+              the CSS min/max still clamp it. Undefined until the first
+              observation (applied un-debounced right after mount); the
+              value equals the fluid width, so first paint is unaffected. */}
+          <div
+            className="mx-auto min-w-[560px] max-w-[1180px] sm:min-w-[640px]"
+            style={chartWidth !== undefined ? { width: chartWidth } : undefined}
+          >
             <Arch
               row="upper"
               left={UPPER_RIGHT}
@@ -1132,15 +1217,117 @@ function Arch({
   );
 }
 
+/**
+ * Build a hard-stop CSS `linear-gradient` that splits into N EQUAL bands,
+ * one per colour (no blending). Used for the multi-mark number chip so it
+ * mirrors the segmented tooth. One colour → returns the flat hex.
+ */
+function segmentGradient(hexes: string[], direction: string): string {
+  const n = hexes.length;
+  if (n === 0) return 'transparent';
+  if (n === 1) return hexes[0];
+  const stops = hexes
+    .map((hex, i) => {
+      const start = ((i / n) * 100).toFixed(3);
+      const end = (((i + 1) / n) * 100).toFixed(3);
+      return `${hex} ${start}%, ${hex} ${end}%`;
+    })
+    .join(', ');
+  return `linear-gradient(${direction}, ${stops})`;
+}
+
+/**
+ * Renders the tooth glyph coloured by its assigned instruction colours —
+ * the colours are painted ON THE TOOTH, never as dots beside it.
+ *
+ *   • 0–1 colours → one glyph filled with that colour (or the neutral
+ *     default). Identical to the original single-colour rendering.
+ *   • 2, 3 or 4 colours → the SAME tooth glyph is stacked once per colour,
+ *     each layer clipped to an equal horizontal band (top→bottom) and
+ *     painted with one colour. Because every layer is the real tooth
+ *     silhouette, the result is the tooth itself divided into equal
+ *     coloured parts (e.g. half red / half green) with a crisp edge where
+ *     the colours meet — no dots.
+ *
+ * Fully generic: the band maths derives from the colour count, so it works
+ * for ANY tooth (11…48) and any of the tooth-level marks (No Attachments /
+ * Do Not Move / No IPR / Extract / Attachment). The stacked layers all use
+ * the same `viewBox` + `preserveAspectRatio`, so the bands stay aligned.
+ */
+function SegmentedToothGlyph({
+  viewBox,
+  spriteHref,
+  colors,
+}: {
+  viewBox: string;
+  spriteHref: string;
+  /** Ordered, de-duped instruction colours for this tooth (0–4). */
+  colors: ColorEntry[];
+}) {
+  // Single (or empty) → one glyph, exactly as before.
+  if (colors.length <= 1) {
+    const color = colors[0];
+    return (
+      <svg
+        className="odo-glyph"
+        viewBox={viewBox}
+        width="100%"
+        preserveAspectRatio="xMidYMid meet"
+        aria-hidden
+        focusable="false"
+        style={
+          {
+            '--tooth-color': color?.hex ?? DEFAULT_TOOTH,
+            '--tooth-outline': color?.outline ?? DEFAULT_OUTLINE,
+          } as CSSProperties
+        }
+      >
+        <use href={spriteHref} xlinkHref={spriteHref} />
+      </svg>
+    );
+  }
+
+  const n = colors.length;
+  return (
+    <span className="odo-glyph odo-glyph-stack" aria-hidden>
+      {colors.map((c, i) => {
+        // Band i (0 = top): reveal only its horizontal slice via inset clip.
+        const top = ((i / n) * 100).toFixed(3);
+        const bottom = (((n - 1 - i) / n) * 100).toFixed(3);
+        return (
+          <svg
+            key={c.type}
+            className="odo-seg-glyph"
+            viewBox={viewBox}
+            width="100%"
+            preserveAspectRatio="xMidYMid meet"
+            aria-hidden
+            focusable="false"
+            style={
+              {
+                '--tooth-color': c.hex,
+                '--tooth-outline': c.outline,
+                clipPath: `inset(${top}% 0 ${bottom}% 0)`,
+              } as CSSProperties
+            }
+          >
+            <use href={spriteHref} xlinkHref={spriteHref} />
+          </svg>
+        );
+      })}
+    </span>
+  );
+}
+
 type ToothButtonProps = {
   toothNumber: number;
   row: 'upper' | 'lower';
   mirrored: boolean;
   /**
    * Editable instructions on this tooth (already normalised: EXTRACT is
-   * exclusive). The FIRST drives the tooth's dominant fill; the rest
-   * render as small colour dots so several non-extraction marks stay
-   * visible at once. Owned by the editable layer.
+   * exclusive). When more than one is present the tooth is split into
+   * equal coloured bands, one per mark (see SegmentedToothGlyph). Owned
+   * by the editable layer.
    */
   types?: ToothInstructionType[];
   /**
@@ -1192,11 +1379,18 @@ const ToothButton = memo(
       seenTypes.add(c.type);
       return true;
     });
-    // The FIRST mark is the dominant fill; the rest render as small dots so
-    // several non-extraction instructions stay visible together. (EXTRACT
-    // is normalised to a lone mark upstream, so it never shows dots.)
+    // Colours painted ON the tooth: ONE colour fills the whole tooth; TWO
+    // to FOUR split it into equal coloured bands (SegmentedToothGlyph).
+    // No dots. `color` (first mark) still drives the single-mark number
+    // chip; multi-mark chips use a matching hard-stop gradient.
     const color = marks[0];
-    const dotColors = marks.slice(1);
+    const isMulti = marks.length > 1;
+    const chipBackground = isMulti
+      ? segmentGradient(
+          marks.map((m) => m.hex),
+          'to right',
+        )
+      : color?.hex;
     // Normalise the host viewBox to "0 0 w h" — some source teeth (17, 27,
     // 37, 47) have content drawn far from the SVG origin (min-x ≈ 22.5).
     // Keeping the raw viewBox would push the <use> at (0, 0) outside the
@@ -1234,11 +1428,19 @@ const ToothButton = memo(
     const labelChip = (
       <span
         className={cn('odo-chip', color && 'odo-chip-on')}
-        style={color ? { background: color.hex } : undefined}
+        style={chipBackground ? { background: chipBackground } : undefined}
       >
         <span className="odo-chip-num">{toothNumber}</span>
-        {color && <span className="odo-chip-sep" aria-hidden />}
-        {color && <span className="odo-chip-code">{color.short}</span>}
+        {/* Single mark → show its short code (NA / DNM / …). Multiple
+            marks → show the count (×2 / ×3 / ×4); the individual codes
+            live in the legend + the badge list under the chart, and the
+            colours read straight off the segmented tooth. */}
+        {color && !isMulti && <span className="odo-chip-sep" aria-hidden />}
+        {color && !isMulti && (
+          <span className="odo-chip-code">{color.short}</span>
+        )}
+        {isMulti && <span className="odo-chip-sep" aria-hidden />}
+        {isMulti && <span className="odo-chip-code">×{marks.length}</span>}
       </span>
     );
 
@@ -1260,34 +1462,14 @@ const ToothButton = memo(
       >
         {row === 'upper' && labelChip}
 
-        <svg
-          className="odo-glyph"
+        {/* The tooth itself, painted with its instruction colour(s). One
+            mark fills the whole tooth; two-to-four split it into equal
+            coloured bands (no dots). */}
+        <SegmentedToothGlyph
           viewBox={viewBox}
-          width="100%"
-          preserveAspectRatio="xMidYMid meet"
-          aria-hidden
-          focusable="false"
-        >
-          <use href={spriteHref} xlinkHref={spriteHref} />
-        </svg>
-
-        {/* Extra-mark dots — one per instruction beyond the dominant fill,
-            so a tooth carrying several non-extraction marks (e.g. No IPR +
-            No Attachments + Do Not Move) shows every colour at once instead
-            of hiding all but one. Also surfaces read-only doctor marks as
-            reference dots in the treatment/attachments editors. */}
-        {dotColors.length > 0 && (
-          <span className="odo-tooth-marks" aria-hidden>
-            {dotColors.map((c) => (
-              <span
-                key={c.type}
-                className="odo-tooth-mark-dot"
-                style={{ background: c.hex }}
-                title={c.label}
-              />
-            ))}
-          </span>
-        )}
+          spriteHref={spriteHref}
+          colors={marks}
+        />
 
         {row === 'lower' && labelChip}
       </button>
@@ -1791,9 +1973,13 @@ const ODONTOGRAM_CSS = /* css */ `
   outline: none;
   /* Scope style + paint to this tooth — a color change only repaints here. */
   contain: layout style paint;
-  /* GPU-promote the hover transform — no per-frame paint on the SVG. */
-  will-change: transform;
-  transform: translateZ(0);
+  /* NOTE: we deliberately do NOT permanently promote every tooth to its
+     own compositor layer here (no will-change / translateZ on the base).
+     32 always-on layers made the compositor churn whenever something else
+     animated over the chart — the dashboard sidebar open/close and the
+     full-screen image dialog both janked. Promotion is now transient:
+     applied on :hover only (below), so idle teeth cost the compositor
+     nothing and the hover lift still runs on its own layer. */
   transition:
     transform 180ms cubic-bezier(0.4, 0, 0.2, 1),
     filter 180ms cubic-bezier(0.4, 0, 0.2, 1),
@@ -1801,6 +1987,10 @@ const ODONTOGRAM_CSS = /* css */ `
     border-color 180ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 .odo-tooth:hover {
+  /* Promote just-in-time for the lift animation, then drop back to no
+     layer once the hover ends — keeps the interaction smooth without the
+     idle layer cost. */
+  will-change: transform;
   transform: translate3d(0, -3px, 0) scale(1.06);
   filter: drop-shadow(0 6px 10px rgba(15, 23, 42, 0.18));
 }
@@ -1833,67 +2023,21 @@ const ODONTOGRAM_CSS = /* css */ `
   transform: scaleX(-1);
 }
 
-/* Overlay dot — pink attachment marker that sits on top of a tooth
-   already painted with the doctor's prescription colour. Anchored to
-   the inside-corner of the tooth glyph (top for upper row, bottom for
-   lower row) so it never clashes with the FDI number chip. */
-.odo-tooth-overlay {
+/* Segmented tooth. When a tooth carries several instruction colours the
+   glyph is drawn once per colour, each copy clipped to an equal
+   horizontal band, so the TOOTH itself is split into equal coloured
+   parts (no dots). The wrapper reuses .odo-glyph's box (width, responsive
+   height, mirror transform) and hosts the absolutely-stacked bands. */
+.odo-glyph-stack {
+  position: relative;
+}
+.odo-seg-glyph {
   position: absolute;
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  border: 1.5px solid #ffffff;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.35);
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
-  z-index: 2;
-}
-.odo-tooth-upper .odo-tooth-overlay {
-  /* Below the upper glyph, just above the FDI chip. */
-  bottom: 18px;
-  right: 4px;
-}
-.odo-tooth-lower .odo-tooth-overlay {
-  /* Above the lower glyph, just below the FDI chip. */
-  top: 18px;
-  right: 4px;
-}
-.odo-tooth-mirrored .odo-tooth-overlay {
-  /* Mirror keeps the dot on the SAME anatomical side (mesial) as the
-     unmirrored siblings — the tooth-button is flipped but the dot
-     should still read clearly on the same corner of the card. */
-  right: auto;
-  left: 4px;
-}
-
-/* Multi-mark dots — a small row of coloured dots for the instructions
-   BEYOND the dominant fill, so a tooth carrying several non-extraction
-   marks (No IPR + No Attachments + Do Not Move) shows every colour at
-   once. Anchored on the same corner as the legacy overlay dot. */
-.odo-tooth-marks {
-  position: absolute;
-  display: flex;
-  gap: 2px;
-  pointer-events: none;
-  z-index: 2;
-}
-.odo-tooth-upper .odo-tooth-marks {
-  bottom: 18px;
-  right: 4px;
-}
-.odo-tooth-lower .odo-tooth-marks {
-  top: 18px;
-  right: 4px;
-}
-.odo-tooth-mirrored .odo-tooth-marks {
-  right: auto;
-  left: 4px;
-}
-.odo-tooth-mark-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 999px;
-  border: 1.5px solid #ffffff;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.35);
 }
 
 /* The label chip: number is ALWAYS visible; colour state is communicated
@@ -1918,6 +2062,9 @@ const ODONTOGRAM_CSS = /* css */ `
 .odo-chip-on {
   color: #fff;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+  /* Keep the number + code legible on light fills (green / orange) and
+     across a multi-colour gradient chip. */
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
   /* Subtle pop when colour is applied — confirms the action. */
   animation: odo-chip-pop 180ms cubic-bezier(0.16, 1, 0.3, 1);
 }

@@ -98,10 +98,19 @@ export function ClinicalConditionsField({
     <fieldset className="space-y-3 rounded-lg border bg-card p-4">
       <legend className="px-1 text-sm font-semibold">{resolvedLegend}</legend>
       <p className="text-xs text-muted-foreground">{resolvedDescription}</p>
+      {/*
+        Two-column, COLUMN-MAJOR layout: options fill the left column
+        top-to-bottom, then the right column — so the on-screen order
+        reads exactly like the clinical spec sheet (Encombrement…Articulé
+        croisé postérieur on the left, Supraclusion…Autre on the right).
+        CSS multi-column flows column-major automatically and balances
+        the two halves, so it adapts if the option list ever changes.
+        Single column on mobile.
+       */}
       <div
         role="group"
         aria-label={resolvedLegend}
-        className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3"
+        className="columns-1 gap-2 sm:columns-2"
       >
         {CLINICAL_CONDITION_OPTIONS.map((opt) => {
           const checked = conditions.includes(opt);
@@ -115,7 +124,7 @@ export function ClinicalConditionsField({
               key={opt}
               htmlFor={id}
               className={cn(
-                'flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm transition',
+                'mb-2 flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm transition break-inside-avoid',
                 checked
                   ? 'border-primary bg-primary/5 text-primary'
                   : 'border-input bg-background hover:bg-accent/40',

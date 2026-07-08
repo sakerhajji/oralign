@@ -92,9 +92,11 @@ import {
   Lock,
   Minus,
   Package,
+  Pencil,
   Plus,
   Scale,
   Send,
+  ShieldCheck,
   Stethoscope,
   Truck,
   Unlock,
@@ -158,21 +160,36 @@ export function QuotePackPanel({
   // dedupes these by key, so there's no double fetch.)
   const installmentsQ = useInstallments(quote.id, hasPack);
   const batchesQ = useStepBatches(quote.id, hasPack);
+  // Lets the admin re-open the pack picker on an already-attached quote to
+  // swap the pack / arcade mode. Only meaningful while the quote is still a
+  // draft (attaching wipes the payment plan; approved/paid quotes are
+  // locked by the backend anyway).
+  const [editingPack, setEditingPack] = useState(false);
 
   if (!isAdmin && !isDoctor) return null;
 
   const showPack = section === 'all' || section === 'pack';
   const showPlan = section === 'all' || section === 'plan';
+  const canChangePack = quote.status === QuotationStatus.DRAFT;
 
   return (
     <div className="flex flex-col gap-4">
       {isAdmin ? (
         <>
           {showPack ? (
-            !hasPack ? (
-              <AttachPackCard quote={quote} />
+            !hasPack || editingPack ? (
+              <AttachPackCard
+                quote={quote}
+                editing={hasPack}
+                onCancel={hasPack ? () => setEditingPack(false) : undefined}
+                onAttached={() => setEditingPack(false)}
+              />
             ) : (
-              <PackSnapshotCard quote={quote} />
+              <PackSnapshotCard
+                quote={quote}
+                canChange={canChangePack}
+                onChange={() => setEditingPack(true)}
+              />
             )
           ) : null}
           {showPlan && hasPack ? (
@@ -207,12 +224,29 @@ export function QuotePackPanel({
 // Admin — Attach pack
 // ═══════════════════════════════════════════════════════════════════════
 
-function AttachPackCard({ quote }: { quote: Quotation }) {
+function AttachPackCard({
+  quote,
+  editing,
+  onCancel,
+  onAttached,
+}: {
+  quote: Quotation;
+  /** True when re-opening the picker on an already-attached quote. */
+  editing?: boolean;
+  /** Shown as a Cancel button in edit mode; omitted on first attach. */
+  onCancel?: () => void;
+  /** Fired after a successful (re-)attach so the parent can close edit mode. */
+  onAttached?: () => void;
+}) {
   const { t, lang } = useT();
   const packsQ = usePacks({ limit: 100 });
   const attach = useAttachPackToQuotation();
-  const [packId, setPackId] = useState<string>('');
-  const [archMode, setArchMode] = useState<ArchType>(ArchType.TWO_ARCHES);
+  // Prefill from the current snapshot when editing so the admin sees the
+  // pack / arcade mode they're changing FROM.
+  const [packId, setPackId] = useState<string>(quote.packId ?? '');
+  const [archMode, setArchMode] = useState<ArchType>(
+    quote.archType ?? ArchType.TWO_ARCHES,
+  );
 
   const activePacks = (packsQ.data?.data ?? []).filter((p) => p.isActive);
   const effectiveId = packId || activePacks[0]?.id || '';
@@ -242,109 +276,144 @@ function AttachPackCard({ quote }: { quote: Quotation }) {
 
   const submit = () => {
     if (!effectiveId || !activePrice) return;
-    attach.mutate({
-      quotationId: quote.id,
-      dto: { packId: effectiveId, archType: effectiveArch },
-    });
+    attach.mutate(
+      {
+        quotationId: quote.id,
+        dto: { packId: effectiveId, archType: effectiveArch },
+      },
+      { onSuccess: () => onAttached?.() },
+    );
   };
 
   return (
-    <Card>
+    <Card size="sm">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
+        <CardTitle className="flex items-center gap-2">
           <Package className="h-4 w-4 text-primary" />
           {t('quoteUi.attachPack.title')}
         </CardTitle>
-        <CardDescription>
+        <CardDescription className="text-xs">
           {t('quoteUi.attachPack.desc')}
         </CardDescription>
       </CardHeader>
-      <CardContent className="grid gap-4 md:grid-cols-3">
-        <div className="grid gap-2 md:col-span-2">
-          <Label>{t('quoteUi.attachPack.packLabel')}</Label>
-          <Select value={effectiveId} onValueChange={setPackId}>
-            <SelectTrigger>
-              <SelectValue placeholder={t('quoteUi.attachPack.packPlaceholder')} />
-            </SelectTrigger>
-            <SelectContent>
-              {activePacks.length === 0 ? (
-                <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                  {t('quoteUi.attachPack.noActivePack')}
-                </div>
+      <CardContent className="space-y-3">
+        {/* Row 1 — pack + its active price, side by side so the number
+            reads right next to the selection. */}
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-1.5 sm:col-span-2">
+            <Label className="text-xs font-medium text-muted-foreground">
+              {t('quoteUi.attachPack.packLabel')}
+            </Label>
+            <Select value={effectiveId} onValueChange={setPackId}>
+              <SelectTrigger className="h-10">
+                <SelectValue
+                  placeholder={t('quoteUi.attachPack.packPlaceholder')}
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {activePacks.length === 0 ? (
+                  <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                    {t('quoteUi.attachPack.noActivePack')}
+                  </div>
+                ) : (
+                  activePacks.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {pickLocalized(p.nameI18n ?? p.name, lang) || p.name}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-1.5">
+            <Label className="text-xs font-medium text-muted-foreground">
+              {t('quoteUi.attachPack.activePrice')}
+            </Label>
+            <div className="flex h-10 items-center rounded-md border bg-muted/40 px-3">
+              {selectedPack ? (
+                activePrice ? (
+                  <span className="text-base font-semibold tabular-nums">
+                    {money(activePrice.price, activePrice.currency)}
+                  </span>
+                ) : (
+                  <span className="text-sm text-destructive">
+                    {t('quoteUi.attachPack.noActivePrice')}
+                  </span>
+                )
               ) : (
-                activePacks.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {pickLocalized(p.nameI18n ?? p.name, lang) || p.name}
-                  </SelectItem>
-                ))
+                <span className="text-muted-foreground">—</span>
               )}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="grid gap-2">
-          <Label>{t('quoteUi.attachPack.activePrice')}</Label>
-          <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
-            {selectedPack ? (
-              activePrice ? (
-                <strong>{money(activePrice.price, activePrice.currency)}</strong>
-              ) : (
-                <span className="text-destructive">
-                  {t('quoteUi.attachPack.noActivePrice')}
-                </span>
-              )
-            ) : (
-              <span className="text-muted-foreground">—</span>
-            )}
+            </div>
           </div>
         </div>
 
-        {/* Arcade mode — single vs two arches. Single is disabled when the
-            pack has no active single-arch price. */}
-        <div className="grid gap-2 md:col-span-3">
-          <Label>{t('quoteUi.attachPack.archModeLabel')}</Label>
-          <div className="flex flex-wrap gap-2">
+        {/* Row 2 — arcade mode + the primary Attach action on the same
+            line, so the CTA sits right beside the choice it commits. */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div className="grid gap-1.5">
+            <Label className="text-xs font-medium text-muted-foreground">
+              {t('quoteUi.attachPack.archModeLabel')}
+            </Label>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant={
+                  effectiveArch === ArchType.TWO_ARCHES ? 'default' : 'outline'
+                }
+                disabled={!hasTwo}
+                onClick={() => setArchMode(ArchType.TWO_ARCHES)}
+                className="h-10"
+              >
+                {t('quoteUi.attachPack.twoArches')}
+                {twoPrice
+                  ? ` · ${money(twoPrice.price, twoPrice.currency)}`
+                  : ''}
+              </Button>
+              <Button
+                type="button"
+                variant={
+                  effectiveArch === ArchType.ONE_ARCH ? 'default' : 'outline'
+                }
+                disabled={!hasSingle}
+                onClick={() => hasSingle && setArchMode(ArchType.ONE_ARCH)}
+                className="h-10"
+              >
+                {t('quoteUi.attachPack.singleArch')}
+                {singlePrice
+                  ? ` · ${money(singlePrice.price, singlePrice.currency)}`
+                  : ''}
+              </Button>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            {onCancel ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={onCancel}
+                disabled={attach.isPending}
+                className="h-10"
+              >
+                {t('common.cancel')}
+              </Button>
+            ) : null}
             <Button
-              type="button"
-              size="sm"
-              variant={
-                effectiveArch === ArchType.TWO_ARCHES ? 'default' : 'outline'
-              }
-              disabled={!hasTwo}
-              onClick={() => setArchMode(ArchType.TWO_ARCHES)}
+              onClick={submit}
+              disabled={!effectiveId || !activePrice || attach.isPending}
+              className="h-10 min-w-[150px] gap-2"
             >
-              {t('quoteUi.attachPack.twoArches')}
-              {twoPrice ? ` · ${money(twoPrice.price, twoPrice.currency)}` : ''}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant={
-                effectiveArch === ArchType.ONE_ARCH ? 'default' : 'outline'
-              }
-              disabled={!hasSingle}
-              onClick={() => hasSingle && setArchMode(ArchType.ONE_ARCH)}
-            >
-              {t('quoteUi.attachPack.singleArch')}
-              {singlePrice
-                ? ` · ${money(singlePrice.price, singlePrice.currency)}`
-                : ''}
+              <Package className="h-4 w-4" />
+              {editing
+                ? t('quoteUi.attachPack.updateBtn')
+                : t('quoteUi.attachPack.attachBtn')}
             </Button>
           </div>
-          {selectedPack && !hasSingle ? (
-            <p className="text-xs text-muted-foreground">
-              {t('quoteUi.attachPack.singleArchUnavailable')}
-            </p>
-          ) : null}
         </div>
-
-        <div className="md:col-span-3 flex justify-end">
-          <Button
-            onClick={submit}
-            disabled={!effectiveId || !activePrice || attach.isPending}
-          >
-            {t('quoteUi.attachPack.attachBtn')}
-          </Button>
-        </div>
+        {selectedPack && !hasSingle ? (
+          <p className="text-xs text-muted-foreground">
+            {t('quoteUi.attachPack.singleArchUnavailable')}
+          </p>
+        ) : null}
       </CardContent>
     </Card>
   );
@@ -354,7 +423,16 @@ function AttachPackCard({ quote }: { quote: Quotation }) {
 // Admin — Pack snapshot summary (read-only header above the plan)
 // ═══════════════════════════════════════════════════════════════════════
 
-function PackSnapshotCard({ quote }: { quote: Quotation }) {
+function PackSnapshotCard({
+  quote,
+  canChange,
+  onChange,
+}: {
+  quote: Quotation;
+  /** Show a "Change pack" button (draft quotes only). */
+  canChange?: boolean;
+  onChange?: () => void;
+}) {
   const { t, lang } = useT();
   // Localized name resolves from the live pack (joined on the read),
   // falling back to the stable `packName` snapshot when the pack was
@@ -371,10 +449,10 @@ function PackSnapshotCard({ quote }: { quote: Quotation }) {
     : '';
   const isSingle = quote.archType === ArchType.ONE_ARCH;
   return (
-    <Card>
+    <Card size="sm">
       <CardHeader className="flex flex-row items-start justify-between gap-3">
         <div className="space-y-1">
-          <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+          <CardTitle className="flex flex-wrap items-center gap-2">
             <Package className="h-4 w-4 text-primary" />
             {name}
             <Badge variant="secondary" className="font-normal">
@@ -401,13 +479,27 @@ function PackSnapshotCard({ quote }: { quote: Quotation }) {
             {finishing ? <span className="block">{finishing}</span> : null}
           </CardDescription>
         </div>
-        <div className="shrink-0 text-right">
-          <div className="text-xs text-muted-foreground">
-            {t('quoteUi.snapshot.totalPrice')}
+        <div className="flex shrink-0 flex-col items-end gap-2 text-right">
+          <div>
+            <div className="text-xs text-muted-foreground">
+              {t('quoteUi.snapshot.totalPrice')}
+            </div>
+            <div className="text-lg font-semibold">
+              {money(quote.totalPrice, quote.currency)}
+            </div>
           </div>
-          <div className="text-lg font-semibold">
-            {money(quote.totalPrice, quote.currency)}
-          </div>
+          {canChange && onChange ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onChange}
+              className="h-8 gap-1.5"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              {t('quoteUi.snapshot.changePack')}
+            </Button>
+          ) : null}
         </div>
       </CardHeader>
     </Card>
@@ -1565,6 +1657,13 @@ function PaymentMethodDialog({
                 />
               ) : null}
             </dl>
+
+            {/* Secure-payment reassurance — visible in the summary rail
+                before the doctor picks a method / confirms. */}
+            <div className="mt-6 flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs leading-relaxed text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300">
+              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{t('quoteUi.payDialog.secureNote')}</span>
+            </div>
 
             <div className="mt-auto pt-6">
               <p className="rounded-lg border bg-card p-3 text-xs leading-relaxed text-muted-foreground">

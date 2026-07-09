@@ -15,6 +15,37 @@ import {
 } from '../../common/utils/code-naming.util';
 
 /**
+ * Registered legal identity of the merchant — Aura Aligners SARL — taken
+ * verbatim from the official Tunisian documents (Carte d'Identification
+ * Fiscale + Extrait du Registre National des Entreprises, 09/07/2026).
+ *
+ * Used as the DEFAULT for the public "Mentions légales" / help-hub legal
+ * pages so they always publish the company's real, legally-required
+ * details, even before an admin fills the billing-settings form (and even
+ * on an environment where the optional legal columns aren't present yet).
+ * Any admin-entered value overrides the matching default below.
+ */
+const DEFAULT_LEGAL_COMPANY = {
+  companyName: 'Aura Aligners',
+  tradeName: 'Aura Aligners',
+  legalForm:
+    'Société à Responsabilité Limitée (SARL) au capital de 10 000 TND',
+  // Matricule fiscal (Code TVA A · Code catégorie M · N° établissement 000).
+  taxRegistrationNumber: '1958766/W/A/M/000',
+  // Registre National des Entreprises (RNE).
+  registreDeCommerce: 'B505022026',
+  address: 'Complexe Carthage Medical, Bureau C34, Jardins de Carthage',
+  city: 'La Marsa 2046',
+  country: 'Tunisie',
+  phone: null as string | null,
+  email: null as string | null,
+  hostingProvider: null as string | null,
+  hostingProviderUrl: null as string | null,
+  websiteDomain: null as string | null,
+  currency: 'TND',
+};
+
+/**
  * CompanyBillingSettings is treated as a singleton: there is at most
  * one active row at a time. The service exposes the "active" row via
  * `getActive()` and lazily creates one on first PUT.
@@ -43,8 +74,11 @@ export class CompanyBillingSettingsService {
    * fiscal, RC, adresse, contact, hébergeur, domaine) plus the merchant
    * currency — and nothing sensitive (no bank details, counters, fees).
    *
-   * When no settings row exists yet, every field is null; the frontend
-   * renders graceful "à compléter" placeholders so the page never breaks.
+   * When no admin value is set (or no settings row exists), each field
+   * falls back to the registered Aura Aligners identity in
+   * DEFAULT_LEGAL_COMPANY so the compliance pages always publish real,
+   * legally-required details instead of "à compléter" placeholders. An
+   * admin-entered value always wins.
    */
   async getLegalInfo(): Promise<{
     companyName: string | null;
@@ -62,22 +96,39 @@ export class CompanyBillingSettingsService {
     websiteDomain: string | null;
     currency: string | null;
   }> {
-    const s = await this.getActive();
+    // The optional legal columns (tradeName, legalForm, …) may not be
+    // present on every environment yet (migration not applied). A read
+    // error must never break the public legal pages — fall back to the
+    // registered defaults instead.
+    let s: CompanyBillingSettings | null = null;
+    try {
+      s = await this.getActive();
+    } catch {
+      s = null;
+    }
+    const d = DEFAULT_LEGAL_COMPANY;
+    // Treat the "Oralign" bootstrap placeholder (written by setLogoPath
+    // before any real company name is saved) as unset so the registered
+    // raison sociale shows through.
+    const storedName =
+      s?.companyName && s.companyName.trim() && s.companyName.trim() !== 'Oralign'
+        ? s.companyName
+        : null;
     return {
-      companyName: s?.companyName ?? null,
-      tradeName: s?.tradeName ?? null,
-      legalForm: s?.legalForm ?? null,
-      taxRegistrationNumber: s?.taxRegistrationNumber ?? null,
-      registreDeCommerce: s?.registreDeCommerce ?? null,
-      address: s?.companyAddress ?? null,
-      city: s?.companyCity ?? null,
-      country: s?.companyCountry ?? null,
-      phone: s?.companyPhone ?? null,
-      email: s?.companyEmail ?? null,
-      hostingProvider: s?.hostingProvider ?? null,
-      hostingProviderUrl: s?.hostingProviderUrl ?? null,
-      websiteDomain: s?.websiteDomain ?? null,
-      currency: s?.defaultCurrency ?? 'TND',
+      companyName: storedName ?? d.companyName,
+      tradeName: s?.tradeName ?? d.tradeName,
+      legalForm: s?.legalForm ?? d.legalForm,
+      taxRegistrationNumber: s?.taxRegistrationNumber ?? d.taxRegistrationNumber,
+      registreDeCommerce: s?.registreDeCommerce ?? d.registreDeCommerce,
+      address: s?.companyAddress ?? d.address,
+      city: s?.companyCity ?? d.city,
+      country: s?.companyCountry ?? d.country,
+      phone: s?.companyPhone ?? d.phone,
+      email: s?.companyEmail ?? d.email,
+      hostingProvider: s?.hostingProvider ?? d.hostingProvider,
+      hostingProviderUrl: s?.hostingProviderUrl ?? d.hostingProviderUrl,
+      websiteDomain: s?.websiteDomain ?? d.websiteDomain,
+      currency: s?.defaultCurrency ?? d.currency,
     };
   }
 

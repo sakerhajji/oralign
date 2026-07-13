@@ -1,8 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import { dict } from "../../_lib/i18n/dict";
 import { useShowcaseLang } from "../../_lib/i18n/lang-context";
-import type { PublicPractitioner } from "../../_lib/finder";
+import { mediaUrl, type PublicPractitioner } from "../../_lib/finder";
 import { formatDistanceLabel } from "./distance";
 
 interface ListProps {
@@ -89,6 +90,8 @@ function PractitionerCard({
   const { lang } = useShowcaseLang();
   const f = dict.finder;
   const distance = formatDistanceLabel(p.distanceKm, lang);
+  const [imgOk, setImgOk] = useState(true);
+  const avatar = mediaUrl(p.avatarUrl);
   const initials = p.practitionerName
     .split(/\s+/)
     .slice(0, 2)
@@ -109,9 +112,15 @@ function PractitionerCard({
     >
       {/* Avatar / initials */}
       <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[var(--sc-sun)] text-[0.85rem] font-bold text-[var(--sc-black)]">
-        {p.avatarUrl ? (
+        {avatar && imgOk ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={p.avatarUrl} alt="" className="h-full w-full object-cover" />
+          <img
+            src={avatar}
+            alt=""
+            loading="lazy"
+            className="h-full w-full object-cover"
+            onError={() => setImgOk(false)}
+          />
         ) : (
           initials || "•"
         )}
@@ -133,14 +142,11 @@ function PractitionerCard({
           {p.clinicName}
         </span>
 
-        <span className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.78rem] text-[var(--sc-text-mid)]">
-          {p.specialty && (
-            <span className="border border-[rgba(25,25,25,0.14)] px-2 py-0.5 text-[0.72rem] uppercase tracking-[0.08em] text-[var(--sc-black)]">
-              {p.specialty}
-            </span>
-          )}
-          {p.city && <span>{p.city}</span>}
-        </span>
+        {p.city && (
+          <span className="mt-1.5 block text-[0.78rem] text-[var(--sc-text-mid)]">
+            {p.city}
+          </span>
+        )}
 
         <span className="mt-2 inline-block text-[0.72rem] font-bold uppercase tracking-[0.14em] text-[var(--sc-black)] underline decoration-[var(--sc-sun)] decoration-2 underline-offset-4 group-hover:decoration-[var(--sc-black)]">
           {f.viewDetails[lang]}

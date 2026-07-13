@@ -6,6 +6,7 @@ import { useShowcaseLang } from "../../_lib/i18n/lang-context";
 import {
   fetchAvailability,
   fetchPractitioner,
+  mediaUrl,
   type AvailabilityResponse,
   type DayOfWeek,
   type PractitionerDetail as Detail,
@@ -41,6 +42,7 @@ export function PractitionerDetailPanel({ summary, onClose }: Props) {
   const [availability, setAvailability] = useState<AvailabilityResponse | null>(null);
   const [availLoading, setAvailLoading] = useState(true);
   const [availError, setAvailError] = useState(false);
+  const [avatarOk, setAvatarOk] = useState(true);
 
   const id = summary.id;
 
@@ -94,6 +96,12 @@ export function PractitionerDetailPanel({ summary, onClose }: Props) {
   }, [onClose]);
 
   const view = detail ?? summary;
+  const avatar = mediaUrl(view.avatarUrl);
+  const initials = view.practitionerName
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() ?? "")
+    .join("");
   const hoursByDay = new Map<DayOfWeek, WorkingHour>();
   detail?.workingHours?.forEach((w) => hoursByDay.set(w.dayOfWeek, w));
   // Distance is only computed by the list endpoint (needs lat/lng); keep it
@@ -119,14 +127,29 @@ export function PractitionerDetailPanel({ summary, onClose }: Props) {
       <div className="relative flex h-full w-full max-w-[560px] flex-col overflow-y-auto bg-[var(--sc-white)] text-[var(--sc-black)] shadow-2xl">
         {/* Header */}
         <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-[rgba(25,25,25,0.1)] bg-[var(--sc-white)] px-6 py-5">
-          <div>
-            <p className="text-[0.58rem] uppercase tracking-[0.36em] text-[var(--sc-sun-deep)]">
-              {view.specialty || dict.brand.name[lang]}
-            </p>
-            <h2 className="sc-serif mt-1 text-[1.6rem] font-normal leading-tight tracking-[-0.01em]">
-              {view.practitionerName}
-            </h2>
-            <p className="mt-0.5 text-[0.95rem] text-[var(--sc-text-mid)]">{view.clinicName}</p>
+          <div className="flex min-w-0 items-start gap-3.5">
+            <span className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[var(--sc-sun)] text-[1rem] font-bold text-[var(--sc-black)]">
+              {avatar && avatarOk ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={avatar}
+                  alt=""
+                  className="h-full w-full object-cover"
+                  onError={() => setAvatarOk(false)}
+                />
+              ) : (
+                initials || "•"
+              )}
+            </span>
+            <div className="min-w-0">
+              <p className="text-[0.58rem] uppercase tracking-[0.36em] text-[var(--sc-sun-deep)]">
+                {dict.brand.name[lang]}
+              </p>
+              <h2 className="sc-serif mt-1 text-[1.5rem] font-normal leading-tight tracking-[-0.01em]">
+                {view.practitionerName}
+              </h2>
+              <p className="mt-0.5 text-[0.95rem] text-[var(--sc-text-mid)]">{view.clinicName}</p>
+            </div>
           </div>
           <button
             type="button"

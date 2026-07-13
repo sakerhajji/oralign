@@ -104,6 +104,20 @@ function apiBase(): string {
   return base.replace(/\/$/, "");
 }
 
+/**
+ * Resolve a backend-relative `/uploads/...` path (practitioner avatar, clinic
+ * logo) to an absolute URL. Uploaded files are served from the API ORIGIN, not
+ * under the `/api` prefix — so a raw relative path in an `<img src>` would 404
+ * against the frontend origin. Absolute URLs and data: URIs pass through;
+ * null / empty → null.
+ */
+export function mediaUrl(path: string | null | undefined): string | null {
+  if (!path) return null;
+  if (/^(https?:)?\/\//i.test(path) || path.startsWith("data:")) return path;
+  const origin = apiBase().replace(/\/api\/?$/, "");
+  return `${origin}${path.startsWith("/") ? "" : "/"}${path}`;
+}
+
 function toQuery(params: Record<string, string | number | undefined>): string {
   const usp = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {

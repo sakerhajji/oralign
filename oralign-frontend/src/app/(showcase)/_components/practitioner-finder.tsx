@@ -39,7 +39,6 @@ export function PractitionerFinder() {
   // Filters
   const [search, setSearch] = useState("");
   const [city, setCity] = useState("");
-  const [specialty, setSpecialty] = useState("");
 
   // Data
   const [practitioners, setPractitioners] = useState<PublicPractitioner[]>([]);
@@ -50,7 +49,6 @@ export function PractitionerFinder() {
 
   // Facet options accumulate so the dropdowns stay stable across filtering.
   const [facetCities, setFacetCities] = useState<string[]>([]);
-  const [facetSpecialties, setFacetSpecialties] = useState<string[]>([]);
 
   // Geolocation + map focus
   const [userPosition, setUserPosition] = useState<LatLng | null>(null);
@@ -72,7 +70,6 @@ export function PractitionerFinder() {
           limit: 100,
           search: search.trim() || undefined,
           city: city || undefined,
-          specialty: specialty || undefined,
           lat: userPosition?.[0],
           lng: userPosition?.[1],
         },
@@ -83,7 +80,6 @@ export function PractitionerFinder() {
           setTotal(res.total);
           setLoading(false);
           setFacetCities((prev) => mergeFacet(prev, res.data.map((p) => p.city)));
-          setFacetSpecialties((prev) => mergeFacet(prev, res.data.map((p) => p.specialty)));
         })
         .catch((err) => {
           if (ctrl.signal.aborted) return;
@@ -97,7 +93,7 @@ export function PractitionerFinder() {
       clearTimeout(timer);
       ctrl.abort();
     };
-  }, [search, city, specialty, userPosition, reloadKey]);
+  }, [search, city, userPosition, reloadKey]);
 
   // ── Geolocation ──
   const requestLocation = useCallback(() => {
@@ -150,11 +146,10 @@ export function PractitionerFinder() {
 
   const closeDetail = useCallback(() => setSelected(null), []);
 
-  const hasActiveFilters = Boolean(search || city || specialty);
+  const hasActiveFilters = Boolean(search || city);
   const clearFilters = () => {
     setSearch("");
     setCity("");
-    setSpecialty("");
   };
 
   const resultsLabel = useMemo(
@@ -211,24 +206,6 @@ export function PractitionerFinder() {
                 {facetCities.map((c) => (
                   <option key={c} value={c}>
                     {c}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="lg:w-44">
-              <span className="mb-1 block text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-[var(--sc-text-mid)]">
-                {f.specialtyLabel[lang]}
-              </span>
-              <select
-                value={specialty}
-                onChange={(e) => setSpecialty(e.target.value)}
-                className="w-full border border-[rgba(25,25,25,0.18)] bg-[var(--sc-white)] px-3 py-2.5 text-[0.9rem] text-[var(--sc-black)] outline-none focus:border-[var(--sc-black)]"
-              >
-                <option value="">{f.specialtyPlaceholder[lang]}</option>
-                {facetSpecialties.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
                   </option>
                 ))}
               </select>

@@ -103,6 +103,8 @@ export interface LegalRow {
 export interface LegalSection {
   heading?: string;
   paragraphs?: string[];
+  /** Bullet list, rendered after the paragraphs. */
+  list?: string[];
   rows?: LegalRow[];
 }
 
@@ -357,11 +359,25 @@ function buildRefunds(lang: LegalLang, c: LegalCompany): LegalSection[] {
   const fr: LegalSection[] = [
     {
       paragraphs: [
-        'Le client peut déposer une réclamation concernant une commande, un paiement, une livraison ou un produit reçu en nous contactant par email ou par téléphone.',
-        'Toute réclamation doit contenir les informations suivantes : nom et prénom du client, numéro de commande, date de commande, montant payé, description du problème et, si nécessaire, photos ou documents justificatifs.',
-        'Notre service client s’engage à traiter les réclamations dans un délai de 48 à 72 heures ouvrables à partir de la réception de la demande complète.',
-        'En cas d’erreur de paiement, de commande annulée ou de produit non disponible, le client peut bénéficier d’un remboursement selon le mode de paiement utilisé lors de la commande. Le remboursement est effectué après vérification de la demande et validation par notre service client.',
-        'Les délais de remboursement peuvent varier selon la banque du client et le moyen de paiement utilisé.',
+        'Vous rencontrez un souci avec un dossier patient, une commande, un paiement, un plan de traitement, la fabrication de vos aligneurs ou leur livraison ? Notre équipe support est là pour vous aider — adressez-nous simplement votre réclamation.',
+        'Pour que nous puissions la traiter au plus vite, merci d’y joindre :',
+      ],
+      list: [
+        'le nom du praticien ou du client ;',
+        'le numéro de commande ou du dossier patient ;',
+        'la date de la commande ;',
+        'une description précise du problème rencontré ;',
+        'les photos, fichiers ou documents justificatifs utiles.',
+      ],
+    },
+    {
+      paragraphs: [
+        'Dès réception d’une réclamation complète, notre équipe s’engage à l’examiner sous un délai indicatif de 48 à 72 heures ouvrables.',
+        'Nos aligneurs sont des dispositifs médicaux personnalisés, fabriqués sur mesure à partir des fichiers et informations que vous validez. Une fois la conception ou la fabrication lancée, une commande ne peut donc plus être annulée ni remboursée, sauf en cas d’erreur ou de non-conformité de notre fait.',
+        'Après vérification, et selon la situation, nous vous proposerons la solution la plus adaptée : une correction, une nouvelle fabrication, un avoir ou un remboursement.',
+        'Un remboursement reste également possible en cas de double paiement, d’annulation avant le début du traitement du dossier, ou si nous ne sommes pas en mesure de prendre votre commande en charge.',
+        'Les délais de remboursement dépendent ensuite du moyen de paiement utilisé et des délais propres à votre établissement bancaire.',
+        'Enfin, les professionnels de santé peuvent à tout moment joindre directement notre équipe via le chat intégré à l’application, pour toute question concernant leurs dossiers, leurs traitements ou leurs commandes.',
       ],
     },
     { heading: STR.complaintsContact[b], rows: contactRows },
@@ -369,11 +385,25 @@ function buildRefunds(lang: LegalLang, c: LegalCompany): LegalSection[] {
   const en: LegalSection[] = [
     {
       paragraphs: [
-        'The customer may submit a complaint regarding an order, payment, delivery, or received product by contacting us by email or by phone.',
-        'Any complaint must include the following information: customer first and last name, order number, order date, amount paid, description of the issue, and, if necessary, photos or supporting documents.',
-        'Our customer service team undertakes to process complaints within 48 to 72 business hours from the receipt of the complete request.',
-        'In the event of a payment error, order cancellation, or product unavailability, the customer may receive a refund according to the payment method used when placing the order. The refund is processed after verification of the request and validation by our customer service team.',
-        'Refund processing times may vary depending on the customer’s bank and the payment method used.',
+        'Run into an issue with a patient case, an order, a payment, a treatment plan, the manufacturing of your aligners or their delivery? Our support team is here to help — just send us your complaint.',
+        'So we can handle it as quickly as possible, please include:',
+      ],
+      list: [
+        'the practitioner’s or customer’s name;',
+        'the order number or patient case number;',
+        'the order date;',
+        'a precise description of the issue;',
+        'any helpful photos, files or supporting documents.',
+      ],
+    },
+    {
+      paragraphs: [
+        'As soon as we receive a complete complaint, our team commits to reviewing it within an indicative 48 to 72 business hours.',
+        'Our aligners are personalized medical devices, custom-made from the files and information you validate. Once design or manufacturing has started, an order can therefore no longer be cancelled or refunded, except in the event of an error or non-conformity on our side.',
+        'After verification, and depending on the situation, we will offer you the most suitable solution: a correction, a new production, a credit note or a refund.',
+        'A refund also remains possible in the event of a double payment, a cancellation before the case has started processing, or if we are unable to take on your order.',
+        'Refund times then depend on the payment method used and your bank’s own processing times.',
+        'Finally, healthcare professionals can reach our team directly at any time through the chat built into the application, for any question about their cases, treatments or orders.',
       ],
     },
     { heading: STR.complaintsContact[b], rows: contactRows },

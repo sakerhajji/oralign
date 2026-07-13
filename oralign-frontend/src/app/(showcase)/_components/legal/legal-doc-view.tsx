@@ -66,6 +66,14 @@ export function LegalDocView({
                   </p>
                 ))}
 
+                {section.list && section.list.length > 0 && (
+                  <ul className="mb-4 ml-5 list-disc space-y-1.5 text-[0.97rem] leading-8 text-[var(--sc-text-mid)] last:mb-0 marker:text-[var(--sc-sun-deep)]">
+                    {section.list.map((item, j) => (
+                      <li key={j}>{item}</li>
+                    ))}
+                  </ul>
+                )}
+
                 {section.rows && section.rows.length > 0 && (
                   <dl className="mt-4 divide-y divide-[rgba(25,25,25,0.08)] overflow-hidden rounded-xl border border-[rgba(25,25,25,0.1)] bg-[rgba(25,25,25,0.015)]">
                     {section.rows.map((r, k) => (

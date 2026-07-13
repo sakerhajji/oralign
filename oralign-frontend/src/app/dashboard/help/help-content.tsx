@@ -104,6 +104,13 @@ function LegalDocCard({ doc }: { doc: LegalDoc }) {
                   {p}
                 </p>
               ))}
+              {section.list && section.list.length > 0 && (
+                <ul className="ml-5 list-disc space-y-1 text-sm leading-6 text-muted-foreground">
+                  {section.list.map((item, j) => (
+                    <li key={j}>{item}</li>
+                  ))}
+                </ul>
+              )}
               {section.rows && section.rows.length > 0 && (
                 <dl className="divide-y rounded-lg border bg-muted/20">
                   {section.rows.map((r, k) => (

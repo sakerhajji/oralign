@@ -26,22 +26,24 @@ import {
  * Any admin-entered value overrides the matching default below.
  */
 const DEFAULT_LEGAL_COMPANY = {
+  // Dénomination sociale (legal name).
   companyName: 'Aura Aligners',
-  tradeName: 'Aura Aligners',
-  legalForm:
-    'Société à Responsabilité Limitée (SARL) au capital de 10 000 TND',
+  // Nom commercial / plateforme (the public brand).
+  tradeName: 'ORALIGN',
+  legalForm: 'Société à Responsabilité Limitée (SARL)',
+  capitalSocial: '10 000 TND',
   // Matricule fiscal (Code TVA A · Code catégorie M · N° établissement 000).
   taxRegistrationNumber: '1958766/W/A/M/000',
-  // Registre National des Entreprises (RNE).
+  // Identifiant unique au Registre National des Entreprises (RNE).
   registreDeCommerce: 'B505022026',
   address: 'Complexe Carthage Medical, Bureau C34, Jardins de Carthage',
   city: 'La Marsa 2046',
   country: 'Tunisie',
-  phone: null as string | null,
-  email: null as string | null,
+  phone: '+216 99 506 061' as string | null,
+  email: 'contact@oraaligner.com' as string | null,
   hostingProvider: null as string | null,
   hostingProviderUrl: null as string | null,
-  websiteDomain: null as string | null,
+  websiteDomain: 'oralign.com.tn' as string | null,
   currency: 'TND',
 };
 
@@ -84,6 +86,7 @@ export class CompanyBillingSettingsService {
     companyName: string | null;
     tradeName: string | null;
     legalForm: string | null;
+    capitalSocial: string | null;
     taxRegistrationNumber: string | null;
     registreDeCommerce: string | null;
     address: string | null;
@@ -118,6 +121,8 @@ export class CompanyBillingSettingsService {
       companyName: storedName ?? d.companyName,
       tradeName: s?.tradeName ?? d.tradeName,
       legalForm: s?.legalForm ?? d.legalForm,
+      // No admin-editable column for capital yet — always the registered value.
+      capitalSocial: d.capitalSocial,
       taxRegistrationNumber: s?.taxRegistrationNumber ?? d.taxRegistrationNumber,
       registreDeCommerce: s?.registreDeCommerce ?? d.registreDeCommerce,
       address: s?.companyAddress ?? d.address,

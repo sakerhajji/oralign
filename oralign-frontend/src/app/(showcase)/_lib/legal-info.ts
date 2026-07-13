@@ -23,6 +23,7 @@ const EMPTY: LegalCompany = {
   companyName: null,
   tradeName: null,
   legalForm: null,
+  capitalSocial: null,
   taxRegistrationNumber: null,
   registreDeCommerce: null,
   address: null,

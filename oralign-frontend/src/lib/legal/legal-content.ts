@@ -76,6 +76,7 @@ export interface LegalCompany {
   companyName?: string | null;
   tradeName?: string | null;
   legalForm?: string | null;
+  capitalSocial?: string | null;
   taxRegistrationNumber?: string | null;
   registreDeCommerce?: string | null;
   address?: string | null;
@@ -260,15 +261,20 @@ const STR = {
   hostingTitle: { fr: 'Hébergement du site', en: 'Website hosting' },
   identityTitle: { fr: 'Identité de l’entreprise', en: 'Company identity' },
   ipTitle: { fr: 'Propriété intellectuelle', en: 'Intellectual property' },
-  dataTitle: { fr: 'Données personnelles', en: 'Personal data' },
+  dataTitle: {
+    fr: 'Données personnelles et données de santé',
+    en: 'Personal data and health data',
+  },
   paymentTitle: { fr: 'Paiement sécurisé', en: 'Secure payment' },
+  responsibilityTitle: { fr: 'Responsabilité', en: 'Liability' },
   labels: {
-    tradeName: { fr: 'Nom commercial', en: 'Trade name' },
-    companyName: { fr: 'Raison sociale', en: 'Company name' },
+    tradeName: { fr: 'Nom commercial et plateforme', en: 'Trade name and platform' },
+    companyName: { fr: 'Dénomination sociale', en: 'Company name' },
     legalForm: { fr: 'Forme juridique', en: 'Legal form' },
+    capital: { fr: 'Capital social', en: 'Share capital' },
     taxId: { fr: 'Matricule fiscal', en: 'Tax identification number' },
-    rc: { fr: 'Registre de commerce', en: 'Trade register' },
-    address: { fr: 'Adresse du siège', en: 'Registered office address' },
+    rc: { fr: 'Identifiant unique (RNE)', en: 'Unique identifier (RNE)' },
+    address: { fr: 'Adresse du siège social', en: 'Registered office address' },
     phone: { fr: 'Téléphone', en: 'Phone' },
     email: { fr: 'Email', en: 'Email' },
     host: { fr: 'Hébergeur', en: 'Hosting provider' },
@@ -363,11 +369,11 @@ function buildRefunds(lang: LegalLang, c: LegalCompany): LegalSection[] {
         'Pour que nous puissions la traiter au plus vite, merci d’y joindre',
       ],
       list: [
-        'le nom du praticien ou du client ;',
-        'le numéro de commande ou du dossier patient ;',
-        'la date de la commande ;',
-        'une description précise du problème rencontré ;',
-        'les photos, fichiers ou documents justificatifs utiles.',
+        'le nom du praticien ou du client',
+        'le numéro de commande ou du dossier patient',
+        'la date de la commande',
+        'une description précise du problème rencontré',
+        'les photos, fichiers ou documents justificatifs utiles',
       ],
     },
     {
@@ -389,11 +395,11 @@ function buildRefunds(lang: LegalLang, c: LegalCompany): LegalSection[] {
         'So we can handle it as quickly as possible, please include',
       ],
       list: [
-        'the practitioner’s or customer’s name;',
-        'the order number or patient case number;',
-        'the order date;',
-        'a precise description of the issue;',
-        'any helpful photos, files or supporting documents.',
+        'the practitioner’s or customer’s name',
+        'the order number or patient case number',
+        'the order date',
+        'a precise description of the issue',
+        'any helpful photos, files or supporting documents',
       ],
     },
     {
@@ -413,12 +419,16 @@ function buildRefunds(lang: LegalLang, c: LegalCompany): LegalSection[] {
 
 function buildLegal(lang: LegalLang, c: LegalCompany): LegalSection[] {
   const b = base(lang);
-  const dom = domain(c);
-  const legalName = (c.companyName || storeName(c)).trim();
+  // All dynamic company data comes from the injected `company` (loaded from
+  // billing settings / the /legal-info projection) — never hardcoded here.
+  const dom = domain(c); // websiteDomain
+  const store = storeName(c); // nom commercial / plateforme (ORALIGN)
+  const legalName = (c.companyName || store).trim(); // dénomination sociale
   const identityRows = [
-    row(STR.labels.tradeName[b], c.tradeName || c.companyName, lang),
     row(STR.labels.companyName[b], c.companyName, lang),
+    row(STR.labels.tradeName[b], c.tradeName || c.companyName, lang),
     row(STR.labels.legalForm[b], c.legalForm, lang),
+    row(STR.labels.capital[b], c.capitalSocial, lang),
     row(STR.labels.taxId[b], c.taxRegistrationNumber, lang),
     row(STR.labels.rc[b], c.registreDeCommerce, lang),
     row(STR.labels.address[b], composeAddress(c), lang),
@@ -426,54 +436,90 @@ function buildLegal(lang: LegalLang, c: LegalCompany): LegalSection[] {
     row(STR.labels.email[b], c.email, lang, (v) => `mailto:${v}`),
   ];
   const fr: LegalSection[] = [
+    {
+      paragraphs: [
+        `La plateforme ${store} est éditée par la société ${legalName}, société tunisienne spécialisée dans la conception et la fabrication d’aligneurs dentaires transparents et de dispositifs orthodontiques personnalisés.`,
+      ],
+    },
     { heading: STR.identityTitle[b], rows: identityRows },
     {
       paragraphs: [
-        `Le site web ${dom} est édité par ${legalName}, société immatriculée en Tunisie.`,
+        `Le site ${dom} ainsi que l’application ${store} sont édités et exploités par la société ${legalName}, immatriculée en Tunisie.`,
       ],
     },
     {
       heading: STR.ipTitle[b],
       paragraphs: [
-        'Tous les contenus présents sur ce site, notamment les textes, images, logos, éléments graphiques et catalogues produits, sont protégés. Toute reproduction ou utilisation sans autorisation préalable est interdite.',
+        `L’ensemble des contenus présents sur le site et l’application ${store}, notamment les textes, images, photographies, logos, marques, éléments graphiques, interfaces, documents et contenus techniques, est protégé par la législation applicable en matière de propriété intellectuelle.`,
+        `Toute reproduction, représentation, modification, diffusion ou utilisation, totale ou partielle, sans l’autorisation écrite préalable d’${legalName} est interdite.`,
       ],
     },
     {
       heading: STR.dataTitle[b],
       paragraphs: [
-        'Les informations collectées lors d’une commande ou d’une prise de contact sont utilisées uniquement pour le traitement des commandes, la livraison, la facturation et le service client. Elles ne sont pas vendues à des tiers.',
+        `Dans le cadre de l’utilisation de la plateforme, ${store} peut collecter et traiter les informations nécessaires à la création et au suivi des dossiers patients, à la conception des plans de traitement, à la fabrication des aligneurs, à la gestion des commandes, à la facturation, au paiement, à la livraison et à l’assistance des professionnels de santé.`,
+        'Ces informations peuvent notamment comprendre des données d’identification, des coordonnées, des photographies, des empreintes numériques, des scans, des radiographies, des fichiers médicaux ou orthodontiques et toute autre information nécessaire au traitement du dossier patient.',
+        `Les données collectées sont traitées de manière confidentielle et sécurisée. Elles sont accessibles uniquement aux personnes autorisées et ne sont ni vendues ni utilisées à des fins étrangères aux services proposés par ${store}.`,
+        'Les utilisateurs disposent, conformément à la législation applicable, d’un droit d’accès, de rectification, de mise à jour et, lorsque cela est légalement possible, d’opposition ou de suppression de leurs données personnelles.',
+        'Toute demande relative aux données personnelles peut nous être adressée par e-mail, à l’adresse de contact indiquée ci-dessus.',
+        'Des informations complémentaires sont disponibles dans notre Politique de confidentialité.',
       ],
     },
     {
       heading: STR.paymentTitle[b],
       paragraphs: [
-        'Les paiements en ligne sont traités via une solution de paiement sécurisée. Les informations bancaires du client ne sont pas stockées par notre site.',
+        'Les paiements en ligne effectués sur la plateforme sont traités par l’intermédiaire d’une solution de paiement sécurisée.',
+        `${store} ne conserve pas les données bancaires complètes du client lorsque celles-ci sont directement saisies et traitées par le prestataire de paiement sécurisé.`,
+      ],
+    },
+    {
+      heading: STR.responsibilityTitle[b],
+      paragraphs: [
+        `${store} met en œuvre les moyens nécessaires afin d’assurer l’exactitude et la disponibilité des informations publiées sur sa plateforme. Toutefois, la société ne peut garantir l’absence totale d’erreurs, d’interruptions temporaires ou de dysfonctionnements indépendants de sa volonté.`,
       ],
     },
   ];
   const en: LegalSection[] = [
+    {
+      paragraphs: [
+        `The ${store} platform is published by ${legalName}, a Tunisian company specialized in the design and manufacturing of clear dental aligners and personalized orthodontic devices.`,
+      ],
+    },
     { heading: STR.identityTitle[b], rows: identityRows },
     {
       paragraphs: [
-        `The website ${dom} is published by ${legalName}, a company registered in Tunisia.`,
+        `The ${dom} website and the ${store} application are published and operated by ${legalName}, a company registered in Tunisia.`,
       ],
     },
     {
       heading: STR.ipTitle[b],
       paragraphs: [
-        'All content available on this website, including text, images, logos, graphic elements, and product catalogs, is protected. Any reproduction or use without prior authorization is prohibited.',
+        `All content on the ${store} website and application, including text, images, photographs, logos, trademarks, graphic elements, interfaces, documents and technical content, is protected under the applicable intellectual property law.`,
+        `Any reproduction, representation, modification, distribution or use, in whole or in part, without the prior written authorization of ${legalName}, is prohibited.`,
       ],
     },
     {
       heading: STR.dataTitle[b],
       paragraphs: [
-        'The information collected during an order or contact request is used only for order processing, delivery, invoicing, and customer support. It is not sold to third parties.',
+        `As part of using the platform, ${store} may collect and process the information required to create and follow up patient cases, design treatment plans, manufacture aligners, manage orders, and handle invoicing, payment, delivery and support for healthcare professionals.`,
+        'This information may include identification data, contact details, photographs, digital impressions, scans, radiographs, medical or orthodontic files, and any other information required to process the patient case.',
+        `The data collected is processed confidentially and securely. It is accessible only to authorized persons and is neither sold nor used for purposes unrelated to the services offered by ${store}.`,
+        'In accordance with applicable law, users have a right to access, correct and update their personal data and, where legally possible, to object to or delete it.',
+        'Any request regarding personal data can be sent to us by email, at the contact address shown above.',
+        'Further information is available in our Privacy Policy.',
       ],
     },
     {
       heading: STR.paymentTitle[b],
       paragraphs: [
-        'Online payments are processed through a secure payment solution. The customer’s banking information is not stored by our website.',
+        'Online payments made on the platform are processed through a secure payment solution.',
+        `${store} does not retain the customer’s full banking details when these are entered and processed directly by the secure payment provider.`,
+      ],
+    },
+    {
+      heading: STR.responsibilityTitle[b],
+      paragraphs: [
+        `${store} takes the necessary measures to ensure the accuracy and availability of the information published on its platform. However, the company cannot guarantee the complete absence of errors, temporary interruptions or malfunctions beyond its control.`,
       ],
     },
   ];

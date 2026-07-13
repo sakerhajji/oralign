@@ -33,13 +33,10 @@ const nextConfig: NextConfig = {
     return [
       // Patient home now lives at "/" (the audience chooser is gone).
       { source: "/patient", destination: "/", permanent: true },
-      // The single public blog moved out from under /patient to top-level /blog.
-      {
-        source: "/patient/blog/:slug",
-        destination: "/blog/:slug",
-        permanent: true,
-      },
-      { source: "/patient/blog", destination: "/blog", permanent: true },
+      // The whole /patient/* subtree was flattened to top-level routes
+      // (/patient/cas -> /cas, /patient/blog -> /blog, and so on). One
+      // catch-all keeps every old patient URL — blog included — reachable.
+      { source: "/patient/:path*", destination: "/:path*", permanent: true },
       // The old practitioner blog merged into the same public blog.
       {
         source: "/practitioner/blog/:slug",

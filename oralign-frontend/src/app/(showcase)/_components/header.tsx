@@ -27,7 +27,7 @@ export function Header() {
 
   // Anchor sections to observe on the CURRENT page = the `#hash` of any
   // dropdown child whose route is the active pathname (e.g. on
-  // /patient/decouvrir we watch #oralign, #oralign-prime, …).
+  // /decouvrir we watch #oralign, #oralign-prime, …).
   const sectionIds = (() => {
     const ids: string[] = [];
     for (const item of navItems) {

@@ -27,11 +27,11 @@ export const PATIENT_NAV_ITEMS: readonly NavItem[] = [
   {
     id: "why-oralign",
     labelKey: "whyOralign",
-    href: "/patient/decouvrir",
+    href: "/decouvrir",
     children: [
-      { id: "oralign", labelKey: "navOralign", href: "/patient/decouvrir#oralign" },
-      { id: "oralign-prime", labelKey: "oralignPrime", href: "/patient/decouvrir#oralign-prime" },
-      { id: "parcours", labelKey: "howItWorks", href: "/patient/decouvrir#parcours" },
+      { id: "oralign", labelKey: "navOralign", href: "/decouvrir#oralign" },
+      { id: "oralign-prime", labelKey: "oralignPrime", href: "/decouvrir#oralign-prime" },
+      { id: "parcours", labelKey: "howItWorks", href: "/decouvrir#parcours" },
       // Points at the public practitioner finder, not an in-page anchor.
       { id: "find-practitioner", labelKey: "findPractitioner", href: "/trouver-un-praticien" },
     ],
@@ -39,23 +39,23 @@ export const PATIENT_NAV_ITEMS: readonly NavItem[] = [
   {
     id: "clinical-cases",
     labelKey: "clinicalCases",
-    href: "/patient/cas",
+    href: "/cas",
     children: [
-      { id: "before-after", labelKey: "beforeAfter", href: "/patient/cas#avant-apres" },
-      { id: "act-early", labelKey: "actEarly", href: "/patient/cas#agir-tot" },
+      { id: "before-after", labelKey: "beforeAfter", href: "/cas#avant-apres" },
+      { id: "act-early", labelKey: "actEarly", href: "/cas#agir-tot" },
     ],
   },
   {
     id: "community",
     labelKey: "community",
-    href: "/patient/communaute",
+    href: "/communaute",
     children: [
-      { id: "testimonials", labelKey: "temoignages", href: "/patient/communaute#temoignages" },
-      { id: "share-experience", labelKey: "shareExperience", href: "/patient/communaute#partager" },
+      { id: "testimonials", labelKey: "temoignages", href: "/communaute#temoignages" },
+      { id: "share-experience", labelKey: "shareExperience", href: "/communaute#partager" },
     ],
   },
-  { id: "guide", labelKey: "guide", href: "/patient/guide" },
-  { id: "shop", labelKey: "shop", href: "/patient/shop" },
+  { id: "guide", labelKey: "guide", href: "/guide" },
+  { id: "shop", labelKey: "shop", href: "/shop" },
   { id: "blogs", labelKey: "blogs", href: "/blog" },
 ] as const;
 

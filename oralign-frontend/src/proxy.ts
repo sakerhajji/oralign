@@ -41,9 +41,12 @@ export default function proxy(request: NextRequest): NextResponse {
     return NextResponse.next();
   }
 
-  // Guard: protected route without token → send to /login
-  const isProtected = PROTECTED_PREFIXES.some((prefix) =>
-    pathname.startsWith(prefix),
+  // Guard: protected route without token → send to /login. Match on segment
+  // boundaries (like the auth-only / always-public checks) so a public page
+  // that merely shares a prefix — e.g. /accountability — is never gated now
+  // that public pages live at the site root instead of under /patient.
+  const isProtected = PROTECTED_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(prefix + '/'),
   );
   if (isProtected && !isAuthenticated) {
     const loginUrl = new URL('/login', request.url);

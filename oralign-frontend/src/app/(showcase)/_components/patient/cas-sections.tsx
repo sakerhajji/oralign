@@ -1,8 +1,8 @@
 import { ShowcaseSection } from "../showcase-section";
 
 /**
- * Sections of the "Cas" page (/patient/cas). Hash targets:
- * /patient/cas#avant-apres, /patient/cas#agir-tot.
+ * Sections of the "Cas" page (/cas). Hash targets:
+ * /cas#avant-apres, /cas#agir-tot.
  */
 
 export function AvantApresSection() {

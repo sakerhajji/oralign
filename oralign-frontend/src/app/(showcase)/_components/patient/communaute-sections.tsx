@@ -1,8 +1,8 @@
 import { ShowcaseSection } from "../showcase-section";
 
 /**
- * Sections of the "Communauté" page (/patient/communaute). Hash targets:
- * /patient/communaute#temoignages, /patient/communaute#partager.
+ * Sections of the "Communauté" page (/communaute). Hash targets:
+ * /communaute#temoignages, /communaute#partager.
  */
 
 export function TemoignagesSection() {

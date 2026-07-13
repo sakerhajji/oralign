@@ -101,7 +101,7 @@ export function WearAlignersSection() {
             </ul>
 
             <Link
-              href="/patient/guide"
+              href="/guide"
               className="mt-9 inline-flex min-h-13 items-center justify-center border border-[var(--sc-sun)] px-7 py-3 text-[0.7rem] font-medium text-[var(--sc-sun)] no-underline transition-colors hover:bg-[var(--sc-sun)] hover:text-[var(--sc-black)]"
             >
               {copy.cta}

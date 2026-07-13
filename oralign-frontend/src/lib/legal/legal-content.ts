@@ -452,22 +452,24 @@ function buildTerms(lang: LegalLang): LegalSection[] {
   const fr: LegalSection[] = [
     {
       paragraphs: [
-        'Les prix affichés sur le site sont exprimés dans la même devise que celle du compte commerçant, toutes taxes comprises sauf indication contraire.',
-        'Le client peut passer commande directement sur le site en sélectionnant les produits souhaités, en validant son panier puis en choisissant le mode de paiement proposé.',
-        'La commande est confirmée après validation du paiement ou confirmation du mode de paiement choisi. Le client reçoit une confirmation de commande par email ou par tout autre moyen de contact fourni lors de la commande.',
-        'En cas d’indisponibilité d’un produit après validation de la commande, le client sera informé dans les meilleurs délais. Il pourra choisir un remplacement, un avoir ou un remboursement.',
-        'Les délais de livraison sont indiqués au moment de la commande ou communiqués par notre service client. Ces délais peuvent varier selon la zone de livraison et la disponibilité des produits.',
+        'Les prix affichés sur le site ORALIGN sont exprimés dans la même devise que celle du compte commerçant et incluent toutes les taxes applicables, sauf indication contraire.',
+        'Le client peut passer sa commande directement sur le site en sélectionnant les produits ou services souhaités, en validant son panier, puis en choisissant l’un des modes de paiement disponibles.',
+        'La commande devient définitive après la validation du paiement ou la confirmation du mode de paiement sélectionné. Une confirmation de commande est ensuite envoyée au client par e-mail ou par tout autre moyen de contact renseigné lors de la commande.',
+        'En cas d’indisponibilité d’un produit ou d’un service après la validation de la commande, le client sera informé dans les meilleurs délais. Selon la situation, une solution de remplacement, un avoir ou un remboursement pourra lui être proposé.',
+        'Les délais de fabrication et de livraison sont indiqués lors du passage de la commande ou communiqués par le service client. Ils peuvent varier en fonction du type de commande, de la disponibilité des produits, de la zone de livraison et des éventuelles contraintes liées au transport.',
+        'ORALIGN ne pourra être tenue responsable des retards causés par des circonstances indépendantes de sa volonté, notamment les retards des transporteurs, les cas de force majeure ou les informations incorrectes fournies par le client.',
       ],
     },
   ];
   const en: LegalSection[] = [
     {
       paragraphs: [
-        'The prices displayed on the website are expressed in the same currency as the merchant account, including taxes unless otherwise stated.',
-        'The customer may place an order directly on the website by selecting the desired products, validating the cart, and choosing the available payment method.',
-        'The order is confirmed after payment validation or confirmation of the selected payment method. The customer receives an order confirmation by email or through any other contact method provided when placing the order.',
-        'If a product becomes unavailable after the order has been confirmed, the customer will be informed as soon as possible. The customer may choose a replacement, a credit note, or a refund.',
-        'Delivery times are indicated during the order process or communicated by our customer service team. These times may vary depending on the delivery area and product availability.',
+        'The prices displayed on the ORALIGN website are expressed in the same currency as the merchant account and include all applicable taxes, unless otherwise stated.',
+        'The customer may place an order directly on the website by selecting the desired products or services, validating the cart, and then choosing one of the available payment methods.',
+        'The order becomes final after payment validation or confirmation of the selected payment method. An order confirmation is then sent to the customer by email or through any other contact method provided when placing the order.',
+        'If a product or service becomes unavailable after the order has been validated, the customer will be informed as soon as possible. Depending on the situation, a replacement, a credit note, or a refund may be offered.',
+        'Manufacturing and delivery times are indicated when placing the order or communicated by customer service. They may vary depending on the type of order, product availability, the delivery area, and any transport-related constraints.',
+        'ORALIGN cannot be held responsible for delays caused by circumstances beyond its control, in particular carrier delays, cases of force majeure, or incorrect information provided by the customer.',
       ],
     },
   ];

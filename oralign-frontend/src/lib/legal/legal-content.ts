@@ -359,6 +359,9 @@ function buildAbout(lang: LegalLang, c: LegalCompany): LegalSection[] {
 
 function buildRefunds(lang: LegalLang, c: LegalCompany): LegalSection[] {
   const b = base(lang);
+  const brand = BRAND;
+  // Contact details are pulled from the injected company data (billing
+  // settings) — never duplicated in the prose.
   const contactRows = [
     row(STR.labels.email[b], c.email, lang, (v) => `mailto:${v}`),
     row(STR.labels.phone[b], c.phone, lang, (v) => `tel:${v.replace(/\s+/g, '')}`),
@@ -367,54 +370,220 @@ function buildRefunds(lang: LegalLang, c: LegalCompany): LegalSection[] {
   const fr: LegalSection[] = [
     {
       paragraphs: [
-        'Vous rencontrez un souci avec un dossier patient, une commande, un paiement, un plan de traitement, la fabrication de vos aligneurs ou leur livraison ? Notre équipe support est là pour vous aider — adressez-nous simplement votre réclamation.',
-        'Pour que nous puissions la traiter au plus vite, merci d’y joindre',
-      ],
-      list: [
-        'le nom du praticien ou du client',
-        'le numéro de commande ou du dossier patient',
-        'la date de la commande',
-        'une description précise du problème rencontré',
-        'les photos, fichiers ou documents justificatifs utiles',
+        `Vous rencontrez un problème concernant un dossier patient, un paiement, une proposition de traitement, un pack, une tranche de fabrication ou une livraison ? L’équipe support ${brand} est à votre disposition pour examiner votre demande et vous proposer une solution adaptée.`,
       ],
     },
     {
+      heading: 'Déposer une réclamation',
       paragraphs: [
-        'Dès réception d’une réclamation complète, notre équipe s’engage à l’examiner sous un délai indicatif de 48 à 72 heures ouvrables.',
-        'Nos aligneurs sont des dispositifs médicaux personnalisés, fabriqués sur mesure à partir des fichiers et informations que vous validez. Une fois la conception ou la fabrication lancée, une commande ne peut donc plus être annulée ni remboursée, sauf en cas d’erreur ou de non-conformité de notre fait.',
-        'Après vérification, et selon la situation, nous vous proposerons la solution la plus adaptée : une correction, une nouvelle fabrication, un avoir ou un remboursement.',
-        'Un remboursement reste également possible en cas de double paiement, d’annulation avant le début du traitement du dossier, ou si nous ne sommes pas en mesure de prendre votre commande en charge.',
-        'Les délais de remboursement dépendent ensuite du moyen de paiement utilisé et des délais propres à votre établissement bancaire.',
-        'Enfin, les professionnels de santé peuvent à tout moment joindre directement notre équipe via le chat intégré à l’application, pour toute question concernant leurs dossiers, leurs traitements ou leurs commandes.',
+        'Pour permettre un traitement rapide de votre réclamation, merci de fournir les informations suivantes',
+      ],
+      list: [
+        'le nom du praticien',
+        'le numéro de commande ou la référence du dossier patient',
+        'la date de la commande ou du paiement concerné',
+        'une description précise du problème rencontré',
+        'les photographies, fichiers ou documents justificatifs utiles',
+      ],
+      paragraphsAfter: [
+        'Une réclamation incomplète peut nécessiter la transmission d’informations supplémentaires avant de pouvoir être examinée.',
       ],
     },
-    { heading: STR.complaintsContact[b], rows: contactRows },
+    {
+      heading: 'Délai de traitement',
+      paragraphs: [
+        'À compter de la réception d’une réclamation complète, notre équipe s’engage à l’examiner dans un délai indicatif de 48 à 72 heures ouvrables.',
+        'Ce délai correspond à l’examen initial de la demande. La résolution définitive peut nécessiter un délai supplémentaire selon la nature du problème, les vérifications techniques nécessaires ou l’intervention d’un prestataire externe.',
+      ],
+    },
+    {
+      heading: 'Frais d’étude du dossier',
+      paragraphs: [
+        `Le paiement des frais d’étude permet à ${brand} de commencer l’analyse des données cliniques et la préparation d’une proposition de traitement.`,
+        `Lorsque l’étude du dossier a déjà commencé, ces frais ne peuvent plus être remboursés, sauf en cas de double paiement, d’erreur imputable à ${brand} ou d’impossibilité pour ${brand} de prendre le dossier en charge.`,
+        'Le praticien peut demander des modifications de la proposition de traitement avant sa validation, selon les conditions applicables au service choisi.',
+      ],
+    },
+    {
+      heading: 'Pack et lancement de la fabrication',
+      paragraphs: [
+        'Après validation de la proposition de traitement, le praticien sélectionne et approuve le pack correspondant au dossier patient.',
+        `Les aligneurs étant des dispositifs médicaux personnalisés, fabriqués sur mesure à partir des données et du plan validés par le praticien, le paiement correspondant à une fabrication déjà lancée ne peut plus être annulé ni remboursé, sauf en cas d’erreur ou de non-conformité imputable à ${brand}.`,
+      ],
+    },
+    {
+      heading: 'Paiement par tranches',
+      paragraphs: [
+        'Lorsqu’un pack prévoit un paiement par tranches, chaque tranche correspond à une étape du traitement et à un nombre déterminé de gouttières.',
+        'Seule la série correspondant à la tranche confirmée et payée est mise en fabrication, sauf indication contraire dans l’offre approuvée.',
+        `Une tranche peut être annulée avant le lancement de la fabrication correspondante. Une fois cette fabrication lancée, son paiement ne peut plus être remboursé, sauf en cas d’erreur ou de non-conformité imputable à ${brand}.`,
+        'Le non-paiement d’une tranche peut entraîner la suspension de la fabrication et de la livraison des gouttières suivantes.',
+      ],
+    },
+    {
+      heading: 'Erreur ou non-conformité',
+      paragraphs: [
+        `Lorsqu’une erreur de fabrication, une détérioration ou une non-conformité relevant de la responsabilité d’${brand} est confirmée, notre équipe pourra proposer, selon la situation`,
+      ],
+      list: [
+        'une correction du dossier',
+        'une nouvelle fabrication',
+        'le remplacement des gouttières concernées',
+        'un avoir',
+        'un remboursement total ou partiel du montant concerné',
+      ],
+      paragraphsAfter: [
+        'Le praticien doit signaler toute anomalie dans les meilleurs délais et transmettre les photographies ou documents permettant de vérifier la demande.',
+      ],
+    },
+    {
+      heading: 'Cas pouvant donner lieu à un remboursement',
+      paragraphs: ['Un remboursement peut notamment être envisagé en cas de'],
+      list: [
+        'double paiement',
+        'paiement effectué par erreur',
+        'annulation avant le début de l’étude du dossier',
+        'annulation d’une tranche avant le lancement de sa fabrication',
+        `impossibilité pour ${brand} de prendre le dossier ou la fabrication en charge`,
+        `erreur ou non-conformité confirmée imputable à ${brand}`,
+      ],
+      paragraphsAfter: [
+        'Tout remboursement est effectué après vérification et validation de la demande.',
+        'Les délais effectifs de remboursement peuvent varier selon le moyen de paiement utilisé, le prestataire de paiement et les délais de traitement de l’établissement bancaire.',
+      ],
+    },
+    {
+      heading: 'Assistance via l’application',
+      paragraphs: [
+        'Les professionnels de santé peuvent contacter directement l’équipe support via le chat intégré à l’application pour toute question concernant',
+      ],
+      list: [
+        'un dossier patient',
+        'une proposition de traitement',
+        'une demande de modification',
+        'un pack',
+        'une tranche de paiement',
+        'une fabrication',
+        'une livraison',
+        'une réclamation',
+      ],
+    },
+    {
+      heading: STR.complaintsContact[b],
+      paragraphs: [
+        `Les coordonnées du service réclamations sont affichées ci-dessous à partir des informations officielles enregistrées par ${brand}.`,
+      ],
+      rows: contactRows,
+    },
   ];
   const en: LegalSection[] = [
     {
       paragraphs: [
-        'Run into an issue with a patient case, an order, a payment, a treatment plan, the manufacturing of your aligners or their delivery? Our support team is here to help — just send us your complaint.',
-        'So we can handle it as quickly as possible, please include',
-      ],
-      list: [
-        'the practitioner’s or customer’s name',
-        'the order number or patient case number',
-        'the order date',
-        'a precise description of the issue',
-        'any helpful photos, files or supporting documents',
+        `Run into an issue with a patient case, a payment, a treatment proposal, a pack, a manufacturing stage or a delivery? The ${brand} support team is here to review your request and offer you a suitable solution.`,
       ],
     },
     {
+      heading: 'Filing a complaint',
       paragraphs: [
-        'As soon as we receive a complete complaint, our team commits to reviewing it within an indicative 48 to 72 business hours.',
-        'Our aligners are personalized medical devices, custom-made from the files and information you validate. Once design or manufacturing has started, an order can therefore no longer be cancelled or refunded, except in the event of an error or non-conformity on our side.',
-        'After verification, and depending on the situation, we will offer you the most suitable solution: a correction, a new production, a credit note or a refund.',
-        'A refund also remains possible in the event of a double payment, a cancellation before the case has started processing, or if we are unable to take on your order.',
-        'Refund times then depend on the payment method used and your bank’s own processing times.',
-        'Finally, healthcare professionals can reach our team directly at any time through the chat built into the application, for any question about their cases, treatments or orders.',
+        'To allow your complaint to be handled quickly, please provide the following information',
+      ],
+      list: [
+        'the practitioner’s name',
+        'the order number or the patient case reference',
+        'the date of the order or payment concerned',
+        'a precise description of the issue',
+        'any helpful photographs, files or supporting documents',
+      ],
+      paragraphsAfter: [
+        'An incomplete complaint may require additional information before it can be reviewed.',
       ],
     },
-    { heading: STR.complaintsContact[b], rows: contactRows },
+    {
+      heading: 'Processing time',
+      paragraphs: [
+        'From the receipt of a complete complaint, our team commits to reviewing it within an indicative time of 48 to 72 business hours.',
+        'This time frame corresponds to the initial review of the request. Final resolution may require additional time depending on the nature of the issue, the technical checks needed or the involvement of an external provider.',
+      ],
+    },
+    {
+      heading: 'Study fees',
+      paragraphs: [
+        `Payment of the study fees allows ${brand} to begin analyzing the clinical data and preparing a treatment proposal.`,
+        `Once the study of the case has started, these fees can no longer be refunded, except in the event of a double payment, an error attributable to ${brand}, or ${brand} being unable to take on the case.`,
+        'The practitioner can request changes to the treatment proposal before validating it, according to the conditions applicable to the chosen service.',
+      ],
+    },
+    {
+      heading: 'Pack and start of manufacturing',
+      paragraphs: [
+        'After the treatment proposal is validated, the practitioner selects and approves the pack matching the patient case.',
+        `As the aligners are personalized medical devices, custom-made from the data and plan validated by the practitioner, the payment corresponding to manufacturing that has already started can no longer be cancelled or refunded, except in the event of an error or non-conformity attributable to ${brand}.`,
+      ],
+    },
+    {
+      heading: 'Installment payment',
+      paragraphs: [
+        'When a pack provides for installment payment, each installment corresponds to a treatment stage and to a defined number of aligners.',
+        'Only the series corresponding to the confirmed and paid installment is put into production, unless otherwise stated in the approved offer.',
+        `An installment can be cancelled before the corresponding manufacturing starts. Once that manufacturing has started, its payment can no longer be refunded, except in the event of an error or non-conformity attributable to ${brand}.`,
+        'Failure to pay an installment may lead to the suspension of the manufacturing and delivery of the following aligners.',
+      ],
+    },
+    {
+      heading: 'Error or non-conformity',
+      paragraphs: [
+        `When a manufacturing error, damage or non-conformity attributable to ${brand} is confirmed, our team may offer, depending on the situation`,
+      ],
+      list: [
+        'a correction of the case',
+        'a new manufacturing run',
+        'the replacement of the aligners concerned',
+        'a credit note',
+        'a full or partial refund of the amount concerned',
+      ],
+      paragraphsAfter: [
+        'The practitioner must report any anomaly as soon as possible and send the photographs or documents that allow the request to be verified.',
+      ],
+    },
+    {
+      heading: 'Cases that may give rise to a refund',
+      paragraphs: ['A refund may in particular be considered in the event of'],
+      list: [
+        'a double payment',
+        'a payment made by mistake',
+        'a cancellation before the study of the case has started',
+        'a cancellation of an installment before its manufacturing starts',
+        `${brand} being unable to take on the case or the manufacturing`,
+        `a confirmed error or non-conformity attributable to ${brand}`,
+      ],
+      paragraphsAfter: [
+        'Any refund is made after verification and approval of the request.',
+        'The actual refund times may vary depending on the payment method used, the payment provider and your bank’s processing times.',
+      ],
+    },
+    {
+      heading: 'Support through the application',
+      paragraphs: [
+        'Healthcare professionals can contact the support team directly through the chat built into the application for any question about',
+      ],
+      list: [
+        'a patient case',
+        'a treatment proposal',
+        'a change request',
+        'a pack',
+        'a payment installment',
+        'manufacturing',
+        'delivery',
+        'a complaint',
+      ],
+    },
+    {
+      heading: STR.complaintsContact[b],
+      paragraphs: [
+        `The complaints service contact details are shown below, from the official information registered by ${brand}.`,
+      ],
+      rows: contactRows,
+    },
   ];
   return b === 'en' ? en : fr;
 }
@@ -875,7 +1044,7 @@ function buildTerms(lang: LegalLang): LegalSection[] {
       list: [
         'the correction or replacement of the submitted files',
         'a change to the treatment proposal',
-        'a new production',
+        'a new manufacturing run',
         'a credit note',
         'a refund of the amounts concerned',
       ],

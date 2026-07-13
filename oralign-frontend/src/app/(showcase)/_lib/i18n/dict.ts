@@ -663,19 +663,14 @@ export const dict = {
       en: "ORALIGN® by Aura Aligners — precision orthodontic aligners. Designed in Germany, manufactured in Tunisia. Distributed through a network of certified practitioners.",
       ar: "ORALIGN® من Aura Aligners — أجهزة تقويم دقيقة. مصمَّمة في ألمانيا، مصنوعة في تونس.",
     } as T,
-    product: { fr: "Découvrir", en: "Discover", ar: "اكتشف" } as T,
+    access: { fr: "Espace praticien", en: "Practitioner area", ar: "فضاء الطبيب" } as T,
+    backToTop: { fr: "Haut de page", en: "Back to top", ar: "أعلى الصفحة" } as T,
     company: { fr: "Société", en: "Company", ar: "الشركة" } as T,
     legal: { fr: "Mentions légales", en: "Legal", ar: "قانوني" } as T,
     // Header for the compliance column (Qui sommes-nous, Réclamations,
     // Mentions légales, Conditions de vente). Distinct from `legal` above
     // so the column title doesn't collide with the "Mentions légales" item.
     legalCol: { fr: "Informations légales", en: "Legal information", ar: "معلومات قانونية" } as T,
-    productLinks: [
-      { fr: "Pourquoi les aligneurs", en: "Why aligners", ar: "لماذا الأجهزة" },
-      { fr: "Parcours de traitement", en: "Treatment journey", ar: "رحلة العلاج" },
-      { fr: "Ce que nous traitons", en: "What we treat", ar: "ما نعالجه" },
-      { fr: "Tarifs", en: "Pricing", ar: "التسعير" },
-    ] as T[],
     companyLinks: [
       { fr: "À propos", en: "About Oralign", ar: "من نحن" },
       { fr: "Nos dentistes", en: "Our doctors", ar: "أطبّاؤنا" },

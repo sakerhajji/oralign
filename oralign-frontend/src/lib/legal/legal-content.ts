@@ -910,94 +910,278 @@ function buildTerms(lang: LegalLang): LegalSection[] {
 
 function buildPrivacy(lang: LegalLang, c: LegalCompany): LegalSection[] {
   const b = base(lang);
-  const name = storeName(c);
-  const contactRow = [row(STR.labels.email[b], c.email, lang, (v) => `mailto:${v}`)];
+  // Platform via BRAND ('ORALIGN'); operating company (dénomination sociale)
+  // from the injected company data.
+  const brand = BRAND;
+  const legalName = (c.companyName || brand).trim();
   const fr: LegalSection[] = [
     {
       paragraphs: [
-        `La présente politique de confidentialité décrit comment ${name} collecte, utilise, conserve et protège les données personnelles des utilisateurs de la plateforme. Nous accordons une importance particulière à la protection de vos données.`,
+        `La présente Politique de confidentialité explique comment ${legalName}, exploitant la plateforme ${brand}, collecte, utilise, conserve et protège les données personnelles des professionnels de santé, des utilisateurs de la plateforme et des patients concernés par les dossiers orthodontiques transmis.`,
+        `${brand} accorde une importance particulière à la confidentialité et à la protection des données personnelles, notamment des données cliniques et des données relatives à la santé.`,
       ],
     },
     {
       heading: 'Données collectées',
       paragraphs: [
-        'Nous collectons les données nécessaires au fonctionnement du service : informations d’identification et de contact du praticien, données de compte, informations relatives aux commandes et aux dossiers cliniques téléversés (photos, fichiers STL, CBCT/DICOM), ainsi que des données techniques de connexion.',
+        `Dans le cadre de l’utilisation de la plateforme, ${brand} peut collecter les catégories de données suivantes`,
+      ],
+      list: [
+        'les informations d’identification et de contact du praticien',
+        'les informations professionnelles et les données du compte utilisateur',
+        'les informations relatives aux devis, commandes, paiements et factures',
+        'les données nécessaires à la gestion des dossiers patients',
+        'les photographies cliniques',
+        'les empreintes numériques et fichiers STL',
+        'les radiographies et fichiers CBCT ou DICOM',
+        'les observations, prescriptions et instructions du praticien',
+        'les plans et propositions de traitement',
+        'les échanges effectués avec l’équipe support',
+        'les données techniques de connexion et d’utilisation de la plateforme',
+      ],
+    },
+    {
+      heading: 'Origine des données des patients',
+      paragraphs: [
+        `Les données relatives aux patients sont principalement collectées et transmises à ${brand} par le professionnel de santé chargé de leur traitement.`,
+        'Avant de transmettre un dossier patient, le praticien doit s’assurer qu’il dispose des autorisations et consentements nécessaires et qu’il a informé le patient de l’utilisation de ses données dans le cadre de l’étude, de la planification et de la fabrication du traitement orthodontique.',
       ],
     },
     {
       heading: 'Finalités du traitement',
       paragraphs: [
-        'Les données sont utilisées uniquement pour la création et la gestion des comptes, le traitement des commandes et des devis, la facturation, le service client et le respect de nos obligations légales.',
+        `Les données collectées sont utilisées uniquement pour les besoins liés aux services ${brand}, notamment pour`,
+      ],
+      list: [
+        'créer et gérer les comptes utilisateurs',
+        'vérifier les informations professionnelles des praticiens',
+        'créer, analyser et suivre les dossiers patients',
+        'préparer et modifier les propositions de traitement',
+        'permettre au praticien de valider le plan de traitement',
+        'proposer les packs adaptés au dossier patient',
+        'traiter les paiements, y compris les paiements par tranches',
+        'concevoir et fabriquer les gouttières',
+        'organiser et suivre les livraisons',
+        'fournir une assistance via le chat intégré à l’application',
+        'gérer les réclamations et les demandes de remboursement',
+        'assurer la sécurité et le bon fonctionnement de la plateforme',
+        'respecter les obligations légales, administratives, comptables et réglementaires applicables',
+      ],
+      paragraphsAfter: [
+        'Les données relatives à la santé ne sont pas utilisées à des fins publicitaires.',
       ],
     },
     {
       heading: 'Partage des données',
       paragraphs: [
-        'Vos données ne sont pas vendues à des tiers. Elles peuvent être communiquées uniquement aux prestataires strictement nécessaires à l’exécution du service (paiement, hébergement), dans la limite de leurs missions.',
+        `${brand} ne vend pas les données personnelles, cliniques ou médicales à des tiers.`,
+        `Les données peuvent être communiquées uniquement aux personnes autorisées au sein d’${brand} ainsi qu’aux prestataires nécessaires au fonctionnement du service, notamment pour`,
+      ],
+      list: [
+        'l’hébergement et le stockage sécurisé des données',
+        'la maintenance de la plateforme',
+        'le traitement des paiements',
+        'l’envoi des notifications et des e-mails',
+        'la livraison des commandes',
+        'la sauvegarde et la sécurité des systèmes',
+      ],
+      paragraphsAfter: [
+        'Ces prestataires peuvent accéder uniquement aux informations nécessaires à l’exécution de leurs missions et sont tenus de respecter des obligations de confidentialité et de sécurité.',
+        'Les données peuvent également être communiquées aux autorités compétentes lorsque cette transmission est exigée par la loi.',
       ],
     },
     {
       heading: 'Paiement sécurisé',
       paragraphs: [
-        'Les paiements en ligne sont traités par une solution de paiement sécurisée. Les informations bancaires ne sont pas stockées sur notre plateforme.',
+        'Les paiements en ligne sont traités par l’intermédiaire d’une solution de paiement sécurisée.',
+        `Lorsque les données bancaires sont directement saisies sur l’interface du prestataire de paiement, ${brand} ne reçoit pas et ne conserve pas les informations bancaires complètes de l’utilisateur.`,
+        `${brand} peut toutefois conserver les informations nécessaires au suivi de la transaction, notamment le montant, la date, le statut du paiement et la référence de la transaction.`,
       ],
     },
     {
-      heading: 'Conservation et sécurité',
+      heading: 'Conservation des données',
       paragraphs: [
-        'Les données sont conservées pendant la durée nécessaire aux finalités décrites ci-dessus et aux obligations légales applicables. Nous mettons en œuvre des mesures techniques et organisationnelles pour protéger vos données contre tout accès non autorisé.',
+        'Les données sont conservées pendant la durée nécessaire à la réalisation des finalités pour lesquelles elles ont été collectées.',
+        'Certaines informations peuvent être conservées plus longtemps lorsqu’une durée particulière est exigée pour la facturation, la traçabilité des dispositifs, la gestion des réclamations, le respect des obligations légales ou la défense des droits des parties.',
+        'À l’expiration de la durée applicable, les données sont supprimées, anonymisées ou archivées de manière sécurisée.',
       ],
     },
     {
-      heading: 'Vos droits',
+      heading: 'Sécurité et confidentialité',
       paragraphs: [
-        'Vous disposez d’un droit d’accès, de rectification et de suppression de vos données personnelles. Pour exercer ces droits, contactez-nous par email.',
+        `${brand} met en œuvre des mesures techniques et organisationnelles adaptées afin de protéger les données contre`,
       ],
-      rows: contactRow,
+      list: [
+        'les accès non autorisés',
+        'la perte ou la destruction accidentelle',
+        'la modification non autorisée',
+        'la divulgation ou l’utilisation abusive',
+        'les incidents affectant la disponibilité ou la confidentialité des fichiers',
+      ],
+      paragraphsAfter: [
+        'L’accès aux dossiers patients est limité aux utilisateurs et aux membres de l’équipe autorisés qui en ont besoin pour exécuter leurs missions.',
+        'L’utilisateur est responsable de la confidentialité de ses identifiants et doit signaler immédiatement toute utilisation non autorisée de son compte.',
+      ],
+    },
+    {
+      heading: 'Droits des utilisateurs et des patients',
+      paragraphs: [
+        'Conformément à la législation applicable, toute personne concernée peut demander',
+      ],
+      list: [
+        'l’accès aux données personnelles la concernant',
+        'la correction ou la mise à jour de données inexactes',
+        'la suppression des données lorsque celle-ci est légalement possible',
+        'l’opposition à certains traitements pour des motifs légitimes',
+        'le retrait de son consentement lorsque le traitement repose sur celui-ci',
+      ],
+      paragraphsAfter: [
+        'Les demandes relatives à un dossier patient peuvent être traitées en coordination avec le professionnel de santé ayant créé ou transmis le dossier.',
+        `Toute demande peut être adressée à ${brand} en utilisant l’adresse e-mail de contact affichée sur la plateforme.`,
+      ],
+    },
+    {
+      heading: 'Modification de la politique',
+      paragraphs: [
+        `${brand} peut mettre à jour la présente Politique de confidentialité afin de tenir compte de l’évolution de la plateforme, de ses services, de ses procédures ou de la réglementation applicable.`,
+        'La date de la dernière mise à jour est affichée sur la page.',
+        'Dernière mise à jour le 13 juillet 2026.',
+      ],
     },
   ];
   const en: LegalSection[] = [
     {
       paragraphs: [
-        `This privacy policy describes how ${name} collects, uses, retains, and protects the personal data of platform users. We place particular importance on protecting your data.`,
+        `This Privacy Policy explains how ${legalName}, operating the ${brand} platform, collects, uses, retains and protects the personal data of healthcare professionals, platform users and the patients involved in the orthodontic cases submitted.`,
+        `${brand} places particular importance on the confidentiality and protection of personal data, in particular clinical data and health-related data.`,
       ],
     },
     {
       heading: 'Data we collect',
       paragraphs: [
-        'We collect the data required to operate the service: the practitioner’s identification and contact details, account data, information related to orders and uploaded clinical files (photos, STL files, CBCT/DICOM), and technical connection data.',
+        `As part of using the platform, ${brand} may collect the following categories of data`,
+      ],
+      list: [
+        'the practitioner’s identification and contact details',
+        'professional information and user account data',
+        'information related to quotations, orders, payments and invoices',
+        'the data required to manage patient cases',
+        'clinical photographs',
+        'digital impressions and STL files',
+        'radiographs and CBCT or DICOM files',
+        'the practitioner’s observations, prescriptions and instructions',
+        'treatment plans and proposals',
+        'exchanges with the support team',
+        'technical data on connection to and use of the platform',
+      ],
+    },
+    {
+      heading: 'Origin of patient data',
+      paragraphs: [
+        `Patient data is mainly collected and transmitted to ${brand} by the healthcare professional responsible for their treatment.`,
+        'Before transmitting a patient case, the practitioner must ensure that they have the necessary authorizations and consents and that they have informed the patient about the use of their data for the study, planning and manufacturing of the orthodontic treatment.',
       ],
     },
     {
       heading: 'Purposes of processing',
       paragraphs: [
-        'Data is used only to create and manage accounts, process orders and quotations, handle invoicing, provide customer support, and comply with our legal obligations.',
+        `The data collected is used solely for purposes related to ${brand}’s services, in particular to`,
+      ],
+      list: [
+        'create and manage user accounts',
+        'verify practitioners’ professional information',
+        'create, analyze and track patient cases',
+        'prepare and modify treatment proposals',
+        'allow the practitioner to validate the treatment plan',
+        'offer the packs suited to the patient case',
+        'process payments, including installment payments',
+        'design and manufacture the aligners',
+        'organize and track deliveries',
+        'provide support through the chat built into the application',
+        'handle complaints and refund requests',
+        'ensure the security and proper operation of the platform',
+        'comply with applicable legal, administrative, accounting and regulatory obligations',
+      ],
+      paragraphsAfter: [
+        'Health-related data is not used for advertising purposes.',
       ],
     },
     {
       heading: 'Data sharing',
       paragraphs: [
-        'Your data is not sold to third parties. It may be shared only with the providers strictly necessary to deliver the service (payment, hosting), within the limits of their tasks.',
+        `${brand} does not sell personal, clinical or medical data to third parties.`,
+        `Data may be shared only with authorized persons within ${brand} and with the providers necessary for the operation of the service, in particular for`,
+      ],
+      list: [
+        'hosting and secure storage of data',
+        'maintenance of the platform',
+        'payment processing',
+        'sending notifications and emails',
+        'delivery of orders',
+        'system backup and security',
+      ],
+      paragraphsAfter: [
+        'These providers can access only the information necessary to perform their tasks and are bound by confidentiality and security obligations.',
+        'Data may also be disclosed to the competent authorities where such disclosure is required by law.',
       ],
     },
     {
       heading: 'Secure payment',
       paragraphs: [
-        'Online payments are processed through a secure payment solution. Banking details are not stored on our platform.',
+        'Online payments are processed through a secure payment solution.',
+        `When banking details are entered directly on the payment provider’s interface, ${brand} does not receive or retain the user’s full banking information.`,
+        `${brand} may, however, retain the information required to track the transaction, in particular the amount, date, payment status and transaction reference.`,
       ],
     },
     {
-      heading: 'Retention and security',
+      heading: 'Data retention',
       paragraphs: [
-        'Data is retained for as long as necessary for the purposes described above and for applicable legal obligations. We implement technical and organizational measures to protect your data against unauthorized access.',
+        'Data is retained for as long as necessary to fulfill the purposes for which it was collected.',
+        'Some information may be retained longer when a specific period is required for invoicing, device traceability, complaint handling, compliance with legal obligations or the defense of the parties’ rights.',
+        'Once the applicable period expires, the data is deleted, anonymized or securely archived.',
       ],
     },
     {
-      heading: 'Your rights',
+      heading: 'Security and confidentiality',
       paragraphs: [
-        'You have the right to access, correct, and delete your personal data. To exercise these rights, contact us by email.',
+        `${brand} implements appropriate technical and organizational measures to protect data against`,
       ],
-      rows: contactRow,
+      list: [
+        'unauthorized access',
+        'accidental loss or destruction',
+        'unauthorized modification',
+        'disclosure or misuse',
+        'incidents affecting the availability or confidentiality of the files',
+      ],
+      paragraphsAfter: [
+        'Access to patient cases is limited to authorized users and team members who need it to perform their tasks.',
+        'The user is responsible for the confidentiality of their credentials and must immediately report any unauthorized use of their account.',
+      ],
+    },
+    {
+      heading: 'Rights of users and patients',
+      paragraphs: [
+        'In accordance with applicable law, any data subject may request',
+      ],
+      list: [
+        'access to the personal data concerning them',
+        'the correction or updating of inaccurate data',
+        'the deletion of data where this is legally possible',
+        'objection to certain processing on legitimate grounds',
+        'the withdrawal of their consent where the processing is based on it',
+      ],
+      paragraphsAfter: [
+        'Requests relating to a patient case may be handled in coordination with the healthcare professional who created or transmitted the case.',
+        `Any request can be sent to ${brand} using the contact email address shown on the platform.`,
+      ],
+    },
+    {
+      heading: 'Changes to this policy',
+      paragraphs: [
+        `${brand} may update this Privacy Policy to take into account changes in the platform, its services, its procedures or the applicable regulations.`,
+        'The date of the last update is shown on the page.',
+        'Last updated on 13 July 2026.',
+      ],
     },
   ];
   return b === 'en' ? en : fr;

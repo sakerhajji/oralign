@@ -2241,6 +2241,20 @@ export const dict = {
       en: 'Your clinic tax id (“Matricule fiscal”). Shown on invoices issued to your clinic.',
       fr: 'Le matricule fiscal de votre cabinet. Affiché sur les factures émises à votre cabinet.',
     } as T,
+    // Public directory ("Trouver un praticien")
+    specialtyLabel: { en: 'Specialty', fr: 'Spécialité' } as T,
+    specialtyPlaceholder: {
+      en: 'e.g. Orthodontist, General dentist',
+      fr: 'ex. Orthodontiste, Dentiste généraliste',
+    } as T,
+    publicListingLabel: {
+      en: 'List my clinic in the public directory',
+      fr: 'Afficher mon cabinet dans l’annuaire public',
+    } as T,
+    publicListingHelp: {
+      en: 'When on, patients can find your clinic on the public “Find a practitioner” map and request appointments. Your tax id and private email are never shown.',
+      fr: 'Activé, les patients peuvent trouver votre cabinet sur la carte publique « Trouver un praticien » et demander un rendez-vous. Votre matricule fiscal et votre e-mail privé ne sont jamais affichés.',
+    } as T,
     saving: { en: 'Saving...', fr: 'Enregistrement…' } as T,
     saveClinicDetails: { en: 'Save clinic details', fr: 'Enregistrer les informations du cabinet' } as T,
     toastClinicCreated: { en: 'Clinic profile created.', fr: 'Profil du cabinet créé.' } as T,

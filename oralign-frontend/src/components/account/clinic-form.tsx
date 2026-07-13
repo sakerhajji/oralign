@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Form } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import { PhoneInput } from '@/components/ui/phone-input';
 import { LocationPicker } from '@/components/ui/location-picker';
 import { clinicSettingsSchema, type ClinicSettingsFormData } from '@/lib/schemas';
@@ -43,6 +44,8 @@ export function ClinicForm({ profile }: { profile: DentistProfile | null }) {
       longitude: undefined,
       description: '',
       taxId: '',
+      specialty: '',
+      isListedPublicly: true,
     },
   });
 
@@ -58,6 +61,8 @@ export function ClinicForm({ profile }: { profile: DentistProfile | null }) {
       longitude: profile.longitude ?? undefined,
       description: profile.description ?? '',
       taxId: profile.taxId ?? '',
+      specialty: profile.specialty ?? '',
+      isListedPublicly: profile.isListedPublicly ?? true,
     });
   }, [profile, form]);
 
@@ -89,6 +94,8 @@ export function ClinicForm({ profile }: { profile: DentistProfile | null }) {
       longitude: values.longitude,
       description: normalizeOptional(values.description),
       taxId: normalizeOptional(values.taxId),
+      specialty: normalizeOptional(values.specialty),
+      isListedPublicly: values.isListedPublicly,
     };
 
     if (!activeProfileId) {
@@ -102,6 +109,8 @@ export function ClinicForm({ profile }: { profile: DentistProfile | null }) {
         longitude: values.longitude,
         description: normalizeOptional(values.description),
         taxId: normalizeOptional(values.taxId),
+        specialty: normalizeOptional(values.specialty),
+        isListedPublicly: values.isListedPublicly,
       });
       setCreatedProfileId(created.id);
       queryClient.invalidateQueries({ queryKey: userKeys.currentUser() });
@@ -120,6 +129,8 @@ export function ClinicForm({ profile }: { profile: DentistProfile | null }) {
       longitude: values.longitude,
       description: values.description,
       taxId: values.taxId,
+      specialty: values.specialty,
+      isListedPublicly: values.isListedPublicly,
     });
   });
 
@@ -253,6 +264,39 @@ export function ClinicForm({ profile }: { profile: DentistProfile | null }) {
                     {t('accountClinic.taxIdHelp')}
                   </p>
                 )}
+              </div>
+
+              <div className="space-y-2 md:col-span-2">
+                <label className="text-sm font-medium" htmlFor="specialty">
+                  {t('accountClinic.specialtyLabel')}
+                </label>
+                <Input
+                  id="specialty"
+                  placeholder={t('accountClinic.specialtyPlaceholder')}
+                  {...form.register('specialty')}
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-4 rounded-lg border p-4 md:col-span-2">
+                <div className="space-y-0.5">
+                  <label className="text-sm font-medium" htmlFor="isListedPublicly">
+                    {t('accountClinic.publicListingLabel')}
+                  </label>
+                  <p className="text-xs text-muted-foreground">
+                    {t('accountClinic.publicListingHelp')}
+                  </p>
+                </div>
+                <Controller
+                  name="isListedPublicly"
+                  control={form.control}
+                  render={({ field }) => (
+                    <Switch
+                      id="isListedPublicly"
+                      checked={field.value ?? true}
+                      onCheckedChange={field.onChange}
+                    />
+                  )}
+                />
               </div>
             </div>
 

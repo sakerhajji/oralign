@@ -763,10 +763,12 @@ model DentistProfile {
   logoUrl        String?        // validated path only, no raw URLs
 
   // Public directory ("Trouver un praticien"): the practitioner's specialty
-  // shown on the finder, and an explicit opt-in to appear in the public
-  // list (default false — a clinic must consciously choose to be public).
+  // shown on the finder, and whether the clinic appears in the public list.
+  // Opt-OUT — approved, active partner clinics are listed by default and can
+  // hide themselves from the clinic settings. (Private data — tax id, clinic
+  // email — is never exposed regardless of this flag.)
   specialty        String?
-  isListedPublicly Boolean      @default(false)
+  isListedPublicly Boolean      @default(true)
 
   // Timestamps + soft delete (mirrors User)
   createdAt      DateTime       @default(now())

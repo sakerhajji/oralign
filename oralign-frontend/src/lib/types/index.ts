@@ -819,6 +819,10 @@ export interface DentistProfile {
    * in the invoice "Billed to" (doctor/clinic) block when present.
    */
   taxId?: string;
+  /** Specialty shown in the public directory ("Trouver un praticien"). */
+  specialty?: string;
+  /** Whether the clinic appears in the public directory (opt-out, default on). */
+  isListedPublicly?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -1130,6 +1134,8 @@ export interface CreateDentistProfileDto {
   logoUrl?: string;
   /** Clinic "Matricule fiscal" (doctor tax registration number). */
   taxId?: string;
+  specialty?: string;
+  isListedPublicly?: boolean;
 }
 
 export interface UpdateDentistProfileDto {
@@ -1145,6 +1151,8 @@ export interface UpdateDentistProfileDto {
   logoUrl?: string;
   /** Clinic "Matricule fiscal" (doctor tax registration number). */
   taxId?: string;
+  specialty?: string;
+  isListedPublicly?: boolean;
 }
 
 /** Single-shot weekly schedule entry — used by SetupClinicDto. */

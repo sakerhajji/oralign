@@ -166,6 +166,12 @@ export const clinicSettingsSchema = z.object({
     normalizeOptionalString,
     z.string().max(60, 'Tax id must be 60 characters or fewer').optional(),
   ),
+  // Public directory ("Trouver un praticien").
+  specialty: z.preprocess(
+    normalizeOptionalString,
+    z.string().max(120, 'Specialty must be 120 characters or fewer').optional(),
+  ),
+  isListedPublicly: z.boolean().optional(),
 });
 
 // Stricter version used in the onboarding wizard: every field needed to flip

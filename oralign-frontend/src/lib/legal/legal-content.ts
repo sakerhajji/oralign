@@ -360,7 +360,7 @@ function buildRefunds(lang: LegalLang, c: LegalCompany): LegalSection[] {
     {
       paragraphs: [
         'Vous rencontrez un souci avec un dossier patient, une commande, un paiement, un plan de traitement, la fabrication de vos aligneurs ou leur livraison ? Notre équipe support est là pour vous aider — adressez-nous simplement votre réclamation.',
-        'Pour que nous puissions la traiter au plus vite, merci d’y joindre :',
+        'Pour que nous puissions la traiter au plus vite, merci d’y joindre',
       ],
       list: [
         'le nom du praticien ou du client ;',
@@ -386,7 +386,7 @@ function buildRefunds(lang: LegalLang, c: LegalCompany): LegalSection[] {
     {
       paragraphs: [
         'Run into an issue with a patient case, an order, a payment, a treatment plan, the manufacturing of your aligners or their delivery? Our support team is here to help — just send us your complaint.',
-        'So we can handle it as quickly as possible, please include:',
+        'So we can handle it as quickly as possible, please include',
       ],
       list: [
         'the practitioner’s or customer’s name;',

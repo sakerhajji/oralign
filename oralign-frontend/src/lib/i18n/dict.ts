@@ -768,6 +768,12 @@ export const dict = {
       suffix: { en: '.', fr: '.' } as T,
     },
 
+    // Final self-verification the doctor must confirm before submitting.
+    reviewConfirm: {
+      en: 'I have reviewed all the information, files and images attached to my order. I confirm that they are complete, correct and compliant before submitting the order.',
+      fr: 'J’ai vérifié l’ensemble des informations, fichiers et images joints à ma commande. Je confirme qu’ils sont complets, corrects et conformes avant la soumission de la commande.',
+    } as T,
+
     // ── Paid-order lock notice ────────────────────────────────────
     paidLock: {
       banner: {

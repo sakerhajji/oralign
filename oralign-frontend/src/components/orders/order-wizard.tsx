@@ -222,6 +222,9 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
   // Doctor's acceptance of the General Terms & Conditions — required to
   // submit (checkbox on the final review step; the backend also enforces).
   const [termsAccepted, setTermsAccepted] = useState(false);
+  // Final self-verification the doctor must tick before submit (that the
+  // order's info / files / images are complete, correct and compliant).
+  const [reviewConfirmed, setReviewConfirmed] = useState(false);
   const [savedOrder, setSavedOrder] = useState<DentalOrder | undefined>(
     initialOrder,
   );
@@ -400,7 +403,7 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
   const isDraftForSubmit = !savedOrder || savedOrder.status === OrderStatus.DRAFT;
   // The General T&C box must be checked before submit is allowed. Only
   // shown/required on the final review step for a draft order.
-  const canSubmit = isDraftForSubmit && termsAccepted;
+  const canSubmit = isDraftForSubmit && termsAccepted && reviewConfirmed;
   const isSaving =
     createPatient.isPending ||
     createOrder.isPending ||
@@ -832,6 +835,26 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
               {t('orderForm.terms.link')}
             </a>
             {t('orderForm.terms.suffix')}
+          </span>
+        </label>
+      )}
+
+      {/* Final self-verification — the doctor confirms the order's info,
+          files and images are complete / correct / compliant before submit.
+          Required (client-side gate) alongside the T&C above. */}
+      {step === steps.length - 1 && canModify && isDraftForSubmit && (
+        <label
+          htmlFor="order-review-confirm"
+          className="flex cursor-pointer items-start gap-3 rounded-md border bg-card p-3 text-sm shadow-sm"
+        >
+          <Checkbox
+            id="order-review-confirm"
+            checked={reviewConfirmed}
+            onCheckedChange={(v) => setReviewConfirmed(v === true)}
+            className="mt-0.5"
+          />
+          <span className="text-muted-foreground">
+            {t('orderForm.reviewConfirm')}
           </span>
         </label>
       )}

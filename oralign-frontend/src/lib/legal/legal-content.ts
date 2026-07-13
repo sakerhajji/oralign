@@ -308,12 +308,13 @@ function row(
 
 function buildAbout(lang: LegalLang, c: LegalCompany): LegalSection[] {
   const b = base(lang);
-  const name = storeName(c);
   const fr: LegalSection[] = [
     {
+      heading: 'Découvrez ORALIGN',
       paragraphs: [
-        `${name} est une boutique en ligne basée en Tunisie, spécialisée dans les aligneurs dentaires transparents et les solutions orthodontiques.`,
-        'Notre objectif est de proposer à nos clients des produits de qualité, avec une expérience d’achat simple, sécurisée et transparente. Nous mettons à disposition un catalogue clair, des prix affichés dans la devise du compte commerçant, ainsi qu’un service client disponible pour répondre aux questions avant et après la commande.',
+        'ORALIGN est une société tunisienne spécialisée dans la conception et la fabrication sur mesure d’aligneurs dentaires transparents et de solutions orthodontiques.',
+        'Nous accompagnons les professionnels de santé dans la gestion de leurs traitements, depuis l’étude du dossier patient et la planification du traitement jusqu’à la fabrication et à la livraison des aligneurs.',
+        'Notre objectif est de proposer des dispositifs de qualité, adaptés à chaque patient, ainsi qu’une plateforme simple et sécurisée permettant aux praticiens de transmettre leurs dossiers, suivre leurs commandes et échanger directement avec notre équipe d’assistance via le chat intégré à l’application.',
       ],
     },
     {
@@ -327,9 +328,11 @@ function buildAbout(lang: LegalLang, c: LegalCompany): LegalSection[] {
   ];
   const en: LegalSection[] = [
     {
+      heading: 'About ORALIGN',
       paragraphs: [
-        `${name} is an online store based in Tunisia, specialized in clear dental aligners and orthodontic solutions.`,
-        'Our goal is to provide customers with quality products and a simple, secure, and transparent shopping experience. We provide a clear product catalog, prices displayed in the merchant account currency, and customer support available before and after each order.',
+        'ORALIGN is a Tunisian company specialized in the custom design and manufacturing of clear dental aligners and orthodontic solutions.',
+        'We support healthcare professionals in managing their treatments — from reviewing the patient case and planning the treatment through to manufacturing and delivering the aligners.',
+        'Our goal is to provide quality devices tailored to each patient, along with a simple and secure platform that lets practitioners submit their cases, track their orders, and talk directly with our support team through the chat built into the application.',
       ],
     },
     {

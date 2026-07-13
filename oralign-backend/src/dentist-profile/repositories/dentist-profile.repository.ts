@@ -1,6 +1,26 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { DentistProfile } from '@prisma/client';
+import {
+  DentistProfile,
+  DayOfWeek,
+  Prisma,
+  VerificationStatus,
+} from '@prisma/client';
+
+/** A public directory row: profile scalars + the safe user projection. */
+export type PublicProfileRow = DentistProfile & {
+  user: { fullName: string; avatarUrl: string | null } | null;
+};
+
+/** Same as PublicProfileRow but with the weekly schedule attached. */
+export type PublicProfileWithHours = PublicProfileRow & {
+  workingHours: {
+    dayOfWeek: DayOfWeek;
+    openTime: string;
+    closeTime: string;
+    isClosed: boolean;
+  }[];
+};
 
 @Injectable()
 export class DentistProfileRepository {
@@ -19,6 +39,8 @@ export class DentistProfileRepository {
     taxId?: string;
     description?: string;
     logoUrl?: string;
+    specialty?: string;
+    isListedPublicly?: boolean;
   }): Promise<DentistProfile> {
     return this.prisma.dentistProfile.create({ data });
   }
@@ -179,6 +201,98 @@ export class DentistProfileRepository {
     return { profiles, total };
   }
 
+  // ─── Public "Trouver un praticien" directory ──────────────────────────────
+  //
+  // STRICT public filter applied to every read here — the same predicate the
+  // list and single-profile endpoints share: the row must be undeleted, the
+  // clinic must have opted in (isListedPublicly), and the owning user must be
+  // an approved AND active account. Anything failing this is invisible.
+
+  private publicWhere(query?: {
+    city?: string;
+    specialty?: string;
+    search?: string;
+  }): Prisma.DentistProfileWhereInput {
+    const where: Prisma.DentistProfileWhereInput = {
+      deletedAt: null,
+      isListedPublicly: true,
+      user: {
+        verificationStatus: VerificationStatus.approved,
+        isActive: true,
+      },
+    };
+
+    if (query?.city) {
+      where.city = { contains: query.city, mode: 'insensitive' };
+    }
+    if (query?.specialty) {
+      where.specialty = { contains: query.specialty, mode: 'insensitive' };
+    }
+    if (query?.search) {
+      where.OR = [
+        { clinicName: { contains: query.search, mode: 'insensitive' } },
+        { user: { fullName: { contains: query.search, mode: 'insensitive' } } },
+      ];
+    }
+
+    return where;
+  }
+
+  /**
+   * List publicly-listed practitioners matching the (optional) filters.
+   * When `skip`/`take` are omitted every matching row is returned — the
+   * service uses that path for the geo-distance ranking, which must sort the
+   * whole result set in memory before paginating.
+   */
+  async findPublic(query: {
+    skip?: number;
+    take?: number;
+    city?: string;
+    specialty?: string;
+    search?: string;
+  }): Promise<{ profiles: PublicProfileRow[]; total: number }> {
+    const where = this.publicWhere(query);
+
+    const [profiles, total] = await Promise.all([
+      this.prisma.dentistProfile.findMany({
+        where,
+        ...(query.skip !== undefined ? { skip: query.skip } : {}),
+        ...(query.take !== undefined ? { take: query.take } : {}),
+        orderBy: { createdAt: 'desc' },
+        include: {
+          user: { select: { fullName: true, avatarUrl: true } },
+        },
+      }),
+      this.prisma.dentistProfile.count({ where }),
+    ]);
+
+    return { profiles: profiles as PublicProfileRow[], total };
+  }
+
+  /**
+   * Single publicly-listed practitioner by id, with the weekly schedule.
+   * Returns null when the row exists but fails the strict public filter, so
+   * the service can 404 without leaking whether the profile exists at all.
+   */
+  async findPublicById(id: string): Promise<PublicProfileWithHours | null> {
+    const profile = await this.prisma.dentistProfile.findFirst({
+      where: { ...this.publicWhere(), id },
+      include: {
+        user: { select: { fullName: true, avatarUrl: true } },
+        workingHours: {
+          select: {
+            dayOfWeek: true,
+            openTime: true,
+            closeTime: true,
+            isClosed: true,
+          },
+        },
+      },
+    });
+
+    return profile as PublicProfileWithHours | null;
+  }
+
   async update(
     id: string,
     data: Partial<{
@@ -193,6 +307,8 @@ export class DentistProfileRepository {
       taxId?: string;
       description?: string;
       logoUrl?: string;
+      specialty?: string;
+      isListedPublicly?: boolean;
     }>,
   ): Promise<DentistProfile> {
     return this.prisma.dentistProfile.update({

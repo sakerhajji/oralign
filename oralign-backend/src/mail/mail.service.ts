@@ -4,6 +4,9 @@ import { Lang, pickLang } from '../common/i18n/lang';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   renderApprovalGrantedEmail,
+  renderAppointmentDecisionForPatient,
+  renderAppointmentRequestedForPatient,
+  renderAppointmentRequestForPractitioner,
   renderNewOrderForAdminEmail,
   renderNewUserPendingForAdminEmail,
   renderNewOrderForDoctorEmail,
@@ -265,6 +268,65 @@ export class MailService {
     const { html, subject } = renderQuoteDecisionForAdminEmail(
       args,
       args.lang ?? (await this.resolveLang(args.to)),
+    );
+    await this.send({ to: args.to, subject, html });
+  }
+
+  // ─── Appointment emails ─────────────────────────────────────────────────
+  //
+  // Patients are NOT app Users, so their language can't be looked up from
+  // preferredLanguage — every appointment wrapper takes an explicit `lang`.
+  // For the practitioner copy the caller passes their stored preference.
+
+  async sendAppointmentRequestedToPatient(args: {
+    to: string;
+    lang: Lang;
+    patientName: string;
+    practitionerName: string;
+    clinicName: string;
+    clinicAddress?: string | null;
+    requestedAtLabel: string;
+  }): Promise<void> {
+    const { html, subject } = renderAppointmentRequestedForPatient(
+      args,
+      args.lang,
+    );
+    await this.send({ to: args.to, subject, html });
+  }
+
+  async sendAppointmentRequestToPractitioner(args: {
+    to: string;
+    lang: Lang;
+    practitionerName: string;
+    patientName: string;
+    patientEmail: string;
+    patientPhone?: string | null;
+    patientMessage?: string | null;
+    clinicName: string;
+    requestedAtLabel: string;
+    acceptUrl: string;
+    declineUrl: string;
+  }): Promise<void> {
+    const { html, subject } = renderAppointmentRequestForPractitioner(
+      args,
+      args.lang,
+    );
+    await this.send({ to: args.to, subject, html });
+  }
+
+  async sendAppointmentDecisionToPatient(args: {
+    to: string;
+    lang: Lang;
+    patientName: string;
+    practitionerName: string;
+    clinicName: string;
+    clinicAddress?: string | null;
+    requestedAtLabel: string;
+    decision: 'accepted' | 'declined';
+  }): Promise<void> {
+    const { html, subject } = renderAppointmentDecisionForPatient(
+      args,
+      args.lang,
     );
     await this.send({ to: args.to, subject, html });
   }

@@ -25,6 +25,9 @@ import {
   UpdateDentistProfileDto,
   DentistProfileResponseDto,
   SetupClinicDto,
+  PublicFinderQueryDto,
+  PublicDentistProfileDto,
+  PublicFinderResponseDto,
 } from '../dto/dentist-profile.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -104,8 +107,10 @@ export class DentistProfileController {
     return this.profileService.createProfile(userId, createProfileDto);
   }
 
+  // Full-DTO read (incl. private taxId / clinicEmail) — authenticated only.
+  // The public directory is served by the separate @Public() `public` routes.
   @Get()
-  @Public()
+  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Get all dentist profiles with pagination' })
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
@@ -125,7 +130,7 @@ export class DentistProfileController {
   }
 
   @Get('search/by-city')
-  @Public()
+  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Search dentist profiles by city' })
   @ApiQuery({ name: 'city', type: String, description: 'City name' })
@@ -144,7 +149,7 @@ export class DentistProfileController {
   }
 
   @Get('search/nearby')
-  @Public()
+  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Find dentist profiles nearby (geo search)' })
   @ApiQuery({ name: 'latitude', type: Number, description: 'Latitude' })
@@ -174,8 +179,58 @@ export class DentistProfileController {
     );
   }
 
-  @Get(':id')
+  // NOTE: the literal `public` routes MUST be declared before the `:id`
+  // param route below — otherwise Nest would match `/public` as `:id = public`.
+
+  @Get('public')
   @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Public practitioner directory ("Trouver un praticien"). Only clinics ' +
+      'that opted in AND whose owner is an approved, active account are ' +
+      'returned. Supply lat & lng to rank results by distance.',
+  })
+  @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, type: Number, example: 24 })
+  @ApiQuery({ name: 'city', required: false, type: String })
+  @ApiQuery({ name: 'specialty', required: false, type: String })
+  @ApiQuery({ name: 'search', required: false, type: String })
+  @ApiQuery({ name: 'lat', required: false, type: Number })
+  @ApiQuery({ name: 'lng', required: false, type: Number })
+  @ApiResponse({
+    status: 200,
+    description: 'Public practitioners fetched successfully',
+    type: PublicFinderResponseDto,
+  })
+  async getPublicList(
+    @Query() query: PublicFinderQueryDto,
+  ): Promise<PublicFinderResponseDto> {
+    return this.profileService.getPublicList(query);
+  }
+
+  @Get('public/:id')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Public single practitioner profile + weekly schedule. 404 when the ' +
+      'profile is not publicly listed / not approved.',
+  })
+  @ApiParam({ name: 'id', type: String, description: 'Profile ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Public practitioner fetched successfully',
+    type: PublicDentistProfileDto,
+  })
+  async getPublicById(
+    @Param('id') id: string,
+  ): Promise<PublicDentistProfileDto> {
+    return this.profileService.getPublicById(id);
+  }
+
+  @Get(':id')
+  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Get dentist profile by ID' })
   @ApiParam({ name: 'id', type: String, description: 'Profile ID' })

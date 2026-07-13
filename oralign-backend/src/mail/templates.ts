@@ -931,6 +931,325 @@ export function renderQuoteDecisionForAdminEmail(
   };
 }
 
+// ─── Appointment helpers ────────────────────────────────────────────────────
+
+// Accept / decline call-to-actions are the ONE place the transactional
+// palette earns a splash of colour: a dentist scanning their phone needs to
+// tell the two actions apart at a glance. Everything else stays B&W.
+const ACCEPT_GREEN = '#0a7d33';
+const DECLINE_RED = '#b3261e';
+
+/** Single coloured CTA (green accept / red decline). Table-driven padding so
+ *  Outlook desktop honours it. */
+function coloredButton(href: string, label: string, bg: string): string {
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0"
+           style="display:inline-block;margin:0 6px;">
+    <tr>
+      <td align="center" bgcolor="${bg}" style="background:${bg};">
+        <a href="${href}"
+           style="display:inline-block;padding:14px 30px;font-size:13px;font-weight:700;
+                  letter-spacing:1.5px;text-transform:uppercase;
+                  color:#ffffff;text-decoration:none;
+                  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+          ${label}
+        </a>
+      </td>
+    </tr>
+  </table>`;
+}
+
+/** Centered accept + decline pair used in the practitioner request email. */
+function acceptDeclineButtons(
+  acceptUrl: string,
+  acceptLabel: string,
+  declineUrl: string,
+  declineLabel: string,
+): string {
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+           style="margin:0 0 24px;">
+    <tr>
+      <td align="center">
+        ${coloredButton(acceptUrl, acceptLabel, ACCEPT_GREEN)}
+        ${coloredButton(declineUrl, declineLabel, DECLINE_RED)}
+      </td>
+    </tr>
+  </table>`;
+}
+
+// ─── Appointment renderers ──────────────────────────────────────────────────
+
+/**
+ * Sent to the PATIENT the moment they submit an appointment request. Confirms
+ * we forwarded it to the practitioner; the request is still pending their
+ * accept/decline. `lang` is the language the patient chose on the site
+ * (patients aren't Users, so it's always passed explicitly).
+ */
+export function renderAppointmentRequestedForPatient(
+  args: {
+    patientName: string;
+    practitionerName: string;
+    clinicName: string;
+    clinicAddress?: string | null;
+    requestedAtLabel: string;
+  },
+  lang: Lang,
+): { html: string; subject: string } {
+  const TEXTS = {
+    en: {
+      subject: `Your appointment request has been sent — ${args.practitionerName}`,
+      title: `Appointment request received`,
+      preheader: `We've forwarded your request to ${escape(args.practitionerName)}. You'll hear back shortly.`,
+      lead:
+        `Thanks — your appointment request has been sent to ` +
+        `<strong>${escape(args.practitionerName)}</strong>. You'll receive ` +
+        `an email as soon as they confirm or decline your requested time.`,
+      labels: {
+        practitioner: `Practitioner`,
+        clinic: `Clinic`,
+        address: `Address`,
+        when: `Requested time`,
+      },
+    },
+    fr: {
+      subject: `Votre demande de rendez-vous a été envoyée — ${args.practitionerName}`,
+      title: `Demande de rendez-vous reçue`,
+      preheader: `Nous avons transmis votre demande à ${escape(args.practitionerName)}. Vous aurez bientôt une réponse.`,
+      lead:
+        `Merci — votre demande de rendez-vous a été envoyée à ` +
+        `<strong>${escape(args.practitionerName)}</strong>. Vous recevrez ` +
+        `un e-mail dès qu'il/elle confirmera ou refusera l'horaire demandé.`,
+      labels: {
+        practitioner: `Praticien`,
+        clinic: `Cabinet`,
+        address: `Adresse`,
+        when: `Horaire demandé`,
+      },
+    },
+  };
+  const t = TEXTS[lang];
+  const rows: Array<{ label: string; value: string }> = [
+    { label: t.labels.practitioner, value: args.practitionerName },
+    { label: t.labels.clinic, value: args.clinicName },
+  ];
+  if (args.clinicAddress && args.clinicAddress.trim()) {
+    rows.push({ label: t.labels.address, value: args.clinicAddress.trim() });
+  }
+  rows.push({ label: t.labels.when, value: args.requestedAtLabel });
+  return {
+    subject: t.subject,
+    html: shell({
+      lang,
+      title: t.title,
+      preheader: t.preheader,
+      body: `
+        ${greeting(escape(args.patientName), lang)}
+        ${lead(t.lead)}
+        ${metaTable(rows)}
+      `,
+    }),
+  };
+}
+
+/**
+ * Sent to the PRACTITIONER when a patient requests an appointment. Carries the
+ * patient's contact details plus the two tokenized accept / decline links
+ * (green / red) that open the branded confirmation page in their browser.
+ */
+export function renderAppointmentRequestForPractitioner(
+  args: {
+    practitionerName: string;
+    patientName: string;
+    patientEmail: string;
+    patientPhone?: string | null;
+    patientMessage?: string | null;
+    clinicName: string;
+    requestedAtLabel: string;
+    acceptUrl: string;
+    declineUrl: string;
+  },
+  lang: Lang,
+): { html: string; subject: string } {
+  const TEXTS = {
+    en: {
+      subject: `New appointment request from ${args.patientName}`,
+      title: `New appointment request`,
+      preheader: `${escape(args.patientName)} requested an appointment for ${escape(args.requestedAtLabel)}.`,
+      lead:
+        `You have a new appointment request. Review the details below, then ` +
+        `accept or decline — the patient is emailed your decision automatically.`,
+      labels: {
+        patient: `Patient`,
+        email: `Email`,
+        phone: `Phone`,
+        when: `Requested time`,
+        message: `Message`,
+      },
+      accept: `Accept`,
+      decline: `Decline`,
+    },
+    fr: {
+      subject: `Nouvelle demande de rendez-vous de ${args.patientName}`,
+      title: `Nouvelle demande de rendez-vous`,
+      preheader: `${escape(args.patientName)} a demandé un rendez-vous pour ${escape(args.requestedAtLabel)}.`,
+      lead:
+        `Vous avez une nouvelle demande de rendez-vous. Vérifiez les détails ` +
+        `ci-dessous, puis acceptez ou refusez — le patient est informé de ` +
+        `votre décision automatiquement par e-mail.`,
+      labels: {
+        patient: `Patient`,
+        email: `Email`,
+        phone: `Téléphone`,
+        when: `Horaire demandé`,
+        message: `Message`,
+      },
+      accept: `Accepter`,
+      decline: `Refuser`,
+    },
+  };
+  const t = TEXTS[lang];
+  const rows: Array<{ label: string; value: string }> = [
+    { label: t.labels.patient, value: args.patientName },
+    { label: t.labels.email, value: args.patientEmail },
+  ];
+  if (args.patientPhone && args.patientPhone.trim()) {
+    rows.push({ label: t.labels.phone, value: args.patientPhone.trim() });
+  }
+  rows.push({ label: t.labels.when, value: args.requestedAtLabel });
+  if (args.patientMessage && args.patientMessage.trim()) {
+    rows.push({ label: t.labels.message, value: args.patientMessage.trim() });
+  }
+  return {
+    subject: t.subject,
+    html: shell({
+      lang,
+      title: t.title,
+      preheader: t.preheader,
+      body: `
+        ${greeting(escape(args.practitionerName), lang)}
+        ${lead(t.lead)}
+        ${metaTable(rows)}
+        ${acceptDeclineButtons(
+          args.acceptUrl,
+          t.accept,
+          args.declineUrl,
+          t.decline,
+        )}
+      `,
+    }),
+  };
+}
+
+/**
+ * Sent to the PATIENT once the practitioner accepts or declines. One template
+ * covers both outcomes via the `decision` flag. `lang` is the patient's.
+ */
+export function renderAppointmentDecisionForPatient(
+  args: {
+    patientName: string;
+    practitionerName: string;
+    clinicName: string;
+    clinicAddress?: string | null;
+    requestedAtLabel: string;
+    decision: 'accepted' | 'declined';
+  },
+  lang: Lang,
+): { html: string; subject: string } {
+  const isAccepted = args.decision === 'accepted';
+  const TEXTS = {
+    en: {
+      subjectAccepted: `Your appointment with ${args.practitionerName} is confirmed`,
+      subjectDeclined: `Update on your appointment request`,
+      titleAccepted: `Appointment confirmed`,
+      titleDeclined: `Appointment not confirmed`,
+      preheaderAccepted: `${args.practitionerName} confirmed your appointment.`,
+      preheaderDeclined: `${args.practitionerName} could not confirm your requested time.`,
+      leadAccepted:
+        `Good news — <strong>${escape(args.practitionerName)}</strong> ` +
+        `confirmed your appointment. The details are below.`,
+      leadDeclined:
+        `Unfortunately, <strong>${escape(args.practitionerName)}</strong> ` +
+        `is unable to confirm your requested time. You're welcome to book ` +
+        `another slot at your convenience.`,
+      labels: {
+        practitioner: `Practitioner`,
+        clinic: `Clinic`,
+        address: `Address`,
+        when: `Requested time`,
+      },
+    },
+    fr: {
+      subjectAccepted: `Votre rendez-vous avec ${args.practitionerName} est confirmé`,
+      subjectDeclined: `Mise à jour concernant votre demande de rendez-vous`,
+      titleAccepted: `Rendez-vous confirmé`,
+      titleDeclined: `Rendez-vous non confirmé`,
+      preheaderAccepted: `${args.practitionerName} a confirmé votre rendez-vous.`,
+      preheaderDeclined: `${args.practitionerName} n'a pas pu confirmer l'horaire demandé.`,
+      leadAccepted:
+        `Bonne nouvelle — <strong>${escape(args.practitionerName)}</strong> ` +
+        `a confirmé votre rendez-vous. Les détails figurent ci-dessous.`,
+      leadDeclined:
+        `Malheureusement, <strong>${escape(args.practitionerName)}</strong> ` +
+        `ne peut pas confirmer l'horaire demandé. Vous pouvez réserver un ` +
+        `autre créneau à votre convenance.`,
+      labels: {
+        practitioner: `Praticien`,
+        clinic: `Cabinet`,
+        address: `Adresse`,
+        when: `Horaire demandé`,
+      },
+    },
+  };
+  const t = TEXTS[lang];
+  const subject = isAccepted ? t.subjectAccepted : t.subjectDeclined;
+  const rows: Array<{ label: string; value: string }> = [
+    { label: t.labels.practitioner, value: args.practitionerName },
+    { label: t.labels.clinic, value: args.clinicName },
+  ];
+  if (args.clinicAddress && args.clinicAddress.trim()) {
+    rows.push({ label: t.labels.address, value: args.clinicAddress.trim() });
+  }
+  rows.push({ label: t.labels.when, value: args.requestedAtLabel });
+  return {
+    subject,
+    html: shell({
+      lang,
+      title: isAccepted ? t.titleAccepted : t.titleDeclined,
+      preheader: isAccepted ? t.preheaderAccepted : t.preheaderDeclined,
+      body: `
+        ${greeting(escape(args.patientName), lang)}
+        <p style="margin:0 0 16px;">${appointmentDecisionBadge(
+          args.decision,
+          lang,
+        )}</p>
+        ${lead(isAccepted ? t.leadAccepted : t.leadDeclined)}
+        ${metaTable(rows)}
+      `,
+    }),
+  };
+}
+
+/** Accepted (green) / declined (red) status badge for the patient email. */
+function appointmentDecisionBadge(
+  decision: 'accepted' | 'declined',
+  lang: Lang,
+): string {
+  const isAccepted = decision === 'accepted';
+  const label =
+    lang === 'fr'
+      ? isAccepted
+        ? 'Confirmé'
+        : 'Non confirmé'
+      : isAccepted
+        ? 'Confirmed'
+        : 'Not confirmed';
+  const bg = isAccepted ? ACCEPT_GREEN : DECLINE_RED;
+  return `<span style="display:inline-block;padding:5px 14px;font-size:11px;
+                       font-weight:800;text-transform:uppercase;letter-spacing:1.5px;
+                       background:${bg};color:#ffffff;">
+    ${label}
+  </span>`;
+}
+
 // ─── Formatting helpers ─────────────────────────────────────────────────────
 
 function formatMoney(amount: number, currency: string): string {

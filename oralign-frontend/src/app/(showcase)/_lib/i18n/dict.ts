@@ -72,6 +72,157 @@ export const dict = {
       en: "We're finalizing the map and the list of ORALIGN-certified practitioners. In the meantime, practitioners can access their secure space.",
       ar: "نعمل على إنهاء الخريطة وقائمة الأطباء المعتمدين. في هذه الأثناء، يمكن للأطباء الوصول إلى مساحتهم الآمنة.",
     } as T,
+
+    // ── Filters ──
+    searchLabel: { fr: "Rechercher", en: "Search", ar: "بحث" } as T,
+    searchPlaceholder: {
+      fr: "Nom du praticien ou du cabinet",
+      en: "Practitioner or clinic name",
+      ar: "اسم الطبيب أو العيادة",
+    } as T,
+    cityLabel: { fr: "Ville", en: "City", ar: "المدينة" } as T,
+    cityPlaceholder: { fr: "Toutes les villes", en: "All cities", ar: "كل المدن" } as T,
+    specialtyLabel: { fr: "Spécialité", en: "Specialty", ar: "الاختصاص" } as T,
+    specialtyPlaceholder: { fr: "Toutes", en: "All", ar: "الكل" } as T,
+    clearFilters: { fr: "Réinitialiser", en: "Reset", ar: "إعادة تعيين" } as T,
+
+    // ── Geolocation ──
+    useMyLocation: { fr: "Utiliser ma position", en: "Use my location", ar: "استخدم موقعي" } as T,
+    locating: { fr: "Localisation…", en: "Locating…", ar: "جارٍ تحديد الموقع…" } as T,
+    geoDenied: {
+      fr: "Localisation refusée. Affichage de tous les praticiens.",
+      en: "Location denied. Showing all practitioners.",
+      ar: "تم رفض تحديد الموقع. عرض جميع الأطباء.",
+    } as T,
+    geoUnavailable: {
+      fr: "Localisation indisponible sur cet appareil.",
+      en: "Location is unavailable on this device.",
+      ar: "تحديد الموقع غير متاح على هذا الجهاز.",
+    } as T,
+    youAreHere: { fr: "Vous êtes ici", en: "You are here", ar: "أنت هنا" } as T,
+    sortedByDistance: {
+      fr: "Triés du plus proche au plus loin",
+      en: "Sorted nearest first",
+      ar: "مرتّبة من الأقرب",
+    } as T,
+
+    // ── List states ──
+    loading: { fr: "Chargement des praticiens…", en: "Loading practitioners…", ar: "جارٍ تحميل الأطباء…" } as T,
+    loadError: {
+      fr: "Impossible de charger les praticiens. Veuillez réessayer.",
+      en: "Couldn't load practitioners. Please try again.",
+      ar: "تعذّر تحميل الأطباء. حاول مرّة أخرى.",
+    } as T,
+    retry: { fr: "Réessayer", en: "Retry", ar: "إعادة المحاولة" } as T,
+    empty: {
+      fr: "Aucun praticien ne correspond à votre recherche.",
+      en: "No practitioner matches your search.",
+      ar: "لا يوجد طبيب يطابق بحثك.",
+    } as T,
+    resultsCount: { fr: "{n} praticien(s)", en: "{n} practitioner(s)", ar: "{n} طبيب" } as T,
+    distanceKm: { fr: "à {n} km", en: "{n} km away", ar: "على بعد {n} كم" } as T,
+
+    // ── Card / detail ──
+    viewDetails: { fr: "Voir la fiche", en: "View details", ar: "عرض التفاصيل" } as T,
+    close: { fr: "Fermer", en: "Close", ar: "إغلاق" } as T,
+    back: { fr: "Retour", en: "Back", ar: "رجوع" } as T,
+    contact: { fr: "Contact", en: "Contact", ar: "التواصل" } as T,
+    phone: { fr: "Téléphone", en: "Phone", ar: "الهاتف" } as T,
+    noPhone: { fr: "Téléphone non communiqué", en: "Phone not provided", ar: "الهاتف غير متوفّر" } as T,
+    address: { fr: "Adresse", en: "Address", ar: "العنوان" } as T,
+    about: { fr: "À propos", en: "About", ar: "نبذة" } as T,
+    workingHours: { fr: "Horaires d'ouverture", en: "Opening hours", ar: "ساعات العمل" } as T,
+    closed: { fr: "Fermé", en: "Closed", ar: "مغلق" } as T,
+    detailError: {
+      fr: "Impossible de charger la fiche du praticien.",
+      en: "Couldn't load the practitioner's details.",
+      ar: "تعذّر تحميل بيانات الطبيب.",
+    } as T,
+
+    // ── Days of week (WorkingHours enum → label) ──
+    days: {
+      monday: { fr: "Lundi", en: "Monday", ar: "الإثنين" } as T,
+      tuesday: { fr: "Mardi", en: "Tuesday", ar: "الثلاثاء" } as T,
+      wednesday: { fr: "Mercredi", en: "Wednesday", ar: "الأربعاء" } as T,
+      thursday: { fr: "Jeudi", en: "Thursday", ar: "الخميس" } as T,
+      friday: { fr: "Vendredi", en: "Friday", ar: "الجمعة" } as T,
+      saturday: { fr: "Samedi", en: "Saturday", ar: "السبت" } as T,
+      sunday: { fr: "Dimanche", en: "Sunday", ar: "الأحد" } as T,
+    },
+
+    // ── Availability / slots ──
+    availableSlots: { fr: "Créneaux disponibles", en: "Available slots", ar: "المواعيد المتاحة" } as T,
+    slotsLoading: { fr: "Recherche de créneaux…", en: "Finding slots…", ar: "جارٍ البحث عن مواعيد…" } as T,
+    noSlots: {
+      fr: "Aucun créneau disponible sur cette période.",
+      en: "No slots available in this period.",
+      ar: "لا توجد مواعيد متاحة في هذه الفترة.",
+    } as T,
+    nextAvailable: { fr: "Prochaine disponibilité : {date}", en: "Next available: {date}", ar: "أقرب موعد: {date}" } as T,
+
+    // ── Booking ──
+    book: { fr: "Prendre rendez-vous", en: "Book an appointment", ar: "حجز موعد" } as T,
+    bookWithTitle: { fr: "Rendez-vous avec {name}", en: "Appointment with {name}", ar: "موعد مع {name}" } as T,
+    chooseSlot: { fr: "Choisissez un créneau", en: "Choose a slot", ar: "اختر موعداً" } as T,
+    selectedSlot: { fr: "Créneau sélectionné", en: "Selected slot", ar: "الموعد المحدّد" } as T,
+    changeSlot: { fr: "Changer", en: "Change", ar: "تغيير" } as T,
+    yourInfo: { fr: "Vos coordonnées", en: "Your details", ar: "معلوماتك" } as T,
+    fullName: { fr: "Nom complet", en: "Full name", ar: "الاسم الكامل" } as T,
+    fullNamePlaceholder: { fr: "Prénom et nom", en: "First and last name", ar: "الاسم واللقب" } as T,
+    phonePlaceholder: { fr: "Ex. +216 20 000 000", en: "e.g. +216 20 000 000", ar: "مثال: +216 20 000 000" } as T,
+    email: { fr: "E-mail", en: "Email", ar: "البريد الإلكتروني" } as T,
+    emailPlaceholder: { fr: "vous@exemple.com", en: "you@example.com", ar: "you@example.com" } as T,
+    addressOptional: { fr: "Adresse (facultatif)", en: "Address (optional)", ar: "العنوان (اختياري)" } as T,
+    addressPlaceholder: { fr: "Votre adresse", en: "Your address", ar: "عنوانك" } as T,
+    message: { fr: "Message (facultatif)", en: "Message (optional)", ar: "رسالة (اختياري)" } as T,
+    messagePlaceholder: {
+      fr: "Motif de consultation, questions…",
+      en: "Reason for visit, questions…",
+      ar: "سبب الزيارة، أسئلة…",
+    } as T,
+    submit: { fr: "Confirmer la demande", en: "Confirm request", ar: "تأكيد الطلب" } as T,
+    submitting: { fr: "Envoi…", en: "Sending…", ar: "جارٍ الإرسال…" } as T,
+    cancel: { fr: "Annuler", en: "Cancel", ar: "إلغاء" } as T,
+
+    // ── Validation ──
+    errRequired: { fr: "Ce champ est requis.", en: "This field is required.", ar: "هذا الحقل مطلوب." } as T,
+    errName: { fr: "Veuillez indiquer votre nom.", en: "Please enter your name.", ar: "يرجى إدخال اسمك." } as T,
+    errEmail: { fr: "Adresse e-mail invalide.", en: "Invalid email address.", ar: "بريد إلكتروني غير صالح." } as T,
+    errPhone: { fr: "Numéro de téléphone invalide.", en: "Invalid phone number.", ar: "رقم هاتف غير صالح." } as T,
+    errSlot: { fr: "Veuillez choisir un créneau.", en: "Please choose a slot.", ar: "يرجى اختيار موعد." } as T,
+
+    // ── Result ──
+    successTitle: { fr: "Demande envoyée !", en: "Request sent!", ar: "تم إرسال الطلب!" } as T,
+    successBody: {
+      fr: "Votre demande de rendez-vous a bien été envoyée. Le praticien vous confirmera par e-mail.",
+      en: "Your appointment request was sent. The practitioner will confirm by email.",
+      ar: "تم إرسال طلب الموعد بنجاح. سيؤكّد لك الطبيب عبر البريد الإلكتروني.",
+    } as T,
+    done: { fr: "Terminé", en: "Done", ar: "تم" } as T,
+    bookingError: {
+      fr: "L'envoi a échoué. Veuillez réessayer.",
+      en: "Something went wrong. Please try again.",
+      ar: "فشل الإرسال. حاول مرّة أخرى.",
+    } as T,
+    conflictError: {
+      fr: "Ce créneau vient d'être réservé. Prochaine disponibilité : {date}",
+      en: "That slot was just taken. Next available: {date}",
+      ar: "تم حجز هذا الموعد للتوّ. أقرب موعد: {date}",
+    } as T,
+    conflictErrorNoNext: {
+      fr: "Ce créneau vient d'être réservé. Veuillez en choisir un autre.",
+      en: "That slot was just taken. Please pick another.",
+      ar: "تم حجز هذا الموعد للتوّ. يرجى اختيار موعد آخر.",
+    } as T,
+
+    // ── Mobile map / list toggle ──
+    showMap: { fr: "Carte", en: "Map", ar: "الخريطة" } as T,
+    showList: { fr: "Liste", en: "List", ar: "القائمة" } as T,
+    mapUnavailable: {
+      fr: "Ce praticien n'a pas encore de localisation sur la carte.",
+      en: "This practitioner has no map location yet.",
+      ar: "لا يوجد موقع على الخريطة لهذا الطبيب بعد.",
+    } as T,
   },
 
   // ── Scaffold copy for the empty per-page SEO pages ──

@@ -7,12 +7,18 @@ import {
   ForbiddenException,
   BadRequestException,
 } from '../../common/exceptions/app.exception';
-import { DentistProfileRepository } from '../repositories/dentist-profile.repository';
+import {
+  DentistProfileRepository,
+  PublicProfileRow,
+} from '../repositories/dentist-profile.repository';
 import {
   CreateDentistProfileDto,
   UpdateDentistProfileDto,
   DentistProfileResponseDto,
   SetupClinicDto,
+  PublicFinderQueryDto,
+  PublicDentistProfileDto,
+  PublicFinderResponseDto,
 } from '../dto/dentist-profile.dto';
 import { PaginatedResponse } from '../../common/dto/response.dto';
 import { UserRole, VerificationStatus } from '@prisma/client';
@@ -35,6 +41,8 @@ type ProfileWithUser = {
   taxId: string | null;
   description: string | null;
   logoUrl: string | null;
+  specialty: string | null;
+  isListedPublicly: boolean;
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
@@ -436,10 +444,162 @@ export class DentistProfileService {
       taxId: profile.taxId ?? undefined,
       description: profile.description ?? undefined,
       logoUrl: profile.logoUrl ?? undefined,
+      specialty: profile.specialty ?? undefined,
+      isListedPublicly: profile.isListedPublicly,
       userFullName: profile.user?.fullName,
       userAvatarUrl: profile.user?.avatarUrl ?? undefined,
       createdAt: profile.createdAt,
       updatedAt: profile.updatedAt,
     };
+  }
+
+  // ─── Public "Trouver un praticien" directory ──────────────────────────────
+
+  /**
+   * Public practitioner finder. Applies the strict public filter in the
+   * repository, then — when the query carries lat/lng — ranks the whole
+   * matching set by haversine distance ascending and paginates in memory
+   * (distance ordering can't be pushed into Postgres without PostGIS). With
+   * no coordinates it falls back to the DB's createdAt-desc pagination.
+   */
+  async getPublicList(
+    query: PublicFinderQueryDto,
+  ): Promise<PublicFinderResponseDto> {
+    const page = query.page && query.page > 0 ? query.page : 1;
+    const limit = query.limit && query.limit > 0 ? query.limit : 24;
+
+    const hasGeo =
+      typeof query.lat === 'number' &&
+      typeof query.lng === 'number' &&
+      Number.isFinite(query.lat) &&
+      Number.isFinite(query.lng);
+
+    if (hasGeo) {
+      const lat = query.lat as number;
+      const lng = query.lng as number;
+
+      // Fetch every matching row (no skip/take) so the distance sort ranks
+      // the full set before we slice the requested page out of it.
+      const { profiles, total } = await this.profileRepository.findPublic({
+        city: query.city,
+        specialty: query.specialty,
+        search: query.search,
+      });
+
+      const ranked = profiles
+        .map((p) => ({
+          row: p,
+          distanceKm: this.distanceKm(lat, lng, p.latitude, p.longitude),
+        }))
+        // Rows without coordinates sink to the bottom (Infinity), stable
+        // enough for a directory — createdAt-desc already broke ties.
+        .sort((a, b) => a.distanceKm - b.distanceKm);
+
+      const start = (page - 1) * limit;
+      const data = ranked
+        .slice(start, start + limit)
+        .map(({ row, distanceKm }) =>
+          this.mapToPublic(
+            row,
+            Number.isFinite(distanceKm)
+              ? Math.round(distanceKm * 10) / 10
+              : undefined,
+          ),
+        );
+
+      return { data, total, page, limit };
+    }
+
+    const skip = (page - 1) * limit;
+    const { profiles, total } = await this.profileRepository.findPublic({
+      skip,
+      take: limit,
+      city: query.city,
+      specialty: query.specialty,
+      search: query.search,
+    });
+
+    return {
+      data: profiles.map((p) => this.mapToPublic(p)),
+      total,
+      page,
+      limit,
+    };
+  }
+
+  /**
+   * Single publicly-listed practitioner + their weekly schedule. 404s (via
+   * the repository returning null) when the profile fails the strict public
+   * filter, so unapproved / unlisted / deleted profiles stay invisible.
+   */
+  async getPublicById(id: string): Promise<PublicDentistProfileDto> {
+    const profile = await this.profileRepository.findPublicById(id);
+    if (!profile) {
+      throw new NotFoundException('Practitioner not found');
+    }
+
+    const dto = this.mapToPublic(profile);
+    dto.workingHours = (profile.workingHours ?? []).map((wh) => ({
+      dayOfWeek: wh.dayOfWeek,
+      openTime: wh.openTime,
+      closeTime: wh.closeTime,
+      isClosed: wh.isClosed,
+    }));
+    return dto;
+  }
+
+  /**
+   * Map an internal profile row to the PUBLIC-SAFE shape. Deliberately drops
+   * every private field — taxId, clinicEmail, userId — so they can never
+   * leak through the unauthenticated directory.
+   */
+  private mapToPublic(
+    p: PublicProfileRow,
+    distanceKm?: number,
+  ): PublicDentistProfileDto {
+    return {
+      id: p.id,
+      practitionerName: p.user?.fullName ?? '',
+      clinicName: p.clinicName,
+      specialty: p.specialty ?? null,
+      clinicAddress: p.clinicAddress ?? null,
+      city: p.city ?? null,
+      country: p.country ?? null,
+      latitude: p.latitude ?? null,
+      longitude: p.longitude ?? null,
+      clinicPhone: p.clinicPhone ?? null,
+      description: p.description ?? null,
+      logoUrl: p.logoUrl ?? null,
+      avatarUrl: p.user?.avatarUrl ?? null,
+      ...(distanceKm !== undefined ? { distanceKm } : {}),
+    };
+  }
+
+  /**
+   * Great-circle distance in km between two points. Returns +Infinity when
+   * the target has no coordinates so it sorts last in the finder ranking.
+   */
+  private distanceKm(
+    lat1: number,
+    lng1: number,
+    lat2: number | null,
+    lng2: number | null,
+  ): number {
+    if (
+      lat2 === null ||
+      lng2 === null ||
+      !Number.isFinite(lat2) ||
+      !Number.isFinite(lng2)
+    ) {
+      return Number.POSITIVE_INFINITY;
+    }
+    const R = 6371; // Earth radius, km
+    const toRad = (deg: number) => (deg * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
   }
 }

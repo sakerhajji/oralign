@@ -13,6 +13,7 @@ import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { DentistProfileModule } from './dentist-profile/dentist-profile.module';
 import { WorkingHoursModule } from './working-hours/working-hours.module';
+import { AppointmentsModule } from './appointments/appointments.module';
 import { StorageModule } from './storage/storage.module';
 import { MailModule } from './mail/mail.module';
 import { PatientModule } from './patients/patient.module';
@@ -106,6 +107,7 @@ function buildRedisUrl(): string {
     UsersModule,
     DentistProfileModule,
     WorkingHoursModule,
+    AppointmentsModule,
     PatientModule,
     OrderModule,
     TreatmentPlanModule,

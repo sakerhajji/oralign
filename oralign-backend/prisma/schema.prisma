@@ -762,6 +762,12 @@ model DentistProfile {
   description    String?
   logoUrl        String?        // validated path only, no raw URLs
 
+  // Public directory ("Trouver un praticien"): the practitioner's specialty
+  // shown on the finder, and an explicit opt-in to appear in the public
+  // list (default false — a clinic must consciously choose to be public).
+  specialty        String?
+  isListedPublicly Boolean      @default(false)
+
   // Timestamps + soft delete (mirrors User)
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
@@ -769,10 +775,12 @@ model DentistProfile {
 
   user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   workingHours   WorkingHours[]
+  appointments   Appointment[]
 
   @@index([city])
   @@index([country])
   @@index([latitude, longitude])   // geo proximity search
+  @@index([isListedPublicly])      // public directory filter
   @@index([deletedAt])
 }
 
@@ -797,6 +805,55 @@ model WorkingHours {
   // One row per day per clinic
   @@unique([dentistProfileId, dayOfWeek])
   @@index([dentistProfileId])
+}
+
+// ─────────────────────────────────────────
+// APPOINTMENTS (public "Trouver un praticien" booking)
+// ─────────────────────────────────────────
+
+enum AppointmentStatus {
+  pending
+  accepted
+  declined
+  cancelled
+  expired
+}
+
+/// Public appointment request from a patient to a listed practitioner.
+/// The patient is NOT an app User — this is a public lead. The practitioner
+/// accepts / declines via a tokenized link in their notification email
+/// (unauthenticated action); the patient then gets a final-status email.
+model Appointment {
+  id               String            @id @default(uuid())
+  dentistProfileId String
+
+  // Patient (public lead — not a User row)
+  patientName      String
+  patientEmail     String
+  patientPhone     String?
+  patientAddress   String?
+  message          String?
+
+  // Concrete slot chosen from the availability grid (start of the visit).
+  requestedAt      DateTime
+  status           AppointmentStatus @default(pending)
+
+  // Opaque token embedded in the practitioner's accept / decline email
+  // links. Once `status` leaves `pending` the links become inert.
+  actionToken      String            @unique @default(uuid())
+  respondedAt      DateTime?
+
+  // Language the patient used on the site, so their emails match.
+  patientLang      String            @default("fr")
+
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  dentistProfile   DentistProfile    @relation(fields: [dentistProfileId], references: [id], onDelete: Cascade)
+
+  @@index([dentistProfileId, requestedAt])
+  @@index([status])
+  @@index([actionToken])
 }
 
 // ─────────────────────────────────────────

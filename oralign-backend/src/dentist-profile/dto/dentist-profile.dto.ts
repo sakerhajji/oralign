@@ -4,6 +4,7 @@ import {
   IsString,
   IsOptional,
   IsNumber,
+  IsInt,
   Min,
   Max,
   IsArray,
@@ -119,6 +120,29 @@ export class CreateDentistProfileDto {
   @IsOptional()
   @IsString()
   logoUrl?: string;
+
+  @ApiProperty({
+    example: 'Orthodontics',
+    description:
+      'Practitioner specialty shown on the public "Trouver un praticien" ' +
+      'finder.',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  specialty?: string;
+
+  @ApiProperty({
+    example: false,
+    description:
+      'Explicit opt-in to appear in the public practitioner directory. ' +
+      'Defaults to false — a clinic must consciously choose to be public.',
+    required: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  isListedPublicly?: boolean;
 }
 
 export class UpdateDentistProfileDto extends CreateDentistProfileDto {}
@@ -193,6 +217,10 @@ export class DentistProfileResponseDto {
   @ApiProperty({ required: false })
   logoUrl?: string;
   @ApiProperty({ required: false })
+  specialty?: string;
+  @ApiProperty({ required: false })
+  isListedPublicly?: boolean;
+  @ApiProperty({ required: false })
   userFullName?: string;
   @ApiProperty({ required: false })
   userAvatarUrl?: string;
@@ -200,4 +228,137 @@ export class DentistProfileResponseDto {
   createdAt!: Date;
   @ApiProperty()
   updatedAt!: Date;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// PUBLIC "Trouver un praticien" directory
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Query params for the public practitioner finder. All optional; `@Type`
+ * coercions turn the raw query strings into numbers so class-validator can
+ * range-check them. When `lat` & `lng` are both present the service sorts
+ * results by haversine distance ascending.
+ */
+export class PublicFinderQueryDto {
+  @ApiProperty({ required: false, example: 1, default: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number = 1;
+
+  @ApiProperty({ required: false, example: 24, default: 24 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number = 24;
+
+  @ApiProperty({ required: false, description: 'Filter by city (contains)' })
+  @IsOptional()
+  @IsString()
+  city?: string;
+
+  @ApiProperty({
+    required: false,
+    description: 'Filter by specialty (contains)',
+  })
+  @IsOptional()
+  @IsString()
+  specialty?: string;
+
+  @ApiProperty({
+    required: false,
+    description: 'Free-text search on clinic name or practitioner name',
+  })
+  @IsOptional()
+  @IsString()
+  search?: string;
+
+  @ApiProperty({
+    required: false,
+    description: 'Latitude — when paired with lng, sorts results by distance',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  lat?: number;
+
+  @ApiProperty({
+    required: false,
+    description: 'Longitude — when paired with lat, sorts results by distance',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  lng?: number;
+}
+
+/** One working-hours row exposed on the public single-practitioner view. */
+export class PublicWorkingHoursDto {
+  @ApiProperty({ enum: DayOfWeek, example: 'monday' })
+  dayOfWeek!: DayOfWeek;
+  @ApiProperty({ example: '09:00' })
+  openTime!: string;
+  @ApiProperty({ example: '17:00' })
+  closeTime!: string;
+  @ApiProperty({ example: false })
+  isClosed!: boolean;
+}
+
+/**
+ * PUBLIC-SAFE practitioner shape. Intentionally omits every private field
+ * (taxId, clinicEmail, userId, …) — only fields safe for an unauthenticated
+ * directory are present. `distanceKm` is set only when the finder query
+ * carried lat/lng. `workingHours` is populated only by the single endpoint.
+ */
+export class PublicDentistProfileDto {
+  @ApiProperty()
+  id!: string;
+  @ApiProperty()
+  practitionerName!: string;
+  @ApiProperty()
+  clinicName!: string;
+  @ApiProperty({ nullable: true })
+  specialty!: string | null;
+  @ApiProperty({ nullable: true })
+  clinicAddress!: string | null;
+  @ApiProperty({ nullable: true })
+  city!: string | null;
+  @ApiProperty({ nullable: true })
+  country!: string | null;
+  @ApiProperty({ nullable: true })
+  latitude!: number | null;
+  @ApiProperty({ nullable: true })
+  longitude!: number | null;
+  @ApiProperty({ nullable: true })
+  clinicPhone!: string | null;
+  @ApiProperty({ nullable: true })
+  description!: string | null;
+  @ApiProperty({ nullable: true })
+  logoUrl!: string | null;
+  @ApiProperty({ nullable: true })
+  avatarUrl!: string | null;
+  @ApiProperty({ required: false, description: 'Only when lat/lng supplied' })
+  distanceKm?: number;
+  @ApiProperty({ required: false, type: [PublicWorkingHoursDto] })
+  workingHours?: PublicWorkingHoursDto[];
+}
+
+/** Paginated envelope for the public finder list endpoint. */
+export class PublicFinderResponseDto {
+  @ApiProperty({ type: [PublicDentistProfileDto] })
+  data!: PublicDentistProfileDto[];
+  @ApiProperty({ example: 100 })
+  total!: number;
+  @ApiProperty({ example: 1 })
+  page!: number;
+  @ApiProperty({ example: 24 })
+  limit!: number;
 }

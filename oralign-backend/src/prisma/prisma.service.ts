@@ -29,6 +29,10 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     return this.prisma.workingHours;
   }
 
+  get appointment() {
+    return this.prisma.appointment;
+  }
+
   get patient() {
     return this.prisma.patient;
   }

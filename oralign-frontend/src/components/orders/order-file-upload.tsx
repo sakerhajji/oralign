@@ -537,34 +537,6 @@ export function ClinicalOrderFiles({
             outside a tracked slot is intentionally hidden here. */}
       </section>
 
-      {/* CBCT-requested toggle sits BETWEEN radiography and STL so the
-          reading order is Imagerie → panoramic → profile → CBCT toggle →
-          CBCT / ZIP bundle → STL. Editable surfaces (the wizard) pass the
-          toggle node; read-only surfaces omit it. */}
-      {cbctToggle ?? null}
-
-      {/* CBCT / ZIP bundle upload — sits directly under the CBCT toggle
-          (the thing it belongs to), NOT at the bottom under the STL cards.
-          Conditional: rendered when CBCT was requested for this order; in
-          read-only mode (order detail / résumé) it also shows whenever a
-          bundle already exists so admins / doctors still see the shipped
-          CBCT / ZIP volume — that read-only render drops the upload row +
-          delete buttons and just lists the uploaded bundles. */}
-      {showCbctUpload && (
-        <ZipUploadAction
-          orderId={orderId}
-          title={t('media.zipAction.freeformTitle')}
-          category={OrderFileCategory.ZIP}
-          files={files}
-          onDelete={
-            readOnly
-              ? undefined
-              : (fileId) => deleteFile.mutate({ id: orderId, fileId })
-          }
-          readOnly={readOnly}
-        />
-      )}
-
       <section className="space-y-5">
         <SectionIntro
           title={t('orderForm.files.sections.stlTitle')}
@@ -589,6 +561,34 @@ export function ClinicalOrderFiles({
         {/* Legacy "Other scan files" list removed for the same reason —
             keep the page focused on the structured slots. */}
       </section>
+
+      {/* CBCT-requested toggle + CBCT/ZIP bundle upload — placed BELOW the
+          STL section (reading order: Imagerie → STL → CBCT toggle → CBCT /
+          ZIP bundle). Editable surfaces (the wizard) pass the toggle node;
+          read-only surfaces omit it. */}
+      {cbctToggle ?? null}
+
+      {/* CBCT / ZIP bundle upload — sits directly under the CBCT toggle
+          (the thing it belongs to). Conditional: rendered when CBCT was
+          requested for this order; in read-only mode (order detail /
+          résumé) it also shows whenever a bundle already exists so admins /
+          doctors still see the shipped CBCT / ZIP volume — that read-only
+          render drops the upload row + delete buttons and just lists the
+          uploaded bundles. */}
+      {showCbctUpload && (
+        <ZipUploadAction
+          orderId={orderId}
+          title={t('media.zipAction.freeformTitle')}
+          category={OrderFileCategory.ZIP}
+          files={files}
+          onDelete={
+            readOnly
+              ? undefined
+              : (fileId) => deleteFile.mutate({ id: orderId, fileId })
+          }
+          readOnly={readOnly}
+        />
+      )}
     </div>
   );
 }

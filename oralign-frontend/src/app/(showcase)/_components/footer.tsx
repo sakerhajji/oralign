@@ -23,7 +23,7 @@ export function Footer() {
   const companyLinks: FooterLink[] = companyFooterLinks(lang);
   const legalLinks: FooterLink[] = legalFooterLinks(lang);
   const accessLinks: FooterLink[] = [
-    { label: dict.nav.blogs[lang], href: "/patient/blog" },
+    { label: dict.nav.blogs[lang], href: "/blog" },
     { label: dict.footer.access[lang], href: "/login" },
   ];
 

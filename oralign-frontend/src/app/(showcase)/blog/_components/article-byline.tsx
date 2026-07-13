@@ -1,7 +1,7 @@
 "use client";
 
-import { dict, type Lang } from "../../../_lib/i18n/dict";
-import { useShowcaseLang } from "../../../_lib/i18n/lang-context";
+import { dict, type Lang } from "../../_lib/i18n/dict";
+import { useShowcaseLang } from "../../_lib/i18n/lang-context";
 
 /**
  * Article meta line: author · published date · reading time. Client

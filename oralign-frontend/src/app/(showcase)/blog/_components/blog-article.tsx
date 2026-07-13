@@ -5,10 +5,10 @@ import Image from "next/image";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { resolveBlogMediaUrl } from "@/lib/api/blog.service";
-import type { BlogAudience, BlogBlock, BlogDetail, Localized } from "@/lib/types";
-import { dict, type Lang } from "../../../_lib/i18n/dict";
-import { useShowcaseLang } from "../../../_lib/i18n/lang-context";
-import { Reveal } from "../../../_components/shared/reveal";
+import type { BlogBlock, BlogDetail, Localized } from "@/lib/types";
+import { dict, type Lang } from "../../_lib/i18n/dict";
+import { useShowcaseLang } from "../../_lib/i18n/lang-context";
+import { Reveal } from "../../_components/shared/reveal";
 import { BlockRenderer } from "./block-renderer";
 import { ArticleByline } from "./article-byline";
 import { ShareButtons } from "./share-buttons";
@@ -54,11 +54,9 @@ function pickBlocks(
  */
 export function BlogArticle({
   post,
-  audience,
   canonicalUrl,
 }: {
   post: BlogDetail;
-  audience: BlogAudience;
   canonicalUrl: string;
 }) {
   const { lang } = useShowcaseLang();
@@ -76,7 +74,7 @@ export function BlogArticle({
   const coverAlt = pick(post.coverImageAlt, lang) || title;
   const blocks = pickBlocks(post.content, lang);
 
-  const backHref = `/${audience}/blog`;
+  const backHref = "/blog";
   const cover =
     resolveBlogMediaUrl(
       post.cover?.lgUrl ?? post.cover?.mdUrl ?? post.cover?.url ?? null,
@@ -170,7 +168,7 @@ export function BlogArticle({
       </div>
 
       {/* ── Related ── */}
-      <RelatedPosts posts={post.related ?? []} audience={audience} />
+      <RelatedPosts posts={post.related ?? []} />
     </>
   );
 }

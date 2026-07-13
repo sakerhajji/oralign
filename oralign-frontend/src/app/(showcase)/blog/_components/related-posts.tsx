@@ -3,10 +3,10 @@
 import Link from "next/link";
 import Image from "next/image";
 import { resolveBlogMediaUrl } from "@/lib/api/blog.service";
-import type { BlogAudience, BlogSummary, Localized } from "@/lib/types";
-import { dict, type Lang } from "../../../_lib/i18n/dict";
-import { useShowcaseLang } from "../../../_lib/i18n/lang-context";
-import { Reveal } from "../../../_components/shared/reveal";
+import type { BlogSummary, Localized } from "@/lib/types";
+import { dict, type Lang } from "../../_lib/i18n/dict";
+import { useShowcaseLang } from "../../_lib/i18n/lang-context";
+import { Reveal } from "../../_components/shared/reveal";
 
 /** Resolve a Localized<T> bag for the active showcase lang (ar → fr). */
 function pick<T>(
@@ -23,15 +23,12 @@ function pick<T>(
 /**
  * "Keep reading" rail under an article. Client component so dates + the
  * section heading follow the live language selection. Renders nothing when
- * the backend returned no siblings. `audience` keeps the card links on the
- * same showcase surface.
+ * the backend returned no siblings.
  */
 export function RelatedPosts({
   posts,
-  audience,
 }: {
   posts: BlogSummary[];
-  audience: BlogAudience;
 }) {
   const { lang } = useShowcaseLang();
   if (!posts || posts.length === 0) return null;
@@ -57,7 +54,7 @@ export function RelatedPosts({
           {posts.map((post, i) => (
             <li key={post.id}>
               <Reveal delay={i % 3 === 2}>
-                <RelatedCard post={post} lang={lang} audience={audience} />
+                <RelatedCard post={post} lang={lang} />
               </Reveal>
             </li>
           ))}
@@ -70,11 +67,9 @@ export function RelatedPosts({
 function RelatedCard({
   post,
   lang,
-  audience,
 }: {
   post: BlogSummary;
   lang: Lang;
-  audience: BlogAudience;
 }) {
   const cover =
     resolveBlogMediaUrl(post.cover?.thumbUrl ?? post.cover?.mdUrl ?? null) ??
@@ -85,7 +80,7 @@ function RelatedCard({
 
   return (
     <Link
-      href={`/${audience}/blog/${post.slug}`}
+      href={`/blog/${post.slug}`}
       className="group block no-underline outline-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--sc-sun)]"
     >
       <article className="flex h-full flex-col">

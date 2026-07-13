@@ -46,7 +46,7 @@ export function pickLocalized<T = string>(
 /**
  * Build the public showcase URL for a post by slug. The public blog is
  * unified: patient- and practitioner-authored posts all live under the
- * single `/patient/blog/<slug>` route. `audience` is accepted for call-site
+ * single `/blog/<slug>` route. `audience` is accepted for call-site
  * compatibility (the CMS passes the post's audience) but is not part of the
  * URL anymore.
  */
@@ -54,7 +54,7 @@ export function blogShowcaseUrl(
   _audience: BlogAudience | string,
   slug: string,
 ): string {
-  return `/patient/blog/${encodeURIComponent(slug)}`;
+  return `/blog/${encodeURIComponent(slug)}`;
 }
 
 /**

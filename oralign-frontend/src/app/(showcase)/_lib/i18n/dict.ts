@@ -874,29 +874,22 @@ export const dict = {
   },
   blog: {
     eyebrow: { fr: "Le journal ORALIGN", en: "The ORALIGN journal", ar: "مدوّنة ORALIGN" } as T,
+    // Combined blog: patient articles + practitioner resources under one
+    // roof, split by the audience tab strip. The header stays neutral.
     indexTitle: {
-      fr: "Ressources & actualités praticiens",
-      en: "Practitioner resources & insights",
-      ar: "موارد وأخبار للأطباء",
+      fr: "Conseils, guides & actualités",
+      en: "Advice, guides & news",
+      ar: "نصائح وأدلّة وأخبار",
     } as T,
     indexSubtitle: {
-      fr: "Guides cliniques, protocoles d'aligneurs et actualités ORALIGN® pour faire grandir votre pratique.",
-      en: "Clinical guides, aligner protocols and ORALIGN® news to grow your practice.",
-      ar: "أدلّة سريرية وبروتوكولات الأجهزة وأخبار ORALIGN® لتطوير عيادتك.",
+      fr: "Des conseils pour les patients et des ressources cliniques pour les praticiens, par ORALIGN®.",
+      en: "Advice for patients and clinical resources for practitioners, by ORALIGN®.",
+      ar: "نصائح للمرضى وموارد سريرية للأطباء، من ORALIGN®.",
     } as T,
-    // ── Patient-surface index header (the practitioner keys above keep
-    //    their clinical wording; the patient blog uses these) ──
-    eyebrowPatient: { fr: "Le journal ORALIGN", en: "The ORALIGN journal", ar: "مدوّنة ORALIGN" } as T,
-    indexTitlePatient: {
-      fr: "Conseils sourire & orthodontie",
-      en: "Smile tips & orthodontics",
-      ar: "نصائح الابتسامة وتقويم الأسنان",
-    } as T,
-    indexSubtitlePatient: {
-      fr: "Conseils, actualités et guides sur les aligneurs invisibles et le sourire, par ORALIGN®.",
-      en: "Tips, news and guides on invisible aligners and your smile, by ORALIGN®.",
-      ar: "نصائح وأخبار وأدلّة حول الأجهزة الشفافة والابتسامة، من ORALIGN®.",
-    } as T,
+    // ── Audience tab strip (splits the combined feed) ──
+    audienceAll: { fr: "Tous", en: "All", ar: "الكل" } as T,
+    audiencePatients: { fr: "Patients", en: "Patients", ar: "المرضى" } as T,
+    audiencePractitioners: { fr: "Praticiens", en: "Practitioners", ar: "الأطباء" } as T,
     searchPlaceholder: {
       fr: "Rechercher un article…",
       en: "Search articles…",

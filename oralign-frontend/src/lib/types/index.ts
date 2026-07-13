@@ -1772,10 +1772,10 @@ export enum BlogStatus {
 }
 
 /**
- * Which public showcase surface a post belongs to. The showcase splits
- * the blog into two audiences — `/patient/blog` and
- * `/practitioner/blog` — and a post targets exactly one. Mirrors the
- * backend Prisma `BlogAudience` enum (identical lowercase wire values).
+ * Which audience a post targets. The single public blog at `/blog` shows
+ * both and splits them with an audience tab strip (Patients / Practitioners);
+ * a post targets exactly one. Mirrors the backend Prisma `BlogAudience`
+ * enum (identical lowercase wire values).
  */
 export enum BlogAudience {
   PATIENT = 'patient',

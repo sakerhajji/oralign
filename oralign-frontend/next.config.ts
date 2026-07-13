@@ -33,13 +33,20 @@ const nextConfig: NextConfig = {
     return [
       // Patient home now lives at "/" (the audience chooser is gone).
       { source: "/patient", destination: "/", permanent: true },
-      // The practitioner blog merged into the single public blog.
+      // The single public blog moved out from under /patient to top-level /blog.
       {
-        source: "/practitioner/blog/:slug",
-        destination: "/patient/blog/:slug",
+        source: "/patient/blog/:slug",
+        destination: "/blog/:slug",
         permanent: true,
       },
-      { source: "/practitioner/blog", destination: "/patient/blog", permanent: true },
+      { source: "/patient/blog", destination: "/blog", permanent: true },
+      // The old practitioner blog merged into the same public blog.
+      {
+        source: "/practitioner/blog/:slug",
+        destination: "/blog/:slug",
+        permanent: true,
+      },
+      { source: "/practitioner/blog", destination: "/blog", permanent: true },
       // Any remaining practitioner marketing URL → the secured platform sign-in.
       { source: "/practitioner/:path*", destination: "/login", permanent: true },
     ];

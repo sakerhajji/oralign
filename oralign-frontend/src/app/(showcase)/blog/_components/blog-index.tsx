@@ -5,10 +5,11 @@ import Link from "next/link";
 import Image from "next/image";
 import { Search } from "lucide-react";
 import { resolveBlogMediaUrl } from "@/lib/api/blog.service";
-import type { BlogAudience, BlogSummary, Localized } from "@/lib/types";
-import { dict, type Lang } from "../../../_lib/i18n/dict";
-import { useShowcaseLang } from "../../../_lib/i18n/lang-context";
-import { Reveal } from "../../../_components/shared/reveal";
+import { BlogAudience } from "@/lib/types";
+import type { BlogSummary, Localized } from "@/lib/types";
+import { dict, type Lang } from "../../_lib/i18n/dict";
+import { useShowcaseLang } from "../../_lib/i18n/lang-context";
+import { Reveal } from "../../_components/shared/reveal";
 
 const PAGE_SIZE = 9;
 
@@ -30,31 +31,65 @@ function pick<T>(
   return (bag[key] ?? bag.fr ?? bag.en ?? ("" as unknown as T)) as T;
 }
 
+type AudienceTab = BlogAudience | "all";
+
 type Props = {
-  audience: BlogAudience;
   initialPosts: BlogSummary[];
-  categories: string[];
 };
 
 /**
- * Client-side blog index: search + category filter applied to the
- * server-provided first page, plus a simple "load more" that grows the
- * visible window. Pure client filtering keeps the marketing page snappy
- * (no extra round-trips) and degrades gracefully — the server already
+ * Client-side blog index for the single public blog. An audience tab strip
+ * (All / Patients / Practitioners) splits the combined feed, then search +
+ * category filter narrow the active audience. Category chips are derived
+ * from the active audience so they always line up with what is shown. Pure
+ * client filtering keeps the marketing page snappy — the server already
  * rendered the cards, this just narrows / paginates them.
  */
-export function BlogIndex({ audience, initialPosts, categories }: Props) {
+export function BlogIndex({ initialPosts }: Props) {
   const { lang } = useShowcaseLang();
+  const [audienceTab, setAudienceTab] = useState<AudienceTab>("all");
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string>("");
   const [visible, setVisible] = useState(PAGE_SIZE);
 
+  // How many posts sit in each audience — shown as tab counts.
+  const counts = useMemo(() => {
+    let patient = 0;
+    let practitioner = 0;
+    for (const p of initialPosts) {
+      if (p.audience === BlogAudience.PATIENT) patient += 1;
+      else if (p.audience === BlogAudience.PRACTITIONER) practitioner += 1;
+    }
+    return { all: initialPosts.length, patient, practitioner };
+  }, [initialPosts]);
+
+  // Posts in the active audience drive both the grid and the category chips.
+  const audiencePosts = useMemo(
+    () =>
+      audienceTab === "all"
+        ? initialPosts
+        : initialPosts.filter((p) => p.audience === audienceTab),
+    [initialPosts, audienceTab],
+  );
+
+  // Category chips reflect only the categories present in the active
+  // audience, so switching tabs never leaves a stale chip that matches
+  // nothing.
+  const categories = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of audiencePosts) {
+      const c = (p.category ?? "").trim();
+      if (c) set.add(c);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [audiencePosts]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     const activeCat = category.trim().toLowerCase();
-    return initialPosts.filter((post) => {
+    return audiencePosts.filter((post) => {
       // Case/space-tolerant category match so a chip picked from the
-      // server's category list always lines up with the post value even
+      // derived category list always lines up with the post value even
       // if one side carries stray casing or whitespace.
       if (activeCat && (post.category ?? "").trim().toLowerCase() !== activeCat)
         return false;
@@ -70,11 +105,17 @@ export function BlogIndex({ audience, initialPosts, categories }: Props) {
         (post.authorName ?? "").toLowerCase().includes(q)
       );
     });
-  }, [initialPosts, query, category, lang]);
+  }, [audiencePosts, query, category, lang]);
 
   const shown = filtered.slice(0, visible);
   const hasMore = filtered.length > visible;
 
+  const onAudience = (value: AudienceTab) => {
+    setAudienceTab(value);
+    // Categories differ per audience, so reset the chip + the window.
+    setCategory("");
+    setVisible(PAGE_SIZE);
+  };
   const onSearch = (value: string) => {
     setQuery(value);
     setVisible(PAGE_SIZE);
@@ -86,6 +127,34 @@ export function BlogIndex({ audience, initialPosts, categories }: Props) {
 
   return (
     <div>
+      {/* ── Audience tabs ── */}
+      <Reveal>
+        <div
+          role="tablist"
+          aria-label={dict.blog.eyebrow[lang]}
+          className="mb-8 flex flex-wrap items-center gap-x-7 gap-y-2 border-b border-[var(--sc-grey)]"
+        >
+          <AudienceTabButton
+            label={dict.blog.audienceAll[lang]}
+            count={counts.all}
+            active={audienceTab === "all"}
+            onClick={() => onAudience("all")}
+          />
+          <AudienceTabButton
+            label={dict.blog.audiencePatients[lang]}
+            count={counts.patient}
+            active={audienceTab === BlogAudience.PATIENT}
+            onClick={() => onAudience(BlogAudience.PATIENT)}
+          />
+          <AudienceTabButton
+            label={dict.blog.audiencePractitioners[lang]}
+            count={counts.practitioner}
+            active={audienceTab === BlogAudience.PRACTITIONER}
+            onClick={() => onAudience(BlogAudience.PRACTITIONER)}
+          />
+        </div>
+      </Reveal>
+
       {/* ── Filter bar ── */}
       <Reveal>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -143,7 +212,7 @@ export function BlogIndex({ audience, initialPosts, categories }: Props) {
             {shown.map((post, i) => (
               <li key={post.id}>
                 <Reveal delay={i % 3 === 2}>
-                  <BlogCard post={post} lang={lang} audience={audience} />
+                  <BlogCard post={post} lang={lang} />
                 </Reveal>
               </li>
             ))}
@@ -163,6 +232,43 @@ export function BlogIndex({ audience, initialPosts, categories }: Props) {
         </>
       )}
     </div>
+  );
+}
+
+function AudienceTabButton({
+  label,
+  count,
+  active,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={[
+        "relative -mb-px inline-flex items-baseline gap-2 border-b-2 pb-3.5 pt-1 text-[0.74rem] font-bold uppercase tracking-[0.18em] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sc-sun)]",
+        active
+          ? "border-[var(--sc-black)] text-[var(--sc-black)]"
+          : "border-transparent text-[var(--sc-text-mid)] hover:text-[var(--sc-black)]",
+      ].join(" ")}
+    >
+      {label}
+      <span
+        className={[
+          "text-[0.62rem] font-medium tabular-nums",
+          active ? "text-[var(--sc-sun-deep)]" : "text-[var(--sc-mid-grey)]",
+        ].join(" ")}
+      >
+        {count}
+      </span>
+    </button>
   );
 }
 
@@ -195,11 +301,9 @@ function CategoryChip({
 function BlogCard({
   post,
   lang,
-  audience,
 }: {
   post: BlogSummary;
   lang: Lang;
-  audience: BlogAudience;
 }) {
   const cover =
     resolveBlogMediaUrl(post.cover?.mdUrl ?? post.cover?.thumbUrl ?? null) ??
@@ -215,7 +319,7 @@ function BlogCard({
 
   return (
     <Link
-      href={`/${audience}/blog/${post.slug}`}
+      href={`/blog/${post.slug}`}
       className="group block no-underline outline-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--sc-sun)]"
     >
       <article className="flex h-full flex-col">

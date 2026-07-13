@@ -7,7 +7,7 @@ import type {
 
 /**
  * Server-side blog fetch helpers for the single PUBLIC blog mounted at
- * /patient/blog. `audience` is an OPTIONAL filter — the public blog is
+ * /blog. `audience` is an OPTIONAL filter — the public blog is
  * unified, so the pages call these WITHOUT an audience and get the merged
  * feed of both patient- and practitioner-authored posts. The admin CMS
  * still authors per-audience; only the public surface is merged.
@@ -111,17 +111,6 @@ export async function getPublishedPosts(params?: {
     page: data.page ?? page,
     limit: data.limit ?? limit,
   };
-}
-
-/**
- * Distinct categories among published posts of one audience. Empty array
- * on failure.
- */
-export async function getCategories(
-  audience?: BlogAudience,
-): Promise<string[]> {
-  const data = await fetchJson<string[]>(blogUrl("/categories", { audience }));
-  return Array.isArray(data) ? data : [];
 }
 
 /**

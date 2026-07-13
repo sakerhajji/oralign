@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import Script from "next/script";
 import { notFound } from "next/navigation";
 import { resolveBlogMediaUrl } from "@/lib/api/blog.service";
-import { BlogAudience } from "@/lib/types";
 import type { BlogDetail } from "@/lib/types";
 import { getPostBySlug } from "../_lib/fetch";
 import { BlogArticle } from "../_components/blog-article";
@@ -11,10 +10,6 @@ import { BlogArticle } from "../_components/blog-article";
 // hand because the layout doesn't export it; the canonical / OG / JSON-LD
 // absolute URLs all derive from this.
 const SITE_URL = "https://oralign.com.tn";
-
-// This page belongs to the patient surface; every read + the notFound()
-// audience guard pin to it.
-const AUDIENCE = BlogAudience.PATIENT;
 
 export const revalidate = 60;
 
@@ -54,7 +49,7 @@ export async function generateMetadata({
   const description =
     pickFr(post.seoDescription) || pickFr(post.excerpt) || undefined;
   const keywords = pickFr<string[]>(post.seoKeywords);
-  const canonical = `/patient/blog/${post.slug}`;
+  const canonical = `/blog/${post.slug}`;
   const cover = coverAbsoluteUrl(post);
 
   return {
@@ -88,7 +83,7 @@ export default async function PatientBlogPostPage({
   const post = await getPostBySlug(slug);
   if (!post) notFound();
 
-  const canonicalPath = `/patient/blog/${post.slug}`;
+  const canonicalPath = `/blog/${post.slug}`;
   const canonicalUrl = `${SITE_URL}${canonicalPath}`;
   const cover = coverAbsoluteUrl(post);
 
@@ -122,7 +117,7 @@ export default async function PatientBlogPostPage({
         {JSON.stringify(ldArticle)}
       </Script>
 
-      <BlogArticle post={post} audience={AUDIENCE} canonicalUrl={canonicalUrl} />
+      <BlogArticle post={post} canonicalUrl={canonicalUrl} />
     </article>
   );
 }

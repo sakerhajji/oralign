@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { Check, Link2 } from "lucide-react";
-import { dict } from "../../../_lib/i18n/dict";
-import { useShowcaseLang } from "../../../_lib/i18n/lang-context";
+import { dict } from "../../_lib/i18n/dict";
+import { useShowcaseLang } from "../../_lib/i18n/lang-context";
 
 /**
  * Social share row for a blog article. No third-party SDKs — every target

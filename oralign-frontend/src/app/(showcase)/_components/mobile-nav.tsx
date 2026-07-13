@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { ChevronDown, X } from "lucide-react";
 import {
@@ -13,32 +12,20 @@ import {
   SheetTrigger,
   SheetClose,
 } from "@/components/ui/sheet";
-import {
-  getShowcaseAudience,
-  getShowcaseBasePath,
-  getShowcaseNavItems,
-} from "../_lib/nav";
+import { NAV_ITEMS } from "../_lib/nav";
 import { dict, LANGS, type Lang } from "../_lib/i18n/dict";
 import { useShowcaseLang } from "../_lib/i18n/lang-context";
 
+const FINDER_HREF = "/trouver-un-praticien";
+const PRACTITIONER_SPACE_HREF = "/login";
+
 export function MobileNav() {
   const { lang, setLang } = useShowcaseLang();
-  const pathname = usePathname();
   const [open, setOpen] = useState(false);
-  const audience = getShowcaseAudience(pathname);
-  const basePath = getShowcaseBasePath(pathname);
-  const navItems = getShowcaseNavItems(pathname);
+  const navItems = NAV_ITEMS;
   const [openId, setOpenId] = useState<string | null>(null);
   const navLabel = (key: string): string =>
     dict.nav[key as keyof typeof dict.nav]?.[lang] ?? key;
-
-  // Same trick as the desktop Header: anchor links must target the active
-  // audience page before adding a hash.
-  const resolveAnchor = (hashHref: string): string =>
-    hashHref.startsWith("#") && pathname !== basePath ? `${basePath}${hashHref}` : hashHref;
-  const ctaHref = audience === "practitioner" ? "/signup" : resolveAnchor("#cta");
-  const ctaLabel =
-    audience === "practitioner" ? dict.nav.createAccount[lang] : dict.nav.bookDemo[lang];
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
@@ -111,7 +98,7 @@ export function MobileNav() {
                   <li key={item.id}>
                     <SheetClose asChild>
                       <Link
-                        href={resolveAnchor(item.href)}
+                        href={item.href}
                         className="group flex min-h-16 items-center justify-between gap-4 border-b border-[var(--sc-grey)] py-4 no-underline text-[var(--sc-text-dark)]/70 transition-colors hover:text-[var(--sc-black)]"
                       >
                         <span className="text-[0.98rem] font-medium leading-snug">
@@ -155,7 +142,7 @@ export function MobileNav() {
                         <li key={child.id}>
                           <SheetClose asChild>
                             <Link
-                              href={resolveAnchor(child.href)}
+                              href={child.href}
                               className="flex min-h-12 items-center gap-3 py-2.5 ps-3 text-[0.9rem] leading-snug text-[var(--sc-text-mid)] no-underline transition-colors hover:text-[var(--sc-black)]"
                             >
                               <span
@@ -199,23 +186,18 @@ export function MobileNav() {
           <div className="mt-auto flex flex-col gap-3 pt-8">
             <SheetClose asChild>
               <Link
-                href={ctaHref}
-                className={[
-                  "block w-full px-5 py-4 text-center text-[0.76rem] font-bold uppercase tracking-[0.14em] no-underline transition-colors",
-                  audience === "practitioner"
-                    ? "bg-[var(--sc-black)] text-[var(--sc-white)] hover:bg-[rgba(25,25,25,0.82)]"
-                    : "bg-[var(--sc-sun)] text-[var(--sc-black)] hover:bg-[var(--sc-sun-2)]",
-                ].join(" ")}
+                href={FINDER_HREF}
+                className="block w-full bg-[var(--sc-sun)] px-5 py-4 text-center text-[0.76rem] font-bold uppercase tracking-[0.14em] text-[var(--sc-black)] no-underline transition-colors hover:bg-[var(--sc-sun-2)]"
               >
-                {ctaLabel}
+                {dict.nav.findPractitionerCta[lang]}
               </Link>
             </SheetClose>
             <SheetClose asChild>
               <Link
-                href="/login"
+                href={PRACTITIONER_SPACE_HREF}
                 className="block w-full border border-[var(--sc-black)] px-5 py-4 text-center text-[0.76rem] font-medium uppercase tracking-[0.14em] text-[var(--sc-black)] no-underline transition-colors hover:bg-[var(--sc-black)] hover:text-[var(--sc-white)]"
               >
-                {dict.nav.login[lang]}
+                {dict.nav.practitionerSpace[lang]}
               </Link>
             </SheetClose>
           </div>

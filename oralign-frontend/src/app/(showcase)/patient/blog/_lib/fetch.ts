@@ -6,11 +6,11 @@ import type {
 } from "@/lib/types";
 
 /**
- * Server-side blog fetch helpers for the PUBLIC showcase blog — SHARED
- * across both audiences (patient + practitioner). The audience is always
- * passed in by the caller so this module stays surface-agnostic; it lives
- * under `practitioner/blog/_lib` for historical reasons but both audiences'
- * pages import it (a cross-route-group import is fine in the app router).
+ * Server-side blog fetch helpers for the single PUBLIC blog mounted at
+ * /patient/blog. `audience` is an OPTIONAL filter — the public blog is
+ * unified, so the pages call these WITHOUT an audience and get the merged
+ * feed of both patient- and practitioner-authored posts. The admin CMS
+ * still authors per-audience; only the public surface is merged.
  *
  * These run only in React Server Components — never import the authed
  * axios `apiClient` here. We hit the public `/blog/...` routes with the

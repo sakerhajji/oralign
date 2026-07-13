@@ -1,13 +1,17 @@
 import type { Metadata } from "next";
-import { AudienceChooser } from "./_components/audience-chooser";
+import { PatientHome } from "./_components/patient-home";
 
 export const metadata: Metadata = {
-  title: "ORALIGN® — Choisissez votre espace",
+  title: "ORALIGN® — Aligneurs invisibles pour patients",
   description:
-    "Accédez à l'espace patient ORALIGN® ou à la plateforme digitale dédiée aux dentistes et orthodontistes.",
+    "Découvrez ORALIGN® : aligneurs transparents, confortables et supervisés par un praticien certifié.",
   alternates: { canonical: "/" },
 };
 
+// The public site is the Patient website. Its home renders directly at "/"
+// (the old Patient/Practitioner audience chooser is gone). The practitioner
+// marketing showcase has been removed — practitioners enter via the secured
+// platform ("Espace praticien" → /login).
 export default function ShowcaseHomePage() {
-  return <AudienceChooser />;
+  return <PatientHome />;
 }

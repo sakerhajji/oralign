@@ -31,17 +31,12 @@ export const dict = {
     platform: { fr: "Indications", en: "Indications", ar: "العلاجات" } as T,
     results: { fr: "Résultats", en: "Results", ar: "النتائج" } as T,
     practitioners: { fr: "Praticiens", en: "Practitioners", ar: "الأطباء" } as T,
-    contrast: { fr: "Avant", en: "Before", ar: "قبل" } as T,
-    workflow: { fr: "Workflow", en: "Workflow", ar: "المسار" } as T,
-    clinical: { fr: "Clinique", en: "Clinical", ar: "سريري" } as T,
-    platformB2B: { fr: "Plateforme", en: "Platform", ar: "المنصة" } as T,
-    challenge: { fr: "Défi", en: "Challenge", ar: "تحدي" } as T,
-    createAccount: { fr: "Compte gratuit", en: "Free account", ar: "حساب مجاني" } as T,
     pricing: { fr: "Devis", en: "Quote", ar: "عرض السعر" } as T,
     forPatients: { fr: "Avis", en: "Reviews", ar: "آراء" } as T,
     about: { fr: "FAQ", en: "FAQ", ar: "الأسئلة" } as T,
-    bookDemo: { fr: "Consultation", en: "Consultation", ar: "احجز" } as T,
     login: { fr: "Connexion", en: "Login", ar: "دخول" } as T,
+    practitionerSpace: { fr: "Espace praticien", en: "Practitioner Space", ar: "فضاء الطبيب" } as T,
+    findPractitionerCta: { fr: "Trouver un praticien", en: "Find a Practitioner", ar: "ابحث عن طبيب" } as T,
 
     // ── Patient mega-menu (grouped nav) — short menu labels ──
     whyOralign: { fr: "Découvrir", en: "Discover", ar: "اكتشف" } as T,
@@ -57,6 +52,26 @@ export const dict = {
     actEarly: { fr: "Agir tôt", en: "Act early", ar: "التدخّل مبكرًا" } as T,
     temoignages: { fr: "Témoignages", en: "Testimonials", ar: "شهادات" } as T,
     shareExperience: { fr: "Partager", en: "Share", ar: "شارك" } as T,
+  },
+
+  // ── Public practitioner finder ("Trouver un praticien") ──
+  finder: {
+    title: { fr: "Trouver un praticien", en: "Find a Practitioner", ar: "ابحث عن طبيب" } as T,
+    subtitle: {
+      fr: "Praticiens certifiés ORALIGN près de chez vous.",
+      en: "ORALIGN-certified practitioners near you.",
+      ar: "أطباء معتمدون من ORALIGN بالقرب منك.",
+    } as T,
+    comingSoon: {
+      fr: "Notre annuaire de praticiens arrive très bientôt.",
+      en: "Our practitioner directory is coming very soon.",
+      ar: "دليل الأطباء لدينا قادم قريباً جداً.",
+    } as T,
+    comingSoonBody: {
+      fr: "Nous finalisons la carte et la liste des praticiens certifiés ORALIGN. En attendant, les praticiens peuvent accéder à leur espace sécurisé.",
+      en: "We're finalizing the map and the list of ORALIGN-certified practitioners. In the meantime, practitioners can access their secure space.",
+      ar: "نعمل على إنهاء الخريطة وقائمة الأطباء المعتمدين. في هذه الأثناء، يمكن للأطباء الوصول إلى مساحتهم الآمنة.",
+    } as T,
   },
 
   // ── Scaffold copy for the empty per-page SEO pages ──

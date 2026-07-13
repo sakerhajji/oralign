@@ -25,7 +25,7 @@ export default function robots(): MetadataRoute.Robots {
         allow: [
           '/',
           '/patient',
-          '/practitioner',
+          '/trouver-un-praticien',
           '/login',
           '/signup',
           '/forgot-password',

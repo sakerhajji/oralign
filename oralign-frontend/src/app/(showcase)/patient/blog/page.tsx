@@ -2,12 +2,12 @@ import type { Metadata } from "next";
 import { BlogAudience } from "@/lib/types";
 import { dict, DEFAULT_LANG } from "../../_lib/i18n/dict";
 import { Reveal } from "../../_components/shared/reveal";
-import {
-  getCategories,
-  getPublishedPosts,
-} from "../../practitioner/blog/_lib/fetch";
-import { BlogIndex } from "../../practitioner/blog/_components/blog-index";
+import { getCategories, getPublishedPosts } from "./_lib/fetch";
+import { BlogIndex } from "./_components/blog-index";
 
+// Single public blog: the feed is fetched WITHOUT an audience filter so both
+// patient- and practitioner-authored articles surface here. AUDIENCE is only
+// the link base for the shared components (every post routes under /patient/blog).
 const AUDIENCE = BlogAudience.PATIENT;
 
 export const metadata: Metadata = {
@@ -30,8 +30,8 @@ export const revalidate = 60;
 
 export default async function PatientBlogPage() {
   const [{ posts }, categories] = await Promise.all([
-    getPublishedPosts({ audience: AUDIENCE, page: 1, limit: 24 }),
-    getCategories(AUDIENCE),
+    getPublishedPosts({ page: 1, limit: 24 }),
+    getCategories(),
   ]);
 
   // The H1 + intro are server-rendered for SEO. They use the default

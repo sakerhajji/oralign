@@ -3,35 +3,32 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronDown } from "lucide-react";
-import type { NavItem } from "../_lib/nav";
-import {
-  getShowcaseAudience,
-  getShowcaseBasePath,
-  getShowcaseNavItems,
-} from "../_lib/nav";
+import { NAV_ITEMS, type NavItem } from "../_lib/nav";
 import { dict } from "../_lib/i18n/dict";
 import { useShowcaseLang } from "../_lib/i18n/lang-context";
 import { MobileNav } from "./mobile-nav";
+
+// The public site is the patient website with one nav. Two clear actions
+// live in the header: "Trouver un praticien" (the public finder) and
+// "Espace praticien" (the secured platform sign-in / sign-up).
+const FINDER_HREF = "/trouver-un-praticien";
+const PRACTITIONER_SPACE_HREF = "/login";
 
 export function Header() {
   const { lang } = useShowcaseLang();
   const pathname = usePathname();
   const [scrolled, setScrolled] = useState(false);
   const [active, setActive] = useState<string | null>(null);
-  const audience = getShowcaseAudience(pathname);
-  const basePath = getShowcaseBasePath(pathname);
-  const navItems = useMemo(() => getShowcaseNavItems(pathname), [pathname]);
-  const showAudienceNav = audience !== "chooser";
+  const navItems = NAV_ITEMS;
   const navLabel = (key: string): string =>
     dict.nav[key as keyof typeof dict.nav]?.[lang] ?? key;
 
   // Anchor sections to observe on the CURRENT page = the `#hash` of any
   // dropdown child whose route is the active pathname (e.g. on
-  // /patient/decouvrir we watch #oralign, #oralign-prime, …). For the
-  // practitioner page the items are bare `#hash` hrefs, observed as-is.
-  const sectionIds = useMemo(() => {
+  // /patient/decouvrir we watch #oralign, #oralign-prime, …).
+  const sectionIds = (() => {
     const ids: string[] = [];
     for (const item of navItems) {
       const collect = (href: string) => {
@@ -44,13 +41,11 @@ export function Header() {
       for (const child of item.children ?? []) collect(child.href);
     }
     return Array.from(new Set(ids));
-  }, [navItems, pathname]);
+  })();
 
   // The in-view section id, ignoring any value left over from a previous
-  // page (a stale id won't be among the current page's sectionIds), so we
-  // never need to reset state synchronously when the route changes.
-  const activeSection =
-    active && sectionIds.includes(active) ? active : null;
+  // page (a stale id won't be among the current page's sectionIds).
+  const activeSection = active && sectionIds.includes(active) ? active : null;
 
   // A top-level item is active when its page is current (or one of its
   // children lives on the current page); a dropdown child is active when
@@ -58,16 +53,6 @@ export function Header() {
   const isItemActive = (item: NavItem): boolean =>
     pathname === item.href ||
     (item.children ?? []).some((c) => c.href.split("#")[0] === pathname);
-
-  /**
-   * Patient and practitioner pages each own their anchors. If the user is on
-   * another route, prefix the active audience path before the hash.
-   */
-  const resolveAnchor = (hashHref: string): string =>
-    hashHref.startsWith("#") && pathname !== basePath ? `${basePath}${hashHref}` : hashHref;
-  const ctaHref = audience === "practitioner" ? "/signup" : resolveAnchor("#cta");
-  const ctaLabel =
-    audience === "practitioner" ? dict.nav.createAccount[lang] : dict.nav.bookDemo[lang];
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
@@ -94,7 +79,8 @@ export function Header() {
     );
     els.forEach((el) => observer.observe(el));
     return () => observer.disconnect();
-  }, [sectionIds]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sectionIds.join(",")]);
 
   return (
     <header
@@ -136,7 +122,7 @@ export function Header() {
 
               const trigger = (
                 <Link
-                  href={resolveAnchor(item.href)}
+                  href={item.href}
                   aria-current={isActive ? "true" : undefined}
                   aria-haspopup={hasChildren ? "true" : undefined}
                   className={[
@@ -171,9 +157,7 @@ export function Header() {
               return (
                 <li key={item.id} className="group relative">
                   {trigger}
-                  {/* Dropdown — opens on hover + keyboard focus-within.
-                      The pt-3 forms a hover bridge to the trigger so the
-                      panel doesn't flicker as the pointer crosses the gap. */}
+                  {/* Dropdown — opens on hover + keyboard focus-within. */}
                   <div className="invisible absolute left-1/2 top-full z-50 -translate-x-1/2 translate-y-1 pt-3 opacity-0 transition-all duration-200 group-hover:visible group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:visible group-focus-within:translate-y-0 group-focus-within:opacity-100">
                     <ul className="min-w-[264px] list-none border border-[var(--sc-grey)] bg-[var(--sc-white)] p-2 shadow-[0_24px_60px_-28px_rgba(10,10,10,0.4)]">
                       {(item.children ?? []).map((child) => {
@@ -184,7 +168,7 @@ export function Header() {
                         return (
                           <li key={child.id}>
                             <Link
-                              href={resolveAnchor(child.href)}
+                              href={child.href}
                               aria-current={childActive ? "true" : undefined}
                               className={[
                                 "block rounded-md px-3 py-2.5 text-[0.88rem] font-medium leading-snug no-underline transition-colors",
@@ -206,28 +190,21 @@ export function Header() {
           </ul>
         </nav>
 
-        {/* Right cluster — Login + Book Demo on lg+ only; hamburger on <lg */}
+        {/* Right cluster — the two public actions on lg+; hamburger on <lg */}
         <div className="ms-auto flex shrink-0 items-center gap-2 sm:gap-3">
           <Link
-            href="/login"
+            href={PRACTITIONER_SPACE_HREF}
             className="hidden items-center px-2 py-2 text-[0.68rem] font-medium uppercase tracking-[0.16em] text-[var(--sc-text-mid)] no-underline transition-colors hover:text-[var(--sc-black)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sc-sun)] lg:inline-flex xl:px-3 xl:text-[0.72rem]"
           >
-            {dict.nav.login[lang]}
+            {dict.nav.practitionerSpace[lang]}
           </Link>
-          {showAudienceNav ? (
-            <Link
-              href={ctaHref}
-              className={[
-                "hidden min-h-11 items-center px-4 py-3 text-[0.68rem] font-semibold uppercase tracking-[0.15em] no-underline transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 lg:inline-flex xl:px-5 xl:text-[0.72rem]",
-                audience === "practitioner"
-                  ? "bg-[var(--sc-black)] text-[var(--sc-white)] hover:bg-[rgba(25,25,25,0.82)] focus-visible:outline-[var(--sc-sun)]"
-                  : "bg-[var(--sc-sun)] text-[var(--sc-black)] hover:bg-[var(--sc-sun-2,#f9d96a)] focus-visible:outline-[var(--sc-black)]",
-              ].join(" ")}
-            >
-              {ctaLabel}
-            </Link>
-          ) : null}
-          {showAudienceNav ? <MobileNav /> : null}
+          <Link
+            href={FINDER_HREF}
+            className="hidden min-h-11 items-center bg-[var(--sc-sun)] px-4 py-3 text-[0.68rem] font-semibold uppercase tracking-[0.15em] text-[var(--sc-black)] no-underline transition-colors hover:bg-[var(--sc-sun-2,#f9d96a)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sc-black)] lg:inline-flex xl:px-5 xl:text-[0.72rem]"
+          >
+            {dict.nav.findPractitionerCta[lang]}
+          </Link>
+          <MobileNav />
         </div>
       </div>
     </header>

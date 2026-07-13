@@ -4,8 +4,8 @@ import { notFound } from "next/navigation";
 import { resolveBlogMediaUrl } from "@/lib/api/blog.service";
 import { BlogAudience } from "@/lib/types";
 import type { BlogDetail } from "@/lib/types";
-import { getPostBySlug } from "../../../practitioner/blog/_lib/fetch";
-import { BlogArticle } from "../../../practitioner/blog/_components/blog-article";
+import { getPostBySlug } from "../_lib/fetch";
+import { BlogArticle } from "../_components/blog-article";
 
 // Mirrors the SITE_URL constant in the (showcase) layout. Kept in sync by
 // hand because the layout doesn't export it; the canonical / OG / JSON-LD
@@ -45,8 +45,8 @@ export async function generateMetadata({
   params: Promise<Params>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const post = await getPostBySlug(slug, AUDIENCE);
-  if (!post || post.audience !== AUDIENCE) {
+  const post = await getPostBySlug(slug);
+  if (!post) {
     return { title: "Article introuvable | ORALIGN®", robots: { index: false } };
   }
 
@@ -85,8 +85,8 @@ export default async function PatientBlogPostPage({
   params: Promise<Params>;
 }) {
   const { slug } = await params;
-  const post = await getPostBySlug(slug, AUDIENCE);
-  if (!post || post.audience !== AUDIENCE) notFound();
+  const post = await getPostBySlug(slug);
+  if (!post) notFound();
 
   const canonicalPath = `/patient/blog/${post.slug}`;
   const canonicalUrl = `${SITE_URL}${canonicalPath}`;

@@ -1,24 +1,14 @@
 /**
  * Showcase navigation model.
  *
- * The PATIENT nav is a grouped mega-menu (per the 2026 sitemap): a few
- * top-level entries open a dropdown of `children`, the rest are plain
- * links. The PRACTITIONER nav stays a flat list of section anchors.
- * Both render through the same Header / MobileNav — an entry with no
- * `children` is a plain link; one with `children` opens a dropdown
- * (desktop) / accordion (mobile).
+ * The public site is the PATIENT website. The nav is a grouped mega-menu:
+ * a few top-level entries open a dropdown of `children`, the rest are plain
+ * links. An entry with no `children` is a plain link; one with `children`
+ * opens a dropdown (desktop) / accordion (mobile).
  *
  * `labelKey` indexes `dict.nav` (resolved by the renderer, so this file
  * stays free of the i18n import). `href` is where the top-level click
- * lands — a `#section` on the current audience page or a route.
- *
- * Each grouped patient entry is ONE page whose dropdown children are
- * `#section` anchors within it (e.g. /patient/decouvrir + #oralign,
- * #oralign-prime …). The standalone entries (guide, shop, blogs) are
- * their own routes. Smooth scroll + the sticky-header offset for those
- * anchors are handled in showcase.css (`scroll-behavior` + the
- * `section[id]` scroll-margin); the active child is tracked by the
- * Header's IntersectionObserver.
+ * lands — a route or a `route#section` anchor within a patient page.
  */
 export type NavChild = {
   id: string;
@@ -42,7 +32,8 @@ export const PATIENT_NAV_ITEMS: readonly NavItem[] = [
       { id: "oralign", labelKey: "navOralign", href: "/patient/decouvrir#oralign" },
       { id: "oralign-prime", labelKey: "oralignPrime", href: "/patient/decouvrir#oralign-prime" },
       { id: "parcours", labelKey: "howItWorks", href: "/patient/decouvrir#parcours" },
-      { id: "find-practitioner", labelKey: "findPractitioner", href: "/patient/decouvrir#praticiens" },
+      // Points at the public practitioner finder, not an in-page anchor.
+      { id: "find-practitioner", labelKey: "findPractitioner", href: "/trouver-un-praticien" },
     ],
   },
   {
@@ -68,36 +59,12 @@ export const PATIENT_NAV_ITEMS: readonly NavItem[] = [
   { id: "blogs", labelKey: "blogs", href: "/patient/blog" },
 ] as const;
 
-export const PRACTITIONER_NAV_ITEMS: readonly NavItem[] = [
-  { id: "contrast", labelKey: "contrast", href: "#contrast" },
-  { id: "workflow", labelKey: "workflow", href: "#workflow" },
-  { id: "clinical", labelKey: "clinical", href: "#clinical" },
-  { id: "platform-b2b", labelKey: "platformB2B", href: "#platform-b2b" },
-  { id: "cta", labelKey: "challenge", href: "#cta" },
-  // Real route (no `#hash`) — renders as a plain link, not an anchor.
-  { id: "blog", labelKey: "blogs", href: "/practitioner/blog" },
-] as const;
-
+/** The single public nav (patient website). */
 export const NAV_ITEMS = PATIENT_NAV_ITEMS;
 
-export type ShowcaseAudience = "chooser" | "patient" | "practitioner";
-
-export function getShowcaseAudience(pathname: string | null): ShowcaseAudience {
-  if (pathname?.startsWith("/practitioner")) return "practitioner";
-  if (pathname?.startsWith("/patient")) return "patient";
-  if (pathname === "/" || !pathname) return "chooser";
-  return "patient";
-}
-
-export function getShowcaseBasePath(pathname: string | null): "/patient" | "/practitioner" {
-  return getShowcaseAudience(pathname) === "practitioner" ? "/practitioner" : "/patient";
-}
-
-export function getShowcaseNavItems(pathname: string | null): readonly NavItem[] {
-  const audience = getShowcaseAudience(pathname);
-  if (audience === "practitioner") return PRACTITIONER_NAV_ITEMS;
-  if (audience === "patient") return PATIENT_NAV_ITEMS;
-  return [];
+/** Kept for the Header/MobileNav call site — always the patient nav now. */
+export function getShowcaseNavItems(): readonly NavItem[] {
+  return PATIENT_NAV_ITEMS;
 }
 
 /**

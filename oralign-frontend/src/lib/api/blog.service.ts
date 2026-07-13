@@ -44,17 +44,17 @@ export function pickLocalized<T = string>(
 }
 
 /**
- * Build the public showcase URL for a post given its audience + slug —
- * `/${audience}/blog/${slug}`. The CMS "view on site" button + any
- * cross-link uses this so the audience→route mapping lives in one
- * place. `audience` is the `BlogAudience` wire value ('patient' |
- * 'practitioner'), which is exactly the showcase path segment.
+ * Build the public showcase URL for a post by slug. The public blog is
+ * unified: patient- and practitioner-authored posts all live under the
+ * single `/patient/blog/<slug>` route. `audience` is accepted for call-site
+ * compatibility (the CMS passes the post's audience) but is not part of the
+ * URL anymore.
  */
 export function blogShowcaseUrl(
-  audience: BlogAudience | string,
+  _audience: BlogAudience | string,
   slug: string,
 ): string {
-  return `/${audience}/blog/${encodeURIComponent(slug)}`;
+  return `/patient/blog/${encodeURIComponent(slug)}`;
 }
 
 /**

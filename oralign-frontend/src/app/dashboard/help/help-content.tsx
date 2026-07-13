@@ -111,6 +111,11 @@ function LegalDocCard({ doc }: { doc: LegalDoc }) {
                   ))}
                 </ul>
               )}
+              {section.paragraphsAfter?.map((p, j) => (
+                <p key={`after-${j}`} className="text-sm leading-6 text-muted-foreground">
+                  {p}
+                </p>
+              ))}
               {section.rows && section.rows.length > 0 && (
                 <dl className="divide-y rounded-lg border bg-muted/20">
                   {section.rows.map((r, k) => (

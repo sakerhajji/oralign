@@ -74,6 +74,15 @@ export function LegalDocView({
                   </ul>
                 )}
 
+                {section.paragraphsAfter?.map((p, j) => (
+                  <p
+                    key={`after-${j}`}
+                    className="mb-4 text-[0.97rem] leading-8 text-[var(--sc-text-mid)] last:mb-0"
+                  >
+                    {p}
+                  </p>
+                ))}
+
                 {section.rows && section.rows.length > 0 && (
                   <dl className="mt-4 divide-y divide-[rgba(25,25,25,0.08)] overflow-hidden rounded-xl border border-[rgba(25,25,25,0.1)] bg-[rgba(25,25,25,0.015)]">
                     {section.rows.map((r, k) => (

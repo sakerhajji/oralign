@@ -57,6 +57,10 @@ const OdontogramSelector = dynamic(
     ),
   },
 );
+
+// Stable no-op for the read-only odontogram on the review step — an inline
+// `() => undefined` would break the selector's memo boundary every render.
+const NOOP_TOOTH_CHANGE = () => undefined;
 import {
   ClinicalOrderFiles,
 } from '@/components/orders/order-file-upload';
@@ -2715,7 +2719,7 @@ function ReviewStep({
         <div className="space-y-8">
           <OdontogramSelector
             value={toothInstructions}
-            onChange={() => undefined}
+            onChange={NOOP_TOOTH_CHANGE}
             disabled
             iprValues={iprValues}
           />

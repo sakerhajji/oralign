@@ -98,6 +98,12 @@ const OdontogramSelector = dynamic(
 
 type OrderDetailTab = 'order' | 'treatment-plans' | 'quote';
 
+// Stable no-op + empty fallback for the read-only odontogram — inline
+// `() => undefined` / `?? []` literals would mint new identities per page
+// render and defeat the selector's memo boundary.
+const NOOP_TOOTH_CHANGE = () => undefined;
+const EMPTY_INSTRUCTIONS: never[] = [];
+
 // Locale-aware date helpers. FR uses "d MMM yyyy" (e.g. "8 juin 2026")
 // matching the orders list page so dates read consistently.
 const dateLocale = (lang: 'en' | 'fr'): Locale | undefined =>
@@ -219,6 +225,23 @@ export default function OrderDetailPage() {
       return next;
     });
   }, [activeTab]);
+
+  // Legacy per-tooth IPR map for the read-only odontogram. Memoized —
+  // this used to be built inline in JSX, so EVERY page render (tab
+  // switches, dialog toggles, query settles) re-filtered the instruction
+  // list, built a fresh Map and broke the odontogram's memo boundary.
+  const orderToothInstructions = orderQuery.data?.toothInstructions;
+  const legacyIprValues = useMemo(() => {
+    const instructions = orderToothInstructions ?? [];
+    return new Map(
+      instructions
+        .filter(
+          (i) =>
+            i.type === 'ipr_value' && !!i.value && i.value.trim().length > 0,
+        )
+        .map((i) => [i.toothNumber, i.value as string]),
+    );
+  }, [orderToothInstructions]);
 
   if (orderQuery.isLoading) {
     return (
@@ -533,21 +556,10 @@ export default function OrderDetailPage() {
               omitted intentionally — the order page is view-only here;
               IPR editing lives in the treatment-plan review screen. */}
           <OdontogramSelector
-            value={order.toothInstructions ?? []}
-            onChange={() => undefined}
+            value={order.toothInstructions ?? EMPTY_INSTRUCTIONS}
+            onChange={NOOP_TOOTH_CHANGE}
             disabled
-            iprValues={
-              new Map(
-                (order.toothInstructions ?? [])
-                  .filter(
-                    (i) =>
-                      i.type === 'ipr_value' &&
-                      !!i.value &&
-                      i.value.trim().length > 0,
-                  )
-                  .map((i) => [i.toothNumber, i.value as string]),
-              )
-            }
+            iprValues={legacyIprValues}
           />
 
           {/* Mechanics summary below the chart */}

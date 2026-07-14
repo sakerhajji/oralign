@@ -913,6 +913,15 @@ function MovementTableSection({
    * IPR no longer flows through this endpoint at all — it lives in
    * TreatmentPlanIpr with its own dedicated mutations below.
    */
+  // Depend on the STABLE `.mutate` references (react-query keeps their
+  // identity across renders) rather than the mutation result objects,
+  // which are recreated on every pending/success flip — otherwise these
+  // callbacks (and the memoized odontogram they feed) would churn on
+  // each render.
+  const { mutate: mutateInstructions } = updateInstructions;
+  const { mutate: mutateUpsertIpr } = upsertIpr;
+  const { mutate: mutateRemoveIpr } = removeIpr;
+
   const persistInstructions = useCallback(
     (colors: ToothInstruction[]) => {
       const deduped = new Map<string, ToothInstruction>();
@@ -929,18 +938,14 @@ function MovementTableSection({
       // this surface deleted every OrderToothInstruction row including
       // the doctor's, so the order odontogram appeared to "lose" all
       // four flags as soon as the planner placed any attachment.
-      updateInstructions.mutate({
+      mutateInstructions({
         id: review.orderId,
         instructions: Array.from(deduped.values()),
         replaceTypes: [ToothInstructionType.ATTACHMENT],
       });
     },
-    [review.orderId, updateInstructions],
+    [review.orderId, mutateInstructions],
   );
-
-  const handleColorChange = (next: ToothInstruction[]) => {
-    persistInstructions(next);
-  };
 
   /**
    * IPR / STEP commit — runs via the dedicated upsertIpr mutation
@@ -954,36 +959,39 @@ function MovementTableSection({
    * Clearing both `value` and `note` is interpreted as a DELETE so
    * the contact disappears from the arch — no zombie zero-value rows.
    */
-  const handleIprChange = (
-    fromTooth: number,
-    toTooth: number,
-    payload: { value: string | null; note: string | null },
-  ) => {
-    const trimmedValue = payload.value?.trim() ?? '';
-    const trimmedNote = payload.note?.trim() ?? '';
-    if (!trimmedValue && !trimmedNote) {
-      removeIpr.mutate({ fromTooth, toTooth });
-      return;
-    }
-    if (!trimmedValue) {
-      // STEP without an IPR mm — the backend requires a
-      // value, so use '0' as a sentinel meaning "no reduction, just
-      // a staged contact marker". The UI renders the STEP pill regardless.
-      upsertIpr.mutate({
+  const handleIprChange = useCallback(
+    (
+      fromTooth: number,
+      toTooth: number,
+      payload: { value: string | null; note: string | null },
+    ) => {
+      const trimmedValue = payload.value?.trim() ?? '';
+      const trimmedNote = payload.note?.trim() ?? '';
+      if (!trimmedValue && !trimmedNote) {
+        mutateRemoveIpr({ fromTooth, toTooth });
+        return;
+      }
+      if (!trimmedValue) {
+        // STEP without an IPR mm — the backend requires a
+        // value, so use '0' as a sentinel meaning "no reduction, just
+        // a staged contact marker". The UI renders the STEP pill regardless.
+        mutateUpsertIpr({
+          fromTooth,
+          toTooth,
+          value: '0',
+          note: trimmedNote.length > 0 ? trimmedNote : null,
+        });
+        return;
+      }
+      mutateUpsertIpr({
         fromTooth,
         toTooth,
-        value: '0',
+        value: trimmedValue,
         note: trimmedNote.length > 0 ? trimmedNote : null,
       });
-      return;
-    }
-    upsertIpr.mutate({
-      fromTooth,
-      toTooth,
-      value: trimmedValue,
-      note: trimmedNote.length > 0 ? trimmedNote : null,
-    });
-  };
+    },
+    [mutateUpsertIpr, mutateRemoveIpr],
+  );
 
   return (
     <Card>
@@ -1005,7 +1013,7 @@ function MovementTableSection({
           // editable here — they come in via `readonlyValue` below.
           mode="attachments"
           value={colorInstructions}
-          onChange={handleColorChange}
+          onChange={persistInstructions}
           // ── Doctor's order odontogram painted as a read-only
           //    background. Lets the planner see clinical context
           //    (No Attachments / Do Not Move / No IPR / Extract)
@@ -1017,6 +1025,14 @@ function MovementTableSection({
           readonlyValue={orderColors}
           disabled={
             !canEdit ||
+            updateInstructions.isPending ||
+            upsertIpr.isPending ||
+            removeIpr.isPending
+          }
+          // Non-blocking "Enregistrement…" chip next to the heading while
+          // a tooth/IPR persist is in flight (the disabled flip above
+          // already prevents double submits — this makes it VISIBLE).
+          saving={
             updateInstructions.isPending ||
             upsertIpr.isPending ||
             removeIpr.isPending

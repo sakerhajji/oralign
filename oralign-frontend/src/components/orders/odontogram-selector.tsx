@@ -33,6 +33,20 @@ const LOWER_LEFT = [31, 32, 33, 34, 35, 36, 37, 38] as const;
 
 const MIRRORED = new Set<number>([...UPPER_LEFT, ...LOWER_RIGHT]);
 
+/**
+ * Sprite symbol each tooth renders. The sprite ships only the 16 right-side
+ * symbols (11–18, 31–38): the artwork for every mirrored pair was
+ * byte-identical, and the left-side teeth are ALREADY flipped with CSS
+ * `scaleX(-1)` (the MIRRORED set above) — so tooth 21 rendering symbol
+ * #tooth-11 produces the exact same pixels while the sprite file, its
+ * parse time and the hidden symbol DOM are all halved.
+ */
+function canonicalSpriteTooth(toothNumber: number): number {
+  if (toothNumber >= 21 && toothNumber <= 28) return toothNumber - 10; // 21→11 … 28→18
+  if (toothNumber >= 41 && toothNumber <= 48) return toothNumber - 10; // 41→31 … 48→38
+  return toothNumber;
+}
+
 // Sprite URL — Next.js serves /public files at the root.
 const SPRITE_URL = '/teeth-sprite.svg';
 const SPRITE_HOST_ID = 'oralign-tooth-sprite-host';
@@ -312,10 +326,16 @@ function useSettledWidth<T extends HTMLElement>(): [
 
 // ── Component ──────────────────────────────────────────────────────────────
 
-export function OdontogramSelector({
+// memo matters here: the wizard + order pages keep ALL their state at the
+// page root, so every keystroke / dialog toggle / query settle anywhere on
+// the page re-renders the host. Without the wrap each of those re-ran this
+// whole component (two arches, legend, badge strip) even though nothing
+// odontogram-related changed. Callers pass stable/memoized props.
+export const OdontogramSelector = memo(function OdontogramSelector({
   value,
   onChange,
   disabled,
+  saving,
   iprValues,
   iprNotes,
   onIprChange,
@@ -327,6 +347,13 @@ export function OdontogramSelector({
   value: ToothInstruction[];
   onChange: (value: ToothInstruction[]) => void;
   disabled?: boolean;
+  /**
+   * True while a tooth/IPR change is being persisted. Renders a small
+   * non-blocking spinner next to the heading (with an accessible label)
+   * so the user knows the save is in flight — the parent usually also
+   * passes `disabled` during the same window to prevent double submits.
+   */
+  saving?: boolean;
   /**
    * Optional per-tooth IPR values (mm as a string). When provided together
    * with `onIprChange`, the odontogram renders clickable purple bars
@@ -596,6 +623,37 @@ export function OdontogramSelector({
 
   const closePopup = useCallback(() => setPopup(null), []);
 
+  // Badge strip under the chart — recomputed only when the marks (or the
+  // language) actually change, not on every popup open/close render.
+  const markBadges = useMemo(
+    () =>
+      [...assignments.entries()]
+        .sort(([a], [b]) => a - b)
+        .flatMap(([toothNumber, types]) =>
+          types.map((type) => {
+            const c = COLOR_BY_TYPE.get(type);
+            return (
+              <Badge
+                key={`${toothNumber}-${type}`}
+                variant="secondary"
+                className="gap-1.5 rounded-full px-3 py-1"
+              >
+                <span
+                  className="h-2 w-2 rounded-full"
+                  style={{ background: c?.hex }}
+                  aria-hidden
+                />
+                <span>
+                  {t('orderForm.files.tooth.toothBadge', { n: toothNumber })}
+                </span>
+                <span className="text-muted-foreground">{c?.label}</span>
+              </Badge>
+            );
+          }),
+        ),
+    [assignments, t],
+  );
+
   // Esc + scroll/resize close. Outside-click is handled in the popover itself
   // so we can ignore the click that opened it.
   useEffect(() => {
@@ -619,13 +677,26 @@ export function OdontogramSelector({
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-foreground">
+          <h2 className="flex items-center gap-2 text-lg font-semibold text-foreground">
             {title ??
               (mode === 'attachments'
                 ? t('orderForm.files.tooth.attachmentsTitle')
                 : mode === 'treatment'
                   ? t('orderForm.files.tooth.treatmentTitle')
                   : t('orderForm.files.tooth.selectorTitle'))}
+            {saving && (
+              <span
+                role="status"
+                aria-live="polite"
+                className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+              >
+                <span
+                  aria-hidden
+                  className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"
+                />
+                {t('orderForm.files.tooth.saving')}
+              </span>
+            )}
           </h2>
           <p className="text-sm text-muted-foreground">
             {subtitle ??
@@ -661,9 +732,22 @@ export function OdontogramSelector({
       )}
 
       <div className="rounded-2xl border bg-card shadow-sm">
+        {/* Skeleton while the tooth artwork downloads: same layout box
+            (fixed glyph heights), a soft pulse behind each glyph slot and
+            an accessible status line. Disappears the moment the sprite is
+            in the DOM — no layout shift either way. */}
+        {!toothSpriteReady && (
+          <p role="status" className="sr-only">
+            {t('orderForm.files.tooth.loadingChart')}
+          </p>
+        )}
         <div
           ref={chartHostRef}
-          className="odo-scroll overflow-x-auto px-2 pt-8 pb-6 sm:px-5"
+          aria-busy={!toothSpriteReady || undefined}
+          className={cn(
+            'odo-scroll overflow-x-auto px-2 pt-8 pb-6 sm:px-5',
+            !toothSpriteReady && 'odo-chart-loading',
+          )}
         >
           {/* Fixed pixel width (settled container width) instead of fluid —
               the CSS min/max still clamp it. Undefined until the first
@@ -714,32 +798,7 @@ export function OdontogramSelector({
       </div>
 
       {assignments.size > 0 ? (
-        <div className="flex flex-wrap gap-2">
-          {[...assignments.entries()]
-            .sort(([a], [b]) => a - b)
-            .flatMap(([toothNumber, types]) =>
-              types.map((type) => {
-                const c = COLOR_BY_TYPE.get(type);
-                return (
-                  <Badge
-                    key={`${toothNumber}-${type}`}
-                    variant="secondary"
-                    className="gap-1.5 rounded-full px-3 py-1"
-                  >
-                    <span
-                      className="h-2 w-2 rounded-full"
-                      style={{ background: c?.hex }}
-                      aria-hidden
-                    />
-                    <span>
-                      {t('orderForm.files.tooth.toothBadge', { n: toothNumber })}
-                    </span>
-                    <span className="text-muted-foreground">{c?.label}</span>
-                  </Badge>
-                );
-              }),
-            )}
-        </div>
+        <div className="flex flex-wrap gap-2">{markBadges}</div>
       ) : (
         <div className="flex items-center gap-2 rounded-md border border-dashed p-4 text-sm text-muted-foreground">
           <Info className="h-4 w-4" />
@@ -789,7 +848,7 @@ export function OdontogramSelector({
       )}
     </div>
   );
-}
+});
 
 // ── Legend ─────────────────────────────────────────────────────────────────
 
@@ -850,7 +909,7 @@ const BETWEEN_TEETH: readonly BetweenTeethEntry[] = [
   },
 ] as const;
 
-function ColorLegend({
+const ColorLegend = memo(function ColorLegend({
   assignments,
   readonlyAssignments,
   colors,
@@ -978,7 +1037,7 @@ function ColorLegend({
       ) : null}
     </div>
   );
-}
+});
 
 /**
  * Compact legend row — matches the original order-page legend density
@@ -1346,6 +1405,17 @@ type ToothButtonProps = {
   ) => void;
 };
 
+/** Order-sensitive content equality for the small (0–4 entry) mark arrays. */
+function sameTypes(
+  a: ToothInstructionType[] | undefined,
+  b: ToothInstructionType[] | undefined,
+): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
 const ToothButton = memo(
   function ToothButton({
     toothNumber,
@@ -1413,9 +1483,10 @@ const ToothButton = memo(
         }) as CSSProperties,
       [color?.hex, color?.outline, row],
     );
+    const spriteTooth = canonicalSpriteTooth(toothNumber);
     const spriteHref = spriteReady
-      ? `#tooth-${toothNumber}`
-      : `${SPRITE_URL}#tooth-${toothNumber}`;
+      ? `#tooth-${spriteTooth}`
+      : `${SPRITE_URL}#tooth-${spriteTooth}`;
 
     const handleClick = useCallback(
       (e: ReactMouseEvent<HTMLButtonElement>) => onClick(toothNumber, e),
@@ -1475,6 +1546,22 @@ const ToothButton = memo(
       </button>
     );
   },
+  // Compare the mark arrays by CONTENT. Every change to the instruction
+  // list rebuilds the assignments Map and mints fresh per-tooth arrays —
+  // with the default reference compare, marking ONE tooth repainted every
+  // marked tooth (each glyph is a heavy filter-laden sprite instance).
+  // Content equality confines the repaint to the tooth that changed.
+  (prev, next) =>
+    prev.toothNumber === next.toothNumber &&
+    prev.row === next.row &&
+    prev.mirrored === next.mirrored &&
+    prev.active === next.active &&
+    prev.spriteReady === next.spriteReady &&
+    prev.preferEditableFill === next.preferEditableFill &&
+    prev.disabled === next.disabled &&
+    prev.onClick === next.onClick &&
+    sameTypes(prev.types, next.types) &&
+    sameTypes(prev.readonlyTypes, next.readonlyTypes),
 );
 
 // ── IPR slot (purple bar between two adjacent teeth) ───────────────────────
@@ -1516,7 +1603,6 @@ const IprSlot = memo(function IprSlot({
   disabled,
   onClick,
 }: IprSlotProps) {
-  const { t } = useT();
   const handleClick = useCallback(
     (e: ReactMouseEvent<HTMLButtonElement>) => {
       // The slot is always rendered with an explicit `neighbour` from
@@ -2018,6 +2104,19 @@ const ODONTOGRAM_CSS = /* css */ `
   width: 100%;
   height: 96px;
   pointer-events: none;
+}
+
+/* Skeleton shown while the sprite downloads — a soft pulse in each glyph
+   slot. The glyph boxes already have fixed heights, so the pulse occupies
+   exactly the space the artwork will take: zero layout shift. */
+.odo-chart-loading .odo-glyph {
+  border-radius: 10px;
+  background: color-mix(in srgb, currentColor 7%, transparent);
+  animation: odo-skeleton-pulse 1.4s ease-in-out infinite;
+}
+@keyframes odo-skeleton-pulse {
+  0%, 100% { opacity: 0.5; }
+  50%      { opacity: 1; }
 }
 .odo-tooth-mirrored .odo-glyph {
   transform: scaleX(-1);

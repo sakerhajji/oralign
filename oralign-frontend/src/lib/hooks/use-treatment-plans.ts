@@ -334,21 +334,57 @@ export function useTreatmentPlanIprList(
  * Idempotent on the backend — re-running with the same pair updates
  * the existing row instead of inserting a duplicate. No P2002.
  */
+/**
+ * Patch ONE contact into the cached review payload instead of refetching
+ * it. The review is the heaviest query on the page (odontogram + full
+ * chat history + clinical images) — a full round-trip per IPR chip edit
+ * made every save feel slow, silently re-downloaded the movement/dental
+ * table images (their URLs embed `review.updatedAt` as a cache-buster)
+ * and repainted the whole plan editor. The row returned by the PUT is
+ * the source of truth; the review still reconciles on focus/remount per
+ * its own query settings.
+ */
+function patchReviewIprEntries(
+  queryClient: ReturnType<typeof useQueryClient>,
+  planId: string,
+  fromTooth: number,
+  toTooth: number,
+  row: TreatmentPlanIpr | null,
+) {
+  queryClient.setQueryData<TreatmentPlanReview>(
+    treatmentPlanKeys.review(planId),
+    (cached) => {
+      if (!cached) return cached;
+      const others = (cached.iprEntries ?? []).filter(
+        (e) => !(e.fromTooth === fromTooth && e.toTooth === toTooth),
+      );
+      return {
+        ...cached,
+        iprEntries: row ? [...others, row] : others,
+      };
+    },
+  );
+}
+
 export function useUpsertTreatmentPlanIpr(
   planId: string,
 ): UseMutationResult<TreatmentPlanIpr, Error, UpsertTreatmentPlanIprDto> {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (dto) => treatmentPlansService.upsertIpr(planId, dto),
-    onSuccess: () => {
-      // Invalidate both the standalone list and the review payload
-      // (which embeds iprEntries) so every consumer sees the new row.
+    onSuccess: (row) => {
+      // The standalone list is cheap — let it refetch. The heavy review
+      // payload is patched in place from the mutation response.
       queryClient.invalidateQueries({
         queryKey: treatmentPlanIprKeys.list(planId),
       });
-      queryClient.invalidateQueries({
-        queryKey: treatmentPlanKeys.review(planId),
-      });
+      patchReviewIprEntries(
+        queryClient,
+        planId,
+        row.fromTooth,
+        row.toTooth,
+        row,
+      );
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -365,13 +401,11 @@ export function useRemoveTreatmentPlanIpr(
   return useMutation({
     mutationFn: ({ fromTooth, toTooth }) =>
       treatmentPlansService.removeIpr(planId, fromTooth, toTooth),
-    onSuccess: () => {
+    onSuccess: (_res, { fromTooth, toTooth }) => {
       queryClient.invalidateQueries({
         queryKey: treatmentPlanIprKeys.list(planId),
       });
-      queryClient.invalidateQueries({
-        queryKey: treatmentPlanKeys.review(planId),
-      });
+      patchReviewIprEntries(queryClient, planId, fromTooth, toTooth, null);
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });

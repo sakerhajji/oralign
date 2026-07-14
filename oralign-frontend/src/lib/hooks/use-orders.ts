@@ -541,9 +541,13 @@ export function useUpdateToothInstructions(): UseMutationResult<
   return useMutation({
     mutationFn: ({ id, instructions, replaceTypes }) =>
       ordersService.updateToothInstructions(id, instructions, replaceTypes),
-    onSuccess: (order, variables) => {
+    onSuccess: (order) => {
+      // The PUT already returns the FULL updated order — write it into
+      // the detail cache and the lists. Do NOT also invalidate the
+      // detail key: that refired GET /orders/:id (files + variants
+      // included) right after every odontogram save for data we
+      // already hold.
       syncOrderCaches(queryClient, order);
-      queryClient.invalidateQueries({ queryKey: orderKeys.detail(variables.id) });
       // The treatment plan review payload also includes the tooth
       // instructions (grouped odontogram + IPR map). Without this
       // invalidation, the IPR purple bars in the plan editor stay

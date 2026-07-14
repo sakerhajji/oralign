@@ -148,11 +148,12 @@ export function DoctorDashboard() {
           • Unpaid orders              (count, secondary signal)
           • Paid orders                (count, healthy signal)
        */}
-      <section className="grid w-full grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 *:data-[slot=card]:bg-gradient-to-t *:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card *:data-[slot=card]:shadow-xs dark:*:data-[slot=card]:bg-card">
+      <section className="grid w-full grid-cols-1 items-stretch gap-4 md:grid-cols-2 lg:grid-cols-3">
         <KpiCard
           label={t('dashboard.kpi.totalOrders')}
           value={N(d?.orders.total ?? 0)}
           icon={ClipboardListIcon}
+          tone="primary"
           // Deep-link to the orders page so the count acts as a real
           // navigation entry — clicking the headline number takes the
           // doctor straight into the book of work it describes.
@@ -169,6 +170,9 @@ export function DoctorDashboard() {
           label={t('dashboard.kpi.outstandingBalance')}
           value={TND(d?.revenue.unpaidDebt ?? 0)}
           icon={WalletIcon}
+          // Chip mirrors the story: red while money is due, emerald
+          // when the doctor is clear — one glance, no reading.
+          tone={(d?.revenue.unpaidDebt ?? 0) > 0 ? 'red' : 'emerald'}
           // Tint the value RED when the doctor actually owes money;
           // otherwise leave the neutral default. We deliberately do
           // NOT tint emerald on zero — green on every healthy dashboard
@@ -196,6 +200,7 @@ export function DoctorDashboard() {
           label={t('dashboard.kpi.totalPatients')}
           value={N(d?.patients.total ?? 0)}
           icon={UserRoundIcon}
+          tone="violet"
           // Same idea as Total orders — clicking the count navigates
           // into the patients page so the doctor can browse the list
           // behind the number.
@@ -209,6 +214,7 @@ export function DoctorDashboard() {
           label={t('dashboard.kpi.pendingPayments')}
           value={N(d?.payments.pending ?? 0)}
           icon={TimerIcon}
+          tone="amber"
           // Deep-link straight into the payment-history page so the
           // doctor sees the list of rows behind the number. The page
           // is role-aware and shows only the doctor's own payments.
@@ -222,6 +228,7 @@ export function DoctorDashboard() {
           label={t('dashboard.kpi.unpaidOrders')}
           value={N(d?.orders.unpaid ?? 0)}
           icon={BanIcon}
+          tone={(d?.orders.unpaid ?? 0) > 0 ? 'red' : 'neutral'}
           // Unpaid orders surface the SAME per-order list as the
           // Outstanding-balance KPI — both KPIs describe the same set
           // of rows from different angles (count vs total due). Reuse
@@ -239,6 +246,7 @@ export function DoctorDashboard() {
           label={t('dashboard.kpi.paidOrders')}
           value={N(d?.orders.paid ?? 0)}
           icon={BadgeCheckIcon}
+          tone="emerald"
           // Mirror of the outstanding popup but tuned to collected
           // revenue — emerald tone, "Total collected" headline, every
           // row a 100 %-paid record.

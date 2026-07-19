@@ -61,6 +61,10 @@ services:
       MAIL_USER: ${MAIL_USER}
       MAIL_PASSWORD: ${MAIL_PASSWORD}
       MAIL_FROM: ${MAIL_FROM}
+      # Public origin of THIS API. The appointment accept/decline links in
+      # the practitioner emails are built from it — without it they fall
+      # back to http://localhost:3000 and are dead outside the server.
+      API_PUBLIC_URL: ${API_PUBLIC_URL:-https://api.oralign.com.tn}
 
     # !override REPLACES the base's "3000:3000" (which binds 0.0.0.0 and
     # would conflict with our 127.0.0.1 binding when merged).

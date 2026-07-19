@@ -71,10 +71,41 @@ export class MailService {
     }
   }
 
+  /**
+   * Extract a bare email address from a raw env value. Tolerates the
+   * formats people naturally put in MAIL_FROM — `addr@dom.tn`,
+   * `Name <addr@dom.tn>`, `"Name" <addr@dom.tn>` — and returns '' when
+   * no address can be found. Anything except a BARE address in the SMTP
+   * envelope makes strict providers reject with "553 sender address
+   * rejected: not owned by user" (seen in production when MAIL_FROM
+   * carried a display name).
+   */
+  private static extractBareAddress(raw: string | undefined): string {
+    if (!raw) return '';
+    // Prefer an explicit <addr> group, then any address-shaped token —
+    // covers `addr`, `Name <addr>` and `Name addr` alike.
+    const angled = raw.match(/<([^<>\s]+@[^<>\s]+)>/);
+    if (angled) return angled[1];
+    const token = raw.match(/[^\s"'<>,;]+@[^\s"'<>,;]+/);
+    return token ? token[0] : '';
+  }
+
   /** Bare From address — defaults to the AUTHENTICATED mailbox (never a
-   *  foreign domain: an unaligned From is what triggers spam filters). */
+   *  foreign domain: an unaligned From is what triggers spam filters).
+   *  MAIL_FROM is sanitised to a bare address; if it is set but yields
+   *  no parseable address, the authenticated MAIL_USER is used instead
+   *  so mail keeps flowing while the misconfiguration is logged. */
   private get fromAddress(): string {
-    return process.env.MAIL_FROM || process.env.MAIL_USER || '';
+    const configured = MailService.extractBareAddress(process.env.MAIL_FROM);
+    if (configured) return configured;
+    if (process.env.MAIL_FROM) {
+      this.logger.error(
+        `MAIL_FROM ("${process.env.MAIL_FROM}") does not contain a valid ` +
+          'email address — falling back to MAIL_USER. Set MAIL_FROM to a ' +
+          'BARE address (use MAIL_FROM_NAME for the display name).',
+      );
+    }
+    return MailService.extractBareAddress(process.env.MAIL_USER);
   }
 
   /** Full From header with a human display name — "Oralign <addr>". A

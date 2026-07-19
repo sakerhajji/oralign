@@ -434,11 +434,18 @@ export class AppointmentsService {
    * public API origin (global prefix `/api`), not the frontend.
    */
   private actionUrl(token: string, action: 'accept' | 'decline'): string {
-    const base = (
-      process.env.API_PUBLIC_URL ||
-      process.env.APP_URL ||
-      'http://localhost:3000'
-    ).replace(/\/$/, '');
+    const configured = process.env.API_PUBLIC_URL || process.env.APP_URL;
+    if (!configured && process.env.NODE_ENV === 'production') {
+      // Fail loud in the logs: the email still goes out, but its
+      // accept/decline links point at localhost and are dead for the
+      // recipient. Set API_PUBLIC_URL (public origin of this API,
+      // no /api suffix) in the deployment environment.
+      this.logger.error(
+        'API_PUBLIC_URL is not set — appointment accept/decline email ' +
+          'links will point at http://localhost:3000 and will not work.',
+      );
+    }
+    const base = (configured || 'http://localhost:3000').replace(/\/$/, '');
     return `${base}/api/appointments/action/${token}/${action}`;
   }
 

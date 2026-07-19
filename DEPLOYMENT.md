@@ -332,7 +332,7 @@ sudo chown "$USER":"$USER" .env.production
 
 | What you changed | What to run |
 |---|---|
-| Backend runtime vars (`JWT_*`, `MAIL_*`, `DATABASE_URL`, `REDIS_PASSWORD`, `LOG_LEVEL`, …) | `docker compose -p oralign-app -f docker-compose.yml -f docker-compose.production.yml --env-file .env.production up -d backend` |
+| Backend runtime vars (`JWT_*`, `MAIL_*`, `API_PUBLIC_URL`, `DATABASE_URL`, `REDIS_PASSWORD`, `LOG_LEVEL`, …) | `docker compose -p oralign-app -f docker-compose.yml -f docker-compose.production.yml --env-file .env.production up -d backend` |
 | `NEXT_PUBLIC_*` (frontend) | **Rebuild required** — they are baked at build time: `bash scripts/deploy.sh` |
 | `DB_USER` / `DB_PASSWORD` / `DB_NAME` | Postgres credentials are **set on volume init**. Changing them in `.env.production` only affects fresh volumes; you must also `ALTER USER` inside Postgres, or restore from backup with the new credentials. |
 | `POSTGRES_HOST_DIR` / `UPLOADS_HOST_DIR` / `BACKUPS_HOST_DIR` | Stop the stack, move the data, then `up -d`. Bind-mount paths are not hot-swappable. |
@@ -414,6 +414,39 @@ shown at [mail-tester.com](https://www.mail-tester.com) and aim for ≥ 9/10.
 The backend also logs a startup **warning** if `MAIL_FROM`'s domain differs
 from the authenticated account's domain — if you see it, the config is in
 the misaligned (spam-prone) state.
+
+> **`MAIL_FROM` must be a BARE address** (`contact@aura-aligners.com`),
+> never `Oralign <contact@…>` or `Oralign contact@…`. A display name in
+> the value corrupts the SMTP envelope and strict servers reject with
+> `553 … Sender address rejected: not owned by user`. Put the display
+> name in `MAIL_FROM_NAME`. The backend now sanitises the value (and
+> logs an error when it has to), but the env should still be clean.
+
+### 5.10 Troubleshooting — finder distance & appointment emails
+
+**Finder shows no distances** (`/trouver-un-praticien`): the browser can
+only send its position if the page's `Permissions-Policy` allows
+geolocation. The repo's nginx conf grants it (`geolocation=(self)`), but
+an older conf deployed on the VPS blocks it (`geolocation=()`), which
+silently disables the "Use my location" flow. Fix by re-applying the conf:
+
+```bash
+sudo cp /opt/oralign-app/deploy/nginx/oralign.com.tn.conf /etc/nginx/sites-available/
+sudo nginx -t && sudo systemctl reload nginx
+# verify — MUST print geolocation=(self):
+curl -sI https://oralign.com.tn/trouver-un-praticien | grep -i permissions-policy
+```
+
+**Appointment emails**: three independent requirements, all visible in
+`docker logs oralign-backend`:
+1. `MAIL_*` set and valid — otherwise `Mail configuration is incomplete`
+   at startup (no mail is sent at all).
+2. `MAIL_FROM` is a bare address — otherwise the `553 Sender address
+   rejected` above.
+3. `API_PUBLIC_URL` set (compose defaults it to
+   `https://api.oralign.com.tn`) — otherwise the accept/decline links in
+   the practitioner email point at `http://localhost:3000` and the
+   backend logs `API_PUBLIC_URL is not set`.
 
 ---
 

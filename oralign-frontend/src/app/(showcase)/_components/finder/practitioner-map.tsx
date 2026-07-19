@@ -12,7 +12,14 @@
  */
 
 import { useEffect, useMemo, useRef } from "react";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
+import {
+  MapContainer,
+  TileLayer,
+  Marker,
+  Popup,
+  useMap,
+  useMapEvents,
+} from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import type { PublicPractitioner } from "../../_lib/finder";
@@ -87,6 +94,23 @@ function MapEffects({
   return null;
 }
 
+/**
+ * Fallback position picker — a plain click anywhere on the map (not on a
+ * marker) reports its coordinates. Lets visitors get distance sorting even
+ * when browser geolocation is denied, unavailable, or blocked by a
+ * restrictive Permissions-Policy header.
+ */
+function MapClickPicker({
+  onPick,
+}: {
+  onPick: (lat: number, lng: number) => void;
+}) {
+  useMapEvents({
+    click: (e) => onPick(e.latlng.lat, e.latlng.lng),
+  });
+  return null;
+}
+
 export interface PractitionerMapProps {
   practitioners: PublicPractitioner[];
   userPosition: LatLng | null;
@@ -94,6 +118,8 @@ export interface PractitionerMapProps {
   focus: LatLng | null;
   userLabel: string;
   onSelect: (id: string) => void;
+  /** Optional — when provided, clicking the map sets the visitor position. */
+  onPickPosition?: (lat: number, lng: number) => void;
 }
 
 export default function PractitionerMap({
@@ -103,6 +129,7 @@ export default function PractitionerMap({
   focus,
   userLabel,
   onSelect,
+  onPickPosition,
 }: PractitionerMapProps) {
   // Only practitioners that carry real coordinates can be mapped.
   const located = useMemo(
@@ -139,6 +166,8 @@ export default function PractitionerMap({
       />
 
       <MapEffects focus={focus} bounds={bounds} boundsKey={boundsKey} />
+
+      {onPickPosition && <MapClickPicker onPick={onPickPosition} />}
 
       {userPosition && (
         <Marker position={userPosition} icon={userIcon()} zIndexOffset={1000}>

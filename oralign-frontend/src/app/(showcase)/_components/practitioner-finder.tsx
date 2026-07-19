@@ -10,7 +10,16 @@ import { PractitionerList } from "./finder/practitioner-list";
 import { PractitionerDetailPanel } from "./finder/practitioner-detail";
 
 type LatLng = [number, number];
-type GeoStatus = "idle" | "locating" | "denied" | "unavailable" | "granted";
+type GeoStatus =
+  | "idle"
+  | "locating"
+  | "denied"
+  | "unavailable"
+  | "granted"
+  // Visitor picked their position by clicking the map — the fallback when
+  // browser geolocation is denied, unavailable, or blocked by a restrictive
+  // Permissions-Policy header. Distance sorting works exactly the same.
+  | "manual";
 
 // Leaflet touches `window`, so the map is client-only. A branded skeleton
 // holds the layout while the chunk loads.
@@ -144,6 +153,16 @@ export function PractitionerFinder() {
     [practitioners, handleSelect],
   );
 
+  // Manual position fallback — clicking the map sets "where I am". Works
+  // even when the browser refuses geolocation, and lets a visitor search
+  // around any other point (their office, a relative's town, …).
+  const handlePickPosition = useCallback((lat: number, lng: number) => {
+    const p: LatLng = [lat, lng];
+    setUserPosition(p);
+    setFocus(p);
+    setGeoStatus("manual");
+  }, []);
+
   const closeDetail = useCallback(() => setSelected(null), []);
 
   const hasActiveFilters = Boolean(search || city);
@@ -233,11 +252,18 @@ export function PractitionerFinder() {
         {/* ── Status line ── */}
         <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-[0.82rem] text-[var(--sc-text-mid)]">
           {!loading && !error && <span>{resultsLabel}</span>}
-          {geoStatus === "granted" && userPosition && (
+          {userPosition && (geoStatus === "granted" || geoStatus === "manual") && (
             <span className="text-[var(--sc-sun-deep)]">· {f.sortedByDistance[lang]}</span>
           )}
           {geoStatus === "denied" && <span>· {f.geoDenied[lang]}</span>}
           {geoStatus === "unavailable" && <span>· {f.geoUnavailable[lang]}</span>}
+          {/* No position yet (never asked, refused, or blocked) → tell the
+              visitor the map itself is the fallback. */}
+          {!userPosition && geoStatus !== "locating" && (
+            <span className="text-[var(--sc-sun-deep)]">
+              · {f.pickOnMapHint[lang]}
+            </span>
+          )}
           {hasActiveFilters && (
             <button
               type="button"
@@ -272,6 +298,7 @@ export function PractitionerFinder() {
               focus={focus}
               userLabel={f.youAreHere[lang]}
               onSelect={handleMapSelect}
+              onPickPosition={handlePickPosition}
             />
           </div>
         </div>

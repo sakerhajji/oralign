@@ -105,6 +105,11 @@ export const dict = {
       en: "Sorted nearest first",
       ar: "مرتّبة من الأقرب",
     } as T,
+    pickOnMapHint: {
+      fr: "Ou cliquez sur la carte pour définir votre position",
+      en: "Or click the map to set your position",
+      ar: "أو انقر على الخريطة لتحديد موقعك",
+    } as T,
 
     // ── List states ──
     loading: { fr: "Chargement des praticiens…", en: "Loading practitioners…", ar: "جارٍ تحميل الأطباء…" } as T,

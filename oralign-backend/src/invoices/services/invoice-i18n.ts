@@ -32,6 +32,7 @@ export interface InvoiceLabels {
   unitPrice: string;
   amount: string;
   treatmentFee: string;
+  cbctSupplement: string;
   packLabel: string;
   installmentLine: (n: number, total: number) => string;
   // Totals
@@ -86,6 +87,7 @@ const FR: InvoiceLabels = {
   unitPrice: 'Prix unitaire',
   amount: 'Montant',
   treatmentFee: 'Honoraires de traitement',
+  cbctSupplement: 'Supplément CBCT',
   packLabel: 'Pack',
   installmentLine: (n, total) => `Échéance ${n} sur ${total}`,
   subtotalHt: 'Total HT',
@@ -137,6 +139,7 @@ const EN: InvoiceLabels = {
   unitPrice: 'Unit price',
   amount: 'Amount',
   treatmentFee: 'Treatment fee',
+  cbctSupplement: 'CBCT supplement',
   packLabel: 'Pack',
   installmentLine: (n, total) => `Installment ${n} of ${total}`,
   subtotalHt: 'Subtotal',

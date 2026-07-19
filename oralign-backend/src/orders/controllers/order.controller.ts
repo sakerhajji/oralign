@@ -50,6 +50,7 @@ import {
   BulkRestoreOrdersDto,
   BulkUpdateOrderStatusDto,
   CreateOrderDto,
+  InitChunkedUploadDto,
   OrderFilterDto,
   OrderResponseDto,
   SubmitOrderDto,
@@ -57,6 +58,7 @@ import {
   UpdateOrderStatusDto,
   UpdateToothInstructionsDto,
 } from '../dto/order.dto';
+import { ChunkedUploadService } from '../services/chunked-upload.service';
 import { OrderService } from '../services/order.service';
 
 @ApiTags('orders')
@@ -70,7 +72,10 @@ import { OrderService } from '../services/order.service';
 )
 @Controller('orders')
 export class OrderController {
-  constructor(private readonly orderService: OrderService) {}
+  constructor(
+    private readonly orderService: OrderService,
+    private readonly chunkedUploads: ChunkedUploadService,
+  ) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
@@ -515,6 +520,105 @@ export class OrderController {
       },
       dto.replaceTypes,
     );
+  }
+
+  // ── Chunked / resumable uploads (large CBCT ZIP bundles) ─────────
+  // One small request per 8 MiB chunk instead of a single 1 GB POST:
+  // per-chunk retry, resume after interruption, and the payload never
+  // sits in container RAM (parts stream to disk, assembly streams too).
+  // Same guards + service-level access rules as the single-shot path.
+
+  @Post(':id/files/chunked')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Open (or resume) a chunked upload session' })
+  @ApiParam({ name: 'id', type: String })
+  async initChunkedUpload(
+    @Param('id') id: string,
+    @Body() dto: InitChunkedUploadDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.chunkedUploads.initSession(id, dto, {
+      userId: user.sub,
+      role: user.role,
+    });
+  }
+
+  @Get(':id/files/chunked/:uploadId')
+  @HttpCode(HttpStatus.OK)
+  @SkipThrottle()
+  @ApiOperation({ summary: 'Chunked upload session state (for resume)' })
+  async getChunkedUpload(
+    @Param('id') id: string,
+    @Param('uploadId') uploadId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.chunkedUploads.getSession(id, uploadId, {
+      userId: user.sub,
+      role: user.role,
+    });
+  }
+
+  @Put(':id/files/chunked/:uploadId/chunks/:index')
+  @HttpCode(HttpStatus.OK)
+  // A 1 GB upload is ~128 chunk requests in well under a minute on a fast
+  // link — the default throttle buckets would reject it mid-flight.
+  @SkipThrottle()
+  @UseInterceptors(
+    FileInterceptor('chunk', {
+      // Chunk ceiling with a safety margin over the server-owned 8 MiB.
+      limits: { fileSize: 9 * 1024 * 1024 },
+    }),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Upload one chunk (idempotent per index)' })
+  async putChunk(
+    @Param('id') id: string,
+    @Param('uploadId') uploadId: string,
+    @Param('index') index: string,
+    @UploadedFile() chunk: Express.Multer.File,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    if (!chunk) {
+      throw new BadRequestException('Missing chunk payload');
+    }
+    return this.chunkedUploads.putChunk(
+      id,
+      uploadId,
+      Number(index),
+      chunk.buffer,
+      { userId: user.sub, role: user.role },
+    );
+  }
+
+  @Post(':id/files/chunked/:uploadId/complete')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary:
+      'Assemble the received chunks, scan the file and register it as an order file',
+  })
+  async completeChunkedUpload(
+    @Param('id') id: string,
+    @Param('uploadId') uploadId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.chunkedUploads.complete(id, uploadId, {
+      userId: user.sub,
+      role: user.role,
+    });
+  }
+
+  @Delete(':id/files/chunked/:uploadId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Abort a chunked upload and delete its parts' })
+  async abortChunkedUpload(
+    @Param('id') id: string,
+    @Param('uploadId') uploadId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.chunkedUploads.abort(id, uploadId, {
+      userId: user.sub,
+      role: user.role,
+    });
   }
 
   @Post(':id/files')

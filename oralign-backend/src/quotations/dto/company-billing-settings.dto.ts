@@ -4,6 +4,7 @@ import {
   IsBoolean,
   IsEmail,
   IsInt,
+  IsNumber,
   IsObject,
   IsOptional,
   IsString,
@@ -178,6 +179,31 @@ export class UpsertCompanyBillingSettingsDto {
   @Min(0)
   stampDuty?: number;
 
+  // CBCT paid supplement — when enabled with a fee > 0, requesting
+  // CBCT on a new order adds this supplement to the professional fee.
+  // The amount is snapshotted onto the order at request time, so
+  // editing it here only affects NEW orders (mirrors defaultTreatmentFee).
+  @ApiPropertyOptional({
+    default: false,
+    description:
+      'Whether the paid CBCT supplement is offered when doctors request CBCT on a new order.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  cbctSupplementEnabled?: boolean;
+
+  @ApiPropertyOptional({
+    minimum: 0,
+    default: 0,
+    description:
+      'CBCT supplement fee added to the professional fee when the doctor requests CBCT.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  cbctSupplementFee?: number;
+
   @ApiPropertyOptional({
     default: 'TND',
     description: 'ISO 4217 currency code',
@@ -260,6 +286,8 @@ export class CompanyBillingSettingsResponseDto {
   @ApiProperty() defaultTvaRate!: number;
   @ApiProperty() defaultTreatmentFee!: number;
   @ApiProperty() stampDuty!: number;
+  @ApiProperty() cbctSupplementEnabled!: boolean;
+  @ApiProperty() cbctSupplementFee!: number;
   @ApiProperty() defaultCurrency!: string;
   @ApiProperty() devisPrefix!: string;
   @ApiProperty() devisNextNumber!: number;

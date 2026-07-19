@@ -28,6 +28,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { formatPrice } from '@/lib/utils/currency';
 import { useT } from '@/lib/i18n/lang-context';
+import { hasUsableBankTransferDetails } from '@/lib/payments/bank-transfer';
 import {
   useBillingPublicDefaults,
   usePayTreatmentFee,
@@ -98,18 +99,22 @@ export function TreatmentFeePaymentDialog({
   // TND. The dedicated `/company-billing-settings/public-defaults`
   // route returns only the two fields we need (fee + currency) and
   // is callable by dentist + admin.
-  const { data: defaults } = useBillingPublicDefaults();
+  const { data: defaults, isLoading: defaultsLoading } =
+    useBillingPublicDefaults();
   const pay = usePayTreatmentFee();
   const uploadProof = useUploadTreatmentFeeProof();
 
   // Settings-driven amount + currency so the doctor sees what the
   // admin set under /account/billing-settings, not a stale hard-coded
-  // value. We fall back to a snapshot already stamped on the order
-  // (e.g. for an order created when the fee was different) and then
-  // to zero.
-  const amount =
-    defaults?.defaultTreatmentFee ?? order.treatmentFeeAmount ?? 0;
-  const currency = defaults?.defaultCurrency ?? 'TND';
+  // value. The CBCT supplement snapshotted on the ORDER (server-side,
+  // at request time) is added on top. An amount already stamped on the
+  // order (paid / awaiting confirmation) always wins — it's the
+  // authoritative total for that order.
+  const baseFee = defaults?.defaultTreatmentFee ?? 0;
+  const cbctFee = order.cbctFeeAmount ?? 0;
+  const amount = order.treatmentFeeAmount ?? baseFee + cbctFee;
+  const currency =
+    order.cbctFeeCurrency ?? defaults?.defaultCurrency ?? 'TND';
   const bankDetails = defaults?.bankDetails ?? null;
   const beneficiary = defaults?.companyName ?? null;
   // City + address rolled into a single beneficiary-address line so
@@ -118,15 +123,29 @@ export function TreatmentFeePaymentDialog({
     [defaults?.companyAddress, defaults?.companyCity]
       .filter((v): v is string => !!v && v.trim().length > 0)
       .join(', ') || null;
+  const isResolvingAmount =
+    defaultsLoading && order.treatmentFeeAmount == null;
+  const hasAmountDue = amount > 0;
+  const hasBankTransfer = hasUsableBankTransferDetails(bankDetails);
 
-  // Filter methods by role (doctor doesn't see Cash).
+  // Filter methods by role and payment availability.
   const methods = useMemo(
-    () => METHODS.filter((m) => !m.adminOnly || isAdmin),
-    [isAdmin],
+    () =>
+      !isResolvingAmount && hasAmountDue
+        ? METHODS.filter((m) => !m.adminOnly || isAdmin).filter(
+            (m) => m.key !== 'bank_transfer' || hasBankTransfer,
+          )
+        : [],
+    [hasAmountDue, hasBankTransfer, isAdmin, isResolvingAmount],
   );
 
   const [selected, setSelected] = useState<MethodKey | null>(null);
   const [proofFile, setProofFile] = useState<File | null>(null);
+  const selectedMethod =
+    selected && methods.some((m) => m.key === selected) ? selected : null;
+  const selectedMethodConfig = selectedMethod
+    ? METHODS.find((m) => m.key === selectedMethod)
+    : null;
 
   // Object-URL preview so the doctor can eyeball the receipt before
   // submitting. Derived from the file (not effect-driven state, which
@@ -145,9 +164,9 @@ export function TreatmentFeePaymentDialog({
 
   // Card / Cash → single backend call, stamps paidAt and closes.
   const handleInstantPay = () => {
-    if (!selected || selected === 'bank_transfer') return;
+    if (!selectedMethod || selectedMethod === 'bank_transfer') return;
     pay.mutate(
-      { id: order.id, method: selected, amount },
+      { id: order.id, method: selectedMethod, amount },
       {
         onSuccess: () => {
           onPaid?.();
@@ -172,7 +191,7 @@ export function TreatmentFeePaymentDialog({
     );
   };
 
-  const isBankTransferSelected = selected === 'bank_transfer';
+  const isBankTransferSelected = selectedMethod === 'bank_transfer';
 
   return (
     <Dialog
@@ -215,6 +234,36 @@ export function TreatmentFeePaymentDialog({
             <p className="mt-1.5 text-3xl font-bold tabular-nums text-foreground sm:text-4xl">
               {formatPrice(amount, currency)}
             </p>
+            {/* Price breakdown — only when the order carries a CBCT
+                supplement, so plain orders keep the single clean figure. */}
+            {cbctFee > 0 && order.treatmentFeeAmount == null && (
+              <dl className="mt-3 space-y-1 rounded-lg border bg-card p-3 text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-muted-foreground">
+                    {t('feeUi.payDialog.breakdownBase')}
+                  </dt>
+                  <dd className="font-medium tabular-nums">
+                    {formatPrice(baseFee, currency)}
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-muted-foreground">
+                    {t('feeUi.payDialog.breakdownCbct')}
+                  </dt>
+                  <dd className="font-medium tabular-nums">
+                    {formatPrice(cbctFee, currency)}
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between gap-3 border-t pt-1.5">
+                  <dt className="font-semibold">
+                    {t('feeUi.payDialog.breakdownTotal')}
+                  </dt>
+                  <dd className="font-semibold tabular-nums">
+                    {formatPrice(amount, currency)}
+                  </dd>
+                </div>
+              </dl>
+            )}
             <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
               {t('feeUi.payDialog.feeIntro')}
             </p>
@@ -255,11 +304,16 @@ export function TreatmentFeePaymentDialog({
                 picked → a compact strip with a Change button so the steps
                 below get the room they need.
                */}
-              {selected ? (
+              {selectedMethodConfig ? (
                 <SelectedMethodStrip
-                  method={METHODS.find((m) => m.key === selected)!}
+                  method={selectedMethodConfig}
                   disabled={busy}
                   onChange={() => setSelected(null)}
+                />
+              ) : methods.length === 0 ? (
+                <PaymentUnavailableNotice
+                  hasAmountDue={hasAmountDue}
+                  isLoading={isResolvingAmount}
                 />
               ) : (
                 <div className="space-y-2">
@@ -411,9 +465,9 @@ export function TreatmentFeePaymentDialog({
             disabled={busy}
             onClick={() => onOpenChange(false)}
           >
-            {t('common.cancel')}
+            {methods.length === 0 ? t('common.close') : t('common.cancel')}
           </Button>
-          {isBankTransferSelected ? (
+          {methods.length > 0 && isBankTransferSelected ? (
             <Button
               type="button"
               disabled={busy || !proofFile}
@@ -423,24 +477,89 @@ export function TreatmentFeePaymentDialog({
               {uploadProof.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
               {t('feeUi.payDialog.uploadReceiptBtn')}
             </Button>
-          ) : (
+          ) : methods.length > 0 ? (
             <Button
               type="button"
-              disabled={busy || !selected}
+              disabled={busy || !selectedMethod}
               onClick={handleInstantPay}
               className="gap-2"
             >
               {pay.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-              {selected === 'cash'
+              {selectedMethod === 'cash'
                 ? t('feeUi.payDialog.recordCashBtn')
                 : t('feeUi.payDialog.payAmountBtn', {
                     amount: `${amount} ${currency}`,
                   })}
             </Button>
-          )}
+          ) : null}
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function PaymentUnavailableNotice({
+  hasAmountDue,
+  isLoading,
+}: {
+  hasAmountDue: boolean;
+  isLoading: boolean;
+}) {
+  const { t } = useT();
+  return (
+    <Card
+      className={
+        isLoading
+          ? 'border-border bg-muted/30'
+          : hasAmountDue
+          ? 'border-amber-200 bg-amber-50/50'
+          : 'border-emerald-200 bg-emerald-50/50'
+      }
+    >
+      <CardContent className="flex items-start gap-3 pt-4 text-sm">
+        {isLoading ? (
+          <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
+        ) : hasAmountDue ? (
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+        ) : (
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+        )}
+        <div className="space-y-1">
+          <p
+            className={cn(
+              'font-medium',
+              isLoading
+                ? 'text-foreground'
+                : hasAmountDue
+                  ? 'text-amber-900'
+                  : 'text-emerald-900',
+            )}
+          >
+            {isLoading
+              ? t('common.loading')
+              : hasAmountDue
+                ? t('feeUi.payDialog.noAvailableMethodsTitle')
+                : t('feeUi.payDialog.noAmountTitle')}
+          </p>
+          <p
+            className={cn(
+              'text-xs',
+              isLoading
+                ? 'text-muted-foreground'
+                : hasAmountDue
+                  ? 'text-amber-800/90'
+                  : 'text-emerald-800/90',
+            )}
+          >
+            {isLoading
+              ? t('feeUi.payDialog.loadingDefaultsDesc')
+              : hasAmountDue
+                ? t('feeUi.payDialog.noAvailableMethodsDesc')
+                : t('feeUi.payDialog.noAmountDesc')}
+          </p>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

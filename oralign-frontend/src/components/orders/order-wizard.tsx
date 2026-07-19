@@ -77,6 +77,8 @@ import {
   useUpdateOrder,
   useUpdateToothInstructions,
 } from '@/lib/hooks';
+import { useBillingPublicDefaults } from '@/lib/hooks/use-company-billing';
+import { formatPrice } from '@/lib/utils/currency';
 import {
   ArchTreatment,
   CLINICAL_CONDITION_OPTIONS,
@@ -214,6 +216,19 @@ interface NewPatientDraft {
 export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
   const router = useRouter();
   const { isAdmin, isDentist, user } = useAuth();
+  // Configured CBCT paid supplement (doctor-safe public-defaults read).
+  // Null when the option is disabled or priced at 0 — the CBCT toggle
+  // then behaves exactly as before (free).
+  const { data: billingDefaults } = useBillingPublicDefaults();
+  const cbctSupplement =
+    billingDefaults?.cbctSupplementEnabled &&
+    (billingDefaults?.cbctSupplementFee ?? 0) > 0
+      ? {
+          fee: billingDefaults.cbctSupplementFee,
+          currency: billingDefaults.defaultCurrency ?? 'TND',
+          baseFee: billingDefaults.defaultTreatmentFee ?? 0,
+        }
+      : null;
   const { t } = useT();
   const [step, setStep] = useState(0);
   const [patientMode, setPatientMode] = useState<PatientMode>('existing');
@@ -732,15 +747,29 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
               section="radiography-stl"
               cbctRequested={!!form.useCbctWithScans}
               cbctToggle={
-                <ToggleTile
-                  label={t('orderForm.files.cbctRequested')}
-                  description={t('orderForm.files.cbctRequestedHint')}
-                  checked={!!form.useCbctWithScans}
-                  disabled={!canModify}
-                  onCheckedChange={(value) =>
-                    updateField('useCbctWithScans', value)
-                  }
-                />
+                <div className="space-y-2">
+                  <ToggleTile
+                    label={t('orderForm.files.cbctRequested')}
+                    description={t('orderForm.files.cbctRequestedHint')}
+                    checked={!!form.useCbctWithScans}
+                    disabled={!canModify}
+                    onCheckedChange={(value) =>
+                      updateField('useCbctWithScans', value)
+                    }
+                  />
+                  {/* Paid-supplement notice — shown the moment the
+                      toggle is on so the price is never a surprise. */}
+                  {form.useCbctWithScans && cbctSupplement && (
+                    <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800">
+                      {t('orderForm.files.cbctSupplementNote', {
+                        price: formatPrice(
+                          cbctSupplement.fee,
+                          cbctSupplement.currency,
+                        ),
+                      })}
+                    </p>
+                  )}
+                </div>
               }
             />
           </div>
@@ -799,6 +828,7 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
               }
               form={form}
               toothInstructions={toothInstructions}
+              cbctSupplement={cbctSupplement}
             />
           </div>
         )}
@@ -2554,6 +2584,7 @@ function ReviewStep({
   fallbackDentistName,
   form,
   toothInstructions,
+  cbctSupplement,
 }: {
   savedOrder?: DentalOrder;
   selectedPatient?: Patient;
@@ -2564,6 +2595,8 @@ function ReviewStep({
   fallbackDentistName: string | null;
   form: CreateOrderDto;
   toothInstructions: ToothInstruction[];
+  /** Configured CBCT paid supplement — null when disabled or free. */
+  cbctSupplement: { fee: number; currency: string; baseFee: number } | null;
 }) {
   const { t } = useT();
   // Resolve patient demographics from whichever source is populated.
@@ -2779,6 +2812,56 @@ function ReviewStep({
             value={savedOrder?.status ?? OrderStatus.DRAFT}
           />
         </div>
+
+        {/* ── Price summary — only when CBCT is requested AND priced.
+            The supplement shown prefers the order's own snapshot (an
+            already-saved draft carries the authoritative amount); the
+            configured default covers the not-yet-saved case. */}
+        {form.useCbctWithScans &&
+          (savedOrder?.cbctFeeAmount || cbctSupplement) && (
+            <dl className="mt-4 max-w-sm space-y-1 rounded-lg border bg-muted/20 p-3 text-sm">
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-muted-foreground">
+                  {t('orderForm.review.priceBase')}
+                </dt>
+                <dd className="font-medium tabular-nums">
+                  {formatPrice(
+                    cbctSupplement?.baseFee ?? 0,
+                    savedOrder?.cbctFeeCurrency ??
+                      cbctSupplement?.currency ??
+                      'TND',
+                  )}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-muted-foreground">
+                  {t('orderForm.review.priceCbct')}
+                </dt>
+                <dd className="font-medium tabular-nums">
+                  {formatPrice(
+                    savedOrder?.cbctFeeAmount ?? cbctSupplement?.fee ?? 0,
+                    savedOrder?.cbctFeeCurrency ??
+                      cbctSupplement?.currency ??
+                      'TND',
+                  )}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between gap-3 border-t pt-1.5">
+                <dt className="font-semibold">
+                  {t('orderForm.review.priceTotal')}
+                </dt>
+                <dd className="font-semibold tabular-nums">
+                  {formatPrice(
+                    (cbctSupplement?.baseFee ?? 0) +
+                      (savedOrder?.cbctFeeAmount ?? cbctSupplement?.fee ?? 0),
+                    savedOrder?.cbctFeeCurrency ??
+                      cbctSupplement?.currency ??
+                      'TND',
+                  )}
+                </dd>
+              </div>
+            </dl>
+          )}
       </ReviewSection>
     </div>
   );

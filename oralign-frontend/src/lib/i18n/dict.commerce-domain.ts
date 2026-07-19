@@ -230,6 +230,10 @@ export const commerceDomainDict = {
         en: 'Cash payments are recorded by the clinic admin when they physically receive the funds.',
         fr: 'Les paiements en espèces sont enregistrés par l’administrateur du cabinet à la réception physique des fonds.',
       } as T,
+      footDefault: {
+        en: 'Choose an available payment method to continue.',
+        fr: 'Choisissez un mode de paiement disponible pour continuer.',
+      } as T,
       sectionAria: {
         en: 'Installment payment details',
         fr: 'Détails du paiement de l’échéance',
@@ -242,6 +246,23 @@ export const commerceDomainDict = {
       methodCardDesc: { en: 'Instant confirmation', fr: 'Confirmation instantanée' } as T,
       methodBankDesc: { en: 'Upload your receipt', fr: 'Téléversez votre reçu' } as T,
       methodCashDesc: { en: 'Recorded by the clinic', fr: 'Enregistré par le cabinet' } as T,
+      loadingOptionsDesc: {
+        en: 'Checking the balance and available payment methods.',
+        fr: 'Vérification du solde et des modes de paiement disponibles.',
+      } as T,
+      noBalanceTitle: { en: 'No balance due', fr: 'Aucun solde à régler' } as T,
+      noBalanceDesc: {
+        en: 'This installment has no payable balance, so payment options are hidden.',
+        fr: 'Cette échéance n’a aucun solde à payer, les options de paiement sont donc masquées.',
+      } as T,
+      noAvailableMethodsTitle: {
+        en: 'No payment option available',
+        fr: 'Aucune option de paiement disponible',
+      } as T,
+      noAvailableMethodsDesc: {
+        en: 'The available methods are not configured for this payment yet. Please contact the clinic admin.',
+        fr: 'Les modes de paiement disponibles ne sont pas encore configurés pour ce paiement. Veuillez contacter l’administrateur du cabinet.',
+      } as T,
       cardTitle: { en: 'Secure card payment', fr: 'Paiement par carte sécurisé' } as T,
       cardAllDesc: {
         en: 'The remaining installments are processed securely in sequence. If one fails, completed payments remain recorded.',
@@ -438,6 +459,10 @@ export const commerceDomainDict = {
       title: { en: 'Pay treatment fee', fr: 'Payer les honoraires de traitement' } as T,
       orderCode: { en: 'Order {code}', fr: 'Commande {code}' } as T,
       amountDue: { en: 'Amount due', fr: 'Montant dû' } as T,
+      // Breakdown lines shown when the order carries a CBCT supplement.
+      breakdownBase: { en: 'Treatment fee', fr: 'Honoraires de traitement' } as T,
+      breakdownCbct: { en: 'CBCT supplement', fr: 'Supplément CBCT' } as T,
+      breakdownTotal: { en: 'Total', fr: 'Total' } as T,
       feeIntro: {
         en: 'The professional fee must be settled before the treatment plan can be prepared.',
         fr: 'Les honoraires professionnels doivent être réglés avant la préparation du plan de traitement.',
@@ -458,6 +483,26 @@ export const commerceDomainDict = {
       } as T,
       regionAria: { en: 'Payment details', fr: 'Détails du paiement' } as T,
       methodHeading: { en: 'Payment method', fr: 'Mode de paiement' } as T,
+      loadingDefaultsDesc: {
+        en: 'Checking the configured treatment fee and available payment methods.',
+        fr: 'Vérification des honoraires configurés et des modes de paiement disponibles.',
+      } as T,
+      noAmountTitle: {
+        en: 'No treatment fee balance due',
+        fr: 'Aucun solde d’honoraires à régler',
+      } as T,
+      noAmountDesc: {
+        en: 'This order has no payable treatment-fee balance, so payment options are hidden.',
+        fr: 'Cette commande n’a aucun solde d’honoraires à payer, les options de paiement sont donc masquées.',
+      } as T,
+      noAvailableMethodsTitle: {
+        en: 'No payment option available',
+        fr: 'Aucune option de paiement disponible',
+      } as T,
+      noAvailableMethodsDesc: {
+        en: 'The available methods are not configured for this order yet. Please contact the clinic admin.',
+        fr: 'Les modes de paiement disponibles ne sont pas encore configurés pour cette commande. Veuillez contacter l’administrateur du cabinet.',
+      } as T,
       uploadReceiptTitle: {
         en: 'Upload bank-transfer receipt',
         fr: 'Téléverser le reçu de virement bancaire',

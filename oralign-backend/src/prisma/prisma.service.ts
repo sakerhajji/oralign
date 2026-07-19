@@ -33,6 +33,10 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     return this.prisma.appointment;
   }
 
+  get uploadSession() {
+    return this.prisma.uploadSession;
+  }
+
   get patient() {
     return this.prisma.patient;
   }

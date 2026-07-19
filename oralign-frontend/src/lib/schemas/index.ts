@@ -312,6 +312,12 @@ export const companyBillingSettingsSchema = z.object({
     .min(0, 'Treatment fee must be 0 or greater'),
   // "Droit de timbre" — fiscal stamp added to the invoice total.
   stampDuty: z.number().min(0, 'Stamp duty must be 0 or greater'),
+  // CBCT paid supplement (currency follows defaultCurrency).
+  cbctSupplementEnabled: z.boolean().optional(),
+  cbctSupplementFee: z
+    .number()
+    .min(0, 'CBCT supplement must be 0 or greater')
+    .optional(),
   defaultCurrency: z.string().min(1, 'Currency is required'),
   devisPrefix: z.string().min(1, 'Devis prefix is required'),
   devisNextNumber: z.number().int().min(1, 'Next number must be at least 1'),
@@ -408,6 +414,10 @@ export const orderClinicalSchema = z.object({
   midline: z.string().optional(),
   ipr: z.string().optional(),
   biteRamps: z.string().optional(),
+  // Was MISSING from this schema although present in the DTO/types —
+  // safeParse silently stripped the expansion value from every draft
+  // save payload.
+  expansion: z.string().optional(),
   crossbite: z.string().optional(),
   spaces: z.string().optional(),
   extractions: z.string().optional(),

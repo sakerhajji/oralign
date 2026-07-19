@@ -455,6 +455,17 @@ model DentalOrder {
   // share a printed number.
   treatmentFeeInvoiceNumber     String?                   @unique
 
+  // ── CBCT paid supplement snapshot ───────────────────────────────
+  // Snapshot of CompanyBillingSettings.cbctSupplementFee taken
+  // SERVER-SIDE when the doctor requests CBCT on a DRAFT order (create
+  // or update while status = draft). Frozen once the order leaves
+  // draft, so a later config change never rewrites the price of an
+  // existing order — same idiom as treatmentFeeAmount / the pack
+  // snapshot on quotes. NULL when CBCT was not requested or the
+  // supplement is disabled / configured at 0.
+  cbctFeeAmount                 Decimal?                  @db.Decimal(12, 3)
+  cbctFeeCurrency               String?
+
   // Approved treatment plan reference — used by the order's lifecycle.
   approvedTreatmentPlanId       String?
 
@@ -469,6 +480,7 @@ model DentalOrder {
   // unique constraint on `Quotation.orderId`.
   quotation                     Quotation?
   payments                      Payment[]
+  uploadSessions                UploadSession[]
 
   @@index([doctorId])
   @@index([patientId])
@@ -554,6 +566,44 @@ model OrderFile {
   @@index([category])
   @@index([deletedAt])
   @@index([processingStatus])
+}
+
+// ── Chunked / resumable uploads ─────────────────────────────────────
+// One row per in-flight large upload (CBCT ZIP bundles). Chunks land as
+// `part-<index>` files under uploads/tmp/chunked/<sessionId>/ and the
+// row tracks which indexes arrived, so an interrupted upload resumes
+// instead of restarting. On completion the parts are STREAMED into the
+// final file (never buffered in RAM), scanned, registered as a normal
+// OrderFile and the session is deleted. Stale sessions (updatedAt older
+// than the TTL) are swept together with their part directories by
+// UploadCleanupService.
+enum UploadSessionStatus {
+  active
+  assembling
+  completed
+  failed
+}
+
+model UploadSession {
+  id             String              @id @default(uuid())
+  orderId        String
+  uploaderId     String
+  category       OrderFileCategory
+  originalName   String
+  mimeType       String?
+  totalBytes     BigInt
+  chunkSize      Int
+  totalChunks    Int
+  // Chunk indexes received so far (small: 1 GB / 8 MiB = 128 entries).
+  receivedChunks Int[]               @default([])
+  status         UploadSessionStatus @default(active)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  order          DentalOrder         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([status, updatedAt])
 }
 
 // ─────────────────────────────────────────
@@ -922,6 +972,15 @@ model CompanyBillingSettings {
   // the billing settings. Decimal(12,3) mirrors defaultTreatmentFee so
   // it rounds identically; cast back to Number at the DTO boundary.
   stampDuty               Decimal       @default(1) @db.Decimal(12, 3)
+
+  // ── CBCT paid supplement ─────────────────────────────────────────
+  // When enabled with a fee > 0, requesting CBCT on a new order adds
+  // this supplement to the professional fee. The amount is snapshotted
+  // onto the order (DentalOrder.cbctFeeAmount) at request time, so
+  // editing it here only affects NEW orders. Currency follows
+  // defaultCurrency — the merchant bills in a single currency.
+  cbctSupplementEnabled   Boolean       @default(false)
+  cbctSupplementFee       Decimal       @default(0) @db.Decimal(12, 3)
 
   // Devis numbering. Incremented inside a transaction when each quote
   // is first assigned a number, so two concurrent quote-creations can't

@@ -19,6 +19,7 @@ import {
   IsOptional,
   IsString,
   Max,
+  MaxLength,
   Min,
   MinLength,
   ValidateNested,
@@ -275,6 +276,38 @@ export class SubmitOrderDto {
   })
   @IsBoolean()
   termsAccepted!: boolean;
+}
+
+/**
+ * Body for POST /orders/:id/files/chunked — opens (or resumes) a
+ * chunked/resumable upload session for one large file. The DECLARED
+ * name + size are validated with the same rules as the single-shot
+ * upload before any byte is transferred; the response carries the
+ * server-owned chunk size plus the indexes already received, so an
+ * interrupted upload continues instead of restarting.
+ */
+export class InitChunkedUploadDto {
+  @ApiProperty({ description: 'Original client file name (no paths).' })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(255)
+  fileName!: string;
+
+  @ApiProperty({ description: 'Total file size in bytes.' })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  size!: number;
+
+  @ApiProperty({ required: false, description: 'Client-reported MIME type.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  mimeType?: string;
+
+  @ApiProperty({ enum: OrderFileCategory })
+  @IsEnum(OrderFileCategory)
+  category!: OrderFileCategory;
 }
 
 // ── Sort fields the list endpoint honours ────────────────────────
@@ -662,6 +695,10 @@ export class OrderResponseDto {
   treatmentFeePaidAt?: Date;
   @ApiProperty({ required: false, description: 'Snapshot of treatment fee amount at payment time.' })
   treatmentFeeAmount?: number;
+  @ApiProperty({ required: false, description: 'CBCT supplement price snapshotted server-side when CBCT was requested on the draft order. Absent when CBCT is not requested or the paid supplement is disabled.' })
+  cbctFeeAmount?: number;
+  @ApiProperty({ required: false, description: 'Currency of the CBCT supplement snapshot.' })
+  cbctFeeCurrency?: string;
   @ApiProperty({ required: false, description: 'Treatment fee payment method (reuses installment Payment enum).' })
   treatmentFeePaymentMethod?: string;
   @ApiProperty({ required: false, description: 'Treatment fee payment lifecycle status.' })

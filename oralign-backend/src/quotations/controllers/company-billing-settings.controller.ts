@@ -180,6 +180,8 @@ export class PublicBillingDefaultsController {
       properties: {
         defaultTreatmentFee: { type: 'number', example: 100 },
         defaultCurrency: { type: 'string', example: 'TND' },
+        cbctSupplementEnabled: { type: 'boolean', example: false },
+        cbctSupplementFee: { type: 'number', example: 0 },
         companyName: { type: 'string', nullable: true },
         companyAddress: { type: 'string', nullable: true },
         companyCity: { type: 'string', nullable: true },
@@ -200,6 +202,8 @@ export class PublicBillingDefaultsController {
   async getPublicDefaults(): Promise<{
     defaultTreatmentFee: number;
     defaultCurrency: string;
+    cbctSupplementEnabled: boolean;
+    cbctSupplementFee: number;
     companyName: string | null;
     companyAddress: string | null;
     companyCity: string | null;
@@ -243,6 +247,12 @@ export class PublicBillingDefaultsController {
         ? Number(settings.defaultTreatmentFee)
         : 0,
       defaultCurrency: settings?.defaultCurrency ?? 'TND',
+      // CBCT supplement — Number-unwrapped like defaultTreatmentFee so
+      // the order form can show the configured price before requesting.
+      cbctSupplementEnabled: settings?.cbctSupplementEnabled ?? false,
+      cbctSupplementFee: settings
+        ? Number(settings.cbctSupplementFee)
+        : 0,
       companyName: settings?.companyName ?? null,
       companyAddress: settings?.companyAddress ?? null,
       companyCity: settings?.companyCity ?? null,

@@ -68,12 +68,37 @@ import { useAuth } from '@/lib/providers/auth-provider';
 import { useT } from '@/lib/i18n/lang-context';
 import {
   Gender,
+  OrderFileCategory,
   OrderStatus,
   QuotationStatus,
   TreatmentPlanStatus,
   UserRole,
+  type OrderFile,
 } from '@/lib/types';
+import { formatPrice } from '@/lib/utils/currency';
 import { useEffect, useMemo, useRef, useState } from 'react';
+
+/**
+ * CBCT delivery status derived from the order's ZIP bundle files:
+ * none uploaded → awaiting; any still in the async pipeline →
+ * processing; any failed → failed; otherwise uploaded.
+ */
+function cbctFilesStatus(
+  files: OrderFile[],
+): 'awaiting' | 'processing' | 'failed' | 'uploaded' {
+  const zips = files.filter((f) => f.category === OrderFileCategory.ZIP);
+  if (zips.length === 0) return 'awaiting';
+  if (zips.some((f) => f.processingStatus === 'failed')) return 'failed';
+  if (
+    zips.some(
+      (f) =>
+        f.processingStatus === 'pending' || f.processingStatus === 'processing',
+    )
+  ) {
+    return 'processing';
+  }
+  return 'uploaded';
+}
 
 // Defer the odontogram (its sprite payload is heavy) until the page mounts.
 function OdontogramLoading() {
@@ -615,6 +640,24 @@ export default function OrderDetailPage() {
             label={t('orderDetail.metadata.orderCode')}
             value={order.orderCode}
           />
+          {/* CBCT paid supplement — the price snapshotted on THIS order
+              when CBCT was requested (config changes never reprice it). */}
+          {(order.cbctFeeAmount ?? 0) > 0 && (
+            <Info
+              label={t('orderDetail.metadata.cbctSupplement')}
+              value={formatPrice(
+                order.cbctFeeAmount ?? 0,
+                order.cbctFeeCurrency ?? 'TND',
+              )}
+            />
+          )}
+          {/* CBCT delivery status, derived from the ZIP bundle files. */}
+          {order.useCbctWithScans && (
+            <Info
+              label={t('orderDetail.metadata.cbctFiles')}
+              value={t(`orderDetail.metadata.cbctStatus.${cbctFilesStatus(order.files ?? [])}`)}
+            />
+          )}
         </div>
       </Section>
             </>

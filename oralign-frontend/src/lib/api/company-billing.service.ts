@@ -26,6 +26,10 @@ import type {
 export interface BillingPublicDefaults {
   defaultTreatmentFee: number;
   defaultCurrency: string;
+  /** CBCT paid supplement — drives the price note in the order wizard
+   *  and the breakdown in the treatment-fee payment dialog. */
+  cbctSupplementEnabled: boolean;
+  cbctSupplementFee: number;
   companyName: string | null;
   companyAddress: string | null;
   companyCity: string | null;

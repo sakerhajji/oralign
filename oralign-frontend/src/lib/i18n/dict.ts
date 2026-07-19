@@ -309,6 +309,10 @@ export const dict = {
         en: 'Turn on to attach a CBCT / DICOM bundle (ZIP) for this order.',
         fr: 'Activez pour joindre un volume CBCT / DICOM (ZIP) à cette commande.',
       } as T,
+      cbctSupplementNote: {
+        en: 'CBCT supplement: {price} — added to the order total.',
+        fr: 'Supplément CBCT : {price} — ajouté au total de la commande.',
+      } as T,
 
       // ── Section headers shown by ClinicalOrderFiles ──────────────
       // The order wizard renders three sub-sections that each have
@@ -748,6 +752,10 @@ export const dict = {
       treatmentObjective: { en: 'Treatment plan & clinical objective', fr: 'Plan de traitement & objectif clinique' } as T,
       toothLevel: { en: 'Tooth-level instructions & movement plan', fr: 'Instructions par dent & plan de mouvement' } as T,
       orderMetadata: { en: 'Order metadata', fr: 'Informations de commande' } as T,
+      // Price summary shown on the review step when CBCT is a paid option.
+      priceBase: { en: 'Treatment fee', fr: 'Honoraires de traitement' } as T,
+      priceCbct: { en: 'CBCT supplement', fr: 'Supplément CBCT' } as T,
+      priceTotal: { en: 'Total', fr: 'Total' } as T,
       readyToSubmit: { en: 'Ready to submit', fr: 'Prêt à soumettre' } as T,
       readyToSubmitHint: {
         en: 'Once submitted, the planner is notified and you’ll receive the treatment plan to approve.',
@@ -935,6 +943,14 @@ export const dict = {
     // Order metadata block at the bottom
     metadata: {
       cbctRequested: { en: 'CBCT requested', fr: 'CBCT demandé' } as T,
+      cbctSupplement: { en: 'CBCT supplement', fr: 'Supplément CBCT' } as T,
+      cbctFiles: { en: 'CBCT files', fr: 'Fichiers CBCT' } as T,
+      cbctStatus: {
+        awaiting: { en: 'Awaiting upload', fr: 'En attente d’envoi' } as T,
+        processing: { en: 'Processing', fr: 'Traitement en cours' } as T,
+        failed: { en: 'Processing failed', fr: 'Échec du traitement' } as T,
+        uploaded: { en: 'Uploaded', fr: 'Téléversés' } as T,
+      },
       yes: { en: 'Yes', fr: 'Oui' } as T,
       no: { en: 'No', fr: 'Non' } as T,
       manufacturing: { en: 'Manufacturing', fr: 'Fabrication' } as T,
@@ -2346,6 +2362,23 @@ export const dict = {
       en: 'Fiscal stamp (“Droit de timbre”) added to every invoice total. Set to 0 to disable.',
       fr: 'Droit de timbre fiscal ajouté au total de chaque facture. Mettez 0 pour le désactiver.',
     } as T,
+    // ── CBCT paid supplement ────────────────────────────────────
+    cbctEnabledLabel: {
+      en: 'CBCT paid supplement',
+      fr: 'Supplément CBCT payant',
+    } as T,
+    cbctEnabledHelp: {
+      en: 'When enabled, requesting CBCT on a NEW order adds the supplement below to the professional fee. Existing orders keep their original price.',
+      fr: 'Une fois activé, demander un CBCT sur une NOUVELLE commande ajoute le supplément ci-dessous aux honoraires. Les commandes existantes conservent leur prix d’origine.',
+    } as T,
+    cbctFeeLabel: {
+      en: 'CBCT supplement ({currency})',
+      fr: 'Supplément CBCT ({currency})',
+    } as T,
+    cbctFeeHelp: {
+      en: 'Charged once per order when the doctor requests CBCT files.',
+      fr: 'Facturé une fois par commande lorsque le praticien demande des fichiers CBCT.',
+    } as T,
     defaultCurrencyLabel: { en: 'Default currency', fr: 'Devise par défaut' } as T,
     devisPrefixLabel: { en: 'Devis prefix', fr: 'Préfixe du devis' } as T,
     nextQuoteNumberLabel: { en: 'Next quote number', fr: 'Prochain numéro de devis' } as T,
@@ -3186,6 +3219,22 @@ export const dict = {
       fr: 'Max 1 Go par archive ZIP (CBCT / DICOM)',
     } as T,
     maxFileHint: { en: 'Max 50 MB per file', fr: 'Max 50 Mo par fichier' } as T,
+    // ── Chunked / resumable upload (large CBCT ZIPs) ──────────────
+    chunked: {
+      preparing: { en: 'Preparing upload…', fr: 'Préparation du téléversement…' } as T,
+      uploading: { en: 'Uploading in segments — you can stay on this page', fr: 'Téléversement par segments — vous pouvez rester sur cette page' } as T,
+      finalizing: { en: 'Assembling and checking the file…', fr: 'Assemblage et vérification du fichier…' } as T,
+      done: { en: 'Upload complete', fr: 'Téléversement terminé' } as T,
+      failed: {
+        en: 'Upload interrupted. Your progress is saved — resume when ready.',
+        fr: 'Téléversement interrompu. Votre progression est enregistrée — reprenez quand vous êtes prêt.',
+      } as T,
+      resume: { en: 'Resume upload', fr: 'Reprendre le téléversement' } as T,
+      tooBig: {
+        en: '"{name}" exceeds the 1 GB ZIP limit.',
+        fr: '« {name} » dépasse la limite de 1 Go par ZIP.',
+      } as T,
+    },
     pasteImage: { en: 'Paste image', fr: 'Coller l’image' } as T,
     pasteOver: { en: 'Paste over', fr: 'Coller par-dessus' } as T,
     copy: { en: 'Copy', fr: 'Copier' } as T,

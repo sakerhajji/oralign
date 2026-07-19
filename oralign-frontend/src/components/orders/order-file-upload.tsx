@@ -54,12 +54,20 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { formatDistanceToNow } from 'date-fns';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   useDeleteOrderFile,
   useOrderFiles,
   useUploadOrderFiles,
 } from '@/lib/hooks';
+import { orderKeys } from '@/lib/hooks/use-orders';
 import { getAccessToken } from '@/lib/api';
+import {
+  CHUNKED_UPLOAD_THRESHOLD_BYTES,
+  uploadFileChunked,
+  type ChunkedUploadPhase,
+  type ResumableUploadError,
+} from '@/lib/api/chunked-upload';
 import { useT } from '@/lib/i18n/lang-context';
 import { OrderFile, OrderFileCategory } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -2333,6 +2341,11 @@ function ZipUploadAction({
   // per-file bar the backend can't actually feed.
   const [progress, setProgress] = useState<number | null>(null);
   const [uploadingCount, setUploadingCount] = useState<number | null>(null);
+  // Chunked-upload extras: the current phase for the status line, and
+  // whether an interrupted upload can be resumed (server session alive).
+  const [chunkPhase, setChunkPhase] = useState<ChunkedUploadPhase | null>(null);
+  const [resumeAvailable, setResumeAvailable] = useState(false);
+  const queryClient = useQueryClient();
 
   // True while the client-side content-security pre-check reads file
   // headers — normally a few ms, but gates the picker so a second pick
@@ -2380,7 +2393,15 @@ function ZipUploadAction({
     if (zips.length > 0) {
       // Only one ZIP at a time — a ZIP selection REPLACES the staged set.
       if (zips.length > 1) toast.warning(t('media.zipAction.oneZipReplaced'));
-      setStaged([zips[zips.length - 1]]);
+      const zip = zips[zips.length - 1];
+      // Fail fast on the 1 GB ZIP ceiling — the server enforces it too,
+      // but rejecting BEFORE a multi-minute transfer is basic courtesy.
+      if (zip.size > 1024 * 1024 * 1024) {
+        toast.error(t('media.chunked.tooBig', { name: zip.name }));
+        return;
+      }
+      setResumeAvailable(false);
+      setStaged([zip]);
       return;
     }
 
@@ -2400,8 +2421,64 @@ function ZipUploadAction({
   const removeStaged = (index: number) =>
     setStaged((cur) => cur.filter((_, i) => i !== index));
 
+  /**
+   * Chunked path for large ZIPs: segments + per-chunk retry + resume.
+   * The server session survives interruptions, so re-invoking this after
+   * a failure continues from the last received chunk.
+   */
+  const startChunkedZipUpload = async (file: File) => {
+    setResumeAvailable(false);
+    setUploadingCount(1);
+    setProgress(0);
+    try {
+      await uploadFileChunked(orderId, file, category, {
+        onProgress: setProgress,
+        onPhase: setChunkPhase,
+      });
+      toast.success(t('media.chunked.done'));
+      setStaged([]);
+      // Same cache refresh as the single-shot mutation's onSuccess.
+      await queryClient.invalidateQueries({
+        queryKey: orderKeys.files(orderId),
+      });
+      await queryClient.invalidateQueries({
+        queryKey: orderKeys.detail(orderId),
+      });
+    } catch (error) {
+      const err = error as ResumableUploadError & {
+        response?: { status?: number; data?: { message?: string } };
+      };
+      const serverMessage = err.response?.data?.message;
+      if (err.response?.status === 409 && serverMessage) {
+        // Duplicate upload — the backend message is user-friendly.
+        toast.error(serverMessage);
+        setStaged([]);
+      } else if (err.resumable) {
+        toast.error(t('media.chunked.failed'));
+        setResumeAvailable(true);
+      } else {
+        toast.error(serverMessage ?? t('media.chunked.failed'));
+      }
+    } finally {
+      window.setTimeout(() => {
+        setProgress(null);
+        setUploadingCount(null);
+        setChunkPhase(null);
+      }, 600);
+    }
+  };
+
   const startUploadBatch = () => {
     if (staged.length === 0) return;
+    // Large single ZIPs go through the chunked/resumable pipeline; small
+    // files keep the proven single-request path.
+    if (
+      stagedKind === 'zip' &&
+      staged[0].size > CHUNKED_UPLOAD_THRESHOLD_BYTES
+    ) {
+      void startChunkedZipUpload(staged[0]);
+      return;
+    }
     // ZIP → the caller's category (ZIP). A pure DICOM batch → IMAGE (the
     // existing single-.dcm routing). Any other loose file(s) → OTHER, so
     // arbitrary attachments land in a neutral bucket and still surface in
@@ -2612,7 +2689,9 @@ function ZipUploadAction({
               onClick={startUploadBatch}
             >
               <UploadCloud className="h-4 w-4" />
-              {t('media.zipAction.uploadCount', { count: staged.length })}
+              {resumeAvailable
+                ? t('media.chunked.resume')
+                : t('media.zipAction.uploadCount', { count: staged.length })}
             </Button>
           </div>
         )}
@@ -2639,10 +2718,18 @@ function ZipUploadAction({
             </span>
           </div>
           <Progress value={progress ?? 0} className="h-2" />
-          {progress === 100 && (
+          {/* Chunked uploads narrate their phase; the single-shot path
+              keeps the original "finalising" hint at 100%. */}
+          {chunkPhase ? (
             <p className="text-xs text-primary">
-              {t('media.zipAction.finalising')}
+              {t(`media.chunked.${chunkPhase}`)}
             </p>
+          ) : (
+            progress === 100 && (
+              <p className="text-xs text-primary">
+                {t('media.zipAction.finalising')}
+              </p>
+            )
           )}
         </div>
       )}

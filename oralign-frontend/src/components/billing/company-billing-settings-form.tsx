@@ -15,6 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { CountryCityPicker } from '@/components/ui/country-city-picker';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { companyBillingService } from '@/lib/api/company-billing.service';
@@ -38,6 +39,8 @@ interface FormState extends UpsertCompanyBillingSettingsDto {
   defaultTvaRate: number;
   defaultTreatmentFee: number;
   stampDuty: number;
+  cbctSupplementEnabled: boolean;
+  cbctSupplementFee: number;
   defaultCurrency: string;
   devisPrefix: string;
   devisNextNumber: number;
@@ -65,6 +68,10 @@ const emptyState: FormState = {
   // "Droit de timbre" — Tunisian fiscal stamp added to every invoice
   // total. Backend column defaults to 1.000 TND.
   stampDuty: 1,
+  // CBCT paid supplement — off by default; enabling it prices CBCT
+  // requests on NEW orders only (existing orders keep their snapshot).
+  cbctSupplementEnabled: false,
+  cbctSupplementFee: 0,
   defaultCurrency: 'TND',
   devisPrefix: 'DEV',
   devisNextNumber: 1,
@@ -117,6 +124,8 @@ export function CompanyBillingSettingsForm() {
       defaultTvaRate: settings.defaultTvaRate ?? 19,
       defaultTreatmentFee: settings.defaultTreatmentFee ?? 0,
       stampDuty: settings.stampDuty ?? 1,
+      cbctSupplementEnabled: settings.cbctSupplementEnabled ?? false,
+      cbctSupplementFee: settings.cbctSupplementFee ?? 0,
       defaultCurrency: settings.defaultCurrency ?? 'TND',
       devisPrefix: settings.devisPrefix ?? 'DEV',
       devisNextNumber: settings.devisNextNumber ?? 1,
@@ -179,6 +188,8 @@ export function CompanyBillingSettingsForm() {
       defaultTvaRate: form.defaultTvaRate,
       defaultTreatmentFee: form.defaultTreatmentFee,
       stampDuty: form.stampDuty,
+      cbctSupplementEnabled: form.cbctSupplementEnabled,
+      cbctSupplementFee: Math.max(0, form.cbctSupplementFee),
       defaultCurrency: form.defaultCurrency.trim() || 'TND',
       devisPrefix: form.devisPrefix.trim() || 'DEV',
       devisNextNumber: form.devisNextNumber,
@@ -429,6 +440,45 @@ export function CompanyBillingSettingsForm() {
             placeholder={t('accountBillingSettings.stampDutyPlaceholder')}
             helper={t('accountBillingSettings.stampDutyHelp')}
           />
+          {/* ── CBCT paid supplement ─────────────────────────────────
+              When enabled with a fee > 0, requesting CBCT on a NEW
+              order adds this amount to the professional fee (the price
+              is snapshotted onto the order server-side, so changing it
+              here never touches existing orders). */}
+          <div className="space-y-3 rounded-lg border p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="space-y-0.5">
+                <Label htmlFor="cbct-supplement-enabled" className="font-medium">
+                  {t('accountBillingSettings.cbctEnabledLabel')}
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  {t('accountBillingSettings.cbctEnabledHelp')}
+                </p>
+              </div>
+              <Switch
+                id="cbct-supplement-enabled"
+                checked={form.cbctSupplementEnabled}
+                onCheckedChange={(checked) =>
+                  updateField('cbctSupplementEnabled', checked)
+                }
+              />
+            </div>
+            <Field
+              label={t('accountBillingSettings.cbctFeeLabel', {
+                currency: form.defaultCurrency || 'TND',
+              })}
+              value={String(form.cbctSupplementFee)}
+              type="number"
+              step="0.001"
+              min="0"
+              disabled={!form.cbctSupplementEnabled}
+              onChange={(v) =>
+                updateField('cbctSupplementFee', Math.max(0, Number(v) || 0))
+              }
+              placeholder="0"
+              helper={t('accountBillingSettings.cbctFeeHelp')}
+            />
+          </div>
           <Field
             label={t('accountBillingSettings.defaultCurrencyLabel')}
             value={form.defaultCurrency}
@@ -596,6 +646,7 @@ function Field({
   step,
   min,
   helper,
+  disabled,
 }: {
   label: string;
   value: string;
@@ -607,6 +658,7 @@ function Field({
   step?: string;
   min?: string;
   helper?: string;
+  disabled?: boolean;
 }) {
   return (
     <div className={wide ? 'sm:col-span-2' : undefined}>
@@ -621,6 +673,7 @@ function Field({
         placeholder={placeholder}
         step={step}
         min={min}
+        disabled={disabled}
       />
       {helper && <p className="mt-1 text-xs text-muted-foreground">{helper}</p>}
     </div>

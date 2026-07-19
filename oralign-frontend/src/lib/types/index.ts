@@ -300,6 +300,11 @@ export interface CompanyBillingSettings {
   // Added to the INVOICE total. Decimal on the backend, serialised as a
   // number at the DTO boundary exactly like `defaultTreatmentFee`.
   stampDuty: number;
+  // CBCT paid supplement — when enabled with a fee > 0, requesting CBCT
+  // on a NEW order snapshots this amount onto the order. Currency
+  // follows defaultCurrency.
+  cbctSupplementEnabled: boolean;
+  cbctSupplementFee: number;
   defaultCurrency: string;
   devisPrefix: string;
   devisNextNumber: number;
@@ -331,6 +336,9 @@ export interface UpsertCompanyBillingSettingsDto {
   defaultTreatmentFee?: number;
   /** "Droit de timbre" — fiscal stamp added to the invoice total. */
   stampDuty?: number;
+  /** CBCT paid supplement toggle + fee (currency = defaultCurrency). */
+  cbctSupplementEnabled?: boolean;
+  cbctSupplementFee?: number;
   defaultCurrency?: string;
   devisPrefix?: string;
   devisNextNumber?: number;
@@ -1017,6 +1025,11 @@ export interface DentalOrder {
   treatmentFeePaymentMethod?: PaymentMethod;
   treatmentFeePaymentStatus?: PaymentRecordStatus;
   treatmentFeeProofPath?: string;
+  // CBCT supplement snapshot — set server-side when the doctor requests
+  // CBCT on a draft order and the paid supplement is enabled; frozen
+  // after submission so config changes never reprice existing orders.
+  cbctFeeAmount?: number;
+  cbctFeeCurrency?: string;
   // ── Notification badges (computed by the backend list endpoint) ───────────
   // `latestPlanStatus` is undefined when no treatment plan has been started.
   latestPlanStatus?: TreatmentPlanStatus;

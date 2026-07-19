@@ -105,6 +105,14 @@ export interface InvoiceRenderPayload {
   settings: CompanyBillingSettings;
   language: InvoiceLanguage;
   /**
+   * CBCT supplement snapshot included in `payment.amount` — only set on
+   * treatment-fee payloads whose order carried `cbctFeeAmount`. When
+   * positive the line-item table splits the amount into a professional
+   * fee row + a "Supplément CBCT" row; the totals stay unchanged.
+   * Installment / pack receipts never carry it.
+   */
+  cbctFeeAmount?: number | null;
+  /**
    * Prefix for the id-derived fallback number when no sequential number
    * has been allocated yet — `INV` for an installment receipt, `TF` for
    * a treatment-fee invoice. Ignored once a real number exists.
@@ -341,6 +349,8 @@ export class InvoicePdfService implements OnModuleDestroy {
         treatmentFeePaymentStatus: true,
         treatmentFeePaidAt: true,
         treatmentFeeInvoiceNumber: true,
+        cbctFeeAmount: true,
+        cbctFeeCurrency: true,
         doctor: {
           select: {
             id: true,
@@ -419,7 +429,10 @@ export class InvoicePdfService implements OnModuleDestroy {
       payment,
       quotation: {
         id: order.id,
-        currency: 'TND',
+        // The CBCT snapshot carries the merchant currency at request
+        // time (follows defaultCurrency); fall back to TND for orders
+        // without one — same value the fee has always been billed in.
+        currency: order.cbctFeeCurrency ?? 'TND',
         // Treatment fee is a flat professional fee — no VAT line.
         tvaRate: 0,
         totalTtc: this.toNumber(order.treatmentFeeAmount),
@@ -436,6 +449,12 @@ export class InvoicePdfService implements OnModuleDestroy {
       settings,
       language: finalLanguage,
       numberFallbackPrefix: 'TF',
+      // Decimal → Number at the payload boundary, same treatment as
+      // `totalTtc` above; null when the order never carried a CBCT fee.
+      cbctFeeAmount:
+        order.cbctFeeAmount !== null
+          ? this.toNumber(order.cbctFeeAmount)
+          : null,
     };
   }
 
@@ -1011,6 +1030,31 @@ export class InvoicePdfService implements OnModuleDestroy {
   ): InvoiceLineRow[] {
     const { payment, quotation, installment } = payload;
     const amount = this.toNumber(payment.amount);
+
+    // Treatment-fee invoice whose order snapshotted a CBCT supplement →
+    // break the single billed amount into its two components so the
+    // doctor sees what the supplement cost. The rows sum back to the
+    // same `payment.amount`, so the totals section is untouched.
+    // Installment / pack receipts never carry `cbctFeeAmount`.
+    const cbctFee = Math.max(0, this.toNumber(payload.cbctFeeAmount ?? 0));
+    if (!installment && cbctFee > 0) {
+      const professionalFee = Math.max(0, amount - cbctFee);
+      return [
+        {
+          description: labels.treatmentFee,
+          quantity: 1,
+          unitPrice: professionalFee,
+          amount: professionalFee,
+        },
+        {
+          description: labels.cbctSupplement,
+          quantity: 1,
+          unitPrice: cbctFee,
+          amount: cbctFee,
+        },
+      ];
+    }
+
     const packLabel = quotation.packName
       ? `${labels.packLabel}: ${quotation.packName}`
       : labels.treatmentFee;

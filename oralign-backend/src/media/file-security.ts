@@ -27,6 +27,7 @@
  * place. Returns a verdict; the caller decides how to surface it.
  */
 
+import * as fs from 'fs';
 import * as yauzl from 'yauzl';
 import {
   ZIP_MAX_LISTED_ENTRIES,
@@ -308,19 +309,16 @@ const STRICT_MAGIC_EXTENSIONS = new Set([
 ]);
 
 /**
- * Scan a single uploaded file. Extension allow-listing / size limits stay
- * with the caller — this only judges CONTENT.
+ * Judge a file's PREFIX bytes (first 64 KB is enough for every check
+ * below). Returns 'zip' when the content is a valid ZIP whose entries
+ * still need inspecting — the caller picks the buffer- or file-based
+ * ZIP walk. Shared by the single-shot (RAM buffer) and chunked
+ * (assembled-on-disk) upload paths so both enforce identical rules.
  */
-export async function scanUploadContent(
-  file: ScannableFile,
-): Promise<FileSecurityVerdict> {
-  const buf = file.buffer;
-  if (!buf || buf.length === 0) {
-    return { safe: false, code: 'empty', reason: 'The file is empty.' };
-  }
-
-  const ext = extOf(file.originalname);
-
+function judgePrefix(
+  buf: Buffer,
+  ext: string,
+): FileSecurityVerdict | 'zip' {
   // 1) Disguised executable / script — reject no matter the extension.
   const exe = hasExecutableSignature(buf);
   if (exe) {
@@ -340,8 +338,8 @@ export async function scanUploadContent(
         reason: `File content does not match its "${ext}" type.`,
       };
     }
-    // ZIP gets a full entry inspection.
-    if (ext === '.zip') return scanZipBuffer(buf);
+    // ZIP gets a full entry inspection by the caller.
+    if (ext === '.zip') return 'zip';
     // Other strong-magic formats are validated binary blobs — done.
     return { safe: true };
   }
@@ -375,6 +373,70 @@ export async function scanUploadContent(
 }
 
 /**
+ * Scan a single uploaded file. Extension allow-listing / size limits stay
+ * with the caller — this only judges CONTENT.
+ */
+export async function scanUploadContent(
+  file: ScannableFile,
+): Promise<FileSecurityVerdict> {
+  const buf = file.buffer;
+  if (!buf || buf.length === 0) {
+    return { safe: false, code: 'empty', reason: 'The file is empty.' };
+  }
+
+  const verdict = judgePrefix(buf, extOf(file.originalname));
+  if (verdict === 'zip') return scanZipBuffer(buf);
+  return verdict;
+}
+
+/**
+ * Scan a file that already lives ON DISK (chunked-upload assembly) with
+ * the exact same rules as scanUploadContent — but without ever loading
+ * the payload into RAM: the prefix checks read the first 64 KB and the
+ * ZIP walk streams the central directory via yauzl.open().
+ */
+export async function scanUploadFile(
+  absolutePath: string,
+  originalName: string,
+): Promise<FileSecurityVerdict> {
+  let stat: fs.Stats;
+  try {
+    stat = await fs.promises.stat(absolutePath);
+  } catch {
+    return { safe: false, code: 'empty', reason: 'The file is missing.' };
+  }
+  if (stat.size === 0) {
+    return { safe: false, code: 'empty', reason: 'The file is empty.' };
+  }
+
+  const prefixLength = Math.min(stat.size, 64 * 1024);
+  const prefix = Buffer.alloc(prefixLength);
+  const fd = await fs.promises.open(absolutePath, 'r');
+  try {
+    await fd.read(prefix, 0, prefixLength, 0);
+  } finally {
+    await fd.close();
+  }
+
+  const verdict = judgePrefix(prefix, extOf(originalName));
+  if (verdict !== 'zip') return verdict;
+
+  return new Promise((resolve) => {
+    yauzl.open(absolutePath, { lazyEntries: true }, (err, zipfile) => {
+      if (err || !zipfile) {
+        resolve({
+          safe: false,
+          code: 'zip_unreadable',
+          reason: 'The ZIP archive is corrupt or unreadable.',
+        });
+        return;
+      }
+      inspectZipEntries(zipfile, stat.size, resolve);
+    });
+  });
+}
+
+/**
  * Inspect a ZIP archive's central directory (no extraction / inflation).
  * Rejects dangerous entry types, path traversal, and bomb-like archives.
  */
@@ -389,103 +451,115 @@ export function scanZipBuffer(buf: Buffer): Promise<FileSecurityVerdict> {
         });
         return;
       }
-
-      let entryCount = 0;
-      let totalUncompressed = 0;
-      let settled = false;
-
-      const done = (verdict: FileSecurityVerdict) => {
-        if (settled) return;
-        settled = true;
-        try {
-          zipfile.close();
-        } catch {
-          /* already closed */
-        }
-        resolve(verdict);
-      };
-
-      zipfile.on('entry', (entry: yauzl.Entry) => {
-        entryCount += 1;
-        totalUncompressed += entry.uncompressedSize || 0;
-
-        const raw = entry.fileName || '';
-        const normalized = raw.replace(/\\/g, '/');
-
-        // Control chars / null bytes in a member name — never legitimate.
-        if (hasControlChar(raw)) {
-          done({
-            safe: false,
-            code: 'zip_traversal',
-            reason: 'The archive contains an entry with an invalid name.',
-            detail: raw,
-          });
-          return;
-        }
-
-        // Path traversal / absolute paths → Zip-Slip.
-        const segments = normalized.split('/');
-        const isAbsolute =
-          normalized.startsWith('/') || /^[a-zA-Z]:/.test(normalized);
-        if (isAbsolute || segments.some((s) => s === '..')) {
-          done({
-            safe: false,
-            code: 'zip_traversal',
-            reason: 'The archive contains an unsafe path (directory traversal).',
-            detail: raw,
-          });
-          return;
-        }
-
-        // Dangerous member type (skip pure directory entries).
-        const isDir = normalized.endsWith('/');
-        if (!isDir) {
-          const entryExt = extOf(normalized);
-          if (DANGEROUS_ENTRY_EXTENSIONS.has(entryExt)) {
-            done({
-              safe: false,
-              code: 'zip_dangerous_entry',
-              reason: `The archive contains a script/executable file (${entryExt}).`,
-              detail: raw,
-            });
-            return;
-          }
-        }
-
-        // Bomb guards — declared sizes only (nothing is inflated).
-        if (
-          entryCount > ZIP_MAX_LISTED_ENTRIES ||
-          totalUncompressed > ZIP_SUSPICIOUS_TOTAL_BYTES ||
-          totalUncompressed / Math.max(1, buf.length) > ZIP_SUSPICIOUS_RATIO
-        ) {
-          done({
-            safe: false,
-            code: 'zip_bomb',
-            reason: 'The archive looks like a zip bomb and was rejected.',
-          });
-          return;
-        }
-
-        zipfile.readEntry();
-      });
-
-      zipfile.on('end', () => {
-        if (entryCount === 0) {
-          done({ safe: false, code: 'empty', reason: 'The ZIP archive is empty.' });
-          return;
-        }
-        done({ safe: true });
-      });
-
-      zipfile.on('error', () => {
-        done({
-          safe: false,
-          code: 'zip_unreadable',
-          reason: 'The ZIP archive is corrupt or unreadable.',
-        });
-      });
-
-      zipfile.readEntry();
+      inspectZipEntries(zipfile, buf.length, resolve);
     });
   });
+}
+
+/**
+ * Shared central-directory walk used by both the buffer- and file-based
+ * ZIP scans. `archiveBytes` (compressed size on the wire) feeds the
+ * bomb-ratio guard.
+ */
+function inspectZipEntries(
+  zipfile: yauzl.ZipFile,
+  archiveBytes: number,
+  resolve: (verdict: FileSecurityVerdict) => void,
+): void {
+  let entryCount = 0;
+  let totalUncompressed = 0;
+  let settled = false;
+
+  const done = (verdict: FileSecurityVerdict) => {
+    if (settled) return;
+    settled = true;
+    try {
+      zipfile.close();
+    } catch {
+      /* already closed */
+    }
+    resolve(verdict);
+  };
+
+  zipfile.on('entry', (entry: yauzl.Entry) => {
+    entryCount += 1;
+    totalUncompressed += entry.uncompressedSize || 0;
+
+    const raw = entry.fileName || '';
+    const normalized = raw.replace(/\\/g, '/');
+
+    // Control chars / null bytes in a member name — never legitimate.
+    if (hasControlChar(raw)) {
+      done({
+        safe: false,
+        code: 'zip_traversal',
+        reason: 'The archive contains an entry with an invalid name.',
+        detail: raw,
+      });
+      return;
+    }
+
+    // Path traversal / absolute paths → Zip-Slip.
+    const segments = normalized.split('/');
+    const isAbsolute =
+      normalized.startsWith('/') || /^[a-zA-Z]:/.test(normalized);
+    if (isAbsolute || segments.some((s) => s === '..')) {
+      done({
+        safe: false,
+        code: 'zip_traversal',
+        reason: 'The archive contains an unsafe path (directory traversal).',
+        detail: raw,
+      });
+      return;
+    }
+
+    // Dangerous member type (skip pure directory entries).
+    const isDir = normalized.endsWith('/');
+    if (!isDir) {
+      const entryExt = extOf(normalized);
+      if (DANGEROUS_ENTRY_EXTENSIONS.has(entryExt)) {
+        done({
+          safe: false,
+          code: 'zip_dangerous_entry',
+          reason: `The archive contains a script/executable file (${entryExt}).`,
+          detail: raw,
+        });
+        return;
+      }
+    }
+
+    // Bomb guards — declared sizes only (nothing is inflated).
+    if (
+      entryCount > ZIP_MAX_LISTED_ENTRIES ||
+      totalUncompressed > ZIP_SUSPICIOUS_TOTAL_BYTES ||
+      totalUncompressed / Math.max(1, archiveBytes) > ZIP_SUSPICIOUS_RATIO
+    ) {
+      done({
+        safe: false,
+        code: 'zip_bomb',
+        reason: 'The archive looks like a zip bomb and was rejected.',
+      });
+      return;
+    }
+
+    zipfile.readEntry();
+  });
+
+  zipfile.on('end', () => {
+    if (entryCount === 0) {
+      done({ safe: false, code: 'empty', reason: 'The ZIP archive is empty.' });
+      return;
+    }
+    done({ safe: true });
+  });
+
+  zipfile.on('error', () => {
+    done({
+      safe: false,
+      code: 'zip_unreadable',
+      reason: 'The ZIP archive is corrupt or unreadable.',
+    });
+  });
+
+  zipfile.readEntry();
 }

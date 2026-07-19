@@ -135,6 +135,14 @@ type ClinicalOrderData = Partial<
   >
 >;
 
+type BankDetailsSnapshot = {
+  bankName?: string;
+  accountName?: string;
+  rib?: string;
+  iban?: string;
+  swift?: string;
+} | null;
+
 const ADMIN_ROLES: string[] = [UserRole.admin, UserRole.super_admin];
 
 // ── Per-category upload caps ─────────────────────────────────────────
@@ -149,10 +157,10 @@ const ADMIN_ROLES: string[] = [UserRole.admin, UserRole.super_admin];
 //
 // Bytes-only constants (no MB strings) so unit conversion is obvious
 // at the call site.
-const MAX_FILE_SIZE_DEFAULT_BYTES = 50 * 1024 * 1024;      //  50 MB
-const MAX_FILE_SIZE_ZIP_BUNDLE_BYTES = 1024 * 1024 * 1024; //   1 GB
+export const MAX_FILE_SIZE_DEFAULT_BYTES = 50 * 1024 * 1024;      //  50 MB
+export const MAX_FILE_SIZE_ZIP_BUNDLE_BYTES = 1024 * 1024 * 1024; //   1 GB
 
-const UPLOAD_ROOT = path.join(process.cwd(), 'uploads');
+export const UPLOAD_ROOT = path.join(process.cwd(), 'uploads');
 
 @Injectable()
 export class OrderService {
@@ -185,9 +193,18 @@ export class OrderService {
     await this.ensurePatientBelongsToDoctor(createOrderDto.patientId, doctorId);
     this.ensureUniqueToothInstructions(createOrderDto.toothInstructions ?? []);
 
+    // CBCT paid supplement — snapshot the CONFIGURED price server-side
+    // the moment the doctor requests CBCT. Never client-supplied.
+    const cbct = createOrderDto.useCbctWithScans
+      ? await this.resolveCbctSupplement()
+      : null;
+
     const order = await this.prisma.dentalOrder.create({
       data: {
         ...this.buildClinicalData(createOrderDto),
+        ...(cbct
+          ? { cbctFeeAmount: cbct.amount, cbctFeeCurrency: cbct.currency }
+          : {}),
         orderCode:
           createOrderDto.orderCode ??
           (await this.generateOrderCode(createOrderDto.patientId)),
@@ -283,6 +300,7 @@ export class OrderService {
       where: { id },
       data: {
         ...this.buildClinicalData(updateOrderDto),
+        ...(await this.cbctSnapshotUpdate(current, updateOrderDto)),
         ...(ADMIN_ROLES.includes(caller.role) && doctorId ? { doctorId } : {}),
         patientId,
         ...(updateOrderDto.orderCode
@@ -293,6 +311,61 @@ export class OrderService {
     });
 
     return this.mapToDto(order);
+  }
+
+  /**
+   * CBCT supplement price for NEW requests, read from the ACTIVE company
+   * billing settings. Returns null when the paid option is disabled or
+   * configured at 0 — CBCT then behaves exactly as before (free).
+   */
+  private async resolveCbctSupplement(): Promise<{
+    amount: Prisma.Decimal;
+    currency: string;
+  } | null> {
+    const settings = await this.prisma.companyBillingSettings.findFirst({
+      where: { isActive: true },
+      orderBy: { updatedAt: 'desc' },
+      select: {
+        cbctSupplementEnabled: true,
+        cbctSupplementFee: true,
+        defaultCurrency: true,
+      },
+    });
+    if (!settings?.cbctSupplementEnabled) return null;
+    if (Number(settings.cbctSupplementFee) <= 0) return null;
+    return {
+      amount: settings.cbctSupplementFee,
+      currency: settings.defaultCurrency || 'TND',
+    };
+  }
+
+  /**
+   * Snapshot transitions on update. Only DRAFT orders reprice — once the
+   * order left draft (submitted / fee paid) the snapshot is frozen, so a
+   * configuration change can never rewrite an existing order's price.
+   *   • CBCT toggled ON  (no snapshot yet) → snapshot the current config.
+   *   • CBCT toggled OFF                   → clear the snapshot.
+   *   • Toggle untouched / already priced  → leave as-is.
+   */
+  private async cbctSnapshotUpdate(
+    current: { status: OrderStatus; cbctFeeAmount: Prisma.Decimal | null },
+    dto: UpdateOrderDto,
+  ): Promise<{
+    cbctFeeAmount?: Prisma.Decimal | null;
+    cbctFeeCurrency?: string | null;
+  }> {
+    if (dto.useCbctWithScans === undefined) return {};
+    if (current.status !== OrderStatus.draft) return {};
+
+    if (dto.useCbctWithScans === false) {
+      return { cbctFeeAmount: null, cbctFeeCurrency: null };
+    }
+    if (current.cbctFeeAmount !== null) return {};
+
+    const cbct = await this.resolveCbctSupplement();
+    return cbct
+      ? { cbctFeeAmount: cbct.amount, cbctFeeCurrency: cbct.currency }
+      : {};
   }
 
   async deleteOrder(id: string, caller: Caller): Promise<{ message: string }> {
@@ -489,6 +562,7 @@ export class OrderService {
     // Bank transfer takes a dedicated path — admin confirmation gates
     // the actual `paidAt`. Direct callers should use uploadProof + confirm.
     if (method === PaymentMethod.bank_transfer) {
+      await this.ensureBankTransferIsConfigured();
       const order = await this.prisma.dentalOrder.update({
         where: { id },
         data: {
@@ -556,6 +630,7 @@ export class OrderService {
         'Treatment fee is already paid — receipt upload not allowed.',
       );
     }
+    await this.ensureBankTransferIsConfigured();
     const order = await this.prisma.dentalOrder.update({
       where: { id },
       data: {
@@ -821,6 +896,32 @@ export class OrderService {
         `Failed to emit ${eventName} for order ${order.id}: ${(err as Error).message}`,
       );
     }
+  }
+
+  private async ensureBankTransferIsConfigured(): Promise<void> {
+    const settings = await this.prisma.companyBillingSettings.findFirst({
+      where: { isActive: true },
+      orderBy: { updatedAt: 'desc' },
+      select: { bankDetails: true },
+    });
+    const details = (settings?.bankDetails ?? null) as BankDetailsSnapshot;
+    if (this.hasUsableBankDetails(details)) return;
+    throw new BadRequestException(
+      'Bank transfer is not available until company bank details are configured.',
+    );
+  }
+
+  private hasUsableBankDetails(details: BankDetailsSnapshot): boolean {
+    if (!details) return false;
+    const hasNamedAccount =
+      this.hasText(details.accountName) || this.hasText(details.bankName);
+    const hasAccountNumber =
+      this.hasText(details.rib) || this.hasText(details.iban);
+    return hasNamedAccount && hasAccountNumber;
+  }
+
+  private hasText(value: string | null | undefined): boolean {
+    return typeof value === 'string' && value.trim().length > 0;
   }
 
   /**
@@ -1601,7 +1702,9 @@ export class OrderService {
     return where;
   }
 
-  private async findAccessibleOrder(
+  // Public: the chunked-upload service enforces the exact same access
+  // rules as the single-shot upload path by delegating to these helpers.
+  async findAccessibleOrder(
     id: string,
     caller: Caller,
   ): Promise<OrderWithRelations> {
@@ -1630,7 +1733,7 @@ export class OrderService {
     throw new ForbiddenException('You cannot access orders');
   }
 
-  private ensureCanCreateOrModify(caller: Caller): void {
+  ensureCanCreateOrModify(caller: Caller): void {
     if (caller.role === UserRole.designer) {
       throw new ForbiddenException('Designers cannot modify orders directly');
     }
@@ -1673,7 +1776,7 @@ export class OrderService {
    * admins are NOT locked: the treatment-plan work legitimately happens
    * after the fee is paid.
    */
-  private ensureOrderNotLockedByPayment(
+  ensureOrderNotLockedByPayment(
     order: { treatmentFeePaidAt: Date | null },
     caller: Caller,
   ): void {
@@ -1796,8 +1899,11 @@ export class OrderService {
       : `${stem}-${String(existingToday + 1).padStart(2, '0')}`;
   }
 
-  private validateFile(
-    file: Express.Multer.File,
+  // Public + structurally typed: the chunked-upload service validates the
+  // DECLARED name/size at session init with the exact same rules, before
+  // a single byte is transferred.
+  validateFile(
+    file: { originalname: string; size: number },
     category: OrderFileCategory,
   ): void {
     // CBCT / DICOM bundles arrive in the `zip` category and routinely
@@ -1831,12 +1937,20 @@ export class OrderService {
   private async saveFileToDisk(
     orderId: string,
     category: OrderFileCategory,
-    file: Express.Multer.File,
+    file: {
+      originalname: string;
+      mimetype?: string;
+      size: number;
+      buffer?: Buffer;
+    },
     naming: {
       doctorName?: string | null;
       patientName: string | null | undefined;
       seq: number;
     },
+    // When set, the payload already exists on disk (chunked-upload
+    // assembly) — MOVE it into place instead of writing a RAM buffer.
+    sourcePath?: string,
   ): Promise<Prisma.OrderFileCreateManyInput> {
     const ext = path.extname(file.originalname).toLowerCase();
 
@@ -1867,7 +1981,18 @@ export class OrderService {
     }
 
     await fs.promises.mkdir(path.dirname(absolutePath), { recursive: true });
-    await fs.promises.writeFile(absolutePath, file.buffer);
+    if (sourcePath) {
+      try {
+        await fs.promises.rename(sourcePath, absolutePath);
+      } catch {
+        // Cross-device fallback (tmp and orders trees on different
+        // mounts) — copy then unlink.
+        await fs.promises.copyFile(sourcePath, absolutePath);
+        await fs.promises.unlink(sourcePath).catch(() => undefined);
+      }
+    } else {
+      await fs.promises.writeFile(absolutePath, file.buffer!);
+    }
 
     return {
       orderId,
@@ -1881,10 +2006,58 @@ export class OrderService {
       orderIndex: naming.seq,
       // pending = the async pipeline applies (image/zip/stl); null =
       // nothing to derive (pdf, video, …) — readers serve the original.
-      processingStatus: classifyMedia(file.mimetype, fileName)
+      processingStatus: classifyMedia(
+        file.mimetype ?? 'application/octet-stream',
+        fileName,
+      )
         ? MediaProcessingStatus.pending
         : null,
     };
+  }
+
+  /**
+   * Register a file that ALREADY exists on disk (assembled from a chunked
+   * upload) as a normal OrderFile: same sequential naming, same DB shape,
+   * same async media pipeline as the single-shot upload path. The payload
+   * is MOVED into the order's directory — it is never buffered in RAM.
+   * Content security is the CALLER's responsibility (the chunked service
+   * scans the assembled file before calling this).
+   */
+  async registerAssembledFile(
+    order: OrderWithRelations,
+    category: OrderFileCategory,
+    meta: { originalName: string; mimeType?: string; sizeBytes: number },
+    sourceAbsolutePath: string,
+  ): Promise<OrderFileResponseDto> {
+    const maxExisting = await this.prisma.orderFile.aggregate({
+      where: { orderId: order.id, category },
+      _max: { orderIndex: true },
+    });
+    const seq = (maxExisting._max.orderIndex ?? 0) + 1;
+
+    const saved = await this.saveFileToDisk(
+      order.id,
+      category,
+      {
+        originalname: meta.originalName,
+        mimetype: meta.mimeType,
+        size: meta.sizeBytes,
+      },
+      {
+        doctorName: order.doctor?.fullName,
+        patientName: order.patient.fullName,
+        seq,
+      },
+      sourceAbsolutePath,
+    );
+
+    const file = await this.prisma.orderFile.create({ data: saved });
+
+    if (file.processingStatus === MediaProcessingStatus.pending) {
+      this.mediaProcessing.enqueue('order-file', file.id);
+    }
+
+    return this.mapFileToDto(file);
   }
 
   private async removeFileFromDisk(relativePath: string): Promise<void> {
@@ -1987,6 +2160,12 @@ export class OrderService {
         order.treatmentFeeAmount !== undefined
           ? Number(order.treatmentFeeAmount)
           : undefined,
+      // CBCT supplement snapshot (Decimal → Number, same convention).
+      cbctFeeAmount:
+        order.cbctFeeAmount !== null && order.cbctFeeAmount !== undefined
+          ? Number(order.cbctFeeAmount)
+          : undefined,
+      cbctFeeCurrency: order.cbctFeeCurrency ?? undefined,
       treatmentFeePaymentMethod: order.treatmentFeePaymentMethod ?? undefined,
       treatmentFeePaymentStatus: order.treatmentFeePaymentStatus ?? undefined,
       treatmentFeeProofPath: order.treatmentFeeProofPath ?? undefined,

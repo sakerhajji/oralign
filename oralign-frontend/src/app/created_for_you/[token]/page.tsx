@@ -13,7 +13,7 @@
  */
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { AlertCircle, Loader2, ShieldCheck, Sparkles } from 'lucide-react';
 import { treatmentPlansService } from '@/lib/api/treatment-plans.service';
@@ -22,10 +22,34 @@ import {
   prepareViewer,
   stripViewerHash,
 } from '@/lib/viewer/smart-shell';
-import { useT } from '@/lib/i18n/lang-context';
+import { dict } from '../../(showcase)/_lib/i18n/dict';
+import { useShowcaseLang } from '../../(showcase)/_lib/i18n/lang-context';
 import type { PublicTreatmentViewerPayload } from '@/lib/types';
 
-type Translate = (path: string, vars?: Record<string, string | number>) => string;
+// This route is wrapped by the SHOWCASE LangProvider (see ../layout.tsx),
+// not the dashboard one — so translations must come from the showcase
+// dictionary. Using the dashboard useT() here silently rendered raw key
+// paths: that provider is never mounted on this public route, and its
+// context fallback just echoes the key back.
+type PublicCaseKey = keyof typeof dict.publicCase;
+type Translate = (key: PublicCaseKey, vars?: Record<string, string | number>) => string;
+
+/** publicCase translator bound to the showcase language switcher. */
+function usePublicCaseT(): Translate {
+  const { lang } = useShowcaseLang();
+  return useCallback(
+    (key: PublicCaseKey, vars?: Record<string, string | number>) => {
+      let text: string = dict.publicCase[key][lang];
+      if (vars) {
+        for (const [k, v] of Object.entries(vars)) {
+          text = text.replaceAll(`{${k}}`, String(v));
+        }
+      }
+      return text;
+    },
+    [lang],
+  );
+}
 
 /**
  * Build a warm, VIP-feeling salutation for the patient.
@@ -45,10 +69,10 @@ function patientSalutation(
   gender: 'male' | 'female' | 'other' | null | undefined,
 ): string {
   const name = (firstName ?? '').trim();
-  if (!name) return t('publicCase.salutationHello');
-  if (gender === 'male') return t('publicCase.salutationMr', { name });
-  if (gender === 'female') return t('publicCase.salutationMs', { name });
-  return t('publicCase.salutationNeutral', { name });
+  if (!name) return t('salutationHello');
+  if (gender === 'male') return t('salutationMr', { name });
+  if (gender === 'female') return t('salutationMs', { name });
+  return t('salutationNeutral', { name });
 }
 
 /**
@@ -66,7 +90,7 @@ function doctorByline(
   if (name) return name.toLowerCase().startsWith('dr') ? name : `Dr. ${name}`;
   const clinic = (clinicName ?? '').trim();
   if (clinic) return clinic;
-  return t('publicCase.doctorFallback');
+  return t('doctorFallback');
 }
 
 // Patient-facing viewers honour the planner's "Type de visualiseur"
@@ -78,16 +102,19 @@ function doctorByline(
 // inner viewer so the wrapper logo never even hits the network.
 
 export default function PublicTreatmentViewerPage() {
-  const { t } = useT();
+  const t = usePublicCaseT();
   const params = useParams<{ token: string }>();
   const token = params?.token ?? '';
   const [payload, setPayload] = useState<PublicTreatmentViewerPayload | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // The error is stored as a dictionary KEY (not a translated string) so
+  // an already-displayed error re-renders in the new language when the
+  // patient uses the navbar switcher.
+  const [errorKey, setErrorKey] = useState<'invalidLink' | 'expiredLink' | null>(null);
   const [iframeBlocked, setIframeBlocked] = useState(false);
 
   useEffect(() => {
     if (!token) {
-      setError(t('publicCase.invalidLink'));
+      setErrorKey('invalidLink');
       return;
     }
     let active = true;
@@ -97,12 +124,12 @@ export default function PublicTreatmentViewerPage() {
         if (active) setPayload(res);
       })
       .catch(() => {
-        if (active) setError(t('publicCase.expiredLink'));
+        if (active) setErrorKey('expiredLink');
       });
     return () => {
       active = false;
     };
-  }, [token, t]);
+  }, [token]);
 
   // Respect the planner's saved viewer type ("Type de visualiseur"):
   // the mode travels in the stored URL's #internal / #external hash.
@@ -135,24 +162,24 @@ export default function PublicTreatmentViewerPage() {
       <div className="mb-5 flex justify-center sm:mb-6">
         <span className="inline-flex items-center gap-1.5 rounded-full border bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
           <ShieldCheck className="h-3.5 w-3.5" />
-          {t('publicCase.secureLink')}
+          {t('secureLink')}
         </span>
       </div>
 
-      {!payload && !error && (
+      {!payload && !errorKey && (
         <div className="flex h-72 items-center justify-center text-sm text-muted-foreground sm:h-96">
           <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-          {t('publicCase.loading')}
+          {t('loading')}
         </div>
       )}
 
-      {error && (
+      {errorKey && (
         <div className="mx-auto max-w-md rounded-xl border border-red-200 bg-red-50 p-5 text-center sm:p-6">
           <AlertCircle className="mx-auto mb-3 h-8 w-8 text-red-600" />
-          <p className="text-sm font-semibold text-red-700">{t('publicCase.linkUnavailableTitle')}</p>
-          <p className="mt-1 text-xs text-red-600/80">{error}</p>
+          <p className="text-sm font-semibold text-red-700">{t('linkUnavailableTitle')}</p>
+          <p className="mt-1 text-xs text-red-600/80">{t(errorKey)}</p>
           <p className="mt-3 text-xs text-muted-foreground">
-            {t('publicCase.requestNewLink')}
+            {t('requestNewLink')}
           </p>
         </div>
       )}
@@ -166,15 +193,15 @@ export default function PublicTreatmentViewerPage() {
           <div className="mb-6 text-center sm:mb-8">
             <p className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-[0.62rem] font-semibold uppercase tracking-[0.25em] text-amber-800">
               <Sparkles className="h-3.5 w-3.5" />
-              {t('publicCase.madeForYou')}
+              {t('madeForYou')}
             </p>
             <h1 className="break-words text-3xl font-semibold tracking-tight text-foreground sm:text-4xl lg:text-5xl">
               {salutation},
             </h1>
             <p className="mx-auto mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground sm:text-base">
-              {t('publicCase.welcomeBefore')}{' '}
+              {t('welcomeBefore')}{' '}
               <span className="font-semibold text-foreground">{doctorName}</span>
-              {t('publicCase.welcomeAfter')}
+              {t('welcomeAfter')}
             </p>
           </div>
 
@@ -199,7 +226,7 @@ export default function PublicTreatmentViewerPage() {
                     key={`${cleanUrl}#${savedMode}`}
                     src={srcDoc ? undefined : viewerSlot.src}
                     srcDoc={srcDoc || undefined}
-                    title={t('publicCase.viewerTitle')}
+                    title={t('viewerTitle')}
                     className="absolute inset-0 h-full w-full"
                     sandbox="allow-scripts allow-same-origin allow-popups allow-presentation"
                     allow="fullscreen; xr-spatial-tracking; gyroscope; accelerometer; autoplay"
@@ -207,7 +234,7 @@ export default function PublicTreatmentViewerPage() {
                   />
                 ) : (
                   <div className="grid h-full place-items-center p-6 text-center text-sm text-muted-foreground sm:p-8">
-                    {t('publicCase.iframeBlocked')}
+                    {t('iframeBlocked')}
                   </div>
                 )}
               </div>
@@ -215,13 +242,13 @@ export default function PublicTreatmentViewerPage() {
           ) : (
             <div className="mx-auto max-w-md rounded-xl border border-amber-200 bg-amber-50 p-6 text-center">
               <p className="text-sm font-medium text-amber-800">
-                {t('publicCase.previewPreparing')}
+                {t('previewPreparing')}
               </p>
             </div>
           )}
 
           <p className="mt-10 text-center text-xs text-muted-foreground">
-            {t('publicCase.privacyNote')}
+            {t('privacyNote')}
           </p>
         </>
       )}

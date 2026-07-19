@@ -926,6 +926,68 @@ export const dict = {
     skipToContent: { fr: "Aller au contenu", en: "Skip to content", ar: "تخطّي إلى المحتوى" } as T,
     imagePlaceholder: { fr: "Image à venir", en: "Image coming soon", ar: "صورة قريباً" } as T,
   },
+
+  // ── /created_for_you — public patient treatment viewer ─────────────
+  // Lives in the SHOWCASE dictionary (not the dashboard one) because the
+  // page is wrapped by the showcase LangProvider + Header switcher; keys
+  // here follow the same fr/en/ar switcher the patient sees in the navbar.
+  publicCase: {
+    salutationHello: {
+      fr: "Bonjour et bienvenue",
+      en: "Hello and welcome",
+      ar: "مرحبًا وأهلاً بكم",
+    } as T,
+    salutationMr: { fr: "Cher M. {name}", en: "Dear Mr. {name}", ar: "عزيزي السيد {name}" } as T,
+    salutationMs: { fr: "Chère Mme {name}", en: "Dear Ms. {name}", ar: "عزيزتي السيدة {name}" } as T,
+    salutationNeutral: { fr: "Cher·e {name}", en: "Dear {name}", ar: "عزيزي/عزيزتي {name}" } as T,
+    doctorFallback: { fr: "votre praticien", en: "your dentist", ar: "طبيب أسنانك" } as T,
+    secureLink: { fr: "Lien partagé sécurisé", en: "Secure shared link", ar: "رابط مشترك آمن" } as T,
+    invalidLink: { fr: "Lien invalide.", en: "Invalid link.", ar: "رابط غير صالح." } as T,
+    expiredLink: {
+      fr: "Ce lien de traitement n’est plus disponible ou a expiré.",
+      en: "This treatment link is no longer available or has expired.",
+      ar: "لم يعد رابط العلاج هذا متاحًا أو انتهت صلاحيته.",
+    } as T,
+    loading: {
+      fr: "Chargement de votre plan de traitement…",
+      en: "Loading your treatment plan…",
+      ar: "جارٍ تحميل خطة علاجك…",
+    } as T,
+    linkUnavailableTitle: { fr: "Lien indisponible", en: "Link unavailable", ar: "الرابط غير متاح" } as T,
+    requestNewLink: {
+      fr: "Veuillez contacter votre praticien pour demander un nouveau lien.",
+      en: "Please contact your dentist to request a new link.",
+      ar: "يرجى الاتصال بطبيب أسنانك لطلب رابط جديد.",
+    } as T,
+    madeForYou: { fr: "Conçu pour vous", en: "Made for you", ar: "صُمم من أجلك" } as T,
+    // Welcome paragraph wraps the bold doctor name: "<before> <name> <after>".
+    welcomeBefore: {
+      fr: "Nous avons conçu ce plan d’aligneurs spécialement pour vous, élaboré avec soin par",
+      en: "We’ve designed this aligner plan especially for you, crafted with care by",
+      ar: "لقد صممنا خطة التقويم هذه خصيصًا لك، أعدّها بعناية",
+    } as T,
+    welcomeAfter: {
+      fr: ". Prenez un moment pour le découvrir — nous espérons que le sourire qu’il apporte vous plaira.",
+      en: ". Take a moment to explore it — we hope you love the smile it brings.",
+      ar: ". خذ لحظة لاستكشافها — نأمل أن تنال الابتسامة التي تمنحها إعجابك.",
+    } as T,
+    viewerTitle: { fr: "Visionneuse de traitement", en: "Treatment viewer", ar: "عارض العلاج" } as T,
+    iframeBlocked: {
+      fr: "La visionneuse ne peut pas être intégrée ici. Veuillez contacter votre praticien pour vous aider à ouvrir cet aperçu.",
+      en: "The viewer cannot be embedded here. Please contact your dentist for help opening this preview.",
+      ar: "تعذّر عرض العارض هنا. يرجى الاتصال بطبيب أسنانك للمساعدة في فتح هذه المعاينة.",
+    } as T,
+    previewPreparing: {
+      fr: "Votre aperçu de traitement est en cours de préparation. Veuillez revenir bientôt ou contacter votre praticien.",
+      en: "Your treatment preview is being prepared. Please check back shortly or contact your dentist.",
+      ar: "معاينة علاجك قيد التحضير. يرجى العودة قريبًا أو الاتصال بطبيب أسنانك.",
+    } as T,
+    privacyNote: {
+      fr: "Ce lien privé vous est exclusivement destiné. Aucun dossier médical ni détail de paiement n’est partagé sur cette page.",
+      en: "This private link is meant just for you. No medical records or payment details are shared on this page.",
+      ar: "هذا الرابط الخاص مخصص لك وحدك. لا تتم مشاركة أي سجلات طبية أو تفاصيل دفع على هذه الصفحة.",
+    } as T,
+  },
 } as const;
 
 export function pickLang<V extends Record<Lang, string>>(value: V, lang: Lang): string {

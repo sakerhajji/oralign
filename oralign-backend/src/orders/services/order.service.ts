@@ -46,6 +46,7 @@ import {
   UpdateOrderDto,
 } from '../dto/order.dto';
 import { MediaProcessingService } from '../../media/media-processing.service';
+import { OrderPdfService } from './order-pdf.service';
 import { classifyMedia } from '../../media/media.constants';
 import {
   scanUploadContent,
@@ -171,6 +172,7 @@ export class OrderService {
     private readonly notifications: OrderNotificationService,
     private readonly events: EventEmitter2,
     private readonly mediaProcessing: MediaProcessingService,
+    private readonly orderPdf: OrderPdfService,
   ) {}
 
   readonly includeOrder = orderInclude;
@@ -1600,9 +1602,23 @@ export class OrderService {
       appended += 1;
     }
 
-    // The "data of order all" payload — the full order DTO, pretty so a
-    // human can read it straight out of the zip.
-    archive.append(JSON.stringify(dto, null, 2), { name: 'order-data.json' });
+    // The order data itself ships as a branded, human-readable PDF
+    // (logo masthead + odontogram + clinical fields) instead of raw
+    // JSON. If the renderer fails (e.g. Chromium missing in a dev
+    // environment) we fall back to the legacy JSON dump so the lab
+    // still receives the data with the files.
+    const safeCode = (order.orderCode || orderId).replace(/[^\w.-]+/g, '_');
+    try {
+      const pdf = await this.orderPdf.renderOrderSheet(dto);
+      archive.append(pdf, { name: `fiche-commande-${safeCode}.pdf` });
+    } catch (err) {
+      this.logger.error(
+        `Order sheet PDF failed for order ${orderId} — falling back to order-data.json: ${
+          (err as Error).message
+        }`,
+      );
+      archive.append(JSON.stringify(dto, null, 2), { name: 'order-data.json' });
+    }
 
     this.logger.log(
       `Prepared full ZIP for order ${order.orderCode} (${orderId}): ` +

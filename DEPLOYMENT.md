@@ -415,6 +415,24 @@ The backend also logs a startup **warning** if `MAIL_FROM`'s domain differs
 from the authenticated account's domain — if you see it, the config is in
 the misaligned (spam-prone) state.
 
+**C. Hostinger mailbox (`contact@aura-aligners.com`) — current setup**
+
+The domain's auth records (checked live 2026-07-19): SPF ✓
+(`include:_spf.mail.hostinger.com`), DKIM ✓ (Hostinger's
+`hostingermail-a/b/c` CNAME selectors), DMARC present but weak
+(`p=none`, no reporting). For inbox placement:
+
+1. `MAIL_HOST` **must** be `smtp.hostinger.com` (port 587, or 465 with
+   TLS) and `MAIL_USER`/`MAIL_FROM` **must** both be the mailbox itself —
+   SPF+DKIM only cover mail that actually flows through Hostinger's
+   relay from the authenticated account.
+2. Upgrade the DMARC TXT record on `_dmarc.aura-aligners.com` (hPanel →
+   Domains → DNS) to add reporting, then tighten after a clean week:
+   `v=DMARC1; p=none; rua=mailto:contact@aura-aligners.com; fo=1`
+   → later: `v=DMARC1; p=quarantine; rua=mailto:contact@aura-aligners.com; fo=1`
+3. Verify like in section B: Gmail → *Show original* → SPF / DKIM /
+   DMARC all `PASS`, and a ≥9/10 on mail-tester.com.
+
 > **`MAIL_FROM` must be a BARE address** (`contact@aura-aligners.com`),
 > never `Oralign <contact@…>` or `Oralign contact@…`. A display name in
 > the value corrupts the SMTP envelope and strict servers reject with

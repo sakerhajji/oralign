@@ -571,6 +571,10 @@ export const dict = {
         en: 'e.g. Full-time wear; upper canine → lower first molar',
         fr: 'p. ex. port permanent ; canine supérieure → première molaire inférieure',
       } as T,
+      openBiteAsk: {
+        en: 'Is there an open bite to manage?',
+        fr: 'Y a-t-il une béance à prendre en charge ?',
+      } as T,
       openBiteHint: {
         en: 'What should happen to the open bite during treatment?',
         fr: 'Que faire de la béance pendant le traitement ?',
@@ -622,6 +626,10 @@ export const dict = {
       } as T,
       expansionNoneOpt: { en: 'No expansion', fr: 'Pas d’expansion' } as T,
 
+      crossbiteAsk: {
+        en: 'Is there a crossbite to manage?',
+        fr: 'Y a-t-il un articulé inversé à prendre en charge ?',
+      } as T,
       crossbiteHint: {
         en: 'What should happen to any present crossbite?',
         fr: 'Que faire de l’articulé inversé, s’il est présent ?',

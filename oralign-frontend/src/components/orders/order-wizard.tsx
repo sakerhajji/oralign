@@ -2081,6 +2081,36 @@ function AdvancedMovementStep({
 }) {
   const { t } = useT();
 
+  // ── Open bite / crossbite gate questions ────────────────────────────
+  // The clinical team wants these two sections to open with a yes/no
+  // question instead of showing treatment options straight away. The
+  // answer is UI-only: "yes" reveals the options, "no" hides them and
+  // clears any previously picked option so a hidden choice can never be
+  // submitted. Untouched, the answer is derived from the saved value so
+  // editing a draft that has one re-opens with the options visible.
+  const [openBiteAnswer, setOpenBiteAnswer] = useState<'yes' | 'no' | null>(null);
+  const [crossbiteAnswer, setCrossbiteAnswer] = useState<'yes' | 'no' | null>(null);
+  const openBiteNeeded: boolean | undefined =
+    openBiteAnswer !== null
+      ? openBiteAnswer === 'yes'
+      : (form.openBite ?? '').trim()
+        ? true
+        : undefined;
+  const crossbiteNeeded: boolean | undefined =
+    crossbiteAnswer !== null
+      ? crossbiteAnswer === 'yes'
+      : (form.crossbite ?? '').trim()
+        ? true
+        : undefined;
+  const answerOpenBite = (yes: boolean) => {
+    setOpenBiteAnswer(yes ? 'yes' : 'no');
+    if (!yes && (form.openBite ?? '').trim()) updateField('openBite', '');
+  };
+  const answerCrossbite = (yes: boolean) => {
+    setCrossbiteAnswer(yes ? 'yes' : 'no');
+    if (!yes && (form.crossbite ?? '').trim()) updateField('crossbite', '');
+  };
+
   // ── Option-pill label resolvers ─────────────────────────────────────
   // Saved values stay English (backend storage key) — labels run
   // through t() for localisation. Tables collect every mapping in one
@@ -2245,23 +2275,48 @@ function AdvancedMovementStep({
       <fieldset className="space-y-3 rounded-lg border bg-card p-4">
         <legend className="px-1 text-sm font-semibold">{t('orderForm.advanced.openBite')}</legend>
         <p className="text-xs text-muted-foreground">
-          {t('orderForm.advanced.openBiteHint')}
+          {t('orderForm.advanced.openBiteAsk')}
         </p>
         <div
           role="radiogroup"
-          aria-label={t('orderForm.advanced.openBite')}
-          className="grid gap-2 sm:grid-cols-3"
+          aria-label={t('orderForm.advanced.openBiteAsk')}
+          className="grid grid-cols-2 gap-2"
         >
-          {openBiteOptions.map((opt) => (
-            <OptionPill
-              key={opt}
-              active={form.openBite === opt}
-              disabled={disabled}
-              label={OPEN_BITE_KEY[opt] ? t(OPEN_BITE_KEY[opt]) : opt}
-              onClick={() => updateField('openBite', opt)}
-            />
-          ))}
+          <OptionPill
+            active={openBiteNeeded === true}
+            disabled={disabled}
+            label={t('common.yes')}
+            onClick={() => answerOpenBite(true)}
+          />
+          <OptionPill
+            active={openBiteNeeded === false}
+            disabled={disabled}
+            label={t('common.no')}
+            onClick={() => answerOpenBite(false)}
+          />
         </div>
+        {openBiteNeeded === true && (
+          <>
+            <p className="text-xs text-muted-foreground">
+              {t('orderForm.advanced.openBiteHint')}
+            </p>
+            <div
+              role="radiogroup"
+              aria-label={t('orderForm.advanced.openBite')}
+              className="grid gap-2 sm:grid-cols-3"
+            >
+              {openBiteOptions.map((opt) => (
+                <OptionPill
+                  key={opt}
+                  active={form.openBite === opt}
+                  disabled={disabled}
+                  label={OPEN_BITE_KEY[opt] ? t(OPEN_BITE_KEY[opt]) : opt}
+                  onClick={() => updateField('openBite', opt)}
+                />
+              ))}
+            </div>
+          </>
+        )}
       </fieldset>
 
       {/* ─── Midline ──────────────────────────────────────────────────── */}
@@ -2369,23 +2424,48 @@ function AdvancedMovementStep({
       <fieldset className="space-y-3 rounded-lg border bg-card p-4">
         <legend className="px-1 text-sm font-semibold">{t('orderForm.advanced.crossbite')}</legend>
         <p className="text-xs text-muted-foreground">
-          {t('orderForm.advanced.crossbiteHint')}
+          {t('orderForm.advanced.crossbiteAsk')}
         </p>
         <div
           role="radiogroup"
-          aria-label={t('orderForm.advanced.crossbite')}
-          className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4"
+          aria-label={t('orderForm.advanced.crossbiteAsk')}
+          className="grid grid-cols-2 gap-2"
         >
-          {crossbiteOptions.map((opt) => (
-            <OptionPill
-              key={opt}
-              active={form.crossbite === opt}
-              disabled={disabled}
-              label={CROSSBITE_KEY[opt] ? t(CROSSBITE_KEY[opt]) : opt}
-              onClick={() => updateField('crossbite', opt)}
-            />
-          ))}
+          <OptionPill
+            active={crossbiteNeeded === true}
+            disabled={disabled}
+            label={t('common.yes')}
+            onClick={() => answerCrossbite(true)}
+          />
+          <OptionPill
+            active={crossbiteNeeded === false}
+            disabled={disabled}
+            label={t('common.no')}
+            onClick={() => answerCrossbite(false)}
+          />
         </div>
+        {crossbiteNeeded === true && (
+          <>
+            <p className="text-xs text-muted-foreground">
+              {t('orderForm.advanced.crossbiteHint')}
+            </p>
+            <div
+              role="radiogroup"
+              aria-label={t('orderForm.advanced.crossbite')}
+              className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4"
+            >
+              {crossbiteOptions.map((opt) => (
+                <OptionPill
+                  key={opt}
+                  active={form.crossbite === opt}
+                  disabled={disabled}
+                  label={CROSSBITE_KEY[opt] ? t(CROSSBITE_KEY[opt]) : opt}
+                  onClick={() => updateField('crossbite', opt)}
+                />
+              ))}
+            </div>
+          </>
+        )}
       </fieldset>
 
       {/* ─── Spaces — single source of truth ────────────────────────────── */}

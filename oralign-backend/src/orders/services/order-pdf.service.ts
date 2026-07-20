@@ -1,4 +1,9 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ToothInstructionType } from '@prisma/client';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -237,12 +242,34 @@ const FILE_CATEGORY_FR: Record<string, string> = {
  * same `--tooth-color` / `--tooth-outline` CSS variables the app uses.
  */
 @Injectable()
-export class OrderPdfService implements OnModuleDestroy {
+export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(OrderPdfService.name);
   private browserPromise: Promise<Browser> | null = null;
   private spriteCache: string | null | undefined;
 
   constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * Warm the renderer at boot: launching Chromium costs ~1.5s, and
+   * without this the first planner to export an order that day pays it
+   * inside their request. Detached and failure-tolerant — a box without
+   * Chromium must still boot (the export falls back to JSON), so this
+   * only logs and lets `getBrowser()` retry on demand.
+   */
+  onModuleInit(): void {
+    void this.getBrowser()
+      .then(() => this.logger.log('✓ Order-sheet PDF renderer ready'))
+      .catch((err: unknown) => {
+        this.logger.warn(
+          `PDF renderer warm-up skipped: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      });
+    // Read the tooth sprite off disk once, now, rather than on the first
+    // export — it is ~2 MB and the read is otherwise inside the request.
+    this.loadSprite();
+  }
 
   async onModuleDestroy(): Promise<void> {
     if (this.browserPromise) {
@@ -870,7 +897,7 @@ export class OrderPdfService implements OnModuleDestroy {
   private async launchBrowser(): Promise<Browser> {
     const executablePath = this.resolveChromiumExecutable();
     this.logger.log(`Launching Chromium PDF renderer at ${executablePath}`);
-    return puppeteer.launch({
+    const browser = await puppeteer.launch({
       executablePath,
       headless: true,
       args: [
@@ -881,6 +908,18 @@ export class OrderPdfService implements OnModuleDestroy {
         '--font-render-hinting=medium',
       ],
     });
+
+    // Self-heal a dead renderer. `browserPromise` is only cleared when
+    // the LAUNCH rejects, so without this a Chromium that dies later
+    // (OOM-killed during a large export, crash) stays cached as a
+    // resolved-but-dead handle: every later export fails and silently
+    // falls back to order-data.json until the process restarts.
+    browser.on('disconnected', () => {
+      this.logger.warn('Chromium PDF renderer disconnected — will relaunch');
+      this.browserPromise = null;
+    });
+
+    return browser;
   }
 
   private resolveChromiumExecutable(): string {

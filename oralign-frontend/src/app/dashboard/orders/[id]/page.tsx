@@ -76,6 +76,7 @@ import {
   type OrderFile,
 } from '@/lib/types';
 import { formatPrice } from '@/lib/utils/currency';
+import { formatBytes } from '@/lib/utils/bytes';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 /**
@@ -200,7 +201,22 @@ export default function OrderDetailPage() {
     setDownloadingZip(true);
     const pendingToast = toast.loading(t('orderDetail.downloadAll.preparing'));
     try {
-      const blob = await ordersService.downloadAllZip(current.id);
+      // Swap the static "preparing" label for live received-bytes as soon
+      // as the stream starts, so a multi-hundred-MB CBCT export visibly
+      // progresses instead of looking stuck. Throttled to whole MB so the
+      // toast doesn't re-render on every chunk.
+      let lastShownMb = -1;
+      const blob = await ordersService.downloadAllZip(current.id, (loaded) => {
+        const mb = Math.floor(loaded / (1024 * 1024));
+        if (mb <= lastShownMb) return;
+        lastShownMb = mb;
+        toast.loading(
+          t('orderDetail.downloadAll.downloading', {
+            size: formatBytes(loaded),
+          }),
+          { id: pendingToast },
+        );
+      });
       const blobUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = blobUrl;

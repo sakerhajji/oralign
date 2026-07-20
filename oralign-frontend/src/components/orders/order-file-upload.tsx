@@ -71,6 +71,7 @@ import {
 import { useT } from '@/lib/i18n/lang-context';
 import { OrderFile, OrderFileCategory } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { formatBytes } from '@/lib/utils/bytes';
 import { ImageEditDialog } from './image-edit-dialog';
 
 // Category → dict key (resolved with t() at render time so the labels
@@ -2995,18 +2996,6 @@ async function sniffClientThreat(
   } catch {
     return null; // never block on a read error — the backend still validates
   }
-}
-
-/**
- * Human-friendly byte formatter (1.2 MB, 873 KB, 1.4 GB, …). Used by
- * the upload progress strip; rounds to one decimal so a 207 MB CBCT
- * archive reads as "207.4 MB" not "207426742 B".
- */
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${Math.round(bytes)} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 function SectionIntro({

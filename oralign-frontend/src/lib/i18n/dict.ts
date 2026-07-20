@@ -833,6 +833,13 @@ export const dict = {
         en: 'Preparing archive…',
         fr: 'Préparation de l’archive…',
       } as T,
+      // Shown once bytes start arriving. The archive is streamed with no
+      // Content-Length, so we report what has been received rather than
+      // an invented percentage.
+      downloading: {
+        en: 'Downloading archive… {size}',
+        fr: 'Téléchargement de l’archive… {size}',
+      } as T,
       success: {
         en: 'Archive downloaded',
         fr: 'Archive téléchargée',

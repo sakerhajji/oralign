@@ -361,10 +361,19 @@ export const ordersService = {
    * exactly like the large-file upload path — a CBCT-heavy order can be
    * hundreds of MB and take minutes to compress + transfer.
    */
-  downloadAllZip: async (id: string): Promise<Blob> => {
+  downloadAllZip: async (
+    id: string,
+    // Reports BYTES RECEIVED, not a percentage: the archive is streamed
+    // with no Content-Length (entries are appended as they're read), so
+    // there is no total to compute a percentage against.
+    onProgress?: (loadedBytes: number) => void,
+  ): Promise<Blob> => {
     const response = await apiClient.get<Blob>(`/orders/${id}/download-all`, {
       responseType: 'blob',
       timeout: 0,
+      onDownloadProgress: onProgress
+        ? (event) => onProgress(event.loaded ?? 0)
+        : undefined,
     });
     return response.data;
   },

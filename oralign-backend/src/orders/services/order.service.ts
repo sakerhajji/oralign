@@ -20,7 +20,7 @@ import * as path from 'path';
 // via a typed `require` (see `createArchive` below the imports) so
 // `archiver('zip', …)` stays the documented API while the return value
 // is strongly typed as an `Archiver` stream.
-import type { Archiver, ArchiverOptions } from 'archiver';
+import type { Archiver, ArchiverOptions, ZipEntryData } from 'archiver';
 import { v4 as uuidv4 } from 'uuid';
 import { PaginatedResponse } from '../../common/dto/response.dto';
 import {
@@ -63,6 +63,43 @@ const createArchive: (
   format: 'zip' | 'tar',
   options?: ArchiverOptions,
 ) => Archiver = require('archiver');
+
+/**
+ * Extensions whose bytes are ALREADY compressed. Re-deflating them in
+ * the export archive burns a lot of CPU for ~0% size gain — a 1 GB CBCT
+ * bundle costs ~30s of pure compression and comes out marginally
+ * LARGER. These entries are stored verbatim (zip "store" method), which
+ * turns the export into an I/O copy. Everything else (STL, DICOM, text)
+ * still deflates, at zlib's default level 6: level 9 triples the CPU for
+ * a fraction of a percent of extra ratio.
+ */
+const PRECOMPRESSED_ARCHIVE_EXTENSIONS = new Set([
+  '.zip', '.7z', '.rar', '.gz', '.tgz', '.bz2', '.xz',
+  '.jpg', '.jpeg', '.png', '.webp', '.avif', '.heic', '.heif', '.gif',
+  '.mp4', '.mov', '.webm', '.pdf',
+]);
+
+function isPrecompressedEntry(name: string): boolean {
+  return PRECOMPRESSED_ARCHIVE_EXTENSIONS.has(path.extname(name).toLowerCase());
+}
+
+/**
+ * True for the errors archiver raises once the stream has been torn
+ * down — which the export controller does deliberately when the client
+ * cancels a download. `QUEUECLOSED` is the same situation seen from the
+ * other side: the order sheet finished rendering just as the archive
+ * was aborted. Neither is a fault, so neither belongs in the error log.
+ */
+function isAbortedArchiveError(err: unknown): boolean {
+  const e = err as { code?: string; message?: string } | null;
+  const message = e?.message ?? '';
+  return (
+    e?.code === 'ABORTED' ||
+    e?.code === 'QUEUECLOSED' ||
+    message.includes('archive was aborted') ||
+    message.includes('queue closed')
+  );
+}
 
 type Caller = { userId: string; role: string };
 
@@ -176,6 +213,13 @@ export class OrderService {
   ) {}
 
   readonly includeOrder = orderInclude;
+
+  /**
+   * Export archives torn down because the client cancelled the download.
+   * Weak so a cancelled export is collected with its archive; used by the
+   * detached order-sheet task to know there is nothing left to write to.
+   */
+  private readonly abortedArchives = new WeakSet<Archiver>();
 
   async createOrder(
     createOrderDto: CreateOrderDto,
@@ -1490,13 +1534,18 @@ export class OrderService {
   /**
    * Build a single ZIP archive of EVERY non-deleted file on the order
    * (clinical photos, STL/scans, CBCT/ZIP bundles, …) organised into
-   * `<category>/` folders, plus an `order-data.json` carrying the full
-   * order DTO (clinical + patient + doctor data) for the lab.
+   * `<category>/` folders, plus a branded order-sheet PDF (or a JSON
+   * dump of the order DTO if that render fails) for the lab.
    *
    * Returns the live `archiver` stream so the controller can pipe it
-   * straight to the HTTP response — nothing is buffered to disk. The
-   * caller MUST `finalize()` is already invoked here; the controller
-   * only pipes + handles transport errors.
+   * straight to the HTTP response — nothing is buffered to disk, and
+   * the first bytes leave before the PDF is ready.
+   *
+   * Finalisation is DEFERRED: this method returns with the archive still
+   * open, and `appendOrderSheetAndFinalize` closes it once the render
+   * settles. The caller must therefore (a) pipe the stream — nothing
+   * drains otherwise — and (b) `abort()` it if the client goes away, or
+   * that pending finalize never settles.
    *
    * RBAC: planner-only (admin / super_admin / designer). Designers see
    * the archive only for orders they're assigned to — `assertOrderReadable`
@@ -1527,7 +1576,17 @@ export class OrderService {
     const order = await this.findAccessibleOrder(orderId, caller);
     const dto = this.mapToDto(order);
 
-    const archive = createArchive('zip', { zlib: { level: 9 } });
+    // Kick the order-sheet render off NOW so Chromium works in parallel
+    // with the file streaming below instead of delaying the first byte.
+    // `.then/.catch` folds both outcomes into a value: the promise can
+    // never reject, so nothing can become an unhandled rejection while
+    // the archive streams.
+    const sheetRender = this.orderPdf
+      .renderOrderSheet(dto)
+      .then((pdf) => ({ ok: true as const, pdf }))
+      .catch((err: unknown) => ({ ok: false as const, err }));
+
+    const archive = createArchive('zip', { zlib: { level: 6 } });
 
     // archiver emits `warning` for non-fatal issues (e.g. ENOENT on a
     // file we add) and `error` for fatal ones. We pre-check existence
@@ -1538,6 +1597,13 @@ export class OrderService {
       );
     });
     archive.on('error', (err) => {
+      // A cancelled download aborts the archive on purpose — that is a
+      // normal user action, not a fault to page someone about.
+      if (isAbortedArchiveError(err)) {
+        this.abortedArchives.add(archive);
+        this.logger.log(`Export cancelled by client for order ${orderId}`);
+        return;
+      }
       this.logger.error(
         `Zip archive error for order ${orderId}: ${err.message}`,
       );
@@ -1598,26 +1664,17 @@ export class OrderService {
         path.basename(file.relativePath);
       const entryName = uniqueName(folder, baseName);
 
-      archive.file(absolutePath, { name: path.posix.join(folder, entryName) });
+      // Typed as ZipEntryData: `store` is honoured by the zip backend for
+      // file entries (zip-stream sets the STORE method from it), but
+      // @types/archiver only declares it on `append()`, so the narrower
+      // `EntryData` on `file()` would reject the literal.
+      const entry: ZipEntryData = {
+        name: path.posix.join(folder, entryName),
+        // Photos / CBCT bundles are already compressed — store them.
+        store: isPrecompressedEntry(entryName),
+      };
+      archive.file(absolutePath, entry);
       appended += 1;
-    }
-
-    // The order data itself ships as a branded, human-readable PDF
-    // (logo masthead + odontogram + clinical fields) instead of raw
-    // JSON. If the renderer fails (e.g. Chromium missing in a dev
-    // environment) we fall back to the legacy JSON dump so the lab
-    // still receives the data with the files.
-    const safeCode = (order.orderCode || orderId).replace(/[^\w.-]+/g, '_');
-    try {
-      const pdf = await this.orderPdf.renderOrderSheet(dto);
-      archive.append(pdf, { name: `fiche-commande-${safeCode}.pdf` });
-    } catch (err) {
-      this.logger.error(
-        `Order sheet PDF failed for order ${orderId} — falling back to order-data.json: ${
-          (err as Error).message
-        }`,
-      );
-      archive.append(JSON.stringify(dto, null, 2), { name: 'order-data.json' });
     }
 
     this.logger.log(
@@ -1625,9 +1682,12 @@ export class OrderService {
         `${appended}/${order.files.length} file(s) by user ${caller.userId}`,
     );
 
-    // Kick off compression. We do NOT await — the controller pipes the
-    // stream and the response completes when archiver flushes its end.
-    void archive.finalize();
+    // Append the order sheet and finalize OFF the request path. Returning
+    // now lets the controller send headers and start piping file bytes
+    // immediately; the PDF (which has been rendering since the top of
+    // this method) lands as the last entry whenever it is ready. The
+    // export therefore costs max(render, streaming) instead of their sum.
+    void this.appendOrderSheetAndFinalize(archive, dto, sheetRender, orderId);
 
     return {
       archive,
@@ -1636,6 +1696,70 @@ export class OrderService {
       fileName: `order-${(order.orderCode || orderId).replace(/[^\w.-]+/g, '_')}.zip`,
       mimeType: 'application/zip',
     };
+  }
+
+  /**
+   * Tail of `downloadAllAsZip`, run after the archive stream has been
+   * handed to the controller: wait for the order-sheet render, append it
+   * (or the legacy JSON dump if rendering failed), then finalize.
+   *
+   * Everything is caught: this runs detached from the request promise, so
+   * a throw here would surface as an unhandled rejection rather than a
+   * 500. `finalize()` is in the `finally` block because a client whose
+   * archive never finalises hangs until it times out — ending the stream
+   * matters more than the sheet.
+   */
+  private async appendOrderSheetAndFinalize(
+    archive: Archiver,
+    dto: OrderResponseDto,
+    sheetRender: Promise<
+      { ok: true; pdf: Buffer } | { ok: false; err: unknown }
+    >,
+    orderId: string,
+  ): Promise<void> {
+    const safeCode = (dto.orderCode || orderId).replace(/[^\w.-]+/g, '_');
+    try {
+      const result = await sheetRender;
+      // The client may have cancelled while the sheet was rendering; the
+      // controller then aborted the archive. Appending to (or finalizing)
+      // a torn-down archive only raises noise, so stop here.
+      if (this.abortedArchives.has(archive)) return;
+      if (result.ok) {
+        // Deflated, NOT stored: the sheet is mostly uncompressed vector
+        // path data from the odontogram, so zip shrinks it by about half
+        // (measured 6.4 MB -> 3.0 MB) for a fraction of a second of CPU.
+        archive.append(result.pdf, { name: `fiche-commande-${safeCode}.pdf` });
+      } else {
+        this.logger.error(
+          `Order sheet PDF failed for order ${orderId} — falling back to order-data.json: ${
+            result.err instanceof Error ? result.err.message : String(result.err)
+          }`,
+        );
+        archive.append(JSON.stringify(dto, null, 2), {
+          name: 'order-data.json',
+        });
+      }
+    } catch (err) {
+      this.logger.error(
+        `Failed to attach order sheet for order ${orderId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    } finally {
+      if (this.abortedArchives.has(archive)) return;
+      try {
+        await archive.finalize();
+      } catch (err) {
+        // Aborted = the client cancelled and the controller tore the
+        // archive down; finalize rejecting is how this task unblocks.
+        if (isAbortedArchiveError(err)) return;
+        this.logger.error(
+          `Failed to finalize export archive for order ${orderId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
   }
 
   private buildWhere(

@@ -713,15 +713,35 @@ export class OrderController {
 
     // If the archive errors mid-stream, destroy the socket so the client
     // sees a broken transfer rather than hanging on a truncated body
-    // that never reaches the end-of-zip marker.
+    // that never reaches the end-of-zip marker. `abort()` tears the
+    // archive down too — otherwise it sits half-drained forever (see the
+    // 'close' handler below for why that matters).
     archive.on('error', (err) => {
       if (!response.headersSent) {
         response.status(HttpStatus.INTERNAL_SERVER_ERROR);
       }
+      archive.abort();
       response.destroy(err);
     });
 
-    // The service already called finalize(); we just pump bytes out.
+    // A cancelled download (planner navigates away, proxy drops) only
+    // unpipes the archive — Node never destroys the source. Without this
+    // the archiver stalls at its high-water mark with an open file
+    // descriptor, and the service's pending `finalize()` never settles,
+    // stranding that task's buffers for the life of the process. One
+    // leak per cancelled CBCT export is enough to matter. `abort()`
+    // makes the pending finalize reject promptly, which the service
+    // logs and moves on from.
+    response.on('close', () => {
+      if (!response.writableFinished) {
+        archive.abort();
+      }
+    });
+
+    // NOTE: the archive is NOT finalised yet — the service appends the
+    // order sheet and finalises asynchronously once the PDF render
+    // completes. The archive only ever drains because of this pipe, so
+    // it must not be made conditional or deferred.
     archive.pipe(response);
   }
 

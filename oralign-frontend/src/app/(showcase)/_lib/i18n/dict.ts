@@ -1,7 +1,10 @@
 export type Lang = "fr" | "en" | "ar";
 
 export const LANGS: readonly Lang[] = ["fr", "en", "ar"] as const;
-export const DEFAULT_LANG: Lang = "fr";
+// Language a visitor sees before they pick one (and the SSR/first-paint
+// value). A stored choice always wins — see readLang() in use-lang.ts —
+// so this only affects first-time visitors.
+export const DEFAULT_LANG: Lang = "en";
 
 type T = Record<Lang, string>;
 

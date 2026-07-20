@@ -260,7 +260,7 @@ model User {
   // of notifications, emails and any backend-generated copy addressed
   // to this user. Plain String (not enum) so adding a locale later is
   // a data change, not a migration. Default matches the app default.
-  preferredLanguage   String             @default("fr")
+  preferredLanguage   String             @default("en")
 
   // Timestamps
   lastLoginAt         DateTime?

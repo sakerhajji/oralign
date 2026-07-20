@@ -15,7 +15,13 @@
 
 export type Lang = 'en' | 'fr';
 
-export const DEFAULT_LANG: Lang = 'fr';
+/**
+ * Language used when there is no user to read a preference from — e.g.
+ * the appointment action page rendered for a link whose appointment no
+ * longer exists. Matches the fallback policy above and the frontend's
+ * DEFAULT_LANG; a known user's `preferredLanguage` always wins.
+ */
+export const DEFAULT_LANG: Lang = 'en';
 
 /** A translatable pair. `fr` optional so catalogs can be filled over time. */
 export interface LangText {

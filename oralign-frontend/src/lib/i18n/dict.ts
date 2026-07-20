@@ -24,7 +24,11 @@
 export type Lang = 'en' | 'fr';
 
 export const LANGS: readonly Lang[] = ['en', 'fr'] as const;
-export const DEFAULT_LANG: Lang = 'fr';
+// Language the dashboard renders before anything better is known: the
+// SSR/first-paint value, and the fallback when a user has no stored
+// choice. A signed-in user's `preferredLanguage` still wins once the
+// auth provider seeds it.
+export const DEFAULT_LANG: Lang = 'en';
 
 type T = Record<Lang, string>;
 

@@ -75,11 +75,10 @@ export default function CreatedForYouLayout({
       `}</style>
       <LangProvider>
         <Header />
-        {/* The page is fully translated (FR / EN / AR) but the showcase
-            header carries no language control, so without this the
-            patient has no way to switch. `showOnMobile` because the
-            treatment link is usually opened on a phone. */}
-        <FloatingLang showOnMobile />
+        {/* Desktop-only, exactly as on the showcase: below `lg` the
+            switcher lives in the burger menu (MobileNav), which this
+            layout already renders via Header. */}
+        <FloatingLang />
         <main id="main" className="flex-1">
           {children}
         </main>

@@ -13,10 +13,7 @@ import { Playfair_Display, DM_Sans } from 'next/font/google';
 import { LangProvider } from '../(showcase)/_lib/i18n/lang-context';
 import { Header } from '../(showcase)/_components/header';
 import { Footer } from '../(showcase)/_components/footer';
-// FloatingLang is intentionally NOT imported here — patients on the
-// public viewer don't need a vertical language-switcher hovering over
-// the iframe. LangProvider is kept because Header + Footer read their
-// labels from the i18n dictionary.
+import { FloatingLang } from '../(showcase)/_components/floating-lang';
 // Pull in the showcase CSS variables + behavioural rules. Next.js
 // hoists global CSS imports so they apply to this subtree.
 import '../(showcase)/showcase.css';
@@ -78,6 +75,11 @@ export default function CreatedForYouLayout({
       `}</style>
       <LangProvider>
         <Header />
+        {/* The page is fully translated (FR / EN / AR) but the showcase
+            header carries no language control, so without this the
+            patient has no way to switch. `showOnMobile` because the
+            treatment link is usually opened on a phone. */}
+        <FloatingLang showOnMobile />
         <main id="main" className="flex-1">
           {children}
         </main>

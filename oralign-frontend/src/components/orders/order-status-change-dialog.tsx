@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { ArrowRight, Loader2, ShieldCheck } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -116,15 +116,6 @@ export function OrderStatusChangeDialog({
   const [target, setTarget] = useState<OrderStatus>(currentStatus);
   const [reason, setReason] = useState('');
 
-  // Reset the picked target / reason whenever the dialog reopens so the
-  // user starts from a clean slate, not from whatever they last picked.
-  useEffect(() => {
-    if (open) {
-      setTarget(currentStatus);
-      setReason('');
-    }
-  }, [open, currentStatus]);
-
   const handleSave = async () => {
     if (target === currentStatus) {
       setOpen(false);
@@ -143,7 +134,16 @@ export function OrderStatusChangeDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (next) {
+          setTarget(currentStatus);
+          setReason('');
+        }
+        setOpen(next);
+      }}
+    >
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>

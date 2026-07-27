@@ -85,6 +85,17 @@ export class TreatmentPlanService {
     }
   }
 
+  /** Fire-and-forget chat broadcast helper. Sockets are advisory. */
+  private safeBroadcastNewMessage(orderId: string, message: unknown) {
+    try {
+      this.chatGateway.broadcastNewMessage(orderId, message);
+    } catch (err) {
+      this.logger.warn(
+        `message:new broadcast failed: ${(err as Error).message}`,
+      );
+    }
+  }
+
   // ─── Authorisation helpers ────────────────────────────────────────────────
 
   /**
@@ -262,9 +273,7 @@ export class TreatmentPlanService {
       where: {
         orderId,
         deletedAt: null,
-        ...(isPlanner
-          ? {}
-          : { status: { not: TreatmentPlanStatus.pending } }),
+        ...(isPlanner ? {} : { status: { not: TreatmentPlanStatus.pending } }),
       },
       orderBy: { version: 'desc' },
     });
@@ -307,12 +316,11 @@ export class TreatmentPlanService {
    *
    * Two flows:
    *   • PENDING plan → transitions in place to READY (the very first send).
-   *   • REJECTED plan → "resend" creates a NEW versioned plan that inherits
-   *     plan-level data from the rejected one and starts in READY status.
+   *   • REJECTED plan → "renew" creates a NEW versioned plan that inherits
+   *     plan-level data from the rejected one and starts as an editable
+   *     PENDING draft. The planner sends it only after making corrections.
    *     The rejected plan stays around as historical evidence of what the
-   *     doctor pushed back on. This is the behaviour requested by clinical
-   *     ops: once a plan is rejected, the next attempt is logged as v+1,
-   *     never as a re-edit of the same row.
+   *     doctor pushed back on.
    *
    * ALREADY-READY / APPROVED plans cannot be marked ready again.
    */
@@ -339,6 +347,14 @@ export class TreatmentPlanService {
         dentalTreatmentTableImageName: true,
         dentalTreatmentTableImageMimeType: true,
         dentalTreatmentTableImageSizeBytes: true,
+        iprEntries: {
+          select: {
+            fromTooth: true,
+            toTooth: true,
+            value: true,
+            note: true,
+          },
+        },
       },
     });
     if (!plan) throw new NotFoundException('Treatment plan not found.');
@@ -379,11 +395,11 @@ export class TreatmentPlanService {
     }
 
     if (plan.status === TreatmentPlanStatus.rejected) {
-      // ── Resend after rejection → spawn a NEW version ──────────────────
-      // Plan-level data (URL, aligner counts, movement-table image path) is
-      // copied so the new version is a true continuation. Order-level data
-      // (tooth instructions, files) is shared via orderId so it picks up
-      // any corrections the planner made automatically.
+      // ── Renew after rejection → spawn an EDITABLE new version ─────────
+      // Plan-level data (URL, aligner counts, movement-table image path,
+      // treatment-level IPR/stripping) is copied so the new version is a
+      // true continuation. Order-level data (tooth instructions, files) is
+      // shared via orderId so it picks up any corrections automatically.
       const latest = await this.prisma.treatmentPlan.findFirst({
         where: { orderId: plan.orderId, deletedAt: null },
         orderBy: { version: 'desc' },
@@ -398,7 +414,7 @@ export class TreatmentPlanService {
             orderId: plan.orderId,
             version: nextVersion,
             name: nextName,
-            status: TreatmentPlanStatus.ready,
+            status: TreatmentPlanStatus.pending,
             resultViewUrl: plan.resultViewUrl,
             totalUpperAligners: plan.totalUpperAligners,
             totalLowerAligners: plan.totalLowerAligners,
@@ -408,10 +424,8 @@ export class TreatmentPlanService {
             movementTableImageSizeBytes: plan.movementTableImageSizeBytes,
             // Carry the dental treatment table forward too — same
             // reasoning as the movement table just above.
-            dentalTreatmentTableImagePath:
-              plan.dentalTreatmentTableImagePath,
-            dentalTreatmentTableImageName:
-              plan.dentalTreatmentTableImageName,
+            dentalTreatmentTableImagePath: plan.dentalTreatmentTableImagePath,
+            dentalTreatmentTableImageName: plan.dentalTreatmentTableImageName,
             dentalTreatmentTableImageMimeType:
               plan.dentalTreatmentTableImageMimeType,
             dentalTreatmentTableImageSizeBytes:
@@ -419,9 +433,21 @@ export class TreatmentPlanService {
             createdById: caller.userId,
           },
         });
+        if (plan.iprEntries.length > 0) {
+          await tx.treatmentPlanIpr.createMany({
+            data: plan.iprEntries.map((entry) => ({
+              treatmentPlanId: c.id,
+              fromTooth: entry.fromTooth,
+              toTooth: entry.toTooth,
+              value: entry.value,
+              note: entry.note,
+              createdById: caller.userId,
+            })),
+          });
+        }
         await tx.dentalOrder.update({
           where: { id: plan.orderId },
-          data: { status: OrderStatus.treatment_plan_ready },
+          data: { status: OrderStatus.treatment_planning },
         });
         // Audit trail on BOTH the old (closed) plan and the new one so
         // doctors can trace the lineage in the conversation tab.
@@ -437,25 +463,16 @@ export class TreatmentPlanService {
           data: {
             treatmentPlanId: c.id,
             senderId: caller.userId,
-            message: `${nextName} READY for review (replaces previous rejected plan)`,
+            message: `${nextName} draft created from the rejected plan. Edit it, then mark it ready for doctor review.`,
             type: TreatmentMessageType.system,
           },
         });
         return c;
       });
-      // Two broadcasts: one for the new plan creation, one for ready.
-      // Frontends use the type to choose between "new tab" and "switch
-      // active plan" UX.
+      // The replacement is intentionally only CREATED/PENDING. No ready
+      // broadcast, email, or bell notification is sent until the planner
+      // explicitly marks the new draft ready after editing.
       this.safeBroadcastPlanChanged(plan.orderId, 'created', created.id);
-      this.safeBroadcastPlanChanged(plan.orderId, 'ready', created.id);
-      // Email the doctor: replacement plan is ready for review.
-      void this.notifications.notifyTreatmentReady(created.id);
-      // Doctor bell ping — same flow as the first-send branch above.
-      void this.emitPlanEvent(NotificationEvents.TreatmentPlanReady, {
-        treatmentPlanId: created.id,
-        orderId: plan.orderId,
-        planName: created.name,
-      });
       return created;
     }
 
@@ -557,7 +574,12 @@ export class TreatmentPlanService {
     return approved;
   }
 
-  async reject(id: string, caller: Caller) {
+  async reject(id: string, rejectionReason: string, caller: Caller) {
+    const reason = rejectionReason.trim();
+    if (!reason) {
+      throw new BadRequestException('Rejection reason is required.');
+    }
+
     const plan = await this.prisma.treatmentPlan.findUnique({
       where: { id },
       select: {
@@ -595,7 +617,7 @@ export class TreatmentPlanService {
       );
     }
 
-    const rejected = await this.prisma.$transaction(async (tx) => {
+    const { rejected, message } = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.treatmentPlan.update({
         where: { id },
         data: {
@@ -607,17 +629,24 @@ export class TreatmentPlanService {
         where: { id: plan.orderId },
         data: { status: OrderStatus.revision_requested },
       });
-      await tx.treatmentMessage.create({
+      const chatMessage = await tx.treatmentMessage.create({
         data: {
           treatmentPlanId: id,
           senderId: caller.userId,
-          message: 'REJECTED (Request a replanning)',
+          message: `Treatment plan rejected.\nReason: ${reason}`,
           type: TreatmentMessageType.rejection,
         },
+        include: {
+          attachments: { where: { deletedAt: null } },
+          sender: {
+            select: { id: true, fullName: true, role: true, avatarUrl: true },
+          },
+        },
       });
-      return updated;
+      return { rejected: updated, message: chatMessage };
     });
     this.safeBroadcastPlanChanged(plan.orderId, 'rejected', id);
+    this.safeBroadcastNewMessage(plan.orderId, message);
     // Email all admins: doctor requested a revision.
     void this.notifications.notifyTreatmentDecision(id, 'rejected');
     // Same admin bell-ping path as approval, just with `decision`.
@@ -677,8 +706,7 @@ export class TreatmentPlanService {
         doctorId: enriched.doctorId,
         doctorName: enriched.doctor?.fullName ?? null,
         patientName: enriched.patient?.fullName ?? null,
-        planName:
-          base.planName ?? enriched.treatmentPlans[0]?.name ?? null,
+        planName: base.planName ?? enriched.treatmentPlans[0]?.name ?? null,
         ...(base.decision ? { decision: base.decision } : {}),
       });
     } catch (err) {
@@ -963,57 +991,57 @@ export class TreatmentPlanService {
 
     const [toothInstructions, messages, clinicalImages, iprEntries] =
       await Promise.all([
-      this.prisma.orderToothInstruction.findMany({
-        where: { orderId: plan.orderId },
-        orderBy: [{ toothNumber: 'asc' }, { createdAt: 'asc' }],
-      }),
-      // Order-scoped chat: pull messages from EVERY non-deleted plan
-      // under this order so the doctor sees the full back-and-forth even
-      // after a rejected plan was replaced by a new versioned one.
-      this.prisma.treatmentMessage.findMany({
-        where: {
-          treatmentPlan: { orderId: plan.orderId, deletedAt: null },
-          deletedAt: null,
-        },
-        orderBy: { createdAt: 'asc' },
-        include: {
-          attachments: { where: { deletedAt: null } },
-          sender: {
-            select: {
-              id: true,
-              fullName: true,
-              role: true,
-              avatarUrl: true,
+        this.prisma.orderToothInstruction.findMany({
+          where: { orderId: plan.orderId },
+          orderBy: [{ toothNumber: 'asc' }, { createdAt: 'asc' }],
+        }),
+        // Order-scoped chat: pull messages from EVERY non-deleted plan
+        // under this order so the doctor sees the full back-and-forth even
+        // after a rejected plan was replaced by a new versioned one.
+        this.prisma.treatmentMessage.findMany({
+          where: {
+            treatmentPlan: { orderId: plan.orderId, deletedAt: null },
+            deletedAt: null,
+          },
+          orderBy: { createdAt: 'asc' },
+          include: {
+            attachments: { where: { deletedAt: null } },
+            sender: {
+              select: {
+                id: true,
+                fullName: true,
+                role: true,
+                avatarUrl: true,
+              },
             },
           },
-        },
-      }),
-      this.prisma.orderFile.findMany({
-        where: {
-          orderId: plan.orderId,
-          deletedAt: null,
-          category: { in: CLINICAL_IMAGE_CATEGORIES },
-        },
-        orderBy: { createdAt: 'desc' },
-        select: {
-          id: true,
-          category: true,
-          originalName: true,
-          fileName: true,
-          relativePath: true,
-          mimeType: true,
-          size: true,
-          createdAt: true,
-        },
-      }),
-      // IPR / stripping is owned by THIS plan (not the order). The
-      // table is intentionally scoped to treatmentPlanId so each plan
-      // version carries its own IPR map and a re-plan starts blank.
-      this.prisma.treatmentPlanIpr.findMany({
-        where: { treatmentPlanId: id },
-        orderBy: [{ fromTooth: 'asc' }, { toTooth: 'asc' }],
-      }),
-    ]);
+        }),
+        this.prisma.orderFile.findMany({
+          where: {
+            orderId: plan.orderId,
+            deletedAt: null,
+            category: { in: CLINICAL_IMAGE_CATEGORIES },
+          },
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            category: true,
+            originalName: true,
+            fileName: true,
+            relativePath: true,
+            mimeType: true,
+            size: true,
+            createdAt: true,
+          },
+        }),
+        // IPR / stripping is owned by THIS plan (not the order). The
+        // table is intentionally scoped to treatmentPlanId so each plan
+        // version carries its own IPR map and a re-plan starts blank.
+        this.prisma.treatmentPlanIpr.findMany({
+          where: { treatmentPlanId: id },
+          orderBy: [{ fromTooth: 'asc' }, { toTooth: 'asc' }],
+        }),
+      ]);
 
     // Group odontogram entries by tooth number so the UI can render per-tooth.
     const byTooth = new Map<

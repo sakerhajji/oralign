@@ -1,7 +1,10 @@
 'use client';
 
-import { useEffect, useState, type ReactNode } from 'react';
+import Link from 'next/link';
+import { useState, type ReactNode } from 'react';
+import { AvailablePacks } from '@/components/dashboard/available-packs';
 import { useT } from '@/lib/i18n/lang-context';
+import { useAuth } from '@/lib/providers/auth-provider';
 import {
   usePacks,
   useCreatePack,
@@ -15,6 +18,7 @@ import { useBillingPublicDefaults } from '@/lib/hooks/use-company-billing';
 import { pickLocalized } from '@/lib/api/blog.service';
 import {
   ArchType,
+  UserRole,
   type CreatePackDto,
   type Pack,
   type PackPrice,
@@ -123,6 +127,71 @@ function packDescription(pack: Pack, lang: string): string {
 // Page
 
 export function PacksPageContent() {
+  const { t } = useT();
+  const { user, isAdmin } = useAuth();
+
+  if (!user) {
+    return (
+      <div className="p-6 text-sm text-muted-foreground">
+        {t('common.loading')}
+      </div>
+    );
+  }
+
+  if (isAdmin) {
+    return <AdminPacksManager />;
+  }
+
+  if (user.role === UserRole.DENTIST) {
+    return <DoctorPacksCatalogue />;
+  }
+
+  return (
+    <div className="flex min-h-[50vh] items-center justify-center p-6 text-center">
+      <Card className="max-w-md">
+        <CardHeader>
+          <CardTitle>{t('packsAdmin.accessDeniedTitle')}</CardTitle>
+          <CardDescription>{t('packsAdmin.accessDeniedBody')}</CardDescription>
+        </CardHeader>
+      </Card>
+    </div>
+  );
+}
+
+function DoctorPacksCatalogue() {
+  const { t } = useT();
+
+  return (
+    <div className="flex flex-col gap-5 p-3 sm:gap-6 sm:p-4 md:p-6">
+      <header className="flex flex-col gap-4 rounded-2xl border bg-card p-4 shadow-sm sm:p-6 md:flex-row md:items-center md:justify-between">
+        <div className="space-y-2">
+          <div className="inline-flex items-center gap-2 rounded-full border bg-background px-3 py-1 text-xs font-medium text-muted-foreground">
+            <PackageIcon className="size-3.5 text-primary" />
+            {t('packsDoctor.eyebrow')}
+          </div>
+          <div>
+            <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
+              {t('packsDoctor.title')}
+            </h1>
+            <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
+              {t('packsDoctor.intro')}
+            </p>
+          </div>
+        </div>
+        <Button asChild>
+          <Link href="/dashboard/orders/new">
+            <Plus className="mr-2 size-4" />
+            {t('packsDoctor.newOrder')}
+          </Link>
+        </Button>
+      </header>
+
+      <AvailablePacks />
+    </div>
+  );
+}
+
+function AdminPacksManager() {
   const { t, lang } = useT();
   const [includeInactive, setIncludeInactive] = useState(false);
   const { data: packsResponse, isLoading } = usePacks({
@@ -423,11 +492,13 @@ export function PacksPageContent() {
 
       {/* Create / edit dialogs share the same form to keep validation aligned. */}
       <PackFormDialog
+        key={`create:${createOpen ? 'open' : 'closed'}`}
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         pack={null}
       />
       <PackFormDialog
+        key={`edit:${editingPack?.id ?? 'closed'}`}
         open={!!editingPack}
         onClose={() => setEditingPack(null)}
         pack={editingPack}
@@ -679,52 +750,57 @@ function PackFormDialog({
   const update = useUpdatePack();
   const billing = useBillingPublicDefaults();
   const defaultCurrency = billing.data?.defaultCurrency ?? 'TND';
+  const initialTwo = pack ? priceForArch(pack, ArchType.TWO_ARCHES) : null;
+  const initialSingle = pack ? priceForArch(pack, ArchType.ONE_ARCH) : null;
 
   // Multilingual text
-  const [nameFr, setNameFr] = useState('');
-  const [nameEn, setNameEn] = useState('');
-  const [descFr, setDescFr] = useState('');
-  const [descEn, setDescEn] = useState('');
-  const [expFr, setExpFr] = useState('');
-  const [expEn, setExpEn] = useState('');
-  const [finFr, setFinFr] = useState('');
-  const [finEn, setFinEn] = useState('');
+  const [nameFr, setNameFr] = useState(
+    () => pack?.nameI18n?.fr ?? pack?.name ?? '',
+  );
+  const [nameEn, setNameEn] = useState(() => pack?.nameI18n?.en ?? '');
+  const [descFr, setDescFr] = useState(
+    () => pack?.descriptionI18n?.fr ?? pack?.description ?? '',
+  );
+  const [descEn, setDescEn] = useState(
+    () => pack?.descriptionI18n?.en ?? '',
+  );
+  const [expFr, setExpFr] = useState(
+    () => pack?.treatmentExpirationLabel?.fr ?? '',
+  );
+  const [expEn, setExpEn] = useState(
+    () => pack?.treatmentExpirationLabel?.en ?? '',
+  );
+  const [finFr, setFinFr] = useState(
+    () => pack?.finishingIncludedLabel?.fr ?? '',
+  );
+  const [finEn, setFinEn] = useState(
+    () => pack?.finishingIncludedLabel?.en ?? '',
+  );
   // Treatment
-  const [maxSteps, setMaxSteps] = useState('');
-  const [isUnlimitedSteps, setIsUnlimitedSteps] = useState(false);
-  const [includedCorrections, setIncludedCorrections] = useState('');
-  const [isUnlimitedCorrections, setIsUnlimitedCorrections] = useState(false);
+  const [maxSteps, setMaxSteps] = useState(() =>
+    pack?.maxStepsPerArch != null ? String(pack.maxStepsPerArch) : '',
+  );
+  const [isUnlimitedSteps, setIsUnlimitedSteps] = useState(
+    () => pack?.isUnlimitedSteps ?? false,
+  );
+  const [includedCorrections, setIncludedCorrections] = useState(() =>
+    pack?.includedCorrections != null ? String(pack.includedCorrections) : '',
+  );
+  const [isUnlimitedCorrections, setIsUnlimitedCorrections] = useState(
+    () => pack?.isUnlimitedCorrections ?? false,
+  );
   // Pricing
-  const [priceTwo, setPriceTwo] = useState('');
-  const [priceSingle, setPriceSingle] = useState('');
-  const [currency, setCurrency] = useState('TND');
+  const [priceTwo, setPriceTwo] = useState(() =>
+    initialTwo ? String(initialTwo.price) : '',
+  );
+  const [priceSingle, setPriceSingle] = useState(() =>
+    initialSingle ? String(initialSingle.price) : '',
+  );
+  const [currency, setCurrency] = useState(
+    () => initialTwo?.currency ?? initialSingle?.currency ?? defaultCurrency,
+  );
   // Visibility
-  const [isActive, setIsActive] = useState(true);
-
-  // Reset the form whenever the dialog opens or the target pack changes.
-  useEffect(() => {
-    if (!open) return;
-    setNameFr(pack?.nameI18n?.fr ?? pack?.name ?? '');
-    setNameEn(pack?.nameI18n?.en ?? '');
-    setDescFr(pack?.descriptionI18n?.fr ?? pack?.description ?? '');
-    setDescEn(pack?.descriptionI18n?.en ?? '');
-    setExpFr(pack?.treatmentExpirationLabel?.fr ?? '');
-    setExpEn(pack?.treatmentExpirationLabel?.en ?? '');
-    setFinFr(pack?.finishingIncludedLabel?.fr ?? '');
-    setFinEn(pack?.finishingIncludedLabel?.en ?? '');
-    setMaxSteps(pack?.maxStepsPerArch != null ? String(pack.maxStepsPerArch) : '');
-    setIsUnlimitedSteps(pack?.isUnlimitedSteps ?? false);
-    setIncludedCorrections(
-      pack?.includedCorrections != null ? String(pack.includedCorrections) : '',
-    );
-    setIsUnlimitedCorrections(pack?.isUnlimitedCorrections ?? false);
-    const two = pack ? priceForArch(pack, ArchType.TWO_ARCHES) : null;
-    const single = pack ? priceForArch(pack, ArchType.ONE_ARCH) : null;
-    setPriceTwo(two ? String(two.price) : '');
-    setPriceSingle(single ? String(single.price) : '');
-    setCurrency(two?.currency ?? single?.currency ?? defaultCurrency);
-    setIsActive(pack?.isActive ?? true);
-  }, [open, pack, defaultCurrency]);
+  const [isActive, setIsActive] = useState(() => pack?.isActive ?? true);
 
   // ── Derived validation ──
   const twoNum = priceTwo.trim() === '' ? undefined : Number(priceTwo);

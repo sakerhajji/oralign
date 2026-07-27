@@ -16,7 +16,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { AlertCircle, Loader2, ShieldCheck, Sparkles } from 'lucide-react';
-import { treatmentPlansService } from '@/lib/api/treatment-plans.service';
+import {
+  PublicViewerFetchError,
+  treatmentPlansService,
+} from '@/lib/api/treatment-plans.service';
 import {
   parseViewerMode,
   prepareViewer,
@@ -111,20 +114,32 @@ export default function PublicTreatmentViewerPage() {
   // patient uses the navbar switcher.
   const [errorKey, setErrorKey] = useState<'invalidLink' | 'expiredLink' | null>(null);
   const [iframeBlocked, setIframeBlocked] = useState(false);
+  const visibleErrorKey = !token ? 'invalidLink' : errorKey;
 
   useEffect(() => {
     if (!token) {
-      setErrorKey('invalidLink');
       return;
     }
     let active = true;
     treatmentPlansService
       .publicByToken(token)
       .then((res) => {
-        if (active) setPayload(res);
+        if (!active) return;
+        setPayload(res);
+        setErrorKey(null);
       })
-      .catch(() => {
-        if (active) setErrorKey('expiredLink');
+      .catch((error) => {
+        if (!active) return;
+        setPayload(null);
+        if (
+          error instanceof PublicViewerFetchError &&
+          error.status !== 410 &&
+          error.errorCode !== 'PUBLIC_LINK_EXPIRED'
+        ) {
+          setErrorKey('invalidLink');
+          return;
+        }
+        setErrorKey('expiredLink');
       });
     return () => {
       active = false;
@@ -166,21 +181,29 @@ export default function PublicTreatmentViewerPage() {
         </span>
       </div>
 
-      {!payload && !errorKey && (
+      {!payload && !visibleErrorKey && (
         <div className="flex h-72 items-center justify-center text-sm text-muted-foreground sm:h-96">
           <Loader2 className="mr-2 h-5 w-5 animate-spin" />
           {t('loading')}
         </div>
       )}
 
-      {errorKey && (
-        <div className="mx-auto max-w-md rounded-xl border border-red-200 bg-red-50 p-5 text-center sm:p-6">
-          <AlertCircle className="mx-auto mb-3 h-8 w-8 text-red-600" />
-          <p className="text-sm font-semibold text-red-700">{t('linkUnavailableTitle')}</p>
-          <p className="mt-1 text-xs text-red-600/80">{t(errorKey)}</p>
-          <p className="mt-3 text-xs text-muted-foreground">
-            {t('requestNewLink')}
-          </p>
+      {visibleErrorKey && (
+        <div className="mx-auto grid min-h-[52vh] max-w-lg place-items-center py-10">
+          <div className="w-full rounded-2xl border bg-card p-6 text-center shadow-sm sm:p-8">
+            <span className="mx-auto mb-4 grid size-12 place-items-center rounded-full bg-red-50 text-red-600">
+              <AlertCircle className="h-6 w-6" />
+            </span>
+            <p className="text-lg font-semibold text-foreground">
+              {t('linkUnavailableTitle')}
+            </p>
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+              {t(visibleErrorKey)}
+            </p>
+            <p className="mt-4 rounded-xl bg-muted/50 px-4 py-3 text-xs leading-relaxed text-muted-foreground">
+              {t('requestNewLink')}
+            </p>
+          </div>
         </div>
       )}
 

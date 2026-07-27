@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import {
+  OrderStatus,
   PaymentRecordStatus,
   Prisma,
   QuotationPaymentStatus,
@@ -79,6 +80,10 @@ export class DoctorDashboardService {
       ordersToday,
       ordersThisMonth,
       ordersPrevMonth,
+      ordersSubmitted,
+      ordersCompleted,
+      ordersInTreatment,
+      ordersInPayment,
       patientsTotal,
       newPatientsThisMonth,
     ] = await this.prisma.$transaction([
@@ -94,6 +99,44 @@ export class DoctorDashboardService {
           doctorId,
           deletedAt: null,
           createdAt: { gte: prevMonthStart, lt: monthStart },
+        },
+      }),
+      this.prisma.dentalOrder.count({
+        where: {
+          doctorId,
+          deletedAt: null,
+          status: { in: [OrderStatus.submitted, OrderStatus.under_review] },
+        },
+      }),
+      this.prisma.dentalOrder.count({
+        where: { doctorId, deletedAt: null, status: OrderStatus.finished },
+      }),
+      this.prisma.dentalOrder.count({
+        where: {
+          doctorId,
+          deletedAt: null,
+          status: {
+            in: [
+              OrderStatus.treatment_planning,
+              OrderStatus.treatment_plan_ready,
+              OrderStatus.revision_requested,
+              OrderStatus.treatment_approved,
+            ],
+          },
+        },
+      }),
+      this.prisma.dentalOrder.count({
+        where: {
+          doctorId,
+          deletedAt: null,
+          status: {
+            in: [
+              OrderStatus.quotation_sent,
+              OrderStatus.payment_plan_selected,
+              OrderStatus.payment_pending,
+              OrderStatus.payment_review,
+            ],
+          },
         },
       }),
       this.prisma.patient.count({ where: { doctorId, deletedAt: null } }),
@@ -273,7 +316,7 @@ export class DoctorDashboardService {
     const latestPaidWithPack = await this.prisma.quotation.findFirst({
       where: {
         deletedAt: null,
-        order: { doctorId },
+        order: { doctorId, deletedAt: null },
         packId: { not: null },
       },
       orderBy: { sentAt: 'desc' },
@@ -331,6 +374,13 @@ export class DoctorDashboardService {
     let packExpiresAt: Date | null = null;
     let packRemainingDays: number | null = null;
     let packUsagePct: number | null = null;
+    let packTotalCredits: number | null = null;
+    let packUsedCredits: number | null = null;
+    let packRemainingCredits: number | null = null;
+    const latestPackLimit = latestPaidWithPack?.pack?.maxStepsPerArch ?? null;
+    if (latestPackLimit && !latestPaidWithPack?.pack?.isUnlimitedSteps) {
+      packTotalCredits = latestPackLimit;
+    }
     if (latestPaidWithPack?.approvedAt) {
       packExpiresAt = new Date(latestPaidWithPack.approvedAt);
       packExpiresAt.setDate(packExpiresAt.getDate() + 90);
@@ -338,7 +388,7 @@ export class DoctorDashboardService {
         0,
         Math.ceil((packExpiresAt.getTime() - now.getTime()) / (24 * 60 * 60 * 1000)),
       );
-      const max = latestPaidWithPack.pack?.maxStepsPerArch;
+      const max = latestPackLimit;
       if (max && !latestPaidWithPack.pack?.isUnlimitedSteps) {
         const used = await this.prisma.dentalOrder.count({
           where: {
@@ -347,6 +397,8 @@ export class DoctorDashboardService {
             createdAt: { gte: latestPaidWithPack.approvedAt },
           },
         });
+        packUsedCredits = used;
+        packRemainingCredits = Math.max(0, max - used);
         packUsagePct = Math.min(100, Math.round((used / max) * 100));
       }
     }
@@ -359,6 +411,10 @@ export class DoctorDashboardService {
         today: ordersToday,
         thisMonth: ordersThisMonth,
         prevMonth: ordersPrevMonth,
+        submitted: ordersSubmitted,
+        completed: ordersCompleted,
+        inTreatment: ordersInTreatment,
+        inPayment: ordersInPayment,
         // ORDER counts (not quotation counts) — see the comment block
         // above the breakdown query. paid + unpaid + noActiveQuote
         // === total, guaranteed.
@@ -401,6 +457,9 @@ export class DoctorDashboardService {
             expiresAt: packExpiresAt?.toISOString() ?? null,
             remainingDays: packRemainingDays,
             usagePct: packUsagePct,
+            totalCredits: packTotalCredits,
+            usedCredits: packUsedCredits,
+            remainingCredits: packRemainingCredits,
             isUnlimitedSteps: latestPaidWithPack.pack.isUnlimitedSteps,
           }
         : null,

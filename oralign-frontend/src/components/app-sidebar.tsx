@@ -30,7 +30,6 @@ import {
 } from "@/components/ui/sidebar"
 import {
   ClipboardListIcon,
-  BellIcon,
   CircleHelpIcon,
   CreditCardIcon,
   FileBarChartIcon,
@@ -124,9 +123,8 @@ const NAV_MAIN: NavItemDef[] = [
     titleKey: "chrome.nav.packs",
     url: "/dashboard/packs",
     icon: <PackageIcon />,
-    // Admin-only — pack catalogue + price management. Doctors see the
-    // pack name indirectly through the quotation snapshot, not here.
-    roles: [UserRole.ADMIN, UserRole.SUPER_ADMIN],
+    // Admins manage packs; dentists get a read-only catalogue.
+    roles: [UserRole.DENTIST, UserRole.ADMIN, UserRole.SUPER_ADMIN],
   },
   {
     titleKey: "chrome.nav.pendingPayments",

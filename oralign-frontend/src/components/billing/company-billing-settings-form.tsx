@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   Building2,
   Check,
@@ -29,6 +29,7 @@ import { useAuth } from '@/lib/providers/auth-provider';
 import {
   DevisLanguage,
   type BankDetails,
+  type CompanyBillingSettings,
   type TranslatedTexts,
   type UpsertCompanyBillingSettingsDto,
 } from '@/lib/types';
@@ -80,6 +81,53 @@ const emptyState: FormState = {
   bankDetails: { bankName: '', accountName: '', rib: '', iban: '', swift: '' },
 };
 
+function formFromBillingSettings(
+  settings?: CompanyBillingSettings | null,
+): FormState {
+  if (!settings) return emptyState;
+
+  return {
+    companyName: settings.companyName ?? '',
+    companyAddress: settings.companyAddress ?? '',
+    companyCity: settings.companyCity ?? '',
+    companyCountry: settings.companyCountry ?? '',
+    companyPhone: settings.companyPhone ?? '',
+    companyEmail: settings.companyEmail ?? '',
+    taxRegistrationNumber: settings.taxRegistrationNumber ?? '',
+    tradeName: settings.tradeName ?? '',
+    legalForm: settings.legalForm ?? '',
+    registreDeCommerce: settings.registreDeCommerce ?? '',
+    hostingProvider: settings.hostingProvider ?? '',
+    hostingProviderUrl: settings.hostingProviderUrl ?? '',
+    websiteDomain: settings.websiteDomain ?? '',
+    defaultTvaRate: settings.defaultTvaRate ?? 19,
+    defaultTreatmentFee: settings.defaultTreatmentFee ?? 0,
+    stampDuty: settings.stampDuty ?? 1,
+    cbctSupplementEnabled: settings.cbctSupplementEnabled ?? false,
+    cbctSupplementFee: settings.cbctSupplementFee ?? 0,
+    defaultCurrency: settings.defaultCurrency ?? 'TND',
+    devisPrefix: settings.devisPrefix ?? 'DEV',
+    devisNextNumber: settings.devisNextNumber ?? 1,
+    legalTextTranslations: settings.legalTextTranslations ?? {
+      fr: '',
+      en: '',
+      ar: '',
+    },
+    footerTextTranslations: settings.footerTextTranslations ?? {
+      fr: '',
+      en: '',
+      ar: '',
+    },
+    bankDetails: settings.bankDetails ?? {
+      bankName: '',
+      accountName: '',
+      rib: '',
+      iban: '',
+      swift: '',
+    },
+  };
+}
+
 /**
  * Single-form admin page for the company-billing-settings singleton.
  *
@@ -100,40 +148,30 @@ export function CompanyBillingSettingsForm() {
   const removeLogo = useDeleteCompanyLogo();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [form, setForm] = useState<FormState>(emptyState);
-
-  useEffect(() => {
-    if (!settings) {
-      setForm(emptyState);
-      return;
-    }
-    setForm({
-      companyName: settings.companyName ?? '',
-      companyAddress: settings.companyAddress ?? '',
-      companyCity: settings.companyCity ?? '',
-      companyCountry: settings.companyCountry ?? '',
-      companyPhone: settings.companyPhone ?? '',
-      companyEmail: settings.companyEmail ?? '',
-      taxRegistrationNumber: settings.taxRegistrationNumber ?? '',
-      tradeName: settings.tradeName ?? '',
-      legalForm: settings.legalForm ?? '',
-      registreDeCommerce: settings.registreDeCommerce ?? '',
-      hostingProvider: settings.hostingProvider ?? '',
-      hostingProviderUrl: settings.hostingProviderUrl ?? '',
-      websiteDomain: settings.websiteDomain ?? '',
-      defaultTvaRate: settings.defaultTvaRate ?? 19,
-      defaultTreatmentFee: settings.defaultTreatmentFee ?? 0,
-      stampDuty: settings.stampDuty ?? 1,
-      cbctSupplementEnabled: settings.cbctSupplementEnabled ?? false,
-      cbctSupplementFee: settings.cbctSupplementFee ?? 0,
-      defaultCurrency: settings.defaultCurrency ?? 'TND',
-      devisPrefix: settings.devisPrefix ?? 'DEV',
-      devisNextNumber: settings.devisNextNumber ?? 1,
-      legalTextTranslations: settings.legalTextTranslations ?? { fr: '', en: '', ar: '' },
-      footerTextTranslations: settings.footerTextTranslations ?? { fr: '', en: '', ar: '' },
-      bankDetails: settings.bankDetails ?? { bankName: '', accountName: '', rib: '', iban: '', swift: '' },
-    });
-  }, [settings]);
+  const settingsKey = settings
+    ? `${settings.id}:${settings.updatedAt ?? ''}`
+    : 'empty';
+  const baseForm = useMemo(
+    () => formFromBillingSettings(settings),
+    [settings],
+  );
+  const [draft, setDraft] = useState<{ key: string; form: FormState }>(() => ({
+    key: settingsKey,
+    form: baseForm,
+  }));
+  const form = draft.key === settingsKey ? draft.form : baseForm;
+  const setForm = useCallback(
+    (next: FormState | ((previous: FormState) => FormState)) => {
+      setDraft((current) => {
+        const previous = current.key === settingsKey ? current.form : baseForm;
+        return {
+          key: settingsKey,
+          form: typeof next === 'function' ? next(previous) : next,
+        };
+      });
+    },
+    [baseForm, settingsKey],
+  );
 
   const logoUrl = useMemo(
     () => companyBillingService.resolveLogoUrl(settings?.companyLogoPath),

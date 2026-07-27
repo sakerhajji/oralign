@@ -3,14 +3,13 @@ import {
   DailyLifeSection,
   GuidePreviewSection,
   OralignHeroSection,
-  OralignPrimeSection,
-  ParcoursSection,
   PrecisionSection,
-  PraticiensSection,
+  SmileConsultationCtaSection,
   SmileFreedomSection,
   TreatmentDurationSection,
-  WearAlignersSection,
+  WearAlignersVideoSection,
 } from "../_components/patient/decouvrir-sections";
+import { HowItWorks } from "../_components/how-it-works";
 
 export const metadata: Metadata = {
   title: "Découvrir Oralign — Aligneurs invisibles, Prime, parcours | ORALIGN",
@@ -27,11 +26,10 @@ export default function DecouvrirPage() {
       <DailyLifeSection />
       <GuidePreviewSection />
       <PrecisionSection />
+      <HowItWorks />
       <TreatmentDurationSection />
-      <WearAlignersSection />
-      <OralignPrimeSection />
-      <ParcoursSection />
-      <PraticiensSection />
+      <WearAlignersVideoSection />
+      <SmileConsultationCtaSection />
     </>
   );
 }

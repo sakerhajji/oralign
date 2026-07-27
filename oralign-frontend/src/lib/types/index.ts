@@ -231,6 +231,7 @@ export interface PublicTreatmentViewerPayload {
     name: string;
     version: number;
     resultViewUrl?: string | null;
+    publicExpiresAt?: string | null;
   };
   doctor?: { fullName?: string | null; clinicName?: string | null };
   patient?: {
@@ -1598,6 +1599,14 @@ export interface DoctorDashboardKpis {
     today: number;
     thisMonth: number;
     prevMonth: number;
+    /** Submitted / under-review orders waiting for clinical review. */
+    submitted?: number;
+    /** Finished orders. */
+    completed?: number;
+    /** Orders currently in treatment-planning workflow. */
+    inTreatment?: number;
+    /** Orders currently in quotation / payment workflow. */
+    inPayment?: number;
     /** Orders whose active quotation is paid in full. */
     paid: number;
     /** Orders whose active quotation is pending / partially paid. */
@@ -1627,6 +1636,9 @@ export interface DoctorDashboardKpis {
     expiresAt: string | null;
     remainingDays: number | null;
     usagePct: number | null;
+    totalCredits?: number | null;
+    usedCredits?: number | null;
+    remainingCredits?: number | null;
     isUnlimitedSteps: boolean;
   } | null;
   suggestedPack: {

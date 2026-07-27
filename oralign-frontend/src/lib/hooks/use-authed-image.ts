@@ -90,6 +90,7 @@ export function useAuthedImage(url: string | null | undefined): {
   error: Error | null;
 } {
   const [state, setState] = useState<{
+    url: string | null;
     src: string | null;
     loading: boolean;
     error: Error | null;
@@ -97,41 +98,40 @@ export function useAuthedImage(url: string | null | undefined): {
     // Synchronously hand back the cached blob URL on first render
     // when the image is already in cache — avoids the brief skeleton
     // flash on every re-mount of an already-loaded photo.
-    if (!url) return { src: null, loading: false, error: null };
+    if (!url) return { url: null, src: null, loading: false, error: null };
     const entry = blobCache.get(url);
     if (entry?.blobUrl) {
       touchCacheKey(url);
-      return { src: entry.blobUrl, loading: false, error: null };
+      return { url, src: entry.blobUrl, loading: false, error: null };
     }
-    return { src: null, loading: true, error: null };
+    return { url, src: null, loading: true, error: null };
   });
 
   useEffect(() => {
     let cancelled = false;
 
-    if (!url) {
-      setState({ src: null, loading: false, error: null });
-      return;
-    }
+    if (!url) return;
 
     // Cached + ready → done.
     const entry = blobCache.get(url);
-    if (entry?.blobUrl) {
-      touchCacheKey(url);
-      setState({ src: entry.blobUrl, loading: false, error: null });
+    const cachedBlobUrl = entry?.blobUrl;
+    if (cachedBlobUrl) {
+      queueMicrotask(() => {
+        if (cancelled) return;
+        touchCacheKey(url);
+        setState({ url, src: cachedBlobUrl, loading: false, error: null });
+      });
       return;
     }
-
-    setState((prev) => ({ ...prev, loading: true, error: null }));
 
     fetchBlobUrl(url)
       .then((blobUrl) => {
         if (cancelled) return;
-        setState({ src: blobUrl, loading: false, error: null });
+        setState({ url, src: blobUrl, loading: false, error: null });
       })
       .catch((err: Error) => {
         if (cancelled) return;
-        setState({ src: null, loading: false, error: err });
+        setState({ url, src: null, loading: false, error: err });
       });
 
     return () => {
@@ -142,5 +142,10 @@ export function useAuthedImage(url: string | null | undefined): {
     };
   }, [url]);
 
-  return state;
+  const hasCurrentState = !!url && state.url === url;
+  return {
+    src: hasCurrentState ? state.src : null,
+    loading: url ? (hasCurrentState ? state.loading : true) : false,
+    error: hasCurrentState ? state.error : null,
+  };
 }

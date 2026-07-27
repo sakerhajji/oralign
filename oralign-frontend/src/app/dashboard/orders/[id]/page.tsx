@@ -3,7 +3,7 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { format, type Locale } from 'date-fns';
 import { fr as frLocale } from 'date-fns/locale';
 import {
@@ -52,7 +52,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   dashboardKeys,
   useBillingPublicDefaults,
-  useConfirmTreatmentFeePayment,
   useDeleteOrder,
   useOrder,
   usePatient,
@@ -77,6 +76,7 @@ import {
 } from '@/lib/types';
 import { formatPrice } from '@/lib/utils/currency';
 import { formatBytes } from '@/lib/utils/bytes';
+import { safeDashboardReturnTo } from '@/lib/orders/order-navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 /**
@@ -124,6 +124,12 @@ const OdontogramSelector = dynamic(
 
 type OrderDetailTab = 'order' | 'treatment-plans' | 'quote';
 
+const ORDER_DETAIL_TAB_TRIGGER_CLASS =
+  'group flex h-12 min-w-0 w-full items-center justify-center gap-2.5 rounded-lg border border-transparent px-4 text-center text-sm font-semibold text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 data-[state=active]:border-border data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm sm:h-14';
+
+const ORDER_DETAIL_TAB_ICON_CLASS =
+  'grid h-7 w-7 shrink-0 place-items-center rounded-md border border-border/70 bg-background/70 text-muted-foreground transition-colors group-data-[state=active]:border-primary group-data-[state=active]:bg-primary group-data-[state=active]:text-primary-foreground';
+
 // Stable no-op + empty fallback for the read-only odontogram — inline
 // `() => undefined` / `?? []` literals would mint new identities per page
 // render and defeat the selector's memo boundary.
@@ -139,12 +145,17 @@ const dateFmt = (lang: 'en' | 'fr') =>
 
 export default function OrderDetailPage() {
   const params = useParams<{ id: string }>();
+  const pathname = usePathname();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const orderQuery = useOrder(params.id);
   const deleteOrder = useDeleteOrder();
   const permanentDeleteOrder = usePermanentDeleteOrder();
   const { isAdmin, isDentist, user } = useAuth();
   const { t, lang } = useT();
+  const requestedTab = parseOrderDetailTab(searchParams.get('tab'));
+  const returnHref =
+    safeDashboardReturnTo(searchParams.get('returnTo')) ?? '/dashboard/orders';
 
   // Pull the full patient record separately — the order endpoint only
   // returns a slim {id,fullName,email,phone} on purpose, but the detail
@@ -245,18 +256,41 @@ export default function OrderDetailPage() {
       hasQuotation: !!quotationQuery.data,
     });
   }, [
-    orderQuery.data?.status,
-    orderQuery.data?.treatmentPlansCount,
+    orderQuery.data,
     quotationQuery.data,
+  ]);
+
+  const initialTab = useMemo<OrderDetailTab>(() => {
+    if (!orderQuery.data) return 'order';
+    return resolveRequestedTab({
+      requestedTab,
+      defaultTab,
+      isPlanner: isAdmin || user?.role === UserRole.DESIGNER,
+      hasTreatmentPlans: (orderQuery.data.treatmentPlansCount ?? 0) > 0,
+      hasQuotation:
+        !!quotationQuery.data ||
+        POST_QUOTE_STATUSES.has(orderQuery.data.status),
+    });
+  }, [
+    defaultTab,
+    isAdmin,
+    orderQuery.data,
+    quotationQuery.data,
+    requestedTab,
+    user?.role,
   ]);
 
   useEffect(() => {
     const orderId = orderQuery.data?.id;
-    if (!orderId || initializedOrderIdRef.current === orderId) return;
-    initializedOrderIdRef.current = orderId;
-    setActiveTab(defaultTab);
-    setMountedTabs(new Set([defaultTab]));
-  }, [defaultTab, orderQuery.data?.id]);
+    if (!orderId) return;
+
+    const initKey = `${orderId}:${requestedTab ?? 'default'}`;
+    if (initializedOrderIdRef.current === initKey) return;
+
+    initializedOrderIdRef.current = initKey;
+    setActiveTab(initialTab);
+    setMountedTabs(new Set([initialTab]));
+  }, [initialTab, orderQuery.data?.id, requestedTab]);
 
   useEffect(() => {
     setMountedTabs((current) => {
@@ -266,6 +300,18 @@ export default function OrderDetailPage() {
       return next;
     });
   }, [activeTab]);
+
+  const handleTabChange = (value: string) => {
+    const nextTab = parseOrderDetailTab(value);
+    if (!nextTab) return;
+
+    setActiveTab(nextTab);
+    setMountedTabs((current) => new Set([...current, nextTab]));
+
+    const nextParams = new URLSearchParams(searchParams.toString());
+    nextParams.set('tab', nextTab);
+    router.replace(`${pathname}?${nextParams.toString()}`, { scroll: false });
+  };
 
   // Legacy per-tooth IPR map for the read-only odontogram. Memoized —
   // this used to be built inline in JSX, so EVERY page render (tab
@@ -302,7 +348,7 @@ export default function OrderDetailPage() {
               {t('orderDetail.orderNotFound')}
             </p>
             <Button asChild variant="outline">
-              <Link href="/dashboard/orders">{t('orderDetail.backToOrders')}</Link>
+              <Link href={returnHref}>{t('orderDetail.backToOrders')}</Link>
             </Button>
           </CardContent>
         </Card>
@@ -320,6 +366,22 @@ export default function OrderDetailPage() {
   const canEditOrder = canManage && !paidLocked;
   const hasQuotationSignal =
     !!quotationQuery.data || POST_QUOTE_STATUSES.has(order.status);
+  const isPlanner = isAdmin || user?.role === UserRole.DESIGNER;
+  const hasTreatmentPlans = (order.treatmentPlansCount ?? 0) > 0;
+  const shouldShowTreatmentPlansTab = showTreatmentTab({
+    isPlanner,
+    hasTreatmentPlans,
+  });
+  const shouldShowQuoteTab = showQuoteTab({
+    isPlanner,
+    hasQuotation: hasQuotationSignal,
+  });
+  const tabListColumns =
+    shouldShowTreatmentPlansTab && shouldShowQuoteTab
+      ? 'sm:grid-cols-3'
+      : shouldShowTreatmentPlansTab || shouldShowQuoteTab
+        ? 'sm:grid-cols-2'
+        : 'sm:grid-cols-1';
 
   // Extractions summary — the doctor marks teeth for extraction on the
   // odontogram (tooth instructions of type 'extract'); `order.extractions`
@@ -348,16 +410,16 @@ export default function OrderDetailPage() {
   return (
     <div className="@container/main flex flex-1 flex-col gap-6 p-4 lg:p-6">
       {/* ─── Sticky-ish header with the order code, status, and actions ─── */}
-      <header className="flex flex-col gap-4 rounded-2xl border bg-card p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-6">
+      <header className="flex flex-col gap-4 rounded-2xl border bg-card p-4 shadow-sm sm:flex-row sm:items-start sm:justify-between sm:p-6">
         <div className="min-w-0">
           <Button asChild variant="ghost" size="sm" className="mb-1 px-0">
-            <Link href="/dashboard/orders">
+            <Link href={returnHref}>
               <ArrowLeft className="mr-2 h-4 w-4" />
               {t('orderDetail.backToList')}
             </Link>
           </Button>
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="truncate text-2xl font-bold tracking-tight sm:text-3xl">
+            <h1 className="min-w-0 break-all text-2xl font-bold tracking-tight sm:text-3xl">
               {order.orderCode}
             </h1>
             <OrderStatusBadge status={order.status} />
@@ -375,7 +437,7 @@ export default function OrderDetailPage() {
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="h-7 gap-1.5 text-xs"
+                    className="h-8 gap-1.5 text-xs"
                   >
                     <ShieldCheck className="h-3 w-3" />
                     {t('orderDetail.changeStatus')}
@@ -392,7 +454,7 @@ export default function OrderDetailPage() {
               : ''}
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="grid w-full grid-cols-1 gap-2 sm:w-auto sm:grid-cols-none sm:flex sm:flex-wrap sm:justify-end">
           {/* Admin / designer bulk export — pulls EVERY order file plus
               an order-data.json into a single ZIP. Hidden from doctors:
               the backend also rejects them (planner-only RBAC). */}
@@ -402,6 +464,7 @@ export default function OrderDetailPage() {
               variant="outline"
               onClick={handleDownloadAllZip}
               disabled={downloadingZip}
+              className="h-10 w-full justify-center sm:w-auto"
             >
               {downloadingZip ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -413,7 +476,10 @@ export default function OrderDetailPage() {
           )}
           {canEditOrder && (
             <Button asChild>
-              <Link href={`/dashboard/orders/${order.id}/edit`}>
+              <Link
+                href={`/dashboard/orders/${order.id}/edit`}
+                className="h-10 w-full justify-center sm:w-auto"
+              >
                 <Edit className="mr-2 h-4 w-4" />
                 {t('common.edit')}
               </Link>
@@ -429,7 +495,7 @@ export default function OrderDetailPage() {
               disabled={deleteOrder.isPending}
               onConfirm={() =>
                 deleteOrder.mutate(order.id, {
-                  onSuccess: () => router.push('/dashboard/orders'),
+                  onSuccess: () => router.push(returnHref),
                 })
               }
             />
@@ -445,7 +511,7 @@ export default function OrderDetailPage() {
               destructive
               onConfirm={() =>
                 permanentDeleteOrder.mutate(order.id, {
-                  onSuccess: () => router.push('/dashboard/orders'),
+                  onSuccess: () => router.push(returnHref),
                 })
               }
             />
@@ -492,42 +558,61 @@ export default function OrderDetailPage() {
             order summary. */}
       <Tabs
         value={activeTab}
-        onValueChange={(value) => setActiveTab(value as OrderDetailTab)}
+        onValueChange={handleTabChange}
       >
-        <TabsList className="w-full justify-start sm:w-auto">
-          <TabsTrigger value="order">{t('orderDetail.tabs.details')}</TabsTrigger>
-          {showTreatmentTab({
-            isPlanner: isAdmin || user?.role === UserRole.DESIGNER,
-            hasTreatmentPlans: (order.treatmentPlansCount ?? 0) > 0,
-          }) && (
-            <TabsTrigger value="treatment-plans" className="gap-1.5">
-              <Sparkles className="h-3.5 w-3.5" />
-              {t('orderDetail.tabs.treatmentPlan')}
-              {(order.treatmentPlansCount ?? 0) > 0 && (
-                <span className="ml-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
-                  {order.treatmentPlansCount}
+        <div className="w-full rounded-xl border bg-muted/50 p-1.5 shadow-sm">
+          <TabsList
+            className={`grid !h-auto w-full grid-cols-1 items-stretch gap-1 bg-transparent p-0 ${tabListColumns}`}
+          >
+            <TabsTrigger value="order" className={ORDER_DETAIL_TAB_TRIGGER_CLASS}>
+              <span className={ORDER_DETAIL_TAB_ICON_CLASS}>
+                <ListChecks className="h-4 w-4" />
+              </span>
+              <span className="min-w-0 truncate">
+                {t('orderDetail.tabs.details')}
+              </span>
+            </TabsTrigger>
+            {shouldShowTreatmentPlansTab && (
+              <TabsTrigger
+                value="treatment-plans"
+                className={ORDER_DETAIL_TAB_TRIGGER_CLASS}
+              >
+                <span className={ORDER_DETAIL_TAB_ICON_CLASS}>
+                  <Sparkles className="h-4 w-4" />
                 </span>
-              )}
-              {needsTreatmentAttention({
-                role: user?.role,
-                latestPlanStatus: order.latestPlanStatus,
-              }) && <AttentionDot />}
-            </TabsTrigger>
-          )}
-          {showQuoteTab({
-            isPlanner: isAdmin || user?.role === UserRole.DESIGNER,
-            hasQuotation: hasQuotationSignal,
-          }) && (
-            <TabsTrigger value="quote" className="gap-1.5">
-              <FileText className="h-3.5 w-3.5" />
-              {t('orderDetail.tabs.quote')}
-              {needsQuoteAttention({
-                role: user?.role,
-                status: quotationQuery.data?.status,
-              }) && <AttentionDot />}
-            </TabsTrigger>
-          )}
-        </TabsList>
+                <span className="min-w-0 truncate">
+                  {t('orderDetail.tabs.treatmentPlan')}
+                </span>
+                {hasTreatmentPlans && (
+                  <span className="shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-xs font-bold text-primary">
+                    {order.treatmentPlansCount}
+                  </span>
+                )}
+                {needsTreatmentAttention({
+                  role: user?.role,
+                  latestPlanStatus: order.latestPlanStatus,
+                }) && <AttentionDot />}
+              </TabsTrigger>
+            )}
+            {shouldShowQuoteTab && (
+              <TabsTrigger
+                value="quote"
+                className={ORDER_DETAIL_TAB_TRIGGER_CLASS}
+              >
+                <span className={ORDER_DETAIL_TAB_ICON_CLASS}>
+                  <FileText className="h-4 w-4" />
+                </span>
+                <span className="min-w-0 truncate">
+                  {t('orderDetail.tabs.quote')}
+                </span>
+                {needsQuoteAttention({
+                  role: user?.role,
+                  status: quotationQuery.data?.status,
+                }) && <AttentionDot />}
+              </TabsTrigger>
+            )}
+          </TabsList>
+        </div>
 
         <TabsContent
           value="order"
@@ -735,6 +820,51 @@ const POST_QUOTE_STATUSES = new Set<OrderStatus>([
   OrderStatus.FINISHED,
 ]);
 
+function parseOrderDetailTab(value: string | null): OrderDetailTab | null {
+  if (
+    value === 'order' ||
+    value === 'treatment-plans' ||
+    value === 'quote'
+  ) {
+    return value;
+  }
+  return null;
+}
+
+function resolveRequestedTab(args: {
+  requestedTab: OrderDetailTab | null;
+  defaultTab: OrderDetailTab;
+  isPlanner: boolean;
+  hasTreatmentPlans: boolean;
+  hasQuotation: boolean;
+}): OrderDetailTab {
+  if (!args.requestedTab) {
+    return args.defaultTab;
+  }
+  if (args.requestedTab === 'order') {
+    return 'order';
+  }
+  if (
+    args.requestedTab === 'treatment-plans' &&
+    showTreatmentTab({
+      isPlanner: args.isPlanner,
+      hasTreatmentPlans: args.hasTreatmentPlans,
+    })
+  ) {
+    return 'treatment-plans';
+  }
+  if (
+    args.requestedTab === 'quote' &&
+    showQuoteTab({
+      isPlanner: args.isPlanner,
+      hasQuotation: args.hasQuotation,
+    })
+  ) {
+    return 'quote';
+  }
+  return args.defaultTab;
+}
+
 /**
  * Pick the initial tab on first mount.
  * Priority: existing quote → existing treatment plan → order details.
@@ -828,7 +958,7 @@ function needsQuoteAttention(args: {
 function AttentionDot() {
   const { t } = useT();
   return (
-    <span className="relative ml-1 flex h-2 w-2" aria-label={t('orderDetail.newActivity')}>
+    <span className="relative ml-1 flex h-2 w-2 shrink-0" aria-label={t('orderDetail.newActivity')}>
       <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
       <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
     </span>
@@ -1021,6 +1151,7 @@ function TreatmentPlansSection({
           treatmentPlanId={activeId}
           role={role}
           socketConnected={socketConnected}
+          onPlanCreated={setSelectedId}
         />
       ) : null}
     </div>
@@ -1053,6 +1184,7 @@ function OrderDeleteAction({
           type="button"
           variant={destructive ? 'destructive' : 'outline'}
           disabled={disabled}
+          className="h-10 w-full justify-center sm:w-auto"
         >
           {icon}
           {actionLabel}
@@ -1115,7 +1247,6 @@ function TreatmentFeeGateBanner({
   // to TreatmentFeePaymentDialog — the banner is the second consumer
   // of the same setting and needed the same treatment.
   const { data: defaults } = useBillingPublicDefaults();
-  const confirmBT = useConfirmTreatmentFeePayment();
   const [payOpen, setPayOpen] = useState(false);
   // The receipt-viewer modal — opened from the awaiting-confirmation
   // banner. Replaces the previous "click Confirm and hope" flow with

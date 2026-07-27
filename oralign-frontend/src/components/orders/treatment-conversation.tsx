@@ -400,11 +400,27 @@ function DateSeparator({ date }: { date: string }) {
 }
 
 function SystemRow({ message }: { message: TreatmentMessage }) {
+  const isRejection = message.type === TreatmentMessageType.REJECTION;
+  const isApproval = message.type === TreatmentMessageType.APPROVAL;
+  const Icon = isRejection ? X : isApproval ? CheckCheck : null;
+
   return (
-    <div className="my-1 flex justify-center">
-      <span className="inline-flex max-w-[80%] items-center gap-2 rounded-full bg-amber-100/80 px-3 py-1 text-center text-[11px] font-medium text-amber-800 shadow-sm">
-        {message.message}
-      </span>
+    <div className="my-2 flex justify-center">
+      <div
+        className={cn(
+          'inline-flex max-w-[92%] items-start gap-2 text-center text-[11px] font-medium shadow-sm sm:max-w-[80%]',
+          isRejection
+            ? 'rounded-2xl border border-red-200 bg-red-50 px-4 py-2 text-left text-red-800'
+            : isApproval
+              ? 'rounded-full bg-emerald-100/80 px-3 py-1 text-emerald-800'
+              : 'rounded-full bg-amber-100/80 px-3 py-1 text-amber-800',
+        )}
+      >
+        {Icon && <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
+        <span className="whitespace-pre-wrap break-words">
+          {message.message}
+        </span>
+      </div>
     </div>
   );
 }

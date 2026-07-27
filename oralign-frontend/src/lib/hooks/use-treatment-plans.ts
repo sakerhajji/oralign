@@ -11,13 +11,14 @@ import { toast } from 'sonner';
 import { treatmentPlansService } from '@/lib/api/treatment-plans.service';
 import { extractApiErrorMessage } from '@/lib/api/error';
 import { useT } from '@/lib/i18n/lang-context';
-import type {
-  TreatmentAttachmentCategory,
-  TreatmentMessage,
-  TreatmentPlan,
-  TreatmentPlanIpr,
-  TreatmentPlanReview,
-  UpsertTreatmentPlanIprDto,
+import {
+  TreatmentPlanStatus,
+  type TreatmentAttachmentCategory,
+  type TreatmentMessage,
+  type TreatmentPlan,
+  type TreatmentPlanIpr,
+  type TreatmentPlanReview,
+  type UpsertTreatmentPlanIprDto,
 } from '@/lib/types';
 
 export const treatmentPlanKeys = {
@@ -124,13 +125,17 @@ export function useMarkTreatmentPlanReady(): UseMutationResult<
     onSuccess: (plan, sourceId) => {
       invalidatePlan(queryClient, plan);
       queryClient.invalidateQueries({ queryKey: ['orders'] });
-      // Resend-after-rejection creates a NEW versioned plan — surface that
-      // in the toast so the planner knows the rejected version is preserved
-      // and they're now looking at a fresh one.
+      // Renew-after-rejection creates a NEW editable draft — surface that
+      // in the toast so the planner knows it still needs review/edit/send.
       const isNewVersion = plan.id !== sourceId;
       toast.success(
         isNewVersion
-          ? t('toasts.treatmentPlans.readyNewVersion', { name: plan.name })
+          ? t(
+              plan.status === TreatmentPlanStatus.PENDING
+                ? 'toasts.treatmentPlans.draftNewVersion'
+                : 'toasts.treatmentPlans.readyNewVersion',
+              { name: plan.name },
+            )
           : t('toasts.treatmentPlans.markedReady'),
       );
     },
@@ -159,12 +164,13 @@ export function useApproveTreatmentPlan(): UseMutationResult<
 export function useRejectTreatmentPlan(): UseMutationResult<
   TreatmentPlan,
   Error,
-  string
+  { id: string; rejectionReason: string }
 > {
   const queryClient = useQueryClient();
   const { t } = useT();
   return useMutation({
-    mutationFn: (id: string) => treatmentPlansService.reject(id),
+    mutationFn: ({ id, rejectionReason }) =>
+      treatmentPlansService.reject(id, rejectionReason),
     onSuccess: (plan) => {
       invalidatePlan(queryClient, plan);
       queryClient.invalidateQueries({ queryKey: ['orders'] });

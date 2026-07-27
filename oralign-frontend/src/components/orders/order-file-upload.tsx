@@ -365,27 +365,6 @@ export function ClinicalOrderFiles({
   }
 
   const files = filesQuery.data ?? [];
-  const assignedPatientFileIds = new Set(
-    patientImageSlots
-      .map((slot) => fileForSlot(files, slot, patientImageSlots)?.id)
-      .filter(Boolean),
-  );
-  // Files that explicitly belong to a patient image slot — keyed by the
-  // `key__` prefix the upload helper writes. Helps us route legacy items
-  // that share a generic category (e.g. IMAGE) into the right bucket.
-  const patientSlotKeys = new Set<string>(
-    patientImageSlots.map((slot) => slot.key),
-  );
-  const radiographySlotKeys = new Set<string>(
-    radiographySlots.map((slot) => slot.key),
-  );
-  const extraPatientFiles = files.filter((file) => {
-    if (assignedPatientFileIds.has(file.id)) return false;
-    const prefix = slotPrefixOf(file);
-    if (prefix && patientSlotKeys.has(prefix)) return true;
-    if (prefix && radiographySlotKeys.has(prefix)) return false;
-    return photoCategories.has(file.category);
-  });
 
   const uploadSlot = (slot: UploadSlotDefinition, file: File) => {
     setActiveUpload({ key: slot.key, progress: 0 });
@@ -481,31 +460,6 @@ export function ClinicalOrderFiles({
       </div>
     );
   }
-
-  const assignedRadiographyFileIds = new Set(
-    radiographySlots
-      .map((slot) => fileForSlot(files, slot, radiographySlots)?.id)
-      .filter(Boolean),
-  );
-  // Same slot-key/category routing logic for radiography. Specifically,
-  // avoid pulling in patient-image files that happen to share the IMAGE
-  // category (face-rest slot) — they belong above, not here.
-  const extraRadiographyFiles = files.filter((file) => {
-    if (assignedRadiographyFileIds.has(file.id)) return false;
-    const prefix = slotPrefixOf(file);
-    if (prefix && radiographySlotKeys.has(prefix)) return true;
-    if (prefix && patientSlotKeys.has(prefix)) return false;
-    return (
-      file.category === OrderFileCategory.ORTHOPANTOMOGRAPHY ||
-      file.category === OrderFileCategory.PDF
-    );
-  });
-  const assignedStlFileIds = new Set(
-    stlSlots.map((slot) => fileForSlot(files, slot, stlSlots)?.id).filter(Boolean),
-  );
-  const extraStlFiles = files.filter(
-    (file) => modelCategories.has(file.category) && !assignedStlFileIds.has(file.id),
-  );
 
   // ── CBCT / ZIP bundle visibility ────────────────────────────────────
   // The ZIP/CBCT upload is now gated on the order being marked as using a
@@ -668,107 +622,6 @@ function FileGallery({
           onDelete={() => onDelete(file.id)}
         />
       ))}
-    </div>
-  );
-}
-
-function LegacyFileList({
-  title,
-  description,
-  orderId,
-  files,
-  readOnly,
-  onDelete,
-}: {
-  title: string;
-  description: string;
-  orderId: string;
-  files: OrderFile[];
-  readOnly?: boolean;
-  onDelete: (fileId: string) => void;
-}) {
-  return (
-    <div className="rounded-md border bg-muted/20 p-4">
-      <div className="mb-3">
-        <h3 className="text-sm font-semibold">{title}</h3>
-        <p className="text-xs text-muted-foreground">{description}</p>
-      </div>
-      <div className="grid gap-2">
-        {files.map((file) => (
-          <LegacyFileRow
-            key={file.id}
-            orderId={orderId}
-            file={file}
-            readOnly={readOnly}
-            onDelete={() => onDelete(file.id)}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function LegacyFileRow({
-  orderId,
-  file,
-  readOnly,
-  onDelete,
-}: {
-  orderId: string;
-  file: OrderFile;
-  readOnly?: boolean;
-  onDelete: () => void;
-}) {
-  const { t } = useT();
-  const previewType = getPreviewType(file);
-  // Rows only ever fetch the lightweight thumbnail, and only for
-  // images — PDFs/videos load lazily inside the fullscreen viewer the
-  // moment the user actually opens them.
-  const { objectUrl } = useSecureFileUrl(
-    orderId,
-    file.id,
-    previewType === 'image',
-    'thumb',
-  );
-
-  return (
-    <div className="flex flex-col gap-3 rounded-md border bg-background p-3 sm:flex-row sm:items-center sm:justify-between">
-      <div className="min-w-0">
-        <p className="truncate text-sm font-medium">{displayFileName(file)}</p>
-        <p className="text-xs text-muted-foreground">
-          {labelForCategory(file.category, t)} · {formatBytes(file.size)}
-        </p>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <PreviewDialog
-          orderId={orderId}
-          objectUrl={objectUrl}
-          file={file}
-          type={previewType}
-          disabled={false}
-        />
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => downloadOrderFile(orderId, file)}
-        >
-          <Download className="mr-2 h-4 w-4" />
-          {t('media.download')}
-        </Button>
-        {!readOnly && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="text-red-600"
-            onClick={onDelete}
-          >
-            <Trash2 className="mr-2 h-4 w-4" />
-            {t('common.delete')}
-          </Button>
-        )}
-      </div>
     </div>
   );
 }
@@ -1339,7 +1192,6 @@ function ClinicalMediaSlot({
       setPendingFile(reconstructed);
     } catch (err) {
       // Log the underlying error for diagnostics; surface a clean toast.
-      // eslint-disable-next-line no-console
       console.error('[ClinicalMediaSlot] edit-existing failed:', err);
       toast.error(t('media.toasts.editorOpenFailed'));
     } finally {
@@ -1368,7 +1220,6 @@ function ClinicalMediaSlot({
       onClipboard({ file: reconstructed, sourceTitle: title });
       toast.success(t('media.toasts.copied', { title }));
     } catch (err) {
-      // eslint-disable-next-line no-console
       console.error('[ClinicalMediaSlot] copy failed:', err);
       toast.error(t('media.toasts.copyFailed'));
     } finally {
@@ -1749,6 +1600,7 @@ function StlModelViewer({
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [errorMessage, setErrorMessage] = useState<string>();
   const [reloadKey, setReloadKey] = useState(0); // bump to force retry
+  const optimizedModelVariant = file.variants?.model ?? null;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -1842,7 +1694,7 @@ function StlModelViewer({
         // Any GLB failure falls back to the original STL so the viewer
         // never regresses for legacy/unprocessed files.
         let loadedGeometry: import('three').BufferGeometry | undefined;
-        if (file.variants?.model) {
+        if (optimizedModelVariant) {
           try {
             const glbBuffer = await fetchStlBuffer(
               abortController.signal,
@@ -1970,7 +1822,6 @@ function StlModelViewer({
         if (disposed) return;
         // Log full error to console — the UI message gets truncated and
         // we want stack + cause available in DevTools for diagnostics.
-        // eslint-disable-next-line no-console
         console.error('[StlModelViewer] load failed:', error);
         // undefined → the render falls back to the localized
         // t('media.unableToLoadStl') message.
@@ -1996,7 +1847,7 @@ function StlModelViewer({
     };
     // `reloadKey` is part of the deps so clicking Retry replays the effect
     // without unmounting the component.
-  }, [file.id, orderId, large, reloadKey]);
+  }, [file.id, optimizedModelVariant, orderId, large, reloadKey]);
 
   return (
     <div
@@ -3154,39 +3005,45 @@ function useSecureFileUrl(
   const url = buildDownloadUrl(orderId, fileId, variant);
   const [version, setVersion] = useState(0);
   const [state, setState] = useState<{
+    url: string;
+    version: number;
     objectUrl?: string;
     loading: boolean;
     error?: string;
   }>(() => {
     // Synchronous cache hit → no skeleton flash on remount / re-open.
-    if (!enabled) return { loading: false };
+    if (!enabled) return { url, version: 0, loading: false };
     const entry = secureFileCache.get(url);
     if (entry?.blobUrl) {
       touchSecureKey(url);
-      return { objectUrl: entry.blobUrl, loading: false };
+      return { url, version: 0, objectUrl: entry.blobUrl, loading: false };
     }
-    return { loading: true };
+    return { url, version: 0, loading: true };
   });
 
   useEffect(() => {
-    if (!enabled) {
-      setState({ loading: false });
-      return undefined;
-    }
+    if (!enabled) return undefined;
     let active = true;
     const entry = secureFileCache.get(url);
     if (entry?.blobUrl) {
-      touchSecureKey(url);
-      setState({ objectUrl: entry.blobUrl, loading: false });
+      queueMicrotask(() => {
+        if (!active) return;
+        touchSecureKey(url);
+        setState({
+          url,
+          version,
+          objectUrl: entry.blobUrl,
+          loading: false,
+        });
+      });
       return undefined;
     }
-    setState((prev) => ({ ...prev, loading: true, error: undefined }));
     fetchSecureBlobUrl(url)
       .then((objectUrl) => {
-        if (active) setState({ objectUrl, loading: false });
+        if (active) setState({ url, version, objectUrl, loading: false });
       })
       .catch((error: Error) => {
-        if (active) setState({ loading: false, error: error.message });
+        if (active) setState({ url, version, loading: false, error: error.message });
       });
     return () => {
       active = false;
@@ -3197,10 +3054,13 @@ function useSecureFileUrl(
   // No per-unmount revocation: blob URLs live in the shared module cache
   // and may still be in use by another mount. Eviction revokes them.
 
+  const hasCurrentState =
+    enabled && state.url === url && state.version === version;
+
   return {
-    objectUrl: state.objectUrl,
-    loading: state.loading,
-    error: state.error,
+    objectUrl: hasCurrentState ? state.objectUrl : undefined,
+    loading: enabled ? (hasCurrentState ? state.loading : true) : false,
+    error: hasCurrentState ? state.error : undefined,
     refresh: () => {
       const entry = secureFileCache.get(url);
       if (entry?.blobUrl) URL.revokeObjectURL(entry.blobUrl);
@@ -3290,13 +3150,6 @@ function displayFileName(file: OrderFile) {
   return file.originalName.replace(/^[a-z0-9-]+__/i, '');
 }
 
-/** Returns the slot key encoded into a file's name (the `key__` prefix the
- *  uploader writes), or null for legacy / category-only files. */
-function slotPrefixOf(file: OrderFile): string | null {
-  const match = file.originalName.match(/^([a-z0-9-]+)__/i);
-  return match ? match[1] : null;
-}
-
 function downloadOrderFile(orderId: string, file: OrderFile) {
   const token = getAccessToken();
   fetch(buildDownloadUrl(orderId, file.id), {
@@ -3314,21 +3167,6 @@ function downloadOrderFile(orderId: string, file: OrderFile) {
       URL.revokeObjectURL(href);
     });
 }
-
-const photoCategories = new Set<OrderFileCategory>([
-  OrderFileCategory.RIGHT_PHOTO,
-  OrderFileCategory.FRONT_PHOTO,
-  OrderFileCategory.LEFT_PHOTO,
-  OrderFileCategory.UPPER_PHOTO,
-  OrderFileCategory.LOWER_PHOTO,
-  OrderFileCategory.IMAGE,
-]);
-
-const modelCategories = new Set<OrderFileCategory>([
-  OrderFileCategory.STL,
-  OrderFileCategory.PLY,
-  OrderFileCategory.OBJ,
-]);
 
 function labelForCategory(
   category: OrderFileCategory,

@@ -15,7 +15,6 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
-  CalendarClock,
   CheckCircle2,
   CheckSquare2,
   ChevronLeft,
@@ -87,6 +86,10 @@ import { OrderStatusBadge } from '@/components/orders/order-status-badge';
 import { TreatmentFeeBadge } from '@/components/orders/treatment-fee-badge';
 import { usersService } from '@/lib/api';
 import { useAuth } from '@/lib/providers/auth-provider';
+import {
+  buildOrderNavigationHref,
+  handleOrderNavigation,
+} from '@/lib/orders/order-navigation';
 import {
   useBulkDeleteOrders,
   useBulkPermanentDeleteOrders,
@@ -351,7 +354,7 @@ export default function OrdersPage() {
   ]);
 
   const ordersQuery = useOrders(params);
-  const orders = ordersQuery.data?.data ?? [];
+  const orders = useMemo(() => ordersQuery.data?.data ?? [], [ordersQuery.data]);
   const total = ordersQuery.data?.total ?? 0;
   const totalPages = ordersQuery.data?.totalPages ?? 1;
   const canCreate = isDentist || isAdmin;
@@ -937,12 +940,12 @@ export default function OrdersPage() {
                       ) {
                         return;
                       }
-                      router.push(`/dashboard/orders/${order.id}`);
+                      handleOrderNavigation(order, router);
                     }}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter' || event.key === ' ') {
                         event.preventDefault();
-                        router.push(`/dashboard/orders/${order.id}`);
+                        handleOrderNavigation(order, router);
                       }
                     }}
                     data-state={
@@ -1250,7 +1253,7 @@ function OrderRowActions({
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem asChild>
-            <Link href={`/dashboard/orders/${order.id}`} className="gap-2">
+            <Link href={buildOrderNavigationHref(order)} className="gap-2">
               <Eye className="h-4 w-4" />
               {t('ordersPage.viewOrder')}
             </Link>
@@ -1466,15 +1469,24 @@ function OrderMobileCard({
   const { t, lang } = useT();
   return (
     <Card
+      role="link"
+      tabIndex={0}
+      aria-label={t('ordersPage.openOrderAria', { code: order.orderCode })}
       onMouseEnter={onPrefetch}
       onClick={(event) => {
         if ((event.target as HTMLElement).closest('button, a, [role="menuitem"]')) {
           return;
         }
-        router.push(`/dashboard/orders/${order.id}`);
+        handleOrderNavigation(order, router);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          handleOrderNavigation(order, router);
+        }
       }}
       className={cn(
-        'cursor-pointer transition active:scale-[0.99]',
+        'cursor-pointer transition active:scale-[0.99] focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2',
         isDeletedView && 'border-amber-200 bg-amber-50/40 text-muted-foreground',
       )}
     >

@@ -5,18 +5,22 @@ import { DailyLifeSection } from "./decouvrir/daily-life-section";
 import { GuidePreviewSection } from "./decouvrir/guide-preview-section";
 import { OralignHeroSection } from "./decouvrir/hero-section";
 import { PrecisionSection } from "./decouvrir/precision-section";
+import { SmileConsultationCtaSection } from "./decouvrir/smile-consultation-cta-section";
 import { SmileFreedomSection } from "./decouvrir/smile-freedom-section";
 import { TreatmentDurationSection } from "./decouvrir/treatment-duration-section";
 import { WearAlignersSection } from "./decouvrir/wear-aligners-section";
+import { WearAlignersVideoSection } from "./decouvrir/wear-aligners-video-section";
 
 export {
   DailyLifeSection,
   GuidePreviewSection,
   OralignHeroSection,
   PrecisionSection,
+  SmileConsultationCtaSection,
   SmileFreedomSection,
   TreatmentDurationSection,
   WearAlignersSection,
+  WearAlignersVideoSection,
 };
 
 /**

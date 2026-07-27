@@ -72,14 +72,9 @@ export function DashboardSlider() {
   const [index, setIndex] = useState(0);
   const [hovered, setHovered] = useState(false);
   const timer = useRef<number | null>(null);
-  const currentSlide = slides[index] ?? null;
+  const activeIndex = slides.length > 0 ? index % slides.length : 0;
+  const currentSlide = slides[activeIndex] ?? null;
   const isVideo = currentSlide?.mediaType === SliderMediaType.VIDEO;
-
-  // Reset to first slide when the slide list itself changes (e.g.
-  // admin reorder lands in real-time).
-  useEffect(() => {
-    setIndex(0);
-  }, [slides.length]);
 
   // Autoplay timer. Videos manage themselves, so we don't tick them.
   useEffect(() => {
@@ -92,7 +87,7 @@ export function DashboardSlider() {
     return () => {
       if (timer.current) window.clearTimeout(timer.current);
     };
-  }, [index, slides.length, hovered, isVideo]);
+  }, [activeIndex, slides.length, hovered, isVideo]);
 
   const goPrev = useCallback(() => {
     setIndex((i) => (i - 1 + slides.length) % slides.length);
@@ -186,9 +181,9 @@ export function DashboardSlider() {
               key={s.id}
               className={cn(
                 'absolute inset-0 transition-opacity duration-500',
-                i === index ? 'opacity-100' : 'pointer-events-none opacity-0',
+                i === activeIndex ? 'opacity-100' : 'pointer-events-none opacity-0',
               )}
-              aria-hidden={i !== index}
+              aria-hidden={i !== activeIndex}
             >
               {s.linkUrl ? (
                 <a
@@ -238,7 +233,7 @@ export function DashboardSlider() {
                 key={i}
                 className={cn(
                   'h-1.5 rounded-full transition-all',
-                  i === index ? 'w-6 bg-white' : 'w-1.5 bg-white/60',
+                  i === activeIndex ? 'w-6 bg-white' : 'w-1.5 bg-white/60',
                 )}
               />
             ))}

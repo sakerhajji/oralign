@@ -37,49 +37,52 @@ export function PractitionerDetailPanel({ summary, onClose }: Props) {
   const f = dict.finder;
 
   const [detail, setDetail] = useState<Detail | null>(null);
-  const [detailError, setDetailError] = useState(false);
+  const [detailErrorId, setDetailErrorId] = useState<string | null>(null);
 
-  const [availability, setAvailability] = useState<AvailabilityResponse | null>(null);
-  const [availLoading, setAvailLoading] = useState(true);
-  const [availError, setAvailError] = useState(false);
+  const [availabilityRequest, setAvailabilityRequest] = useState(0);
+  const [availabilityState, setAvailabilityState] = useState<{
+    key: string | null;
+    data: AvailabilityResponse | null;
+    error: boolean;
+  }>({ key: null, data: null, error: false });
   const [avatarOk, setAvatarOk] = useState(true);
 
   const id = summary.id;
+  const availabilityKey = `${id}:${availabilityRequest}`;
 
   // Fetch the full profile (adds workingHours).
   useEffect(() => {
     const ctrl = new AbortController();
-    setDetail(null);
-    setDetailError(false);
     fetchPractitioner(id, ctrl.signal)
-      .then(setDetail)
+      .then((res) => {
+        setDetail(res);
+        setDetailErrorId(null);
+      })
       .catch((err) => {
         if (ctrl.signal.aborted) return;
-        setDetailError(true);
+        setDetailErrorId(id);
         void err;
       });
     return () => ctrl.abort();
   }, [id]);
 
   const loadAvailability = useCallback(() => {
+    setAvailabilityRequest((current) => current + 1);
+  }, []);
+
+  useEffect(() => {
     const ctrl = new AbortController();
-    setAvailLoading(true);
-    setAvailError(false);
     fetchAvailability(id, {}, ctrl.signal)
       .then((res) => {
-        setAvailability(res);
-        setAvailLoading(false);
+        setAvailabilityState({ key: availabilityKey, data: res, error: false });
       })
       .catch((err) => {
         if (ctrl.signal.aborted) return;
-        setAvailError(true);
-        setAvailLoading(false);
+        setAvailabilityState({ key: availabilityKey, data: null, error: true });
         void err;
       });
     return () => ctrl.abort();
-  }, [id]);
-
-  useEffect(() => loadAvailability(), [loadAvailability]);
+  }, [availabilityKey, id]);
 
   // Close on Escape + lock background scroll while the panel is open.
   useEffect(() => {
@@ -95,7 +98,14 @@ export function PractitionerDetailPanel({ summary, onClose }: Props) {
     };
   }, [onClose]);
 
-  const view = detail ?? summary;
+  const detailForCurrent = detail?.id === id ? detail : null;
+  const detailError = detailErrorId === id;
+  const availability =
+    availabilityState.key === availabilityKey ? availabilityState.data : null;
+  const availLoading = availabilityState.key !== availabilityKey;
+  const availError =
+    availabilityState.key === availabilityKey && availabilityState.error;
+  const view = detailForCurrent ?? summary;
   const avatar = mediaUrl(view.avatarUrl);
   const initials = view.practitionerName
     .split(/\s+/)
@@ -103,7 +113,9 @@ export function PractitionerDetailPanel({ summary, onClose }: Props) {
     .map((w) => w[0]?.toUpperCase() ?? "")
     .join("");
   const hoursByDay = new Map<DayOfWeek, WorkingHour>();
-  detail?.workingHours?.forEach((w) => hoursByDay.set(w.dayOfWeek, w));
+  detailForCurrent?.workingHours?.forEach((w) =>
+    hoursByDay.set(w.dayOfWeek, w),
+  );
   // Distance is only computed by the list endpoint (needs lat/lng); keep it
   // from the summary since the detail endpoint never returns it.
   const distance = formatDistanceLabel(summary.distanceKm, lang);

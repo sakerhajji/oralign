@@ -34,6 +34,14 @@ import { NotificationEvents } from '../../notifications/events/notification-even
 
 type Caller = { userId: string; role: UserRole };
 
+type BankDetailsSnapshot = {
+  bankName?: string;
+  accountName?: string;
+  rib?: string;
+  iban?: string;
+  swift?: string;
+} | null;
+
 /**
  * Shape consumed by the shared payment-list executor. Mirrors the
  * PaymentFilterDto fields the controller surfaces, with explicit
@@ -100,6 +108,32 @@ export class PaymentsService {
 
   private isAdmin(caller: Caller): boolean {
     return ADMIN_ROLES.includes(caller.role);
+  }
+
+  private async ensureBankTransferIsConfigured(): Promise<void> {
+    const settings = await this.prisma.companyBillingSettings.findFirst({
+      where: { isActive: true },
+      orderBy: { updatedAt: 'desc' },
+      select: { bankDetails: true },
+    });
+    const details = (settings?.bankDetails ?? null) as BankDetailsSnapshot;
+    if (this.hasUsableBankDetails(details)) return;
+    throw new BadRequestException(
+      'Bank transfer is not available until company bank details are configured.',
+    );
+  }
+
+  private hasUsableBankDetails(details: BankDetailsSnapshot): boolean {
+    if (!details) return false;
+    const hasNamedAccount =
+      this.hasText(details.accountName) || this.hasText(details.bankName);
+    const hasAccountNumber =
+      this.hasText(details.rib) || this.hasText(details.iban);
+    return hasNamedAccount && hasAccountNumber;
+  }
+
+  private hasText(value: string | null | undefined): boolean {
+    return typeof value === 'string' && value.trim().length > 0;
   }
 
   /**
@@ -266,6 +300,7 @@ export class PaymentsService {
       args.caller,
     );
     this.assertPayable(row);
+    await this.ensureBankTransferIsConfigured();
     await this.approveQuoteIfSent(row.quotationId, args.caller.userId);
 
     return this.prisma.$transaction(async (tx) => {

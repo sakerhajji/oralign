@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import {
@@ -167,6 +167,7 @@ export function QuoteReview({ orderId, role }: Props) {
   // shrink to one compact row (language + optional discount + notes).
   return isAdmin ? (
     <AdminLayout
+      key={`${quote.id}:${quote.updatedAt ?? quote.status}`}
       quote={quote}
       orderId={orderId}
       patientName={patientName}
@@ -174,6 +175,7 @@ export function QuoteReview({ orderId, role }: Props) {
     />
   ) : (
     <DoctorLayout
+      key={`${quote.id}:${quote.updatedAt ?? quote.language}`}
       quote={quote}
       patientName={patientName}
       orderCode={orderCode}
@@ -194,19 +196,19 @@ function QuoteHeader({
   quote: Quotation;
   patientName: string;
   orderCode: string;
-  rightSlot?: React.ReactNode;
+  rightSlot?: ReactNode;
 }) {
   const { t } = useT();
   return (
     <Card className="overflow-hidden">
       <div className="bg-gradient-to-r from-primary/8 via-primary/4 to-transparent">
-        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
               <UserIcon className="h-3 w-3" />
               {t('quoteUi.review.patient')}
             </div>
-            <h2 className="mt-0.5 truncate text-2xl font-semibold tracking-tight">
+            <h2 className="mt-0.5 break-words text-2xl font-semibold tracking-tight">
               {patientName}
             </h2>
             <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
@@ -245,7 +247,7 @@ function QuoteHeader({
               ) : null}
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end [&>button]:h-9 [&>button]:w-full sm:[&>button]:w-auto">
             <Badge
               variant="outline"
               className={cn('text-xs', STATUS_TONE[quote.status])}
@@ -375,16 +377,6 @@ function AdminLayout({
   const [notesOpen, setNotesOpen] = useState(
     !!(quote.notes || quote.adminMessage),
   );
-
-  useEffect(() => {
-    setForm({
-      language: quote.language,
-      deliveryFees: quote.deliveryFees,
-      discountAmount: quote.discountAmount,
-      notes: quote.notes ?? '',
-      adminMessage: quote.adminMessage ?? '',
-    });
-  }, [quote]);
 
   const isEditable = quote.status === QuotationStatus.DRAFT;
   const canCancel =
@@ -682,7 +674,7 @@ function AdminLayout({
                 ? t('quoteUi.review.footerSent')
                 : t('quoteUi.review.footerLocked')}
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="grid w-full grid-cols-1 gap-2 sm:w-auto sm:grid-cols-none sm:flex sm:flex-wrap sm:items-center sm:justify-end [&>button]:w-full sm:[&>button]:w-auto">
             {/* Recall — only shown on SENT quotes. Two-click: first
                 click flips into confirm mode; second click fires the
                 mutation. We use the same button slot so the bar
@@ -775,7 +767,7 @@ function AdminLayout({
                   disabled={
                     send.isPending || update.isPending || needsPlanConfig
                   }
-                  className="h-10 min-w-[150px] gap-2 bg-emerald-600 hover:bg-emerald-700"
+                  className="h-10 gap-2 bg-emerald-600 hover:bg-emerald-700 sm:min-w-[150px]"
                   title={
                     needsPlanConfig
                       ? t('quoteUi.review.planFirstTitle')
@@ -827,10 +819,6 @@ function DoctorLayout({
   // the server identical for everyone (no per-user files), but the
   // doctor controls the language they read.
   const [docLang, setDocLang] = useState<DevisLanguage>(quote.language);
-  useEffect(() => {
-    setDocLang(quote.language);
-  }, [quote.language]);
-
   // Doctors only ever see a quote that's been sent. Draft = waiting.
   if (quote.status === QuotationStatus.DRAFT) {
     return (
@@ -854,7 +842,6 @@ function DoctorLayout({
     );
   }
 
-  const isActionable = quote.status === QuotationStatus.SENT;
   const hasPdf = !!quote.pdfFilePath;
 
   const handleDownloadPdf = async () => {
@@ -916,9 +903,9 @@ function DoctorLayout({
           row so subsequent default downloads also serve this lang. */}
       {hasPdf ? (
         <Card size="sm">
-          <CardContent className="flex flex-wrap items-center gap-3">
+          <CardContent className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
             <Globe className="h-4 w-4 text-muted-foreground" />
-            <div className="flex flex-1 flex-wrap items-center gap-2">
+            <div className="flex w-full flex-1 flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
               <Label className="text-xs font-medium text-muted-foreground">
                 {t('quoteUi.review.readIn')}
               </Label>
@@ -927,7 +914,7 @@ function DoctorLayout({
                 onValueChange={(v) => setDocLang(v as DevisLanguage)}
                 disabled={generate.isPending}
               >
-                <SelectTrigger className="h-9 w-[160px]">
+                <SelectTrigger className="h-10 w-full sm:h-9 sm:w-[160px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -947,7 +934,7 @@ function DoctorLayout({
               variant="outline"
               onClick={handleRegenerateInLanguage}
               disabled={generate.isPending || docLang === quote.language}
-              className="h-9 gap-2"
+              className="h-10 w-full gap-2 sm:h-9 sm:w-auto"
               title={
                 docLang === quote.language
                   ? t('quoteUi.review.pickDifferent')
@@ -1009,9 +996,6 @@ function DoctorLayout({
         first payment lands (see PaymentsService.approveQuoteIfSent)
         so the audit trail stays intact.
 
-        `isActionable` is still computed because the admin-facing
-        path uses it elsewhere — we just don't render the doctor
-        review card here anymore.
        */}
 
       {quote.status === QuotationStatus.REJECTED && quote.rejectionReason ? (

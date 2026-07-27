@@ -14,12 +14,13 @@
  * surface is left untouched.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { useT } from '@/lib/i18n/lang-context';
 import { pickLocalized } from '@/lib/api/blog.service';
+import { hasUsableBankTransferDetails } from '@/lib/payments/bank-transfer';
 import {
   ArchType,
   BatchStatus,
@@ -42,6 +43,7 @@ import {
   usePayByCard,
   useDeclareBankTransfer,
   useRecordCash,
+  useBillingPublicDefaults,
 } from '@/lib/hooks';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -106,6 +108,12 @@ import {
   X,
 } from 'lucide-react';
 
+const QUOTE_PAYMENT_METHODS: PaymentMethod[] = [
+  PaymentMethod.CARD,
+  PaymentMethod.BANK_TRANSFER,
+  PaymentMethod.CASH,
+];
+
 interface Props {
   quote: Quotation;
   role: UserRole;
@@ -154,12 +162,14 @@ export function QuotePackPanel({
   const isDoctor = role === UserRole.DENTIST;
 
   const hasPack = !!quote.packId;
+  const showPack = section === 'all' || section === 'pack';
+  const showPlan = section === 'all' || section === 'plan';
+  const needsPlanData = hasPack && (showPlan || isDoctor);
   // Fetch installments + batches in parallel; both queries are
-  // cheap and the admin/doctor views read the same data. (When the
-  // admin mounts the panel twice for the pack + plan slots, React Query
-  // dedupes these by key, so there's no double fetch.)
-  const installmentsQ = useInstallments(quote.id, hasPack);
-  const batchesQ = useStepBatches(quote.id, hasPack);
+  // cheap and the admin/doctor views read the same data. Sectioned admin
+  // renders mount this panel twice; only the plan section needs the data.
+  const installmentsQ = useInstallments(quote.id, needsPlanData);
+  const batchesQ = useStepBatches(quote.id, needsPlanData);
   // Lets the admin re-open the pack picker on an already-attached quote to
   // swap the pack / arcade mode. Only meaningful while the quote is still a
   // draft (attaching wipes the payment plan; approved/paid quotes are
@@ -168,8 +178,6 @@ export function QuotePackPanel({
 
   if (!isAdmin && !isDoctor) return null;
 
-  const showPack = section === 'all' || section === 'pack';
-  const showPlan = section === 'all' || section === 'plan';
   const canChangePack = quote.status === QuotationStatus.DRAFT;
 
   return (
@@ -796,7 +804,7 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
           </div>
         ) : null}
 
-        <div className="overflow-x-auto rounded-lg border">
+        <div className="hidden overflow-hidden rounded-lg border md:block">
           <Table>
             <TableHeader>
               <TableRow>
@@ -874,6 +882,97 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
           </Table>
         </div>
 
+        <div className="grid gap-3 md:hidden">
+          {rows.map((row, i) => (
+            <div key={i} className="rounded-xl border bg-card p-4 shadow-sm">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    {t('quoteUi.plan.trancheCount')} #{i + 1}
+                  </p>
+                  <p className="mt-0.5 text-sm font-semibold">
+                    {t('quoteUi.plan.colAmount', { currency: quote.currency })}
+                  </p>
+                </div>
+                <Badge variant="outline" className="shrink-0">
+                  #{i + 1}
+                </Badge>
+              </div>
+
+              <div className="grid gap-4">
+                <div className="grid gap-1.5">
+                  <Label htmlFor={`plan-amount-${i}`} className="text-xs">
+                    {t('quoteUi.plan.colAmount', { currency: quote.currency })}
+                  </Label>
+                  <Input
+                    id={`plan-amount-${i}`}
+                    type="number"
+                    step="0.001"
+                    min={0.001}
+                    value={row.amount}
+                    onChange={(e) => updateRow(i, { amount: e.target.value })}
+                    className="h-11 font-medium tabular-nums"
+                  />
+                </div>
+
+                <div className="grid gap-1.5">
+                  <Label className="text-xs">{t('quoteUi.plan.colSteps')}</Label>
+                  <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                    <Input
+                      type="number"
+                      min={1}
+                      value={row.fromStep}
+                      onChange={(e) =>
+                        updateRow(i, { fromStep: e.target.value })
+                      }
+                      className="h-11"
+                      aria-label={t('quoteUi.plan.firstStepAria', { n: i + 1 })}
+                    />
+                    <span className="text-muted-foreground">→</span>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={row.toStep}
+                      onChange={(e) => updateRow(i, { toStep: e.target.value })}
+                      className="h-11"
+                      aria-label={t('quoteUi.plan.lastStepAria', { n: i + 1 })}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="grid gap-1.5">
+                    <Label htmlFor={`plan-available-${i}`} className="text-xs">
+                      {t('quoteUi.plan.colAvailableFrom')}
+                    </Label>
+                    <Input
+                      id={`plan-available-${i}`}
+                      type="date"
+                      value={row.availableFrom}
+                      onChange={(e) =>
+                        updateRow(i, { availableFrom: e.target.value })
+                      }
+                      className="h-11"
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor={`plan-due-${i}`} className="text-xs">
+                      {t('quoteUi.plan.colDueDate')}
+                    </Label>
+                    <Input
+                      id={`plan-due-${i}`}
+                      type="date"
+                      value={row.dueDate}
+                      onChange={(e) => updateRow(i, { dueDate: e.target.value })}
+                      className="h-11"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
         {/* Balance indicator — green when Σ matches the target. */}
         <div
           className={cn(
@@ -923,7 +1022,7 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
           <Button
             onClick={submit}
             disabled={configure.isPending || validation.errors.length > 0}
-            className="gap-2"
+            className="h-10 w-full gap-2 sm:w-auto"
           >
             {configure.isPending ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -987,6 +1086,21 @@ function BatchStatusBadge({ status }: { status: BatchStatus }) {
   }
 }
 
+function InfoLine({
+  label,
+  value,
+}: {
+  label: string;
+  value: ReactNode;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="min-w-0 text-right font-medium">{value}</span>
+    </div>
+  );
+}
+
 function AdminPlanView({
   quote,
   installments,
@@ -1022,6 +1136,7 @@ function AdminPlanView({
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
+          <div className="hidden md:block">
           <Table>
             <TableHeader>
               <TableRow>
@@ -1103,6 +1218,89 @@ function AdminPlanView({
               })}
             </TableBody>
           </Table>
+          </div>
+          <div className="grid gap-3 p-3 md:hidden">
+            {installments.map((inst) => {
+              const batch = batchByInstallment.get(inst.id);
+              const isPayable =
+                inst.status === InstallmentStatus.PENDING ||
+                inst.status === InstallmentStatus.OVERDUE;
+              return (
+                <div
+                  key={inst.id}
+                  className="rounded-xl border bg-card p-4 shadow-sm"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        #{inst.installmentNumber}
+                      </p>
+                      <p className="mt-1 text-lg font-semibold tabular-nums">
+                        {money(inst.amount, quote.currency)}
+                      </p>
+                    </div>
+                    <InstallmentStatusBadge status={inst.status} />
+                  </div>
+                  <div className="mt-4 grid gap-2 text-sm">
+                    <InfoLine
+                      label={t('quoteUi.adminPlan.colSteps')}
+                      value={batch ? `${batch.fromStep} → ${batch.toStep}` : '—'}
+                    />
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-muted-foreground">
+                        {t('quoteUi.adminPlan.colBatch')}
+                      </span>
+                      <span>{batch ? <BatchStatusBadge status={batch.status} /> : '—'}</span>
+                    </div>
+                    <InfoLine
+                      label={t('quoteUi.adminPlan.colAvailable')}
+                      value={new Date(inst.availableFrom).toLocaleDateString()}
+                    />
+                    <InfoLine
+                      label={t('quoteUi.adminPlan.colDue')}
+                      value={
+                        inst.dueDate
+                          ? new Date(inst.dueDate).toLocaleDateString()
+                          : '—'
+                      }
+                    />
+                  </div>
+                  {(isPayable || batch?.status === BatchStatus.UNLOCKED) && (
+                    <div className="mt-4 grid gap-2">
+                      {isPayable ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-10 w-full justify-center"
+                          onClick={() => setCashTarget(inst)}
+                        >
+                          <Wallet className="mr-2 h-4 w-4" />
+                          {t('quoteUi.adminPlan.recordCash')}
+                        </Button>
+                      ) : null}
+                      {batch?.status === BatchStatus.UNLOCKED ? (
+                        <Button
+                          size="sm"
+                          className="h-10 w-full justify-center"
+                          onClick={() =>
+                            deliver.mutate({
+                              quotationId: quote.id,
+                              orderId: quote.orderId,
+                              batchId: batch.id,
+                            })
+                          }
+                          disabled={deliver.isPending}
+                        >
+                          <Truck className="mr-2 h-4 w-4" />
+                          {t('quoteUi.adminPlan.markDelivered')}
+                        </Button>
+                      ) : null}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </CardContent>
       </Card>
 
@@ -1280,6 +1478,7 @@ function DoctorPlanView({
               patientName={patientName}
               doctorName={doctorName}
               orderCode={orderCode}
+              fullWidth
             />
           </CardContent>
         </Card>
@@ -1297,6 +1496,7 @@ function DoctorPlanView({
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
+          <div className="hidden md:block">
           <Table>
             <TableHeader>
               <TableRow>
@@ -1360,6 +1560,66 @@ function DoctorPlanView({
               })}
             </TableBody>
           </Table>
+          </div>
+          <div className="grid gap-3 p-3 md:hidden">
+            {installments.map((inst) => {
+              const batch = batchByInstallment.get(inst.id);
+              const available = new Date(inst.availableFrom).getTime() <= now;
+              const isNext = nextPayable?.id === inst.id;
+              return (
+                <div
+                  key={inst.id}
+                  className={cn(
+                    'rounded-xl border bg-card p-4 shadow-sm',
+                    isNext && available && 'border-primary/40 bg-primary/5',
+                  )}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        #{inst.installmentNumber}
+                      </p>
+                      <p className="mt-1 text-lg font-semibold tabular-nums">
+                        {money(inst.amount, quote.currency)}
+                      </p>
+                    </div>
+                    <div className="flex flex-col items-end gap-1">
+                      <InstallmentStatusBadge status={inst.status} />
+                      {batch ? <BatchStatusBadge status={batch.status} /> : null}
+                    </div>
+                  </div>
+                  <div className="mt-4 grid gap-2 text-sm">
+                    <InfoLine
+                      label={t('quoteUi.adminPlan.colSteps')}
+                      value={batch ? `${batch.fromStep} → ${batch.toStep}` : '—'}
+                    />
+                    <InfoLine
+                      label={t('quoteUi.adminPlan.colAvailable')}
+                      value={new Date(inst.availableFrom).toLocaleDateString()}
+                    />
+                    {!available ? (
+                      <p className="rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                        {t('quoteUi.doctor.lockedUntil')}
+                      </p>
+                    ) : null}
+                  </div>
+                  {isApproved && isNext && available ? (
+                    <div className="mt-4">
+                      <DoctorPayActions
+                        quote={quote}
+                        installment={inst}
+                        payable={payable}
+                        patientName={patientName}
+                        doctorName={doctorName}
+                        orderCode={orderCode}
+                        fullWidth
+                      />
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
         </CardContent>
       </Card>
     </>
@@ -1375,6 +1635,7 @@ function DoctorPayActions({
   patientName,
   doctorName,
   orderCode,
+  fullWidth = false,
 }: {
   quote: Quotation;
   installment: QuoteInstallment;
@@ -1387,13 +1648,18 @@ function DoctorPayActions({
   patientName?: string | null;
   doctorName?: string | null;
   orderCode?: string | null;
+  fullWidth?: boolean;
 }) {
   const { t } = useT();
   const [open, setOpen] = useState(false);
   return (
     <>
-      <Button size="sm" onClick={() => setOpen(true)}>
-        <CreditCard className="mr-1 h-3 w-3" />
+      <Button
+        size="sm"
+        onClick={() => setOpen(true)}
+        className={cn(fullWidth && 'h-10 w-full justify-center sm:w-auto')}
+      >
+        <CreditCard className="mr-1 h-4 w-4" />
         {label ?? t('quoteUi.doctor.payNow')}
       </Button>
       <PaymentMethodDialog
@@ -1435,14 +1701,11 @@ function PaymentMethodDialog({
   orderCode?: string | null;
 }) {
   const { t, lang } = useT();
+  const { data: billingDefaults, isLoading: billingDefaultsLoading } =
+    useBillingPublicDefaults(open);
   // Backend currently allows all three methods. If the project later
   // adds `allowedPaymentMethods` on the quote, swap this constant for
-  // `quote.allowedPaymentMethods ?? METHODS`.
-  const METHODS: PaymentMethod[] = [
-    PaymentMethod.CARD,
-    PaymentMethod.BANK_TRANSFER,
-    PaymentMethod.CASH,
-  ];
+  // `quote.allowedPaymentMethods ?? QUOTE_PAYMENT_METHODS`.
   const [method, setMethod] = useState<PaymentMethod>(PaymentMethod.CARD);
   const [scope, setScope] = useState<PayScope>(defaultScope);
 
@@ -1450,6 +1713,7 @@ function PaymentMethodDialog({
   const declareBT = useDeclareBankTransfer();
   const [bankReference, setBankReference] = useState('');
   const [proofFile, setProofFile] = useState<File | null>(null);
+  const bankTransferRef = useRef<HTMLDivElement | null>(null);
   const proofPreview = useMemo(
     () => (proofFile ? URL.createObjectURL(proofFile) : null),
     [proofFile],
@@ -1468,6 +1732,34 @@ function PaymentMethodDialog({
   const canPickAll = payable.length > 1;
   const targets = scope === 'all' ? payable : [installment];
   const total = targets.reduce((acc, t) => acc + toDec(t.amount), 0);
+  const isResolvingPaymentOptions = billingDefaultsLoading && open;
+  const hasBalanceDue = total > 0;
+  const hasBankTransfer = hasUsableBankTransferDetails(
+    billingDefaults?.bankDetails,
+  );
+  const methods = useMemo(
+    () =>
+      !isResolvingPaymentOptions && hasBalanceDue
+        ? QUOTE_PAYMENT_METHODS.filter(
+            (m) => m !== PaymentMethod.BANK_TRANSFER || hasBankTransfer,
+          )
+        : [],
+    [hasBalanceDue, hasBankTransfer, isResolvingPaymentOptions],
+  );
+  const activeMethod = methods.includes(method) ? method : methods[0] ?? null;
+
+  useEffect(() => {
+    if (!open || activeMethod !== PaymentMethod.BANK_TRANSFER) return;
+
+    const timer = window.setTimeout(() => {
+      bankTransferRef.current?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      });
+    }, 80);
+
+    return () => window.clearTimeout(timer);
+  }, [activeMethod, open]);
 
   const close = () => {
     setProgress(null);
@@ -1479,7 +1771,9 @@ function PaymentMethodDialog({
   };
 
   const submit = async () => {
-    if (method === PaymentMethod.CASH) {
+    if (!activeMethod) return;
+
+    if (activeMethod === PaymentMethod.CASH) {
       // Cash is admin-recorded. No doctor endpoint either way.
       toast.info(t('quoteUi.payDialog.cashToast'));
       close();
@@ -1493,7 +1787,7 @@ function PaymentMethodDialog({
     try {
       for (let i = 0; i < targets.length; i++) {
         const t = targets[i]!;
-        if (method === PaymentMethod.CARD) {
+        if (activeMethod === PaymentMethod.CARD) {
           const idempotencyKey =
             typeof crypto !== 'undefined' && 'randomUUID' in crypto
               ? crypto.randomUUID()
@@ -1548,7 +1842,7 @@ function PaymentMethodDialog({
         if (!next) close();
       }}
     >
-      <DialogContent className="flex h-[calc(100dvh-1rem)] max-h-[900px] w-full flex-col gap-0 overflow-hidden rounded-2xl border-0 p-0 shadow-2xl sm:h-[90dvh] sm:max-w-[600px] lg:h-[82dvh] lg:max-w-[920px]">
+      <DialogContent className="flex h-[calc(100dvh-1rem)] max-h-[900px] w-full max-w-[calc(100vw-1rem)] flex-col gap-0 overflow-hidden rounded-2xl border-0 p-0 shadow-2xl sm:h-[90dvh] sm:max-w-[600px] lg:h-[82dvh] lg:max-w-[920px]">
         {/* ─── Header ─────────────────────────────────────────────── */}
         <DialogHeader className="shrink-0 space-y-1 border-b bg-card py-4 pl-5 pr-14 text-left sm:py-5 sm:pl-8 sm:pr-14">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1667,11 +1961,13 @@ function PaymentMethodDialog({
 
             <div className="mt-auto pt-6">
               <p className="rounded-lg border bg-card p-3 text-xs leading-relaxed text-muted-foreground">
-                {method === PaymentMethod.CARD
+                {activeMethod === PaymentMethod.CARD
                   ? t('quoteUi.payDialog.footCard')
-                  : method === PaymentMethod.BANK_TRANSFER
+                  : activeMethod === PaymentMethod.BANK_TRANSFER
                     ? t('quoteUi.payDialog.footBank')
-                  : t('quoteUi.payDialog.footCash')}
+                    : activeMethod === PaymentMethod.CASH
+                      ? t('quoteUi.payDialog.footCash')
+                      : t('quoteUi.payDialog.footDefault')}
               </p>
             </div>
           </aside>
@@ -1739,62 +2035,70 @@ function PaymentMethodDialog({
                 </div>
               ) : null}
 
-              <div>
-                <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  {t('quoteUi.payDialog.methodHeading')}
-                </h3>
-                <div className="grid gap-2 sm:grid-cols-3">
-                  {METHODS.map((m) => {
-                    const isSelected = method === m;
-                    const Icon =
-                      m === PaymentMethod.CARD
-                        ? CreditCard
-                        : m === PaymentMethod.BANK_TRANSFER
-                          ? Landmark
-                          : Wallet;
-                    const description =
-                      m === PaymentMethod.CARD
-                        ? t('quoteUi.payDialog.methodCardDesc')
-                        : m === PaymentMethod.BANK_TRANSFER
-                          ? t('quoteUi.payDialog.methodBankDesc')
-                          : t('quoteUi.payDialog.methodCashDesc');
-                    return (
-                      <button
-                        key={m}
-                        type="button"
-                        aria-pressed={isSelected}
-                        onClick={() => setMethod(m)}
-                        disabled={isPending}
-                        className={cn(
-                          'flex min-h-16 items-center gap-3 rounded-lg border bg-card p-3 text-left transition',
-                          isSelected
-                            ? 'border-primary shadow-sm ring-2 ring-primary/10'
-                            : 'hover:border-primary/40 hover:bg-muted/20',
-                        )}
-                      >
-                        <span
+              {methods.length > 0 ? (
+                <div>
+                  <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    {t('quoteUi.payDialog.methodHeading')}
+                  </h3>
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    {methods.map((m) => {
+                      const isSelected = activeMethod === m;
+                      const Icon =
+                        m === PaymentMethod.CARD
+                          ? CreditCard
+                          : m === PaymentMethod.BANK_TRANSFER
+                            ? Landmark
+                            : Wallet;
+                      const description =
+                        m === PaymentMethod.CARD
+                          ? t('quoteUi.payDialog.methodCardDesc')
+                          : m === PaymentMethod.BANK_TRANSFER
+                            ? t('quoteUi.payDialog.methodBankDesc')
+                            : t('quoteUi.payDialog.methodCashDesc');
+                      return (
+                        <button
+                          key={m}
+                          type="button"
+                          aria-pressed={isSelected}
+                          onClick={() => setMethod(m)}
+                          disabled={isPending}
                           className={cn(
-                            'grid h-9 w-9 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground',
-                            isSelected && 'bg-primary text-primary-foreground',
+                            'flex min-h-16 items-center gap-3 rounded-lg border bg-card p-3 text-left transition',
+                            isSelected
+                              ? 'border-primary shadow-sm ring-2 ring-primary/10'
+                              : 'hover:border-primary/40 hover:bg-muted/20',
                           )}
                         >
-                          <Icon className="h-4 w-4" />
-                        </span>
-                        <span className="min-w-0">
-                          <span className="block text-xs font-semibold">
-                            {t(`paymentsCommon.method.${m}`)}
+                          <span
+                            className={cn(
+                              'grid h-9 w-9 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground',
+                              isSelected &&
+                                'bg-primary text-primary-foreground',
+                            )}
+                          >
+                            <Icon className="h-4 w-4" />
                           </span>
-                          <span className="mt-0.5 block text-[10px] leading-snug text-muted-foreground">
-                            {description}
+                          <span className="min-w-0">
+                            <span className="block text-xs font-semibold">
+                              {t(`paymentsCommon.method.${m}`)}
+                            </span>
+                            <span className="mt-0.5 block text-[10px] leading-snug text-muted-foreground">
+                              {description}
+                            </span>
                           </span>
-                        </span>
-                      </button>
-                    );
-                  })}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
+              ) : null}
 
-              {method === PaymentMethod.CARD ? (
+              {isResolvingPaymentOptions || methods.length === 0 ? (
+                <PaymentOptionNotice
+                  hasBalanceDue={hasBalanceDue}
+                  isLoading={isResolvingPaymentOptions}
+                />
+              ) : activeMethod === PaymentMethod.CARD ? (
                 <div className="rounded-lg border border-blue-100 bg-blue-50/60 p-4">
                   <div className="flex items-start gap-3">
                     <CreditCard className="mt-0.5 h-4 w-4 shrink-0 text-blue-700" />
@@ -1810,8 +2114,9 @@ function PaymentMethodDialog({
                     </div>
                   </div>
                 </div>
-              ) : method === PaymentMethod.BANK_TRANSFER ? (
-                <Card id="installment-bank-transfer" className="scroll-mt-4">
+              ) : activeMethod === PaymentMethod.BANK_TRANSFER ? (
+                <div ref={bankTransferRef} className="scroll-mt-4">
+                <Card id="installment-bank-transfer">
                   <CardContent className="space-y-4 pt-5">
                     <div className="flex items-start gap-3">
                       <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground">
@@ -1936,6 +2241,7 @@ function PaymentMethodDialog({
                     </p>
                   </CardContent>
                 </Card>
+                </div>
               ) : (
                 <div className="rounded-lg border border-amber-100 bg-amber-50/60 p-4">
                   <div className="flex items-start gap-3">
@@ -1976,37 +2282,106 @@ function PaymentMethodDialog({
             disabled={isPending}
             className="w-full sm:w-auto"
           >
-            {t('common.cancel')}
+            {activeMethod ? t('common.cancel') : t('common.close')}
           </Button>
-          <Button
-            onClick={submit}
-            disabled={isPending}
-            className="w-full gap-1.5 font-medium shadow-sm sm:min-w-[180px] sm:w-auto"
-          >
-            {isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : method === PaymentMethod.CARD ? (
-              <CreditCard className="h-4 w-4" />
-            ) : method === PaymentMethod.BANK_TRANSFER ? (
-              <Send className="h-4 w-4" />
-            ) : (
-              <CheckCircle2 className="h-4 w-4" />
-            )}
-            {method === PaymentMethod.CARD
-              ? scope === 'all'
-                ? t('quoteUi.payDialog.payTranches', { count: payable.length })
-                : t('quoteUi.payDialog.payByCard')
-              : method === PaymentMethod.BANK_TRANSFER
+          {activeMethod ? (
+            <Button
+              onClick={submit}
+              disabled={isPending}
+              className="w-full gap-1.5 font-medium shadow-sm sm:min-w-[180px] sm:w-auto"
+            >
+              {isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : activeMethod === PaymentMethod.CARD ? (
+                <CreditCard className="h-4 w-4" />
+              ) : activeMethod === PaymentMethod.BANK_TRANSFER ? (
+                <Send className="h-4 w-4" />
+              ) : (
+                <CheckCircle2 className="h-4 w-4" />
+              )}
+              {activeMethod === PaymentMethod.CARD
                 ? scope === 'all'
-                  ? t('quoteUi.payDialog.submitDeclarations', {
+                  ? t('quoteUi.payDialog.payTranches', {
                       count: payable.length,
                     })
-                  : t('quoteUi.payDialog.submitDeclaration')
-                : t('quoteUi.payDialog.gotIt')}
-          </Button>
+                  : t('quoteUi.payDialog.payByCard')
+                : activeMethod === PaymentMethod.BANK_TRANSFER
+                  ? scope === 'all'
+                    ? t('quoteUi.payDialog.submitDeclarations', {
+                        count: payable.length,
+                      })
+                    : t('quoteUi.payDialog.submitDeclaration')
+                  : t('quoteUi.payDialog.gotIt')}
+            </Button>
+          ) : null}
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function PaymentOptionNotice({
+  hasBalanceDue,
+  isLoading,
+}: {
+  hasBalanceDue: boolean;
+  isLoading: boolean;
+}) {
+  const { t } = useT();
+  return (
+    <Card
+      className={
+        isLoading
+          ? 'border-border bg-muted/30'
+          : hasBalanceDue
+            ? 'border-amber-200 bg-amber-50/50'
+            : 'border-emerald-200 bg-emerald-50/50'
+      }
+    >
+      <CardContent className="flex items-start gap-3 pt-4 text-sm">
+        {isLoading ? (
+          <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
+        ) : hasBalanceDue ? (
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+        ) : (
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+        )}
+        <div className="space-y-1">
+          <p
+            className={cn(
+              'font-medium',
+              isLoading
+                ? 'text-foreground'
+                : hasBalanceDue
+                  ? 'text-amber-900'
+                  : 'text-emerald-900',
+            )}
+          >
+            {isLoading
+              ? t('common.loading')
+              : hasBalanceDue
+                ? t('quoteUi.payDialog.noAvailableMethodsTitle')
+                : t('quoteUi.payDialog.noBalanceTitle')}
+          </p>
+          <p
+            className={cn(
+              'text-xs',
+              isLoading
+                ? 'text-muted-foreground'
+                : hasBalanceDue
+                  ? 'text-amber-800/90'
+                  : 'text-emerald-800/90',
+            )}
+          >
+            {isLoading
+              ? t('quoteUi.payDialog.loadingOptionsDesc')
+              : hasBalanceDue
+                ? t('quoteUi.payDialog.noAvailableMethodsDesc')
+                : t('quoteUi.payDialog.noBalanceDesc')}
+          </p>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

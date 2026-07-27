@@ -44,6 +44,13 @@ export class ConflictException extends AppException {
   }
 }
 
+export class GoneException extends AppException {
+  constructor(message: string = 'Gone', errorCode?: string) {
+    super(410, message, errorCode);
+    this.name = 'GoneException';
+  }
+}
+
 export class InternalServerErrorException extends AppException {
   constructor(message: string = 'Internal server error', errorCode?: string) {
     super(500, message, errorCode);

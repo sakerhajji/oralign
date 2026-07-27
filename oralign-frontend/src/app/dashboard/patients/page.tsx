@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useDebouncedCallback } from 'use-debounce';
 import { format } from 'date-fns';
@@ -97,6 +97,7 @@ import { cn } from '@/lib/utils';
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
 type PageSize = (typeof PAGE_SIZE_OPTIONS)[number];
+const EMPTY_PATIENT_SELECTION = new Set<string>();
 
 // Sort options carry a `labelKey` instead of a hard-coded English
 // label so the dropdown re-renders the menu in the current language.
@@ -122,7 +123,7 @@ const dateFormat = (lang: Lang) =>
 export default function PatientsPage() {
   const { isAdmin, isDentist, user } = useAuth();
   const prefetchPatient = usePatientPrefetch();
-  const { t, lang } = useT();
+  const { t } = useT();
 
   // ── Query state ─────────────────────────────────────────────────
   const [page, setPage] = useState(1);
@@ -135,9 +136,6 @@ export default function PatientsPage() {
   const [createdTo, setCreatedTo] = useState('');
   const [sortKey, setSortKey] = useState<string>('created-desc');
   const [showFilters, setShowFilters] = useState(false);
-
-  // ── Selection state ──────────────────────────────────────────────
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   // ── Sheet state ──────────────────────────────────────────────────
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -174,6 +172,31 @@ export default function PatientsPage() {
     sortKey,
   ]);
 
+  const paramsKey = useMemo(() => JSON.stringify(params), [params]);
+
+  // ── Selection state ──────────────────────────────────────────────
+  const [selectionState, setSelectionState] = useState<{
+    key: string;
+    ids: Set<string>;
+  }>(() => ({ key: paramsKey, ids: new Set() }));
+  const selectedIds =
+    selectionState.key === paramsKey
+      ? selectionState.ids
+      : EMPTY_PATIENT_SELECTION;
+  const setSelectedIds = useCallback(
+    (next: Set<string> | ((previous: Set<string>) => Set<string>)) => {
+      setSelectionState((current) => {
+        const previous =
+          current.key === paramsKey ? current.ids : EMPTY_PATIENT_SELECTION;
+        return {
+          key: paramsKey,
+          ids: typeof next === 'function' ? next(previous) : next,
+        };
+      });
+    },
+    [paramsKey],
+  );
+
   const patientsQuery = usePatients(params);
   const createPatient = useCreatePatient();
   const updatePatient = useUpdatePatient();
@@ -193,14 +216,12 @@ export default function PatientsPage() {
     staleTime: 1000 * 60 * 5,
   });
 
-  const patients = patientsQuery.data?.data ?? [];
+  const patients = useMemo(
+    () => patientsQuery.data?.data ?? [],
+    [patientsQuery.data],
+  );
   const total = patientsQuery.data?.total ?? 0;
   const totalPages = patientsQuery.data?.totalPages ?? 1;
-
-  // Clear selection whenever the query params change (page turn, filter, etc.)
-  useEffect(() => {
-    setSelectedIds(new Set());
-  }, [params]);
 
   // ── Selection helpers ────────────────────────────────────────────
   const allOnPageSelected =
@@ -215,7 +236,7 @@ export default function PatientsPage() {
       else next.add(id);
       return next;
     });
-  }, []);
+  }, [setSelectedIds]);
 
   const toggleAll = useCallback(() => {
     setSelectedIds((prev) => {
@@ -227,7 +248,7 @@ export default function PatientsPage() {
       }
       return next;
     });
-  }, [allOnPageSelected, patients]);
+  }, [allOnPageSelected, patients, setSelectedIds]);
 
   // ── Active filter count ──────────────────────────────────────────
   const activeFilterCount =
@@ -298,7 +319,7 @@ export default function PatientsPage() {
           }),
       });
     },
-    [removePatient],
+    [removePatient, setSelectedIds],
   );
 
   const handleRowPermanentDelete = useCallback(
@@ -312,7 +333,7 @@ export default function PatientsPage() {
           }),
       });
     },
-    [permanentRemovePatient],
+    [permanentRemovePatient, setSelectedIds],
   );
 
   // Bulk delete
@@ -320,7 +341,7 @@ export default function PatientsPage() {
     bulkDelete.mutate(Array.from(selectedIds), {
       onSuccess: () => setSelectedIds(new Set()),
     });
-  }, [bulkDelete, selectedIds]);
+  }, [bulkDelete, selectedIds, setSelectedIds]);
 
   if (!isAdmin && !isDentist) {
     return (

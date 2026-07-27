@@ -4,6 +4,7 @@ import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { format } from 'date-fns';
 import {
+  CalendarClock,
   Check,
   ClipboardPaste,
   Globe,
@@ -22,14 +23,19 @@ import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-// Dialog primitives are no longer used directly — the three full-view
-// modals (IPR reference, clinical photo, dental treatment table) all
-// go through the shared <ImageLightbox> below, which owns the
-// Radix Dialog primitives at the right layer to avoid the
-// rounded-corners / ring / popover-bg artefacts the default shadcn
-// DialogContent introduces on a full-bleed modal.
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+// Full-view image modals go through the shared <ImageLightbox> below, while
+// the compact reject-reason form uses the standard shadcn dialog.
 import { ImageLightbox } from '@/components/ui/image-lightbox';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { useT } from '@/lib/i18n/lang-context';
 import { getAccessToken } from '@/lib/api';
@@ -135,6 +141,8 @@ interface Props {
    *  socket lives at the order level so plan-list and chat updates flow
    *  through a single shared connection. */
   socketConnected?: boolean;
+  /** Selects the editable vNext draft created from a rejected plan. */
+  onPlanCreated?: (planId: string) => void;
 }
 
 /**
@@ -149,6 +157,7 @@ export function TreatmentPlanReview({
   treatmentPlanId,
   role,
   socketConnected = false,
+  onPlanCreated,
 }: Props) {
   const { t } = useT();
   const reviewQuery = useTreatmentPlanReview(treatmentPlanId);
@@ -171,9 +180,9 @@ export function TreatmentPlanReview({
     role === UserRole.DESIGNER;
   const isDoctor = role === UserRole.DENTIST;
   const isApproved = review.status === TreatmentPlanStatus.APPROVED;
-  // Approve / Reject is a DOCTOR-only action. The bar is ALWAYS visible
-  // for the doctor — buttons enable/disable based on plan state so the
-  // doctor never has to hunt for them when the designer flips status.
+  // Approve / Reject is a DOCTOR-only action. It becomes actionable only
+  // while the plan is READY; final states render a read-only decision card
+  // so doctors do not see dead approval buttons after a decision.
   const showApproval = isDoctor;
 
   return (
@@ -252,13 +261,13 @@ export function TreatmentPlanReview({
       {isPlanner &&
         (review.status === TreatmentPlanStatus.PENDING ||
           review.status === TreatmentPlanStatus.REJECTED) && (
-          <ReadyAction review={review} />
+          <ReadyAction review={review} onPlanCreated={onPlanCreated} />
         )}
 
-      {/* ─── Approve / Reject sits at the BOTTOM of the page so the doctor
-            scrolls through the plan + chat first, then commits. The card
-            is only rendered for doctors when the plan is READY — admins
-            don't get to sign off on behalf of the doctor anymore. */}
+      {/* ─── Decision area sits at the BOTTOM of the page so the doctor
+            scrolls through the plan + chat first, then commits. Once the
+            plan is approved/rejected, this becomes a status card instead
+            of disabled buttons. */}
       {showApproval && <ApprovalActions review={review} />}
     </div>
   );
@@ -266,8 +275,10 @@ export function TreatmentPlanReview({
 
 function ReadyAction({
   review,
+  onPlanCreated,
 }: {
   review: NonNullable<ReturnType<typeof useTreatmentPlanReview>['data']>;
+  onPlanCreated?: (planId: string) => void;
 }) {
   const { t } = useT();
   const markReady = useMarkTreatmentPlanReady();
@@ -295,7 +306,13 @@ function ReadyAction({
         </div>
         <Button
           type="button"
-          onClick={() => markReady.mutate(review.id)}
+          onClick={() =>
+            markReady.mutate(review.id, {
+              onSuccess: (plan) => {
+                if (plan.id !== review.id) onPlanCreated?.(plan.id);
+              },
+            })
+          }
           disabled={markReady.isPending}
           className={cn('gap-2', isResend && 'bg-orange-600 hover:bg-orange-700')}
         >
@@ -328,6 +345,7 @@ function PlanHeader({
 }) {
   const { t } = useT();
   const generate = useGeneratePublicLink();
+  const [renderedAt] = useState(() => Date.now());
   // Public-link generation is now also available to doctors (the order
   // owner) so they can hand the link directly to their patient without
   // routing through an admin.
@@ -340,10 +358,16 @@ function PlanHeader({
   const publicUrl = review.publicToken
     ? `${typeof window !== 'undefined' ? window.location.origin : ''}/created_for_you/${review.publicToken}`
     : null;
+  const publicExpiresAt = review.publicExpiresAt
+    ? new Date(review.publicExpiresAt)
+    : null;
+  const isPublicLinkExpired = !!(
+    publicExpiresAt && publicExpiresAt.getTime() < renderedAt
+  );
 
   return (
     <Card>
-      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <CardHeader className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <CardTitle className="flex flex-wrap items-center gap-2 text-lg">
             {review.name}
@@ -363,27 +387,57 @@ function PlanHeader({
         </div>
 
         {canSharePublicly && (
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap lg:w-auto lg:justify-end">
             {publicUrl && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="gap-2"
-                onClick={() => {
-                  void navigator.clipboard?.writeText(publicUrl);
-                }}
-                title={publicUrl}
+              <div
+                className={cn(
+                  'flex w-full flex-col gap-2 rounded-xl border p-3 text-xs sm:min-w-[320px] lg:max-w-md',
+                  isPublicLinkExpired
+                    ? 'border-red-200 bg-red-50 text-red-900'
+                    : 'border-emerald-200 bg-emerald-50 text-emerald-900',
+                )}
               >
-                <Link2 className="h-4 w-4" />
-                {t('treatmentReview.header.copyPatientLink')}
-              </Button>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="inline-flex items-center gap-1.5 font-semibold">
+                    <CalendarClock className="h-3.5 w-3.5" />
+                    {isPublicLinkExpired
+                      ? t('treatmentReview.header.patientLinkExpired')
+                      : t('treatmentReview.header.patientLinkActive')}
+                  </span>
+                  {publicExpiresAt ? (
+                    <span>
+                      {t('treatmentReview.header.expiresOn', {
+                        date: format(publicExpiresAt, 'MMM d, yyyy'),
+                      })}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+                  <code className="min-w-0 flex-1 truncate rounded-md bg-white/70 px-2 py-1.5 text-[11px] text-muted-foreground">
+                    {publicUrl}
+                  </code>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-9 shrink-0 gap-2 bg-white/80"
+                    onClick={() => {
+                      void navigator.clipboard?.writeText(publicUrl);
+                      toast.success(t('treatmentReview.header.patientLinkCopied'));
+                    }}
+                    title={publicUrl}
+                  >
+                    <Link2 className="h-4 w-4" />
+                    {t('treatmentReview.header.copyPatientLink')}
+                  </Button>
+                </div>
+              </div>
             )}
             <Button
               type="button"
               size="sm"
               variant="secondary"
-              className="gap-2"
+              className="h-10 gap-2 sm:h-9"
               onClick={() => generate.mutate({ id: review.id, validDays: 30 })}
               disabled={generate.isPending}
             >
@@ -1812,14 +1866,11 @@ function DentalTreatmentTableSection({
 // header make it unmissable when scrolling, even with the chat below it.
 
 /**
- * Always-visible Approve / Reject bar.
+ * Doctor decision area.
  *
- * Rendered for the doctor on every treatment plan, sticky to the bottom
- * of the page so the action is one click away no matter how far down the
- * doctor has scrolled. No banner text — the buttons speak for themselves.
- * The buttons are enabled only when the plan is in READY status; outside
- * READY they show disabled with a tiny status hint so the doctor knows
- * why they can't act yet.
+ * READY plans show the sticky Approve / Reject action bar. Final or
+ * non-ready states show a calm read-only status card instead of disabled
+ * buttons, which avoids suggesting the doctor can approve twice.
  */
 function ApprovalActions({
   review,
@@ -1829,58 +1880,212 @@ function ApprovalActions({
   const { t } = useT();
   const approve = useApproveTreatmentPlan();
   const reject = useRejectTreatmentPlan();
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
   const isReady = review.status === TreatmentPlanStatus.READY;
   const isApproved = review.status === TreatmentPlanStatus.APPROVED;
   const isRejected = review.status === TreatmentPlanStatus.REJECTED;
   const busy = approve.isPending || reject.isPending;
-  const disabled = !isReady || busy;
+  const normalizedRejectReason = rejectReason.trim();
 
-  const statusHint = isApproved
-    ? t('treatmentReview.approval.alreadyApproved')
-    : isRejected
-      ? t('treatmentReview.approval.wasRejected')
-      : !isReady
-        ? t('treatmentReview.approval.awaitingDesigner')
-        : null;
+  const closeRejectDialog = () => {
+    if (reject.isPending) return;
+    setRejectOpen(false);
+    setRejectReason('');
+  };
+
+  const submitReject = () => {
+    if (!normalizedRejectReason || reject.isPending) return;
+    reject.mutate(
+      { id: review.id, rejectionReason: normalizedRejectReason },
+      {
+        onSuccess: () => {
+          setRejectOpen(false);
+          setRejectReason('');
+        },
+      },
+    );
+  };
+
+  if (!isReady) {
+    const status =
+      isApproved
+        ? {
+            title: t('treatmentReview.approval.approvedTitle'),
+            description: t('treatmentReview.approval.alreadyApproved'),
+            date: review.approvedAt
+              ? t('treatmentReview.approval.approvedDate', {
+                  date: format(new Date(review.approvedAt), 'MMM d, yyyy'),
+                })
+              : null,
+            icon: Check,
+            className: 'border-emerald-200 bg-emerald-50/80 text-emerald-950',
+            iconClassName: 'bg-emerald-100 text-emerald-700',
+            badgeClassName: 'border-emerald-200 bg-white text-emerald-800',
+          }
+        : isRejected
+          ? {
+              title: t('treatmentReview.approval.rejectedTitle'),
+              description: t('treatmentReview.approval.wasRejected'),
+              date: review.rejectedAt
+                ? t('treatmentReview.approval.rejectedDate', {
+                    date: format(new Date(review.rejectedAt), 'MMM d, yyyy'),
+                  })
+                : null,
+              icon: X,
+              className: 'border-red-200 bg-red-50/80 text-red-950',
+              iconClassName: 'bg-red-100 text-red-700',
+              badgeClassName: 'border-red-200 bg-white text-red-800',
+            }
+          : {
+              title: t('treatmentReview.approval.awaitingTitle'),
+              description: t('treatmentReview.approval.awaitingDesigner'),
+              date: null,
+              icon: Lock,
+              className: 'border-muted bg-muted/30 text-foreground',
+              iconClassName: 'bg-background text-muted-foreground',
+              badgeClassName: 'border-muted bg-background text-muted-foreground',
+            };
+    const Icon = status.icon;
+
+    return (
+      <Card className={cn('shadow-sm', status.className)}>
+        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-start gap-3">
+            <span
+              className={cn(
+                'grid h-10 w-10 shrink-0 place-items-center rounded-full',
+                status.iconClassName,
+              )}
+            >
+              <Icon className="h-5 w-5" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold">{status.title}</p>
+              <p className="mt-1 max-w-2xl text-sm opacity-80">
+                {status.description}
+              </p>
+            </div>
+          </div>
+          {status.date && (
+            <Badge
+              variant="outline"
+              className={cn(
+                'w-fit shrink-0 rounded-full px-3 py-1',
+                status.badgeClassName,
+              )}
+            >
+              {status.date}
+            </Badge>
+          )}
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
-    <div className="sticky bottom-0 -mx-4 mt-4 border-t bg-background/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:-mx-6 sm:px-6">
-      {statusHint && (
-        <p className="mb-2 text-center text-xs text-muted-foreground">
-          {statusHint}
-        </p>
-      )}
-      <div className="mx-auto grid max-w-3xl gap-3 sm:grid-cols-2">
-        <Button
-          type="button"
-          variant="outline"
-          size="lg"
-          onClick={() => reject.mutate(review.id)}
-          disabled={disabled}
-          className="h-12 gap-2 border-red-300 bg-white text-red-700 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {reject.isPending ? (
-            <Loader2 className="h-5 w-5 animate-spin" />
-          ) : (
-            <X className="h-5 w-5" />
-          )}
-          {t('treatmentReview.approval.reject')}
-        </Button>
-        <Button
-          type="button"
-          size="lg"
-          onClick={() => approve.mutate(review.id)}
-          disabled={disabled}
-          className="h-12 gap-2 bg-emerald-600 text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {approve.isPending ? (
-            <Loader2 className="h-5 w-5 animate-spin" />
-          ) : (
-            <Check className="h-5 w-5" />
-          )}
-          {t('treatmentReview.approval.approve')}
-        </Button>
+    <>
+      <div className="sticky bottom-0 -mx-4 mt-4 border-t bg-background/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:-mx-6 sm:px-6">
+        <div className="mx-auto grid max-w-3xl gap-3 sm:grid-cols-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="lg"
+            onClick={() => setRejectOpen(true)}
+            disabled={busy}
+            className="h-12 gap-2 border-red-300 bg-white text-red-700 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {reject.isPending ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : (
+              <X className="h-5 w-5" />
+            )}
+            {t('treatmentReview.approval.reject')}
+          </Button>
+          <Button
+            type="button"
+            size="lg"
+            onClick={() => approve.mutate(review.id)}
+            disabled={busy}
+            className="h-12 gap-2 bg-emerald-600 text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {approve.isPending ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : (
+              <Check className="h-5 w-5" />
+            )}
+            {t('treatmentReview.approval.approve')}
+          </Button>
+        </div>
       </div>
-    </div>
+
+      <Dialog
+        open={rejectOpen}
+        onOpenChange={(open) => {
+          if (open) {
+            setRejectOpen(true);
+            return;
+          }
+          closeRejectDialog();
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              {t('treatmentReview.approval.rejectDialogTitle')}
+            </DialogTitle>
+            <DialogDescription>
+              {t('treatmentReview.approval.rejectDialogDesc')}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2">
+            <label
+              htmlFor="treatment-rejection-reason"
+              className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+            >
+              {t('treatmentReview.approval.rejectReasonLabel')}
+            </label>
+            <Textarea
+              id="treatment-rejection-reason"
+              value={rejectReason}
+              onChange={(event) => setRejectReason(event.target.value)}
+              placeholder={t('treatmentReview.approval.rejectReasonPlaceholder')}
+              rows={5}
+              maxLength={1000}
+              className="min-h-32 resize-none"
+              disabled={reject.isPending}
+            />
+            <p className="text-xs text-muted-foreground">
+              {t('treatmentReview.approval.rejectReasonHelp')}
+            </p>
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={closeRejectDialog}
+              disabled={reject.isPending}
+            >
+              {t('treatmentReview.approval.cancelReject')}
+            </Button>
+            <Button
+              type="button"
+              onClick={submitReject}
+              disabled={!normalizedRejectReason || reject.isPending}
+              className="gap-2 bg-red-600 text-white hover:bg-red-700"
+            >
+              {reject.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <X className="h-4 w-4" />
+              )}
+              {t('treatmentReview.approval.confirmReject')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

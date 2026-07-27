@@ -2,10 +2,12 @@ import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import {
   IsEnum,
   IsInt,
+  IsNotEmpty,
   IsOptional,
   IsString,
   IsUrl,
   Max,
+  MaxLength,
   Min,
 } from 'class-validator';
 import {
@@ -90,6 +92,19 @@ export class CreatePublicLinkDto {
   @Min(1)
   @Max(365)
   validDays?: number;
+}
+
+export class RejectTreatmentPlanDto {
+  @ApiProperty({
+    example:
+      'Please reduce the upper incisor proclination and avoid IPR on 12/11.',
+    description:
+      'Clinical reason for rejecting the treatment plan. It is saved into the treatment chat.',
+  })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(1000)
+  rejectionReason!: string;
 }
 
 // ─── Response shapes (Swagger only — values come straight from Prisma) ─────

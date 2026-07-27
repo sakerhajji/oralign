@@ -3,20 +3,19 @@
 import { useState } from 'react';
 import {
   AlertTriangleIcon,
-  BadgeCheckIcon,
-  BanIcon,
+  CircleDollarSignIcon,
+  ClipboardCheckIcon,
   ClipboardListIcon,
-  PackageIcon,
+  PackageCheckIcon,
   RefreshCwIcon,
-  TimerIcon,
-  UserRoundIcon,
+  StethoscopeIcon,
   WalletIcon,
 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { KpiCard } from './kpi-card';
 import { DashboardSlider } from './dashboard-slider';
-import { AvailablePacks } from './available-packs';
+import { DoctorLatestOrders } from './doctor-latest-orders';
 import { OutstandingBalanceDialog } from './outstanding-balance-dialog';
 import { PaidOrdersDialog } from './paid-orders-dialog';
 import { useDashboardSocket, useDoctorDashboardKpis } from '@/lib/hooks';
@@ -41,8 +40,8 @@ const useFormatters = () => {
  *
  * Order on the page:
  *   1. Slider          (most visible — promo / latest from Oralign)
- *   2. KPI grid        (6 tiles, centered, two rows × three columns on desktop)
- *   3. Packs catalogue (read-only — packs are info, not a buy surface)
+ *   2. KPI grid        (workflow, finance, and pack-credit signals)
+ *   3. Latest orders   (searchable, paginated, last-updated first)
  *
  * Every KPI is doctor-scoped: the backend enforces `doctorId = req.user.sub`
  * on the underlying Prisma queries, so a doctor only ever sees their own
@@ -53,9 +52,8 @@ const useFormatters = () => {
  *   • 0 TND   → emerald  ("you're clear")
  *   • > 0 TND → destructive red ("you owe — pay it or follow up with the team")
  *
- * The Pending-payments tile is clickable and deep-links to the payment
- * history page so the doctor can drill straight from the KPI to the
- * actionable list.
+ * The order stream below the cards uses the same role-scoped /orders
+ * endpoint as the full orders page, so doctors only see their cases.
  */
 export function DoctorDashboard() {
   useDashboardSocket();
@@ -131,61 +129,79 @@ export function DoctorDashboard() {
       </section>
 
       {/* ─── 2. KPI grid ──────────────────────────────────────────── */}
-      {/*
-        Six tiles laid out 1 / 2 / 3 columns by breakpoint — matches
-        the AvailablePacks grid right below, so KPI cards and pack
-        cards align vertically on any viewport (no awkward centred
-        narrow band on wide screens). The KpiGrid wrapper used
-        elsewhere caps at 4 columns; we roll our own here for the
-        specific 6-tile + full-width-as-packs layout the doctor spec
-        calls for.
-
-        Order of tiles (top-left → bottom-right):
-          • Total orders               (book of work)
-          • Outstanding balance        (click for breakdown popup)
-          • Total patients             (clinic size)
-          • Pending payments           (clickable → /payments/history)
-          • Unpaid orders              (count, secondary signal)
-          • Paid orders                (count, healthy signal)
-       */}
       <section className="grid w-full grid-cols-1 items-stretch gap-4 md:grid-cols-2 lg:grid-cols-3">
         <KpiCard
-          label={t('dashboard.kpi.totalOrders')}
-          value={N(d?.orders.total ?? 0)}
+          label={t('dashboard.kpi.submittedOrders')}
+          value={N(d?.orders.submitted ?? 0)}
           icon={ClipboardListIcon}
           tone="primary"
-          // Deep-link to the orders page so the count acts as a real
-          // navigation entry — clicking the headline number takes the
-          // doctor straight into the book of work it describes.
           href="/dashboard/orders"
-          footerLabel={t('dashboard.kpi.totalOrdersThisMonth', {
+          footerLabel={t('dashboard.kpi.submittedHint')}
+          footerDetail={t('dashboard.kpi.totalOrdersThisMonth', {
             count: N(d?.orders.thisMonth ?? 0),
           })}
+          loading={loading}
+        />
+        <KpiCard
+          label={t('dashboard.kpi.treatmentOrders')}
+          value={N(d?.orders.inTreatment ?? 0)}
+          icon={StethoscopeIcon}
+          tone="violet"
+          href="/dashboard/orders"
+          footerLabel={t('dashboard.kpi.treatmentHint')}
           footerDetail={t('dashboard.kpi.totalOrdersToday', {
             count: N(d?.orders.today ?? 0),
           })}
           loading={loading}
         />
         <KpiCard
+          label={t('dashboard.kpi.completedOrders')}
+          value={N(d?.orders.completed ?? 0)}
+          icon={ClipboardCheckIcon}
+          tone="emerald"
+          href="/dashboard/orders"
+          footerLabel={t('dashboard.kpi.completedHint')}
+          footerDetail={t('dashboard.kpi.paidOrdersCollected', {
+            amount: TND(d?.revenue.collected ?? 0),
+          })}
+          loading={loading}
+        />
+        <KpiCard
+          label={t('dashboard.kpi.availableCredits')}
+          value={
+            d?.currentPack?.isUnlimitedSteps
+              ? t('dashboard.kpi.creditsUnlimited')
+              : N(
+                  d?.currentPack?.remainingCredits ??
+                    d?.currentPack?.totalCredits ??
+                    0,
+                )
+          }
+          icon={PackageCheckIcon}
+          tone={d?.currentPack ? 'sky' : 'neutral'}
+          href="/dashboard/packs"
+          footerLabel={
+            d?.currentPack?.name ?? t('dashboard.kpi.noActivePack')
+          }
+          footerDetail={
+            d?.currentPack?.remainingDays != null
+              ? t('dashboard.kpi.creditsRemainingDays', {
+                  count: N(d.currentPack.remainingDays),
+                })
+              : t('dashboard.kpi.viewPacks')
+          }
+          loading={loading}
+        />
+        <KpiCard
           label={t('dashboard.kpi.outstandingBalance')}
           value={TND(d?.revenue.unpaidDebt ?? 0)}
           icon={WalletIcon}
-          // Chip mirrors the story: red while money is due, emerald
-          // when the doctor is clear — one glance, no reading.
           tone={(d?.revenue.unpaidDebt ?? 0) > 0 ? 'red' : 'emerald'}
-          // Tint the value RED when the doctor actually owes money;
-          // otherwise leave the neutral default. We deliberately do
-          // NOT tint emerald on zero — green on every healthy dashboard
-          // would be visual noise. The red only shows when there's
-          // something to do.
           valueClassName={
             (d?.revenue.unpaidDebt ?? 0) > 0
               ? 'text-destructive'
               : undefined
           }
-          // Click → opens the per-order breakdown popup. The KpiCard
-          // wraps itself in a semantic <button> so keyboard
-          // activation + screen-reader role come for free.
           onClick={() => setOutstandingOpen(true)}
           footerLabel={
             (d?.revenue.unpaidDebt ?? 0) > 0
@@ -197,59 +213,10 @@ export function DoctorDashboard() {
           loading={loading}
         />
         <KpiCard
-          label={t('dashboard.kpi.totalPatients')}
-          value={N(d?.patients.total ?? 0)}
-          icon={UserRoundIcon}
-          tone="violet"
-          // Same idea as Total orders — clicking the count navigates
-          // into the patients page so the doctor can browse the list
-          // behind the number.
-          href="/dashboard/patients"
-          footerLabel={t('dashboard.kpi.totalPatientsNew', {
-            count: N(d?.patients.newThisMonth ?? 0),
-          })}
-          loading={loading}
-        />
-        <KpiCard
-          label={t('dashboard.kpi.pendingPayments')}
-          value={N(d?.payments.pending ?? 0)}
-          icon={TimerIcon}
-          tone="amber"
-          // Deep-link straight into the payment-history page so the
-          // doctor sees the list of rows behind the number. The page
-          // is role-aware and shows only the doctor's own payments.
-          href="/dashboard/payments/history"
-          footerLabel={t('dashboard.kpi.awaitingConfirmation', {
-            count: N(d?.payments.awaitingConfirmation ?? 0),
-          })}
-          loading={loading}
-        />
-        <KpiCard
-          label={t('dashboard.kpi.unpaidOrders')}
-          value={N(d?.orders.unpaid ?? 0)}
-          icon={BanIcon}
-          tone={(d?.orders.unpaid ?? 0) > 0 ? 'red' : 'neutral'}
-          // Unpaid orders surface the SAME per-order list as the
-          // Outstanding-balance KPI — both KPIs describe the same set
-          // of rows from different angles (count vs total due). Reuse
-          // the single dialog so the doctor sees consistent data and
-          // we don't end up with two near-identical popups to maintain.
-          onClick={() => setOutstandingOpen(true)}
-          footerLabel={
-            (d?.orders.unpaid ?? 0) > 0
-              ? t('dashboard.kpi.unpaidOrdersHint')
-              : t('dashboard.kpi.unpaidOrdersEmpty')
-          }
-          loading={loading}
-        />
-        <KpiCard
           label={t('dashboard.kpi.paidOrders')}
           value={N(d?.orders.paid ?? 0)}
-          icon={BadgeCheckIcon}
+          icon={CircleDollarSignIcon}
           tone="emerald"
-          // Mirror of the outstanding popup but tuned to collected
-          // revenue — emerald tone, "Total collected" headline, every
-          // row a 100 %-paid record.
           onClick={() => setPaidOpen(true)}
           footerLabel={
             (d?.orders.paid ?? 0) > 0
@@ -262,24 +229,8 @@ export function DoctorDashboard() {
         />
       </section>
 
-      {/* ─── 3. Packs catalogue (info-only) ──────────────────────── */}
-      {/* Pack cards now ship as a read-only catalogue. Subscription /
-          purchase flows live elsewhere (the order wizard picks the
-          pack inline when the doctor creates a new case) — surfacing
-          them here as a "buy" affordance was confusing because the
-          actual pack selection happens later in the order flow. */}
-      <section className="space-y-3">
-        <div className="flex items-baseline gap-2">
-          <PackageIcon className="size-5 text-primary" />
-          <h2 className="text-lg font-semibold tracking-tight">
-            {t('dashboard.packs.sectionTitle')}
-          </h2>
-          <span className="text-sm text-muted-foreground">
-            · {t('dashboard.packs.sectionHint')}
-          </span>
-        </div>
-        <AvailablePacks recommendedId={d?.suggestedPack?.id} />
-      </section>
+      {/* ─── 3. Latest orders ────────────────────────────────────── */}
+      <DoctorLatestOrders />
 
       {/*
         Outstanding-balance details modal. Mounted at the page level so

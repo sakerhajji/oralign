@@ -1107,6 +1107,92 @@ export const dict = {
         en: 'No paid orders yet — click for details.',
         fr: 'Aucune commande payée — cliquez pour le détail.',
       } as T,
+      submittedOrders: { en: 'Submitted orders', fr: 'Commandes soumises' } as T,
+      submittedHint: {
+        en: 'Ready for review or already under review.',
+        fr: 'Prêtes à être vérifiées ou déjà en revue.',
+      } as T,
+      treatmentOrders: { en: 'In treatment planning', fr: 'En planification' } as T,
+      treatmentHint: {
+        en: 'Cases currently in clinical planning.',
+        fr: 'Cas en cours de planification clinique.',
+      } as T,
+      completedOrders: { en: 'Completed orders', fr: 'Commandes terminées' } as T,
+      completedHint: {
+        en: 'Finished cases delivered to patients.',
+        fr: 'Cas finalisés et livrés aux patients.',
+      } as T,
+      availableCredits: { en: 'Available credits', fr: 'Crédits disponibles' } as T,
+      creditsUnlimited: { en: 'Unlimited', fr: 'Illimité' } as T,
+      noActivePack: { en: 'No active pack', fr: 'Aucun forfait actif' } as T,
+      creditsRemainingDays: {
+        en: '{count} day(s) remaining',
+        fr: '{count} jour(s) restant(s)',
+      } as T,
+      viewPacks: {
+        en: 'Open the packs page to review available options.',
+        fr: 'Ouvrez la page Forfaits pour consulter les options.',
+      } as T,
+    },
+
+    // Latest-orders section on the doctor dashboard.
+    orders: {
+      eyebrow: { en: 'Latest activity', fr: 'Activité récente' } as T,
+      title: { en: 'Your orders', fr: 'Vos commandes' } as T,
+      subtitle: {
+        en: 'Newest updates first. Search, filter, and open the right workflow directly.',
+        fr: 'Dernières mises à jour en premier. Recherchez, filtrez et ouvrez directement le bon workflow.',
+      } as T,
+      newOrder: { en: 'New order', fr: 'Nouvelle commande' } as T,
+      searchPlaceholder: {
+        en: 'Search order, patient, phone…',
+        fr: 'Rechercher commande, patient, téléphone…',
+      } as T,
+      filterLabel: { en: 'Filter orders', fr: 'Filtrer les commandes' } as T,
+      sortLabel: { en: 'Sort orders', fr: 'Trier les commandes' } as T,
+      filters: {
+        all: { en: 'All orders', fr: 'Toutes' } as T,
+        submitted: { en: 'Submitted', fr: 'Soumises' } as T,
+        treatment: { en: 'Treatment', fr: 'Traitement' } as T,
+        payment: { en: 'Payment', fr: 'Paiement' } as T,
+        production: { en: 'Production', fr: 'Production' } as T,
+        completed: { en: 'Completed', fr: 'Terminées' } as T,
+      },
+      sort: {
+        updatedDesc: { en: 'Last updated', fr: 'Mise à jour' } as T,
+        createdDesc: { en: 'Newest created', fr: 'Création récente' } as T,
+        codeAsc: { en: 'Order code A-Z', fr: 'Code commande A-Z' } as T,
+      },
+      errorTitle: { en: 'Orders could not load', fr: 'Impossible de charger les commandes' } as T,
+      errorDescription: {
+        en: 'Please refresh or check your connection.',
+        fr: 'Actualisez ou vérifiez votre connexion.',
+      } as T,
+      emptyTitle: { en: 'No orders found', fr: 'Aucune commande trouvée' } as T,
+      emptyDescription: {
+        en: 'Try another filter or create the first order for this view.',
+        fr: 'Essayez un autre filtre ou créez la première commande pour cette vue.',
+      } as T,
+      colOrder: { en: 'Order', fr: 'Commande' } as T,
+      colPatient: { en: 'Patient', fr: 'Patient' } as T,
+      colStatus: { en: 'Status', fr: 'Statut' } as T,
+      colLastUpdated: { en: 'Last updated', fr: 'Dernière mise à jour' } as T,
+      colOpen: { en: 'Open', fr: 'Ouvrir' } as T,
+      open: { en: 'Open', fr: 'Ouvrir' } as T,
+      contact: { en: 'Contact', fr: 'Contact' } as T,
+      openAria: {
+        en: 'Open order {code}',
+        fr: 'Ouvrir la commande {code}',
+      } as T,
+      created: { en: 'Created {date}', fr: 'Créée le {date}' } as T,
+      noPatient: { en: 'No patient selected', fr: 'Aucun patient sélectionné' } as T,
+      noContact: { en: 'No contact', fr: 'Aucun contact' } as T,
+      paginationSummary: {
+        en: '{total} order(s) · page {page} of {totalPages}',
+        fr: '{total} commande(s) · page {page} sur {totalPages}',
+      } as T,
+      previous: { en: 'Previous', fr: 'Précédent' } as T,
+      next: { en: 'Next', fr: 'Suivant' } as T,
     },
 
     // Available packs section
@@ -2581,6 +2667,11 @@ export const dict = {
 
   packsAdmin: {
     loading: { en: 'Loading packs…', fr: 'Chargement des forfaits…' } as T,
+    accessDeniedTitle: { en: 'Packs are not available for this role', fr: 'Forfaits indisponibles pour ce rôle' } as T,
+    accessDeniedBody: {
+      en: 'Only dentists and admins can open the packs area.',
+      fr: 'Seuls les praticiens et les administrateurs peuvent ouvrir l’espace forfaits.',
+    } as T,
     title: { en: 'Pack catalogue', fr: 'Catalogue des forfaits' } as T,
     intro: {
       en: 'Commercial bundles attached to quotations. Each pack supports French / English content and pricing per arcade (two arches / single arch).',
@@ -2711,6 +2802,16 @@ export const dict = {
     } as T,
     saveChanges: { en: 'Save changes', fr: 'Enregistrer les modifications' } as T,
     createPack: { en: 'Create pack', fr: 'Créer le forfait' } as T,
+  },
+
+  packsDoctor: {
+    eyebrow: { en: 'Available packs', fr: 'Forfaits disponibles' } as T,
+    title: { en: 'Choose the right pack for your next case', fr: 'Choisissez le bon forfait pour votre prochain cas' } as T,
+    intro: {
+      en: 'This catalogue is informational. You select the pack inside the new-order workflow, after the clinical case is created.',
+      fr: 'Ce catalogue est informatif. La sélection du forfait se fait dans le workflow de nouvelle commande, après la création du cas clinique.',
+    } as T,
+    newOrder: { en: 'Create an order', fr: 'Créer une commande' } as T,
   },
 
   mediaAdmin: {
@@ -3659,6 +3760,10 @@ export const dict = {
       readyNewVersion: {
         en: '{name} created and marked ready (replaces the rejected plan).',
         fr: '{name} créé et marqué prêt (remplace le plan rejeté).',
+      } as T,
+      draftNewVersion: {
+        en: '{name} created as an editable draft. Review it, then mark it ready for the doctor.',
+        fr: '{name} créé comme brouillon modifiable. Vérifiez-le, puis marquez-le prêt pour le praticien.',
       } as T,
       markedReady: {
         en: 'Plan marked ready for doctor review.',

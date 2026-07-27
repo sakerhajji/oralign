@@ -34,6 +34,17 @@ function parseContentDispositionFilename(
   return null;
 }
 
+export class PublicViewerFetchError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly errorCode?: string,
+  ) {
+    super(message);
+    this.name = 'PublicViewerFetchError';
+  }
+}
+
 export const treatmentPlansService = {
   // ─── Plans ────────────────────────────────────────────────────────────────
 
@@ -94,10 +105,13 @@ export const treatmentPlansService = {
     return res.data;
   },
 
-  reject: async (id: string): Promise<TreatmentPlan> => {
+  reject: async (
+    id: string,
+    rejectionReason: string,
+  ): Promise<TreatmentPlan> => {
     const res = await apiClient.post<TreatmentPlan>(
       `/treatment-plans/${id}/reject`,
-      {},
+      { rejectionReason },
     );
     return res.data;
   },
@@ -293,7 +307,17 @@ export const treatmentPlansService = {
       },
     );
     if (!res.ok) {
-      throw new Error(`Public viewer fetch failed: HTTP ${res.status}`);
+      let body: { message?: string; errorCode?: string } | null = null;
+      try {
+        body = (await res.json()) as { message?: string; errorCode?: string };
+      } catch {
+        body = null;
+      }
+      throw new PublicViewerFetchError(
+        body?.message ?? `Public viewer fetch failed: HTTP ${res.status}`,
+        res.status,
+        body?.errorCode,
+      );
     }
     return (await res.json()) as PublicTreatmentViewerPayload;
   },

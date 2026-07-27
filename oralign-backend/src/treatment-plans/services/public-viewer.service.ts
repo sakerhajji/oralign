@@ -2,7 +2,10 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
 import { PrismaService } from '../../prisma/prisma.service';
-import { NotFoundException } from '../../common/exceptions/app.exception';
+import {
+  GoneException,
+  NotFoundException,
+} from '../../common/exceptions/app.exception';
 
 export interface PublicViewerPayload {
   treatmentPlan: {
@@ -10,6 +13,7 @@ export interface PublicViewerPayload {
     name: string;
     version: number;
     resultViewUrl?: string | null;
+    publicExpiresAt?: string | null;
   };
   /**
    * Display-only fields. We deliberately omit anything sensitive
@@ -44,12 +48,27 @@ export class PublicTreatmentViewerService {
 
   async getByToken(token: string): Promise<PublicViewerPayload> {
     if (!token || token.length < 8) {
-      throw new NotFoundException('Invalid viewer link.');
+      throw new NotFoundException(
+        'Invalid viewer link.',
+        'PUBLIC_LINK_INVALID',
+      );
     }
 
     const cacheKey = `treatment-viewer:${token}`;
     const cached = await this.cache.get<PublicViewerPayload>(cacheKey);
-    if (cached) return cached;
+    if (cached) {
+      const expiresAt = cached.treatmentPlan.publicExpiresAt
+        ? new Date(cached.treatmentPlan.publicExpiresAt).getTime()
+        : null;
+      if (expiresAt && expiresAt < Date.now()) {
+        await this.cache.del(cacheKey);
+        throw new GoneException(
+          'This treatment link has expired.',
+          'PUBLIC_LINK_EXPIRED',
+        );
+      }
+      return cached;
+    }
 
     const plan = await this.prisma.treatmentPlan.findUnique({
       where: { publicToken: token },
@@ -79,10 +98,14 @@ export class PublicTreatmentViewerService {
     if (!plan || plan.deletedAt) {
       throw new NotFoundException(
         'This treatment link is no longer available.',
+        'PUBLIC_LINK_NOT_FOUND',
       );
     }
     if (plan.publicExpiresAt && plan.publicExpiresAt.getTime() < Date.now()) {
-      throw new NotFoundException('This treatment link has expired.');
+      throw new GoneException(
+        'This treatment link has expired.',
+        'PUBLIC_LINK_EXPIRED',
+      );
     }
 
     const payload: PublicViewerPayload = {
@@ -91,6 +114,7 @@ export class PublicTreatmentViewerService {
         name: plan.name,
         version: plan.version,
         resultViewUrl: plan.resultViewUrl ?? null,
+        publicExpiresAt: plan.publicExpiresAt?.toISOString() ?? null,
       },
       doctor: plan.order.doctor
         ? {
@@ -113,9 +137,15 @@ export class PublicTreatmentViewerService {
         : undefined,
     };
 
-    // 10-minute TTL — short enough to honour revocations / URL edits,
-    // long enough to absorb refresh spikes.
-    await this.cache.set(cacheKey, payload, 10 * 60_000);
+    // Keep the cache short, and never longer than the public link expiry.
+    // Otherwise a just-expired link could remain readable until cache TTL.
+    const ttlMs = plan.publicExpiresAt
+      ? Math.max(
+          1_000,
+          Math.min(10 * 60_000, plan.publicExpiresAt.getTime() - Date.now()),
+        )
+      : 10 * 60_000;
+    await this.cache.set(cacheKey, payload, ttlMs);
     return payload;
   }
 }

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { ShowcasePageScaffold } from "../_components/showcase-page";
+import { GuidePage } from "./_components/guide-page";
 
 export const metadata: Metadata = {
   title: "Guide d'utilisation des aligneurs Oralign | ORALIGN",
@@ -8,5 +8,5 @@ export const metadata: Metadata = {
 };
 
 export default function Page() {
-  return <ShowcasePageScaffold titleKey="guide" />;
+  return <GuidePage />;
 }

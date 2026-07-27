@@ -36,8 +36,8 @@ export const treatmentDomainDict = {
     // ─── Ready-for-review action card ────────────────────────────────
     ready: {
       resendTitle: {
-        en: 'Resend treatment plan',
-        fr: 'Renvoyer le plan de traitement',
+        en: 'Renew treatment plan',
+        fr: 'Renouveler le plan de traitement',
       } as T,
       sendTitle: {
         en: 'Send for doctor review',
@@ -45,20 +45,20 @@ export const treatmentDomainDict = {
       } as T,
       // Composed: "<resendDescBefore> (v{n}) <resendDescAfter>"
       resendDescBefore: {
-        en: 'The doctor rejected this version. Clicking below creates a new versioned plan',
-        fr: 'Le praticien a rejeté cette version. Le bouton ci-dessous crée un nouveau plan versionné',
+        en: 'The doctor rejected this version. Clicking below creates an editable draft',
+        fr: 'Le praticien a rejeté cette version. Le bouton ci-dessous crée un brouillon modifiable',
       } as T,
       resendDescAfter: {
-        en: 'and marks it ready for the doctor — the rejected plan stays in history for the audit trail.',
-        fr: 'et le marque comme prêt pour le praticien — le plan rejeté reste dans l’historique pour la traçabilité.',
+        en: 'from the old plan. Edit it, then mark it ready when it is correct.',
+        fr: 'à partir de l’ancien plan. Modifiez-le, puis marquez-le comme prêt quand il est corrigé.',
       } as T,
       sendDesc: {
         en: 'Mark this plan as ready once the viewer URL, movement table, and any result files are in place. The doctor is then unblocked to approve or reject.',
         fr: 'Marquez ce plan comme prêt une fois l’URL du visualiseur, le tableau des mouvements et les fichiers de résultats en place. Le praticien pourra alors l’approuver ou le rejeter.',
       } as T,
       createNewVersion: {
-        en: 'Create new version & resend',
-        fr: 'Créer une nouvelle version et renvoyer',
+        en: 'Create editable new version',
+        fr: 'Créer une nouvelle version modifiable',
       } as T,
       markReady: {
         en: 'Mark as ready for review',
@@ -75,6 +75,22 @@ export const treatmentDomainDict = {
       copyPatientLink: {
         en: 'Copy patient link',
         fr: 'Copier le lien patient',
+      } as T,
+      patientLinkCopied: {
+        en: 'Patient link copied.',
+        fr: 'Lien patient copié.',
+      } as T,
+      patientLinkActive: {
+        en: 'Patient link active',
+        fr: 'Lien patient actif',
+      } as T,
+      patientLinkExpired: {
+        en: 'Patient link expired',
+        fr: 'Lien patient expiré',
+      } as T,
+      expiresOn: {
+        en: 'Expires {date}',
+        fr: 'Expire le {date}',
       } as T,
       rotatePatientLink: {
         en: 'Rotate patient link',
@@ -335,17 +351,62 @@ export const treatmentDomainDict = {
 
     // ─── Approve / Reject decision bar ───────────────────────────────
     approval: {
+      approvedTitle: {
+        en: 'Plan approved',
+        fr: 'Plan approuvé',
+      } as T,
       alreadyApproved: {
         en: 'This plan has already been approved.',
         fr: 'Ce plan a déjà été approuvé.',
+      } as T,
+      approvedDate: {
+        en: 'Approved on {date}',
+        fr: 'Approuvé le {date}',
+      } as T,
+      rejectedTitle: {
+        en: 'Plan rejected',
+        fr: 'Plan rejeté',
       } as T,
       wasRejected: {
         en: 'This plan was rejected — the designer will send a new version.',
         fr: 'Ce plan a été rejeté — le concepteur enverra une nouvelle version.',
       } as T,
+      rejectedDate: {
+        en: 'Rejected on {date}',
+        fr: 'Rejeté le {date}',
+      } as T,
+      awaitingTitle: {
+        en: 'Awaiting designer',
+        fr: 'En attente du concepteur',
+      } as T,
       awaitingDesigner: {
         en: 'Awaiting the designer — buttons unlock once the plan is marked ready.',
         fr: 'En attente du concepteur — les boutons se débloquent une fois le plan marqué comme prêt.',
+      } as T,
+      rejectDialogTitle: {
+        en: 'Reject treatment plan',
+        fr: 'Rejeter le plan de traitement',
+      } as T,
+      rejectDialogDesc: {
+        en: 'Explain clearly what must be corrected. Your reason will be posted in the treatment conversation for the designer.',
+        fr: 'Expliquez clairement ce qui doit être corrigé. Votre raison sera publiée dans la conversation du traitement pour le concepteur.',
+      } as T,
+      rejectReasonLabel: {
+        en: 'Reason for rejection',
+        fr: 'Raison du rejet',
+      } as T,
+      rejectReasonPlaceholder: {
+        en: 'Example: reduce proclination on the upper incisors, avoid IPR between 12/11, and review midline correction.',
+        fr: 'Exemple : réduire la proclinaison des incisives supérieures, éviter l’IPR entre 12/11 et revoir la correction de la ligne médiane.',
+      } as T,
+      rejectReasonHelp: {
+        en: 'This note becomes a rejection message in the chat and stays in the case history.',
+        fr: 'Cette note devient un message de rejet dans le chat et reste dans l’historique du cas.',
+      } as T,
+      cancelReject: { en: 'Cancel', fr: 'Annuler' } as T,
+      confirmReject: {
+        en: 'Reject and send reason',
+        fr: 'Rejeter et envoyer la raison',
       } as T,
       reject: { en: 'Reject', fr: 'Rejeter' } as T,
       approve: { en: 'Approve', fr: 'Approuver' } as T,

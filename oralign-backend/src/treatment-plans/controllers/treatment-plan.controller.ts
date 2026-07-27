@@ -30,6 +30,7 @@ import { TreatmentPlanService } from '../services/treatment-plan.service';
 import {
   CreatePublicLinkDto,
   CreateTreatmentPlanDto,
+  RejectTreatmentPlanDto,
   TreatmentPlanReviewDto,
   UpdateResultViewUrlDto,
   UpdateTreatmentPlanDto,
@@ -159,6 +160,7 @@ export class TreatmentPlanController {
     summary:
       'Planner marks the plan as ready for doctor review. The plan status ' +
       'becomes "ready" and the order status becomes "treatment_plan_ready". ' +
+      'For a rejected plan, this creates an editable replacement draft instead of sending it. ' +
       'No longer happens implicitly when uploading a treatment_result file.',
   })
   async markReady(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
@@ -183,9 +185,16 @@ export class TreatmentPlanController {
 
   @Post('treatment-plans/:id/reject')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Doctor (or admin) rejects a treatment plan' })
-  async reject(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
-    return this.service.reject(id, {
+  @ApiOperation({
+    summary:
+      'Doctor (or admin) rejects a treatment plan with a clinical reason. The reason is saved into the treatment chat.',
+  })
+  async reject(
+    @Param('id') id: string,
+    @Body() dto: RejectTreatmentPlanDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.reject(id, dto.rejectionReason, {
       userId: user.sub,
       role: user.role as UserRole,
     });

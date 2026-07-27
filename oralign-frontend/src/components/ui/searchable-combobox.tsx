@@ -95,11 +95,6 @@ export function SearchableCombobox({
     }).slice(0, 200);
   }, [items, query]);
 
-  // Reset active highlight when filter changes.
-  useEffect(() => {
-    setActiveIndex(0);
-  }, [query]);
-
   // Anchor the panel to the trigger on open + on resize/scroll.
   const updatePosition = useCallback(() => {
     if (!triggerRef.current) return;
@@ -263,7 +258,10 @@ export function SearchableCombobox({
                 <Input
                   ref={inputRef}
                   value={query}
-                  onChange={(e) => setQuery(e.target.value)}
+                  onChange={(e) => {
+                    setQuery(e.target.value);
+                    setActiveIndex(0);
+                  }}
                   onKeyDown={handleKey}
                   placeholder={t('uiBits.search')}
                   className="h-8 bg-background pl-7 text-sm"

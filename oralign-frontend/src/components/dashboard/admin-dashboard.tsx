@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import {
   Card,
   CardContent,
@@ -122,7 +122,7 @@ export function AdminDashboard() {
   };
 
   return (
-    <div className="flex flex-1 flex-col gap-6 p-4 lg:p-6">
+    <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-x-hidden p-3 sm:gap-6 sm:p-4 lg:p-6">
       {/* Header — title + global date range */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -338,7 +338,7 @@ export function AdminDashboard() {
       </KpiGrid>
 
       {/* Revenue + orders trend chart */}
-      <Card className="@container/card">
+      <Card className="@container/card overflow-hidden">
         <CardHeader>
           <CardTitle>{t('adminDashboard.trend.title')}</CardTitle>
           <CardDescription>
@@ -347,14 +347,15 @@ export function AdminDashboard() {
         </CardHeader>
         <CardContent className="px-2 sm:px-6">
           {trends.isLoading || !trends.data ? (
-            <Skeleton className="h-[260px] w-full" />
+            <Skeleton className="h-48 w-full sm:h-64" />
           ) : trends.data.points.length === 0 ? (
-            <p className="grid h-[260px] place-items-center text-sm text-muted-foreground">
+            <p className="grid h-48 place-items-center text-sm text-muted-foreground sm:h-64">
               {t('adminDashboard.trend.empty')}
             </p>
           ) : (
-            <ResponsiveContainer width="100%" height={260}>
-              <AreaChart data={trends.data.points}>
+            <div className="h-48 w-full sm:h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={trends.data.points}>
                 <defs>
                   <linearGradient id="revenueFill" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.4} />
@@ -434,8 +435,9 @@ export function AdminDashboard() {
                   strokeWidth={2}
                   isAnimationActive={false}
                 />
-              </AreaChart>
-            </ResponsiveContainer>
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
           )}
         </CardContent>
       </Card>
@@ -457,14 +459,14 @@ export function AdminDashboard() {
             </div>
           ) : (
             <Tabs defaultValue="orders">
-              <TabsList className="grid w-full grid-cols-3">
-                <TabsTrigger value="orders">
+              <TabsList className="grid w-full grid-cols-3 gap-1 bg-muted/60 p-1">
+                <TabsTrigger value="orders" className="min-w-0 px-2 text-xs sm:text-sm">
                   {t('adminDashboard.topDoctors.tabOrders')}
                 </TabsTrigger>
-                <TabsTrigger value="paid">
+                <TabsTrigger value="paid" className="min-w-0 px-2 text-xs sm:text-sm">
                   {t('adminDashboard.topDoctors.tabPaid')}
                 </TabsTrigger>
-                <TabsTrigger value="outstanding">
+                <TabsTrigger value="outstanding" className="min-w-0 px-2 text-xs sm:text-sm">
                   {t('adminDashboard.topDoctors.tabOutstanding')}
                 </TabsTrigger>
               </TabsList>
@@ -507,57 +509,107 @@ export function AdminDashboard() {
               {t('adminDashboard.bestPacks.empty')}
             </p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left text-muted-foreground">
-                    <th className="py-2 pr-3 font-medium">
-                      {t('adminDashboard.bestPacks.colPack')}
-                    </th>
-                    <th className="py-2 pr-3 text-right font-medium">
-                      {t('adminDashboard.bestPacks.colSold')}
-                    </th>
-                    <th className="py-2 pr-3 text-right font-medium">
-                      {t('adminDashboard.bestPacks.colRevenue')}
-                    </th>
-                    <th className="py-2 pr-3 text-right font-medium">
-                      {t('adminDashboard.bestPacks.colCollected')}
-                    </th>
-                    <th className="py-2 text-right font-medium">
-                      {t('adminDashboard.bestPacks.colCurrentPrice')}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {bestPacks.data!.map((row) => (
-                    <tr key={row.packId} className="border-b last:border-0">
-                      <td className="py-2 pr-3">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium">{row.name}</span>
-                          {!row.isActive ? (
-                            <Badge variant="outline" className="text-xs">
-                              {t('adminDashboard.bestPacks.inactive')}
-                            </Badge>
-                          ) : null}
-                        </div>
-                      </td>
-                      <td className="py-2 pr-3 text-right tabular-nums">
-                        {N(row.sold)}
-                      </td>
-                      <td className="py-2 pr-3 text-right tabular-nums">
-                        {TND(row.revenue)}
-                      </td>
-                      <td className="py-2 pr-3 text-right tabular-nums">
-                        {TND(row.collected)}
-                      </td>
-                      <td className="py-2 text-right tabular-nums">
-                        {TND(row.currentPrice)}
-                      </td>
+            <>
+              <div className="hidden overflow-x-auto sm:block">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-left text-muted-foreground">
+                      <th className="py-2 pr-3 font-medium">
+                        {t('adminDashboard.bestPacks.colPack')}
+                      </th>
+                      <th className="py-2 pr-3 text-right font-medium">
+                        {t('adminDashboard.bestPacks.colSold')}
+                      </th>
+                      <th className="py-2 pr-3 text-right font-medium">
+                        {t('adminDashboard.bestPacks.colRevenue')}
+                      </th>
+                      <th className="py-2 pr-3 text-right font-medium">
+                        {t('adminDashboard.bestPacks.colCollected')}
+                      </th>
+                      <th className="py-2 text-right font-medium">
+                        {t('adminDashboard.bestPacks.colCurrentPrice')}
+                      </th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {bestPacks.data!.map((row) => (
+                      <tr key={row.packId} className="border-b last:border-0">
+                        <td className="py-2 pr-3">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">{row.name}</span>
+                            {!row.isActive ? (
+                              <Badge variant="outline" className="text-xs">
+                                {t('adminDashboard.bestPacks.inactive')}
+                              </Badge>
+                            ) : null}
+                          </div>
+                        </td>
+                        <td className="py-2 pr-3 text-right tabular-nums">
+                          {N(row.sold)}
+                        </td>
+                        <td className="py-2 pr-3 text-right tabular-nums">
+                          {TND(row.revenue)}
+                        </td>
+                        <td className="py-2 pr-3 text-right tabular-nums">
+                          {TND(row.collected)}
+                        </td>
+                        <td className="py-2 text-right tabular-nums">
+                          {TND(row.currentPrice)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="grid gap-2 sm:hidden">
+                {bestPacks.data!.map((row) => (
+                  <article
+                    key={row.packId}
+                    className="rounded-xl border bg-muted/20 p-3"
+                  >
+                    <div className="flex min-w-0 items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold">{row.name}</p>
+                        {!row.isActive ? (
+                          <Badge variant="outline" className="mt-1 text-[11px]">
+                            {t('adminDashboard.bestPacks.inactive')}
+                          </Badge>
+                        ) : null}
+                      </div>
+                      <span className="shrink-0 text-right text-xs text-muted-foreground">
+                        {N(row.sold)} {t('adminDashboard.bestPacks.colSold')}
+                      </span>
+                    </div>
+                    <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                      <div>
+                        <dt className="text-muted-foreground">
+                          {t('adminDashboard.bestPacks.colRevenue')}
+                        </dt>
+                        <dd className="mt-0.5 font-medium tabular-nums">
+                          {TND(row.revenue)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-muted-foreground">
+                          {t('adminDashboard.bestPacks.colCollected')}
+                        </dt>
+                        <dd className="mt-0.5 font-medium tabular-nums">
+                          {TND(row.collected)}
+                        </dd>
+                      </div>
+                      <div className="col-span-2 border-t pt-2">
+                        <dt className="text-muted-foreground">
+                          {t('adminDashboard.bestPacks.colCurrentPrice')}
+                        </dt>
+                        <dd className="mt-0.5 font-semibold tabular-nums">
+                          {TND(row.currentPrice)}
+                        </dd>
+                      </div>
+                    </dl>
+                  </article>
+                ))}
+              </div>
+            </>
           )}
         </CardContent>
       </Card>
@@ -596,9 +648,9 @@ function DoctorList({
       {rows.map((r) => (
         <li
           key={r.doctorId}
-          className="flex items-center gap-3 py-3"
+          className="flex min-w-0 items-start gap-2.5 py-3 sm:items-center sm:gap-3"
         >
-          <Avatar className="size-9">
+          <Avatar className="size-8 shrink-0 sm:size-9">
             <AvatarImage src={getAvatarUrl(r.avatarUrl ?? undefined)} />
             <AvatarFallback>{initials(r.fullName)}</AvatarFallback>
           </Avatar>
@@ -609,7 +661,7 @@ function DoctorList({
               {r.city ? ` · ${r.city}` : ''}
             </p>
           </div>
-          <div className="text-right text-sm tabular-nums">
+          <div className="shrink-0 text-right text-xs tabular-nums sm:text-sm">
             {amountKey === 'orders' && (
               <>
                 <p className="font-semibold">

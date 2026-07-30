@@ -1150,6 +1150,7 @@ export const dict = {
       } as T,
       filterLabel: { en: 'Filter orders', fr: 'Filtrer les commandes' } as T,
       sortLabel: { en: 'Sort orders', fr: 'Trier les commandes' } as T,
+      statusTabsAria: { en: 'Filter orders by status', fr: 'Filtrer les commandes par statut' } as T,
       clearFilters: { en: 'Clear filters', fr: 'Effacer les filtres' } as T,
       clearSearch: { en: 'Clear search', fr: 'Effacer la recherche' } as T,
       filters: {
@@ -1197,6 +1198,11 @@ export const dict = {
       created: { en: 'Created {date}', fr: 'Créée le {date}' } as T,
       noPatient: { en: 'No patient selected', fr: 'Aucun patient sélectionné' } as T,
       noContact: { en: 'No contact', fr: 'Aucun contact' } as T,
+      patientAgeYr: { en: 'yr', fr: 'an' } as T,
+      patientAgeYrs: { en: 'yrs', fr: 'ans' } as T,
+      patientGenderMale: { en: 'Male', fr: 'Homme' } as T,
+      patientGenderFemale: { en: 'Female', fr: 'Femme' } as T,
+      patientGenderOther: { en: 'Other', fr: 'Autre' } as T,
       notSet: { en: 'Not set', fr: 'Non défini' } as T,
       editShort: { en: 'Edit', fr: 'Modifier' } as T,
       detailShort: { en: 'Detail', fr: 'Détail' } as T,
@@ -1825,6 +1831,10 @@ export const dict = {
     pagSummary: {
       en: '{from}–{to} of {total} orders',
       fr: '{from}–{to} sur {total} commandes',
+    } as T,
+    pagSummaryWithPage: {
+      en: '{total} order(s) · page {page} of {totalPages}',
+      fr: '{total} commande(s) · page {page} sur {totalPages}',
     } as T,
     pagRowsPerPage: { en: 'Rows per page', fr: 'Lignes par page' } as T,
     pagPrevious: { en: 'Previous', fr: 'Précédent' } as T,

@@ -55,11 +55,19 @@ export function OrderPatientCell({
   const name = patient?.fullName ?? emptyLabel;
   const age = getAge(patient?.dateOfBirth);
   const gender = patient?.gender
-    ? t(`orders.gender.${patient.gender}`)
+    ? t(
+        patient.gender === 'male'
+          ? 'ordersPage.patientGenderMale'
+          : patient.gender === 'female'
+            ? 'ordersPage.patientGenderFemale'
+            : 'ordersPage.patientGenderOther',
+      )
     : undefined;
   const demographic = [
     age !== null
-      ? `${age} ${t(age === 1 ? 'orders.age.yr' : 'orders.age.yrs')}`
+      ? `${age} ${t(
+          age === 1 ? 'ordersPage.patientAgeYr' : 'ordersPage.patientAgeYrs',
+        )}`
       : undefined,
     gender,
   ]

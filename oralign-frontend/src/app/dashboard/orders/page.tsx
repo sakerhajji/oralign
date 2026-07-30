@@ -32,7 +32,6 @@ import {
   ShieldX,
   Trash,
   Trash2,
-  UserRound,
   Wrench,
   X,
 } from 'lucide-react';
@@ -480,7 +479,7 @@ export default function OrdersPage() {
     bulkRestore.isPending || bulkPermanentDelete.isPending;
 
   return (
-    <div className="@container/main flex flex-1 flex-col gap-5 p-4 lg:p-6">
+    <div className="@container/main flex flex-1 flex-col gap-5 p-4 pb-24 lg:p-6 lg:pb-24">
       {/* ─── Header ───────────────────────────────────────────────── */}
       <section className="rounded-lg border bg-background">
         <div className="grid gap-4 p-4 lg:grid-cols-[1fr_auto] lg:items-center lg:p-6">
@@ -511,40 +510,10 @@ export default function OrdersPage() {
         </div>
       </section>
 
-      {/* ─── Status tabs ──────────────────────────────────────────────
-          Horizontal scrollable strip so the full lifecycle is visible
-          on desktop AND swipeable on mobile. Each tab applies the
-          backend status filter; "All" clears it. */}
-      <div className="overflow-x-auto">
-        <div className="flex w-full min-w-max gap-1 rounded-lg border bg-card p-1">
-          {STATUS_TABS.map((tab) => {
-            const active = statusTab === tab.key;
-            return (
-              <button
-                key={tab.key}
-                type="button"
-                onClick={() => {
-                  setStatusTab(tab.key);
-                  setPage(1);
-                }}
-                className={cn(
-                  'whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition',
-                  active
-                    ? 'bg-primary text-primary-foreground shadow-sm'
-                    : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-                )}
-              >
-                {t(tab.labelKey)}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* ─── Toolbar (search + filter toggle + sort + refresh) ────── */}
+      {/* ─── Toolbar (search + lifecycle tabs + sort + actions) ──── */}
       <Card>
-        <CardContent className="grid gap-3 p-3 sm:grid-cols-[1fr_auto] sm:items-center sm:p-4">
-          <div className="relative">
+        <CardContent className="grid min-w-0 gap-3 p-3 sm:p-4 md:grid-cols-[minmax(0,1fr)_190px] xl:grid-cols-[minmax(300px,1fr)_minmax(500px,1.6fr)_190px]">
+          <div className="relative min-w-0 md:order-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               key={searchInputKey}
@@ -554,7 +523,43 @@ export default function OrdersPage() {
               onChange={(event) => debouncedSearch(event.target.value)}
             />
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="min-w-0 md:order-3 md:col-span-2 xl:order-2 xl:col-span-1">
+            <div
+              className="flex h-10 min-w-0 w-full items-center gap-1 overflow-x-auto rounded-lg border bg-background p-1 scrollbar-none"
+              role="tablist"
+              aria-label={t('ordersPage.statusTabsAria')}
+            >
+              {STATUS_TABS.map((tab) => {
+                const active = statusTab === tab.key;
+                return (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => {
+                      setStatusTab(tab.key);
+                      setPage(1);
+                    }}
+                    className={cn(
+                      'min-h-8 shrink-0 whitespace-nowrap rounded-md px-3 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                      active
+                        ? 'bg-primary text-primary-foreground shadow-sm'
+                        : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                    )}
+                  >
+                    {t(tab.labelKey)}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="min-w-0 md:order-2 xl:order-3">
+            <SortMenu sortKey={sortKey} onChange={setSortKey} />
+          </div>
+
+          <div className="flex min-w-0 flex-wrap items-center gap-2 md:order-4 md:col-span-2">
             <Button
               variant="outline"
               size="sm"
@@ -572,8 +577,6 @@ export default function OrdersPage() {
                 </Badge>
               )}
             </Button>
-
-            <SortMenu sortKey={sortKey} onChange={setSortKey} />
 
             {/* Trash-bin toggle — admin only. When ON the page swaps
                 to deleted-orders view: the row menu surfaces Restore
@@ -1123,7 +1126,12 @@ function SortMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" className="h-10 gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-10 w-full justify-start gap-2 px-3"
+          aria-label={t('ordersPage.sortBy')}
+        >
           {active?.order === 'asc' ? (
             <ArrowUp className="h-4 w-4" />
           ) : active?.order === 'desc' ? (
@@ -1131,10 +1139,10 @@ function SortMenu({
           ) : (
             <ArrowUpDown className="h-4 w-4" />
           )}
-          <span className="hidden sm:inline">
+          <span className="min-w-0 truncate text-left text-xs">
+            <span className="text-muted-foreground">{t('ordersPage.sortBy')}:</span>{' '}
             {active ? t(active.labelKey) : t('ordersPage.sort')}
           </span>
-          <span className="sm:hidden">{t('ordersPage.sort')}</span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
@@ -1477,31 +1485,18 @@ function OrderMobileCard({
       )}
     >
       <CardContent className="space-y-3.5 p-4">
-        <div className="flex items-start gap-3">
-          <div className="grid size-11 shrink-0 place-items-center rounded-full bg-primary/10 text-primary ring-1 ring-primary/15">
-            <UserRound className="size-5" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex min-w-0 items-center gap-2">
-              <h3 className="truncate font-semibold">
-                {order.patient?.fullName ?? t('ordersPage.noPatientSelected')}
-              </h3>
-              {isDeletedView ? (
-                <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                  {t('ordersPage.deletedPill')}
-                </span>
-              ) : null}
-            </div>
-            <p className="truncate text-xs text-muted-foreground">
-              {order.orderCode}
-              {isAdmin && order.doctor?.fullName
-                ? ` · ${order.doctor.fullName}`
-                : ''}
-            </p>
-            <p className="truncate text-xs text-muted-foreground">
-              {order.patient?.phone ?? order.patient?.email ?? t('ordersPage.noContact')}
-            </p>
-          </div>
+        <div className="flex min-w-0 items-start gap-3">
+          <OrderPatientCell
+            patient={order.patient}
+            emptyLabel={t('ordersPage.noPatient')}
+            emptyContactLabel={t('ordersPage.noContact')}
+            className="min-w-0 flex-1"
+          />
+          {isDeletedView ? (
+            <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              {t('ordersPage.deletedPill')}
+            </span>
+          ) : null}
           <OrderRowActions
             order={order}
             canManage={canManage}
@@ -1967,12 +1962,12 @@ function OrdersPagination({
   onPageSizeChange: (size: PageSize) => void;
 }) {
   const { t } = useT();
-  const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
-  const to = Math.min(page * pageSize, total);
   return (
-    <div className="flex flex-col gap-3 rounded-lg border bg-card p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4">
+    <div className="flex flex-col gap-3 rounded-lg border bg-card p-3 pr-24 sm:flex-row sm:items-center sm:justify-between sm:p-4 sm:pr-28">
       <div className="flex flex-col gap-1 text-sm text-muted-foreground sm:flex-row sm:items-center sm:gap-3">
-        <span>{t('ordersPage.pagSummary', { from, to, total })}</span>
+        <span>
+          {t('ordersPage.pagSummaryWithPage', { total, page, totalPages })}
+        </span>
         <Separator orientation="vertical" className="hidden h-4 sm:block" />
         <div className="flex items-center gap-2">
           <Label htmlFor="orders-page-size" className="text-xs">
@@ -1995,22 +1990,21 @@ function OrdersPagination({
           </Select>
         </div>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2 sm:justify-end">
         <Button
           variant="outline"
           size="sm"
+          className="min-h-10"
           onClick={() => onPageChange(Math.max(1, page - 1))}
           disabled={page === 1}
         >
           <ChevronLeft className="mr-1 h-4 w-4" />
           {t('ordersPage.pagPrevious')}
         </Button>
-        <span className="text-sm text-muted-foreground">
-          {t('ordersPage.pagPageOf', { page, total: totalPages })}
-        </span>
         <Button
           variant="outline"
           size="sm"
+          className="min-h-10"
           onClick={() => onPageChange(Math.min(totalPages, page + 1))}
           disabled={page === totalPages}
         >

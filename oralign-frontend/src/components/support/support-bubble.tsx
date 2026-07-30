@@ -105,14 +105,14 @@ export function SupportBubble() {
               : t('supportChat.launcherAria')
           }
           className={cn(
-            'group fixed bottom-4 right-4 z-40 grid size-14 place-items-center rounded-full bg-foreground text-background shadow-lg transition hover:bg-foreground/90 hover:shadow-xl sm:bottom-6 sm:right-6 sm:size-16',
+            'group fixed bottom-[calc(16px+env(safe-area-inset-bottom))] right-4 z-40 grid size-14 place-items-center overflow-hidden rounded-full bg-foreground text-background shadow-lg transition hover:bg-foreground/90 hover:shadow-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 md:bottom-[calc(24px+env(safe-area-inset-bottom))] md:right-6 md:size-[56px]',
           )}
         >
-          <MessageCircle className="size-6 transition-transform group-hover:scale-110 sm:size-7" />
+          <MessageCircle className="size-6 shrink-0 transition-transform group-hover:scale-110 md:size-7" />
           {unread > 0 ? (
             <span
               aria-hidden
-              className="absolute -right-1 -top-1 grid min-h-5 min-w-5 place-items-center rounded-full bg-destructive px-1.5 text-[10px] font-bold leading-none text-white ring-2 ring-background"
+              className="absolute right-1 top-1 grid min-h-5 min-w-5 place-items-center rounded-full bg-destructive px-1.5 text-[10px] font-bold leading-none text-white ring-2 ring-foreground"
             >
               {unread > 99 ? '99+' : unread}
             </span>

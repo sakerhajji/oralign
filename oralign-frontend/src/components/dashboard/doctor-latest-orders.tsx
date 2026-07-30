@@ -11,7 +11,6 @@ import {
   Filter,
   RefreshCwIcon,
   SearchIcon,
-  UserRoundIcon,
   X,
 } from 'lucide-react';
 import { useDebouncedCallback } from 'use-debounce';
@@ -267,6 +266,26 @@ export function DoctorLatestOrders() {
     });
   }, [debouncedSearch, updateQuery]);
 
+  const setOrderFilter = useCallback(
+    (value: DashboardOrderFilterKey) => {
+      updateQuery({
+        ordersStatus: value === 'all' ? null : value,
+        ordersPage: null,
+      });
+    },
+    [updateQuery],
+  );
+
+  const setOrderSort = useCallback(
+    (value: DashboardOrderSortKey) => {
+      updateQuery({
+        ordersSort: value === 'updated-desc' ? null : value,
+        ordersPage: null,
+      });
+    },
+    [updateQuery],
+  );
+
   return (
     <section className="space-y-4" aria-labelledby="doctor-orders-title">
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
@@ -341,8 +360,8 @@ export function DoctorLatestOrders() {
             </div>
           </div>
 
-          <div className="grid min-w-0 gap-2 lg:grid-cols-[minmax(220px,1fr)_minmax(360px,1.65fr)_190px]">
-            <div className="relative min-w-0">
+          <div className="grid min-w-0 gap-2 md:grid-cols-[minmax(0,1fr)_190px] xl:grid-cols-[minmax(300px,1fr)_minmax(500px,1.6fr)_190px]">
+            <div className="relative min-w-0 md:order-1">
               <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
               <Input
                 value={searchValue}
@@ -371,7 +390,7 @@ export function DoctorLatestOrders() {
               )}
             </div>
             <div
-              className="flex min-w-0 items-center gap-1 overflow-x-auto rounded-lg border bg-background p-1 scrollbar-none"
+              className="hidden h-10 min-w-0 items-center gap-1 overflow-x-auto rounded-lg border bg-background p-1 scrollbar-none md:order-3 md:col-span-2 xl:order-2 xl:col-span-1"
               role="tablist"
               aria-label={t('dashboard.orders.filterLabel')}
             >
@@ -383,12 +402,7 @@ export function DoctorLatestOrders() {
                     type="button"
                     role="tab"
                     aria-selected={active}
-                    onClick={() =>
-                      updateQuery({
-                        ordersStatus: item.key === 'all' ? null : item.key,
-                        ordersPage: null,
-                      })
-                    }
+                    onClick={() => setOrderFilter(item.key)}
                     className={cn(
                       'min-h-8 shrink-0 rounded-md px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                       active
@@ -401,29 +415,72 @@ export function DoctorLatestOrders() {
                 );
               })}
             </div>
-            <Select
-              value={sortKey}
-              onValueChange={(value) =>
-                updateQuery({
-                  ordersSort: value === 'updated-desc' ? null : value,
-                  ordersPage: null,
-                })
-              }
-            >
-              <SelectTrigger
-                aria-label={t('dashboard.orders.sortLabel')}
-                className="h-10 w-full"
+            <div className="hidden min-w-0 md:order-2 md:block xl:order-3">
+              <Select
+                value={sortKey}
+                onValueChange={(value) =>
+                  setOrderSort(value as DashboardOrderSortKey)
+                }
               >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {SORTS.map((item) => (
-                  <SelectItem key={item.key} value={item.key}>
-                    {t(item.labelKey)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+                <SelectTrigger
+                  aria-label={t('dashboard.orders.sortLabel')}
+                  className="h-10 w-full justify-start gap-1.5"
+                >
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {t('ordersPage.sortBy')}:
+                  </span>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SORTS.map((item) => (
+                    <SelectItem key={item.key} value={item.key}>
+                      {t(item.labelKey)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-2 md:hidden">
+              <Select
+                value={filterKey}
+                onValueChange={(value) => setOrderFilter(value as DashboardOrderFilterKey)}
+              >
+                <SelectTrigger
+                  aria-label={t('dashboard.orders.filterLabel')}
+                  className="h-10 w-full"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {FILTERS.map((item) => (
+                    <SelectItem key={item.key} value={item.key}>
+                      {t(item.labelKey)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select
+                value={sortKey}
+                onValueChange={(value) => setOrderSort(value as DashboardOrderSortKey)}
+              >
+                <SelectTrigger
+                  aria-label={t('dashboard.orders.sortLabel')}
+                  className="h-10 w-full justify-start gap-1.5"
+                >
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {t('ordersPage.sortBy')}:
+                  </span>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SORTS.map((item) => (
+                    <SelectItem key={item.key} value={item.key}>
+                      {t(item.labelKey)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </CardHeader>
 
@@ -618,19 +675,20 @@ export function DoctorLatestOrders() {
             </>
           )}
 
-          <div className="flex flex-col gap-3 border-t p-4 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm text-muted-foreground">
+          <div className="flex flex-col gap-3 border-t p-4 pr-24 sm:flex-row sm:items-center sm:justify-between sm:pr-28">
+            <p className="min-w-0 text-sm text-muted-foreground">
               {t('dashboard.orders.paginationSummary', {
                 total,
                 page,
                 totalPages,
               })}
             </p>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 sm:justify-end">
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
+                className="min-h-10"
                 disabled={page <= 1 || ordersQuery.isFetching}
                 onClick={() =>
                   updateQuery({
@@ -645,6 +703,7 @@ export function DoctorLatestOrders() {
                 type="button"
                 variant="outline"
                 size="sm"
+                className="min-h-10"
                 disabled={page >= totalPages || ordersQuery.isFetching}
                 onClick={() =>
                   updateQuery({
@@ -716,26 +775,22 @@ function OrderCard({
       className="cursor-pointer border-border/80 bg-card shadow-sm transition active:scale-[0.99] hover:border-primary/25 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
     >
       <CardContent className="space-y-3.5 p-4">
-        <div className="flex items-start gap-3">
-          <div className="grid size-11 shrink-0 place-items-center rounded-full bg-primary/10 text-primary ring-1 ring-primary/15">
-            <UserRoundIcon className="size-5" />
+        <div className="flex min-w-0 items-start gap-3">
+          <OrderPatientCell
+            patient={order.patient}
+            emptyLabel={t('dashboard.orders.noPatient')}
+            emptyContactLabel={t('dashboard.orders.noContact')}
+            className="min-w-0 flex-1"
+          />
+          <div className="max-w-[42%] shrink-0 [&_span]:max-w-full [&_span]:truncate">
+            <OrderStatusBadge status={order.status} />
           </div>
-          <div className="min-w-0 flex-1">
-            <p className="truncate font-semibold">
-              {order.patient?.fullName ?? t('dashboard.orders.noPatient')}
-            </p>
-            <p className="truncate text-xs text-muted-foreground">
-              {order.orderCode}
-            </p>
-            <p className="truncate text-xs text-muted-foreground">
-              {order.patient?.phone ||
-                order.patient?.email ||
-                t('dashboard.orders.noContact')}
-            </p>
-          </div>
-          <OrderStatusBadge status={order.status} />
         </div>
-        <div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/35 px-3 py-2 text-xs text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-muted/35 px-3 py-2 text-xs text-muted-foreground">
+          <span className="font-mono font-semibold text-foreground">
+            {order.orderCode}
+          </span>
+          <span aria-hidden="true">•</span>
           <span className="font-medium text-foreground">
             {t('dashboard.orders.created', {
               date: formatDateTime(order.createdAt, lang),

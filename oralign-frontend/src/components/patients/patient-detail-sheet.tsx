@@ -443,7 +443,11 @@ export function PatientDetailSheet({
                 </Button>
                 <Button
                   type="submit"
-                  disabled={isSaving || !!isDeleting || (mode === 'edit' && !isDirty)}
+                  disabled={
+                    isSaving ||
+                    !!isDeleting ||
+                    (mode === 'edit' && !isDirty && !profilePhoto)
+                  }
                   className="gap-2"
                 >
                   {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}

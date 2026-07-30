@@ -8,9 +8,11 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   ClipboardListIcon,
+  Filter,
   RefreshCwIcon,
   SearchIcon,
   UserRoundIcon,
+  X,
 } from 'lucide-react';
 import { useDebouncedCallback } from 'use-debounce';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -239,6 +241,10 @@ export function DoctorLatestOrders() {
   const orders = ordersQuery.data?.data ?? [];
   const total = ordersQuery.data?.total ?? 0;
   const totalPages = Math.max(ordersQuery.data?.totalPages ?? 1, 1);
+  const hasActiveFilters =
+    filterKey !== 'all' ||
+    sortKey !== 'updated-desc' ||
+    Boolean(urlSearchValue.trim());
   const returnTo = `${pathname}${searchParamsToString(
     new URLSearchParams(searchParams.toString()),
   )}`;
@@ -249,6 +255,17 @@ export function DoctorLatestOrders() {
     },
     [returnTo, router],
   );
+
+  const clearFilters = useCallback(() => {
+    debouncedSearch.cancel();
+    setSearchValue('');
+    updateQuery({
+      ordersSearch: null,
+      ordersStatus: null,
+      ordersSort: null,
+      ordersPage: null,
+    });
+  }, [debouncedSearch, updateQuery]);
 
   return (
     <section className="space-y-4" aria-labelledby="doctor-orders-title">
@@ -293,10 +310,40 @@ export function DoctorLatestOrders() {
       </div>
 
       <Card className="overflow-hidden">
-        <CardHeader className="gap-4 border-b bg-muted/20 p-4 sm:p-5">
-          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px_190px]">
-            <div className="relative">
-              <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+        <CardHeader className="gap-3 border-b bg-muted/20 p-3 sm:p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="inline-flex items-center gap-2 text-sm font-semibold">
+              <span className="grid size-8 place-items-center rounded-lg bg-primary/10 text-primary">
+                <Filter className="size-4" aria-hidden="true" />
+              </span>
+              {t('dashboard.orders.filterLabel')}
+            </div>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span>
+                {t('dashboard.orders.paginationSummary', {
+                  total,
+                  page,
+                  totalPages,
+                })}
+              </span>
+              {hasActiveFilters && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
+                  onClick={clearFilters}
+                >
+                  <X className="size-3.5" aria-hidden="true" />
+                  {t('dashboard.orders.clearFilters')}
+                </Button>
+              )}
+            </div>
+          </div>
+
+          <div className="grid min-w-0 gap-2 lg:grid-cols-[minmax(220px,1fr)_minmax(360px,1.65fr)_190px]">
+            <div className="relative min-w-0">
+              <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
               <Input
                 value={searchValue}
                 onChange={(event) => {
@@ -304,29 +351,56 @@ export function DoctorLatestOrders() {
                   debouncedSearch(event.target.value);
                 }}
                 placeholder={t('dashboard.orders.searchPlaceholder')}
-                className="pl-9"
+                aria-label={t('dashboard.orders.searchPlaceholder')}
+                className="h-10 pl-9 pr-9"
               />
+              {searchValue && (
+                <button
+                  type="button"
+                  className="absolute right-2 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  onClick={() => {
+                    debouncedSearch.cancel();
+                    setSearchValue('');
+                    updateQuery({ ordersSearch: null, ordersPage: null });
+                  }}
+                  aria-label={t('dashboard.orders.clearSearch')}
+                  title={t('dashboard.orders.clearSearch')}
+                >
+                  <X className="size-4" aria-hidden="true" />
+                </button>
+              )}
             </div>
-            <Select
-              value={filterKey}
-              onValueChange={(value) =>
-                updateQuery({
-                  ordersStatus: value === 'all' ? null : value,
-                  ordersPage: null,
-                })
-              }
+            <div
+              className="flex min-w-0 items-center gap-1 overflow-x-auto rounded-lg border bg-background p-1 scrollbar-none"
+              role="tablist"
+              aria-label={t('dashboard.orders.filterLabel')}
             >
-              <SelectTrigger aria-label={t('dashboard.orders.filterLabel')}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {FILTERS.map((item) => (
-                  <SelectItem key={item.key} value={item.key}>
+              {FILTERS.map((item) => {
+                const active = item.key === filterKey;
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() =>
+                      updateQuery({
+                        ordersStatus: item.key === 'all' ? null : item.key,
+                        ordersPage: null,
+                      })
+                    }
+                    className={cn(
+                      'min-h-8 shrink-0 rounded-md px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                      active
+                        ? 'bg-primary text-primary-foreground shadow-sm'
+                        : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                    )}
+                  >
                     {t(item.labelKey)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+                  </button>
+                );
+              })}
+            </div>
             <Select
               value={sortKey}
               onValueChange={(value) =>
@@ -336,7 +410,10 @@ export function DoctorLatestOrders() {
                 })
               }
             >
-              <SelectTrigger aria-label={t('dashboard.orders.sortLabel')}>
+              <SelectTrigger
+                aria-label={t('dashboard.orders.sortLabel')}
+                className="h-10 w-full"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

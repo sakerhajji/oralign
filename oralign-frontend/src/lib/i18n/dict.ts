@@ -1150,6 +1150,8 @@ export const dict = {
       } as T,
       filterLabel: { en: 'Filter orders', fr: 'Filtrer les commandes' } as T,
       sortLabel: { en: 'Sort orders', fr: 'Trier les commandes' } as T,
+      clearFilters: { en: 'Clear filters', fr: 'Effacer les filtres' } as T,
+      clearSearch: { en: 'Clear search', fr: 'Effacer la recherche' } as T,
       filters: {
         all: { en: 'All orders', fr: 'Toutes' } as T,
         submitted: { en: 'Submitted', fr: 'Soumises' } as T,

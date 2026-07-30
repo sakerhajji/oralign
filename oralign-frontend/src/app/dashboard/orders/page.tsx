@@ -35,7 +35,6 @@ import {
   Stethoscope,
   Trash,
   Trash2,
-  UserRound,
   Wrench,
   X,
 } from 'lucide-react';
@@ -83,6 +82,7 @@ import {
 } from '@/components/ui/table';
 import { useQuery } from '@tanstack/react-query';
 import { OrderStatusBadge } from '@/components/orders/order-status-badge';
+import { PatientRestPhoto } from '@/components/orders/patient-rest-photo';
 import { TreatmentFeeBadge } from '@/components/orders/treatment-fee-badge';
 import { usersService } from '@/lib/api';
 import { useAuth } from '@/lib/providers/auth-provider';
@@ -758,8 +758,8 @@ export default function OrdersPage() {
           row chrome is muted too, but a top banner makes the mode
           unmissable. */}
       {isAdmin && showDeleted && (
-        <Card className="border-amber-300 bg-amber-50">
-          <CardContent className="flex flex-col gap-2 p-3 text-sm text-amber-900 sm:flex-row sm:items-center sm:justify-between sm:p-4">
+        <Card className="border-destructive/25 bg-destructive/5">
+          <CardContent className="flex flex-col gap-2 p-3 text-sm text-destructive sm:flex-row sm:items-center sm:justify-between sm:p-4">
             <div className="flex items-center gap-2">
               <Trash className="h-4 w-4" />
               <span>{t('ordersPage.trashBannerBody')}</span>
@@ -767,7 +767,7 @@ export default function OrdersPage() {
             <Button
               size="sm"
               variant="outline"
-              className="border-amber-300 bg-white text-amber-900 hover:bg-amber-100"
+              className="border-destructive/25 bg-background text-destructive hover:bg-destructive/10"
               onClick={() => {
                 setShowDeleted(false);
                 setPage(1);
@@ -954,11 +954,11 @@ export default function OrdersPage() {
                     className={cn(
                       'cursor-pointer transition hover:bg-muted/30 focus:bg-muted/50 focus:outline-none',
                       selectedIds.has(order.id) && 'bg-primary/5',
-                      // Trash-view tinting: muted background + amber
-                      // left rule so deleted rows are visually
+                      // Trash-view tinting: muted background + destructive
+                      // context so deleted rows are visually
                       // recoverable but unmistakably "not live".
                       showDeleted &&
-                        'bg-amber-50/40 text-muted-foreground hover:bg-amber-50/60',
+                        'bg-muted/60 text-muted-foreground hover:bg-muted',
                     )}
                   >
                     {isAdmin && (
@@ -990,7 +990,12 @@ export default function OrdersPage() {
                     </TableCell>
                     <TableCell>
                       <PersonLine
-                        icon={<UserRound className="h-4 w-4" />}
+                        icon={
+                          <PatientRestPhoto
+                            order={order}
+                            alt={t('orderForm.files.slots.faceRest')}
+                          />
+                        }
                         name={order.patient?.fullName ?? t('ordersPage.noPatient')}
                         sub={order.patient?.phone ?? order.patient?.email}
                       />
@@ -1248,7 +1253,7 @@ function OrderRowActions({
           <DropdownMenuLabel className="text-xs uppercase tracking-wide text-muted-foreground">
             {order.orderCode}
             {isDeletedView ? (
-              <span className="ml-1 text-amber-700">{t('ordersPage.deletedSuffix')}</span>
+              <span className="ml-1 text-destructive">{t('ordersPage.deletedSuffix')}</span>
             ) : null}
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
@@ -1486,27 +1491,36 @@ function OrderMobileCard({
         }
       }}
       className={cn(
-        'cursor-pointer transition active:scale-[0.99] focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2',
-        isDeletedView && 'border-amber-200 bg-amber-50/40 text-muted-foreground',
+        'cursor-pointer border-border/80 bg-card shadow-sm transition active:scale-[0.99] hover:border-primary/25 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2',
+        isDeletedView && 'border-destructive/20 bg-muted/60 text-muted-foreground',
       )}
     >
-      <CardContent className="space-y-4 p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-              <ClipboardList className="h-3.5 w-3.5" />
-              {format(new Date(order.createdAt), dateFormat(lang), {
-                locale: dateLocale(lang),
-              })}
+      <CardContent className="space-y-3.5 p-4">
+        <div className="flex items-start gap-3">
+          <PatientRestPhoto
+            order={order}
+            size="card"
+            alt={t('orderForm.files.slots.faceRest')}
+          />
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-center gap-2">
+              <h3 className="truncate font-semibold">
+                {order.patient?.fullName ?? t('ordersPage.noPatientSelected')}
+              </h3>
               {isDeletedView ? (
-                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-900">
+                <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                   {t('ordersPage.deletedPill')}
                 </span>
               ) : null}
             </div>
-            <h3 className="truncate text-lg font-semibold">{order.orderCode}</h3>
-            <p className="truncate text-sm text-muted-foreground">
-              {order.patient?.fullName ?? t('ordersPage.noPatientSelected')}
+            <p className="truncate text-xs text-muted-foreground">
+              {order.orderCode}
+              {isAdmin && order.doctor?.fullName
+                ? ` · ${order.doctor.fullName}`
+                : ''}
+            </p>
+            <p className="truncate text-xs text-muted-foreground">
+              {order.patient?.phone ?? order.patient?.email ?? t('ordersPage.noContact')}
             </p>
           </div>
           <OrderRowActions
@@ -1529,7 +1543,7 @@ function OrderMobileCard({
           <PlanBadge order={order} isDoctor={!isAdmin} isAdmin={isAdmin} />
           <TreatmentFeeBadge order={order} />
         </div>
-        <div className="grid grid-cols-2 gap-2 text-sm">
+        <div className="grid grid-cols-2 gap-2">
           <MobileMeta
             label={t('ordersPage.mobileStage')}
             value={order.patientStage ?? t('ordersPage.notSet')}
@@ -1546,6 +1560,26 @@ function OrderMobileCard({
               />
             </div>
           )}
+        </div>
+        <div className="flex items-center justify-between gap-3 border-t pt-3">
+          <span className="truncate text-xs text-muted-foreground">
+            {format(new Date(order.createdAt), dateFormat(lang), {
+              locale: dateLocale(lang),
+            })}
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="shrink-0 gap-1.5"
+            onClick={(event) => {
+              event.stopPropagation();
+              handleOrderNavigation(order, router);
+            }}
+          >
+            <Eye className="size-3.5" />
+            {t('ordersPage.viewOrder')}
+          </Button>
         </div>
       </CardContent>
     </Card>
@@ -1705,17 +1739,17 @@ function TrashBulkActionBar({
   const [confirmHardOpen, setConfirmHardOpen] = useState(false);
   return (
     <>
-      <Card className="border-amber-400/50 bg-amber-50 shadow-sm">
+      <Card className="border-destructive/25 bg-destructive/5 shadow-sm">
         <CardContent className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4">
           <div className="flex items-center gap-3">
-            <span className="grid h-9 w-9 place-items-center rounded-full bg-amber-200/70 text-amber-900">
+            <span className="grid h-9 w-9 place-items-center rounded-full bg-destructive/10 text-destructive">
               <Trash className="h-4 w-4" />
             </span>
             <div>
-              <p className="text-sm font-semibold text-amber-900">
+              <p className="text-sm font-semibold text-destructive">
                 {t('ordersPage.trashBulkSelected', { count })}
               </p>
-              <p className="text-xs text-amber-900/80">
+              <p className="text-xs text-destructive/80">
                 {t('ordersPage.trashBulkSubtext')}
               </p>
             </div>
@@ -1913,7 +1947,7 @@ function PlanBadge({
       label: audienceIsApprover
         ? t('ordersPage.planAwaitingYours')
         : t('ordersPage.planAwaitingDoctor'),
-      tone: 'border-amber-300 bg-amber-50 text-amber-900',
+      tone: 'border-primary/20 bg-primary/10 text-primary',
       icon: <AlertTriangle className="h-3 w-3" />,
     },
     [TreatmentPlanStatus.APPROVED]: {

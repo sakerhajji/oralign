@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import {
+  CommunauteCta,
   TemoignagesSection,
   PartagerSection,
 } from "../_components/patient/communaute-sections";
@@ -16,6 +17,7 @@ export default function CommunautePage() {
     <>
       <TemoignagesSection />
       <PartagerSection />
+      <CommunauteCta />
     </>
   );
 }

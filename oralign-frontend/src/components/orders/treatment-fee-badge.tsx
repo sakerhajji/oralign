@@ -66,7 +66,7 @@ const META: Record<
     dictKey: 'orders.feeBadge.rejected',
   },
   unpaid: {
-    tone: 'bg-amber-100 text-amber-800 border-amber-200',
+    tone: 'bg-primary/10 text-primary border-primary/20',
     Icon: AlertCircle,
     dictKey: 'orders.feeBadge.unpaid',
   },

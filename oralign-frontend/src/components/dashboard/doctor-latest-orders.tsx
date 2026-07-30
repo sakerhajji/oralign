@@ -13,7 +13,6 @@ import {
 } from 'lucide-react';
 import { useDebouncedCallback } from 'use-debounce';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -34,6 +33,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { OrderStatusBadge } from '@/components/orders/order-status-badge';
+import { PatientRestPhoto } from '@/components/orders/patient-rest-photo';
 import { useOrderPrefetch, useOrders } from '@/lib/hooks';
 import { useT } from '@/lib/i18n/lang-context';
 import {
@@ -373,7 +373,7 @@ export function DoctorLatestOrders() {
               <div className="hidden md:block">
                 <Table>
                   <TableHeader>
-                    <TableRow className="bg-background/80">
+                    <TableRow className="bg-muted/20 hover:bg-muted/20">
                       <TableHead>{t('dashboard.orders.colOrder')}</TableHead>
                       <TableHead>{t('dashboard.orders.colPatient')}</TableHead>
                       <TableHead>{t('dashboard.orders.colStatus')}</TableHead>
@@ -413,26 +413,37 @@ export function DoctorLatestOrders() {
                         className="cursor-pointer transition hover:bg-muted/35 focus:bg-muted/50 focus:outline-none"
                       >
                         <TableCell>
-                          <div className="min-w-0">
-                            <p className="font-medium">{order.orderCode}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {t('dashboard.orders.created', {
-                                date: formatDateTime(order.createdAt, lang),
-                              })}
-                            </p>
+                          <div className="flex min-w-0 items-center gap-3">
+                            <div className="grid size-9 shrink-0 place-items-center rounded-full bg-primary/10 text-primary ring-1 ring-primary/15">
+                              <ClipboardListIcon className="size-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="truncate font-semibold">{order.orderCode}</p>
+                              <p className="truncate text-xs text-muted-foreground">
+                                {t('dashboard.orders.created', {
+                                  date: formatDateTime(order.createdAt, lang),
+                                })}
+                              </p>
+                            </div>
                           </div>
                         </TableCell>
                         <TableCell>
-                          <div className="min-w-0">
-                            <p className="truncate font-medium">
-                              {order.patient?.fullName ??
-                                t('dashboard.orders.noPatient')}
-                            </p>
-                            <p className="truncate text-xs text-muted-foreground">
-                              {order.patient?.phone ||
-                                order.patient?.email ||
-                                t('dashboard.orders.noContact')}
-                            </p>
+                          <div className="flex min-w-0 items-center gap-2.5">
+                            <PatientRestPhoto
+                              order={order}
+                              alt={t('orderForm.files.slots.faceRest')}
+                            />
+                            <div className="min-w-0">
+                              <p className="truncate font-medium">
+                                {order.patient?.fullName ??
+                                  t('dashboard.orders.noPatient')}
+                              </p>
+                              <p className="truncate text-xs text-muted-foreground">
+                                {order.patient?.phone ||
+                                  order.patient?.email ||
+                                  t('dashboard.orders.noContact')}
+                              </p>
+                            </div>
                           </div>
                         </TableCell>
                         <TableCell>
@@ -575,45 +586,46 @@ function OrderCard({
           onOpen();
         }
       }}
-      className="cursor-pointer transition active:scale-[0.99] focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+      className="cursor-pointer border-border/80 bg-card shadow-sm transition active:scale-[0.99] hover:border-primary/25 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
     >
-      <CardContent className="space-y-4 p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="truncate font-semibold">{order.orderCode}</p>
-            <p className="truncate text-sm text-muted-foreground">
+      <CardContent className="space-y-3.5 p-4">
+        <div className="flex items-start gap-3">
+          <PatientRestPhoto
+            order={order}
+            size="card"
+            alt={t('orderForm.files.slots.faceRest')}
+          />
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-semibold">
               {order.patient?.fullName ?? t('dashboard.orders.noPatient')}
+            </p>
+            <p className="truncate text-xs text-muted-foreground">
+              {order.orderCode}
+            </p>
+            <p className="truncate text-xs text-muted-foreground">
+              {order.patient?.phone ||
+                order.patient?.email ||
+                t('dashboard.orders.noContact')}
             </p>
           </div>
           <OrderStatusBadge status={order.status} />
         </div>
-        <div className="grid gap-2 text-sm">
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-muted-foreground">
-              {t('dashboard.orders.colLastUpdated')}
-            </span>
-            <span className="font-medium">
-              {formatDateTime(order.updatedAt, lang)}
-            </span>
-          </div>
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-muted-foreground">
-              {t('dashboard.orders.contact')}
-            </span>
-            <span className="truncate font-medium">
-              {order.patient?.phone ||
-                order.patient?.email ||
-                t('dashboard.orders.noContact')}
-            </span>
-          </div>
-        </div>
-        <div className="flex items-center justify-between">
-          <Badge variant="outline" className="font-normal">
+        <div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/35 px-3 py-2 text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">
             {t('dashboard.orders.created', {
               date: formatDateTime(order.createdAt, lang),
             })}
-          </Badge>
-          <Button asChild size="sm" variant="ghost" className="gap-1">
+          </span>
+          <span aria-hidden="true">•</span>
+          <span className="truncate">
+            {t('dashboard.orders.colLastUpdated')}: {formatDateTime(order.updatedAt, lang)}
+          </span>
+        </div>
+        <div className="flex items-center justify-between gap-3 border-t pt-3">
+          <span className="text-xs text-muted-foreground">
+            {t('dashboard.orders.contact')}
+          </span>
+          <Button asChild size="sm" variant="outline" className="gap-1.5">
             <Link href={buildOrderNavigationHref(order, { returnTo })}>
               {t('dashboard.orders.open')}
               <ArrowUpRightIcon className="size-4" />

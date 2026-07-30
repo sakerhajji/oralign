@@ -33,7 +33,6 @@ export function PatientHome() {
       <HowItWorks />
       <AdultBrochureSection />
       <ParentBrochureSection />
-      <DashboardPreview />
       <Testimonials />
       <FaqSection />
       <FinalCta />

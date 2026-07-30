@@ -34,7 +34,7 @@ const copy = {
   },
 } satisfies Record<string, Record<Lang, string>>;
 
-export function DashboardPreview() {
+export function DashboardPreview({ id = "dashboard-preview" }: { id?: string }) {
   const { lang } = useShowcaseLang();
   const [activeIndex, setActiveIndex] = useState(0);
 
@@ -56,7 +56,7 @@ export function DashboardPreview() {
 
   return (
     <section
-      id="dashboard-preview"
+      id={id}
       data-section-tone="light"
       aria-labelledby="preview-h2"
       className="relative isolate overflow-hidden bg-[var(--sc-white)] px-4 py-16 sm:px-8 sm:py-24 lg:px-16 lg:py-32"

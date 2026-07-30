@@ -42,28 +42,28 @@ const STATUS_LABEL: Record<OrderStatus, string> = {
 
 /**
  * Colour palette per lifecycle phase. Grey for early phases, blue for
- * planning, purple for billing, amber for fabrication, green for paid /
+ * planning, purple for billing, cyan for fabrication, green for paid /
  * finished, red for terminal failures. Easy to scan across a list page.
  */
 const STATUS_CLASSNAME: Record<OrderStatus, string> = {
   [OrderStatus.DRAFT]:                 'bg-slate-100 text-slate-700',
-  [OrderStatus.SUBMITTED]:             'bg-blue-100 text-blue-700',
+  [OrderStatus.SUBMITTED]:             'bg-sky-100 text-sky-700',
   [OrderStatus.UNDER_REVIEW]:          'bg-blue-100 text-blue-700',
 
   [OrderStatus.TREATMENT_PLANNING]:    'bg-indigo-100 text-indigo-700',
-  [OrderStatus.TREATMENT_PLAN_READY]:  'bg-amber-100 text-amber-700',
-  [OrderStatus.REVISION_REQUESTED]:    'bg-orange-100 text-orange-700',
+  [OrderStatus.TREATMENT_PLAN_READY]:  'bg-violet-100 text-violet-700',
+  [OrderStatus.REVISION_REQUESTED]:    'bg-red-100 text-red-700',
   [OrderStatus.TREATMENT_APPROVED]:    'bg-emerald-100 text-emerald-700',
 
   [OrderStatus.QUOTATION_SENT]:        'bg-purple-100 text-purple-700',
-  [OrderStatus.PAYMENT_PLAN_SELECTED]: 'bg-purple-100 text-purple-700',
-  [OrderStatus.PAYMENT_PENDING]:       'bg-amber-100 text-amber-700',
-  [OrderStatus.PAYMENT_REVIEW]:        'bg-amber-100 text-amber-700',
+  [OrderStatus.PAYMENT_PLAN_SELECTED]: 'bg-fuchsia-100 text-fuchsia-700',
+  [OrderStatus.PAYMENT_PENDING]:       'bg-pink-100 text-pink-700',
+  [OrderStatus.PAYMENT_REVIEW]:        'bg-rose-100 text-rose-700',
   [OrderStatus.PAID]:                  'bg-emerald-100 text-emerald-700',
 
   [OrderStatus.FABRICATION]:           'bg-cyan-100 text-cyan-700',
   [OrderStatus.READY_TO_SHIP]:         'bg-teal-100 text-teal-700',
-  [OrderStatus.SHIPPED]:               'bg-teal-100 text-teal-700',
+  [OrderStatus.SHIPPED]:               'bg-blue-100 text-blue-700',
   [OrderStatus.FINISHED]:              'bg-emerald-100 text-emerald-700',
 
   [OrderStatus.CANCELED]:              'bg-red-100 text-red-700',

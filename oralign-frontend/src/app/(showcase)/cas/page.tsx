@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
-import {
-  AvantApresSection,
-  AgirTotSection,
-} from "../_components/patient/cas-sections";
+import { AgirTotSection } from "../_components/patient/cas-sections";
+import { DashboardPreview } from "../_components/dashboard-preview";
 
 export const metadata: Metadata = {
   title: "Cas cliniques Oralign — Avant / Après & agir tôt | ORALIGN",
@@ -14,7 +12,7 @@ export const metadata: Metadata = {
 export default function CasPage() {
   return (
     <>
-      <AvantApresSection />
+      <DashboardPreview id="avant-apres" />
       <AgirTotSection />
     </>
   );

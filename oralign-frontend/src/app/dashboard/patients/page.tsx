@@ -46,6 +46,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -82,6 +83,7 @@ import {
   usePermanentDeletePatient,
   usePatientPrefetch,
   usePatients,
+  useUploadPatientProfilePhoto,
   useUpdatePatient,
 } from '@/lib/hooks';
 import { usersService } from '@/lib/api';
@@ -93,7 +95,7 @@ import {
   type SortOrder,
   UserRole,
 } from '@/lib/types';
-import { cn } from '@/lib/utils';
+import { cn, getAvatarUrl } from '@/lib/utils';
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
 type PageSize = (typeof PAGE_SIZE_OPTIONS)[number];
@@ -202,6 +204,7 @@ export default function PatientsPage() {
   const updatePatient = useUpdatePatient();
   const removePatient = useDeletePatient();
   const permanentRemovePatient = usePermanentDeletePatient();
+  const uploadPatientProfilePhoto = useUploadPatientProfilePhoto();
   const bulkDelete = useBulkDeletePatients();
 
   const dentistsQuery = useQuery({
@@ -284,19 +287,36 @@ export default function PatientsPage() {
   }, []);
 
   const handleSubmit = useCallback(
-    (payload: ReturnType<typeof import('@/components/patients/patient-detail-sheet').normalizePatientForm>) => {
+    (
+      payload: ReturnType<
+        typeof import('@/components/patients/patient-detail-sheet').normalizePatientForm
+      >,
+      profilePhoto: File | null,
+    ) => {
+      const finishSave = (patientId: string) => {
+        if (!profilePhoto) {
+          setSheetOpen(false);
+          return;
+        }
+
+        uploadPatientProfilePhoto.mutate(
+          { id: patientId, file: profilePhoto },
+          { onSuccess: () => setSheetOpen(false) },
+        );
+      };
+
       if (editingPatient) {
         updatePatient.mutate(
           { id: editingPatient.id, data: payload },
-          { onSuccess: () => setSheetOpen(false) },
+          { onSuccess: (updatedPatient) => finishSave(updatedPatient.id) },
         );
         return;
       }
       createPatient.mutate(payload, {
-        onSuccess: () => setSheetOpen(false),
+        onSuccess: (createdPatient) => finishSave(createdPatient.id),
       });
     },
-    [createPatient, editingPatient, updatePatient],
+    [createPatient, editingPatient, updatePatient, uploadPatientProfilePhoto],
   );
 
   // Delete from sheet (existing behaviour)
@@ -700,7 +720,11 @@ export default function PatientsPage() {
         isAdmin={isAdmin}
         currentUserId={user?.id}
         dentists={dentistsQuery.data?.data ?? []}
-        isSaving={createPatient.isPending || updatePatient.isPending}
+        isSaving={
+          createPatient.isPending ||
+          updatePatient.isPending ||
+          uploadPatientProfilePhoto.isPending
+        }
         isDeleting={removePatient.isPending}
         onSubmit={handleSubmit}
         onDelete={editingPatient ? handleSheetDelete : undefined}
@@ -861,6 +885,37 @@ function FilterChip({
 
 // ── Row + mobile card (memoised so list doesn't re-render on keystrokes) ─
 
+function PatientAvatar({
+  patient,
+  className,
+}: {
+  patient: Patient;
+  className?: string;
+}) {
+  const initials = patient.fullName
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join('')
+    .toUpperCase();
+
+  return (
+    <Avatar className={cn('size-10', className)}>
+      {patient.profilePhotoUrl ? (
+        <AvatarImage
+          src={getAvatarUrl(patient.profilePhotoUrl)}
+          alt={patient.fullName}
+        />
+      ) : null}
+      <AvatarFallback className="bg-primary/10 font-semibold text-primary">
+        {initials || <UserRound className="size-5" />}
+      </AvatarFallback>
+    </Avatar>
+  );
+}
+
 const PatientRow = function PatientRow({
   patient,
   isAdmin,
@@ -914,9 +969,7 @@ const PatientRow = function PatientRow({
       </TableCell>
       <TableCell className="font-medium">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
-            <UserRound className="h-5 w-5" />
-          </div>
+          <PatientAvatar patient={patient} />
           <div className="min-w-0">
             <p className="truncate font-semibold">{patient.fullName}</p>
             {patient.dateOfBirth && (
@@ -1125,6 +1178,7 @@ function PatientMobileCard({
               onClick={(e) => e.stopPropagation()}
               className="mt-1"
             />
+            <PatientAvatar patient={patient} className="size-11" />
             <div className="min-w-0">
               <h3 className="truncate text-lg font-semibold">{patient.fullName}</h3>
               {isAdmin && (

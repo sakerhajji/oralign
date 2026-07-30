@@ -14,7 +14,7 @@ import {
   UpdatePatientDto,
 } from '../dto/patient.dto';
 
-type Caller = { userId: string; role: UserRole | string };
+type Caller = { userId: string; role: string };
 
 type PatientWithDoctor = Prisma.PatientGetPayload<{
   include: {
@@ -70,7 +70,7 @@ export class PatientService {
       dateOfBirth: createPatientDto.dateOfBirth ?? null,
     });
     if (dedupeMatches.length > 0) {
-      const existing = dedupeMatches[0]!;
+      const existing = dedupeMatches[0];
       throw new BadRequestException(
         `You already have a patient named "${existing.fullName}" in your list` +
           (existing.phone ? ` (phone ${existing.phone})` : '') +
@@ -185,6 +185,26 @@ export class PatientService {
 
     const patient = await this.findAccessiblePatient(id, caller);
     return this.mapToDto(patient);
+  }
+
+  async updateProfilePhoto(
+    id: string,
+    profilePhotoUrl: string,
+    caller: Caller,
+  ): Promise<PatientResponseDto> {
+    this.ensureCanManagePatients(caller);
+    await this.findAccessiblePatient(id, caller);
+
+    const patient = await this.prisma.patient.update({
+      where: { id },
+      // The checked-in generated Prisma client can lag behind the schema in
+      // a local install. Docker regenerates it from schema.prisma at build
+      // time; this cast keeps the service source compatible in both cases.
+      data: { profilePhotoUrl } as unknown as Prisma.PatientUpdateInput,
+      include: this.includeDoctor,
+    });
+
+    return this.mapToDto(patient as PatientWithDoctor);
   }
 
   async updatePatient(
@@ -428,6 +448,7 @@ export class PatientService {
     const p = patient as PatientWithDoctor & {
       clinicalConditions?: string[];
       clinicalConditionsOther?: string | null;
+      profilePhotoUrl?: string | null;
     };
     return {
       id: patient.id,
@@ -439,6 +460,7 @@ export class PatientService {
       dateOfBirth: patient.dateOfBirth ?? undefined,
       address: patient.address ?? undefined,
       notes: patient.notes ?? undefined,
+      profilePhotoUrl: p.profilePhotoUrl ?? undefined,
       clinicalConditions: p.clinicalConditions ?? [],
       clinicalConditionsOther: p.clinicalConditionsOther ?? undefined,
       doctor: patient.doctor

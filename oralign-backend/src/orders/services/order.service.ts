@@ -104,8 +104,25 @@ function isAbortedArchiveError(err: unknown): boolean {
 type Caller = { userId: string; role: string };
 
 const orderInclude = Prisma.validator<Prisma.DentalOrderInclude>()({
-  doctor: { select: { id: true, fullName: true, email: true } },
-  patient: { select: { id: true, fullName: true, email: true, phone: true } },
+  doctor: {
+    select: {
+      id: true,
+      fullName: true,
+      email: true,
+      dentistProfile: { select: { clinicName: true } },
+    },
+  },
+  patient: {
+    select: {
+      id: true,
+      fullName: true,
+      email: true,
+      phone: true,
+      gender: true,
+      dateOfBirth: true,
+      profilePhotoUrl: true,
+    },
+  },
   toothInstructions: {
     select: { toothNumber: true, type: true, value: true, note: true },
     orderBy: [{ toothNumber: 'asc' }, { type: 'asc' }],
@@ -2282,12 +2299,22 @@ export class OrderService {
         note: i.note ?? undefined,
       })),
       files: order.files.map((file) => this.mapFileToDto(file)),
-      doctor: order.doctor,
+      doctor: order.doctor
+        ? {
+            id: order.doctor.id,
+            fullName: order.doctor.fullName,
+            email: order.doctor.email,
+            clinicName: order.doctor.dentistProfile?.clinicName ?? undefined,
+          }
+        : undefined,
       patient: {
         id: order.patient.id,
         fullName: order.patient.fullName,
         email: order.patient.email ?? undefined,
         phone: order.patient.phone ?? undefined,
+        gender: order.patient.gender ?? undefined,
+        dateOfBirth: order.patient.dateOfBirth ?? undefined,
+        profilePhotoUrl: order.patient.profilePhotoUrl ?? undefined,
       },
       createdAt: order.createdAt,
       updatedAt: order.updatedAt,

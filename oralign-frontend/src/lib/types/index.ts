@@ -890,6 +890,7 @@ export interface Patient {
   dateOfBirth?: string;
   address?: string;
   notes?: string;
+  profilePhotoUrl?: string;
   /**
    * Multi-select clinical-condition labels. Empty array (or absent
    * from a legacy payload) means "no conditions recorded".
@@ -1012,8 +1013,21 @@ export interface DentalOrder {
   materials: string[];
   toothInstructions: ToothInstruction[];
   files: OrderFile[];
-  doctor?: { id: string; fullName: string; email: string };
-  patient?: { id: string; fullName: string; email?: string; phone?: string };
+  doctor?: {
+    id: string;
+    fullName: string;
+    email: string;
+    clinicName?: string;
+  };
+  patient?: {
+    id: string;
+    fullName: string;
+    email?: string;
+    phone?: string;
+    gender?: Gender;
+    dateOfBirth?: string;
+    profilePhotoUrl?: string;
+  };
   createdAt: string;
   updatedAt: string;
   submittedAt?: string;

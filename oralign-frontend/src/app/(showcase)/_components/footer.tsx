@@ -39,7 +39,7 @@ export function Footer() {
           {/* Brand */}
           <div className="max-w-[300px]">
             <Link
-              href="/"
+              href="/decouvrir"
               className="sc-serif inline-block text-[1.7rem] font-medium leading-none tracking-[0.22em] text-[var(--sc-white)] no-underline"
             >
               ORALIGN

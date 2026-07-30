@@ -336,6 +336,7 @@ model Patient {
   dateOfBirth   DateTime?
   address       String?
   notes         String?
+  profilePhotoUrl String?
 
   // ── Clinical conditions ───────────────────────────────────────────
   // `clinicalConditions` is a free String[] rather than a strict
@@ -1798,4 +1799,3 @@ model Blog {
   @@index([deletedAt])
   @@index([status, deletedAt, publishedAt(sort: Desc)])
 }
-

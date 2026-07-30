@@ -99,7 +99,7 @@ export function LegalDocView({
         <Reveal delay>
           <div className="mt-14 border-t border-[rgba(25,25,25,0.1)] pt-8">
             <Link
-              href="/"
+              href="/decouvrir"
               className="sc-serif inline-flex min-h-11 items-center justify-center gap-2 bg-[var(--sc-black)] px-6 py-3 text-[0.64rem] font-bold uppercase tracking-[0.18em] text-[var(--sc-white)] no-underline transition-colors hover:bg-[rgba(25,25,25,0.85)]"
             >
               {dict.pages.backHome[lang]}

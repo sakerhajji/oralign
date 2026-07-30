@@ -103,6 +103,27 @@ export function useUpdatePatient(): UseMutationResult<
   });
 }
 
+export function useUploadPatientProfilePhoto(): UseMutationResult<
+  Patient,
+  Error,
+  { id: string; file: File }
+> {
+  const queryClient = useQueryClient();
+  const { t } = useT();
+
+  return useMutation<Patient, Error, { id: string; file: File }>({
+    mutationFn: ({ id, file }) => patientsService.uploadProfilePhoto(id, file),
+    onSuccess: (patient, variables) => {
+      queryClient.invalidateQueries({ queryKey: patientKeys.lists() });
+      queryClient.setQueryData(patientKeys.detail(variables.id), patient);
+      toast.success(t('toasts.patients.updated'));
+    },
+    onError: (error) => {
+      toast.error(extractApiErrorMessage(error));
+    },
+  });
+}
+
 export function useDeletePatient(): UseMutationResult<
   MessageResponse,
   Error,

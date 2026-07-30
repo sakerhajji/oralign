@@ -11,7 +11,7 @@ const SITE_URL =
  * (/dashboard, /account, /onboarding, …) are intentionally omitted —
  * they're blocked in robots.ts and would just leak product paths.
  *
- * The public site is the patient website served at "/". Published blog
+ * The public site is the patient website served at "/decouvrir". Published blog
  * posts (both patient- and practitioner-authored — the blog is unified)
  * are appended dynamically under the single /blog path. The fetch
  * fails SOFT: if the API is unreachable the sitemap still ships every
@@ -22,7 +22,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   const staticRoutes: MetadataRoute.Sitemap = [
     {
-      url: `${SITE_URL}/`,
+      url: `${SITE_URL}/decouvrir`,
       lastModified: now,
       changeFrequency: 'weekly',
       priority: 1.0,

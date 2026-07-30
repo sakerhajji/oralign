@@ -46,6 +46,7 @@ import {
   TabsTrigger,
 } from '@/components/ui/tabs';
 import { ClinicalConditionsField } from '@/components/patients/clinical-conditions-field';
+import { PatientProfilePhotoField } from '@/components/patients/patient-profile-photo-field';
 import { createPatientSchema, type CreatePatientFormData } from '@/lib/schemas';
 import {
   CLINICAL_CONDITION_OTHER,
@@ -104,7 +105,10 @@ export interface PatientDetailSheetProps {
   /** True while the delete mutation is in flight. */
   isDeleting?: boolean;
   /** Save handler — payload is already normalised via `normalizePatientForm`. */
-  onSubmit: (data: ReturnType<typeof normalizePatientForm>) => void;
+  onSubmit: (
+    data: ReturnType<typeof normalizePatientForm>,
+    profilePhoto: File | null,
+  ) => void;
   /** Delete handler. Only invoked in edit mode + only when admin/owner. */
   onDelete?: () => void;
 }
@@ -140,6 +144,7 @@ export function PatientDetailSheet({
 }: PatientDetailSheetProps) {
   const mode: PatientDetailMode = patient ? 'edit' : 'create';
   const { t } = useT();
+  const [profilePhoto, setProfilePhoto] = useState<File | null>(null);
 
   const {
     register,
@@ -175,6 +180,7 @@ export function PatientDetailSheet({
       clinicalConditionsOther: patient?.clinicalConditionsOther ?? '',
       doctorId: patient?.doctorId ?? (isAdmin ? dentists[0]?.id : currentUserId),
     });
+    setProfilePhoto(null);
   }, [currentUserId, dentists, isAdmin, open, patient, reset]);
 
   const initials = useMemo(() => buildInitials(fullName), [fullName]);
@@ -243,7 +249,9 @@ export function PatientDetailSheet({
 
         {/* ─── Tabs ──────────────────────────────────────────────── */}
         <form
-          onSubmit={handleSubmit((data) => onSubmit(normalizePatientForm(data)))}
+          onSubmit={handleSubmit((data) =>
+            onSubmit(normalizePatientForm(data), profilePhoto),
+          )}
           className="flex flex-1 flex-col overflow-hidden"
         >
           <Tabs defaultValue="identity" className="flex flex-1 flex-col">
@@ -289,6 +297,18 @@ export function PatientDetailSheet({
                     {...register('fullName')}
                   />
                 </FieldGroup>
+                <PatientProfilePhotoField
+                  value={profilePhoto}
+                  existingUrl={patient?.profilePhotoUrl}
+                  disabled={isSaving}
+                  label={t('patients.sheet.profilePhotoLabel')}
+                  hint={t('patients.sheet.profilePhotoHint')}
+                  uploadLabel={t('patients.sheet.uploadProfilePhoto')}
+                  changeLabel={t('patients.sheet.changeProfilePhoto')}
+                  editorTitle={t('patients.sheet.profilePhotoEditorTitle')}
+                  alt={fullName || t('patients.sheet.unnamed')}
+                  onChange={setProfilePhoto}
+                />
                 <div className="grid gap-4 sm:grid-cols-2">
                   <FieldGroup label={t('patients.sheet.fieldDob')}>
                     <Input type="date" {...register('dateOfBirth')} />

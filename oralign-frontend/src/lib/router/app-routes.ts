@@ -7,7 +7,7 @@ export type AppRoute = {
 };
 
 export const PUBLIC_ROUTES: AppRoute[] = [
-  { title: 'Home', path: '/' },
+  { title: 'Home', path: '/decouvrir' },
   { title: 'Login', path: '/login' },
   { title: 'Signup', path: '/signup' },
   { title: 'Forgot Password', path: '/forgot-password' },

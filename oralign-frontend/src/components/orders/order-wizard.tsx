@@ -66,6 +66,7 @@ import {
 } from '@/components/orders/order-file-upload';
 import { TreatmentFeePaymentDialog } from '@/components/orders/treatment-fee-payment-dialog';
 import { ClinicalConditionsField } from '@/components/patients/clinical-conditions-field';
+import { PatientProfilePhotoField } from '@/components/patients/patient-profile-photo-field';
 import { useAuth } from '@/lib/providers/auth-provider';
 import { useT } from '@/lib/i18n/lang-context';
 import { patientsService, usersService } from '@/lib/api';
@@ -73,6 +74,7 @@ import {
   patientKeys,
   useCreateOrder,
   useCreatePatient,
+  useUploadPatientProfilePhoto,
   useSubmitOrder,
   useUpdateOrder,
   useUpdateToothInstructions,
@@ -197,6 +199,7 @@ type FieldErrors = Partial<Record<string, string>>;
  */
 interface NewPatientDraft {
   fullName: string;
+  profilePhoto: File | null;
   email: string;
   phone: string;
   dateOfBirth: string;
@@ -252,6 +255,7 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
   );
   const [newPatient, setNewPatient] = useState<NewPatientDraft>({
     fullName: '',
+    profilePhoto: null,
     email: '',
     phone: '',
     dateOfBirth: '',
@@ -290,6 +294,7 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
   });
 
   const createPatient = useCreatePatient();
+  const uploadPatientProfilePhoto = useUploadPatientProfilePhoto();
   const createOrder = useCreateOrder();
   const updateOrder = useUpdateOrder();
   const updateTeeth = useUpdateToothInstructions();
@@ -425,6 +430,7 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
   const canSubmit = isDraftForSubmit && termsAccepted && reviewConfirmed;
   const isSaving =
     createPatient.isPending ||
+    uploadPatientProfilePhoto.isPending ||
     createOrder.isPending ||
     updateOrder.isPending ||
     updateTeeth.isPending;
@@ -524,7 +530,18 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
             clinicalConditionsOther: otherDetail,
             doctorId: isAdmin ? form.doctorId : undefined,
           })
-          .then((createdPatient) => {
+          .then(async (createdPatient) => {
+            if (newPatient.profilePhoto) {
+              try {
+                await uploadPatientProfilePhoto.mutateAsync({
+                  id: createdPatient.id,
+                  file: newPatient.profilePhoto,
+                });
+              } catch {
+                // The patient is still usable if the optional photo upload
+                // fails; the mutation already showed the actionable error.
+              }
+            }
             // The order's chiefComplaint is driven by the chief-complaint
             // multi-select (see handleChiefConditions / the mirror effect),
             // so we only need to bind the freshly-created patient id here.
@@ -1630,6 +1647,19 @@ function PatientStep({
                 error={errors['newPatient.fullName']}
                 disabled={!canModify}
                 onChange={(value) => updateNewPatient('fullName', value)}
+              />
+            </div>
+            <div className="md:col-span-2">
+              <PatientProfilePhotoField
+                value={newPatient.profilePhoto}
+                disabled={!canModify}
+                label={t('patients.sheet.profilePhotoLabel')}
+                hint={t('patients.sheet.profilePhotoHint')}
+                uploadLabel={t('patients.sheet.uploadProfilePhoto')}
+                changeLabel={t('patients.sheet.changeProfilePhoto')}
+                editorTitle={t('patients.sheet.profilePhotoEditorTitle')}
+                alt={newPatient.fullName || t('patients.sheet.unnamed')}
+                onChange={(file) => updateNewPatient('profilePhoto', file)}
               />
             </div>
             <TextInput

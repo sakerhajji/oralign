@@ -220,6 +220,11 @@ export class PatientResponseDto {
   address?: string;
   @ApiProperty({ required: false })
   notes?: string;
+  @ApiProperty({
+    required: false,
+    description: 'Relative URL of the patient profile photo.',
+  })
+  profilePhotoUrl?: string;
   @ApiProperty({ type: [String], required: false })
   clinicalConditions!: string[];
   @ApiProperty({ required: false })

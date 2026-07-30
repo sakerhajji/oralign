@@ -5,14 +5,20 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Inject,
+  UploadedFile,
   Param,
   Post,
   Put,
   Query,
+  UseInterceptors,
   UseGuards,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
   ApiOperation,
   ApiParam,
   ApiQuery,
@@ -27,6 +33,11 @@ import {
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { BadRequestException } from '../../common/exceptions/app.exception';
+import {
+  STORAGE_SERVICE,
+  StorageService,
+} from '../../storage/storage.interface';
 import {
   BulkDeletePatientsDto,
   CreatePatientDto,
@@ -42,7 +53,10 @@ import { PatientService } from '../services/patient.service';
 @Roles(UserRole.dentist, UserRole.admin, UserRole.super_admin)
 @Controller('patients')
 export class PatientController {
-  constructor(private readonly patientService: PatientService) {}
+  constructor(
+    private readonly patientService: PatientService,
+    @Inject(STORAGE_SERVICE) private readonly storageService: StorageService,
+  ) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
@@ -98,6 +112,59 @@ export class PatientController {
         role: user.role,
       },
     );
+  }
+
+  @Post(':id/profile-photo')
+  @HttpCode(HttpStatus.OK)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: 5 * 1024 * 1024 },
+      fileFilter: (_request, file, callback) => {
+        if (!file.mimetype.startsWith('image/')) {
+          callback(
+            new BadRequestException('Only image files are allowed'),
+            false,
+          );
+          return;
+        }
+        callback(null, true);
+      },
+    }),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Upload or replace a patient profile photo' })
+  @ApiParam({ name: 'id', type: String, description: 'Patient ID' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: { file: { type: 'string', format: 'binary' } },
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Patient profile photo uploaded successfully',
+    type: PatientResponseDto,
+  })
+  async uploadProfilePhoto(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<PatientResponseDto> {
+    if (!file) {
+      throw new BadRequestException('A profile photo is required');
+    }
+
+    const profilePhotoUrl = await this.storageService.uploadFile(
+      file,
+      'patient-photos',
+      { optimizeImage: true },
+    );
+
+    return this.patientService.updateProfilePhoto(id, profilePhotoUrl, {
+      userId: user.sub,
+      role: user.role,
+    });
   }
 
   @Get(':id')

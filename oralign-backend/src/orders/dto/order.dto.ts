@@ -682,9 +682,22 @@ export class OrderResponseDto {
   @ApiProperty({ type: [OrderFileResponseDto] })
   files!: OrderFileResponseDto[];
   @ApiProperty({ required: false })
-  doctor?: { id: string; fullName: string; email: string };
+  doctor?: {
+    id: string;
+    fullName: string;
+    email: string;
+    clinicName?: string;
+  };
   @ApiProperty({ required: false })
-  patient?: { id: string; fullName: string; email?: string; phone?: string };
+  patient?: {
+    id: string;
+    fullName: string;
+    email?: string;
+    phone?: string;
+    gender?: string;
+    dateOfBirth?: Date;
+    profilePhotoUrl?: string;
+  };
   @ApiProperty()
   createdAt!: Date;
   @ApiProperty()

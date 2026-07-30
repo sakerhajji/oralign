@@ -51,14 +51,14 @@ export const metadata: Metadata = {
     "sourire aligné",
   ],
   alternates: {
-    canonical: "/",
+    canonical: "/decouvrir",
     languages: {
-      "x-default": "/",
-      "fr-TN": "/",
-      fr: "/",
-      en: "/",
-      "ar-TN": "/",
-      ar: "/",
+      "x-default": "/decouvrir",
+      "fr-TN": "/decouvrir",
+      fr: "/decouvrir",
+      en: "/decouvrir",
+      "ar-TN": "/decouvrir",
+      ar: "/decouvrir",
     },
   },
   openGraph: {

@@ -238,7 +238,7 @@ export function legalFooterLinks(lang: LegalLang): { label: string; href: string
 export function companyFooterLinks(lang: LegalLang): { label: string; href: string }[] {
   const home = base(lang) === 'en' ? 'Home' : 'Accueil';
   return [
-    { label: home, href: '/' },
+    { label: home, href: '/decouvrir' },
     (() => {
       const m = legalDocMeta('about', lang);
       return { label: m.navLabel, href: m.href };

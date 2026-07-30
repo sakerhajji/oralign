@@ -39,7 +39,7 @@ export function ShowcasePageScaffold({ titleKey }: { titleKey: string }) {
             </p>
             <div className="mt-9">
               <Link
-                href="/"
+                href="/decouvrir"
                 className="sc-serif inline-flex min-h-12 items-center justify-center gap-2 bg-[var(--sc-black)] px-6 py-3 text-[0.66rem] font-bold uppercase tracking-[0.18em] text-[var(--sc-white)] no-underline transition-colors hover:bg-[rgba(25,25,25,0.85)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sc-sun)]"
               >
                 {dict.pages.backHome[lang]}

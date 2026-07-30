@@ -95,7 +95,7 @@ export function Header() {
       <div className="relative mx-auto flex h-16 max-w-[1400px] items-center px-4 sm:h-[72px] sm:px-6 lg:h-20 lg:px-12">
         {/* Logo — absolute-centered on <lg, inline on lg+ */}
         <Link
-          href="/"
+          href="/decouvrir"
           aria-label="Oralign — home"
           className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 lg:static lg:translate-x-0 lg:translate-y-0 flex shrink-0 items-center outline-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--sc-sun)]"
         >

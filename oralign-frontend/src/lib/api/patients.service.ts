@@ -37,6 +37,16 @@ export const patientsService = {
     return response.data;
   },
 
+  uploadProfilePhoto: async (id: string, file: File): Promise<Patient> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await apiClient.post<Patient>(
+      `/patients/${id}/profile-photo`,
+      formData,
+    );
+    return response.data;
+  },
+
   deletePatient: async (id: string): Promise<MessageResponse> => {
     const response = await apiClient.delete<MessageResponse>(`/patients/${id}`);
     return response.data;

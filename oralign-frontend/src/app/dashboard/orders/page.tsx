@@ -24,17 +24,15 @@ import {
   Eye,
   FileText,
   Filter,
-  Hourglass,
   Loader2,
   MoreHorizontal,
   Plus,
-  RefreshCcw,
   RefreshCw,
   Search,
   ShieldX,
-  Stethoscope,
   Trash,
   Trash2,
+  UserRound,
   Wrench,
   X,
 } from 'lucide-react';
@@ -82,7 +80,6 @@ import {
 } from '@/components/ui/table';
 import { useQuery } from '@tanstack/react-query';
 import { OrderStatusBadge } from '@/components/orders/order-status-badge';
-import { PatientRestPhoto } from '@/components/orders/patient-rest-photo';
 import { TreatmentFeeBadge } from '@/components/orders/treatment-fee-badge';
 import { usersService } from '@/lib/api';
 import { useAuth } from '@/lib/providers/auth-provider';
@@ -108,10 +105,13 @@ import {
   OrderSortField,
   OrderStatus,
   SortOrder,
-  TreatmentPlanStatus,
   UserRole,
 } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import {
+  OrderPatientCell,
+  OrderReviewBadge,
+} from '@/components/orders/order-list-cells';
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
 type PageSize = (typeof PAGE_SIZE_OPTIONS)[number];
@@ -877,7 +877,7 @@ export default function OrdersPage() {
               hover/focus and navigates on click so the planner lands
               on the detail page with a warm cache (no spinner). */}
           <Card className="hidden overflow-hidden md:block">
-            <Table>
+            <Table className="min-w-[1240px]">
               {/*
                 Sticky header so the column labels stay anchored while
                 the planner scrolls through long result sets. The
@@ -895,28 +895,32 @@ export default function OrdersPage() {
                       />
                     </TableHead>
                   )}
-                  <TableHead className="w-[200px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    {t('ordersPage.colOrder')}
-                  </TableHead>
-                  <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  <TableHead className="min-w-[230px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     {t('ordersPage.colPatient')}
                   </TableHead>
-                  {isAdmin && (
-                    <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      {t('ordersPage.colDentistCol')}
-                    </TableHead>
-                  )}
-                  <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    {t('ordersPage.colClinical')}
+                  <TableHead className="w-[150px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {t('ordersPage.colCaseId')}
                   </TableHead>
-                  <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    {t('ordersPage.colStatus')}
+                  <TableHead className="min-w-[190px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {t('ordersPage.colPractice')}
                   </TableHead>
-                  <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    {t('ordersPage.colCreated')}
+                  <TableHead className="min-w-[180px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {t('ordersPage.colDoctor')}
                   </TableHead>
-                  <TableHead className="w-12 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    {t('ordersPage.colActions')}
+                  <TableHead className="w-[150px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {t('ordersPage.colSubmitTime')}
+                  </TableHead>
+                  <TableHead className="w-[150px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {t('ordersPage.colUpdateTime')}
+                  </TableHead>
+                  <TableHead className="min-w-[165px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {t('ordersPage.colCaseStatus')}
+                  </TableHead>
+                  <TableHead className="min-w-[185px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {t('ordersPage.colReviewStatus')}
+                  </TableHead>
+                  <TableHead className="min-w-[150px] text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {t('ordersPage.colOperation')}
                   </TableHead>
                 </TableRow>
               </TableHeader>
@@ -974,76 +978,72 @@ export default function OrdersPage() {
                       </TableCell>
                     )}
                     <TableCell>
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary/10 text-primary">
-                          <ClipboardList className="h-5 w-5" />
-                        </div>
-                        <div className="min-w-0">
-                          <p className="truncate font-semibold">
-                            {order.orderCode}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {t('ordersPage.files', { count: order.files?.length ?? 0 })}
-                          </p>
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <PersonLine
-                        icon={
-                          <PatientRestPhoto
-                            order={order}
-                            alt={t('orderForm.files.slots.faceRest')}
-                          />
-                        }
-                        name={order.patient?.fullName ?? t('ordersPage.noPatient')}
-                        sub={order.patient?.phone ?? order.patient?.email}
+                      <OrderPatientCell
+                        patient={order.patient}
+                        emptyLabel={t('ordersPage.noPatient')}
+                        emptyContactLabel={t('ordersPage.noContact')}
                       />
                     </TableCell>
-                    {isAdmin && (
-                      <TableCell>
-                        <PersonLine
-                          icon={<Stethoscope className="h-4 w-4" />}
-                          name={order.doctor?.fullName ?? t('ordersPage.noDentist')}
-                          sub={order.doctor?.email}
-                        />
-                      </TableCell>
-                    )}
+                    <TableCell className="font-mono text-sm font-medium text-foreground">
+                      {order.orderCode}
+                    </TableCell>
                     <TableCell>
-                      <div className="text-sm">
-                        <p className="font-medium">
-                          {order.archTreatment ?? t('ordersPage.archNotSet')}
+                      <span className="block max-w-[190px] truncate text-sm font-medium">
+                        {order.doctor?.clinicName ?? t('ordersPage.noDentist')}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">
+                          {order.doctor?.fullName ?? t('ordersPage.noDentist')}
                         </p>
-                        <p className="text-xs text-muted-foreground">
-                          {order.patientStage ?? t('ordersPage.stageNotSet')}
+                        <p className="truncate text-xs text-muted-foreground">
+                          {order.doctor?.email}
                         </p>
                       </div>
                     </TableCell>
-                    <TableCell>
-                      <div className="flex flex-col gap-1">
-                        <OrderStatusBadge status={order.status} />
-                        <PlanBadge
-                          order={order}
-                          isDoctor={isDentist}
-                          isAdmin={isAdmin}
-                        />
-                        {/*
-                          Treatment-fee chip — derived from the existing
-                          treatmentFeePaidAt / treatmentFeePaymentStatus
-                          fields. Returns null on DRAFT / CANCELED rows
-                          where the fee is moot. Updates live because the
-                          orders query is invalidated whenever the pay /
-                          confirm mutations succeed.
-                         */}
-                        <TreatmentFeeBadge order={order} />
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {format(new Date(order.createdAt), dateFormat(lang), {
+                    <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
+                      {format(new Date(order.submittedAt ?? order.createdAt), dateFormat(lang), {
                         locale: dateLocale(lang),
                       })}
                     </TableCell>
+                    <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
+                      {format(new Date(order.updatedAt), dateFormat(lang), {
+                        locale: dateLocale(lang),
+                      })}
+                    </TableCell>
+                    <TableCell>
+                      <OrderStatusBadge status={order.status} />
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-col items-start gap-1">
+                        <OrderReviewBadge
+                          order={order}
+                          isDoctor={isDentist}
+                          isAdmin={isAdmin}
+                          showEmpty
+                        />
+                        <TreatmentFeeBadge order={order} />
+                      </div>
+                    </TableCell>
                     <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-3">
+                        {canManage && !showDeleted ? (
+                          <Link
+                            href={`/dashboard/orders/${order.id}/edit`}
+                            className="text-xs font-medium text-muted-foreground transition hover:text-foreground"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            {t('ordersPage.editShort')}
+                          </Link>
+                        ) : null}
+                        <Link
+                          href={buildOrderNavigationHref(order)}
+                          className="text-xs font-semibold text-foreground transition hover:text-primary"
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          {t('ordersPage.detailShort')}
+                        </Link>
                       <OrderRowActions
                         order={order}
                         canManage={canManage}
@@ -1060,6 +1060,7 @@ export default function OrdersPage() {
                         onRestore={() => restoreOrder.mutate(order.id)}
                         onChangeStatus={runSingleStatus}
                       />
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -1175,26 +1176,6 @@ function FilterChip({
       <span>{label}</span>
       <X className="h-3 w-3" />
     </button>
-  );
-}
-
-function PersonLine({
-  icon,
-  name,
-  sub,
-}: {
-  icon: ReactNode;
-  name: string;
-  sub?: string;
-}) {
-  return (
-    <div className="flex min-w-0 items-center gap-2">
-      <div className="text-muted-foreground">{icon}</div>
-      <div className="min-w-0">
-        <p className="truncate text-sm font-medium">{name}</p>
-        {sub && <p className="truncate text-xs text-muted-foreground">{sub}</p>}
-      </div>
-    </div>
   );
 }
 
@@ -1497,11 +1478,9 @@ function OrderMobileCard({
     >
       <CardContent className="space-y-3.5 p-4">
         <div className="flex items-start gap-3">
-          <PatientRestPhoto
-            order={order}
-            size="card"
-            alt={t('orderForm.files.slots.faceRest')}
-          />
+          <div className="grid size-11 shrink-0 place-items-center rounded-full bg-primary/10 text-primary ring-1 ring-primary/15">
+            <UserRound className="size-5" />
+          </div>
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center gap-2">
               <h3 className="truncate font-semibold">
@@ -1540,7 +1519,7 @@ function OrderMobileCard({
         </div>
         <div className="flex flex-wrap gap-1.5">
           <OrderStatusBadge status={order.status} />
-          <PlanBadge order={order} isDoctor={!isAdmin} isAdmin={isAdmin} />
+          <OrderReviewBadge order={order} isDoctor={!isAdmin} isAdmin={isAdmin} />
           <TreatmentFeeBadge order={order} />
         </div>
         <div className="grid grid-cols-2 gap-2">
@@ -1917,63 +1896,6 @@ function StatusPickerDialog({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
-  );
-}
-
-function PlanBadge({
-  order,
-  isDoctor,
-  isAdmin,
-}: {
-  order: DentalOrder;
-  isDoctor: boolean;
-  isAdmin: boolean;
-}) {
-  const { t } = useT();
-  const status = order.latestPlanStatus;
-  if (!status) return null;
-
-  const audienceIsApprover = isDoctor || isAdmin;
-  const map: Record<
-    TreatmentPlanStatus,
-    { label: string; tone: string; icon: ReactNode } | null
-  > = {
-    [TreatmentPlanStatus.PENDING]: {
-      label: t('ordersPage.planPending'),
-      tone: 'border-slate-200 bg-slate-50 text-slate-700',
-      icon: <Hourglass className="h-3 w-3" />,
-    },
-    [TreatmentPlanStatus.READY]: {
-      label: audienceIsApprover
-        ? t('ordersPage.planAwaitingYours')
-        : t('ordersPage.planAwaitingDoctor'),
-      tone: 'border-primary/20 bg-primary/10 text-primary',
-      icon: <AlertTriangle className="h-3 w-3" />,
-    },
-    [TreatmentPlanStatus.APPROVED]: {
-      label: t('ordersPage.planApproved'),
-      tone: 'border-emerald-300 bg-emerald-50 text-emerald-900',
-      icon: <CheckCircle2 className="h-3 w-3" />,
-    },
-    [TreatmentPlanStatus.REJECTED]: {
-      label: t('ordersPage.planReplanning'),
-      tone: 'border-red-300 bg-red-50 text-red-900',
-      icon: <RefreshCcw className="h-3 w-3" />,
-    },
-  };
-  const entry = map[status];
-  if (!entry) return null;
-  return (
-    <Badge
-      variant="outline"
-      className={cn(
-        'gap-1 whitespace-nowrap border px-1.5 py-0 text-[10px] font-medium',
-        entry.tone,
-      )}
-    >
-      {entry.icon}
-      {entry.label}
-    </Badge>
   );
 }
 

@@ -10,6 +10,7 @@ import {
   ClipboardListIcon,
   RefreshCwIcon,
   SearchIcon,
+  UserRoundIcon,
 } from 'lucide-react';
 import { useDebouncedCallback } from 'use-debounce';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -33,7 +34,10 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { OrderStatusBadge } from '@/components/orders/order-status-badge';
-import { PatientRestPhoto } from '@/components/orders/patient-rest-photo';
+import {
+  OrderPatientCell,
+  OrderReviewBadge,
+} from '@/components/orders/order-list-cells';
 import { useOrderPrefetch, useOrders } from '@/lib/hooks';
 import { useT } from '@/lib/i18n/lang-context';
 import {
@@ -159,6 +163,14 @@ function formatDateTime(value: string, lang: 'en' | 'fr') {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+  }).format(new Date(value));
+}
+
+function formatDateOnly(value: string, lang: 'en' | 'fr') {
+  return new Intl.DateTimeFormat(lang === 'fr' ? 'fr-FR' : 'en-CA', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
   }).format(new Date(value));
 }
 
@@ -371,17 +383,35 @@ export function DoctorLatestOrders() {
           ) : (
             <>
               <div className="hidden md:block">
-                <Table>
-                  <TableHeader>
+                <Table className="min-w-[1240px]">
+                  <TableHeader className="bg-muted/30">
                     <TableRow className="bg-muted/20 hover:bg-muted/20">
-                      <TableHead>{t('dashboard.orders.colOrder')}</TableHead>
-                      <TableHead>{t('dashboard.orders.colPatient')}</TableHead>
-                      <TableHead>{t('dashboard.orders.colStatus')}</TableHead>
-                      <TableHead>{t('dashboard.orders.colLastUpdated')}</TableHead>
-                      <TableHead className="w-12 text-right">
-                        <span className="sr-only">
-                          {t('dashboard.orders.colOpen')}
-                        </span>
+                      <TableHead className="min-w-[230px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        {t('dashboard.orders.colPatient')}
+                      </TableHead>
+                      <TableHead className="w-[150px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        {t('dashboard.orders.colCaseId')}
+                      </TableHead>
+                      <TableHead className="min-w-[190px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        {t('dashboard.orders.colPractice')}
+                      </TableHead>
+                      <TableHead className="min-w-[180px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        {t('dashboard.orders.colDoctor')}
+                      </TableHead>
+                      <TableHead className="w-[150px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        {t('dashboard.orders.colSubmitTime')}
+                      </TableHead>
+                      <TableHead className="w-[150px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        {t('dashboard.orders.colUpdateTime')}
+                      </TableHead>
+                      <TableHead className="min-w-[165px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        {t('dashboard.orders.colCaseStatus')}
+                      </TableHead>
+                      <TableHead className="min-w-[185px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        {t('dashboard.orders.colReviewStatus')}
+                      </TableHead>
+                      <TableHead className="min-w-[150px] text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        {t('dashboard.orders.colOperation')}
                       </TableHead>
                     </TableRow>
                   </TableHeader>
@@ -413,63 +443,83 @@ export function DoctorLatestOrders() {
                         className="cursor-pointer transition hover:bg-muted/35 focus:bg-muted/50 focus:outline-none"
                       >
                         <TableCell>
-                          <div className="flex min-w-0 items-center gap-3">
-                            <div className="grid size-9 shrink-0 place-items-center rounded-full bg-primary/10 text-primary ring-1 ring-primary/15">
-                              <ClipboardListIcon className="size-4" />
-                            </div>
-                            <div className="min-w-0">
-                              <p className="truncate font-semibold">{order.orderCode}</p>
-                              <p className="truncate text-xs text-muted-foreground">
-                                {t('dashboard.orders.created', {
-                                  date: formatDateTime(order.createdAt, lang),
-                                })}
-                              </p>
-                            </div>
-                          </div>
+                          <OrderPatientCell
+                            patient={order.patient}
+                            emptyLabel={t('dashboard.orders.noPatient')}
+                            emptyContactLabel={t('dashboard.orders.noContact')}
+                          />
+                        </TableCell>
+                        <TableCell className="font-mono text-sm font-medium text-foreground">
+                          {order.orderCode}
                         </TableCell>
                         <TableCell>
-                          <div className="flex min-w-0 items-center gap-2.5">
-                            <PatientRestPhoto
-                              order={order}
-                              alt={t('orderForm.files.slots.faceRest')}
-                            />
-                            <div className="min-w-0">
-                              <p className="truncate font-medium">
-                                {order.patient?.fullName ??
-                                  t('dashboard.orders.noPatient')}
-                              </p>
-                              <p className="truncate text-xs text-muted-foreground">
-                                {order.patient?.phone ||
-                                  order.patient?.email ||
-                                  t('dashboard.orders.noContact')}
-                              </p>
-                            </div>
+                          <span className="block max-w-[190px] truncate text-sm font-medium">
+                            {order.doctor?.clinicName ?? t('dashboard.orders.notSet')}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium">
+                              {order.doctor?.fullName ?? t('dashboard.orders.notSet')}
+                            </p>
+                            <p className="truncate text-xs text-muted-foreground">
+                              {order.doctor?.email}
+                            </p>
                           </div>
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
+                          {formatDateOnly(order.submittedAt ?? order.createdAt, lang)}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
+                          {formatDateOnly(order.updatedAt, lang)}
                         </TableCell>
                         <TableCell>
                           <OrderStatusBadge status={order.status} />
                         </TableCell>
-                        <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
-                          {formatDateTime(order.updatedAt, lang)}
+                        <TableCell>
+                          <OrderReviewBadge
+                            order={order}
+                            isDoctor
+                            isAdmin={false}
+                            showEmpty
+                          />
                         </TableCell>
                         <TableCell className="text-right">
-                          <Button
-                            asChild
-                            variant="ghost"
-                            size="icon"
-                            className="size-8"
-                          >
+                          <div className="flex items-center justify-end gap-3">
+                            <Link
+                              href={`/dashboard/orders/${order.id}/edit`}
+                              className="text-xs font-medium text-muted-foreground transition hover:text-foreground"
+                              onClick={(event) => event.stopPropagation()}
+                            >
+                              {t('dashboard.orders.editShort')}
+                            </Link>
                             <Link
                               href={buildOrderNavigationHref(order, {
                                 returnTo,
                               })}
-                              aria-label={t('dashboard.orders.openAria', {
-                                code: order.orderCode,
-                              })}
+                              className="text-xs font-semibold text-foreground transition hover:text-primary"
+                              onClick={(event) => event.stopPropagation()}
                             >
-                              <ArrowUpRightIcon className="size-4" />
+                              {t('dashboard.orders.detailShort')}
                             </Link>
-                          </Button>
+                            <Button
+                              asChild
+                              variant="ghost"
+                              size="icon"
+                              className="size-8"
+                            >
+                              <Link
+                                href={buildOrderNavigationHref(order, {
+                                  returnTo,
+                                })}
+                                aria-label={t('dashboard.orders.openAria', {
+                                  code: order.orderCode,
+                                })}
+                              >
+                                <ArrowUpRightIcon className="size-4" />
+                              </Link>
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -590,11 +640,9 @@ function OrderCard({
     >
       <CardContent className="space-y-3.5 p-4">
         <div className="flex items-start gap-3">
-          <PatientRestPhoto
-            order={order}
-            size="card"
-            alt={t('orderForm.files.slots.faceRest')}
-          />
+          <div className="grid size-11 shrink-0 place-items-center rounded-full bg-primary/10 text-primary ring-1 ring-primary/15">
+            <UserRoundIcon className="size-5" />
+          </div>
           <div className="min-w-0 flex-1">
             <p className="truncate font-semibold">
               {order.patient?.fullName ?? t('dashboard.orders.noPatient')}

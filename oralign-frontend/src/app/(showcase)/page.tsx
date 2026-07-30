@@ -1,17 +1,7 @@
-import type { Metadata } from "next";
-import { PatientHome } from "./_components/patient-home";
+import { redirect } from "next/navigation";
 
-export const metadata: Metadata = {
-  title: "ORALIGN® — Aligneurs invisibles pour patients",
-  description:
-    "Découvrez ORALIGN® : aligneurs transparents, confortables et supervisés par un praticien certifié.",
-  alternates: { canonical: "/" },
-};
-
-// The public site is the Patient website. Its home renders directly at "/"
-// (the old Patient/Practitioner audience chooser is gone). The practitioner
-// marketing showcase has been removed — practitioners enter via the secured
-// platform ("Espace praticien" → /login).
+// Keep a single canonical patient homepage. The detailed Découvrir page is
+// now the public entry point, so old bookmarks to `/` follow it automatically.
 export default function ShowcaseHomePage() {
-  return <PatientHome />;
+  redirect("/decouvrir");
 }

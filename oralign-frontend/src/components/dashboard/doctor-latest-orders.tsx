@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowUpRightIcon,
+  ArrowDown,
+  ArrowUpDown,
   ChevronLeftIcon,
   ChevronRightIcon,
   ClipboardListIcon,
@@ -360,7 +362,7 @@ export function DoctorLatestOrders() {
             </div>
           </div>
 
-          <div className="grid min-w-0 gap-2 md:grid-cols-[minmax(0,1fr)_190px] xl:grid-cols-[minmax(300px,1fr)_minmax(500px,1.6fr)_190px]">
+          <div className="grid min-w-0 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(360px,1.65fr)] xl:grid-cols-[minmax(300px,1fr)_minmax(500px,1.6fr)]">
             <div className="relative min-w-0 md:order-1">
               <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
               <Input
@@ -414,31 +416,6 @@ export function DoctorLatestOrders() {
                   </button>
                 );
               })}
-            </div>
-            <div className="hidden min-w-0 md:order-2 md:block xl:order-3">
-              <Select
-                value={sortKey}
-                onValueChange={(value) =>
-                  setOrderSort(value as DashboardOrderSortKey)
-                }
-              >
-                <SelectTrigger
-                  aria-label={t('dashboard.orders.sortLabel')}
-                  className="h-10 w-full justify-start gap-1.5"
-                >
-                  <span className="shrink-0 text-xs text-muted-foreground">
-                    {t('ordersPage.sortBy')}:
-                  </span>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {SORTS.map((item) => (
-                    <SelectItem key={item.key} value={item.key}>
-                      {t(item.labelKey)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </div>
             <div className="grid grid-cols-2 gap-2 md:hidden">
               <Select
@@ -523,8 +500,22 @@ export function DoctorLatestOrders() {
                       <TableHead className="min-w-[230px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                         {t('dashboard.orders.colPatient')}
                       </TableHead>
-                      <TableHead className="w-[150px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        {t('dashboard.orders.colCaseId')}
+                      <TableHead
+                        className="w-[150px] p-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                        aria-sort={sortKey === 'code-asc' ? 'ascending' : 'none'}
+                      >
+                        <button
+                          type="button"
+                          className="flex min-h-10 w-full items-center gap-1 px-2 text-left transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                          onClick={() => setOrderSort('code-asc')}
+                        >
+                          {t('dashboard.orders.colCaseId')}
+                          {sortKey === 'code-asc' ? (
+                            <ArrowDown className="size-3.5 shrink-0" aria-hidden="true" />
+                          ) : (
+                            <ArrowUpDown className="size-3.5 shrink-0 opacity-50" aria-hidden="true" />
+                          )}
+                        </button>
                       </TableHead>
                       <TableHead className="min-w-[190px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                         {t('dashboard.orders.colPractice')}
@@ -532,11 +523,39 @@ export function DoctorLatestOrders() {
                       <TableHead className="min-w-[180px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                         {t('dashboard.orders.colDoctor')}
                       </TableHead>
-                      <TableHead className="w-[150px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        {t('dashboard.orders.colSubmitTime')}
+                      <TableHead
+                        className="w-[150px] p-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                        aria-sort={sortKey === 'created-desc' ? 'descending' : 'none'}
+                      >
+                        <button
+                          type="button"
+                          className="flex min-h-10 w-full items-center gap-1 px-2 text-left transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                          onClick={() => setOrderSort('created-desc')}
+                        >
+                          {t('dashboard.orders.colSubmitTime')}
+                          {sortKey === 'created-desc' ? (
+                            <ArrowDown className="size-3.5 shrink-0" aria-hidden="true" />
+                          ) : (
+                            <ArrowUpDown className="size-3.5 shrink-0 opacity-50" aria-hidden="true" />
+                          )}
+                        </button>
                       </TableHead>
-                      <TableHead className="w-[150px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        {t('dashboard.orders.colUpdateTime')}
+                      <TableHead
+                        className="w-[150px] p-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                        aria-sort={sortKey === 'updated-desc' ? 'descending' : 'none'}
+                      >
+                        <button
+                          type="button"
+                          className="flex min-h-10 w-full items-center gap-1 px-2 text-left transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                          onClick={() => setOrderSort('updated-desc')}
+                        >
+                          {t('dashboard.orders.colUpdateTime')}
+                          {sortKey === 'updated-desc' ? (
+                            <ArrowDown className="size-3.5 shrink-0" aria-hidden="true" />
+                          ) : (
+                            <ArrowUpDown className="size-3.5 shrink-0 opacity-50" aria-hidden="true" />
+                          )}
+                        </button>
                       </TableHead>
                       <TableHead className="min-w-[165px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                         {t('dashboard.orders.colCaseStatus')}

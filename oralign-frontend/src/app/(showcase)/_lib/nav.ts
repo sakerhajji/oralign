@@ -55,7 +55,6 @@ export const PATIENT_NAV_ITEMS: readonly NavItem[] = [
     ],
   },
   { id: "guide", labelKey: "guide", href: "/guide" },
-  { id: "shop", labelKey: "shop", href: "/shop" },
   { id: "blogs", labelKey: "blogs", href: "/blog" },
 ] as const;
 

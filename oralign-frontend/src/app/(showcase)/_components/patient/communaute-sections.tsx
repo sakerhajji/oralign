@@ -353,7 +353,7 @@ export function TemoignagesSection() {
               return (
                 <article key={story.name.en} className="group flex flex-col overflow-hidden border border-[var(--sc-grey)] bg-[var(--sc-white)] transition-colors hover:border-[var(--sc-sun-deep)]">
                   <div className="relative aspect-[16/8] overflow-hidden border-b border-[var(--sc-grey)] bg-[var(--sc-grey)]">
-                    <Image src={item.after} alt={`${item.shortTitle[lang]} — ORALIGN`} fill sizes="(min-width: 768px) 50vw, 100vw" unoptimized={item.after.endsWith(".webp")} className="object-cover transition-transform duration-500 group-hover:scale-[1.02]" />
+                    <Image src={item.after} alt={`${item.shortTitle[lang]} — ORALIGN`} fill quality={85} sizes="(min-width: 768px) 50vw, 100vw" className="object-cover object-center transition-transform duration-500 group-hover:scale-[1.02]" />
                     <span className="absolute left-4 top-4 bg-[var(--sc-white)]/90 px-2.5 py-1 text-[0.56rem] font-medium uppercase tracking-[0.14em] text-[var(--sc-black)]">{item.shortTitle[lang]}</span>
                   </div>
                   <div className="flex flex-1 flex-col p-6 sm:p-7">

@@ -58,34 +58,33 @@ export function PatientProfilePhotoField({
 
   return (
     <div className="rounded-lg border bg-muted/20 p-4">
-      <div className="flex items-center gap-3 sm:gap-4">
-        <Avatar className="size-16 shrink-0 ring-2 ring-background ring-offset-1 ring-offset-border">
-          {imageUrl ? <AvatarImage src={imageUrl} alt={alt} /> : null}
-          <AvatarFallback className="bg-primary/10 text-primary">
-            <Camera className="size-6" aria-hidden="true" />
-          </AvatarFallback>
-        </Avatar>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+          <Avatar className="size-16 shrink-0 ring-2 ring-background ring-offset-1 ring-offset-border">
+            {imageUrl ? <AvatarImage src={imageUrl} alt={alt} /> : null}
+            <AvatarFallback className="bg-primary/10 text-primary">
+              <Camera className="size-6" aria-hidden="true" />
+            </AvatarFallback>
+          </Avatar>
 
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium">{label}</p>
-          <p className="mt-0.5 max-w-md text-xs leading-relaxed text-muted-foreground">
-            {hint}
-          </p>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium">{label}</p>
+            <p className="mt-0.5 max-w-md text-xs leading-relaxed text-muted-foreground">
+              {hint}
+            </p>
+          </div>
         </div>
 
         <Button
           type="button"
           variant="outline"
           size="sm"
-          className="shrink-0 gap-1.5"
+          className="w-full shrink-0 gap-1.5 sm:w-auto"
           disabled={disabled}
           onClick={openPicker}
         >
           <Upload className="size-4" aria-hidden="true" />
-          <span className="hidden sm:inline">
-            {value || existingUrl ? changeLabel : uploadLabel}
-          </span>
-          <span className="sm:hidden">{value || existingUrl ? changeLabel : uploadLabel}</span>
+          {value || existingUrl ? changeLabel : uploadLabel}
         </Button>
 
         <input

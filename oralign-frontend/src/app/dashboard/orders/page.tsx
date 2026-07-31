@@ -555,7 +555,7 @@ export default function OrdersPage() {
             </div>
           </div>
 
-          <div className="min-w-0 md:order-2 xl:order-3">
+          <div className="min-w-0 md:hidden">
             <SortMenu sortKey={sortKey} onChange={setSortKey} />
           </div>
 
@@ -901,8 +901,22 @@ export default function OrdersPage() {
                   <TableHead className="min-w-[230px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     {t('ordersPage.colPatient')}
                   </TableHead>
-                  <TableHead className="w-[150px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    {t('ordersPage.colCaseId')}
+                  <TableHead
+                    className="w-[150px] p-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                    aria-sort={sortKey === 'code-asc' ? 'ascending' : 'none'}
+                  >
+                    <button
+                      type="button"
+                      className="flex min-h-10 w-full items-center gap-1 px-2 text-left transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                      onClick={() => setSortKey('code-asc')}
+                    >
+                      {t('ordersPage.colCaseId')}
+                      {sortKey === 'code-asc' ? (
+                        <ArrowDown className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                      ) : (
+                        <ArrowUpDown className="h-3.5 w-3.5 shrink-0 opacity-50" aria-hidden="true" />
+                      )}
+                    </button>
                   </TableHead>
                   <TableHead className="min-w-[190px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     {t('ordersPage.colPractice')}
@@ -910,11 +924,39 @@ export default function OrdersPage() {
                   <TableHead className="min-w-[180px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     {t('ordersPage.colDoctor')}
                   </TableHead>
-                  <TableHead className="w-[150px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    {t('ordersPage.colSubmitTime')}
+                  <TableHead
+                    className="w-[150px] p-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                    aria-sort={sortKey === 'created-desc' ? 'descending' : 'none'}
+                  >
+                    <button
+                      type="button"
+                      className="flex min-h-10 w-full items-center gap-1 px-2 text-left transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                      onClick={() => setSortKey('created-desc')}
+                    >
+                      {t('ordersPage.colSubmitTime')}
+                      {sortKey === 'created-desc' ? (
+                        <ArrowDown className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                      ) : (
+                        <ArrowUpDown className="h-3.5 w-3.5 shrink-0 opacity-50" aria-hidden="true" />
+                      )}
+                    </button>
                   </TableHead>
-                  <TableHead className="w-[150px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    {t('ordersPage.colUpdateTime')}
+                  <TableHead
+                    className="w-[150px] p-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                    aria-sort={sortKey === 'updated-desc' ? 'descending' : 'none'}
+                  >
+                    <button
+                      type="button"
+                      className="flex min-h-10 w-full items-center gap-1 px-2 text-left transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                      onClick={() => setSortKey('updated-desc')}
+                    >
+                      {t('ordersPage.colUpdateTime')}
+                      {sortKey === 'updated-desc' ? (
+                        <ArrowDown className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                      ) : (
+                        <ArrowUpDown className="h-3.5 w-3.5 shrink-0 opacity-50" aria-hidden="true" />
+                      )}
+                    </button>
                   </TableHead>
                   <TableHead className="min-w-[165px] text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     {t('ordersPage.colCaseStatus')}

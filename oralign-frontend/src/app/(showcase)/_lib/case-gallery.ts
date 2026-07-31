@@ -104,7 +104,7 @@ export const showcaseCases: ShowcaseCase[] = [
       ar: "تساعد الخطة ثلاثية الأبعاد على رؤية الحركة التدريجية قبل بدء العلاج.",
     },
     before: "/cases/beance/cas2/before.webp",
-    after: "/cases/beance/cas2/after.webp",
+    after: "/cases/beance/cas2/after.png",
     badge: { fr: "Occlusion", en: "Bite", ar: "إطباق" },
   },
   {

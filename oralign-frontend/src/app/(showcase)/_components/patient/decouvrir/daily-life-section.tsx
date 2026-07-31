@@ -44,7 +44,7 @@ export function DailyLifeSection() {
       id="daily-life"
       data-section-tone="light"
       aria-labelledby="daily-life-title"
-      className="flex min-h-[calc(100svh-4rem)] flex-col bg-[var(--sc-white)] text-[var(--sc-black)] sm:min-h-[calc(100svh-4.5rem)] lg:min-h-[calc(100svh-5rem)]"
+      className="flex flex-col bg-[var(--sc-white)] text-[var(--sc-black)] lg:min-h-[calc(100svh-5rem)]"
     >
       <div className="px-5 py-12 text-center sm:px-8 sm:py-16 lg:px-12 lg:py-14">
         <div className="mx-auto max-w-[920px]">
@@ -60,13 +60,14 @@ export function DailyLifeSection() {
         </div>
       </div>
 
-      <div className="relative min-h-[520px] w-full flex-1 overflow-hidden sm:min-h-[600px] lg:min-h-0">
+      <div className="relative aspect-[16/9] w-full overflow-hidden sm:aspect-[16/10] lg:min-h-0 lg:flex-1 lg:aspect-auto">
         <Image
           src="/showcase/image123456.png"
           alt={copy.imageAlt}
           fill
           sizes="100vw"
-          className="object-cover object-[58%_center] sm:object-center"
+          quality={85}
+          className="object-cover object-center"
         />
       </div>
     </section>

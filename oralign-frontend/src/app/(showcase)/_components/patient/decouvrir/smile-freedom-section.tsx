@@ -72,12 +72,13 @@ export function SmileFreedomSection() {
       className="min-h-[calc(100svh-4rem)] overflow-hidden bg-[var(--sc-white)] text-[var(--sc-black)] sm:min-h-[calc(100svh-4.5rem)] lg:min-h-[calc(100svh-5rem)]"
     >
       <div className="grid min-h-[calc(100svh-4rem)] sm:min-h-[calc(100svh-4.5rem)] lg:min-h-[calc(100svh-5rem)] lg:grid-cols-2">
-        <div className="relative min-h-[70svh] overflow-hidden sm:min-h-[760px] lg:min-h-0">
+        <div className="relative aspect-[4/3] w-full overflow-hidden sm:aspect-[16/10] lg:min-h-0 lg:aspect-auto">
           <Image
             src="/showcase/womenBornToshine.png"
             alt={copy.imageAlt}
             fill
             sizes="(min-width: 1024px) 50vw, 100vw"
+            quality={85}
             className="object-cover object-center"
           />
         </div>

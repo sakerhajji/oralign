@@ -126,6 +126,7 @@ export function PrecisionSection() {
           src="/showcase/invisaligne.png"
           alt={copy.imageAlt}
           fill
+          quality={85}
           sizes="100vw"
           className="object-cover object-[60%_42%]"
         />
@@ -175,13 +176,14 @@ export function PrecisionSection() {
           </p>
         </div>
 
-        <div className="relative aspect-[4/5] overflow-hidden sm:aspect-[16/10]">
+        <div className="relative aspect-[16/10] overflow-hidden sm:aspect-[16/10]">
           <Image
             src="/showcase/invisaligne.png"
             alt={copy.imageAlt}
             fill
+            quality={85}
             sizes="100vw"
-            className="object-cover object-[64%_center]"
+            className="object-cover object-center"
           />
           <div
             aria-hidden="true"

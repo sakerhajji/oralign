@@ -98,7 +98,7 @@ export function OralignHeroSection() {
 
             <div className="mt-10 grid max-w-[550px] gap-3 sm:mt-12 sm:grid-cols-2">
               <Link
-                href="#praticiens"
+                href="/trouver-un-praticien"
                 className="group inline-flex min-h-14 items-center justify-between gap-4 bg-[var(--sc-white)] px-5 py-3 text-[var(--sc-black)] no-underline transition-colors hover:bg-white"
               >
                 <span className="flex min-w-0 items-center gap-3">
@@ -152,6 +152,7 @@ export function OralignHeroSection() {
             alt={copy.imageAlt}
             fill
             priority
+            quality={85}
             sizes="(min-width: 1024px) 50vw, 100vw"
             className="object-cover object-[50%_52%] lg:object-[50%_50%]"
           />

@@ -200,7 +200,7 @@ export function PatientDetailSheet({
         className="flex w-full flex-col gap-0 p-0 sm:max-w-2xl"
       >
         {/* ─── Header strap (avatar + identity badges) ────────────── */}
-        <header className="shrink-0 border-b bg-card px-6 py-4">
+        <header className="shrink-0 border-b bg-card px-4 py-4 sm:px-6">
           <SheetTitle className="sr-only">
             {mode === 'edit'
               ? t('patients.sheet.titleEdit')
@@ -211,7 +211,7 @@ export function PatientDetailSheet({
               ? t('patients.sheet.descEdit')
               : t('patients.sheet.descCreate')}
           </SheetDescription>
-          <div className="flex items-start gap-3">
+          <div className="flex min-w-0 items-start gap-3 pr-8">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary/10 text-base font-semibold text-primary">
               {initials || <UserRound className="h-5 w-5" />}
             </div>
@@ -255,36 +255,36 @@ export function PatientDetailSheet({
           className="flex flex-1 flex-col overflow-hidden"
         >
           <Tabs defaultValue="identity" className="flex flex-1 flex-col">
-            <div className="border-b bg-muted/20 px-6">
-              <TabsList className="h-12 w-full justify-start gap-1 bg-transparent p-0">
+            <div className="overflow-x-auto border-b bg-muted/20 px-4 sm:px-6">
+              <TabsList className="h-12 min-w-max justify-start gap-1 bg-transparent p-0">
                 <TabsTrigger
                   value="identity"
-                  className="rounded-none border-b-2 border-transparent px-3 text-sm data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+                  className="shrink-0 rounded-none border-b-2 border-transparent px-3 text-sm data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
                 >
                   {t('patients.sheet.tabIdentity')}
                 </TabsTrigger>
                 <TabsTrigger
                   value="contact"
-                  className="rounded-none border-b-2 border-transparent px-3 text-sm data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+                  className="shrink-0 rounded-none border-b-2 border-transparent px-3 text-sm data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
                 >
                   {t('patients.sheet.tabContact')}
                 </TabsTrigger>
                 <TabsTrigger
                   value="clinical"
-                  className="rounded-none border-b-2 border-transparent px-3 text-sm data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+                  className="shrink-0 rounded-none border-b-2 border-transparent px-3 text-sm data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
                 >
                   {t('patients.sheet.tabClinical')}
                 </TabsTrigger>
                 <TabsTrigger
                   value="notes"
-                  className="rounded-none border-b-2 border-transparent px-3 text-sm data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+                  className="shrink-0 rounded-none border-b-2 border-transparent px-3 text-sm data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
                 >
                   {t('patients.sheet.tabNotes')}
                 </TabsTrigger>
               </TabsList>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-6 py-5">
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
               {/* ─── Identity tab ─────────────────────────────────── */}
               <TabsContent value="identity" className="m-0 space-y-4">
                 <FieldGroup
@@ -421,8 +421,8 @@ export function PatientDetailSheet({
             </div>
 
             {/* ─── Sticky footer ───────────────────────────────── */}
-            <footer className="flex shrink-0 items-center justify-between gap-2 border-t bg-card px-6 py-3">
-              <div>
+            <footer className="flex shrink-0 flex-col gap-3 border-t bg-card px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+              <div className="w-full sm:w-auto">
                 {mode === 'edit' && onDelete && (
                   <DeletePatientButton
                     patientName={patient?.fullName ?? t('patients.sheet.deleteThis')}
@@ -432,10 +432,11 @@ export function PatientDetailSheet({
                   />
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:items-center">
                 <Button
                   type="button"
                   variant="outline"
+                  className="w-full sm:w-auto"
                   onClick={() => onOpenChange(false)}
                   disabled={isSaving || !!isDeleting}
                 >
@@ -448,7 +449,7 @@ export function PatientDetailSheet({
                     !!isDeleting ||
                     (mode === 'edit' && !isDirty && !profilePhoto)
                   }
-                  className="gap-2"
+                  className="w-full gap-2 sm:w-auto"
                 >
                   {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
                   {mode === 'edit'
@@ -516,7 +517,7 @@ function DeletePatientButton({
         variant="outline"
         size="sm"
         className={cn(
-          'gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive',
+          'w-full gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive sm:w-auto',
         )}
         disabled={disabled}
         onClick={() => setOpen(true)}

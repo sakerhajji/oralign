@@ -12,6 +12,7 @@ const nextConfig: NextConfig = {
   // host; the dashboard slider currently renders pre-resized variants
   // with `unoptimized`.
   images: {
+    qualities: [75, 85],
     remotePatterns: [
       {
         protocol: "http",

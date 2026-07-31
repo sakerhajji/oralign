@@ -50,12 +50,12 @@ export function SolutionSection() {
           <Reveal>
             <figure className="relative min-h-[500px] overflow-hidden border border-[#303030] bg-[#202020]">
               <Image
-                src="/showcase/palndetaritemt.webp"
+                src="/showcase/invisaligne.png"
                 alt={dict.solution.imageAlt[lang]}
                 fill
+                quality={85}
                 sizes="(min-width: 1024px) 420px, 100vw"
-                unoptimized
-                className="object-cover"
+                className="object-cover object-center"
               />
               <div
                 aria-hidden="true"

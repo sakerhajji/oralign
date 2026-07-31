@@ -66,7 +66,7 @@ export function GuidePreviewSection() {
     >
       <div className="grid w-full lg:min-h-[calc(100svh-5rem)] lg:grid-cols-2">
         <div className="w-full p-[15px] lg:min-h-0">
-          <div className="relative aspect-[107/100] w-full overflow-hidden sm:aspect-[16/10] lg:h-full lg:min-h-0 lg:aspect-auto">
+          <div className="relative aspect-[4/3] w-full overflow-hidden sm:aspect-[16/10] lg:h-full lg:min-h-0 lg:aspect-auto">
             <span
               aria-hidden="true"
               className="absolute left-0 top-0 z-10 h-2 w-28 bg-[var(--sc-sun)] sm:w-36"
@@ -76,6 +76,7 @@ export function GuidePreviewSection() {
               alt={copy.imageAlt}
               fill
               sizes="(min-width: 1024px) 50vw, 100vw"
+              quality={85}
               className="object-cover object-center"
             />
             <span

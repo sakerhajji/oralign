@@ -71,13 +71,14 @@ export function TreatmentDurationSection() {
           </div>
         </div>
 
-        <div className="relative min-h-[72svh] overflow-hidden sm:min-h-[760px] lg:min-h-0">
+        <div className="relative aspect-square overflow-hidden sm:aspect-[4/3] lg:min-h-0 lg:aspect-auto">
           <Image
             src="/showcase/image.jpeg"
             alt={copy.imageAlt}
             fill
             sizes="(min-width: 1024px) 45vw, 100vw"
-            className="object-cover object-[62%_center]"
+            quality={85}
+            className="object-cover object-center"
           />
         </div>
       </div>

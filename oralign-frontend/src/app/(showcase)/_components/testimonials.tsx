@@ -44,9 +44,9 @@ export function Testimonials() {
                         src={item.after}
                         alt={`${item.shortTitle[lang]} - ${dict.preview.after[lang]}`}
                         fill
+                        quality={85}
                         sizes="(min-width: 768px) 33vw, 100vw"
-                        unoptimized={item.after.endsWith(".webp")}
-                        className="object-contain"
+                        className="object-contain object-center"
                       />
                     </div>
                     <figcaption

@@ -51,7 +51,8 @@ export function SmileConsultationCtaSection() {
         alt={copy.imageAlt}
         fill
         sizes="100vw"
-        className="object-cover object-[70%_center] sm:object-[64%_center] lg:object-[58%_center]"
+        quality={85}
+        className="object-cover object-center lg:object-[58%_center]"
       />
       <div
         aria-hidden="true"

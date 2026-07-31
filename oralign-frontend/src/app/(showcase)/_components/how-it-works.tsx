@@ -162,7 +162,7 @@ function StepCard({
               (max-width: 1024px) 50vw,
               20vw
             "
-            unoptimized
+            quality={84}
             className="
               object-cover transition-transform duration-700
               group-hover:scale-105

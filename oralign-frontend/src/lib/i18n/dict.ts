@@ -205,8 +205,8 @@ export const dict = {
       condUnestheticSmile: { en: 'Unesthetic smile', fr: 'Sourire inesthétique' } as T,
       condDentalShapeAnomaly: { en: 'Dental shape anomaly', fr: 'Anomalie de forme dentaire' } as T,
       condTmjDislocation: {
-        en: 'TMJ problem (temporomandibular dislocation)',
-        fr: 'PROBLÈME ATM (LUXATION TEMPORO-MANDIBULAIRE)',
+        en: 'TMJ disorder',
+        fr: 'Troubles de l’articulation temporo-mandibulaire (ATM)',
       } as T,
       condOther: { en: 'Other', fr: 'Autre' } as T,
 

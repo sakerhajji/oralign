@@ -180,7 +180,7 @@ const CONDITION_FR: Record<string, string> = {
   'Unesthetic smile': 'Sourire inesthétique',
   'Dental shape anomaly': 'Anomalie de forme dentaire',
   'TMJ problem (temporomandibular dislocation)':
-    'PROBLÈME ATM (LUXATION TEMPORO-MANDIBULAIRE)',
+    'Troubles de l’articulation temporo-mandibulaire (ATM)',
   Other: 'Autre',
 };
 

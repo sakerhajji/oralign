@@ -54,11 +54,12 @@ export function OrderPatientCell({
   const { t } = useT();
   const name = patient?.fullName ?? emptyLabel;
   const age = getAge(patient?.dateOfBirth);
-  const gender = patient?.gender
+  const patientGender = patient?.gender?.toLowerCase();
+  const gender = patientGender
     ? t(
-        patient.gender === 'male'
+        patientGender === 'male'
           ? 'ordersPage.patientGenderMale'
-          : patient.gender === 'female'
+          : patientGender === 'female'
             ? 'ordersPage.patientGenderFemale'
             : 'ordersPage.patientGenderOther',
       )

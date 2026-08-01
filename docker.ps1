@@ -356,7 +356,7 @@ Service URLs:
   Backend:   http://localhost:3000
   API Docs:  http://localhost:3000/docs
   Database:  localhost:5432 (user: oralign)
-  Redis:     localhost:6379
+  Redis:     internal Docker service redis:6379
 "@
     Write-Host $help -ForegroundColor Cyan
 }

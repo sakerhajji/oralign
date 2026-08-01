@@ -221,7 +221,7 @@ ${YELLOW}Service URLs:${NC}
   Backend:   ${BLUE}http://localhost:3000${NC}
   API Docs:  ${BLUE}http://localhost:3000/docs${NC}
   Database:  ${BLUE}localhost:5432${NC} (user: oralign)
-  Redis:     ${BLUE}localhost:6379${NC}
+    Redis:     ${BLUE}internal Docker service redis:6379${NC}
 EOF
 }
 

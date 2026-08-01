@@ -138,11 +138,14 @@ const VALUE_FR: Record<string, string> = {
   Improved: 'Amélioration',
   'Correct only anterior': 'Corriger seulement les antérieurs',
   'Correct only posterior': 'Corriger seulement les postérieurs',
-  // IPR / expansion segments
+  // IPR / expansion choices
   No: 'Non',
   Anterior: 'Antérieurs',
   Posterior: 'Postérieurs',
   Both: 'Les deux',
+  Priority: 'En priorité',
+  'If necessary': 'Si nécessaire',
+  'No IPR': 'Pas d’IPR',
   'No expansion': 'Pas d’expansion',
   // spaces
   'Close all spaces': 'Fermer tous les espaces',
@@ -176,6 +179,8 @@ const CONDITION_FR: Record<string, string> = {
   'Increased overjet': 'Surplomb augmenté',
   'Unesthetic smile': 'Sourire inesthétique',
   'Dental shape anomaly': 'Anomalie de forme dentaire',
+  'TMJ problem (temporomandibular dislocation)':
+    'PROBLÈME ATM (LUXATION TEMPORO-MANDIBULAIRE)',
   Other: 'Autre',
 };
 
@@ -226,7 +231,7 @@ const FILE_CATEGORY_FR: Record<string, string> = {
   stl: 'Scan 3D (STL)',
   zip: 'CBCT / DICOM (ZIP)',
   dental_table: 'Tableau de traitement',
-  other: 'Autre',
+  other: 'DICOM',
 };
 
 /**

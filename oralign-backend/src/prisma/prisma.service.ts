@@ -140,6 +140,14 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     return this.prisma.blogImage;
   }
 
+  get communitySubmission() {
+    return this.prisma.communitySubmission;
+  }
+
+  get communitySubmissionMedia() {
+    return this.prisma.communitySubmissionMedia;
+  }
+
   // ─── Prisma utilities ─────────────────────────────────────────────────────
 
   /**

@@ -30,8 +30,8 @@ services:
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_secure_password}
     volumes:
       - redis_data:/data
-    ports:
-      - "6379:6379"
+    # Redis is consumed by the backend over the private Docker network.
+    # Do not publish 6379 on the host: another local stack may use it.
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_secure_password}", "ping"]
       interval: 10s

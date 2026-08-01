@@ -45,6 +45,7 @@ export const CONDITION_DICT_KEY: Record<string, string> = {
   'Increased overjet': 'orderForm.patient.condIncreasedOverjet',
   'Unesthetic smile': 'orderForm.patient.condUnestheticSmile',
   'Dental shape anomaly': 'orderForm.patient.condDentalShapeAnomaly',
+  'TMJ problem (temporomandibular dislocation)': 'orderForm.patient.condTmjDislocation',
   Other: 'orderForm.patient.condOther',
 };
 

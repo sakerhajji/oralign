@@ -1945,12 +1945,15 @@ function TreatmentStep({
 }
 
 // ─── Structured option tables for the mechanics fields ──────────────────────
-// Each control writes a short structured string into the existing free-text
-// backend column (e.g. ipr: "Both"). The wizard parses the same string back
-// so the radio reflects what was previously chosen.
+// These controls write stable English values into the existing free-text
+// columns. The normalizers below also understand the previous
+// Anterior / Posterior / Both values so older drafts remain editable.
 
-const segmentOptions = ['No', 'Anterior', 'Posterior', 'Both'] as const;
-type Segment = (typeof segmentOptions)[number];
+const iprOptions = ['Priority', 'If necessary', 'No IPR'] as const;
+type IprOption = (typeof iprOptions)[number];
+
+const expansionOptions = ['Priority', 'If necessary', 'No expansion'] as const;
+type ExpansionOption = (typeof expansionOptions)[number];
 
 // Bite-ramp placement options. Re-spec'd at the clinic's request to
 // the occlusal-stop + tooth-group set the planners actually use:
@@ -1960,32 +1963,25 @@ type Segment = (typeof segmentOptions)[number];
 // resolve via BITE_RAMPS_KEY → dict). Storage values stay the stable English
 // keys so existing saved orders keep working; only display order + labels changed.
 const biteRampOptions = ['Occlusal stop', 'Incisors', 'Molars', 'Canines'] as const;
-const expansionOptions = ['No expansion', 'Anterior', 'Posterior', 'Both'] as const;
 
-/**
- * Pack a segment selection into the saved string.
- *
- * History note: an older revision of this UI exposed an extra
- * "No priority / Anterior priority / Posterior priority" radio when
- * `segment === 'Both'`, and packed it into the saved string as
- * `"Both — anterior priority"`. The clinical team asked for that
- * sub-radio to be removed, so we now always pack as a bare segment.
- * `unpackSegment` still tolerates the old strings on read so existing
- * orders don't break — the priority qualifier is simply dropped when
- * the user re-saves.
- */
-function packSegment(segment: Segment): string {
-  return segment === 'No' ? 'No' : segment;
+function normalizeIprChoice(value: string | undefined): IprOption | undefined {
+  const raw = (value ?? '').trim();
+  if (!raw) return undefined;
+  if (/no\s*ipr|^no$/i.test(raw)) return 'No IPR';
+  if (/priority/i.test(raw)) return 'Priority';
+  if (/if\s*necessary|anterior|posterior|both/i.test(raw)) return 'If necessary';
+  return undefined;
 }
 
-/** Recover the segment from a saved string (tolerant of legacy priority suffixes). */
-function unpackSegment(value: string | undefined): Segment {
+function normalizeExpansionChoice(
+  value: string | undefined,
+): ExpansionOption | undefined {
   const raw = (value ?? '').trim();
-  if (!raw || /^no\b/i.test(raw)) return 'No';
-  if (/^anterior/i.test(raw)) return 'Anterior';
-  if (/^posterior/i.test(raw)) return 'Posterior';
-  if (/^both/i.test(raw)) return 'Both';
-  return 'No';
+  if (!raw) return undefined;
+  if (/no\s*expansion|^no$/i.test(raw)) return 'No expansion';
+  if (/priority/i.test(raw)) return 'Priority';
+  if (/if\s*necessary|anterior|posterior|both/i.test(raw)) return 'If necessary';
+  return undefined;
 }
 
 // ─── Elastics ───────────────────────────────────────────────────────────────
@@ -2145,11 +2141,10 @@ function AdvancedMovementStep({
   // Saved values stay English (backend storage key) — labels run
   // through t() for localisation. Tables collect every mapping in one
   // place so a translator can find them at a glance.
-  const SEGMENT_KEY: Record<string, string> = {
-    No: 'orderForm.advanced.segmentNo',
-    Anterior: 'orderForm.advanced.segmentAnterior',
-    Posterior: 'orderForm.advanced.segmentPosterior',
-    Both: 'orderForm.advanced.segmentBoth',
+  const IPR_KEY: Record<IprOption, string> = {
+    Priority: 'orderForm.advanced.iprPriorityOpt',
+    'If necessary': 'orderForm.advanced.iprIfNecessaryOpt',
+    'No IPR': 'orderForm.advanced.iprNoneOpt',
   };
   const BITE_RAMPS_KEY: Record<string, string> = {
     'Occlusal stop': 'orderForm.advanced.biteRampsOcclusalStop',
@@ -2157,11 +2152,10 @@ function AdvancedMovementStep({
     Canines: 'orderForm.advanced.biteRampsCanines',
     Molars: 'orderForm.advanced.biteRampsMolars',
   };
-  const EXPANSION_KEY: Record<string, string> = {
+  const EXPANSION_KEY: Record<ExpansionOption, string> = {
+    Priority: 'orderForm.advanced.expansionPriorityOpt',
+    'If necessary': 'orderForm.advanced.expansionIfNecessaryOpt',
     'No expansion': 'orderForm.advanced.expansionNoneOpt',
-    Anterior: 'orderForm.advanced.segmentAnterior',
-    Posterior: 'orderForm.advanced.segmentPosterior',
-    Both: 'orderForm.advanced.segmentBoth',
   };
   const ELASTIC_KEY: Record<string, string> = {
     'No elastics': 'orderForm.advanced.elasticsNone',
@@ -2191,23 +2185,16 @@ function AdvancedMovementStep({
     'Maintain spaces': 'orderForm.advanced.spacesMaintainOpt',
   };
 
-  // Decode the current saved strings into structured UI state. Each
-  // segment is just `'No' | 'Anterior' | 'Posterior' | 'Both'` now —
-  // the legacy priority qualifier was removed at the clinical team's
-  // request and `unpackSegment` silently drops it from old data.
+  // Decode the current saved strings into the three clinical choices. The
+  // normalizers map legacy segment values to "If necessary" so old drafts
+  // still show a meaningful active option instead of appearing blank.
   //
   // IMPORTANT: an UNSET field decodes to `undefined`, NOT `'No'`. The
   // form must open with NOTHING pre-selected — the doctor actively
-  // picks an option (including "Pas d'IPR" / "Pas d'expansion") rather
-  // than the form quietly defaulting to "No" and silently submitting a
-  // choice the doctor never made. `unpackSegment('')` would return
-  // `'No'`, so we guard on the raw string being non-empty first.
-  const iprSegment: Segment | undefined = (form.ipr ?? '').trim()
-    ? unpackSegment(form.ipr)
-    : undefined;
-  const expansionSegment: Segment | undefined = (form.expansion ?? '').trim()
-    ? unpackSegment(form.expansion)
-    : undefined;
+  // picks an option rather than the form quietly submitting a choice the
+  // doctor never made.
+  const iprChoice = normalizeIprChoice(form.ipr);
+  const expansionChoice = normalizeExpansionChoice(form.expansion);
   // Don't trim here — that strips trailing spaces while the doctor is
   // still typing notes, which made it feel like the spacebar didn't
   // work in the Spaces card. We only need leading whitespace ignored
@@ -2226,13 +2213,12 @@ function AdvancedMovementStep({
     [toothInstructions],
   );
 
-  const setIpr = (segment: Segment) => {
-    updateField('ipr', packSegment(segment));
+  const setIpr = (choice: IprOption) => {
+    updateField('ipr', choice);
   };
 
-  const setExpansion = (segment: Segment) => {
-    const packed = packSegment(segment);
-    updateField('expansion', packed === 'No' ? 'No expansion' : packed);
+  const setExpansion = (choice: ExpansionOption) => {
+    updateField('expansion', choice);
   };
 
   /**
@@ -2373,10 +2359,8 @@ function AdvancedMovementStep({
       </fieldset>
 
       {/* ─── IPR ────────────────────────────────────────────────────────
-          The "No priority / Anterior priority / Posterior priority"
-          sub-radio that used to appear when "Both" was selected has
-          been removed at the clinical team's request — they decide
-          ordering at the chair, not on the form. */}
+          Three direct clinical choices keep the field readable: priority,
+          if necessary, or no IPR. */}
       <fieldset className="space-y-3 rounded-lg border bg-card p-4">
         <legend className="px-1 text-sm font-semibold">IPR</legend>
         <p className="text-xs text-muted-foreground">
@@ -2385,14 +2369,14 @@ function AdvancedMovementStep({
         <div
           role="radiogroup"
           aria-label="IPR"
-          className="grid gap-2 sm:grid-cols-4"
+          className="grid gap-2 sm:grid-cols-3"
         >
-          {segmentOptions.map((opt) => (
+          {iprOptions.map((opt) => (
             <OptionPill
               key={opt}
-              active={iprSegment === opt}
+              active={iprChoice === opt}
               disabled={disabled}
-              label={opt === 'No' ? t('orderForm.advanced.segmentNoIpr') : (SEGMENT_KEY[opt] ? t(SEGMENT_KEY[opt]) : opt)}
+              label={t(IPR_KEY[opt])}
               onClick={() => setIpr(opt)}
             />
           ))}
@@ -2422,9 +2406,7 @@ function AdvancedMovementStep({
         </div>
       </fieldset>
 
-      {/* ─── Expansion ──────────────────────────────────────────────────
-          Same removal as IPR above — no anterior / posterior priority
-          when "Both" is selected. */}
+      {/* ─── Expansion ────────────────────────────────────────────────── */}
       <fieldset className="space-y-3 rounded-lg border bg-card p-4">
         <legend className="px-1 text-sm font-semibold">{t('orderForm.advanced.expansion')}</legend>
         <p className="text-xs text-muted-foreground">
@@ -2433,17 +2415,16 @@ function AdvancedMovementStep({
         <div
           role="radiogroup"
           aria-label={t('orderForm.advanced.expansion')}
-          className="grid gap-2 sm:grid-cols-4"
+          className="grid gap-2 sm:grid-cols-3"
         >
           {expansionOptions.map((opt) => {
-            const norm: Segment = opt === 'No expansion' ? 'No' : opt;
             return (
               <OptionPill
                 key={opt}
-                active={expansionSegment === norm}
+                active={expansionChoice === opt}
                 disabled={disabled}
-                label={EXPANSION_KEY[opt] ? t(EXPANSION_KEY[opt]) : opt}
-                onClick={() => setExpansion(norm)}
+                label={t(EXPANSION_KEY[opt])}
+                onClick={() => setExpansion(opt)}
               />
             );
           })}

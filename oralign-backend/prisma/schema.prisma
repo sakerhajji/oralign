@@ -314,6 +314,9 @@ model User {
   blogPosts                Blog[]              @relation("BlogAuthor")
   blogImages               BlogImage[]         @relation("BlogImageCreatedBy")
 
+  // Patient community submissions reviewed by an admin before publication.
+  reviewedCommunitySubmissions CommunitySubmission[] @relation("CommunitySubmissionReviewedBy")
+
   @@index([email])
   @@index([role])
   @@index([verificationStatus])
@@ -1798,4 +1801,85 @@ model Blog {
   @@index([authorId])
   @@index([deletedAt])
   @@index([status, deletedAt, publishedAt(sort: Desc)])
+}
+
+// ─────────────────────────────────────────
+// PUBLIC COMMUNITY SUBMISSIONS
+// ─────────────────────────────────────────
+
+enum CommunitySubmissionFormat {
+  video
+  photo
+  text
+}
+
+enum CommunitySubmissionRole {
+  adult
+  parent
+  teen
+}
+
+enum CommunitySubmissionTreatmentStatus {
+  in_progress
+  completed
+}
+
+enum CommunitySubmissionStatus {
+  pending
+  approved
+  rejected
+}
+
+model CommunitySubmission {
+  id                String                              @id @default(uuid())
+  format            CommunitySubmissionFormat
+  status            CommunitySubmissionStatus           @default(pending)
+
+  firstName         String                              @db.VarChar(80)
+  lastNameInitial   String                              @db.VarChar(2)
+  phone             String                              @db.VarChar(32)
+  email             String                              @db.VarChar(254)
+  city              String?                             @db.VarChar(120)
+  role              CommunitySubmissionRole
+  childName         String?                             @db.VarChar(80)
+  childAge          Int?
+  treatmentStatus   CommunitySubmissionTreatmentStatus
+
+  why               String                              @db.Text
+  journey           String                              @db.Text
+  satisfied         String?                             @db.Text
+  message           String?                             @db.Text
+  consent           Boolean
+  contactConsent    Boolean                             @default(false)
+
+  reviewNote        String?                             @db.Text
+  reviewedAt        DateTime?
+  reviewedById      String?
+  reviewedBy        User?                               @relation("CommunitySubmissionReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  publishedAt       DateTime?
+  deletedAt         DateTime?
+  createdAt         DateTime                            @default(now())
+  updatedAt         DateTime                            @updatedAt
+
+  media             CommunitySubmissionMedia[]
+
+  @@index([status, deletedAt, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+  @@index([reviewedById])
+}
+
+model CommunitySubmissionMedia {
+  id             String              @id @default(uuid())
+  submissionId   String
+  submission     CommunitySubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  relativePath   String
+  originalName   String?             @db.VarChar(255)
+  mimeType       String              @db.VarChar(100)
+  sizeBytes      Int
+  width          Int?
+  height         Int?
+  durationSeconds Float?
+  createdAt      DateTime            @default(now())
+
+  @@index([submissionId])
 }

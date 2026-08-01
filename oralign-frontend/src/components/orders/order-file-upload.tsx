@@ -90,7 +90,7 @@ const categories = [
   [OrderFileCategory.PDF, 'media.categories.pdf'],
   [OrderFileCategory.IMAGE, 'media.categories.images'],
   [OrderFileCategory.VIDEO, 'media.categories.videos'],
-  [OrderFileCategory.OTHER, 'media.categories.other'],
+  [OrderFileCategory.OTHER, 'media.categories.dicom'],
 ] as const;
 
 // Slot order is meaningful — on a 3-column grid the rows read as:
@@ -172,7 +172,10 @@ const patientImageSlots = [
     category: OrderFileCategory.LOWER_PHOTO,
     icon: ScanLine,
     accept: 'image/*',
-    referenceImage: '/defaultImage/Lowerocclusalview.webp',
+    // Public assets are served immutable in production. Keep a versioned
+    // URL here so browsers fetch the corrected mandibular reference instead
+    // of a previously cached placeholder image.
+    referenceImage: '/defaultImage/Lowerocclusalview.webp?v=20260801',
   },
 ] as const;
 
@@ -2607,6 +2610,7 @@ function ZipUploadAction({
               const ext = (file.originalName?.split('.').pop() ?? '').toLowerCase();
               const isDicom = ext === 'dcm';
               const isZip = ext === 'zip' || file.category === OrderFileCategory.ZIP;
+              const isDICOMBundleFile = file.category === OrderFileCategory.OTHER;
               const Icon = isDicom ? FileImage : isZip ? FileArchive : FileText;
               const iconTint = isDicom
                 ? 'bg-violet-100 text-violet-700'
@@ -2617,9 +2621,11 @@ function ZipUploadAction({
                 ? 'DICOM'
                 : isZip
                   ? t('media.zipAction.zipBadge')
-                  : ext
-                    ? ext.toUpperCase()
-                    : t('media.zipAction.fileBadge');
+                  : isDICOMBundleFile
+                    ? t('media.zipAction.dicomBadge')
+                    : ext
+                      ? ext.toUpperCase()
+                      : t('media.zipAction.fileBadge');
               return (
                 <li
                   key={file.id}

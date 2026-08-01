@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useMemo, useState, type ComponentType, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ComponentType, type FormEvent, type ReactNode } from "react";
 import {
   ArrowRight,
   Check,
@@ -12,17 +12,23 @@ import {
   Sparkles,
   Star,
   UploadCloud,
-  Video,
 } from "lucide-react";
 import { showcaseCases } from "../../_lib/case-gallery";
 import type { Lang } from "../../_lib/i18n/dict";
 import { useShowcaseLang } from "../../_lib/i18n/lang-context";
 import { Reveal } from "../shared/reveal";
 import { SectionHeading } from "../shared/section-heading";
+import { useApprovedCommunitySubmissions, useCreateCommunitySubmission } from "@/lib/hooks";
+import {
+  CommunitySubmissionFormat,
+  CommunitySubmissionRole,
+  CommunitySubmissionTreatmentStatus,
+} from "@/lib/types";
+import { getAvatarUrl } from "@/lib/utils";
 
 type Copy = Record<Lang, string>;
 type Filter = "all" | "adult" | "parent" | "teen" | "done" | "ongoing";
-type Format = "video" | "photo" | "text";
+type Format = "photo" | "text";
 
 const copy = (fr: string, en: string, ar: string): Copy => ({ fr, en, ar });
 
@@ -78,11 +84,6 @@ const pageCopy = {
       "قد تساعد تجربتك شخصاً آخر على اتخاذ الخطوة الأولى. اختر الصيغة الأقرب إليك.",
     ),
     formats: {
-      video: {
-        label: copy("Témoignage vidéo", "Video story", "شهادة فيديو"),
-        description: copy("Partagez votre expérience face caméra.", "Share your experience on camera.", "شارك تجربتك أمام الكاميرا."),
-        badge: copy("Accompagnement gratuit", "Free support", "مساعدة مجانية"),
-      },
       photo: {
         label: copy("Témoignage photo", "Photo story", "شهادة مع صورة"),
         description: copy("Racontez votre parcours avec une ou plusieurs photos.", "Tell your journey with one or more photos.", "احكِ تجربتك مع صورة أو أكثر."),
@@ -117,12 +118,16 @@ const pageCopy = {
     satisfied: copy("Qu'est-ce qui vous a le plus satisfait ?", "What did you enjoy most?", "ما أكثر ما أعجبك؟"),
     message: copy("Un message pour ceux qui hésitent ?", "A message for someone still deciding?", "ماذا تقول لمن لا يزال متردداً؟"),
     photoLabel: copy("Vos photos", "Your photos", "صورك"),
+    mediaLabel: copy("Votre média", "Your media", "ملفك"),
     upload: copy("Ajoutez vos photos", "Add your photos", "أضف صورك"),
     uploadHint: copy("JPG ou PNG · 10 Mo maximum par photo", "JPG or PNG · 10 MB maximum per photo", "JPG أو PNG · 10 ميغابايت كحد أقصى للصورة"),
+    uploadProgress: copy("Téléversement", "Uploading", "جارٍ الرفع"),
+    uploadProcessing: copy("Traitement sécurisé…", "Secure processing…", "جارٍ المعالجة الآمنة…"),
+    selectedFiles: copy("fichier(s) sélectionné(s)", "file(s) selected", "ملف محدد"),
+    previous: copy("Témoignage précédent", "Previous testimonial", "الشهادة السابقة"),
+    next: copy("Témoignage suivant", "Next testimonial", "الشهادة التالية"),
     consent: copy("J'autorise ORALIGN à publier mon témoignage avec mon prénom et l'initiale de mon nom uniquement.", "I allow ORALIGN to publish my story using only my first name and last-name initial.", "أسمح لـ ORALIGN بنشر شهادتي باستخدام اسمي الأول والحرف الأول من لقبي فقط."),
-    contactConsent: copy("J'accepte d'être contacté(e) par l'équipe ORALIGN pour un éventuel témoignage vidéo.", "I agree to be contacted by the ORALIGN team about a possible video story.", "أوافق على تواصل فريق ORALIGN معي بخصوص شهادة فيديو محتملة."),
     privacy: copy("Votre témoignage est relu par notre équipe. Aucune donnée n'est partagée avec des tiers.", "Your story is reviewed by our team. No data is shared with third parties.", "تتم مراجعة شهادتك من فريقنا ولا تتم مشاركة بياناتك مع أي طرف ثالث."),
-    videoNote: copy("Notre équipe vous recontactera pour organiser gratuitement le tournage si votre profil est sélectionné.", "Our team will contact you to arrange the filming for free if your profile is selected.", "سيتواصل معك فريقنا لتنظيم التصوير مجاناً إذا تم اختيار ملفك."),
     submit: copy("Je partage mon expérience", "Share my experience", "أشارك تجربتي"),
     success: copy("Merci pour votre témoignage !", "Thank you for sharing your story!", "شكراً لمشاركة شهادتك!"),
     successBody: copy("Notre équipe va relire votre message et vous recontactera si nécessaire.", "Our team will review your message and contact you if needed.", "سيراجع فريقنا رسالتك وسيتواصل معك عند الحاجة."),
@@ -146,6 +151,12 @@ type Story = {
   meta: Copy;
   tags: Filter[];
   avatarClass: string;
+};
+
+type FeaturedSlide = {
+  quote: Copy;
+  name: Copy;
+  meta: Copy;
 };
 
 const stories: Story[] = [
@@ -256,10 +267,45 @@ const inputClass = "min-h-11 w-full rounded-sm border border-[var(--sc-grey)] bg
 export function TemoignagesSection() {
   const { lang } = useShowcaseLang();
   const [activeFilter, setActiveFilter] = useState<Filter>("all");
+  const [featuredIndex, setFeaturedIndex] = useState(0);
+  const approvedSubmissions = useApprovedCommunitySubmissions();
+  const featuredSlides: FeaturedSlide[] = useMemo(() => [
+    {
+      quote: pageCopy.testimonials.featuredQuote,
+      name: pageCopy.testimonials.featuredName,
+      meta: pageCopy.testimonials.featuredMeta,
+    },
+    ...stories.slice(0, 3).map((story) => ({
+      quote: story.quote,
+      name: story.name,
+      meta: story.meta,
+    })),
+  ], []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setFeaturedIndex((current) => (current + 1) % featuredSlides.length);
+    }, 7000);
+    return () => window.clearInterval(timer);
+  }, [featuredSlides.length]);
+
+  const featuredSlide = featuredSlides[featuredIndex];
+  const featuredInitials = text(featuredSlide.name, lang).split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
 
   const visibleStories = useMemo(
     () => stories.filter((story) => activeFilter === "all" || story.tags.includes(activeFilter)),
     [activeFilter],
+  );
+  const visibleApprovedSubmissions = useMemo(
+    () => (approvedSubmissions.data ?? []).filter((story) => {
+      if (activeFilter === "all") return true;
+      if (activeFilter === "adult") return story.role === CommunitySubmissionRole.ADULT;
+      if (activeFilter === "parent") return story.role === CommunitySubmissionRole.PARENT;
+      if (activeFilter === "teen") return story.role === CommunitySubmissionRole.TEEN;
+      if (activeFilter === "done") return story.treatmentStatus === CommunitySubmissionTreatmentStatus.COMPLETED;
+      return story.treatmentStatus === CommunitySubmissionTreatmentStatus.IN_PROGRESS;
+    }),
+    [activeFilter, approvedSubmissions.data],
   );
 
   return (
@@ -315,15 +361,22 @@ export function TemoignagesSection() {
           </Reveal>
 
           <Reveal delay>
-            <article className="relative mt-14 overflow-hidden bg-[var(--sc-black)] p-6 text-[var(--sc-white)] sm:p-9 lg:p-12">
+            <article className="relative mt-14 overflow-hidden bg-[var(--sc-black)] p-6 text-[var(--sc-white)] sm:p-9 lg:p-12" aria-live="polite">
               <div className="pointer-events-none absolute right-5 top-0 font-serif text-[9rem] leading-none text-[rgba(254,202,22,0.08)]" aria-hidden="true">“</div>
               <Stars />
-              <p className="relative mt-5 max-w-4xl text-lg italic leading-8 text-[var(--sc-white)] sm:text-xl sm:leading-9">“{text(pageCopy.testimonials.featuredQuote, lang)}”</p>
+              <p className="relative mt-5 min-h-[8.5rem] max-w-4xl text-lg italic leading-8 text-[var(--sc-white)] sm:min-h-36 sm:text-xl sm:leading-9">“{text(featuredSlide.quote, lang)}”</p>
               <div className="mt-8 flex items-center gap-3 border-t border-[rgba(242,245,239,0.12)] pt-5">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[rgba(254,202,22,0.12)] text-xs font-bold text-[var(--sc-sun)]">SK</div>
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[rgba(254,202,22,0.12)] text-xs font-bold text-[var(--sc-sun)]">{featuredInitials}</div>
                 <div>
-                  <p className="text-sm font-medium">{text(pageCopy.testimonials.featuredName, lang)}</p>
-                  <p className="text-xs text-[var(--sc-text-mid-on-dark)]">{text(pageCopy.testimonials.featuredMeta, lang)}</p>
+                  <p className="text-sm font-medium">{text(featuredSlide.name, lang)}</p>
+                  <p className="text-xs text-[var(--sc-text-mid-on-dark)]">{text(featuredSlide.meta, lang)}</p>
+                </div>
+                <div className="ml-auto flex items-center gap-1.5" aria-label={text(pageCopy.testimonials.eyebrow, lang)}>
+                  <button type="button" aria-label={text(pageCopy.share.previous, lang)} onClick={() => setFeaturedIndex((current) => (current - 1 + featuredSlides.length) % featuredSlides.length)} className="grid h-9 w-9 place-items-center border border-[rgba(242,245,239,0.2)] text-lg transition-colors hover:border-[var(--sc-sun)] hover:text-[var(--sc-sun)] focus-visible:outline-2 focus-visible:outline-[var(--sc-sun)]">‹</button>
+                  <div className="hidden gap-1.5 sm:flex" role="tablist">
+                    {featuredSlides.map((slide, index) => <button key={slide.name.en} type="button" role="tab" aria-selected={featuredIndex === index} aria-label={`Testimonial ${index + 1}`} onClick={() => setFeaturedIndex(index)} className={`h-1.5 rounded-full transition-all ${featuredIndex === index ? "w-7 bg-[var(--sc-sun)]" : "w-1.5 bg-[rgba(242,245,239,0.35)]"}`} />)}
+                  </div>
+                  <button type="button" aria-label={text(pageCopy.share.next, lang)} onClick={() => setFeaturedIndex((current) => (current + 1) % featuredSlides.length)} className="grid h-9 w-9 place-items-center border border-[rgba(242,245,239,0.2)] text-lg transition-colors hover:border-[var(--sc-sun)] hover:text-[var(--sc-sun)] focus-visible:outline-2 focus-visible:outline-[var(--sc-sun)]">›</button>
                 </div>
               </div>
             </article>
@@ -375,6 +428,42 @@ export function TemoignagesSection() {
                 </article>
               );
             })}
+            {visibleApprovedSubmissions.map((story) => {
+              const media = story.media[0];
+              const mediaUrl = media ? getAvatarUrl(media.relativePath) : null;
+              const statusLabel = story.treatmentStatus === CommunitySubmissionTreatmentStatus.COMPLETED
+                ? text(pageCopy.filters.done, lang)
+                : text(pageCopy.filters.ongoing, lang);
+              return (
+                <article key={story.id} className="group flex flex-col overflow-hidden border border-[var(--sc-grey)] bg-[var(--sc-white)] transition-colors hover:border-[var(--sc-sun-deep)]">
+                  {mediaUrl ? (
+                    <div className="relative aspect-[16/8] overflow-hidden border-b border-[var(--sc-grey)] bg-[var(--sc-grey)]">
+                      {media.mimeType.startsWith("video/") ? (
+                        <video src={mediaUrl} controls preload="metadata" className="h-full w-full object-cover" aria-label={`${story.firstName} — ORALIGN`} />
+                      ) : (
+                        <img src={mediaUrl} alt={`${story.firstName} — ORALIGN`} loading="lazy" className="h-full w-full object-cover object-center transition-transform duration-500 group-hover:scale-[1.02]" />
+                      )}
+                      <span className="absolute left-4 top-4 bg-[var(--sc-white)]/90 px-2.5 py-1 text-[0.56rem] font-medium uppercase tracking-[0.14em] text-[var(--sc-black)]">ORALIGN</span>
+                    </div>
+                  ) : null}
+                  <div className="flex flex-1 flex-col p-6 sm:p-7">
+                    <Stars />
+                    <p className="mt-4 flex-1 text-[0.94rem] italic leading-7 text-[var(--sc-black)]">“{story.message || story.journey}”</p>
+                    <div className="mt-6 flex flex-wrap gap-2">
+                      <Tag value={statusLabel} tone={story.treatmentStatus === CommunitySubmissionTreatmentStatus.COMPLETED ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-[var(--sc-sun)]/25 bg-[var(--sc-sun-3)] text-[var(--sc-sun-deep)]"} />
+                      {story.city ? <Tag value={story.city} /> : null}
+                    </div>
+                    <div className="mt-6 flex items-center gap-3 border-t border-[var(--sc-grey)] pt-4">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--sc-sun-3)] text-xs font-bold text-[var(--sc-sun-deep)]">{`${story.firstName}${story.lastNameInitial}`.slice(0, 2).toUpperCase()}</div>
+                      <div>
+                        <p className="text-sm font-medium">{story.firstName} {story.lastNameInitial}</p>
+                        <p className="text-xs text-[var(--sc-text-mid)]">{story.city || "ORALIGN"}</p>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
           </div>
         </div>
       </section>
@@ -384,18 +473,54 @@ export function TemoignagesSection() {
 
 export function PartagerSection() {
   const { lang } = useShowcaseLang();
-  const [format, setFormat] = useState<Format>("video");
+  const [format, setFormat] = useState<Format>("photo");
   const [role, setRole] = useState("");
   const [photoName, setPhotoName] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const [mediaFiles, setMediaFiles] = useState<File[]>([]);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const createSubmission = useCreateCommunitySubmission();
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setSubmitted(true);
+    const form = event.currentTarget;
+    const values = new FormData(form);
+    const value = (name: string) => String(values.get(name) ?? "").trim();
+    const childAge = value("childAge");
+    setUploadProgress(mediaFiles.length ? 0 : null);
+    createSubmission.mutate({ input: {
+        format: format as CommunitySubmissionFormat,
+        firstName: value("firstName"),
+        lastNameInitial: value("lastNameInitial"),
+        phone: value("phone"),
+        email: value("email"),
+        city: value("city") || undefined,
+        role: value("role") as CommunitySubmissionRole,
+        childName: value("childName") || undefined,
+        childAge: childAge ? Number(childAge) : undefined,
+        treatmentStatus: value("treatmentStatus") as CommunitySubmissionTreatmentStatus,
+        why: value("why"),
+        journey: value("journey"),
+        satisfied: value("satisfied") || undefined,
+        message: value("message") || undefined,
+        consent: values.get("consent") === "on",
+        contactConsent: values.get("contactConsent") === "on",
+        media: mediaFiles,
+      }, onProgress: setUploadProgress }, {
+      onSuccess: () => {
+        setSubmitted(true);
+        setMediaFiles([]);
+        setPhotoName("");
+        setUploadProgress(null);
+        form.reset();
+        setRole("");
+        setFormat("photo");
+      },
+      onError: () => setUploadProgress(null),
+    });
   };
 
   const formatIcons: Record<Format, ComponentType<{ className?: string }>> = {
-    video: Video,
     photo: ImageIcon,
     text: PenLine,
   };
@@ -413,12 +538,12 @@ export function PartagerSection() {
 
         <Reveal delay>
           <form onSubmit={handleSubmit} className="mt-12 border border-[var(--sc-grey)] bg-[var(--sc-white)] p-5 sm:p-8 lg:p-10">
-            <div className="mb-10 grid gap-3 md:grid-cols-3">
+            <div className="mb-10 grid gap-3 md:grid-cols-2">
               {(Object.keys(pageCopy.share.formats) as Format[]).map((item) => {
                 const selected = format === item;
                 const Icon = formatIcons[item];
                 return (
-                  <button key={item} type="button" onClick={() => { setFormat(item); setSubmitted(false); }} className={`relative flex min-h-36 flex-col items-center justify-center border-2 p-5 text-center transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sc-sun-deep)] ${selected ? "border-[var(--sc-sun)] bg-[var(--sc-sun-3)]" : "border-[var(--sc-grey)] hover:border-[var(--sc-sun-deep)]"}`} aria-pressed={selected}>
+                  <button key={item} type="button" onClick={() => { setFormat(item); setSubmitted(false); setMediaFiles([]); setPhotoName(""); }} className={`relative flex min-h-36 flex-col items-center justify-center border-2 p-5 text-center transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sc-sun-deep)] ${selected ? "border-[var(--sc-sun)] bg-[var(--sc-sun-3)]" : "border-[var(--sc-grey)] hover:border-[var(--sc-sun-deep)]"}`} aria-pressed={selected}>
                     {selected ? <span className="absolute right-3 top-3 flex h-5 w-5 items-center justify-center rounded-full bg-[var(--sc-sun)] text-[var(--sc-black)]"><Check className="h-3.5 w-3.5" /></span> : null}
                     <Icon className="h-7 w-7 text-[var(--sc-sun-deep)]" aria-hidden="true" />
                     <span className="mt-3 text-sm font-medium">{text(pageCopy.share.formats[item].label, lang)}</span>
@@ -434,20 +559,20 @@ export function PartagerSection() {
               <h3 className="sc-serif text-xl">{text(pageCopy.share.identityTitle, lang)}</h3>
             </div>
             <div className="mt-5 grid gap-5 sm:grid-cols-2">
-              <Field label={`${text(pageCopy.share.firstName, lang)} *`}><input className={inputClass} required placeholder={text(pageCopy.share.firstName, lang)} /></Field>
-              <Field label={`${text(pageCopy.share.initial, lang)} *`}><input className={inputClass} required maxLength={2} placeholder="B." /></Field>
-              <Field label={`${text(pageCopy.share.phone, lang)} *`}><input className={inputClass} required type="tel" placeholder="+216 98 000 000" /></Field>
-              <Field label={`${text(pageCopy.share.email, lang)} *`}><input className={inputClass} required type="email" placeholder="vous@email.com" /></Field>
-              <Field label={text(pageCopy.share.city, lang)}><input className={inputClass} placeholder={text(pageCopy.share.city, lang)} /></Field>
-              <Field label={`${text(pageCopy.share.role, lang)} *`}><select className={inputClass} required value={role} onChange={(event) => setRole(event.target.value)}><option value="">{text(pageCopy.share.choose, lang)}</option><option value="adult">{text(pageCopy.share.adult, lang)}</option><option value="parent">{text(pageCopy.share.parent, lang)}</option><option value="teen">{text(pageCopy.share.teen, lang)}</option></select></Field>
+              <Field label={`${text(pageCopy.share.firstName, lang)} *`}><input name="firstName" className={inputClass} required placeholder={text(pageCopy.share.firstName, lang)} /></Field>
+              <Field label={`${text(pageCopy.share.initial, lang)} *`}><input name="lastNameInitial" className={inputClass} required maxLength={2} placeholder="B." /></Field>
+              <Field label={`${text(pageCopy.share.phone, lang)} *`}><input name="phone" className={inputClass} required type="tel" placeholder="+216 98 000 000" /></Field>
+              <Field label={`${text(pageCopy.share.email, lang)} *`}><input name="email" className={inputClass} required type="email" placeholder="vous@email.com" /></Field>
+              <Field label={text(pageCopy.share.city, lang)}><input name="city" className={inputClass} placeholder={text(pageCopy.share.city, lang)} /></Field>
+              <Field label={`${text(pageCopy.share.role, lang)} *`}><select name="role" className={inputClass} required value={role} onChange={(event) => setRole(event.target.value)}><option value="">{text(pageCopy.share.choose, lang)}</option><option value="adult">{text(pageCopy.share.adult, lang)}</option><option value="parent">{text(pageCopy.share.parent, lang)}</option><option value="teen">{text(pageCopy.share.teen, lang)}</option></select></Field>
             </div>
 
             {role === "parent" ? (
               <div className="mt-7 border-l-2 border-[var(--sc-sun)] pl-4">
                 <h4 className="sc-serif text-base">{text(pageCopy.share.childTitle, lang)}</h4>
                 <div className="mt-4 grid gap-5 sm:grid-cols-2">
-                  <Field label={text(pageCopy.share.childName, lang)}><input className={inputClass} /></Field>
-                  <Field label={text(pageCopy.share.childAge, lang)}><input className={inputClass} type="number" min={1} max={21} /></Field>
+                  <Field label={`${text(pageCopy.share.childName, lang)} *`}><input name="childName" className={inputClass} required={role === "parent"} /></Field>
+                  <Field label={text(pageCopy.share.childAge, lang)}><input name="childAge" className={inputClass} type="number" min={1} max={21} /></Field>
                 </div>
               </div>
             ) : null}
@@ -457,47 +582,52 @@ export function PartagerSection() {
               <h3 className="sc-serif text-xl">{text(pageCopy.share.experienceTitle, lang)}</h3>
             </div>
             <div className="mt-5 space-y-5">
+              <Field label={text(pageCopy.share.message, lang)}>
+                <textarea name="message" className={`${inputClass} min-h-36 resize-y py-3`} placeholder={text(pageCopy.testimonials.featuredQuote, lang)} />
+              </Field>
               <Field label={`${text(pageCopy.share.status, lang)} *`}>
                 <div className="flex flex-wrap gap-5 pt-1">
                   {["inProgress", "completed"].map((value) => (
                     <label key={value} className="inline-flex min-h-11 items-center gap-2 text-sm">
-                      <input type="radio" name="treatment-status" value={value} required className="h-4 w-4 accent-[var(--sc-sun-deep)]" />
+                      <input type="radio" name="treatmentStatus" value={value === "inProgress" ? "in_progress" : "completed"} required className="h-4 w-4 accent-[var(--sc-sun-deep)]" />
                       {text(pageCopy.share[value as "inProgress" | "completed"], lang)}
                     </label>
                   ))}
                 </div>
               </Field>
-              <Field label={`${text(pageCopy.share.why, lang)} *`}><textarea className={`${inputClass} min-h-28 resize-y py-3`} required placeholder={text(pageCopy.share.why, lang)} /></Field>
-              <Field label={`${text(pageCopy.share.journey, lang)} *`}><textarea className={`${inputClass} min-h-28 resize-y py-3`} required placeholder={text(pageCopy.share.journey, lang)} /></Field>
-              <Field label={text(pageCopy.share.satisfied, lang)}><textarea className={`${inputClass} min-h-20 resize-y py-3`} placeholder={text(pageCopy.share.satisfied, lang)} /></Field>
-              <Field label={text(pageCopy.share.message, lang)}><textarea className={`${inputClass} min-h-20 resize-y py-3`} placeholder={text(pageCopy.share.message, lang)} /></Field>
+              <Field label={`${text(pageCopy.share.why, lang)} *`}><textarea name="why" className={`${inputClass} min-h-28 resize-y py-3`} required placeholder={text(pageCopy.share.why, lang)} /></Field>
+              <Field label={`${text(pageCopy.share.journey, lang)} *`}><textarea name="journey" className={`${inputClass} min-h-28 resize-y py-3`} required placeholder={text(pageCopy.share.journey, lang)} /></Field>
+              <Field label={text(pageCopy.share.satisfied, lang)}><textarea name="satisfied" className={`${inputClass} min-h-20 resize-y py-3`} placeholder={text(pageCopy.share.satisfied, lang)} /></Field>
               {format === "photo" ? (
-                <Field label={text(pageCopy.share.photoLabel, lang)}>
-                  <label className="flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-sm border-2 border-dashed border-[var(--sc-grey)] px-5 text-center transition-colors hover:border-[var(--sc-sun-deep)]">
+                <div className="border-t border-[var(--sc-grey)] pt-6">
+                  <div className="mb-4 flex items-center gap-3">
+                    <UploadCloud className="h-4 w-4 text-[var(--sc-sun-deep)]" aria-hidden="true" />
+                    <h4 className="sc-serif text-xl">{text(pageCopy.share.mediaLabel, lang)}</h4>
+                  </div>
+                  <Field label={text(pageCopy.share.photoLabel, lang)}>
+                    <label className="flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-sm border-2 border-dashed border-[var(--sc-grey)] px-5 text-center transition-colors hover:border-[var(--sc-sun-deep)]">
                     <UploadCloud className="h-7 w-7 text-[var(--sc-sun-deep)]" aria-hidden="true" />
                     <span className="mt-3 text-sm font-medium">{photoName || text(pageCopy.share.upload, lang)}</span>
                     <span className="mt-1 text-xs text-[var(--sc-text-mid)]">{text(pageCopy.share.uploadHint, lang)}</span>
-                    <input type="file" accept="image/jpeg,image/png" multiple className="sr-only" onChange={(event) => setPhotoName(event.target.files?.[0]?.name ?? "")} />
-                  </label>
-                </Field>
-              ) : null}
-              {format === "video" ? (
-                <div className="flex items-start gap-3 border-l-2 border-[var(--sc-sun)] bg-[var(--sc-sun-3)] px-4 py-3 text-sm leading-6 text-[var(--sc-text-mid)]">
-                  <Video className="mt-0.5 h-4 w-4 shrink-0 text-[var(--sc-sun-deep)]" aria-hidden="true" />
-                  <span>{text(pageCopy.share.videoNote, lang)}</span>
+                    <input type="file" accept="image/jpeg,image/png,image/webp" multiple className="sr-only" onChange={(event) => { const files = Array.from(event.target.files ?? []); setMediaFiles(files); setUploadProgress(null); setPhotoName(files.length > 1 ? `${files.length} ${text(pageCopy.share.selectedFiles, lang)}` : files[0]?.name ?? ""); }} />
+                    </label>
+                  </Field>
+                  {uploadProgress !== null ? <div className="mt-4" role="status" aria-live="polite">
+                    <div className="mb-2 flex items-center justify-between text-xs text-[var(--sc-text-mid)]"><span>{uploadProgress >= 100 ? text(pageCopy.share.uploadProcessing, lang) : text(pageCopy.share.uploadProgress, lang)}</span><span>{uploadProgress}%</span></div>
+                    <div className="h-2 overflow-hidden rounded-full bg-[var(--sc-grey)]"><div className="h-full rounded-full bg-[var(--sc-sun-deep)] transition-[width] duration-200" style={{ width: `${Math.max(uploadProgress, 2)}%` }} /></div>
+                  </div> : null}
                 </div>
               ) : null}
             </div>
 
             <div className="mt-8 space-y-4 border-t border-[var(--sc-grey)] pt-6">
-              <label className="flex items-start gap-3 text-sm leading-6 text-[var(--sc-text-mid)]"><input type="checkbox" required className="mt-1 h-4 w-4 shrink-0 accent-[var(--sc-sun-deep)]" />{text(pageCopy.share.consent, lang)}</label>
-              {format === "video" ? <label className="flex items-start gap-3 text-sm leading-6 text-[var(--sc-text-mid)]"><input type="checkbox" required className="mt-1 h-4 w-4 shrink-0 accent-[var(--sc-sun-deep)]" />{text(pageCopy.share.contactConsent, lang)}</label> : null}
+              <label className="flex items-start gap-3 text-sm leading-6 text-[var(--sc-text-mid)]"><input name="consent" type="checkbox" required className="mt-1 h-4 w-4 shrink-0 accent-[var(--sc-sun-deep)]" />{text(pageCopy.share.consent, lang)}</label>
               <div className="flex items-start gap-3 text-xs leading-5 text-[var(--sc-text-mid)]"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[var(--sc-sun-deep)]" aria-hidden="true" />{text(pageCopy.share.privacy, lang)}</div>
             </div>
 
-            <button type="submit" className="mt-8 inline-flex min-h-11 items-center gap-2 bg-[var(--sc-sun)] px-5 py-3 text-[0.68rem] font-bold uppercase tracking-[0.16em] text-[var(--sc-black)] transition-transform hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--sc-sun-deep)]">
+            <button type="submit" disabled={createSubmission.isPending} className="mt-8 inline-flex min-h-11 items-center gap-2 bg-[var(--sc-sun)] px-5 py-3 text-[0.68rem] font-bold uppercase tracking-[0.16em] text-[var(--sc-black)] transition-transform hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--sc-sun-deep)] disabled:cursor-wait disabled:opacity-60">
               {submitted ? <CheckCircle2 className="h-4 w-4" aria-hidden="true" /> : <FormatIcon className="h-4 w-4" aria-hidden="true" />}
-              {submitted ? text(pageCopy.share.success, lang) : text(pageCopy.share.submit, lang)}
+              {createSubmission.isPending ? "…" : submitted ? text(pageCopy.share.success, lang) : text(pageCopy.share.submit, lang)}
             </button>
             {submitted ? <div className="mt-4 border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm text-emerald-800"><p className="font-medium">{text(pageCopy.share.success, lang)}</p><p className="mt-1 text-xs leading-5">{text(pageCopy.share.successBody, lang)}</p></div> : null}
           </form>

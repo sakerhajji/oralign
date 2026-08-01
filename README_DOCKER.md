@@ -2,6 +2,26 @@
 
 ## 🐳 Complete Docker Solution
 
+## One-command startup
+
+Run this from the project root (`C:\Users\saker\Desktop\oraling`) to build and
+start PostgreSQL, Redis, the NestJS API, and the Next.js frontend together:
+
+### Windows PowerShell
+
+```powershell
+.\docker.ps1
+```
+
+### macOS / Linux
+
+```bash
+bash docker.sh
+```
+
+The launcher creates `.env` from the Docker template when needed, waits for
+all services to become healthy, and prints the local URLs.
+
 This project includes a production-ready Docker setup with all services containerized:
 
 - **Frontend**: Next.js (React)
@@ -42,7 +62,7 @@ bash docker.sh
 | **Backend API** | http://localhost:3000 | REST API |
 | **API Docs** | http://localhost:3000/docs | Swagger Documentation |
 | **Database** | localhost:5432 | PostgreSQL |
-| **Cache** | localhost:6379 | Redis |
+| **Cache** | internal `redis:6379` | Redis (not exposed on the host) |
 
 ## 🔧 Common Commands
 

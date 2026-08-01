@@ -30,6 +30,7 @@ import { SliderMediaModule } from './slider-media/slider-media.module';
 import { ReportsModule } from './reports/reports.module';
 import { MediaModule } from './media/media.module';
 import { BlogModule } from './blog/blog.module';
+import { CommunityModule } from './community/community.module';
 
 // ─── Redis URL builder ──────────────────────────────────────────────────────
 // Compose injects REDIS_HOST / REDIS_PORT / REDIS_PASSWORD individually; this
@@ -123,6 +124,7 @@ function buildRedisUrl(): string {
     StorageModule,
     MediaModule,
     BlogModule,
+    CommunityModule,
   ],
   controllers: [AppController],
   providers: [

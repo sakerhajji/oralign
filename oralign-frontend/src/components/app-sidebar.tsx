@@ -34,6 +34,7 @@ import {
   CreditCardIcon,
   FileBarChartIcon,
   GalleryHorizontalIcon,
+  HeartIcon,
   LayoutDashboardIcon,
   MessageCircleIcon,
   NewspaperIcon,
@@ -152,6 +153,13 @@ const NAV_MAIN: NavItemDef[] = [
     url: "/dashboard/blog",
     icon: <NewspaperIcon />,
     // Admin-only — blog CMS (write / publish / manage public articles).
+    roles: [UserRole.ADMIN, UserRole.SUPER_ADMIN],
+  },
+  {
+    titleKey: "chrome.nav.community",
+    url: "/dashboard/community",
+    icon: <HeartIcon />,
+    // Admin-only — moderates public patient stories.
     roles: [UserRole.ADMIN, UserRole.SUPER_ADMIN],
   },
   {

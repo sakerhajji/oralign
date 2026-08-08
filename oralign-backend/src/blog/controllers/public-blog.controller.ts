@@ -8,6 +8,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { BlogAudience } from '@prisma/client';
 import { Public } from '../../common/decorators/public.decorator';
 import { BlogFilterDto } from '../dto/blog.dto';
@@ -71,6 +72,9 @@ export class PublicBlogController {
   }
 
   @Public()
+  // SECURITY (audit L-9): cap view-counter inflation per IP. Best-effort
+  // metric, so a modest per-IP limit is enough to stop trivial scripting.
+  @Throttle({ short: { limit: 6, ttl: 60_000 } })
   @Post(':slug/view')
   @HttpCode(HttpStatus.OK)
   @ApiParam({ name: 'slug', type: String })

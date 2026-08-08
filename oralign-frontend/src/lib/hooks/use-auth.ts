@@ -39,12 +39,17 @@ export function getApiErrorMessage(error: unknown, fallback: string): string {
     const apiMessage = apiData?.message;
 
     switch (apiData?.errorCode) {
+      // The backend intentionally returns one generic code for both an
+      // unknown email and a wrong password (anti-enumeration, audit L-1).
+      case 'INVALID_CREDENTIALS':
+        return 'Invalid email or password.';
+      // Legacy codes — kept so older backends still render a message.
       case 'EMAIL_NOT_FOUND':
-        return 'No account was found with this email address.';
+        return 'Invalid email or password.';
       case 'INVALID_PASSWORD':
         return typeof apiMessage === 'string'
           ? apiMessage
-          : 'The password is incorrect.';
+          : 'Invalid email or password.';
       case 'ACCOUNT_LOCKED':
         return typeof apiMessage === 'string'
           ? apiMessage

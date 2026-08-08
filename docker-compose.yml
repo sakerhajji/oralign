@@ -6,7 +6,7 @@ services:
     container_name: oralign-postgres
     environment:
       POSTGRES_USER: ${DB_USER:-oralign}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-oralign_secure_password}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD not set}
       POSTGRES_DB: ${DB_NAME:-oralign_db}
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
@@ -27,13 +27,13 @@ services:
   redis:
     image: redis:7-alpine
     container_name: oralign-redis
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_secure_password}
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD not set}
     volumes:
       - redis_data:/data
     # Redis is consumed by the backend over the private Docker network.
     # Do not publish 6379 on the host: another local stack may use it.
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_secure_password}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?REDIS_PASSWORD not set}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -58,16 +58,16 @@ services:
       - .env
     environment:
       NODE_ENV: ${NODE_ENV:-production}
-      DATABASE_URL: postgresql://${DB_USER:-oralign}:${DB_PASSWORD:-oralign_secure_password}@postgres:5432/${DB_NAME:-oralign_db}
+      DATABASE_URL: postgresql://${DB_USER:-oralign}:${DB_PASSWORD:?DB_PASSWORD not set}@postgres:5432/${DB_NAME:-oralign_db}
       HTTP_PORT: 3000
-      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change-me-refresh-in-production}
-      JWT_RESET_SECRET: ${JWT_RESET_SECRET:-change-me-reset-in-production}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET not set}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET not set}
+      JWT_RESET_SECRET: ${JWT_RESET_SECRET:?JWT_RESET_SECRET not set}
       JWT_EXPIRATION: ${JWT_EXPIRATION:-900}
       JWT_REFRESH_EXPIRATION: ${JWT_REFRESH_EXPIRATION:-604800}
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_secure_password}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD not set}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3001}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       ENABLE_SWAGGER: ${ENABLE_SWAGGER:-true}
@@ -124,7 +124,7 @@ services:
       target: builder          # builder stage has full node_modules + prisma CLI
     command: npx prisma studio --port 5555 --browser none
     environment:
-      DATABASE_URL: postgresql://${DB_USER:-oralign}:${DB_PASSWORD:-oralign_secure_password}@postgres:5432/${DB_NAME:-oralign_db}
+      DATABASE_URL: postgresql://${DB_USER:-oralign}:${DB_PASSWORD:?DB_PASSWORD not set}@postgres:5432/${DB_NAME:-oralign_db}
     ports:
       - "5555:5555"
     depends_on:

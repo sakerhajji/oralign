@@ -69,6 +69,17 @@ async function bootstrap(): Promise<void> {
     prefix: '/uploads',
     setHeaders: (res) => {
       res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      // SECURITY (audit I-2 / M-9 defence-in-depth): a stored file must
+      // never be interpreted as active content. `nosniff` stops MIME
+      // guessing; the sandbox CSP means that even if an HTML/SVG file
+      // were served here and opened as a document or in an <iframe>, no
+      // script runs. These headers do NOT affect <img>/<video> loads, so
+      // avatars, logos and media still render normally.
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader(
+        'Content-Security-Policy',
+        "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; sandbox",
+      );
     },
   });
 

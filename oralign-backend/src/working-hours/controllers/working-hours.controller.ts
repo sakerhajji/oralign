@@ -48,10 +48,12 @@ export class WorkingHoursController {
   async createWorkingHours(
     @Body('dentistProfileId') dentistProfileId: string,
     @Body() createWorkingHoursDto: CreateWorkingHoursDto,
+    @CurrentUser() user: JwtPayload,
   ): Promise<WorkingHoursResponseDto> {
     return this.workingHoursService.createWorkingHours(
       dentistProfileId,
       createWorkingHoursDto,
+      { userId: user.sub, role: user.role },
     );
   }
 

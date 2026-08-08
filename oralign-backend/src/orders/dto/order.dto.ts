@@ -5,6 +5,7 @@ import {
   OrderFileCategory,
   OrderStatus,
   PatientStage,
+  PaymentMethod,
   ToothInstructionType,
   TreatmentPlanStatus,
 } from '@prisma/client';
@@ -308,6 +309,20 @@ export class InitChunkedUploadDto {
   @ApiProperty({ enum: OrderFileCategory })
   @IsEnum(OrderFileCategory)
   category!: OrderFileCategory;
+}
+
+/**
+ * Body for POST /orders/:id/treatment-fee/pay.
+ *
+ * SECURITY (audit M-4): the amount is intentionally NOT accepted from the
+ * client — it is computed server-side from the configured treatment fee.
+ * The strict global ValidationPipe (whitelist + forbidNonWhitelisted)
+ * rejects any extra `amount` field a client tries to smuggle in.
+ */
+export class PayTreatmentFeeDto {
+  @ApiProperty({ enum: PaymentMethod })
+  @IsEnum(PaymentMethod)
+  method!: PaymentMethod;
 }
 
 // ── Sort fields the list endpoint honours ────────────────────────

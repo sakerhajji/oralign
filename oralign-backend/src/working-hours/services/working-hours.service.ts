@@ -33,7 +33,14 @@ export class WorkingHoursService {
   async createWorkingHours(
     dentistProfileId: string,
     createWorkingHoursDto: CreateWorkingHoursDto,
+    caller: Caller,
   ): Promise<WorkingHoursResponseDto> {
+    // SECURITY (audit M-3): only the profile's owner (or an admin) may
+    // add schedule rows — otherwise any authenticated user could write
+    // onto another clinic's profile. Mirrors update/delete which already
+    // assert ownership.
+    await this.assertOwnership(dentistProfileId, caller);
+
     this.validateTimeFormat(createWorkingHoursDto.openTime);
     this.validateTimeFormat(createWorkingHoursDto.closeTime);
 
@@ -74,6 +81,13 @@ export class WorkingHoursService {
   async getWorkingHoursByDentistProfile(
     dentistProfileId: string,
   ): Promise<WorkingHoursResponseDto[]> {
+    // NOTE (audit L-8): these read endpoints are @Public and also serve the
+    // dentist's OWN onboarding/settings page (via useWorkingHoursByProfile)
+    // BEFORE the profile is listed publicly — so we cannot gate them on
+    // `isListedPublicly` without breaking onboarding. Closing the low-risk
+    // schedule-disclosure properly needs an auth-aware redesign (owner/admin
+    // always; others only for listed+approved profiles) and is tracked as a
+    // follow-up rather than risking the onboarding flow here.
     const key = whKey.byProfile(dentistProfileId);
     const cached = await this.safeGet<WorkingHoursResponseDto[]>(key);
     if (cached) return cached;

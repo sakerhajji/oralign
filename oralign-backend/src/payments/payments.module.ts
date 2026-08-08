@@ -11,8 +11,17 @@ import { PaymentsService } from './services/payments.service';
  * strategy, and the dev-only test helpers.
  *
  * Gateway binding: `MockPaymentGateway` ships today. To plug in a
- * real processor (Stripe / Konnect / Flouci / …) replace the
- * `useClass` below; nothing else in PaymentsService changes.
+ * real processor (Stripe / Konnect / Flouci / …) provide it here.
+ *
+ * SECURITY (audit H-1): MockPaymentGateway ALWAYS returns SUCCESS — it
+ * collects no money, so in production it would let a doctor mark
+ * installments paid and unlock fabrication for free. Rather than refuse
+ * to BOOT (which would take the whole backend down), the gateway itself
+ * fails closed at CHARGE time: in production it throws instead of
+ * returning a fake success, unless an operator has knowingly set
+ * ALLOW_MOCK_PAYMENTS=true (dev/test/staging). The app stays up; only
+ * the un-backed card charge is blocked. Wire a real processor before
+ * enabling card payments in production. See MockPaymentGateway.charge.
  *
  * `DevController` is registered ONLY when NODE_ENV !== production.
  * Its OnModuleInit also throws as a belt-and-braces guard.

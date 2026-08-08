@@ -88,8 +88,14 @@ export class QuotationPaymentPlanController {
     UserRole.designer,
   )
   @HttpCode(HttpStatus.OK)
-  async getInstallments(@Param('id') id: string) {
-    const { installments } = await this.service.getPlan(id);
+  async getInstallments(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    const { installments } = await this.service.getPlan(id, {
+      userId: user.sub,
+      role: user.role as UserRole,
+    });
     return installments;
   }
 
@@ -101,8 +107,11 @@ export class QuotationPaymentPlanController {
     UserRole.designer,
   )
   @HttpCode(HttpStatus.OK)
-  async getBatches(@Param('id') id: string) {
-    const { batches } = await this.service.getPlan(id);
+  async getBatches(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    const { batches } = await this.service.getPlan(id, {
+      userId: user.sub,
+      role: user.role as UserRole,
+    });
     return batches;
   }
 

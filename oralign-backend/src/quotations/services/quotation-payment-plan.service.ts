@@ -423,7 +423,48 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
    * Read the plan (installments + batches) for a quote — exposed
    * to both admin + doctor (the controller checks ownership).
    */
-  async getPlan(quotationId: string) {
+  /**
+   * SECURITY (audit M-1): authorize the caller against the parent order
+   * before returning any of the quote's financial schedule. Without this
+   * an authenticated dentist/designer could read ANY order's installments
+   * + step-batches by supplying a known quotation id (BOLA/CWE-639).
+   * Mirrors the admin / owning-dentist / assigned-designer rule used by
+   * every other quotation read path (QuotationService.assertOrderReadable).
+   */
+  private async assertPlanReadable(
+    quotationId: string,
+    caller: Caller,
+  ): Promise<void> {
+    const quote = await this.prisma.quotation.findUnique({
+      where: { id: quotationId },
+      select: {
+        deletedAt: true,
+        order: {
+          select: { doctorId: true, assignedDesignerId: true, deletedAt: true },
+        },
+      },
+    });
+    if (!quote || quote.deletedAt || !quote.order || quote.order.deletedAt) {
+      throw new NotFoundException('Quotation not found');
+    }
+    if (ADMIN_ROLES.includes(caller.role)) return;
+    if (
+      caller.role === UserRole.dentist &&
+      quote.order.doctorId === caller.userId
+    ) {
+      return;
+    }
+    if (
+      caller.role === UserRole.designer &&
+      quote.order.assignedDesignerId === caller.userId
+    ) {
+      return;
+    }
+    throw new ForbiddenException('You cannot access this payment plan.');
+  }
+
+  async getPlan(quotationId: string, caller: Caller) {
+    await this.assertPlanReadable(quotationId, caller);
     const [installments, batches] = await Promise.all([
       this.prisma.quoteInstallment.findMany({
         where: { quotationId },

@@ -99,11 +99,13 @@ EXISTING_SETTINGS=$($DB -c 'SELECT id FROM "CompanyBillingSettings" LIMIT 1;' | 
 if [ -z "$EXISTING_SETTINGS" ]; then
   SETTINGS_ID=$(db_insert "INSERT INTO \"CompanyBillingSettings\" (
     id, \"companyName\", \"defaultTvaRate\", \"defaultCurrency\",
-    \"devisPrefix\", \"devisNextNumber\", \"isActive\",
+    \"devisPrefix\", \"devisNextNumber\", \"isActive\", \"bankDetails\",
     \"createdAt\", \"updatedAt\"
   ) VALUES (
     gen_random_uuid(), 'TEST_PKPAY_SETTINGS', 0, 'TND',
-    'TST', 1, true, NOW(), NOW()
+    'TST', 1, true,
+    '{\"bankName\":\"Test Bank\",\"accountName\":\"OraLign Test\",\"rib\":\"01234567890123456789\"}'::jsonb,
+    NOW(), NOW()
   ) RETURNING id;")
   remember "CompanyBillingSettings" "$SETTINGS_ID"
   ok "billing-settings created (test-only)"
@@ -197,7 +199,9 @@ PACK_RESP=$(curl -sS -X POST "$API/admin/packs" "${ADMIN_HDR[@]}" \
     "includedCorrections":3,
     "isUnlimitedSteps":false,
     "isUnlimitedCorrections":false,
-    "isForOrthodontists":false
+    "isForOrthodontists":false,
+    "priceTwoArches":900,
+    "currency":"TND"
   }')
 PACK_ID=$(echo "$PACK_RESP" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{process.stdout.write(JSON.parse(d).id||'')}catch(e){}})")
 if [ -n "$PACK_ID" ]; then
@@ -470,9 +474,12 @@ INST2_STATE=$($DB -c "SELECT status FROM \"QuoteInstallment\" WHERE id = '${IIDS
 # ─────────────────────────────────────────────────────────────────────
 step "17. Order propagated to PAID after final installment"
 
+# On full payment the order jumps STRAIGHT to `fabrication` (the money
+# landing means lab work has started — see payments.service.ts). `paid`
+# is still accepted for back-compat with the retired long-lived state.
 ORDER_FINAL=$($DB -c "SELECT status FROM \"DentalOrder\" WHERE id = '$ORDER_ID';" | tr -d ' ')
-[ "$ORDER_FINAL" = "paid" ] && ok "order status → paid" || \
-  bad "expected order status paid, got '$ORDER_FINAL'"
+{ [ "$ORDER_FINAL" = "fabrication" ] || [ "$ORDER_FINAL" = "paid" ]; } && ok "order status → $ORDER_FINAL (fully paid)" || \
+  bad "expected order status fabrication|paid, got '$ORDER_FINAL'"
 
 QUOTE_FINAL=$($DB -c "SELECT \"paymentStatus\" FROM \"Quotation\" WHERE id = '$QUOTE_ID';" | tr -d ' ')
 [ "$QUOTE_FINAL" = "paid" ] && ok "quote paymentStatus → paid" || \

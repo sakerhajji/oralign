@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { randomInt } from 'crypto';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MailService } from '../../mail/mail.service';
@@ -117,7 +118,7 @@ export class AuthService {
     // NotificationEvents.DentistOnboardingCompleted. The bell above is the
     // lightweight in-app "a new account registered" awareness ping.
 
-    const authToken = this.generateTokens(user.id, user.email, user.role);
+    const authToken = this.generateTokens(user.id, user.email, user.role, user.tokenVersion);
 
     return {
       id: user.id,
@@ -147,7 +148,12 @@ export class AuthService {
     });
 
     if (!user || user.deletedAt) {
-      throw new UnauthorizedException('Email not found', 'EMAIL_NOT_FOUND');
+      // SECURITY (audit L-1): identical response to a wrong password so an
+      // attacker cannot tell whether the email exists (no enumeration).
+      throw new UnauthorizedException(
+        'Invalid email or password.',
+        'INVALID_CREDENTIALS',
+      );
     }
 
     if (!user.isActive) {
@@ -187,11 +193,14 @@ export class AuthService {
         },
       });
 
+      // SECURITY (audit L-1): the non-locked case returns the SAME generic
+      // message + code as an unknown email — no "N attempts remaining"
+      // disclosure, which would otherwise confirm the account exists.
       throw new UnauthorizedException(
         shouldLock
           ? 'Account locked due to too many failed attempts. Try again in 15 minutes.'
-          : `Incorrect password. ${MAX_ATTEMPTS - newFailedAttempts} attempt${MAX_ATTEMPTS - newFailedAttempts !== 1 ? 's' : ''} remaining.`,
-        shouldLock ? 'ACCOUNT_LOCKED' : 'INVALID_PASSWORD',
+          : 'Invalid email or password.',
+        shouldLock ? 'ACCOUNT_LOCKED' : 'INVALID_CREDENTIALS',
       );
     }
 
@@ -204,7 +213,7 @@ export class AuthService {
       },
     });
 
-    const authToken = this.generateTokens(user.id, user.email, user.role);
+    const authToken = this.generateTokens(user.id, user.email, user.role, user.tokenVersion);
 
     return {
       id: user.id,
@@ -238,7 +247,7 @@ export class AuthService {
 
     if (user.isEmailVerified) {
       // Already verified — still return tokens so the client can complete the flow
-      const authToken = this.generateTokens(user.id, user.email, user.role);
+      const authToken = this.generateTokens(user.id, user.email, user.role, user.tokenVersion);
       return {
         message: 'Email already verified',
         user: {
@@ -268,9 +277,28 @@ export class AuthService {
     }
 
     if (verifyEmailDto.verificationCode !== user.emailVerificationCode) {
+      // SECURITY (audit M-7): per-account brute-force lockout. After
+      // MAX_VERIFY_ATTEMPTS wrong codes we INVALIDATE the code entirely,
+      // forcing the user to request a fresh one — so an attacker can never
+      // grind the 6-digit space against a single stored code.
+      const MAX_VERIFY_ATTEMPTS = 5;
+      const attempts = user.failedVerificationAttempts + 1;
+      const exhausted = attempts >= MAX_VERIFY_ATTEMPTS;
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: exhausted
+          ? {
+              failedVerificationAttempts: 0,
+              emailVerificationCode: null,
+              emailVerificationExpiry: null,
+            }
+          : { failedVerificationAttempts: attempts },
+      });
       throw new BadRequestException(
-        'Invalid verification code.',
-        'INVALID_CODE',
+        exhausted
+          ? 'Too many incorrect attempts. Please request a new verification code.'
+          : 'Invalid verification code.',
+        exhausted ? 'CODE_INVALIDATED' : 'INVALID_CODE',
       );
     }
 
@@ -280,6 +308,7 @@ export class AuthService {
         isEmailVerified: true,
         emailVerificationCode: null,
         emailVerificationExpiry: null,
+        failedVerificationAttempts: 0,
       },
     });
 
@@ -287,6 +316,7 @@ export class AuthService {
       updated.id,
       updated.email,
       updated.role,
+      updated.tokenVersion,
     );
 
     return {
@@ -363,7 +393,10 @@ export class AuthService {
     }
 
     const resetToken = this.jwtService.sign(
-      { sub: user.id, purpose: 'password-reset' },
+      // `tv` (audit L-2) binds the token to the current password state.
+      // resetPassword bumps tokenVersion, so a reset link is single-use —
+      // replaying it after a successful reset fails the tv check below.
+      { sub: user.id, purpose: 'password-reset', tv: user.tokenVersion },
       {
         secret: requiredSecret('JWT_RESET_SECRET'),
         expiresIn: RESET_TOKEN_TTL_S,
@@ -389,7 +422,7 @@ export class AuthService {
   async resetPassword(
     resetPasswordDto: ResetPasswordDto,
   ): Promise<{ message: string }> {
-    let decoded: { sub: string; purpose?: string };
+    let decoded: { sub: string; purpose?: string; tv?: number };
 
     try {
       decoded = this.jwtService.verify(resetPasswordDto.token, {
@@ -417,14 +450,29 @@ export class AuthService {
       throw new NotFoundException('User not found');
     }
 
+    // SECURITY (audit L-2): single-use. Once this account has been reset (or
+    // the password changed), tokenVersion moved on and an old/replayed link
+    // no longer matches.
+    if ((decoded.tv ?? 0) !== user.tokenVersion) {
+      throw new BadRequestException(
+        'This reset link has already been used or is no longer valid.',
+        'INVALID_RESET_TOKEN',
+      );
+    }
+
     const hashedPassword = await bcrypt.hash(
       resetPasswordDto.newPassword,
       BCRYPT_COST,
     );
 
+    // Bump tokenVersion (audit M-6 + L-2): invalidates every existing
+    // session AND this very reset link.
     await this.prisma.user.update({
       where: { id: user.id },
-      data: { passwordHash: hashedPassword },
+      data: {
+        passwordHash: hashedPassword,
+        tokenVersion: { increment: 1 },
+      },
     });
 
     return { message: 'Password reset successfully' };
@@ -436,7 +484,7 @@ export class AuthService {
 
   async refreshToken(refreshTokenDto: RefreshTokenDto): Promise<AuthTokenDto> {
     try {
-      const decoded = this.jwtService.verify<{ sub: string }>(
+      const decoded = this.jwtService.verify<{ sub: string; tv?: number }>(
         refreshTokenDto.refreshToken,
         { secret: requiredSecret('JWT_REFRESH_SECRET') },
       );
@@ -445,11 +493,24 @@ export class AuthService {
         where: { id: decoded.sub },
       });
 
-      if (!user || user.deletedAt) {
+      // SECURITY (audit M-5): a deactivated / deleted account must not be
+      // able to keep minting fresh access tokens by refreshing.
+      if (!user || user.deletedAt || !user.isActive) {
         throw new UnauthorizedException('User not found');
       }
 
-      return this.generateTokens(user.id, user.email, user.role);
+      // SECURITY (audit M-6): reject a refresh token issued before the
+      // last password reset / change (its `tv` is now stale).
+      if ((decoded.tv ?? 0) !== user.tokenVersion) {
+        throw new UnauthorizedException('Session has been revoked');
+      }
+
+      return this.generateTokens(
+        user.id,
+        user.email,
+        user.role,
+        user.tokenVersion,
+      );
     } catch {
       throw new UnauthorizedException('Invalid refresh token');
     }
@@ -488,9 +549,14 @@ export class AuthService {
     }
 
     const hashedPassword = await bcrypt.hash(dto.newPassword, BCRYPT_COST);
+    // Bump tokenVersion (audit M-6): changing your password logs out every
+    // other existing session.
     await this.prisma.user.update({
       where: { id: user.id },
-      data: { passwordHash: hashedPassword },
+      data: {
+        passwordHash: hashedPassword,
+        tokenVersion: { increment: 1 },
+      },
     });
 
     return { message: 'Password changed successfully' };
@@ -501,16 +567,20 @@ export class AuthService {
   // ─────────────────────────────────────────────────────────────────────────────
 
   private generateOtp(): string {
-    return Math.floor(100_000 + Math.random() * 900_000).toString();
+    // SECURITY (audit M-7): cryptographically-secure RNG, not Math.random.
+    return randomInt(100_000, 1_000_000).toString();
   }
 
   private generateTokens(
     userId: string,
     email: string,
     role: UserRole,
+    tokenVersion: number,
   ): AuthTokenDto {
+    // `tv` (audit M-6) rides in both tokens so a password reset/change can
+    // bump User.tokenVersion and instantly invalidate every prior session.
     const accessToken = this.jwtService.sign(
-      { sub: userId, email, role },
+      { sub: userId, email, role, tv: tokenVersion },
       {
         secret: requiredSecret('JWT_SECRET'),
         expiresIn: '15m',
@@ -518,7 +588,7 @@ export class AuthService {
     );
 
     const refreshToken = this.jwtService.sign(
-      { sub: userId },
+      { sub: userId, tv: tokenVersion },
       {
         secret: requiredSecret('JWT_REFRESH_SECRET'),
         expiresIn: '7d',

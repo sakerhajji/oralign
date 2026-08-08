@@ -137,11 +137,14 @@ export const ordersService = {
   payTreatmentFee: async (
     id: string,
     method: 'card' | 'cash' | 'bank_transfer',
-    amount: number,
+    // `amount` is accepted for call-site compatibility but is NOT sent:
+    // the backend computes the fee server-side (audit M-4) and the strict
+    // ValidationPipe rejects any extra body field.
+    _amount?: number,
   ): Promise<DentalOrder> => {
     const response = await apiClient.post<DentalOrder>(
       `/orders/${id}/treatment-fee/pay`,
-      { method, amount },
+      { method },
     );
     return response.data;
   },
@@ -154,11 +157,12 @@ export const ordersService = {
   uploadTreatmentFeeProof: async (
     id: string,
     proof: File,
-    amount: number,
+    // `amount` kept for call-site compatibility; not sent — the backend
+    // derives the fee server-side (audit M-4).
+    _amount?: number,
   ): Promise<DentalOrder> => {
     const form = new FormData();
     form.append('proof', proof);
-    form.append('amount', String(amount));
     const response = await apiClient.post<DentalOrder>(
       `/orders/${id}/treatment-fee/proof`,
       form,

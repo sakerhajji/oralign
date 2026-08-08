@@ -107,12 +107,15 @@ export class DentistProfileController {
     return this.profileService.createProfile(userId, createProfileDto);
   }
 
-  // Full-DTO read (incl. private taxId / clinicEmail) — authenticated only.
-  // The public directory is served by the separate @Public() `public` routes.
+  // Full private directory dump (every clinic's taxId / clinicEmail).
+  // SECURITY (audit M-2): admin-only — a dentist/designer must not be
+  // able to enumerate every clinic's private business data. The public
+  // directory is served by the separate @Public() `public` routes.
   @Get()
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.admin, 'super_admin' as UserRole)
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Get all dentist profiles with pagination' })
+  @ApiOperation({ summary: 'Get all dentist profiles with pagination (admin)' })
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
   @ApiQuery({ name: 'limit', required: false, type: Number, example: 10 })
   @ApiResponse({
@@ -241,8 +244,14 @@ export class DentistProfileController {
   })
   async getProfileById(
     @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
   ): Promise<DentistProfileResponseDto> {
-    return this.profileService.getProfileById(id);
+    // Pass the caller so the service can redact private taxId/clinicEmail
+    // for anyone who is not the owner or an admin (audit M-2).
+    return this.profileService.getProfileById(id, {
+      userId: user.sub,
+      role: user.role as UserRole,
+    });
   }
 
   @Put(':id')

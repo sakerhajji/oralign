@@ -65,6 +65,9 @@ export class AuthController {
   }
 
   @Public()
+  // SECURITY (audit M-7): rate-limit OTP guessing per IP, in addition to
+  // the per-account lockout in the service.
+  @Throttle({ long: { limit: 10, ttl: 15 * 60_000 } })
   @Post('verify-email')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Verify email address with OTP code' })

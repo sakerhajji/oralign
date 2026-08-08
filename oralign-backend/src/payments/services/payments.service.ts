@@ -204,8 +204,12 @@ export class PaymentsService {
     headers?: Record<string, string | undefined>;
   }): Promise<Payment> {
     const { installmentId, caller } = args;
-    const idempotencyKey =
-      args.idempotencyKey?.trim() || `card_${randomUUID()}`;
+    // SECURITY (audit L-5): namespace the idempotency key per caller. The
+    // key is client-supplied, so without the userId prefix a replay lookup
+    // could return ANOTHER user's Payment on a key collision (BOLA). The
+    // prefix scopes both the stored key and the replay lookup to this user.
+    const rawKey = args.idempotencyKey?.trim() || `card_${randomUUID()}`;
+    const idempotencyKey = `${caller.userId}:${rawKey}`;
 
     // Idempotent fast-path: replayed request → return the existing row.
     const replayed = await this.findByIdempotencyKey(idempotencyKey);

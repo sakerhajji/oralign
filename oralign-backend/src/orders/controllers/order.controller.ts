@@ -30,12 +30,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
-import {
-  OrderFileCategory,
-  OrderStatus,
-  PaymentMethod,
-  UserRole,
-} from '@prisma/client';
+import { OrderFileCategory, OrderStatus, UserRole } from '@prisma/client';
 import { Response } from 'express';
 import {
   CurrentUser,
@@ -53,6 +48,7 @@ import {
   InitChunkedUploadDto,
   OrderFilterDto,
   OrderResponseDto,
+  PayTreatmentFeeDto,
   SubmitOrderDto,
   UpdateOrderDto,
   UpdateOrderStatusDto,
@@ -256,15 +252,15 @@ export class OrderController {
   @ApiResponse({ status: 200, type: OrderResponseDto })
   async payTreatmentFee(
     @Param('id') id: string,
-    @Body() body: { method: PaymentMethod; amount?: number },
+    @Body() body: PayTreatmentFeeDto,
     @CurrentUser() user: JwtPayload,
   ): Promise<OrderResponseDto> {
-    return this.orderService.payTreatmentFee(
-      id,
-      body.method,
-      body.amount ?? 0,
-      { userId: user.sub, role: user.role },
-    );
+    // Amount is computed server-side (audit M-4) — the client only
+    // chooses the payment method.
+    return this.orderService.payTreatmentFee(id, body.method, {
+      userId: user.sub,
+      role: user.role,
+    });
   }
 
   /**
@@ -304,7 +300,6 @@ export class OrderController {
   async uploadTreatmentFeeProof(
     @Param('id') id: string,
     @UploadedFile() proof: Express.Multer.File,
-    @Body() body: { amount?: number },
     @CurrentUser() user: JwtPayload,
   ): Promise<OrderResponseDto> {
     if (!proof) {
@@ -313,14 +308,13 @@ export class OrderController {
       );
     }
     // Store relative to uploads/ so the resolver in the frontend
-    // matches every other media path.
+    // matches every other media path. The amount is derived server-side
+    // (audit M-4), not read from the multipart body.
     const relativePath = `/uploads/treatment-fee-proofs/${proof.filename}`;
-    return this.orderService.uploadTreatmentFeeProof(
-      id,
-      relativePath,
-      body.amount ?? 0,
-      { userId: user.sub, role: user.role },
-    );
+    return this.orderService.uploadTreatmentFeeProof(id, relativePath, {
+      userId: user.sub,
+      role: user.role,
+    });
   }
 
   /**

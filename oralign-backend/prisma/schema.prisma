@@ -252,6 +252,15 @@ model User {
   // Brute-force protection
   failedLoginAttempts Int                @default(0)
   lockedUntil         DateTime?          // null = not locked
+  // Email-verification brute-force protection (audit M-7) — separate
+  // from sign-in so a failed OTP never locks the password login.
+  failedVerificationAttempts Int         @default(0)
+
+  // Session revocation (audit M-6). Embedded in issued access + refresh
+  // tokens; bumped on password reset / change so every previously issued
+  // token becomes invalid. The refresh path rejects a token whose `tv`
+  // no longer matches, so a stolen/old session cannot be renewed.
+  tokenVersion        Int                @default(0)
 
   // Profile
   avatarUrl           String?            // validated path only, no raw URLs

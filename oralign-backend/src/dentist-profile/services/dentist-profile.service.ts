@@ -212,10 +212,31 @@ export class DentistProfileService {
     return this.mapToDto(profile as ProfileWithUser);
   }
 
-  async getProfileById(id: string): Promise<DentistProfileResponseDto> {
+  /**
+   * SECURITY (audit M-2): taxId (matricule fiscal) and clinicEmail are
+   * private business data. Only the profile's owner or an admin may see
+   * them; every other authenticated caller gets them stripped. The full
+   * DTO is still what we CACHE (server-side) — redaction is applied to
+   * the per-request copy so the cache stays caller-agnostic.
+   */
+  private redactPrivateFields(
+    dto: DentistProfileResponseDto,
+    caller?: Caller,
+  ): DentistProfileResponseDto {
+    const privileged =
+      !!caller &&
+      (ADMIN_ROLES.includes(caller.role) || dto.userId === caller.userId);
+    if (privileged) return dto;
+    return { ...dto, taxId: undefined, clinicEmail: undefined };
+  }
+
+  async getProfileById(
+    id: string,
+    caller?: Caller,
+  ): Promise<DentistProfileResponseDto> {
     const key = dpKey.byId(id);
     const cached = await this.safeGet<DentistProfileResponseDto>(key);
-    if (cached) return cached;
+    if (cached) return this.redactPrivateFields(cached, caller);
 
     const profile = await this.profileRepository.findById(id);
     if (!profile || profile.deletedAt) {
@@ -224,7 +245,7 @@ export class DentistProfileService {
 
     const dto = this.mapToDto(profile as ProfileWithUser);
     await this.safeSet(key, dto, TTL.warm);
-    return dto;
+    return this.redactPrivateFields(dto, caller);
   }
 
   async getProfileByUserId(userId: string): Promise<DentistProfileResponseDto> {
@@ -282,7 +303,11 @@ export class DentistProfileService {
 
     const totalPages = Math.ceil(total / limit);
     const result = new PaginatedResponse(
-      profiles.map((p) => this.mapToDto(p as ProfileWithUser)),
+      // SECURITY (audit M-2): a directory search never needs private
+      // taxId / clinicEmail — strip them from every row.
+      profiles.map((p) =>
+        this.redactPrivateFields(this.mapToDto(p as ProfileWithUser)),
+      ),
       total,
       page,
       limit,
@@ -316,7 +341,11 @@ export class DentistProfileService {
 
     const totalPages = Math.ceil(total / limit);
     const result = new PaginatedResponse(
-      profiles.map((p) => this.mapToDto(p as ProfileWithUser)),
+      // SECURITY (audit M-2): strip private taxId / clinicEmail from the
+      // geo-search directory listing.
+      profiles.map((p) =>
+        this.redactPrivateFields(this.mapToDto(p as ProfileWithUser)),
+      ),
       total,
       page,
       limit,

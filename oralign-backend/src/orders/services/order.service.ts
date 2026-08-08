@@ -596,10 +596,30 @@ export class OrderService {
    * Idempotent on already-paid orders (both card + cash branches
    * return the row unchanged so a double-click is harmless).
    */
+  /**
+   * SECURITY (audit M-4): the treatment fee is computed SERVER-SIDE, never
+   * taken from the client. It is the configured `defaultTreatmentFee` from
+   * the active billing settings plus this order's server-snapshotted CBCT
+   * supplement (`cbctFeeAmount`, itself set server-side at order creation).
+   * This is the exact figure the treatment-plan gate checks, so a doctor
+   * can no longer pay 0 (or any client value) to unlock treatment planning.
+   */
+  private async resolveTreatmentFeeAmount(order: {
+    cbctFeeAmount: Prisma.Decimal | null;
+  }): Promise<number> {
+    const settings = await this.prisma.companyBillingSettings.findFirst({
+      where: { isActive: true },
+      orderBy: { updatedAt: 'desc' },
+      select: { defaultTreatmentFee: true },
+    });
+    const base = Number(settings?.defaultTreatmentFee ?? 0);
+    const cbct = order.cbctFeeAmount ? Number(order.cbctFeeAmount) : 0;
+    return base + cbct;
+  }
+
   async payTreatmentFee(
     id: string,
     method: PaymentMethod,
-    amount: number,
     caller: Caller,
   ): Promise<OrderResponseDto> {
     this.ensureCanCreateOrModify(caller);
@@ -608,9 +628,8 @@ export class OrderService {
     if (current.treatmentFeePaidAt) {
       return this.mapToDto(current);
     }
-    if (amount < 0) {
-      throw new BadRequestException('Treatment fee amount must be ≥ 0.');
-    }
+    // Server-computed — the client no longer supplies the amount.
+    const amount = await this.resolveTreatmentFeeAmount(current);
 
     // Cash collection is an in-clinic flow — only an admin records it.
     if (
@@ -683,7 +702,6 @@ export class OrderService {
   async uploadTreatmentFeeProof(
     id: string,
     relativePath: string,
-    amount: number,
     caller: Caller,
   ): Promise<OrderResponseDto> {
     this.ensureCanCreateOrModify(caller);
@@ -693,6 +711,8 @@ export class OrderService {
         'Treatment fee is already paid — receipt upload not allowed.',
       );
     }
+    // Server-computed amount (audit M-4) — not taken from the client.
+    const amount = await this.resolveTreatmentFeeAmount(current);
     await this.ensureBankTransferIsConfigured();
     const order = await this.prisma.dentalOrder.update({
       where: { id },

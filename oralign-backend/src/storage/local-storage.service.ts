@@ -1,10 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { StorageService } from './storage.interface';
 import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import sharp from 'sharp';
-import { PROCESSABLE_IMAGE_MIMES } from '../media/media.constants';
 
 /**
  * Avatars are rendered at 28-40px all over the app but phones upload
@@ -46,9 +45,17 @@ export class LocalStorageService implements StorageService {
       fs.mkdirSync(folderPath, { recursive: true });
     }
 
-    if (options?.optimizeImage && PROCESSABLE_IMAGE_MIMES.has(file.mimetype)) {
+    if (options?.optimizeImage) {
+      // SECURITY (audit M-9): ALWAYS re-encode an "image" upload through
+      // sharp to a fixed, safe .webp — never trust the client MIME/
+      // extension. sharp rasterises real images (and even SVG) into inert
+      // pixels; anything it cannot decode (an HTML/JS/script file dressed
+      // up as image/png, a corrupt file) is REJECTED here rather than
+      // stored raw and later served inline as active content. We do NOT
+      // fall through to writing the original bytes.
+      let optimized: Buffer;
       try {
-        const optimized = await sharp(file.buffer, { failOn: 'none' })
+        optimized = await sharp(file.buffer, { failOn: 'none' })
           .rotate() // bake EXIF orientation (and drop EXIF/GPS metadata)
           .resize({
             width: AVATAR_MAX_DIM,
@@ -58,13 +65,14 @@ export class LocalStorageService implements StorageService {
           })
           .webp({ quality: AVATAR_WEBP_QUALITY })
           .toBuffer();
-        const filename = `${uuidv4()}.webp`;
-        await fs.promises.writeFile(path.join(folderPath, filename), optimized);
-        return `/uploads/${folder}/${filename}`;
       } catch {
-        // Undecodable image (e.g. HEIC) — fall through and store the
-        // original byte-for-byte, exactly like before.
+        throw new BadRequestException(
+          'Unsupported or invalid image file. Please upload a JPG, PNG or WebP image.',
+        );
       }
+      const filename = `${uuidv4()}.webp`;
+      await fs.promises.writeFile(path.join(folderPath, filename), optimized);
+      return `/uploads/${folder}/${filename}`;
     }
 
     // Generate unique filename

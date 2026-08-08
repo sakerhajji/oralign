@@ -187,6 +187,43 @@ export class AppointmentsService {
       throw new NotFoundException('Practitioner not found');
     }
 
+    // SECURITY (audit M-8): bound calendar-squatting + practitioner
+    // mail-bombing from a single email. Each unauthenticated booking
+    // creates a `pending` row that both blocks a public slot and emails
+    // the practitioner, so cap how many active (pending/accepted) requests
+    // one email may hold — per practitioner and overall. The per-IP
+    // throttle limits burst rate; this limits the standing footprint a
+    // rotating-IP attacker can accumulate.
+    const MAX_ACTIVE_PER_PROFILE = 3;
+    const MAX_ACTIVE_PER_EMAIL = 8;
+    const emailMatch = {
+      equals: dto.patientEmail.trim(),
+      mode: 'insensitive' as const,
+    };
+    const [activeForProfile, activeForEmail] = await Promise.all([
+      this.prisma.appointment.count({
+        where: {
+          dentistProfileId: profile.id,
+          patientEmail: emailMatch,
+          status: { in: BOOKED_STATUSES },
+        },
+      }),
+      this.prisma.appointment.count({
+        where: {
+          patientEmail: emailMatch,
+          status: { in: BOOKED_STATUSES },
+        },
+      }),
+    ]);
+    if (
+      activeForProfile >= MAX_ACTIVE_PER_PROFILE ||
+      activeForEmail >= MAX_ACTIVE_PER_EMAIL
+    ) {
+      throw new BadRequestException(
+        'You already have several pending appointment requests. Please wait for them to be handled before booking more.',
+      );
+    }
+
     // Re-derive availability for the requested day and confirm the exact slot
     // is still on offer (respects the buffer, working hours, alignment AND
     // existing bookings). The frontend echoes back an ISO string it received

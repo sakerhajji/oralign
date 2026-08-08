@@ -7,14 +7,24 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
 const TOKEN_KEY = 'accessToken';
 const REFRESH_TOKEN_KEY = 'refreshToken';
 
+// SECURITY (audit L-3): mark the mirror cookie Secure whenever the app is
+// served over HTTPS, so it is never sent over a plaintext connection. It
+// stays non-HttpOnly by necessity (this is a JS-set mirror the middleware
+// reads); the real hardening — moving the refresh token to an HttpOnly
+// cookie — is tracked separately.
+const cookieSecure = (): string =>
+  typeof location !== 'undefined' && location.protocol === 'https:'
+    ? '; Secure'
+    : '';
+
 const setAccessTokenCookie = (accessToken: string): void => {
   if (typeof document === 'undefined') return;
-  document.cookie = `accessToken=${encodeURIComponent(accessToken)}; Path=/; SameSite=Lax`;
+  document.cookie = `accessToken=${encodeURIComponent(accessToken)}; Path=/; SameSite=Lax${cookieSecure()}`;
 };
 
 const clearAccessTokenCookie = (): void => {
   if (typeof document === 'undefined') return;
-  document.cookie = 'accessToken=; Path=/; Max-Age=0; SameSite=Lax';
+  document.cookie = `accessToken=; Path=/; Max-Age=0; SameSite=Lax${cookieSecure()}`;
 };
 
 export const getAccessToken = (): string | null => {

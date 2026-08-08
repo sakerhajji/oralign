@@ -229,17 +229,28 @@ DATABASE_URL="postgresql://oralign:THE_PASSWORD@localhost:5432/oralign_db" \
 
 ### 5.4 SSL renewal
 
-`certbot` installs a systemd timer that runs twice a day. To force a renewal:
+One command does everything — renew, reload nginx, repair the
+auto-renewal timer, install the reload deploy-hook, dry-run the next
+renewal, and probe the live domains:
 
 ```bash
-sudo certbot renew
-sudo systemctl reload nginx
+sudo bash scripts/renew-ssl.sh
 ```
 
-To check expiry:
+> **Incident note (2026-08-08):** both certs reached day 90 and expired
+> (`ERR_CERT_DATE_INVALID` on the site AND the API, which also broke
+> every dashboard call). Auto-renewal had been failing silently since
+> ~day 60 — that is why the script repairs the timer and verifies with
+> a dry run rather than just renewing. Run it after any nginx or
+> certbot change.
+
+Manual equivalents, if you ever need them piecemeal:
 
 ```bash
-sudo certbot certificates
+sudo certbot certificates      # check expiry
+sudo certbot renew             # renew whatever is due
+sudo systemctl reload nginx    # nginx serves the old cert until reloaded
+sudo certbot renew --dry-run   # prove the NEXT auto-renewal will work
 ```
 
 ### 5.5 Backups

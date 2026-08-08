@@ -45,15 +45,53 @@ echo "── Installed certificates ──────────────�
 certbot certificates 2>/dev/null | grep -E "Certificate Name|Domains|Expiry" || true
 echo
 
-# ── 2. Renew whatever is due (expired counts as due) ─────────────
+# ── 2a. Migrate standalone → nginx authenticator ─────────────────
+# THE actual root cause found on this VPS (2026-08-08): the two certs
+# were issued with `--standalone`, which spins up its OWN web server on
+# port 80. System nginx already owns port 80, so every renewal since
+# issuance failed with "Could not bind TCP port 80". The nginx
+# authenticator answers the challenge THROUGH the running nginx — no
+# port binding, no downtime — so we re-issue once with it; certbot then
+# persists `authenticator = nginx` in the renewal conf and every future
+# automatic renewal uses it too.
+echo "── Authenticator check (standalone cannot renew under nginx) ─"
+have_nginx_plugin=0
+certbot plugins 2>/dev/null | grep -qi nginx && have_nginx_plugin=1
+for name in "${DOMAINS[@]}"; do
+  conf="/etc/letsencrypt/renewal/$name.conf"
+  [[ -f "$conf" ]] || { echo "  $name: no renewal conf (never issued here?) — skipping"; continue; }
+  if grep -qE '^authenticator *= *standalone' "$conf"; then
+    if [[ $have_nginx_plugin -eq 1 ]]; then
+      echo "  $name: standalone → nginx (re-issuing through running nginx)"
+      # --cert-name with no -d reuses the lineage's existing domains
+      # (keeps www. on the main cert). -n = non-interactive.
+      certbot certonly --cert-name "$name" --nginx -n
+    else
+      # No nginx plugin installed (apt: python3-certbot-nginx). Keep
+      # standalone but persist stop/start hooks so port 80 is free for
+      # the seconds the challenge needs. Brief downtime — the plugin
+      # path above is strictly better; install it when possible.
+      echo "  $name: nginx plugin missing — keeping standalone with stop/start hooks" >&2
+      certbot certonly --cert-name "$name" --standalone -n \
+        --pre-hook "systemctl stop nginx" --post-hook "systemctl start nginx"
+    fi
+  else
+    echo "  $name: authenticator OK ($(grep -E '^authenticator' "$conf" || echo 'default'))"
+  fi
+done
+echo
+
+# ── 2b. Renew anything else that is due (expired counts as due) ──
 echo "── Renewing ────────────────────────────────────────────────"
 if ! certbot renew; then
   echo >&2
   echo "ERROR: certbot renew FAILED — the error above is the same reason" >&2
   echo "auto-renewal has been failing. Most common causes:" >&2
+  echo "  • port 80 already bound (standalone authenticator) → handled by step 2a; re-run" >&2
   echo "  • port 80 blocked / vhost missing  → check: nginx -T | grep -A2 'listen 80'" >&2
   echo "  • stale ACME account or config     → check: certbot renew --dry-run -v" >&2
   echo "  • DNS no longer points at this VPS → check: dig +short ${DOMAINS[0]}" >&2
+  echo "  • LE rate limit (5 failed validations/hour) → wait an hour, re-run" >&2
   exit 1
 fi
 echo

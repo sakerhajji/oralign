@@ -502,8 +502,18 @@ export class AdminDashboardService {
 
     const doctorIds = Array.from(byDoctor.keys());
     if (doctorIds.length === 0) {
-      await this.setCache(key, []);
-      return [];
+      // Keep the empty payload SHAPE-IDENTICAL to the populated one —
+      // consumers dereference `.byOrders` etc. A bare [] here crashed
+      // the /dashboard/reports page (TypeError → tab crash) whenever
+      // the selected range contained no doctors.
+      const empty = {
+        byOrders: [],
+        byPaidOrders: [],
+        byOutstanding: [],
+        _meta: { groupedRecords: grouped.length },
+      };
+      await this.setCache(key, empty);
+      return empty;
     }
     const profiles = await this.prisma.user.findMany({
       where: { id: { in: doctorIds }, deletedAt: null },

@@ -109,32 +109,32 @@ export default function ReportsPage() {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <ReportMetric
           title={t('reportsPage.revenue')}
-          value={TND(data?.kpis.revenue.total ?? 0, numLocale)}
-          detail={t('reportsPage.revenueDetail', { amount: TND(data?.kpis.revenue.collected ?? 0, numLocale) })}
+          value={TND(data?.kpis?.revenue?.total ?? 0, numLocale)}
+          detail={t('reportsPage.revenueDetail', { amount: TND(data?.kpis?.revenue?.collected ?? 0, numLocale) })}
           icon={WalletIcon}
           loading={summary.isLoading}
         />
         <ReportMetric
           title={t('reportsPage.orders')}
-          value={N(data?.kpis.orders.inRange ?? 0, numLocale)}
+          value={N(data?.kpis?.orders?.inRange ?? 0, numLocale)}
           detail={t('reportsPage.ordersDetail', {
-            paid: N(data?.kpis.orders.paid ?? 0, numLocale),
-            unpaid: N(data?.kpis.orders.unpaid ?? 0, numLocale),
+            paid: N(data?.kpis?.orders?.paid ?? 0, numLocale),
+            unpaid: N(data?.kpis?.orders?.unpaid ?? 0, numLocale),
           })}
           icon={BarChart3Icon}
           loading={summary.isLoading}
         />
         <ReportMetric
           title={t('reportsPage.doctors')}
-          value={N(data?.kpis.doctors.total ?? 0, numLocale)}
-          detail={t('reportsPage.doctorsDetail', { count: N(data?.kpis.doctors.active ?? 0, numLocale) })}
+          value={N(data?.kpis?.doctors?.total ?? 0, numLocale)}
+          detail={t('reportsPage.doctorsDetail', { count: N(data?.kpis?.doctors?.active ?? 0, numLocale) })}
           icon={UsersIcon}
           loading={summary.isLoading}
         />
         <ReportMetric
           title={t('reportsPage.conversion')}
-          value={`${data?.kpis.packs.conversionRatePct ?? 0}%`}
-          detail={t('reportsPage.conversionDetail', { amount: TND(data?.kpis.packs.averageOrderValue ?? 0, numLocale) })}
+          value={`${data?.kpis?.packs?.conversionRatePct ?? 0}%`}
+          detail={t('reportsPage.conversionDetail', { amount: TND(data?.kpis?.packs?.averageOrderValue ?? 0, numLocale) })}
           icon={TrendingUpIcon}
           loading={summary.isLoading}
         />
@@ -173,7 +173,7 @@ export default function ReportsPage() {
           <CardContent>
             {summary.isLoading ? (
               <Skeleton className="h-48 w-full" />
-            ) : (data?.topDoctors.byOrders.length ?? 0) === 0 ? (
+            ) : (data?.topDoctors?.byOrders?.length ?? 0) === 0 ? (
               <EmptyReport />
             ) : (
               <Table>
@@ -186,7 +186,7 @@ export default function ReportsPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {data?.topDoctors.byOrders.map((doctor) => (
+                  {data?.topDoctors?.byOrders?.map((doctor) => (
                     <TableRow key={doctor.doctorId}>
                       <TableCell className="min-w-[180px] whitespace-normal">
                         <div className="font-medium">{doctor.fullName}</div>
@@ -219,7 +219,7 @@ export default function ReportsPage() {
           <CardContent>
             {summary.isLoading ? (
               <Skeleton className="h-48 w-full" />
-            ) : (data?.bestPacks.length ?? 0) === 0 ? (
+            ) : (data?.bestPacks?.length ?? 0) === 0 ? (
               <EmptyReport />
             ) : (
               <Table>
@@ -232,7 +232,7 @@ export default function ReportsPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {data?.bestPacks.map((pack) => (
+                  {data?.bestPacks?.map((pack) => (
                     <TableRow key={pack.packId}>
                       <TableCell className="min-w-[160px] whitespace-normal">
                         <div className="flex flex-wrap items-center gap-2">

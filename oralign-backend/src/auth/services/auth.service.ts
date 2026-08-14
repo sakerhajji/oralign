@@ -367,11 +367,14 @@ export class AuthService {
       },
     });
 
-    await this.mailService.sendVerificationEmail(
-      user.email,
-      user.fullName,
-      code,
-    );
+    // A mail-provider outage must not 500 this endpoint, and it must not
+    // change the response either — a 503 only when the account exists
+    // would let an attacker enumerate accounts during outages. The code
+    // is already stored, so a later resend delivers it once mail is back.
+    // MailService logs the SMTP failure server-side.
+    await this.mailService
+      .sendVerificationEmail(user.email, user.fullName, code)
+      .catch(() => undefined);
 
     return { message: 'If that email exists, a new code has been sent.' };
   }
@@ -406,11 +409,12 @@ export class AuthService {
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
     const resetUrl = `${frontendUrl}/reset-password?token=${resetToken}`;
 
-    await this.mailService.sendPasswordResetEmail(
-      user.email,
-      user.fullName,
-      resetUrl,
-    );
+    // Same contract as resendVerification: swallow mail-provider
+    // failures (logged inside MailService) so the response stays
+    // identical whether or not the account exists.
+    await this.mailService
+      .sendPasswordResetEmail(user.email, user.fullName, resetUrl)
+      .catch(() => undefined);
 
     return { message: 'If that email exists, a reset link has been sent.' };
   }

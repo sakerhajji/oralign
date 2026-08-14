@@ -78,10 +78,17 @@ function SidebarProvider({
   // We use openProp and setOpenProp for control from outside the component.
   const [_open, _setOpen] = React.useState(defaultOpen)
   const open = openProp ?? _open
+  // Ref-mirror so `setOpen` never depends on `open`: with `open` in the
+  // deps, every toggle churned setOpen/toggleSidebar identities, which
+  // re-registered the window keydown listener and defeated React.memo on
+  // every SidebarMenuButton (they re-rendered on each hover-expand flip).
+  const openRef = React.useRef(open)
+  openRef.current = open
   const setOpen = React.useCallback(
     (value: boolean | ((value: boolean) => boolean)) => {
-      const openState = typeof value === "function" ? value(open) : value
-      if (openState === open) return
+      const openState =
+        typeof value === "function" ? value(openRef.current) : value
+      if (openState === openRef.current) return
 
       if (setOpenProp) {
         setOpenProp(openState)
@@ -92,7 +99,7 @@ function SidebarProvider({
       // This sets the cookie to keep the sidebar state.
       document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
     },
-    [setOpenProp, open]
+    [setOpenProp]
   )
 
   // Helper to toggle the sidebar.
@@ -254,7 +261,7 @@ function Sidebar({
         data-slot="sidebar-gap"
         className={cn(
           "relative w-(--sidebar-width) bg-transparent transition-[width] duration-200 ease-linear",
-          "[contain:layout] [will-change:width]",
+          "[contain:layout]",
           "group-data-[mode=icon]:transition-none",
           "group-data-[collapsible=offcanvas]:w-0",
           "group-data-[side=right]:rotate-180",
@@ -268,13 +275,48 @@ function Sidebar({
         data-side={side}
         className={cn(
           "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-linear data-[side=left]:left-0 data-[side=left]:group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)] data-[side=right]:right-0 data-[side=right]:group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)] md:flex",
-          // Width changes are isolated to this fixed overlay, so route
-          // content remains stable while the sidebar opens and closes.
-          "[contain:layout_style] [will-change:width] [transform:translateZ(0)] [backface-visibility:hidden] group-data-[state=expanded]:shadow-[12px_0_32px_-24px_rgba(15,23,42,0.45)]",
+          // The overlay is its own compositor layer, so the reveal below
+          // never invalidates route content.
+          "[contain:layout_style] [transform:translateZ(0)] [backface-visibility:hidden] group-data-[state=expanded]:shadow-[12px_0_32px_-24px_rgba(15,23,42,0.45)]",
           // Adjust the padding for floating and inset variants.
           variant === "floating" || variant === "inset"
             ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"
-            : "group-data-[collapsible=icon]:w-(--sidebar-width-icon) group-data-[side=left]:border-r group-data-[side=right]:border-l",
+            : cn(
+                "group-data-[side=left]:border-r group-data-[side=right]:border-l",
+                // Icon mode expands/collapses via a CLIP-PATH reveal, not a
+                // width animation. Animating `width` (a layout property) ran
+                // style→layout→paint for the whole rail on every frame AND
+                // resized this compositor layer per frame — with a heavy
+                // raster workload on the page (the odontogram's sprite
+                // glyphs) those frames blew the 16 ms budget and the
+                // animation janked. The container now keeps its full
+                // expanded width at all times and the collapsed state clips
+                // it down to the rail; clip-path animates on the compositor
+                // against a constant-size layer, so no layout, no paint and
+                // no re-raster happen per frame. Hit-testing follows the
+                // clip, so the collapsed hover/click target stays the rail
+                // strip exactly as before. The expanded clip leaves slack on
+                // the outer edge so the drop shadow isn't clipped off.
+                // NOTE: chaining two group-data-[...] variants silently drops
+                // one condition in this Tailwind version, so "collapsed in
+                // icon mode" is expressed via data-collapsible=icon (which the
+                // root only sets while collapsed) and "expanded in icon mode"
+                // via one arbitrary group selector carrying both attributes.
+                "group-data-[mode=icon]:[will-change:clip-path] group-data-[mode=icon]:transition-[clip-path,box-shadow] group-data-[mode=icon]:duration-200 group-data-[mode=icon]:ease-linear",
+                "group-[[data-mode=icon][data-state=expanded]]:data-[side=left]:[clip-path:inset(0_-48px_0_0)]",
+                "group-[[data-mode=icon][data-state=expanded]]:data-[side=right]:[clip-path:inset(0_0_0_-48px)]",
+                "group-data-[collapsible=icon]:data-[side=left]:[clip-path:inset(0_calc(100%_-_var(--sidebar-width-icon))_0_0)]",
+                "group-data-[collapsible=icon]:data-[side=right]:[clip-path:inset(0_0_0_calc(100%_-_var(--sidebar-width-icon)))]",
+                // The real border sits on the (clipped-away) full-width edge,
+                // so the collapsed rail draws its edge line with a pseudo
+                // pinned at the icon width; it fades as the panel expands.
+                "group-data-[mode=icon]:after:pointer-events-none group-data-[mode=icon]:after:absolute group-data-[mode=icon]:after:inset-y-0 group-data-[mode=icon]:after:w-px group-data-[mode=icon]:after:bg-sidebar-border group-data-[mode=icon]:after:opacity-0 group-data-[mode=icon]:after:transition-opacity group-data-[mode=icon]:after:duration-200",
+                "group-data-[mode=icon]:data-[side=left]:after:left-[calc(var(--sidebar-width-icon)-1px)]",
+                "group-data-[mode=icon]:data-[side=right]:after:right-[calc(var(--sidebar-width-icon)-1px)]",
+                // `!` needed: this competes with the base after:opacity-0
+                // above at equal specificity and loses on stylesheet order.
+                "group-data-[collapsible=icon]:after:opacity-100!"
+              ),
           className
         )}
         {...props}

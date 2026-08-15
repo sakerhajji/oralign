@@ -619,12 +619,12 @@ export const dict = {
         fr: 'Cale molaire occlusale',
       } as T,
       biteRampsIncisors: {
-        en: 'Maxillary retro-incisor 12–22',
+        en: 'Maxillary retro-incisor 12 to 22',
         fr: 'Rétro-incisive maxillaire de 12 à 22',
       } as T,
       biteRampsMolars: {
-        en: 'Maxillary retro-incisor 11, 21',
-        fr: 'Rétro-incisive maxillaire 11,21',
+        en: 'Maxillary retro-incisor 11 to 21',
+        fr: 'Rétro-incisive maxillaire de 11 à 21',
       } as T,
       biteRampsCanines: {
         en: 'Palatal surface of the upper canine',
@@ -3436,6 +3436,13 @@ export const dict = {
   media: {
     view3d: { en: 'View 3D', fr: 'Voir en 3D' } as T,
     loading3d: { en: 'Loading 3D viewer…', fr: 'Chargement de la vue 3D…' } as T,
+    rendering3d: { en: 'Preparing the 3D model…', fr: 'Préparation du modèle 3D…' } as T,
+    rendering3dHint: {
+      en: 'Building the mesh — almost there.',
+      fr: 'Construction du maillage — presque terminé.',
+    } as T,
+    loadingPercent: { en: '{percent}% downloaded', fr: '{percent} % téléchargé' } as T,
+    loadingSizeUnknown: { en: 'Downloading…', fr: 'Téléchargement…' } as T,
     optimizing: { en: 'Optimizing…', fr: 'Optimisation…' } as T,
     notProvided: { en: 'Not provided', fr: 'Non fourni' } as T,
     uploadingPct: { en: 'Uploading… {pct}%', fr: 'Téléversement… {pct} %' } as T,

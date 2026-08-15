@@ -22,6 +22,8 @@ import { ToothInstruction, ToothInstructionType } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { IndeterminateBar, Progress } from '@/components/ui/progress';
+import { readBodyWithProgress } from '@/lib/utils/read-body-with-progress';
 import { TOOTH_VIEWBOXES } from './tooth-viewboxes';
 import { useT } from '@/lib/i18n/lang-context';
 
@@ -78,6 +80,25 @@ function normalizeSpriteMarkup(markup: string) {
   return wrapper.innerHTML;
 }
 
+/**
+ * Download-progress channel for the sprite. The fetch is a module-level
+ * singleton (one download shared by every odontogram on the page), so the
+ * progress is too: every mounted chart subscribes and renders the same
+ * bar. `null` = byte total unknown (indeterminate); 100 = parsed + in DOM.
+ */
+type SpriteProgressListener = (percent: number | null) => void;
+const spriteProgressListeners = new Set<SpriteProgressListener>();
+let spriteProgress: number | null = 0;
+
+function publishSpriteProgress(percent: number | null) {
+  spriteProgress = percent;
+  spriteProgressListeners.forEach((listener) => listener(percent));
+}
+
+// The sprite is served with a fixed size (~2.1 MB); used as the total when
+// the response is content-encoded and Content-Length can't be trusted.
+const SPRITE_EXPECTED_BYTES = 2_106_392;
+
 function ensureToothSprite() {
   if (typeof window === 'undefined') return Promise.resolve(false);
   if (document.getElementById(SPRITE_HOST_ID)) return Promise.resolve(true);
@@ -88,6 +109,17 @@ function ensureToothSprite() {
       if (!response.ok) {
         throw new Error(`Unable to load tooth sprite (${response.status})`);
       }
+      // Stream so the skeleton can show real download progress — on a
+      // slow clinic connection the 2 MB sprite is the visible wait.
+      const buffer = await readBodyWithProgress(
+        response,
+        SPRITE_EXPECTED_BYTES,
+        (percent) =>
+          // Hold at 99 until the markup is parsed + in the DOM; the
+          // final 100 is published below so "100 %" means "ready".
+          publishSpriteProgress(percent === 100 ? 99 : percent),
+      );
+      const markup = new TextDecoder().decode(buffer);
       const host = document.createElement('div');
       host.id = SPRITE_HOST_ID;
       host.setAttribute('aria-hidden', 'true');
@@ -95,12 +127,14 @@ function ensureToothSprite() {
       host.style.width = '0';
       host.style.height = '0';
       host.style.overflow = 'hidden';
-      host.innerHTML = normalizeSpriteMarkup(await response.text());
+      host.innerHTML = normalizeSpriteMarkup(markup);
       document.body.prepend(host);
+      publishSpriteProgress(100);
       return true;
     })
     .catch(() => {
       toothSpritePromise = null;
+      publishSpriteProgress(null);
       return false;
     });
 
@@ -127,6 +161,20 @@ function useToothSpriteReady() {
   }, []);
 
   return ready;
+}
+
+/** Live download progress of the shared tooth sprite (see above). */
+function useToothSpriteProgress(): number | null {
+  const [percent, setPercent] = useState<number | null>(() => spriteProgress);
+  useEffect(() => {
+    // Sync in case progress advanced between render and subscribe.
+    setPercent(spriteProgress);
+    spriteProgressListeners.add(setPercent);
+    return () => {
+      spriteProgressListeners.delete(setPercent);
+    };
+  }, []);
+  return percent;
 }
 
 // ── Color → instruction mapping ─────────────────────────────────────────────
@@ -423,6 +471,7 @@ export const OdontogramSelector = memo(function OdontogramSelector({
 }) {
   const { t } = useT();
   const toothSpriteReady = useToothSpriteReady();
+  const toothSpriteProgress = useToothSpriteProgress();
   const [showLegend, setShowLegend] = useState(true);
   const [popup, setPopup] = useState<{
     tooth: number;
@@ -737,9 +786,32 @@ export const OdontogramSelector = memo(function OdontogramSelector({
             an accessible status line. Disappears the moment the sprite is
             in the DOM — no layout shift either way. */}
         {!toothSpriteReady && (
-          <p role="status" className="sr-only">
-            {t('orderForm.files.tooth.loadingChart')}
-          </p>
+          // Visible progress strip above the skeleton: the ~2 MB tooth
+          // sprite is the one asset users actually wait for on a slow
+          // clinic connection, so show how far along it is rather than
+          // an unexplained pulse. Determinate while bytes stream in,
+          // indeterminate only if the total can't be known.
+          <div
+            role="status"
+            aria-live="polite"
+            className="flex items-center gap-3 border-b bg-muted/30 px-4 py-2.5 sm:px-5"
+          >
+            <span className="shrink-0 text-xs font-medium text-muted-foreground">
+              {t('orderForm.files.tooth.loadingChart')}
+            </span>
+            <div className="min-w-0 flex-1">
+              {toothSpriteProgress === null ? (
+                <IndeterminateBar className="h-1.5" />
+              ) : (
+                <Progress value={toothSpriteProgress} className="h-1.5" />
+              )}
+            </div>
+            {toothSpriteProgress !== null && (
+              <span className="w-9 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
+                {Math.round(toothSpriteProgress)}%
+              </span>
+            )}
+          </div>
         )}
         <div
           ref={chartHostRef}

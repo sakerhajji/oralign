@@ -1962,7 +1962,10 @@ type ExpansionOption = (typeof expansionOptions)[number];
 // Order matches the four bite-plane locations the clinic requested (labels
 // resolve via BITE_RAMPS_KEY → dict). Storage values stay the stable English
 // keys so existing saved orders keep working; only display order + labels changed.
-const biteRampOptions = ['Occlusal stop', 'Incisors', 'Molars', 'Canines'] as const;
+// NB: the stored key `Molars` is LABELLED "retro-incisor 11, 21" and
+// `Incisors` is "retro-incisor 12–22" (legacy key names). Clinic wants the
+// central-incisor pair (11, 21) listed before the lateral pair (12–22).
+const biteRampOptions = ['Occlusal stop', 'Molars', 'Incisors', 'Canines'] as const;
 
 function normalizeIprChoice(value: string | undefined): IprOption | undefined {
   const raw = (value ?? '').trim();

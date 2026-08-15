@@ -28,7 +28,8 @@ import {
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
+import { IndeterminateBar, Progress } from '@/components/ui/progress';
+import { readBodyWithProgress } from '@/lib/utils/read-body-with-progress';
 import {
   Dialog,
   DialogContent,
@@ -1639,6 +1640,12 @@ function StlModelViewer({
   const [errorMessage, setErrorMessage] = useState<string>();
   const [reloadKey, setReloadKey] = useState(0); // bump to force retry
   const optimizedModelVariant = file.variants?.model ?? null;
+  // Download progress for the loading overlay. `percent` is null while
+  // the byte total is unknown (no Content-Length and no size hint) and
+  // during the parse/render phase — the bar then shows an indeterminate
+  // sweep instead of a misleading frozen fill.
+  const [loadPhase, setLoadPhase] = useState<'download' | 'render'>('download');
+  const [loadPercent, setLoadPercent] = useState<number | null>(0);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -1672,7 +1679,13 @@ function StlModelViewer({
      *   - 413 → nginx body-size limit hit (large STL)
      *   - network error → CORS / DNS / dropped connection
      */
-    const fetchStlBuffer = async (signal: AbortSignal, variant?: string) => {
+    const fetchStlBuffer = async (
+      signal: AbortSignal,
+      variant?: string,
+      // Best-known byte total for the progress bar when the response
+      // carries no usable Content-Length (e.g. transparently gzip'd).
+      expectedBytes?: number,
+    ) => {
       const token = getAccessToken();
       const url = buildDownloadUrl(orderId, file.id, variant);
 
@@ -1706,7 +1719,17 @@ function StlModelViewer({
         );
       }
 
-      const arrayBuffer = await response.arrayBuffer();
+      // Stream the body so the overlay can show real download progress
+      // (a full-arch scan can be hundreds of MB on a clinic connection —
+      // a frozen "Loading…" reads as a hang). Falls back to the plain
+      // buffered read when streaming isn't available.
+      const arrayBuffer = await readBodyWithProgress(
+        response,
+        expectedBytes,
+        (percent) => {
+          if (!disposed) setLoadPercent(percent);
+        },
+      );
       if (arrayBuffer.byteLength === 0) {
         throw new Error('STL download returned 0 bytes.');
       }
@@ -1716,6 +1739,8 @@ function StlModelViewer({
     const init = async () => {
       try {
         setStatus('loading');
+        setLoadPhase('download');
+        setLoadPercent(0);
         setErrorMessage(undefined);
         clearCanvas();
 
@@ -1737,8 +1762,11 @@ function StlModelViewer({
             const glbBuffer = await fetchStlBuffer(
               abortController.signal,
               'model',
+              optimizedModelVariant.sizeBytes,
             );
             if (disposed) return;
+            setLoadPhase('render');
+            setLoadPercent(null);
             const gltfModule = await import(
               'three/examples/jsm/loaders/GLTFLoader.js'
             );
@@ -1754,11 +1782,24 @@ function StlModelViewer({
             });
           } catch {
             loadedGeometry = undefined; // fall through to raw STL
+            setLoadPhase('download');
+            setLoadPercent(0);
           }
         }
 
         if (!loadedGeometry) {
-          const arrayBuffer = await fetchStlBuffer(abortController.signal);
+          const arrayBuffer = await fetchStlBuffer(
+            abortController.signal,
+            undefined,
+            file.size,
+          );
+          if (disposed) return;
+          setLoadPhase('render');
+          setLoadPercent(null);
+          // Yield one frame so the "rendering" overlay paints before the
+          // synchronous STL parse (which can block the thread for a
+          // second or two on a large scan).
+          await new Promise((resolve) => requestAnimationFrame(resolve));
           if (disposed) return;
           loadedGeometry = new loaderModule.STLLoader().parse(arrayBuffer);
         }
@@ -1901,8 +1942,30 @@ function StlModelViewer({
         className="h-full w-full"
       />
       {status === 'loading' && (
-        <div className="absolute inset-0 grid place-items-center bg-background/70 text-sm text-muted-foreground">
-          {t('media.loading3d')}
+        <div
+          className="absolute inset-0 grid place-items-center bg-background/70 p-6"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="w-full max-w-xs space-y-2.5 text-center">
+            <p className="text-sm text-muted-foreground">
+              {loadPhase === 'download'
+                ? t('media.loading3d')
+                : t('media.rendering3d')}
+            </p>
+            {loadPercent === null ? (
+              <IndeterminateBar />
+            ) : (
+              <Progress value={loadPercent} className="h-1.5" />
+            )}
+            <p className="text-[11px] tabular-nums text-muted-foreground/80">
+              {loadPercent === null
+                ? loadPhase === 'download'
+                  ? t('media.loadingSizeUnknown')
+                  : t('media.rendering3dHint')
+                : t('media.loadingPercent', { percent: Math.round(loadPercent) })}
+            </p>
+          </div>
         </div>
       )}
       {status === 'error' && (

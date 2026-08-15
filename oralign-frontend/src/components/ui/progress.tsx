@@ -38,3 +38,37 @@ export function Progress({
     </div>
   );
 }
+
+/**
+ * Indeterminate companion to <Progress/> — a sweeping segment for phases
+ * whose length is unknowable (parsing a mesh, decoding, waiting on a
+ * server that sends no Content-Length). Same track/fill treatment so a
+ * bar can switch between determinate and indeterminate without a jump.
+ * The keyframe is co-located (not in globals.css) so the component is
+ * self-contained; the style tag is deduped by the browser per document.
+ */
+export function IndeterminateBar({
+  className,
+  ...props
+}: Omit<ProgressProps, 'value'>) {
+  return (
+    <div
+      role="progressbar"
+      aria-busy="true"
+      className={cn(
+        'relative h-2 w-full overflow-hidden rounded-full bg-muted',
+        className,
+      )}
+      {...props}
+    >
+      <style>{`@keyframes ui-indeterminate-sweep{0%{transform:translateX(-100%)}100%{transform:translateX(250%)}}`}</style>
+      <div
+        className="h-full w-2/5 rounded-full bg-primary"
+        style={{
+          animation: 'ui-indeterminate-sweep 1.2s ease-in-out infinite',
+          willChange: 'transform',
+        }}
+      />
+    </div>
+  );
+}

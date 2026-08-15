@@ -324,7 +324,21 @@ function Sidebar({
         <div
           data-sidebar="sidebar"
           data-slot="sidebar-inner"
-          className="flex size-full flex-col bg-sidebar group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:shadow-sm group-data-[variant=floating]:ring-1 group-data-[variant=floating]:ring-sidebar-border"
+          className={cn(
+            "flex size-full flex-col bg-sidebar group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:shadow-sm group-data-[variant=floating]:ring-1 group-data-[variant=floating]:ring-sidebar-border",
+            // Icon mode: the container above stays at full width (the
+            // clip-path reveal needs a constant-size layer), but the rail's
+            // content is CENTERED (logo, icon buttons), so the inner box
+            // must still be exactly rail-wide when collapsed or the icons
+            // centre themselves out beyond the 56px clip window. Width
+            // switches INSTANTLY (0s) - one layout per toggle, never one
+            // per frame. On collapse the switch is delayed until the
+            // clip has finished closing (200ms) so labels sweep out under
+            // the clip instead of vanishing on frame 0; on expand it flips
+            // immediately so the opening clip reveals the full layout.
+            variant !== "floating" && variant !== "inset" &&
+              "group-data-[mode=icon]:transition-[width] group-data-[mode=icon]:duration-0 group-data-[mode=icon]:delay-0 group-data-[collapsible=icon]:w-(--sidebar-width-icon) group-data-[collapsible=icon]:delay-200"
+          )}
         >
           {children}
         </div>

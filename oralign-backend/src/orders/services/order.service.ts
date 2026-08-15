@@ -201,19 +201,33 @@ type BankDetailsSnapshot = {
 const ADMIN_ROLES: string[] = [UserRole.admin, UserRole.super_admin];
 
 // ── Per-category upload caps ─────────────────────────────────────────
-// Most slots (clinical photos, intra-oral scans as STL/PLY/OBJ, PDFs)
-// fit comfortably under 50 MB and we cap there to keep storage sane.
+// Clinical photos, PDFs and generic attachments fit comfortably under
+// 50 MB and we cap there to keep storage sane.
 //
-// The exception is CBCT / DICOM bundles, which the clinical team ships
-// as a single ZIP archive containing hundreds of slice files. Real-world
-// CBCT volumes sit between 200 MB and 800 MB; bumping the ZIP-category
-// ceiling to 1 GB covers everything we've seen so far without opening
-// the door for someone to drop a 1 GB JPEG into a clinical-photo slot.
+// Two families get the 1 GB ceiling:
+//   • CBCT / DICOM bundles (`zip`) — a single archive holding hundreds
+//     of slice files; real-world volumes sit between 200 MB and 800 MB.
+//   • 3D scans (`stl` / `ply` / `obj`) — high-resolution intra-oral
+//     scanner exports (full-arch STL from modern scanners routinely
+//     exceed 50 MB, and multi-arch/bite exports go far beyond).
+// The photo/PDF slots stay at 50 MB so a stray giant JPEG can't sneak
+// into a clinical-photo slot.
 //
 // Bytes-only constants (no MB strings) so unit conversion is obvious
 // at the call site.
 export const MAX_FILE_SIZE_DEFAULT_BYTES = 50 * 1024 * 1024;      //  50 MB
 export const MAX_FILE_SIZE_ZIP_BUNDLE_BYTES = 1024 * 1024 * 1024; //   1 GB
+/** Categories that get the 1 GB ceiling: CBCT/DICOM archives + 3D scans. */
+export const LARGE_FILE_CATEGORIES: ReadonlySet<OrderFileCategory> = new Set([
+  OrderFileCategory.zip,
+  OrderFileCategory.stl,
+  OrderFileCategory.ply,
+  OrderFileCategory.obj,
+]);
+export const maxUploadBytesFor = (category: OrderFileCategory): number =>
+  LARGE_FILE_CATEGORIES.has(category)
+    ? MAX_FILE_SIZE_ZIP_BUNDLE_BYTES
+    : MAX_FILE_SIZE_DEFAULT_BYTES;
 
 export const UPLOAD_ROOT = path.join(process.cwd(), 'uploads');
 
@@ -2083,17 +2097,16 @@ export class OrderService {
     file: { originalname: string; size: number },
     category: OrderFileCategory,
   ): void {
-    // CBCT / DICOM bundles arrive in the `zip` category and routinely
-    // hit 200–800 MB; only that category gets the 1 GB ceiling. Every
-    // other slot keeps the 50 MB cap so a stray giant JPEG can't
-    // sneak into a clinical-photo slot.
-    const isZipBundle = category === OrderFileCategory.zip;
-    const maxBytes = isZipBundle
-      ? MAX_FILE_SIZE_ZIP_BUNDLE_BYTES
-      : MAX_FILE_SIZE_DEFAULT_BYTES;
+    // CBCT / DICOM bundles (`zip`) and 3D scans (`stl`/`ply`/`obj`) get
+    // the 1 GB ceiling; every other slot keeps the 50 MB cap so a stray
+    // giant JPEG can't sneak into a clinical-photo slot.
+    const maxBytes = maxUploadBytesFor(category);
     if (file.size > maxBytes) {
-      const maxMb = Math.round(maxBytes / (1024 * 1024));
-      throw new BadRequestException(`File size must be ${maxMb}MB or less`);
+      const limitLabel =
+        maxBytes >= 1024 * 1024 * 1024
+          ? `${Math.round(maxBytes / (1024 * 1024 * 1024))} GB`
+          : `${Math.round(maxBytes / (1024 * 1024))} MB`;
+      throw new BadRequestException(`File size must be ${limitLabel} or less`);
     }
 
     // Policy: accept ANY file type EXCEPT scripts/executables. Rather than a

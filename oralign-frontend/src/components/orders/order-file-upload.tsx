@@ -279,12 +279,16 @@ export function OrderFileUpload({
           />
           <span className="text-sm text-muted-foreground">
             {/* Mirrors the backend cap (order.service.ts:
-                MAX_FILE_SIZE_ZIP_BUNDLE_BYTES vs the default). Only the
-                ZIP category — used for CBCT / DICOM bundles — gets the
-                1 GB ceiling; everything else stays at 50 MB. */}
+                maxUploadBytesFor). CBCT / DICOM ZIP bundles AND 3D scans
+                (STL / PLY / OBJ) get the 1 GB ceiling; everything else
+                stays at 50 MB. */}
             {category === OrderFileCategory.ZIP
               ? t('media.maxZipHint')
-              : t('media.maxFileHint')}
+              : category === OrderFileCategory.STL ||
+                  category === OrderFileCategory.PLY ||
+                  category === OrderFileCategory.OBJ
+                ? t('media.maxScanHint')
+                : t('media.maxFileHint')}
           </span>
         </div>
       )}
@@ -350,6 +354,7 @@ export function ClinicalOrderFiles({
   const filesQuery = useOrderFiles(orderId);
   const uploadFiles = useUploadOrderFiles();
   const deleteFile = useDeleteOrderFile();
+  const queryClient = useQueryClient();
 
   // Lifted clipboard state — shared by every ClinicalMediaSlot below.
   // null when nothing has been copied yet.
@@ -370,23 +375,53 @@ export function ClinicalOrderFiles({
   const files = filesQuery.data ?? [];
 
   const uploadSlot = (slot: UploadSlotDefinition, file: File) => {
+    const named = withSlotName(slot.key, file);
+    const onProgress = (percent: number) =>
+      setActiveUpload((cur) =>
+        cur && cur.key === slot.key ? { ...cur, progress: percent } : cur,
+      );
+    // Brief hold so the user sees 100% before the bar disappears, then
+    // clear (server flush + DB insert happen after transfer).
+    const settle = () => window.setTimeout(() => setActiveUpload(null), 500);
     setActiveUpload({ key: slot.key, progress: 0 });
+
+    // Large scans (STL / PLY / OBJ up to the 1 GB ceiling) go through the
+    // chunked / resumable pipeline — same one the CBCT ZIPs use — instead
+    // of one giant multipart POST: 8 MiB segments with per-chunk retry,
+    // so a flaky clinic connection doesn't restart a 600 MB scan from
+    // zero. Small files keep the proven single-request path.
+    if (named.size > CHUNKED_UPLOAD_THRESHOLD_BYTES) {
+      void (async () => {
+        try {
+          await uploadFileChunked(orderId, named, slot.category, {
+            onProgress,
+          });
+          await queryClient.invalidateQueries({
+            queryKey: orderKeys.files(orderId),
+          });
+          await queryClient.invalidateQueries({
+            queryKey: orderKeys.detail(orderId),
+          });
+        } catch (error) {
+          const err = error as ResumableUploadError & {
+            response?: { data?: { message?: string } };
+          };
+          toast.error(err.response?.data?.message ?? t('media.chunked.failed'));
+        } finally {
+          settle();
+        }
+      })();
+      return;
+    }
+
     uploadFiles.mutate(
       {
         id: orderId,
-        files: [withSlotName(slot.key, file)],
+        files: [named],
         category: slot.category,
-        onProgress: (percent) =>
-          setActiveUpload((cur) =>
-            cur && cur.key === slot.key ? { ...cur, progress: percent } : cur,
-          ),
+        onProgress,
       },
-      {
-        // Brief hold so the user sees 100% before the bar disappears,
-        // then clear (server flush + DB insert happen after transfer).
-        onSettled: () =>
-          window.setTimeout(() => setActiveUpload(null), 500),
-      },
+      { onSettled: settle },
     );
   };
 

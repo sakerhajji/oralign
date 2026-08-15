@@ -339,8 +339,8 @@ export const dict = {
         } as T,
         stlTitle: { en: 'STL files', fr: 'Fichiers STL' } as T,
         stlDesc: {
-          en: 'Upload upper, lower, and occlusion scan files. STL, PLY, and OBJ are supported by the backend.',
-          fr: 'Téléversez les empreintes supérieure, inférieure et d’occlusion. Le serveur accepte STL, PLY et OBJ.',
+          en: 'Upload upper, lower, and occlusion scan files. STL, PLY, and OBJ are supported — up to 1 GB per scan.',
+          fr: 'Téléversez les empreintes supérieure, inférieure et d’occlusion. STL, PLY et OBJ acceptés — jusqu’à 1 Go par scan.',
         } as T,
       },
 
@@ -3470,6 +3470,10 @@ export const dict = {
     maxZipHint: {
       en: 'Max 1 GB per ZIP bundle (CBCT / DICOM)',
       fr: 'Max 1 Go par archive ZIP (CBCT / DICOM)',
+    } as T,
+    maxScanHint: {
+      en: 'Max 1 GB per 3D scan (STL / PLY / OBJ)',
+      fr: 'Max 1 Go par scan 3D (STL / PLY / OBJ)',
     } as T,
     maxFileHint: { en: 'Max 50 MB per file', fr: 'Max 50 Mo par fichier' } as T,
     // ── Chunked / resumable upload (large CBCT ZIPs) ──────────────

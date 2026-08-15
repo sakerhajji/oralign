@@ -10,6 +10,7 @@ import {
   Clock,
   CreditCard,
   Download,
+  ExternalLink,
   FileText,
   Landmark,
   Loader2,
@@ -422,43 +423,93 @@ function ReceiptViewport({
     );
   }
 
+  // Always-visible actions above the preview. Two reasons beyond
+  // convenience: (1) mobile browsers are unreliable at framing PDFs
+  // (Android Chrome renders nothing inside an <iframe>, iOS Safari shows
+  // only page 1), so "open in new tab" is the dependable path there;
+  // (2) an admin often wants the original file for their records.
+  const actions = (
+    <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+      {kind === 'image' && !imgError && (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="gap-1.5"
+          onClick={onImageClick}
+        >
+          <Maximize2 className="h-3.5 w-3.5" />
+          {t('feeUi.receiptDialog.zoomIn')}
+        </Button>
+      )}
+      <Button asChild size="sm" variant="outline" className="gap-1.5">
+        <a href={fileUrl} target="_blank" rel="noopener noreferrer">
+          <ExternalLink className="h-3.5 w-3.5" />
+          {t('feeUi.receiptDialog.openInNewTab')}
+        </a>
+      </Button>
+      <Button asChild size="sm" variant="outline" className="gap-1.5">
+        <a href={fileUrl} download={fileName}>
+          <Download className="h-3.5 w-3.5" />
+          {t('feeUi.receiptDialog.downloadReceipt')}
+        </a>
+      </Button>
+    </div>
+  );
+
   if (kind === 'pdf') {
     return (
-      <iframe
-        title={t('feeUi.receiptDialog.iframeTitle', { name: fileName })}
-        src={fileUrl}
-        className="h-full min-h-[420px] w-full rounded-lg border bg-white shadow-sm"
-      />
+      <div className="flex h-full min-h-[420px] w-full flex-col gap-3">
+        {actions}
+        {/* `#view=FitH` asks Chrome/Firefox's viewer to fit the page
+            width so a phone-scanned receipt is legible without zooming;
+            the toolbar is left ON so multi-page statements stay
+            navigable. The frame's origin is the API host — the backend
+            allows this exact frontend via CSP frame-ancestors on
+            /uploads (see main.ts), which is what makes it render at all
+            cross-origin. */}
+        <iframe
+          title={t('feeUi.receiptDialog.iframeTitle', { name: fileName })}
+          src={`${fileUrl}#view=FitH`}
+          className="min-h-0 w-full flex-1 rounded-lg border bg-white shadow-sm"
+        />
+        <p className="text-center text-[11px] leading-snug text-muted-foreground lg:hidden">
+          {t('feeUi.receiptDialog.pdfMobileHint')}
+        </p>
+      </div>
     );
   }
 
   if (kind === 'image' && !imgError) {
     return (
-      <button
-        type="button"
-        onClick={onImageClick}
-        // Light backdrop + cursor-zoom-in + maximize affordance
-        // advertises that clicking expands to the full lightbox.
-        // The image preserves its aspect ratio inside the container.
-        className="group relative flex h-full w-full cursor-zoom-in items-center justify-center"
-        aria-label={t('feeUi.receiptDialog.openFullAria')}
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={fileUrl}
-          alt={t('feeUi.receiptDialog.receiptImgAlt', { name: fileName })}
-          loading="eager"
-          decoding="async"
-          onError={() => setImgError(true)}
-          className="max-h-full max-w-full select-none rounded-lg border bg-white object-contain shadow-sm transition-transform group-hover:scale-[1.01]"
-          draggable={false}
-        />
-        {/* Subtle "tap to zoom" affordance — only on hover so it
-            doesn't add visual noise to the default view. */}
-        <span className="pointer-events-none absolute right-3 top-3 grid h-7 w-7 place-items-center rounded-full bg-black/60 text-white opacity-0 backdrop-blur transition-opacity group-hover:opacity-100">
-          <Maximize2 className="h-3.5 w-3.5" />
-        </span>
-      </button>
+      <div className="flex h-full w-full flex-col gap-3">
+        {actions}
+        <button
+          type="button"
+          onClick={onImageClick}
+          // Light backdrop + cursor-zoom-in + maximize affordance
+          // advertises that clicking expands to the full lightbox.
+          // The image preserves its aspect ratio inside the container.
+          className="group relative flex min-h-0 w-full flex-1 cursor-zoom-in items-center justify-center"
+          aria-label={t('feeUi.receiptDialog.openFullAria')}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={fileUrl}
+            alt={t('feeUi.receiptDialog.receiptImgAlt', { name: fileName })}
+            loading="eager"
+            decoding="async"
+            onError={() => setImgError(true)}
+            className="max-h-full max-w-full select-none rounded-lg border bg-white object-contain shadow-sm transition-transform group-hover:scale-[1.01]"
+            draggable={false}
+          />
+          {/* Subtle "tap to zoom" affordance — only on hover so it
+              doesn't add visual noise to the default view. */}
+          <span className="pointer-events-none absolute right-3 top-3 grid h-7 w-7 place-items-center rounded-full bg-black/60 text-white opacity-0 backdrop-blur transition-opacity group-hover:opacity-100">
+            <Maximize2 className="h-3.5 w-3.5" />
+          </span>
+        </button>
+      </div>
     );
   }
 
@@ -483,17 +534,20 @@ function ReceiptViewport({
           : t('feeUi.receiptDialog.noPreviewDesc')
       }
       action={
-        <Button asChild size="sm" variant="outline" className="gap-1.5">
-          <a
-            href={fileUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            download={fileName}
-          >
-            <Download className="h-3.5 w-3.5" />
-            {t('feeUi.receiptDialog.downloadReceipt')}
-          </a>
-        </Button>
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <Button asChild size="sm" variant="outline" className="gap-1.5">
+            <a href={fileUrl} target="_blank" rel="noopener noreferrer">
+              <ExternalLink className="h-3.5 w-3.5" />
+              {t('feeUi.receiptDialog.openInNewTab')}
+            </a>
+          </Button>
+          <Button asChild size="sm" variant="outline" className="gap-1.5">
+            <a href={fileUrl} download={fileName}>
+              <Download className="h-3.5 w-3.5" />
+              {t('feeUi.receiptDialog.downloadReceipt')}
+            </a>
+          </Button>
+        </div>
       }
     />
   );

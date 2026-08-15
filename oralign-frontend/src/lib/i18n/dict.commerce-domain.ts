@@ -616,6 +616,12 @@ export const commerceDomainDict = {
         fr: 'Ce format de fichier ne peut pas être prévisualisé dans le navigateur. Téléchargez-le pour l’examiner.',
       } as T,
       downloadReceipt: { en: 'Download receipt', fr: 'Télécharger le reçu' } as T,
+      openInNewTab: { en: 'Open in new tab', fr: 'Ouvrir dans un nouvel onglet' } as T,
+      zoomIn: { en: 'Enlarge', fr: 'Agrandir' } as T,
+      pdfMobileHint: {
+        en: 'If the PDF preview stays blank on this device, open it in a new tab.',
+        fr: 'Si l’aperçu PDF reste vide sur cet appareil, ouvrez-le dans un nouvel onglet.',
+      } as T,
     },
   },
 

@@ -65,9 +65,22 @@ async function bootstrap(): Promise<void> {
   //      avatar / clinic-logo / order-file image previews work in the
   //      browser without disabling the protection on the API endpoints
   //      themselves.
+  // The frontend embeds some uploads in an <iframe> (bank-transfer receipt
+  // PDFs in the admin confirmation dialog). The frontend and API are
+  // DIFFERENT origins (oralign.com.tn vs api.oralign.com.tn; :3001 vs
+  // :3000 in dev), so Helmet's default X-Frame-Options: SAMEORIGIN would
+  // make the browser refuse the frame (Chrome's grey "sad document"
+  // tile). /uploads therefore drops XFO and whitelists the frontend via
+  // CSP frame-ancestors instead — nothing else on the API is framable.
+  const uploadsFrameAncestors = [
+    "'self'",
+    ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : []),
+    ...(!isProd ? ['http://localhost:3001', 'http://127.0.0.1:3001'] : []),
+  ].join(' ');
+
   app.useStaticAssets(join(process.cwd(), 'uploads'), {
     prefix: '/uploads',
-    setHeaders: (res) => {
+    setHeaders: (res, filePath) => {
       res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
       // SECURITY (audit I-2 / M-9 defence-in-depth): a stored file must
       // never be interpreted as active content. `nosniff` stops MIME
@@ -76,9 +89,18 @@ async function bootstrap(): Promise<void> {
       // script runs. These headers do NOT affect <img>/<video> loads, so
       // avatars, logos and media still render normally.
       res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.removeHeader('X-Frame-Options');
+      const isPdf = /\.pdf$/i.test(filePath);
+      // Chrome's built-in PDF viewer refuses to render a document served
+      // with a `sandbox` CSP directive (plugins are disabled in sandboxed
+      // contexts), so PDFs get the frame-ancestors allowlist only. A PDF
+      // cannot run page script in the browser's viewer, so this loses no
+      // real protection; every other file type keeps the full sandbox.
       res.setHeader(
         'Content-Security-Policy',
-        "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; sandbox",
+        isPdf
+          ? `frame-ancestors ${uploadsFrameAncestors}`
+          : `default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; frame-ancestors ${uploadsFrameAncestors}; sandbox`,
       );
     },
   });

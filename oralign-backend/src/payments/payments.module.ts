@@ -4,6 +4,7 @@ import { PaymentsController } from './controllers/payments.controller';
 import { MockPaymentGateway } from './gateways/mock-payment.gateway';
 import { PAYMENT_GATEWAY } from './gateways/payment-gateway.interface';
 import { PaymentsService } from './services/payments.service';
+import { env } from '../common/config/env';
 
 /**
  * Payments module — owns the unified Payment table, the gateway
@@ -27,7 +28,7 @@ import { PaymentsService } from './services/payments.service';
  */
 const controllers = [
   PaymentsController,
-  ...(process.env.NODE_ENV !== 'production' ? [DevController] : []),
+  ...(!env.isProd ? [DevController] : []),
 ];
 
 @Module({

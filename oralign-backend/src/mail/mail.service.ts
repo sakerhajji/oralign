@@ -17,6 +17,7 @@ import {
   renderTreatmentReadyForDoctorEmail,
   renderVerificationEmail,
 } from './templates';
+import { env } from '../common/config/env';
 
 type Transporter = ReturnType<typeof nodemailer.createTransport>;
 
@@ -30,9 +31,7 @@ export class MailService {
   }
 
   private initTransporter(): void {
-    const host = process.env.MAIL_HOST;
-    const user = process.env.MAIL_USER;
-    const pass = process.env.MAIL_PASSWORD;
+    const { host, user, password: pass } = env.mail;
 
     if (!host || !user || !pass) {
       this.logger.warn(
@@ -44,8 +43,8 @@ export class MailService {
 
     this.transporter = nodemailer.createTransport({
       host,
-      port: parseInt(process.env.MAIL_PORT || '587', 10),
-      secure: process.env.MAIL_PORT === '465',
+      port: env.mail.port,
+      secure: env.mail.port === 465,
       auth: { user, pass },
     });
 
@@ -96,23 +95,23 @@ export class MailService {
    *  no parseable address, the authenticated MAIL_USER is used instead
    *  so mail keeps flowing while the misconfiguration is logged. */
   private get fromAddress(): string {
-    const configured = MailService.extractBareAddress(process.env.MAIL_FROM);
+    const configured = MailService.extractBareAddress(env.mail.from);
     if (configured) return configured;
-    if (process.env.MAIL_FROM) {
+    if (env.mail.from) {
       this.logger.error(
-        `MAIL_FROM ("${process.env.MAIL_FROM}") does not contain a valid ` +
+        `MAIL_FROM ("${env.mail.from}") does not contain a valid ` +
           'email address — falling back to MAIL_USER. Set MAIL_FROM to a ' +
           'BARE address (use MAIL_FROM_NAME for the display name).',
       );
     }
-    return MailService.extractBareAddress(process.env.MAIL_USER);
+    return MailService.extractBareAddress(env.mail.user);
   }
 
   /** Full From header with a human display name — "Oralign <addr>". A
    *  recognisable sender name improves open rates and filter reputation. */
   private get from(): { name: string; address: string } {
     return {
-      name: process.env.MAIL_FROM_NAME || 'Oralign',
+      name: env.mail.fromName,
       address: this.fromAddress,
     };
   }
@@ -373,7 +372,7 @@ export class MailService {
       // SMTP not configured. Hint is suppressed in production so we don't
       // leak OTPs or reset URLs into stdout (operators may ship logs to a
       // less-trusted system).
-      const isProd = process.env.NODE_ENV === 'production';
+      const isProd = env.isProd;
       const hint = !isProd && options.devHint ? ` | ${options.devHint}` : '';
       this.logger.warn(
         `[MAIL DISABLED] To: ${options.to} | Subject: ${options.subject}${hint}`,
@@ -399,7 +398,7 @@ export class MailService {
         text: htmlToPlainText(options.html),
         // Give recipients a real mailbox to answer to (a From that can't
         // be replied to is another spam signal). Optional override.
-        replyTo: process.env.MAIL_REPLY_TO || this.fromAddress,
+        replyTo: env.mail.replyTo || this.fromAddress,
       });
       this.logger.log(`Email sent to ${options.to}: "${options.subject}"`);
     } catch (error) {

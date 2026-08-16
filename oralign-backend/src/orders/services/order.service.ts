@@ -28,7 +28,6 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '../../common/exceptions/app.exception';
-import { OrderNotificationService } from '../../mail/order-notification.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OrderAccessPolicy } from '../../common/access/order-access.policy';
 import {
@@ -235,7 +234,6 @@ export class OrderService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly orderAccess: OrderAccessPolicy,
-    private readonly notifications: OrderNotificationService,
     private readonly events: EventEmitter2,
     private readonly mediaProcessing: MediaProcessingService,
     private readonly orderPdf: OrderPdfService,
@@ -572,11 +570,8 @@ export class OrderService {
       include: this.includeOrder,
     });
 
-    // Fire-and-forget — fan-out emails to doctor + all admins. Failures
-    // are logged inside the notification service so a flaky SMTP relay
-    // can't break the submit-order transaction the user is waiting on.
-    void this.notifications.notifyOrderSubmitted(order.id);
-
+    // E-mail fan-out (doctor + admins) is handled by the notification
+    // listener on the OrderSubmitted event below - one subscription point.
     // In-app bell ping for the admin team.
     this.events.emit(NotificationEvents.OrderSubmitted, {
       orderId: order.id,

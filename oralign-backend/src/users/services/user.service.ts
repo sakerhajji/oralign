@@ -15,6 +15,7 @@ import * as bcrypt from 'bcryptjs';
 import { PaginatedResponse } from '../../common/dto/response.dto';
 import { MailService } from '../../mail/mail.service';
 import { Logger } from '@nestjs/common';
+import { env } from '../../common/config/env';
 
 type UserWithProfile = Prisma.UserGetPayload<{
   include: { dentistProfile: true };
@@ -254,7 +255,7 @@ export class UserService {
     });
 
     if (wasNotApproved && verificationStatus === VerificationStatus.approved) {
-      const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3001';
+      const frontendUrl = env.frontendUrl;
       void this.mailService
         .sendApprovalGrantedEmail(
           updatedUser.email,

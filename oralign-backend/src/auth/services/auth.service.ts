@@ -32,6 +32,7 @@ import {
   VerifyEmailResponseDto,
 } from '../dto/auth-response.dto';
 import { UserRole } from '@prisma/client';
+import { env } from '../../common/config/env';
 
 /** 15 minutes in milliseconds */
 const VERIFICATION_CODE_TTL_MS = 15 * 60 * 1_000;
@@ -406,7 +407,7 @@ export class AuthService {
       },
     );
 
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
+    const frontendUrl = env.frontendUrl;
     const resetUrl = `${frontendUrl}/reset-password?token=${resetToken}`;
 
     // Same contract as resendVerification: swallow mail-provider

@@ -22,6 +22,7 @@ import {
   MockSimulateCallbackDto,
 } from '../dto/payment.dto';
 import { PaymentsService } from '../services/payments.service';
+import { env } from '../../common/config/env';
 
 /**
  * DEV-ONLY — DO NOT DEPLOY.
@@ -48,7 +49,7 @@ export class DevController implements OnModuleInit {
   constructor(private readonly payments: PaymentsService) {}
 
   onModuleInit(): void {
-    if (process.env.NODE_ENV === 'production') {
+    if (env.isProd) {
       throw new Error(
         'DevController must not be registered in production. ' +
           'Check that the module is conditionally imported.',
@@ -62,7 +63,7 @@ export class DevController implements OnModuleInit {
     @Body() dto: MockForceInstallmentAvailableDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    if (process.env.NODE_ENV === 'production') {
+    if (env.isProd) {
       throw new ForbiddenException('Dev endpoint disabled in production.');
     }
     return this.payments.devForceInstallmentAvailable({
@@ -77,7 +78,7 @@ export class DevController implements OnModuleInit {
     @Body() dto: MockSimulateCallbackDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    if (process.env.NODE_ENV === 'production') {
+    if (env.isProd) {
       throw new ForbiddenException('Dev endpoint disabled in production.');
     }
     return this.payments.devSimulateCallback({

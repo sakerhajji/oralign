@@ -10,6 +10,7 @@ import {
   ChargeStatus,
   PaymentGateway,
 } from './payment-gateway.interface';
+import { env } from '../../common/config/env';
 
 /**
  * Mock implementation of `PaymentGateway`. Default behaviour: simulate
@@ -29,7 +30,7 @@ export class MockPaymentGateway implements PaymentGateway {
   private readonly controllable: boolean;
 
   constructor() {
-    this.controllable = process.env.MOCK_PAYMENT_CONTROLLABLE === 'true';
+    this.controllable = env.payments.mockControllable;
   }
 
   async charge(input: ChargeInput): Promise<ChargeResult> {
@@ -41,8 +42,8 @@ export class MockPaymentGateway implements PaymentGateway {
     // pending Payment row is created before this call, so a throw leaves the
     // payment un-settled rather than fake-succeeding.
     if (
-      process.env.NODE_ENV === 'production' &&
-      process.env.ALLOW_MOCK_PAYMENTS !== 'true'
+      env.isProd &&
+      !env.payments.allowMockInProduction
     ) {
       this.logger.error(
         'Refusing mock card charge in production (no real payment gateway configured; set ALLOW_MOCK_PAYMENTS=true to override in a non-billing environment).',

@@ -7,6 +7,7 @@ import helmet from 'helmet';
 import { join } from 'path';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/exceptions/exception.filter';
+import { env } from './common/config/env';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -14,7 +15,7 @@ async function bootstrap(): Promise<void> {
     bufferLogs: true,
   });
   const logger = new Logger('Bootstrap');
-  const isProd = process.env.NODE_ENV === 'production';
+  const isProd = env.isProd;
 
   // ─── HTTP hardening ───────────────────────────────────────────────────────
 
@@ -74,7 +75,7 @@ async function bootstrap(): Promise<void> {
   // CSP frame-ancestors instead — nothing else on the API is framable.
   const uploadsFrameAncestors = [
     "'self'",
-    ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : []),
+    env.frontendUrl,
     ...(!isProd ? ['http://localhost:3001', 'http://127.0.0.1:3001'] : []),
   ].join(' ');
 
@@ -111,14 +112,7 @@ async function bootstrap(): Promise<void> {
   // Production must whitelist explicit origins from env. Dev includes loopback
   // ports as a convenience. We deliberately do NOT fall through to '*' or
   // accept any origin when env vars are missing.
-  const envOrigins = (
-    process.env.CORS_ORIGINS ??
-    process.env.FRONTEND_URL ??
-    ''
-  )
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const envOrigins = [env.frontendUrl, ...env.corsOrigins];
   const devOrigins = isProd
     ? []
     : [
@@ -186,7 +180,7 @@ async function bootstrap(): Promise<void> {
   // ─── Swagger ───────────────────────────────────────────────────────────────
   // Public docs are useful in dev/staging but a needless attack surface in
   // production. Disable unless ENABLE_SWAGGER=true is explicitly set.
-  const enableSwagger = !isProd || process.env.ENABLE_SWAGGER === 'true';
+  const enableSwagger = env.swaggerEnabled;
   if (enableSwagger) {
     const config = new DocumentBuilder()
       .setTitle('Oralign API')
@@ -208,10 +202,10 @@ async function bootstrap(): Promise<void> {
     SwaggerModule.setup('docs', app, document);
   }
 
-  const httpPort = parseInt(process.env.HTTP_PORT || '3000', 10);
+  const httpPort = env.httpPort;
   await app.listen(httpPort);
   logger.log(
-    `Listening on :${httpPort} (NODE_ENV=${process.env.NODE_ENV ?? 'unset'})`,
+    `Listening on :${httpPort} (NODE_ENV=${env.nodeEnv})`,
   );
   if (enableSwagger) {
     logger.log(`Swagger docs: /docs`);

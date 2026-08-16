@@ -10,6 +10,7 @@ import {
   OrderEvent,
   OrderStatusChangedEvent,
   PaymentEvent,
+  QuotationDecisionEvent,
   QuotationEvent,
   TreatmentFeeEvent,
   TreatmentPlanDecisionEvent,
@@ -212,6 +213,14 @@ export class NotificationsListener {
         },
       });
     });
+
+    // E-mail fan-out. Lives HERE (not in the business service) so the
+    // event bus is the single subscription point for side effects. Kept in
+    // its own safe() so a mail-provider outage never suppresses the in-app
+    // notification above, and vice-versa.
+    await this.safe('order.submitted.mail', () =>
+      this.orderNotifications.notifyOrderSubmitted(payload.orderId),
+    );
   }
 
   @OnEvent(NotificationEvents.OrderStatusChanged, { async: true })
@@ -293,6 +302,14 @@ export class NotificationsListener {
         },
       });
     });
+
+    // E-mail fan-out. Lives HERE (not in the business service) so the
+    // event bus is the single subscription point for side effects. Kept in
+    // its own safe() so a mail-provider outage never suppresses the in-app
+    // notification above, and vice-versa.
+    await this.safe('treatmentPlan.ready.mail', () =>
+      this.orderNotifications.notifyTreatmentReady(payload.treatmentPlanId),
+    );
   }
 
   @OnEvent(NotificationEvents.TreatmentPlanUpdated, { async: true })
@@ -374,6 +391,14 @@ export class NotificationsListener {
         },
       });
     });
+
+    // E-mail fan-out. Lives HERE (not in the business service) so the
+    // event bus is the single subscription point for side effects. Kept in
+    // its own safe() so a mail-provider outage never suppresses the in-app
+    // notification above, and vice-versa.
+    await this.safe('treatmentPlan.approved.mail', () =>
+      this.orderNotifications.notifyTreatmentDecision(payload.treatmentPlanId, 'approved'),
+    );
   }
 
   @OnEvent(NotificationEvents.TreatmentPlanRejected, { async: true })
@@ -413,6 +438,14 @@ export class NotificationsListener {
         },
       });
     });
+
+    // E-mail fan-out. Lives HERE (not in the business service) so the
+    // event bus is the single subscription point for side effects. Kept in
+    // its own safe() so a mail-provider outage never suppresses the in-app
+    // notification above, and vice-versa.
+    await this.safe('treatmentPlan.rejected.mail', () =>
+      this.orderNotifications.notifyTreatmentDecision(payload.treatmentPlanId, 'rejected'),
+    );
   }
 
   // ─── Quotations ─────────────────────────────────────────────────────
@@ -461,6 +494,36 @@ export class NotificationsListener {
         },
       });
     });
+
+    // E-mail fan-out. Lives HERE (not in the business service) so the
+    // event bus is the single subscription point for side effects. Kept in
+    // its own safe() so a mail-provider outage never suppresses the in-app
+    // notification above, and vice-versa.
+    await this.safe('quotation.sent.mail', () =>
+      this.orderNotifications.notifyQuoteSent(payload.quotationId),
+    );
+  }
+
+  // Quote decisions carry no in-app notification today (the doctor took
+  // the action themselves; admins watch the payments queue) - only the
+  // admin e-mail. Routed through the bus like everything else instead of
+  // a direct MailService call from QuotationService.
+  @OnEvent(NotificationEvents.QuotationApproved, { async: true })
+  async onQuotationApproved(payload: QuotationDecisionEvent): Promise<void> {
+    await this.safe('quotation.approved.mail', () =>
+      this.orderNotifications.notifyQuoteDecision(payload.quotationId, 'approved'),
+    );
+  }
+
+  @OnEvent(NotificationEvents.QuotationRejected, { async: true })
+  async onQuotationRejected(payload: QuotationDecisionEvent): Promise<void> {
+    await this.safe('quotation.rejected.mail', () =>
+      this.orderNotifications.notifyQuoteDecision(
+        payload.quotationId,
+        'rejected',
+        payload.reason ?? undefined,
+      ),
+    );
   }
 
   @OnEvent(NotificationEvents.QuotationRecalled, { async: true })

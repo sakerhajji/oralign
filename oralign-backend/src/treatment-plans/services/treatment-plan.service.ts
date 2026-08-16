@@ -14,7 +14,6 @@ import {
   TreatmentPlanStatus,
   UserRole,
 } from '@prisma/client';
-import { OrderNotificationService } from '../../mail/order-notification.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OrderAccessPolicy } from '../../common/access/order-access.policy';
 import {
@@ -68,7 +67,6 @@ export class TreatmentPlanService {
     // used after the request is already in-flight.
     @Inject(forwardRef(() => TreatmentChatGateway))
     private readonly chatGateway: TreatmentChatGateway,
-    private readonly notifications: OrderNotificationService,
     private readonly events: EventEmitter2,
   ) {}
 
@@ -358,7 +356,6 @@ export class TreatmentPlanService {
       });
       this.safeBroadcastPlanChanged(plan.orderId, 'ready', id);
       // Email the doctor: their plan is ready for review.
-      void this.notifications.notifyTreatmentReady(id);
       // Bell ping for the doctor. Fetch the doctor + order once for
       // the event payload — adminByline / metadata on the doctor side
       // also lean on it.
@@ -539,7 +536,6 @@ export class TreatmentPlanService {
     });
     this.safeBroadcastPlanChanged(plan.orderId, 'approved', id);
     // Email all admins: doctor approved the plan.
-    void this.notifications.notifyTreatmentDecision(id, 'approved');
     // Bell ping → admin team. Payload carries doctor name + order code
     // so the message body reads as a self-contained sentence.
     void this.emitPlanEvent(NotificationEvents.TreatmentPlanApproved, {
@@ -624,7 +620,6 @@ export class TreatmentPlanService {
     this.safeBroadcastPlanChanged(plan.orderId, 'rejected', id);
     this.safeBroadcastNewMessage(plan.orderId, message);
     // Email all admins: doctor requested a revision.
-    void this.notifications.notifyTreatmentDecision(id, 'rejected');
     // Same admin bell-ping path as approval, just with `decision`.
     void this.emitPlanEvent(NotificationEvents.TreatmentPlanRejected, {
       treatmentPlanId: id,

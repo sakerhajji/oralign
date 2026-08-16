@@ -9,10 +9,11 @@ import {
   NotFoundException,
 } from '../../common/exceptions/app.exception';
 import { getQuotationLabels, isRtl, pickTranslation } from './quotation-i18n';
+import { env } from '../../common/config/env';
 
 const UPLOAD_ROOT = path.join(process.cwd(), 'uploads');
 const ARABIC_FONT_PATH =
-  process.env.ORALIGN_ARABIC_FONT_PATH ??
+  env.arabicFontPath ??
   path.join(process.cwd(), 'assets', 'fonts', 'Amiri-Regular.ttf');
 
 type JsonRecord = Record<string, unknown>;

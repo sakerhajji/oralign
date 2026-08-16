@@ -33,14 +33,15 @@ import { ReportsModule } from './reports/reports.module';
 import { MediaModule } from './media/media.module';
 import { BlogModule } from './blog/blog.module';
 import { CommunityModule } from './community/community.module';
+import { env } from './common/config/env';
 
 // ─── Redis URL builder ──────────────────────────────────────────────────────
 // Compose injects REDIS_HOST / REDIS_PORT / REDIS_PASSWORD individually; this
 // helper assembles a connection URL the @keyv/redis client understands.
 function buildRedisUrl(): string {
-  const host = process.env.REDIS_HOST ?? '127.0.0.1';
-  const port = process.env.REDIS_PORT ?? '6379';
-  const password = process.env.REDIS_PASSWORD ?? '';
+  const host = env.redis.host;
+  const port = String(env.redis.port);
+  const password = env.redis.password ?? '';
   const auth = password ? `:${encodeURIComponent(password)}@` : '';
   return `redis://${auth}${host}:${port}`;
 }

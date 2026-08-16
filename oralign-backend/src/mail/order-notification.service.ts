@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from './mail.service';
+import { env } from '../common/config/env';
 
 /**
  * High-level orchestrator that translates order-lifecycle events into
@@ -267,7 +268,7 @@ export class OrderNotificationService {
   }): Promise<void> {
     try {
       const base = (
-        process.env.FRONTEND_URL ?? 'https://oralign.com.tn'
+        env.frontendUrl
       ).replace(/\/$/, '');
       const dashboardUrl = `${base}/dashboard/users`;
       const admins = await this.findAdmins();
@@ -307,7 +308,7 @@ export class OrderNotificationService {
   }
 
   private dashboardOrderUrl(orderId: string): string {
-    const base = (process.env.FRONTEND_URL ?? 'https://oralign.com.tn').replace(
+    const base = (env.frontendUrl).replace(
       /\/$/,
       '',
     );

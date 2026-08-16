@@ -35,6 +35,7 @@ import {
 } from '../gateways/payment-gateway.interface';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { NotificationEvents } from '../../notifications/events/notification-events';
+import { env } from '../../common/config/env';
 
 type Caller = { userId: string; role: UserRole };
 
@@ -485,7 +486,7 @@ export class PaymentsService {
     status: 'success' | 'failed' | 'cancelled';
     actor: Caller;
   }): Promise<Payment> {
-    if (process.env.NODE_ENV === 'production') {
+    if (env.isProd) {
       throw new ForbiddenException('Dev endpoint disabled in production.');
     }
     const existing = await this.prisma.payment.findUnique({
@@ -520,7 +521,7 @@ export class PaymentsService {
     installmentId: string;
     actor: Caller;
   }) {
-    if (process.env.NODE_ENV === 'production') {
+    if (env.isProd) {
       throw new ForbiddenException('Dev endpoint disabled in production.');
     }
     if (!this.isAdmin(args.actor)) {

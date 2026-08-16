@@ -14,7 +14,6 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '../../common/exceptions/app.exception';
-import { OrderNotificationService } from '../../mail/order-notification.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OrderAccessPolicy } from '../../common/access/order-access.policy';
 import {
@@ -66,7 +65,6 @@ export class QuotationService {
     private readonly prisma: PrismaService,
     private readonly orderAccess: OrderAccessPolicy,
     private readonly settingsService: CompanyBillingSettingsService,
-    private readonly notifications: OrderNotificationService,
     private readonly paymentPlan: QuotationPaymentPlanService,
     private readonly events: EventEmitter2,
   ) {}
@@ -84,6 +82,52 @@ export class QuotationService {
   private assertOrderReadable(orderId: string, caller: Caller) {
     // Delegates to the single shared rule (common/access/order-access.policy).
     return this.orderAccess.requireReadable(orderId, caller);
+  }
+
+  /**
+   * Publish a quote decision on the event bus. The notification listener
+   * owns every side effect (admin e-mail today; in-app / WS tomorrow) so
+   * this service never talks to MailService directly. Fire-and-forget:
+   * a listener failure must not unwind the approve/reject transaction.
+   */
+  private emitQuoteDecision(
+    quote: Pick<Quotation, 'id' | 'orderId' | 'quotationNumber' | 'language'>,
+    decision: 'approved' | 'rejected',
+    reason?: string,
+  ): void {
+    void this.prisma.dentalOrder
+      .findUnique({
+        where: { id: quote.orderId },
+        select: {
+          orderCode: true,
+          doctorId: true,
+          doctor: { select: { fullName: true } },
+          patient: { select: { fullName: true } },
+        },
+      })
+      .then((order) => {
+        if (!order) return;
+        this.events.emit(
+          decision === 'approved'
+            ? NotificationEvents.QuotationApproved
+            : NotificationEvents.QuotationRejected,
+          {
+            quotationId: quote.id,
+            orderId: quote.orderId,
+            orderCode: order.orderCode ?? null,
+            doctorId: order.doctorId,
+            doctorName: order.doctor?.fullName ?? null,
+            patientName: order.patient?.fullName ?? null,
+            language: quote.language ?? null,
+            quotationNumber: quote.quotationNumber ?? null,
+            decision,
+            reason: reason ?? null,
+          },
+        );
+      })
+      .catch(() => {
+        /* logged by the listener's safe(); nothing to unwind here */
+      });
   }
 
   private async loadQuotation(id: string): Promise<Quotation> {
@@ -524,8 +568,7 @@ export class QuotationService {
       });
       return u;
     });
-    // Email the doctor: their quotation is ready for review.
-    void this.notifications.notifyQuoteSent(updated.id);
+    // Doctor e-mail is sent by the notification listener on QuotationSent.
     // Bell ping for the doctor — the email goes too, this is just the
     // in-app version that backs the badge in the header. Joins
     // doctor + patient so the notification body has the full
@@ -597,7 +640,7 @@ export class QuotationService {
     );
     if (handledByPack) {
       const fresh = await this.loadQuotation(id);
-      void this.notifications.notifyQuoteDecision(fresh.id, 'approved');
+      this.emitQuoteDecision(fresh, 'approved');
       return fresh;
     }
 
@@ -616,8 +659,8 @@ export class QuotationService {
       });
       return u;
     });
-    // Email all admins: doctor approved the quotation.
-    void this.notifications.notifyQuoteDecision(approved.id, 'approved');
+    // Admin e-mail via the notification listener (QuotationApproved).
+    this.emitQuoteDecision(approved, 'approved');
     return approved;
   }
 
@@ -663,12 +706,8 @@ export class QuotationService {
       });
       return u;
     });
-    // Email all admins: doctor rejected the quotation.
-    void this.notifications.notifyQuoteDecision(
-      rejected.id,
-      'rejected',
-      rejectionReason,
-    );
+    // Admin e-mail via the notification listener (QuotationRejected).
+    this.emitQuoteDecision(rejected, 'rejected', rejectionReason);
     return rejected;
   }
 

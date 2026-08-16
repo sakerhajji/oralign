@@ -43,6 +43,11 @@ export const NotificationEvents = {
    *  flips into a "revision coming" wait state until the admin
    *  re-sends. */
   QuotationRecalled: 'quotation.recalled',
+  /** Doctor (or admin on their behalf) accepted / declined a sent quote.
+   *  Drives the admin e-mail fan-out; emitted by QuotationService so the
+   *  notification listener is the ONLY subscriber to business events. */
+  QuotationApproved: 'quotation.approved',
+  QuotationRejected: 'quotation.rejected',
   PaymentReceived: 'payment.received',
   PaymentDeclared: 'payment.declared',
   PaymentConfirmed: 'payment.confirmed',
@@ -119,6 +124,8 @@ export interface TreatmentPlanEvent {
 
 export interface TreatmentPlanDecisionEvent extends TreatmentPlanEvent {
   decision: 'approved' | 'rejected';
+  /** Doctor-supplied rejection reason (rejected only). */
+  reason?: string | null;
 }
 
 export interface QuotationEvent {
@@ -132,6 +139,12 @@ export interface QuotationEvent {
    *  so they know whether the team sent FR/EN/AR before opening it. */
   language?: string | null;
   quotationNumber?: string | null;
+}
+
+export interface QuotationDecisionEvent extends QuotationEvent {
+  decision: 'approved' | 'rejected';
+  /** Doctor-supplied rejection reason (rejected only). */
+  reason?: string | null;
 }
 
 export interface PaymentEvent {

@@ -9,6 +9,7 @@ import {
 } from '../common/exceptions/app.exception';
 import { DEFAULT_LANG, Lang, pickLang } from '../common/i18n/lang';
 import { CreateAppointmentDto } from './dto/appointment.dto';
+import { env } from '../common/config/env';
 
 // ─── Booking constants ──────────────────────────────────────────────────────
 const SLOT_MINUTES = 30; // slot granularity
@@ -471,8 +472,8 @@ export class AppointmentsService {
    * public API origin (global prefix `/api`), not the frontend.
    */
   private actionUrl(token: string, action: 'accept' | 'decline'): string {
-    const configured = process.env.API_PUBLIC_URL || process.env.APP_URL;
-    if (!configured && process.env.NODE_ENV === 'production') {
+    const configured = env.apiPublicUrl;
+    if (!configured && env.isProd) {
       // Fail loud in the logs: the email still goes out, but its
       // accept/decline links point at localhost and are dead for the
       // recipient. Set API_PUBLIC_URL (public origin of this API,

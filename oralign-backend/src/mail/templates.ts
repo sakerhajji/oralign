@@ -19,6 +19,7 @@
  */
 
 import { Lang } from '../common/i18n/lang';
+import { env } from '../common/config/env';
 
 const APP_NAME = 'Oralign';
 // Strict black-and-white palette. Everything renders the same on a
@@ -40,9 +41,7 @@ function logoUrl(): string {
   // (useful when the frontend lives on a different host than the API).
   // Falls back to the dashboard's PNG.
   const base = (
-    process.env.MAIL_LOGO_URL ??
-    process.env.FRONTEND_URL ??
-    ''
+    env.mail.logoUrl ?? env.frontendUrl
   ).replace(/\/$/, '');
   return base
     ? `${base}/ORALIGN%20BLACK.png`

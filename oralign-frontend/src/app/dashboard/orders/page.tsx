@@ -77,10 +77,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { useQuery } from '@tanstack/react-query';
 import { OrderStatusBadge } from '@/components/orders/order-status-badge';
 import { TreatmentFeeBadge } from '@/components/orders/treatment-fee-badge';
-import { usersService } from '@/lib/api';
 import { useAuth } from '@/lib/providers/auth-provider';
 import {
   buildOrderNavigationHref,
@@ -92,6 +90,7 @@ import {
   useBulkRestoreOrders,
   useBulkUpdateOrderStatus,
   useDeleteOrder,
+  useDentistOptions,
   useOrderPrefetch,
   useOrders,
   useOverrideOrderStatus,
@@ -294,17 +293,7 @@ export default function OrdersPage() {
 
   // Dentist filter list — admins can filter orders by owning doctor.
   // Capped at 200 to avoid an unbounded fetch on large clinics.
-  const dentistsQuery = useQuery({
-    queryKey: ['order-dentists-filter'],
-    queryFn: () =>
-      usersService.getAllUsers({
-        role: UserRole.DENTIST,
-        page: 1,
-        limit: 200,
-      }),
-    enabled: isAdmin,
-    staleTime: 1000 * 60 * 5,
-  });
+  const dentistsQuery = useDentistOptions({ enabled: isAdmin });
 
   const debouncedSearch = useDebouncedCallback((value: string) => {
     setSearch(value.trim());

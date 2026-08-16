@@ -77,6 +77,9 @@ export const orderKeys = {
   details: () => [...orderKeys.all, 'detail'] as const,
   detail: (id: string) => [...orderKeys.details(), id] as const,
   files: (id: string) => [...orderKeys.detail(id), 'files'] as const,
+  /** Rendered treatment-fee invoice PDF for an order, per language. */
+  treatmentFeeInvoicePdf: (id: string, lang: string) =>
+    [...orderKeys.detail(id), 'treatment-fee-invoice-pdf', lang] as const,
 };
 
 export function useOrders(

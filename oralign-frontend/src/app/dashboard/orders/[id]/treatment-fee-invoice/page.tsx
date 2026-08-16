@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useT } from '@/lib/i18n/lang-context';
 import { invoicesService } from '@/lib/api/invoices.service';
+import { orderKeys } from '@/lib/hooks/use-orders';
 import { cn } from '@/lib/utils';
 
 type InvoiceLang = 'fr' | 'en';
@@ -32,7 +33,7 @@ export default function TreatmentFeeInvoicePreviewPage() {
   // Fetch the invoice PDF through React Query (owns loading / error +
   // caching). The treatment-fee number is printed on the PDF itself.
   const pdfQuery = useQuery({
-    queryKey: ['treatment-fee-invoice-pdf', orderId, lang],
+    queryKey: orderKeys.treatmentFeeInvoicePdf(orderId, lang),
     queryFn: () => invoicesService.downloadTreatmentFeeInvoice(orderId, lang),
     enabled: !!orderId,
     retry: 1,

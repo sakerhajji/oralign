@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { useDebouncedCallback } from 'use-debounce';
 import { format } from 'date-fns';
 import { fr as frLocale } from 'date-fns/locale';
@@ -80,20 +79,19 @@ import {
   useBulkDeletePatients,
   useCreatePatient,
   useDeletePatient,
+  useDentistOptions,
   usePermanentDeletePatient,
   usePatientPrefetch,
   usePatients,
   useUploadPatientProfilePhoto,
   useUpdatePatient,
 } from '@/lib/hooks';
-import { usersService } from '@/lib/api';
 import {
   Gender,
   type Patient,
   type PatientFilterParams,
   type PatientSortField,
   type SortOrder,
-  UserRole,
 } from '@/lib/types';
 import { cn, getAvatarUrl } from '@/lib/utils';
 
@@ -207,17 +205,7 @@ export default function PatientsPage() {
   const uploadPatientProfilePhoto = useUploadPatientProfilePhoto();
   const bulkDelete = useBulkDeletePatients();
 
-  const dentistsQuery = useQuery({
-    queryKey: ['patient-dentists-filter'],
-    queryFn: () =>
-      usersService.getAllUsers({
-        role: UserRole.DENTIST,
-        page: 1,
-        limit: 200,
-      }),
-    enabled: isAdmin,
-    staleTime: 1000 * 60 * 5,
-  });
+  const dentistsQuery = useDentistOptions({ enabled: isAdmin });
 
   const patients = useMemo(
     () => patientsQuery.data?.data ?? [],

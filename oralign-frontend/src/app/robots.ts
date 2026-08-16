@@ -38,7 +38,6 @@ export default function robots(): MetadataRoute.Robots {
           '/reset-password',
           '/created_for_you/',
           '/qr',
-          '/test',
           '/_next/',
         ],
       },

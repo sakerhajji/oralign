@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient, UseQueryResult, UseMutationResul
 import { toast } from 'sonner';
 import { usersService, extractApiErrorMessage } from '@/lib/api';
 import { useT } from '@/lib/i18n/lang-context';
-import { User, CreateUserDto, UpdateUserDto, PaginatedResponse, UserFilterParams, MessageResponse, BulkActionDto, BulkUpdateStatusDto } from '@/lib/types';
+import { User, UserRole, CreateUserDto, UpdateUserDto, PaginatedResponse, UserFilterParams, MessageResponse, BulkActionDto, BulkUpdateStatusDto } from '@/lib/types';
 
 // Query keys
 export const userKeys = {
@@ -17,6 +17,31 @@ export const userKeys = {
   detail: (id: string) => [...userKeys.details(), id] as const,
   currentUser: () => [...userKeys.all, 'current'] as const,
 };
+
+/**
+ * Dentist options for admin pickers / filters (order wizard, orders +
+ * patients list filters). Keyed on the users LIST factory, so:
+ *   - the three screens that need this share one cache entry, and
+ *   - creating / editing / deleting a user (which invalidates
+ *     `userKeys.all`) refreshes them — the previous ad-hoc string keys
+ *     ('order-dentists', 'order-dentists-filter', 'patient-dentists-filter')
+ *     never did, so a freshly added dentist was missing until reload.
+ */
+export function useDentistOptions(
+  options: { limit?: number; enabled?: boolean } = {},
+): UseQueryResult<PaginatedResponse<User>, Error> {
+  const params: UserFilterParams = {
+    role: UserRole.DENTIST,
+    page: 1,
+    limit: options.limit ?? 200,
+  };
+  return useQuery<PaginatedResponse<User>, Error>({
+    queryKey: userKeys.list(params),
+    queryFn: () => usersService.getAllUsers(params),
+    enabled: options.enabled ?? true,
+    staleTime: 1000 * 60 * 5,
+  });
+}
 
 /**
  * Hook to get current logged-in user

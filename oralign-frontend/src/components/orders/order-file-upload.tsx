@@ -63,6 +63,7 @@ import {
 } from '@/lib/hooks';
 import { orderKeys } from '@/lib/hooks/use-orders';
 import { getAccessToken } from '@/lib/api';
+import { authedFetch, fetchAuthedBlob } from '@/lib/api/authed-fetch';
 import {
   CHUNKED_UPLOAD_THRESHOLD_BYTES,
   uploadFileChunked,
@@ -1686,15 +1687,11 @@ function StlModelViewer({
       // carries no usable Content-Length (e.g. transparently gzip'd).
       expectedBytes?: number,
     ) => {
-      const token = getAccessToken();
       const url = buildDownloadUrl(orderId, file.id, variant);
 
       let response: Response;
       try {
-        response = await fetch(url, {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-          signal,
-        });
+        response = await authedFetch(url, { signal });
       } catch (err) {
         // Network-level failures (DNS, CORS, offline, mixed-content)
         // arrive as TypeError("Failed to fetch") with no status code.
@@ -3054,10 +3051,7 @@ function fetchSecureBlobUrl(url: string): Promise<string> {
     touchSecureKey(url);
     return existing.promise;
   }
-  const token = getAccessToken();
-  const promise = fetch(url, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  })
+  const promise = authedFetch(url)
     .then((response) => {
       if (!response.ok) throw new Error('Unable to load preview');
       return response.blob();
@@ -3195,15 +3189,8 @@ function buildDownloadUrl(orderId: string, fileId: string, variant?: string) {
  * copy/paste between slots both re-upload their result, so feeding
  * them a 300px thumbnail would silently destroy the original quality.
  */
-async function fetchOriginalBlob(orderId: string, fileId: string): Promise<Blob> {
-  const token = getAccessToken();
-  const response = await fetch(buildDownloadUrl(orderId, fileId), {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
-  if (!response.ok) {
-    throw new Error(`Original download failed (HTTP ${response.status})`);
-  }
-  return response.blob();
+function fetchOriginalBlob(orderId: string, fileId: string): Promise<Blob> {
+  return fetchAuthedBlob(buildDownloadUrl(orderId, fileId));
 }
 
 function withSlotName(slotKey: string, file: File) {
@@ -3255,11 +3242,7 @@ function displayFileName(file: OrderFile) {
 }
 
 function downloadOrderFile(orderId: string, file: OrderFile) {
-  const token = getAccessToken();
-  fetch(buildDownloadUrl(orderId, file.id), {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  })
-    .then((response) => response.blob())
+  fetchAuthedBlob(buildDownloadUrl(orderId, file.id))
     .then((blob) => {
       const href = URL.createObjectURL(blob);
       const link = document.createElement('a');

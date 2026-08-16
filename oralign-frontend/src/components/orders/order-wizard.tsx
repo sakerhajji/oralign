@@ -11,7 +11,6 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
-  Factory,
   Info,
   ListChecks,
   Lock,
@@ -20,7 +19,6 @@ import {
   ScanLine,
   Search,
   Send,
-  ShieldCheck,
   Target,
   UserRound,
   X,
@@ -69,11 +67,12 @@ import { ClinicalConditionsField } from '@/components/patients/clinical-conditio
 import { PatientProfilePhotoField } from '@/components/patients/patient-profile-photo-field';
 import { useAuth } from '@/lib/providers/auth-provider';
 import { useT } from '@/lib/i18n/lang-context';
-import { patientsService, usersService } from '@/lib/api';
+import { patientsService } from '@/lib/api';
 import {
   patientKeys,
   useCreateOrder,
   useCreatePatient,
+  useDentistOptions,
   useUploadPatientProfilePhoto,
   useSubmitOrder,
   useUpdateOrder,
@@ -94,7 +93,6 @@ import {
   PatientStage,
   ToothInstruction,
   ToothInstructionType,
-  UserRole,
 } from '@/lib/types';
 import {
   packChiefComplaint,
@@ -104,9 +102,7 @@ import {
 import { createOrderSchema } from '@/lib/schemas';
 import { cn } from '@/lib/utils';
 
-const BRAND_ACTIVE_TEXT = 'text-primary';
 const BRAND_ACTIVE_BORDER = 'border-primary';
-const BRAND_ACTIVE_BG = 'bg-primary';
 
 /**
  * Static step blueprint. Strings live in the i18n dictionary; this
@@ -185,7 +181,6 @@ const crossbiteOptions = [
   'Correct only posterior',
 ] as const;
 const spacesOptions = ['Close all spaces', 'Maintain spaces'] as const;
-const materialOptions = ['TAGLUS', 'ZENDURA', 'NO MANUFACTURING'] as const;
 
 type PatientMode = 'existing' | 'new';
 type FieldErrors = Partial<Record<string, string>>;
@@ -307,12 +302,7 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
   // patient is created per planner action.
   const newPatientPromiseRef = useRef<Promise<string> | null>(null);
 
-  const dentistsQuery = useQuery({
-    queryKey: ['order-dentists'],
-    queryFn: () =>
-      usersService.getAllUsers({ role: UserRole.DENTIST, page: 1, limit: 100 }),
-    enabled: isAdmin,
-  });
+  const dentistsQuery = useDentistOptions({ limit: 100, enabled: isAdmin });
 
   const patientParams: PatientFilterParams = {
     page: 1,
@@ -2573,83 +2563,6 @@ function AdvancedMovementStep({
   );
 }
 
-function ManufacturingStep({
-  form,
-  disabled,
-  updateField,
-}: {
-  form: CreateOrderDto;
-  disabled?: boolean;
-  updateField: <K extends keyof CreateOrderDto>(key: K, value: CreateOrderDto[K]) => void;
-}) {
-  const deliveryDate = deliveryDateFromInstructions(form.additionalInstructions ?? '');
-
-  return (
-    <div className="space-y-6">
-      <TextInput
-        label="Special Instructions"
-        value={form.specialInstructions ?? ''}
-        placeholder="Add special clinical or lab instructions..."
-        disabled={disabled}
-        onChange={(value) => updateField('specialInstructions', value)}
-      />
-
-      {/* "USE CBCT WITH SCANS" toggle removed — the CBCT-requested flag
-          (`useCbctWithScans`) now has a single source of truth on the
-          clinical-files / radiography step, placed directly above the
-          CBCT bundle upload it gates (see step 2 in OrderWizard). */}
-
-      <SectionDivider title="MANUFACTURE" />
-
-      <div className="rounded-md border-l-2 border-primary bg-primary/5 px-4 py-3 text-sm text-muted-foreground">
-        If you want manufacturing, select this option.
-      </div>
-
-      <ToggleTile
-        label="You want Manufacturing"
-        checked={!!form.wantsManufacturing}
-        disabled={disabled}
-        onCheckedChange={(value) => updateField('wantsManufacturing', value)}
-      />
-
-      <RadioGroupField
-        label="MATERIALS"
-        value={(form.materials ?? [])[0] ?? ''}
-        options={materialOptions}
-        disabled={disabled}
-        onChange={(value) => {
-          updateField('materials', value === 'NO MANUFACTURING' ? [] : [value]);
-          updateField('wantsManufacturing', value !== 'NO MANUFACTURING');
-        }}
-      />
-
-      <TextInput
-        label="Delivery Date"
-        value={deliveryDate}
-        type="date"
-        icon={<CalendarDays className="h-4 w-4" />}
-        disabled={disabled}
-        onChange={(value) =>
-          updateField(
-            'additionalInstructions',
-            withDeliveryDate(form.additionalInstructions ?? '', value),
-          )
-        }
-      />
-
-      <TextAreaField
-        label="Additional Instructions"
-        value={removeDeliveryDateLine(form.additionalInstructions ?? '')}
-        placeholder="Add final case notes..."
-        disabled={disabled}
-        onChange={(value) =>
-          updateField('additionalInstructions', withDeliveryDate(value, deliveryDate))
-        }
-      />
-    </div>
-  );
-}
-
 /**
  * Step 6 — Review & submit.
  *
@@ -3277,67 +3190,6 @@ function OptionPill({
   );
 }
 
-/**
- * Single-choice "radio" rendered as a row of outlined pills — same look
- * as <OptionPill> used in the Expansion / IPR / chief-complaint blocks
- * so every choice in the wizard reads as the same control type. The
- * circle-dot variant we used previously was the only place in the form
- * that diverged from the pill aesthetic and it felt inconsistent.
- *
- * Click semantics are the same as a native radio: pick one, replaces
- * the current value. Disabled / error / label props are unchanged so
- * call sites don't need updating.
- */
-function RadioGroupField({
-  label,
-  value,
-  options,
-  disabled,
-  error,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  options: readonly string[];
-  disabled?: boolean;
-  error?: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <div className="grid gap-2">
-      <Label className="text-sm font-semibold">{label}</Label>
-      <div
-        role="radiogroup"
-        aria-label={label}
-        className="flex flex-wrap gap-2"
-      >
-        {options.map((option) => (
-          <OptionPill
-            key={option}
-            label={option}
-            active={value === option}
-            disabled={disabled}
-            onClick={() => onChange(option)}
-          />
-        ))}
-      </div>
-      <FieldError message={error} />
-    </div>
-  );
-}
-
-function SectionDivider({ title }: { title: string }) {
-  return (
-    <div className="flex items-center gap-4">
-      <span className="h-px flex-1 bg-primary/55" />
-      <span className="text-base font-medium tracking-[0.18em] text-muted-foreground">
-        {title}
-      </span>
-      <span className="h-px flex-1 bg-primary/55" />
-    </div>
-  );
-}
-
 // ReviewCard removed — replaced by the larger ReviewSection / ReviewInfo
 // helpers that mirror the order-detail page layout (see ReviewStep).
 
@@ -3346,36 +3198,3 @@ function FieldError({ message }: { message?: string }) {
   return <p className="text-xs text-red-600">{message}</p>;
 }
 
-const DELIVERY_DATE_PREFIX = 'Delivery date:';
-
-function deliveryDateFromInstructions(value: string) {
-  return (
-    value
-      .split('\n')
-      .find((line) => line.trim().startsWith(DELIVERY_DATE_PREFIX))
-      ?.replace(DELIVERY_DATE_PREFIX, '')
-      .trim() ?? ''
-  );
-}
-
-function removeDeliveryDateLine(value: string) {
-  return value
-    .split('\n')
-    .filter((line) => !line.trim().startsWith(DELIVERY_DATE_PREFIX))
-    .join('\n')
-    .trimStart();
-}
-
-function withDeliveryDate(value: string, deliveryDate: string) {
-  const cleanValue = removeDeliveryDateLine(value).trim();
-  if (!deliveryDate) return cleanValue;
-  return [cleanValue, `${DELIVERY_DATE_PREFIX} ${deliveryDate}`]
-    .filter(Boolean)
-    .join('\n');
-}
-
-function stageDescription(stage: PatientStage) {
-  if (stage === PatientStage.REFINEMENT) return 'Correction or continuation.';
-  if (stage === PatientStage.RETAINER) return 'Retention after treatment.';
-  return 'First aligner case.';
-}

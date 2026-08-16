@@ -33,6 +33,9 @@ export const paymentKeys = {
   mine: (filters: Record<string, unknown>) =>
     [...paymentKeys.all, 'mine', filters] as const,
   detail: (id: string) => [...paymentKeys.all, 'detail', id] as const,
+  /** Rendered receipt PDF; `invoiceNumber` in the key re-fetches after an admin renumbers it. */
+  invoicePdf: (id: string, lang: string, invoiceNumber?: string | null) =>
+    [...paymentKeys.detail(id), 'invoice-pdf', lang, invoiceNumber ?? null] as const,
 };
 
 const PAYMENT_STALE_TIME = 10_000;

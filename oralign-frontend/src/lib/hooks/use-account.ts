@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/providers';
@@ -13,16 +13,11 @@ import { useWorkingHoursByProfile } from '@/lib/hooks/use-working-hours';
 import { UpdateUserDto, UpdateDentistProfileDto, DentistProfile, User, UserRole } from '@/lib/types';
 
 export function useAccountData() {
-  const { login } = useAuth();
+  // Same React Query entry AuthProvider reads (`userKeys.currentUser()`),
+  // so no sync-back into the provider is needed: one cache, one user.
   const userQuery = useCurrentUser();
   const profileId = userQuery.data?.dentistProfile?.id ?? '';
   const workingHoursQuery = useWorkingHoursByProfile(profileId);
-
-  useEffect(() => {
-    if (userQuery.data) {
-      login(userQuery.data);
-    }
-  }, [userQuery.data, login]);
 
   const isDentist = userQuery.data?.role === UserRole.DENTIST;
   const isLoading = userQuery.isLoading || (isDentist && workingHoursQuery.isLoading);

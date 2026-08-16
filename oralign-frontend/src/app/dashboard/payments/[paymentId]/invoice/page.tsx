@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useAuth } from '@/lib/providers/auth-provider';
 import { useT } from '@/lib/i18n/lang-context';
-import { useAdminPayment } from '@/lib/hooks/use-payments';
+import { paymentKeys, useAdminPayment } from '@/lib/hooks/use-payments';
 import { invoicesService } from '@/lib/api/invoices.service';
 import { InvoiceNumberEditor } from '@/components/payments/invoice-number-editor';
 import { cn } from '@/lib/utils';
@@ -42,7 +42,7 @@ export default function InvoicePreviewPage() {
   // caching). `invoiceNumber` in the key re-fetches after an admin
   // renumbers the receipt — the number is printed on the PDF.
   const pdfQuery = useQuery({
-    queryKey: ['invoice-pdf', paymentId, lang, invoiceNumber],
+    queryKey: paymentKeys.invoicePdf(paymentId, lang, invoiceNumber),
     queryFn: () => invoicesService.downloadInvoice(paymentId, lang),
     enabled: !!paymentId,
     retry: 1,

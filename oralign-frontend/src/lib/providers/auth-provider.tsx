@@ -1,9 +1,11 @@
 'use client';
 
 import React, { createContext, useContext, useCallback, useMemo } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { User, UserRole } from '@/lib/types';
 import { getAccessToken, getRefreshToken, clearTokens } from '@/lib/api';
 import { usersService } from '@/lib/api/users.service';
+import { userKeys } from '@/lib/hooks/use-users';
 import { applyStoredLang } from '@/lib/i18n/use-lang';
 import { useRouter } from 'next/navigation';
 
@@ -24,92 +26,91 @@ interface AuthProviderProps {
   initialUser?: User | null;
 }
 
+/**
+ * ONE source of truth for "who is signed in".
+ *
+ * The current user lives in the React Query cache under
+ * `userKeys.currentUser()` — the same entry `useCurrentUser()` reads —
+ * and this provider is a thin view over it. Previously the provider kept
+ * its own `useState<User>` copy fetched independently of the RQ entry, so
+ * the two could disagree (profile edits patched both by hand, and
+ * `useAccountData` had an effect syncing RQ back into the provider). Now a
+ * profile mutation only has to `setQueryData` / `invalidateQueries` and
+ * every consumer — `useAuth().user`, `useCurrentUser()`, the account page —
+ * sees the same object at the same time.
+ */
 export function AuthProvider({ children, initialUser = null }: AuthProviderProps) {
-  const [user, setUser] = React.useState<User | null>(initialUser);
   const router = useRouter();
+  const queryClient = useQueryClient();
 
-  // Check if user is authenticated
-  const isAuthenticated = useMemo(() => {
-    return !!user && !!getAccessToken();
-  }, [user]);
-
-  // Check if user is admin
-  const isAdmin = useMemo(() => {
-    return user?.role === UserRole.ADMIN || user?.role === UserRole.SUPER_ADMIN;
-  }, [user]);
-
-  // Check if user is dentist
-  const isDentist = useMemo(() => {
-    return user?.role === UserRole.DENTIST;
-  }, [user]);
-
-  // Login function
-  const login = useCallback((userData: User) => {
-    setUser(userData);
+  // Whether the browser holds a session (access or refresh token). Read in
+  // an effect, not during render: localStorage is unavailable during SSR
+  // and the first client render must match the server markup.
+  const [hasSession, setHasSession] = React.useState(false);
+  React.useEffect(() => {
+    setHasSession(!!getAccessToken() || !!getRefreshToken());
   }, []);
 
-  // Logout function
-  const logout = useCallback((redirect: boolean = true) => {
-    setUser(null);
-    clearTokens();
-    if (redirect) {
-      router.replace('/login');
-    }
-  }, [router]);
+  const currentUser = useQuery<User, Error>({
+    queryKey: userKeys.currentUser(),
+    queryFn: usersService.getCurrentUser,
+    enabled: hasSession,
+    initialData: initialUser ?? undefined,
+    staleTime: 1000 * 60 * 10,
+    // A definitive failure means the session is dead (the API client has
+    // already tried the refresh-token dance); do not hammer the endpoint.
+    retry: false,
+  });
 
-  // Check if user has specific role
-  const hasRole = useCallback(
-    (role: UserRole): boolean => {
-      return user?.role === role;
-    },
-    [user]
+  const user = hasSession ? (currentUser.data ?? null) : null;
+
+  // /users/me failed with a token present → the session is unusable.
+  // Drop it so the app renders signed-out instead of half-authenticated.
+  React.useEffect(() => {
+    if (!currentUser.isError) return;
+    clearTokens();
+    setHasSession(false);
+    queryClient.removeQueries({ queryKey: userKeys.currentUser() });
+  }, [currentUser.isError, queryClient]);
+
+  const isAuthenticated = useMemo(() => !!user && hasSession, [user, hasSession]);
+
+  const isAdmin = useMemo(
+    () => user?.role === UserRole.ADMIN || user?.role === UserRole.SUPER_ADMIN,
+    [user],
   );
 
-  // The profile is the source of truth for the user's language: when a
-  // user object lands (fresh login OR the me-fetch after a refresh),
-  // seed the i18n store from `preferredLanguage` so the dashboard,
-  // emails and notifications all speak the same language on every
-  // device the user signs in from. `applyStoredLang` no-ops on
-  // invalid / unchanged values, so this never fights the switcher.
+  const isDentist = useMemo(() => user?.role === UserRole.DENTIST, [user]);
+
+  /** Seed the cache with the user object the sign-in / profile call returned. */
+  const login = useCallback(
+    (userData: User) => {
+      queryClient.setQueryData<User>(userKeys.currentUser(), userData);
+      setHasSession(true);
+    },
+    [queryClient],
+  );
+
+  const logout = useCallback(
+    (redirect: boolean = true) => {
+      clearTokens();
+      setHasSession(false);
+      queryClient.removeQueries({ queryKey: userKeys.currentUser() });
+      if (redirect) {
+        router.replace('/login');
+      }
+    },
+    [queryClient, router],
+  );
+
+  const hasRole = useCallback((role: UserRole): boolean => user?.role === role, [user]);
+
+  // Apply the user's stored language preference on load / change.
   React.useEffect(() => {
     if (user?.preferredLanguage) {
       applyStoredLang(user.preferredLanguage);
     }
   }, [user?.preferredLanguage]);
-
-  React.useEffect(() => {
-    const token = getAccessToken();
-    const refreshToken = getRefreshToken();
-
-    if (!token && !refreshToken && user) {
-      setUser(null);
-      return;
-    }
-
-    if (!token || user) {
-      return;
-    }
-
-    let isMounted = true;
-
-    usersService
-      .getCurrentUser()
-      .then((currentUser) => {
-        if (isMounted) {
-          setUser(currentUser);
-        }
-      })
-      .catch(() => {
-        if (isMounted) {
-          setUser(null);
-          clearTokens();
-        }
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [user]);
 
   const value = useMemo(
     () => ({

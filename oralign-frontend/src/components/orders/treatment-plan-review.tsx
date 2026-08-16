@@ -38,7 +38,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { useT } from '@/lib/i18n/lang-context';
-import { getAccessToken } from '@/lib/api';
+import { authedFetch } from '@/lib/api/authed-fetch';
 import { ordersService } from '@/lib/api/orders.service';
 import { treatmentPlansService } from '@/lib/api/treatment-plans.service';
 import {
@@ -817,12 +817,9 @@ function useAuthenticatedObjectUrl(url?: string | null) {
     }
 
     let active = true;
-    const token = getAccessToken();
     setState({ objectUrl: null, loading: true, error: null });
 
-    fetch(url, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
+    authedFetch(url)
       .then((response) => {
         if (!response.ok) throw new Error('Unable to load image preview');
         return response.blob();

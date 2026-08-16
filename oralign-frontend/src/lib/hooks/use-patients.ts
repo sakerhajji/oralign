@@ -8,7 +8,7 @@ import {
   UseQueryResult,
 } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { extractApiErrorMessage, patientsService } from '@/lib/api';
+import { toastMutationError, patientsService } from '@/lib/api';
 import { useT } from '@/lib/i18n/lang-context';
 import {
   CreatePatientDto,
@@ -77,7 +77,7 @@ export function useCreatePatient(): UseMutationResult<
       toast.success(t('toasts.patients.created'));
     },
     onError: (error) => {
-      toast.error(extractApiErrorMessage(error));
+      toastMutationError(error);
     },
   });
 }
@@ -98,7 +98,7 @@ export function useUpdatePatient(): UseMutationResult<
       toast.success(t('toasts.patients.updated'));
     },
     onError: (error) => {
-      toast.error(extractApiErrorMessage(error));
+      toastMutationError(error);
     },
   });
 }
@@ -119,7 +119,7 @@ export function useUploadPatientProfilePhoto(): UseMutationResult<
       toast.success(t('toasts.patients.updated'));
     },
     onError: (error) => {
-      toast.error(extractApiErrorMessage(error));
+      toastMutationError(error);
     },
   });
 }
@@ -139,12 +139,32 @@ export function useDeletePatient(): UseMutationResult<
       toast.success(t('toasts.patients.deleted'));
     },
     onError: (error) => {
-      toast.error(extractApiErrorMessage(error));
+      toastMutationError(error);
     },
   });
 }
 
 /** Permanent (hard) delete — admin-only, irreversible. */
+export function useRestorePatient(): UseMutationResult<
+  MessageResponse,
+  Error,
+  string
+> {
+  const queryClient = useQueryClient();
+  const { t } = useT();
+
+  return useMutation<MessageResponse, Error, string>({
+    mutationFn: patientsService.restorePatient,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: patientKeys.lists() });
+      toast.success(t('toasts.patients.restored'));
+    },
+    onError: (error) => {
+      toastMutationError(error);
+    },
+  });
+}
+
 export function usePermanentDeletePatient(): UseMutationResult<
   MessageResponse,
   Error,
@@ -160,7 +180,7 @@ export function usePermanentDeletePatient(): UseMutationResult<
       toast.success(t('toasts.patients.permanentlyDeleted'));
     },
     onError: (error) => {
-      toast.error(extractApiErrorMessage(error));
+      toastMutationError(error);
     },
   });
 }
@@ -180,7 +200,7 @@ export function useBulkDeletePatients(): UseMutationResult<
       toast.success(t('toasts.patients.bulkDeleted', { count: data.deleted }));
     },
     onError: (error) => {
-      toast.error(extractApiErrorMessage(error));
+      toastMutationError(error);
     },
   });
 }

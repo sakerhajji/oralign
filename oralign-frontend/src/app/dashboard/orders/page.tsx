@@ -8,6 +8,7 @@ import { format } from 'date-fns';
 import { fr as frLocale } from 'date-fns/locale';
 import type { Locale } from 'date-fns';
 import { useT } from '@/lib/i18n/lang-context';
+import { PermanentDeleteDialog } from '@/components/shared/permanent-delete-dialog';
 import type { Lang } from '@/lib/i18n/dict';
 import {
   AlertTriangle,
@@ -1339,7 +1340,7 @@ function OrderRowActions({
                   </DropdownMenuItem>
                 </>
               )}
-              {(canManage || canPermanentDelete) && <DropdownMenuSeparator />}
+              {canManage && <DropdownMenuSeparator />}
               {canManage && (
                 <DropdownMenuItem
                   onClick={(event) => {
@@ -1353,19 +1354,7 @@ function OrderRowActions({
                   {t('ordersPage.deleteOrder')}
                 </DropdownMenuItem>
               )}
-              {canPermanentDelete && (
-                <DropdownMenuItem
-                  onClick={(event) => {
-                    event.preventDefault();
-                    setHardOpen(true);
-                  }}
-                  disabled={isPermanentDeleting}
-                  className="gap-2 text-destructive focus:text-destructive"
-                >
-                  <ShieldX className="h-4 w-4" />
-                  {t('ordersPage.deleteForever')}
-                </DropdownMenuItem>
-              )}
+              {/* "Delete forever" lives in the trash view only (trash-first). */}
             </>
           )}
         </DropdownMenuContent>
@@ -1395,14 +1384,13 @@ function OrderRowActions({
         }}
       />
 
-      <ConfirmDeleteDialog
+      <PermanentDeleteDialog
         open={hardOpen}
         onOpenChange={setHardOpen}
         title={t('ordersPage.hardDeleteTitle')}
         description={t('ordersPage.hardDeleteBody', { code: order.orderCode })}
         confirmLabel={t('ordersPage.deleteForever')}
-        disabled={isPermanentDeleting}
-        destructive
+        pending={isPermanentDeleting}
         onConfirm={() => {
           onPermanentDelete();
           setHardOpen(false);
@@ -1809,13 +1797,13 @@ function TrashBulkActionBar({
         }}
       />
 
-      <ConfirmDeleteDialog
+      <PermanentDeleteDialog
         open={confirmHardOpen}
         onOpenChange={setConfirmHardOpen}
         title={t('ordersPage.bulkHardTitle', { count })}
         description={t('ordersPage.bulkHardBody', { count })}
         confirmLabel={t('ordersPage.bulkDeleteForever')}
-        disabled={pending}
+        pending={pending}
         onConfirm={() => {
           setConfirmHardOpen(false);
           onPermanentDelete();

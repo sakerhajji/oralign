@@ -1,5 +1,11 @@
 export { authService } from './auth.service';
-export { extractApiErrorMessage } from './error';
+export {
+  extractApiErrorMessage,
+  extractApiError,
+  toastMutationError,
+  isDeletionBlocked,
+  DELETION_BLOCKED,
+} from './error';
 export { usersService } from './users.service';
 export { dentistProfileService } from './dentist-profile.service';
 export { workingHoursService } from './working-hours.service';

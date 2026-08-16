@@ -52,6 +52,19 @@ export const dict = {
   // ─── Generic / cross-cutting ────────────────────────────────────
   common: {
     save: { en: 'Save', fr: 'Enregistrer' } as T,
+    // Shared strong confirmation for irreversible deletion (PermanentDeleteDialog)
+    permanentDelete: {
+      irreversible: {
+        en: 'This action cannot be undone. If historical records (orders, quotations, payments, treatment plans) depend on this item, the server will refuse and nothing will be deleted.',
+        fr: 'Cette action est irréversible. Si des données historiques (commandes, devis, paiements, plans de traitement) en dépendent, le serveur refusera et rien ne sera supprimé.',
+      } as T,
+      typeToConfirm: { en: 'Type {word} to confirm', fr: 'Saisissez {word} pour confirmer' } as T,
+      confirm: { en: 'Delete forever', fr: 'Supprimer définitivement' } as T,
+      working: { en: 'Deleting…', fr: 'Suppression…' } as T,
+      blockedTitle: { en: 'Deletion blocked', fr: 'Suppression bloquée' } as T,
+    },
+    restore: { en: 'Restore', fr: 'Restaurer' } as T,
+    showDeleted: { en: 'Show deleted', fr: 'Afficher les éléments supprimés' } as T,
     saveChanges: { en: 'Save changes', fr: 'Enregistrer les modifications' } as T,
     saveDraft: { en: 'Save draft', fr: 'Enregistrer le brouillon' } as T,
     cancel: { en: 'Cancel', fr: 'Annuler' } as T,
@@ -1377,6 +1390,8 @@ export const dict = {
   // "Nom complet", "Date de naissance", etc. — so a French-speaking
   // clinic recognises every field without an English crutch.
   patients: {
+    trash: { en: 'Trash', fr: 'Corbeille' } as T,
+    activePatients: { en: 'Active patients', fr: 'Patients actifs' } as T,
     // Header strap
     eyebrow: { en: 'Clinical patient registry', fr: 'Registre clinique des patients' } as T,
     title: { en: 'Patients', fr: 'Patients' } as T,
@@ -3814,6 +3829,7 @@ export const dict = {
       updated: { en: 'Pack updated.', fr: 'Forfait mis à jour.' } as T,
       deleted: { en: 'Pack deleted.', fr: 'Forfait supprimé.' } as T,
       permanentlyDeleted: { en: 'Pack permanently deleted.', fr: 'Forfait supprimé définitivement.' } as T,
+      restored: { en: 'Pack restored.', fr: 'Forfait restauré.' } as T,
       activated: { en: 'Pack activated.', fr: 'Forfait activé.' } as T,
       deactivated: { en: 'Pack deactivated.', fr: 'Forfait désactivé.' } as T,
       priceAdded: { en: 'Price added.', fr: 'Tarif ajouté.' } as T,
@@ -3825,6 +3841,7 @@ export const dict = {
       updated: { en: 'Patient updated successfully', fr: 'Patient mis à jour' } as T,
       deleted: { en: 'Patient deleted successfully', fr: 'Patient supprimé' } as T,
       permanentlyDeleted: { en: 'Patient permanently deleted', fr: 'Patient supprimé définitivement' } as T,
+      restored: { en: 'Patient restored', fr: 'Patient restauré' } as T,
       bulkDeleted: { en: '{count} patient(s) deleted', fr: '{count} patient(s) supprimé(s)' } as T,
     },
     payments: {

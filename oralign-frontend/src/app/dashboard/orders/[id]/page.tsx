@@ -16,7 +16,6 @@ import {
   Loader2,
   ScanLine,
   ShieldCheck,
-  ShieldX,
   Target,
   Trash2,
   UserRound,
@@ -55,7 +54,6 @@ import {
   useDeleteOrder,
   useOrder,
   usePatient,
-  usePermanentDeleteOrder,
 } from '@/lib/hooks';
 import { useQueryClient } from '@tanstack/react-query';
 import { useQuotationForOrder } from '@/lib/hooks/use-quotations';
@@ -150,7 +148,6 @@ export default function OrderDetailPage() {
   const searchParams = useSearchParams();
   const orderQuery = useOrder(params.id);
   const deleteOrder = useDeleteOrder();
-  const permanentDeleteOrder = usePermanentDeleteOrder();
   const { isAdmin, isDentist, user } = useAuth();
   const { t, lang } = useT();
   const requestedTab = parseOrderDetailTab(searchParams.get('tab'));
@@ -500,22 +497,8 @@ export default function OrderDetailPage() {
               }
             />
           )}
-          {isAdmin && (
-            <OrderDeleteAction
-              title={t('orderDetail.deletePermanently') + ' ?'}
-              description={t('orderDetail.deletePermanentlyDescription')}
-              actionLabel={t('orderDetail.deletePermanently')}
-              cancelLabel={t('common.cancel')}
-              icon={<ShieldX className="mr-2 h-4 w-4" />}
-              disabled={permanentDeleteOrder.isPending}
-              destructive
-              onConfirm={() =>
-                permanentDeleteOrder.mutate(order.id, {
-                  onSuccess: () => router.push(returnHref),
-                })
-              }
-            />
-          )}
+          {/* Permanent deletion is trash-first: it lives in the orders
+              trash view (admin), never on a live order's page. */}
         </div>
       </header>
 

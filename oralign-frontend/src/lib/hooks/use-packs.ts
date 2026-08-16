@@ -9,7 +9,7 @@ import {
 } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { packsService } from '@/lib/api/packs.service';
-import { extractApiErrorMessage } from '@/lib/api/error';
+import { toastMutationError } from '@/lib/api/error';
 import { useT } from '@/lib/i18n/lang-context';
 import type {
   CreatePackDto,
@@ -88,7 +88,7 @@ export function useCreatePack(): UseMutationResult<Pack, Error, CreatePackDto> {
       invalidatePacks(queryClient);
       toast.success(t('toasts.packs.created'));
     },
-    onError: (err) => toast.error(extractApiErrorMessage(err)),
+    onError: (err) => toastMutationError(err),
   });
 }
 
@@ -105,7 +105,7 @@ export function useUpdatePack(): UseMutationResult<
       invalidatePacks(queryClient);
       toast.success(t('toasts.packs.updated'));
     },
-    onError: (err) => toast.error(extractApiErrorMessage(err)),
+    onError: (err) => toastMutationError(err),
   });
 }
 
@@ -122,11 +122,24 @@ export function useDeletePack(): UseMutationResult<
       invalidatePacks(queryClient);
       toast.success(t('toasts.packs.deleted'));
     },
-    onError: (err) => toast.error(extractApiErrorMessage(err)),
+    onError: (err) => toastMutationError(err),
   });
 }
 
 /** Permanent (hard) delete — admin-only, irreversible. */
+export function useRestorePack(): UseMutationResult<Pack, Error, string> {
+  const queryClient = useQueryClient();
+  const { t } = useT();
+  return useMutation<Pack, Error, string>({
+    mutationFn: (id) => packsService.restore(id),
+    onSuccess: () => {
+      invalidatePacks(queryClient);
+      toast.success(t('toasts.packs.restored'));
+    },
+    onError: (err) => toastMutationError(err),
+  });
+}
+
 export function usePermanentDeletePack(): UseMutationResult<
   { id: string },
   Error,
@@ -140,7 +153,7 @@ export function usePermanentDeletePack(): UseMutationResult<
       invalidatePacks(queryClient);
       toast.success(t('toasts.packs.permanentlyDeleted'));
     },
-    onError: (err) => toast.error(extractApiErrorMessage(err)),
+    onError: (err) => toastMutationError(err),
   });
 }
 
@@ -153,7 +166,7 @@ export function useActivatePack(): UseMutationResult<Pack, Error, string> {
       invalidatePacks(queryClient);
       toast.success(t('toasts.packs.activated'));
     },
-    onError: (err) => toast.error(extractApiErrorMessage(err)),
+    onError: (err) => toastMutationError(err),
   });
 }
 
@@ -166,7 +179,7 @@ export function useDeactivatePack(): UseMutationResult<Pack, Error, string> {
       invalidatePacks(queryClient);
       toast.success(t('toasts.packs.deactivated'));
     },
-    onError: (err) => toast.error(extractApiErrorMessage(err)),
+    onError: (err) => toastMutationError(err),
   });
 }
 
@@ -183,7 +196,7 @@ export function useAddPackPrice(): UseMutationResult<
       invalidatePacks(queryClient);
       toast.success(t('toasts.packs.priceAdded'));
     },
-    onError: (err) => toast.error(extractApiErrorMessage(err)),
+    onError: (err) => toastMutationError(err),
   });
 }
 
@@ -201,7 +214,7 @@ export function useUpdatePackPrice(): UseMutationResult<
       invalidatePacks(queryClient);
       toast.success(t('toasts.packs.priceUpdated'));
     },
-    onError: (err) => toast.error(extractApiErrorMessage(err)),
+    onError: (err) => toastMutationError(err),
   });
 }
 
@@ -219,6 +232,6 @@ export function useArchivePackPrice(): UseMutationResult<
       invalidatePacks(queryClient);
       toast.success(t('toasts.packs.priceArchived'));
     },
-    onError: (err) => toast.error(extractApiErrorMessage(err)),
+    onError: (err) => toastMutationError(err),
   });
 }

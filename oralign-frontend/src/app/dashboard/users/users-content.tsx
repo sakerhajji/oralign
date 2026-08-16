@@ -55,6 +55,7 @@ import { SearchFilters } from "@/components/users/search-filters";
 import { format } from 'date-fns';
 import { fr as frLocale } from 'date-fns/locale';
 import { useT } from '@/lib/i18n/lang-context';
+import { PermanentDeleteDialog } from '@/components/shared/permanent-delete-dialog';
 
 export function UsersPageContent() {
   const { t, lang } = useT();
@@ -153,21 +154,36 @@ export function UsersPageContent() {
   };
 
   // Bulk actions
+  const bulkPending =
+    bulkDelete.isPending ||
+    bulkRestore.isPending ||
+    bulkPermanentDelete.isPending ||
+    bulkUpdateStatus.isPending;
+
   const handleBulkAction = async (action: 'delete' | 'restore' | 'permanent' | 'block' | 'activate') => {
     const ids = Array.from(selectedUsers);
-    if (ids.length === 0) return;
+    if (ids.length === 0 || bulkPending) return;
 
-    if (action === 'delete') {
-      await bulkDelete.mutateAsync({ ids });
-    } else if (action === 'restore') {
-      await bulkRestore.mutateAsync({ ids });
-    } else if (action === 'permanent') {
-      await bulkPermanentDelete.mutateAsync({ ids });
-    } else {
-      await bulkUpdateStatus.mutateAsync({ ids, isActive: action === 'activate' });
+    try {
+      if (action === 'delete') {
+        await bulkDelete.mutateAsync({ ids });
+      } else if (action === 'restore') {
+        await bulkRestore.mutateAsync({ ids });
+      } else if (action === 'permanent') {
+        await bulkPermanentDelete.mutateAsync({ ids });
+      } else {
+        await bulkUpdateStatus.mutateAsync({ ids, isActive: action === 'activate' });
+      }
+    } catch {
+      // The hook's onError already toasted the backend explanation
+      // (409 = history depends on it). Keep the selection so the admin
+      // can act on the rows that were not processed.
+      setBulkDeleteOpen(false);
+      return;
     }
     setSelectedUsers(new Set());
     setBulkActionType(null);
+    setBulkDeleteOpen(false);
   };
 
   const getRoleBadgeColor = (role: string) => {
@@ -857,8 +873,27 @@ export function UsersPageContent() {
         />
       )}
 
-      {/* Bulk Action Confirmation */}
-      <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+      {/* Permanent (hard) delete — typed confirmation, stays open while pending */}
+      <PermanentDeleteDialog
+        open={bulkDeleteOpen && bulkActionType === 'permanent'}
+        onOpenChange={(o) => {
+          setBulkDeleteOpen(o);
+          if (!o) setBulkActionType(null);
+        }}
+        title={t('usersAdmin.bulkPermanentTitle')}
+        description={
+          t(
+            selectedUsers.size === 1 ? 'usersAdmin.bulkConfirmOne' : 'usersAdmin.bulkConfirmMany',
+            { action: t('usersAdmin.bulkActionPermanent'), count: selectedUsers.size },
+          ) + t('usersAdmin.bulkPermanentNote')
+        }
+        confirmLabel={t('usersAdmin.btnPermanent')}
+        pending={bulkPermanentDelete.isPending}
+        onConfirm={() => void handleBulkAction('permanent')}
+      />
+
+      {/* Bulk Action Confirmation (soft delete / restore / block / activate) */}
+      <AlertDialog open={bulkDeleteOpen && bulkActionType !== 'permanent'} onOpenChange={setBulkDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
@@ -905,8 +940,14 @@ export function UsersPageContent() {
               {t('usersAdmin.cancel')}
             </AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => bulkActionType && handleBulkAction(bulkActionType)}
-              className={bulkActionType === 'permanent' ? 'bg-red-700 hover:bg-red-800' : bulkActionType === 'delete' ? 'bg-orange-600 hover:bg-orange-700' : ''}
+              onClick={(e) => {
+                // Keep the dialog open until the mutation settles (the
+                // Radix action would close it immediately otherwise).
+                e.preventDefault();
+                if (bulkActionType) void handleBulkAction(bulkActionType);
+              }}
+              disabled={bulkPending}
+              className={bulkActionType === 'delete' ? 'bg-orange-600 hover:bg-orange-700' : ''}
             >
               {bulkActionType === 'delete'
                 ? t('usersAdmin.btnDelete')

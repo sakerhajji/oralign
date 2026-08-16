@@ -39,6 +39,8 @@ export interface PatientFilterParams extends PaginationParams {
   /** ISO 8601 dates (YYYY-MM-DD or full datetime). Inclusive bounds. */
   createdFrom?: string;
   createdTo?: string;
+  /** Admin only — return ONLY soft-deleted patients (trash view). */
+  includeDeleted?: boolean;
 }
 
 export interface OrderFilterParams extends PaginationParams {

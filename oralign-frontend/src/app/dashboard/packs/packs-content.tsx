@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useState, type ReactNode } from 'react';
 import { AvailablePacks } from '@/components/dashboard/available-packs';
 import { useT } from '@/lib/i18n/lang-context';
+import { PermanentDeleteDialog } from '@/components/shared/permanent-delete-dialog';
 import { useAuth } from '@/lib/providers/auth-provider';
 import {
   usePacks,
@@ -11,6 +12,7 @@ import {
   useUpdatePack,
   useDeletePack,
   usePermanentDeletePack,
+  useRestorePack,
   useActivatePack,
   useDeactivatePack,
 } from '@/lib/hooks';
@@ -72,6 +74,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import {
   MoreVertical,
+  ArchiveRestore,
   ShieldX,
   Plus,
   PackageIcon,
@@ -208,6 +211,7 @@ function AdminPacksManager() {
 
   const deletePack = useDeletePack();
   const permanentDeletePack = usePermanentDeletePack();
+  const restorePack = useRestorePack();
   const activatePack = useActivatePack();
   const deactivatePack = useDeactivatePack();
 
@@ -363,6 +367,7 @@ function AdminPacksManager() {
                                 deactivatePack.mutate(pack.id)
                               }
                               onDelete={() => setConfirmDelete(pack)}
+                              onRestore={() => restorePack.mutate(pack.id)}
                               onPermanentDelete={() =>
                                 setConfirmPermanentDelete(pack)
                               }
@@ -415,6 +420,7 @@ function AdminPacksManager() {
                           onActivate={() => activatePack.mutate(pack.id)}
                           onDeactivate={() => deactivatePack.mutate(pack.id)}
                           onDelete={() => setConfirmDelete(pack)}
+                          onRestore={() => restorePack.mutate(pack.id)}
                           onPermanentDelete={() =>
                             setConfirmPermanentDelete(pack)
                           }
@@ -533,40 +539,23 @@ function AdminPacksManager() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Permanent (hard) delete — irreversible, admin-only. */}
-      <AlertDialog
+      {/* Permanent (hard) delete — irreversible, admin-only, trash-first. */}
+      <PermanentDeleteDialog
         open={!!confirmPermanentDelete}
         onOpenChange={(o) => !o && setConfirmPermanentDelete(null)}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {t('packsAdmin.deletePermanentlyTitle')}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {t('packsAdmin.deletePermanentlyBody', {
-                name: confirmPermanentDelete
-                  ? packName(confirmPermanentDelete, lang)
-                  : '',
-              })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('packsAdmin.cancel')}</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-white hover:bg-destructive/90"
-              onClick={() => {
-                if (confirmPermanentDelete) {
-                  permanentDeletePack.mutate(confirmPermanentDelete.id);
-                  setConfirmPermanentDelete(null);
-                }
-              }}
-            >
-              {t('packsAdmin.deletePermanently')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        title={t('packsAdmin.deletePermanentlyTitle')}
+        description={t('packsAdmin.deletePermanentlyBody', {
+          name: confirmPermanentDelete ? packName(confirmPermanentDelete, lang) : '',
+        })}
+        confirmLabel={t('packsAdmin.deletePermanently')}
+        pending={permanentDeletePack.isPending}
+        onConfirm={() => {
+          if (confirmPermanentDelete) {
+            permanentDeletePack.mutate(confirmPermanentDelete.id);
+            setConfirmPermanentDelete(null);
+          }
+        }}
+      />
     </div>
   );
 }
@@ -582,6 +571,7 @@ function RowActions({
   onActivate,
   onDeactivate,
   onDelete,
+  onRestore,
   onPermanentDelete,
 }: {
   pack: Pack;
@@ -589,9 +579,37 @@ function RowActions({
   onActivate: () => void;
   onDeactivate: () => void;
   onDelete: () => void;
+  onRestore: () => void;
   onPermanentDelete: () => void;
 }) {
   const { t } = useT();
+  const inTrash = !!pack.deletedAt;
+  if (inTrash) {
+    // Trash-first: an archived pack can only be restored or purged.
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon">
+            <MoreVertical className="size-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={onRestore}>
+            <ArchiveRestore className="mr-2 size-4" />
+            {t('common.restore')}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            className="text-destructive focus:text-destructive"
+            onClick={onPermanentDelete}
+          >
+            <ShieldX className="mr-2 size-4" />
+            {t('packsAdmin.deletePermanently')}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  }
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -623,15 +641,8 @@ function RowActions({
           <Trash2 className="mr-2 size-4" />
           {t('packsAdmin.deletePack')}
         </DropdownMenuItem>
-        {/* Admin-only irreversible hard delete. This whole page is gated
-            to admins, so no extra role check is needed here. */}
-        <DropdownMenuItem
-          className="text-destructive focus:text-destructive"
-          onClick={onPermanentDelete}
-        >
-          <ShieldX className="mr-2 size-4" />
-          {t('packsAdmin.deletePermanently')}
-        </DropdownMenuItem>
+        {/* Permanent deletion is trash-first: archive first, then purge from
+            the archived list (see the inTrash branch above). */}
       </DropdownMenuContent>
     </DropdownMenu>
   );

@@ -2,7 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient, UseQueryResult, UseMutationResult } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { usersService, extractApiErrorMessage } from '@/lib/api';
+import { usersService, extractApiErrorMessage, toastMutationError } from '@/lib/api';
 import { useT } from '@/lib/i18n/lang-context';
 import { User, UserRole, CreateUserDto, UpdateUserDto, PaginatedResponse, UserFilterParams, MessageResponse, BulkActionDto, BulkUpdateStatusDto } from '@/lib/types';
 
@@ -283,15 +283,18 @@ export function useUpdateApproval(): UseMutationResult<
 export function useBulkPermanentlyDeleteUsers(): UseMutationResult<MessageResponse & { count: number }, Error, BulkActionDto> {
   const queryClient = useQueryClient();
 
-  return useMutation<MessageResponse & { count: number }, Error, BulkActionDto>({
+  return useMutation<MessageResponse & { count: number; blocked?: number }, Error, BulkActionDto>({
     mutationFn: usersService.bulkPermanentlyDeleteUsers,
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: userKeys.lists() });
       queryClient.invalidateQueries({ queryKey: userKeys.deletedLists() });
-      toast.success(data.message);
+      // Partial success ("2 deleted, 1 kept because history depends on
+      // it") is a warning, not a plain success.
+      if (data.blocked && data.blocked > 0) toast.warning(data.message, { duration: 9000 });
+      else toast.success(data.message);
     },
-    onError: (error: Error) => {
-      toast.error(extractApiErrorMessage(error));
+    onError: (error) => {
+      toastMutationError(error);
     },
   });
 }

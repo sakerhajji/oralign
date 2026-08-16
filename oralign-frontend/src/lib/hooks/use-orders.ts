@@ -8,7 +8,7 @@ import {
   UseQueryResult,
 } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { extractApiErrorMessage, ordersService } from '@/lib/api';
+import { extractApiErrorMessage, toastMutationError, ordersService } from '@/lib/api';
 import { useT } from '@/lib/i18n/lang-context';
 import {
   CreateOrderDto,
@@ -149,7 +149,7 @@ export function useCreateOrder(): UseMutationResult<
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
       toast.success(t('toasts.orders.draftSaved'));
     },
-    onError: (error) => toast.error(extractApiErrorMessage(error)),
+    onError: (error) => toastMutationError(error),
   });
 }
 
@@ -168,7 +168,7 @@ export function useUpdateOrder(): UseMutationResult<
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(variables.id) });
       toast.success(t('toasts.orders.updated'));
     },
-    onError: (error) => toast.error(extractApiErrorMessage(error)),
+    onError: (error) => toastMutationError(error),
   });
 }
 
@@ -188,7 +188,7 @@ export function useSubmitOrder(): UseMutationResult<
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
       toast.success(t('toasts.orders.submitted'));
     },
-    onError: (error) => toast.error(extractApiErrorMessage(error)),
+    onError: (error) => toastMutationError(error),
   });
 }
 
@@ -219,7 +219,7 @@ export function usePayTreatmentFee(): UseMutationResult<
         toast.success(t('toasts.orders.treatmentFeePaid'));
       }
     },
-    onError: (error) => toast.error(extractApiErrorMessage(error)),
+    onError: (error) => toastMutationError(error),
   });
 }
 
@@ -239,7 +239,7 @@ export function useUploadTreatmentFeeProof(): UseMutationResult<
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
       toast.success(t('toasts.orders.receiptUploaded'));
     },
-    onError: (error) => toast.error(extractApiErrorMessage(error)),
+    onError: (error) => toastMutationError(error),
   });
 }
 
@@ -262,7 +262,7 @@ export function useConfirmTreatmentFeePayment(): UseMutationResult<
       queryClient.invalidateQueries({ queryKey: ['treatment-fees'] });
       toast.success(t('toasts.orders.bankTransferConfirmed'));
     },
-    onError: (error) => toast.error(extractApiErrorMessage(error)),
+    onError: (error) => toastMutationError(error),
   });
 }
 
@@ -319,7 +319,7 @@ export function useOverrideOrderStatus(): UseMutationResult<
       queryClient.invalidateQueries({ queryKey: ['quotations'] });
       toast.success(t('toasts.orders.statusUpdated'));
     },
-    onError: (error) => toast.error(extractApiErrorMessage(error)),
+    onError: (error) => toastMutationError(error),
   });
 }
 
@@ -338,7 +338,7 @@ export function useDeleteOrder(): UseMutationResult<
       queryClient.removeQueries({ queryKey: orderKeys.detail(id) });
       toast.success(t('toasts.orders.deleted'));
     },
-    onError: (error) => toast.error(extractApiErrorMessage(error)),
+    onError: (error) => toastMutationError(error),
   });
 }
 
@@ -357,7 +357,7 @@ export function usePermanentDeleteOrder(): UseMutationResult<
       queryClient.removeQueries({ queryKey: orderKeys.detail(id) });
       toast.success(t('toasts.orders.permanentlyDeleted'));
     },
-    onError: (error) => toast.error(extractApiErrorMessage(error)),
+    onError: (error) => toastMutationError(error),
   });
 }
 
@@ -382,7 +382,7 @@ export function useRestoreOrder(): UseMutationResult<
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
       toast.success(t('toasts.orders.restored'));
     },
-    onError: (error) => toast.error(extractApiErrorMessage(error)),
+    onError: (error) => toastMutationError(error),
   });
 }
 
@@ -422,7 +422,7 @@ export function useBulkUpdateOrderStatus(): UseMutationResult<
         toast.success(t('toasts.orders.bulkUpdated', { count: updated }));
       }
     },
-    onError: (error) => toast.error(extractApiErrorMessage(error)),
+    onError: (error) => toastMutationError(error),
   });
 }
 
@@ -455,7 +455,7 @@ export function useBulkDeleteOrders(): UseMutationResult<
         toast.success(t('toasts.orders.bulkDeleted', { count: deleted }));
       }
     },
-    onError: (error) => toast.error(extractApiErrorMessage(error)),
+    onError: (error) => toastMutationError(error),
   });
 }
 
@@ -482,7 +482,7 @@ export function useBulkRestoreOrders(): UseMutationResult<
         toast.success(t('toasts.orders.bulkRestored', { count: restored }));
       }
     },
-    onError: (error) => toast.error(extractApiErrorMessage(error)),
+    onError: (error) => toastMutationError(error),
   });
 }
 
@@ -519,7 +519,7 @@ export function useBulkPermanentDeleteOrders(): UseMutationResult<
         );
       }
     },
-    onError: (error) => toast.error(extractApiErrorMessage(error)),
+    onError: (error) => toastMutationError(error),
   });
 }
 
@@ -558,7 +558,7 @@ export function useUpdateToothInstructions(): UseMutationResult<
       queryClient.invalidateQueries({ queryKey: ['treatment-plans'] });
       toast.success(t('toasts.orders.odontogramSaved'));
     },
-    onError: (error) => toast.error(extractApiErrorMessage(error)),
+    onError: (error) => toastMutationError(error),
   });
 }
 
@@ -637,6 +637,6 @@ export function useDeleteOrderFile(): UseMutationResult<
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(variables.id) });
       toast.success(t('toasts.orders.fileDeleted'));
     },
-    onError: (error) => toast.error(extractApiErrorMessage(error)),
+    onError: (error) => toastMutationError(error),
   });
 }

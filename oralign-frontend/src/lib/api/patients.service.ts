@@ -52,7 +52,13 @@ export const patientsService = {
     return response.data;
   },
 
-  /** Permanent (hard) delete — admin-only, irreversible. */
+  /** Bring a soft-deleted patient back (owner dentist or admin). */
+  restorePatient: async (id: string): Promise<MessageResponse> => {
+    const response = await apiClient.post<MessageResponse>(`/patients/${id}/restore`);
+    return response.data;
+  },
+
+  /** Permanent (hard) delete — admin-only, trash-first, irreversible. */
   permanentDeletePatient: async (id: string): Promise<MessageResponse> => {
     const response = await apiClient.delete<MessageResponse>(
       `/patients/${id}/permanent`,

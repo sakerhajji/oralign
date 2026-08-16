@@ -67,7 +67,13 @@ export const packsService = {
     return res.data;
   },
 
-  /** Permanent (hard) delete — admin-only, irreversible. */
+  /** Bring an archived pack back (stays inactive until activated). */
+  restore: async (id: string): Promise<Pack> => {
+    const res = await apiClient.post<Pack>(`/admin/packs/${id}/restore`, {});
+    return res.data;
+  },
+
+  /** Permanent (hard) delete — admin-only, trash-first, irreversible. */
   permanentRemove: async (id: string): Promise<{ id: string }> => {
     const res = await apiClient.delete<{ id: string }>(
       `/admin/packs/${id}/permanent`,

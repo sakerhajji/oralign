@@ -126,8 +126,10 @@ export const usersService = {
   /**
    * Bulk permanently delete users (Hard delete - Admin only)
    */
-  bulkPermanentlyDeleteUsers: async (data: BulkActionDto): Promise<MessageResponse & { count: number }> => {
-    const response = await apiClient.delete<MessageResponse & { count: number }>('/users/bulk-permanent', { data });
+  bulkPermanentlyDeleteUsers: async (
+    data: BulkActionDto,
+  ): Promise<MessageResponse & { count: number; blocked?: number }> => {
+    const response = await apiClient.delete<MessageResponse & { count: number; blocked?: number }>('/users/bulk-permanent', { data });
     return response.data;
   },
 

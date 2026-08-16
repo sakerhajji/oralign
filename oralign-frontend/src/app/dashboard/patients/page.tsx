@@ -6,6 +6,7 @@ import { format } from 'date-fns';
 import { fr as frLocale } from 'date-fns/locale';
 import type { Locale } from 'date-fns';
 import { useT } from '@/lib/i18n/lang-context';
+import { PermanentDeleteDialog } from '@/components/shared/permanent-delete-dialog';
 import type { Lang } from '@/lib/i18n/dict';
 import {
   AlertTriangle,
@@ -25,6 +26,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  ArchiveRestore,
   ShieldX,
   Trash2,
   UserRound,
@@ -81,6 +83,7 @@ import {
   useDeletePatient,
   useDentistOptions,
   usePermanentDeletePatient,
+  useRestorePatient,
   usePatientPrefetch,
   usePatients,
   useUploadPatientProfilePhoto,
@@ -136,6 +139,8 @@ export default function PatientsPage() {
   const [createdTo, setCreatedTo] = useState('');
   const [sortKey, setSortKey] = useState<string>('created-desc');
   const [showFilters, setShowFilters] = useState(false);
+  // Admin trash view: lists ONLY soft-deleted patients (restore / purge).
+  const [showDeleted, setShowDeleted] = useState(false);
 
   // ── Sheet state ──────────────────────────────────────────────────
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -159,12 +164,14 @@ export default function PatientsPage() {
       ...(createdTo ? { createdTo } : {}),
       sortBy: sortOption.field,
       sortOrder: sortOption.order,
+      ...(isAdmin && showDeleted ? { includeDeleted: true } : {}),
     };
   }, [
     page,
     pageSize,
     search,
     isAdmin,
+    showDeleted,
     doctorFilter,
     genderFilter,
     createdFrom,
@@ -202,6 +209,9 @@ export default function PatientsPage() {
   const updatePatient = useUpdatePatient();
   const removePatient = useDeletePatient();
   const permanentRemovePatient = usePermanentDeletePatient();
+  const restorePatient = useRestorePatient();
+  const rowActionPending =
+    removePatient.isPending || permanentRemovePatient.isPending || restorePatient.isPending;
   const uploadPatientProfilePhoto = useUploadPatientProfilePhoto();
   const bulkDelete = useBulkDeletePatients();
 
@@ -330,6 +340,20 @@ export default function PatientsPage() {
     [removePatient, setSelectedIds],
   );
 
+  const handleRowRestore = useCallback(
+    (patient: Patient) => {
+      restorePatient.mutate(patient.id, {
+        onSuccess: () =>
+          setSelectedIds((prev) => {
+            const next = new Set(prev);
+            next.delete(patient.id);
+            return next;
+          }),
+      });
+    },
+    [restorePatient, setSelectedIds],
+  );
+
   const handleRowPermanentDelete = useCallback(
     (patient: Patient) => {
       permanentRemovePatient.mutate(patient.id, {
@@ -424,6 +448,23 @@ export default function PatientsPage() {
             </Button>
 
             <SortMenu sortKey={sortKey} onChange={setSortKey} />
+
+            {isAdmin && (
+              <Button
+                variant={showDeleted ? 'default' : 'outline'}
+                size="sm"
+                className="h-10 gap-2"
+                aria-pressed={showDeleted}
+                onClick={() => {
+                  setShowDeleted((current) => !current);
+                  setSelectedIds(new Set());
+                  setPage(1);
+                }}
+              >
+                {showDeleted ? <ArchiveRestore className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
+                {showDeleted ? t('patients.activePatients') : t('patients.trash')}
+              </Button>
+            )}
 
             <Button
               variant="ghost"
@@ -662,7 +703,9 @@ export default function PatientsPage() {
                     onToggle={toggleSelect}
                     onOpen={openEdit}
                     onDelete={handleRowDelete}
+                    onRestore={handleRowRestore}
                     onPermanentDelete={handleRowPermanentDelete}
+                    pending={rowActionPending}
                     onPrefetch={prefetchPatient}
                   />
                 ))}
@@ -681,7 +724,9 @@ export default function PatientsPage() {
                 onPrefetch={() => prefetchPatient(patient.id)}
                 onOpen={openEdit}
                 onDelete={handleRowDelete}
+                onRestore={handleRowRestore}
                 onPermanentDelete={handleRowPermanentDelete}
+                pending={rowActionPending}
               />
             ))}
           </div>
@@ -911,7 +956,9 @@ const PatientRow = function PatientRow({
   onToggle,
   onOpen,
   onDelete,
+  onRestore,
   onPermanentDelete,
+  pending,
   onPrefetch,
 }: {
   patient: Patient;
@@ -920,7 +967,9 @@ const PatientRow = function PatientRow({
   onToggle: (id: string) => void;
   onOpen: (patient: Patient) => void;
   onDelete: (patient: Patient) => void;
+  onRestore?: (patient: Patient) => void;
   onPermanentDelete: (patient: Patient) => void;
+  pending?: boolean;
   onPrefetch: (id: string) => void;
 }) {
   const { t, lang } = useT();
@@ -992,7 +1041,9 @@ const PatientRow = function PatientRow({
           isAdmin={isAdmin}
           onOpen={onOpen}
           onDelete={onDelete}
+          onRestore={onRestore}
           onPermanentDelete={onPermanentDelete}
+          pending={pending}
         />
       </TableCell>
     </TableRow>
@@ -1004,17 +1055,23 @@ function PatientRowActions({
   isAdmin,
   onOpen,
   onDelete,
+  onRestore,
   onPermanentDelete,
+  pending,
 }: {
   patient: Patient;
   isAdmin: boolean;
   onOpen: (patient: Patient) => void;
   onDelete: (patient: Patient) => void;
+  onRestore?: (patient: Patient) => void;
   onPermanentDelete: (patient: Patient) => void;
+  pending?: boolean;
 }) {
   const { t } = useT();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmPermOpen, setConfirmPermOpen] = useState(false);
+  // A row with deletedAt set is in the trash: only restore / purge apply.
+  const inTrash = !!patient.deletedAt;
 
   return (
     <>
@@ -1035,30 +1092,49 @@ function PatientRowActions({
             {patient.fullName}
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onClick={(e) => { e.stopPropagation(); onOpen(patient); }}
-            className="gap-2"
-          >
-            <Edit className="h-4 w-4" />
-            {t('patients.openEdit')}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onClick={(e) => { e.stopPropagation(); setConfirmOpen(true); }}
-            className="gap-2 text-destructive focus:text-destructive"
-          >
-            <Trash2 className="h-4 w-4" />
-            {t('patients.deletePatient')}
-          </DropdownMenuItem>
-          {/* Irreversible hard delete — admins only. */}
-          {isAdmin && (
-            <DropdownMenuItem
-              onClick={(e) => { e.stopPropagation(); setConfirmPermOpen(true); }}
-              className="gap-2 text-destructive focus:text-destructive"
-            >
-              <ShieldX className="h-4 w-4" />
-              {t('patients.deletePermanently')}
-            </DropdownMenuItem>
+          {inTrash ? (
+            <>
+              {onRestore && (
+                <DropdownMenuItem
+                  onClick={(e) => { e.stopPropagation(); onRestore(patient); }}
+                  disabled={pending}
+                  className="gap-2 text-emerald-700 focus:text-emerald-800"
+                >
+                  <ArchiveRestore className="h-4 w-4" />
+                  {t('common.restore')}
+                </DropdownMenuItem>
+              )}
+              {/* Irreversible hard delete — admins only, trash-first. */}
+              {isAdmin && (
+                <DropdownMenuItem
+                  onClick={(e) => { e.stopPropagation(); setConfirmPermOpen(true); }}
+                  disabled={pending}
+                  className="gap-2 text-destructive focus:text-destructive"
+                >
+                  <ShieldX className="h-4 w-4" />
+                  {t('patients.deletePermanently')}
+                </DropdownMenuItem>
+              )}
+            </>
+          ) : (
+            <>
+              <DropdownMenuItem
+                onClick={(e) => { e.stopPropagation(); onOpen(patient); }}
+                className="gap-2"
+              >
+                <Edit className="h-4 w-4" />
+                {t('patients.openEdit')}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={(e) => { e.stopPropagation(); setConfirmOpen(true); }}
+                disabled={pending}
+                className="gap-2 text-destructive focus:text-destructive"
+              >
+                <Trash2 className="h-4 w-4" />
+                {t('patients.deletePatient')}
+              </DropdownMenuItem>
+            </>
           )}
         </DropdownMenuContent>
       </DropdownMenu>
@@ -1092,34 +1168,19 @@ function PatientRowActions({
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Permanent (hard) delete — admin-only, irreversible. */}
-      <AlertDialog open={confirmPermOpen} onOpenChange={setConfirmPermOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              <span className="grid h-9 w-9 place-items-center rounded-full bg-destructive/10 text-destructive">
-                <ShieldX className="h-4 w-4" />
-              </span>
-              {t('patients.deletePermanentlyTitle')}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {t('patients.deletePermanentlyBody', { name: patient.fullName })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('patients.cancel')}</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={() => {
-                onPermanentDelete(patient);
-                setConfirmPermOpen(false);
-              }}
-            >
-              {t('patients.deletePermanently')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {/* Permanent (hard) delete — admin-only, trash-first, irreversible. */}
+      <PermanentDeleteDialog
+        open={confirmPermOpen}
+        onOpenChange={setConfirmPermOpen}
+        title={t('patients.deletePermanentlyTitle')}
+        description={t('patients.deletePermanentlyBody', { name: patient.fullName })}
+        confirmLabel={t('patients.deletePermanently')}
+        pending={pending}
+        onConfirm={() => {
+          onPermanentDelete(patient);
+          setConfirmPermOpen(false);
+        }}
+      />
     </>
   );
 }
@@ -1132,7 +1193,9 @@ function PatientMobileCard({
   onPrefetch,
   onOpen,
   onDelete,
+  onRestore,
   onPermanentDelete,
+  pending,
 }: {
   patient: Patient;
   isAdmin: boolean;
@@ -1141,7 +1204,9 @@ function PatientMobileCard({
   onPrefetch: () => void;
   onOpen: (patient: Patient) => void;
   onDelete: (patient: Patient) => void;
+  onRestore?: (patient: Patient) => void;
   onPermanentDelete: (patient: Patient) => void;
+  pending?: boolean;
 }) {
   const { t, lang } = useT();
   return (
@@ -1181,7 +1246,9 @@ function PatientMobileCard({
             isAdmin={isAdmin}
             onOpen={onOpen}
             onDelete={onDelete}
+            onRestore={onRestore}
             onPermanentDelete={onPermanentDelete}
+            pending={pending}
           />
         </div>
         <div className="mt-4 grid gap-2 text-sm text-muted-foreground">

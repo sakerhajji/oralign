@@ -104,6 +104,8 @@ export const CLINICAL_CONDITION_OTHER: ClinicalCondition = 'Other';
 export interface Patient {
   id: string;
   doctorId: string;
+  /** Set when the patient is in the trash (soft-deleted). */
+  deletedAt?: string | null;
   fullName: string;
   email?: string;
   phone?: string;
@@ -270,4 +272,6 @@ export interface DentalOrder {
   // `latestPlanStatus` is undefined when no treatment plan has been started.
   latestPlanStatus?: TreatmentPlanStatus;
   treatmentPlansCount?: number;
+  /** Set when the order is in the trash (soft-deleted). */
+  deletedAt?: string | null;
 }

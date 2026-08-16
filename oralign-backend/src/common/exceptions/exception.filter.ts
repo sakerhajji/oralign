@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { Prisma } from '@prisma/client';
 import { AppException } from './app.exception';
 
 interface ErrorResponse {
@@ -14,6 +15,46 @@ interface ErrorResponse {
   message: string;
   errorCode?: string;
   timestamp: string;
+}
+
+/**
+ * Map the Prisma "known request" errors that legitimately reach a client
+ * onto proper HTTP semantics. Without this a duplicate email (P2002) or a
+ * concurrent delete (P2025) surfaced as an opaque 500 that looked like a
+ * crash in monitoring and told the user nothing. Everything not listed
+ * here still falls through to the opaque 500 branch (never leak the raw
+ * message - it can carry table/column names).
+ */
+function mapPrismaError(
+  err: Prisma.PrismaClientKnownRequestError,
+): { status: number; message: string; errorCode: string } | null {
+  switch (err.code) {
+    case 'P2002': {
+      const target = (err.meta?.target as string[] | string | undefined) ?? [];
+      const fields = Array.isArray(target) ? target.join(', ') : String(target);
+      return {
+        status: HttpStatus.CONFLICT,
+        message: fields
+          ? `A record with the same ${fields} already exists.`
+          : 'A record with the same unique value already exists.',
+        errorCode: 'UNIQUE_CONSTRAINT',
+      };
+    }
+    case 'P2025':
+      return {
+        status: HttpStatus.NOT_FOUND,
+        message: 'The requested record no longer exists.',
+        errorCode: 'RECORD_NOT_FOUND',
+      };
+    case 'P2003':
+      return {
+        status: HttpStatus.CONFLICT,
+        message: 'This record is referenced by other data and cannot be changed.',
+        errorCode: 'FOREIGN_KEY_CONSTRAINT',
+      };
+    default:
+      return null;
+  }
 }
 
 @Catch()
@@ -48,6 +89,18 @@ export class AllExceptionsFilter implements ExceptionFilter {
         timestamp: new Date().toISOString(),
       };
       response.status(status).json(errorResponse);
+    } else if (
+      exception instanceof Prisma.PrismaClientKnownRequestError &&
+      mapPrismaError(exception)
+    ) {
+      const mapped = mapPrismaError(exception)!;
+      errorResponse = {
+        statusCode: mapped.status,
+        message: mapped.message,
+        errorCode: mapped.errorCode,
+        timestamp: new Date().toISOString(),
+      };
+      response.status(mapped.status).json(errorResponse);
     } else if (exception instanceof Error) {
       // SECURITY (audit L-4): a raw internal Error message can leak DB /
       // stack / dependency details. Log the real error server-side and

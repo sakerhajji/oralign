@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
 import { DevController } from './controllers/dev.controller';
 import { PaymentsController } from './controllers/payments.controller';
 import { MockPaymentGateway } from './gateways/mock-payment.gateway';
@@ -35,7 +34,6 @@ const controllers = [
   controllers,
   providers: [
     PaymentsService,
-    PrismaService,
     {
       provide: PAYMENT_GATEWAY,
       useClass: MockPaymentGateway,

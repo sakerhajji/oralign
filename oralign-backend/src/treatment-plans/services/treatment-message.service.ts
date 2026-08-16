@@ -9,6 +9,7 @@ import {
   UserRole,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { OrderAccessPolicy } from '../../common/access/order-access.policy';
 import {
   BadRequestException,
   ForbiddenException,
@@ -63,6 +64,7 @@ export class TreatmentMessageService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly orderAccess: OrderAccessPolicy,
     @Inject(forwardRef(() => TreatmentChatGateway))
     private readonly chatGateway: TreatmentChatGateway,
     private readonly mediaProcessing: MediaProcessingService,
@@ -96,13 +98,9 @@ export class TreatmentMessageService {
     if (!plan || plan.deletedAt || plan.order.deletedAt) {
       throw new NotFoundException('Treatment plan not found.');
     }
-    const { role, userId } = caller;
-    if (ADMIN_ROLES.includes(role)) return plan;
-    if (role === UserRole.dentist && plan.order.doctorId === userId)
-      return plan;
-    if (role === UserRole.designer && plan.order.assignedDesignerId === userId)
-      return plan;
-    throw new ForbiddenException('You cannot access this treatment plan.');
+    // Single shared rule — see common/access/order-access.policy.ts.
+    this.orderAccess.assertCanRead(plan.order, caller);
+    return plan;
   }
 
   // ─── Reads ────────────────────────────────────────────────────────────────
@@ -153,25 +151,9 @@ export class TreatmentMessageService {
    * Order-level read gate (mirror of assertPlanReadable, but addressed by
    * orderId). Used by the order-scoped chat endpoint.
    */
-  private async assertOrderReadable(orderId: string, caller: Caller) {
-    const order = await this.prisma.dentalOrder.findUnique({
-      where: { id: orderId },
-      select: {
-        id: true,
-        doctorId: true,
-        assignedDesignerId: true,
-        deletedAt: true,
-      },
-    });
-    if (!order || order.deletedAt) {
-      throw new NotFoundException('Order not found.');
-    }
-    const { role, userId } = caller;
-    if (ADMIN_ROLES.includes(role)) return order;
-    if (role === UserRole.dentist && order.doctorId === userId) return order;
-    if (role === UserRole.designer && order.assignedDesignerId === userId)
-      return order;
-    throw new ForbiddenException('You cannot access this order.');
+  private assertOrderReadable(orderId: string, caller: Caller) {
+    // Delegates to the single shared rule (common/access/order-access.policy).
+    return this.orderAccess.requireReadable(orderId, caller);
   }
 
   /**

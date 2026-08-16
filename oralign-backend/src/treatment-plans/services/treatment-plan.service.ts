@@ -16,6 +16,7 @@ import {
 } from '@prisma/client';
 import { OrderNotificationService } from '../../mail/order-notification.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { OrderAccessPolicy } from '../../common/access/order-access.policy';
 import {
   BadRequestException,
   ForbiddenException,
@@ -59,6 +60,7 @@ export class TreatmentPlanService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly orderAccess: OrderAccessPolicy,
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
     // forwardRef because the gateway also depends on the message service,
     // and the message service depends on this one — circular DI shaped
@@ -103,28 +105,9 @@ export class TreatmentPlanService {
    * plans, messages, etc.). Doctor must own the order; designer must be
    * assigned to it; admins always pass.
    */
-  private async assertOrderReadable(orderId: string, caller: Caller) {
-    const order = await this.prisma.dentalOrder.findUnique({
-      where: { id: orderId },
-      select: {
-        id: true,
-        doctorId: true,
-        assignedDesignerId: true,
-        deletedAt: true,
-      },
-    });
-    if (!order || order.deletedAt) {
-      throw new NotFoundException('Order not found');
-    }
-    if (ADMIN_ROLES.includes(caller.role)) return order;
-    if (caller.role === UserRole.dentist && order.doctorId === caller.userId)
-      return order;
-    if (
-      caller.role === UserRole.designer &&
-      order.assignedDesignerId === caller.userId
-    )
-      return order;
-    throw new ForbiddenException('You cannot access this order');
+  private assertOrderReadable(orderId: string, caller: Caller) {
+    // Delegates to the single shared rule (common/access/order-access.policy).
+    return this.orderAccess.requireReadable(orderId, caller);
   }
 
   /**
@@ -145,15 +128,8 @@ export class TreatmentPlanService {
     if (!plan || plan.deletedAt) {
       throw new NotFoundException('Treatment plan not found');
     }
-    if (ADMIN_ROLES.includes(caller.role)) return plan;
-    if (
-      caller.role === UserRole.designer &&
-      plan.order.assignedDesignerId === caller.userId
-    )
-      return plan;
-    throw new ForbiddenException(
-      'Only admins or the assigned designer can plan this treatment.',
-    );
+    this.orderAccess.assertCanPlan(plan.order, caller);
+    return plan;
   }
 
   // ─── Lifecycle ────────────────────────────────────────────────────────────
@@ -960,17 +936,8 @@ export class TreatmentPlanService {
     if (!plan || plan.deletedAt) {
       throw new NotFoundException('Treatment plan not found');
     }
-    const isAdmin = ADMIN_ROLES.includes(caller.role);
-    const isOwnerDoctor =
-      caller.role === UserRole.dentist && plan.order.doctorId === caller.userId;
-    const isAssignedDesigner =
-      caller.role === UserRole.designer &&
-      plan.order.assignedDesignerId === caller.userId;
-    if (!isAdmin && !isOwnerDoctor && !isAssignedDesigner) {
-      throw new ForbiddenException(
-        'Only the order doctor, the assigned designer, or an admin can generate a public link.',
-      );
-    }
+    // Same read rule as everywhere else (admin / owning dentist / assigned designer).
+    this.orderAccess.assertCanRead(plan.order, caller);
 
     const token = randomBytes(24).toString('base64url');
     const days = Math.min(Math.max(validDays ?? 30, 1), 365);

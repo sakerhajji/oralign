@@ -26,6 +26,10 @@ import {
 } from '../../common/exceptions/app.exception';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
+  BankDetailsSnapshot,
+  hasUsableBankTransferDetails,
+} from '../../common/utils/bank-details.util';
+import {
   PAYMENT_GATEWAY,
   PaymentGateway,
 } from '../gateways/payment-gateway.interface';
@@ -33,14 +37,6 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { NotificationEvents } from '../../notifications/events/notification-events';
 
 type Caller = { userId: string; role: UserRole };
-
-type BankDetailsSnapshot = {
-  bankName?: string;
-  accountName?: string;
-  rib?: string;
-  iban?: string;
-  swift?: string;
-} | null;
 
 /**
  * Shape consumed by the shared payment-list executor. Mirrors the
@@ -124,16 +120,7 @@ export class PaymentsService {
   }
 
   private hasUsableBankDetails(details: BankDetailsSnapshot): boolean {
-    if (!details) return false;
-    const hasNamedAccount =
-      this.hasText(details.accountName) || this.hasText(details.bankName);
-    const hasAccountNumber =
-      this.hasText(details.rib) || this.hasText(details.iban);
-    return hasNamedAccount && hasAccountNumber;
-  }
-
-  private hasText(value: string | null | undefined): boolean {
-    return typeof value === 'string' && value.trim().length > 0;
+    return hasUsableBankTransferDetails(details);
   }
 
   /**

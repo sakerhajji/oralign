@@ -24,7 +24,6 @@ import {
   WorkingHoursResponseDto,
 } from '../dto/working-hours.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
-import { Public } from '../../common/decorators/public.decorator';
 import {
   CurrentUser,
   JwtPayload,
@@ -58,7 +57,8 @@ export class WorkingHoursController {
   }
 
   @Get(':id')
-  @Public()
+  // Deferred audit item L-8, now closed: the public directory embeds hours in
+  // /dentist-profile/public/:id, so this route has no anonymous consumer.
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Get working hours by ID' })
   @ApiParam({ name: 'id', type: String, description: 'Working hours ID' })
@@ -74,7 +74,6 @@ export class WorkingHoursController {
   }
 
   @Get('dentist-profile/:dentistProfileId')
-  @Public()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Get all working hours for a dentist profile' })
   @ApiParam({

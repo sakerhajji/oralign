@@ -30,6 +30,11 @@ import {
 } from '../../common/exceptions/app.exception';
 import { OrderNotificationService } from '../../mail/order-notification.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { OrderAccessPolicy } from '../../common/access/order-access.policy';
+import {
+  BankDetailsSnapshot,
+  hasUsableBankTransferDetails,
+} from '../../common/utils/bank-details.util';
 import { formatDateStamp, slugifyForCode } from '../../common/utils/code-naming.util';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
@@ -190,14 +195,6 @@ type ClinicalOrderData = Partial<
   >
 >;
 
-type BankDetailsSnapshot = {
-  bankName?: string;
-  accountName?: string;
-  rib?: string;
-  iban?: string;
-  swift?: string;
-} | null;
-
 const ADMIN_ROLES: string[] = [UserRole.admin, UserRole.super_admin];
 
 // ── Per-category upload caps ─────────────────────────────────────────
@@ -237,6 +234,7 @@ export class OrderService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly orderAccess: OrderAccessPolicy,
     private readonly notifications: OrderNotificationService,
     private readonly events: EventEmitter2,
     private readonly mediaProcessing: MediaProcessingService,
@@ -1009,16 +1007,7 @@ export class OrderService {
   }
 
   private hasUsableBankDetails(details: BankDetailsSnapshot): boolean {
-    if (!details) return false;
-    const hasNamedAccount =
-      this.hasText(details.accountName) || this.hasText(details.bankName);
-    const hasAccountNumber =
-      this.hasText(details.rib) || this.hasText(details.iban);
-    return hasNamedAccount && hasAccountNumber;
-  }
-
-  private hasText(value: string | null | undefined): boolean {
-    return typeof value === 'string' && value.trim().length > 0;
+    return hasUsableBankTransferDetails(details);
   }
 
   /**
@@ -1916,12 +1905,8 @@ export class OrderService {
   }
 
   private accessWhere(caller: Caller): Prisma.DentalOrderWhereInput {
-    if (ADMIN_ROLES.includes(caller.role)) return {};
-    if (caller.role === UserRole.dentist) return { doctorId: caller.userId };
-    if (caller.role === UserRole.designer) {
-      return { assignedDesignerId: caller.userId };
-    }
-    throw new ForbiddenException('You cannot access orders');
+    // Single shared rule — see common/access/order-access.policy.ts.
+    return this.orderAccess.scope(caller);
   }
 
   ensureCanCreateOrModify(caller: Caller): void {

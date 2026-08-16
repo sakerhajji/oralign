@@ -17,6 +17,7 @@ import {
   NotFoundException,
 } from '../../common/exceptions/app.exception';
 import { PrismaService } from '../../prisma/prisma.service';
+import { OrderAccessPolicy } from '../../common/access/order-access.policy';
 import { PackService } from '../../packs/services/pack.service';
 import {
   AttachPackToQuotationDto,
@@ -50,6 +51,7 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly orderAccess: OrderAccessPolicy,
     private readonly packs: PackService,
     private readonly events: EventEmitter2,
   ) {}
@@ -447,20 +449,8 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
     if (!quote || quote.deletedAt || !quote.order || quote.order.deletedAt) {
       throw new NotFoundException('Quotation not found');
     }
-    if (ADMIN_ROLES.includes(caller.role)) return;
-    if (
-      caller.role === UserRole.dentist &&
-      quote.order.doctorId === caller.userId
-    ) {
-      return;
-    }
-    if (
-      caller.role === UserRole.designer &&
-      quote.order.assignedDesignerId === caller.userId
-    ) {
-      return;
-    }
-    throw new ForbiddenException('You cannot access this payment plan.');
+    // Single shared rule — see common/access/order-access.policy.ts.
+    this.orderAccess.assertCanRead(quote.order, caller);
   }
 
   async getPlan(quotationId: string, caller: Caller) {

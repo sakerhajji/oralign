@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '../../common/exceptions/app.exception';
 import { PrismaService } from '../../prisma/prisma.service';
+import { OrderAccessPolicy } from '../../common/access/order-access.policy';
 import { UpsertTreatmentPlanIprDto } from '../dto/treatment-plan-ipr.dto';
 
 type Caller = { userId: string; role: UserRole };
@@ -30,7 +31,10 @@ const PLANNER_ROLES: UserRole[] = [
  */
 @Injectable()
 export class TreatmentPlanIprService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly orderAccess: OrderAccessPolicy,
+  ) {}
 
   // ─── Auth helpers ────────────────────────────────────────────────────────
 
@@ -77,20 +81,8 @@ export class TreatmentPlanIprService {
     caller: Caller,
   ): Promise<{ id: string; orderId: string }> {
     const plan = await this.loadPlanForAuth(treatmentPlanId);
-    if (this.isAdmin(caller)) return plan;
-    if (
-      caller.role === UserRole.dentist &&
-      plan.order.doctorId === caller.userId
-    ) {
-      return plan;
-    }
-    if (
-      caller.role === UserRole.designer &&
-      plan.order.assignedDesignerId === caller.userId
-    ) {
-      return plan;
-    }
-    throw new ForbiddenException('You cannot access this treatment plan.');
+    this.orderAccess.assertCanRead(plan.order, caller);
+    return plan;
   }
 
   /**
@@ -102,16 +94,12 @@ export class TreatmentPlanIprService {
     caller: Caller,
   ): Promise<{ id: string; orderId: string }> {
     const plan = await this.loadPlanForAuth(treatmentPlanId);
-    if (this.isAdmin(caller)) return plan;
-    if (
-      caller.role === UserRole.designer &&
-      plan.order.assignedDesignerId === caller.userId
-    ) {
-      return plan;
-    }
-    throw new ForbiddenException(
+    this.orderAccess.assertCanPlan(
+      plan.order,
+      caller,
       'Only admins or the assigned designer can edit IPR / stripping on this plan.',
     );
+    return plan;
   }
 
   /**

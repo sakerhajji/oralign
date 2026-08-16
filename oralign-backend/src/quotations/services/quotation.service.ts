@@ -16,6 +16,7 @@ import {
 } from '../../common/exceptions/app.exception';
 import { OrderNotificationService } from '../../mail/order-notification.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { OrderAccessPolicy } from '../../common/access/order-access.policy';
 import {
   CreateQuotationDto,
   QuotationFilterDto,
@@ -63,6 +64,7 @@ export class QuotationService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly orderAccess: OrderAccessPolicy,
     private readonly settingsService: CompanyBillingSettingsService,
     private readonly notifications: OrderNotificationService,
     private readonly paymentPlan: QuotationPaymentPlanService,
@@ -79,32 +81,9 @@ export class QuotationService {
    * Returns the order if the caller can READ it (admin, owning dentist,
    * or assigned designer). Throws otherwise.
    */
-  private async assertOrderReadable(orderId: string, caller: Caller) {
-    const order = await this.prisma.dentalOrder.findUnique({
-      where: { id: orderId },
-      select: {
-        id: true,
-        doctorId: true,
-        assignedDesignerId: true,
-        status: true,
-        deletedAt: true,
-        orderCode: true,
-      },
-    });
-    if (!order || order.deletedAt) {
-      throw new NotFoundException('Order not found.');
-    }
-    if (this.isAdmin(caller)) return order;
-    if (caller.role === UserRole.dentist && order.doctorId === caller.userId) {
-      return order;
-    }
-    if (
-      caller.role === UserRole.designer &&
-      order.assignedDesignerId === caller.userId
-    ) {
-      return order;
-    }
-    throw new ForbiddenException('You cannot access this order.');
+  private assertOrderReadable(orderId: string, caller: Caller) {
+    // Delegates to the single shared rule (common/access/order-access.policy).
+    return this.orderAccess.requireReadable(orderId, caller);
   }
 
   private async loadQuotation(id: string): Promise<Quotation> {

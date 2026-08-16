@@ -120,6 +120,7 @@ export class UserService {
       avatarUrl?: string;
       preferredLanguage?: string;
       passwordHash?: string;
+      tokenVersion?: { increment: number };
       role?: UserRole;
       isEmailVerified?: boolean;
     } = {};
@@ -148,9 +149,20 @@ export class UserService {
     if (updateUserDto.preferredLanguage !== undefined)
       updateData.preferredLanguage = updateUserDto.preferredLanguage;
 
-    // Password update: Only if provided and not empty
+    // Password via PUT /users/:id is ADMIN-ONLY (force reset). Self-service
+    // changes must go through POST /auth/change-password, which verifies the
+    // current password. Letting a self-edit set a password here turned any
+    // stolen 15-min access token into a permanent takeover (no current-
+    // password check, no session revocation). Force-resets also bump
+    // tokenVersion so every existing session of that user is revoked.
     if (updateUserDto.password && updateUserDto.password.trim() !== '') {
+      if (!isAdmin) {
+        throw new ForbiddenException(
+          'Use the change-password endpoint to update your own password.',
+        );
+      }
       updateData.passwordHash = await bcrypt.hash(updateUserDto.password, 12);
+      updateData.tokenVersion = { increment: 1 };
     }
 
     // Admin-only fields

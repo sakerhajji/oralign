@@ -4,11 +4,13 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { CacheModule } from '@nestjs/cache-manager';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { APP_GUARD } from '@nestjs/core';
+import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { createKeyv } from '@keyv/redis';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
 import { CommonModule } from './common/common.module';
+import { AccessModule } from './common/access/access.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { DentistProfileModule } from './dentist-profile/dentist-profile.module';
@@ -102,6 +104,7 @@ function buildRedisUrl(): string {
     // depending on registration order the wrong one shadows the correct
     // one and every avatar URL returns 404.
     PrismaModule,
+    AccessModule,
     CommonModule,
     MailModule,
     AuthModule,
@@ -132,6 +135,13 @@ function buildRedisUrl(): string {
     // ThrottlerGuard runs before every request — auth endpoints layer on
     // @Throttle({...}) for stricter per-route ceilings.
     { provide: APP_GUARD, useClass: ThrottlerGuard },
+    // Authentication is DEFAULT-DENY: every route requires a valid JWT
+    // unless it opts out with @Public(). Registering the guard globally
+    // (instead of per controller) closes the class of bug where a new
+    // route is simply forgotten - /auth/change-password shipped unguarded
+    // for exactly that reason. Per-route @UseGuards(JwtAuthGuard) is now
+    // redundant but harmless; RolesGuard stays per route.
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
   ],
 })
 export class AppModule {}

@@ -8,16 +8,11 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
-import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
 import { SupportConversation, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { requiredSecret } from '../../common/config/required-secret';
-
-interface SocketUser {
-  userId: string;
-  role: UserRole;
-}
+import { SocketAuth, SocketUser } from '../../common/ws/socket-auth';
+import { socketCors } from '../../common/config/cors';
 
 /**
  * Real-time support chat gateway.
@@ -37,7 +32,7 @@ interface SocketUser {
  */
 @WebSocketGateway({
   namespace: '/support-chat',
-  cors: { origin: true, credentials: true },
+  cors: socketCors,
 })
 export class SupportChatGateway
   implements OnGatewayConnection, OnGatewayDisconnect
@@ -46,48 +41,28 @@ export class SupportChatGateway
   server!: Server;
 
   private readonly logger = new Logger(SupportChatGateway.name);
-  private readonly jwt = new JwtService({
-    secret: requiredSecret('JWT_SECRET'),
-  });
-
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly socketAuth: SocketAuth,
+  ) {}
 
   // ─── Connection lifecycle ───────────────────────────────────────
 
   async handleConnection(client: Socket) {
-    try {
-      const token =
-        (client.handshake.auth?.token as string | undefined) ??
-        this.tokenFromHeader(client.handshake.headers.authorization);
-      if (!token) {
-        client.emit('error', { message: 'No auth token' });
-        client.disconnect(true);
-        return;
-      }
-      const payload = this.jwt.verify<{
-        sub: string;
-        role: UserRole;
-      }>(token);
-      const user: SocketUser = { userId: payload.sub, role: payload.role };
-      client.data.user = user;
+    // Handshake auth (token, revocation, expiry cap) is shared across every
+    // gateway — see common/ws/socket-auth.ts. Null means already rejected.
+    const user = await this.socketAuth.authenticate(client, 'support');
+    if (!user) return;
 
-      // Every user joins their own room so a doctor receives queue-level
-      // pings (unread badge + conversation list) in real time even when
-      // they aren't viewing a specific thread — without it, the doctor's
-      // always-on socket was in NO room and only `admins:all` got the
-      // `conversation:touched` ping, so the doctor badge/list only
-      // refreshed via the slow fallback poll.
-      await client.join(this.userRoom(user.userId));
+    // Every user joins their own room so a doctor receives queue-level
+    // pings (unread badge + conversation list) in real time even when
+    // they aren't viewing a specific thread.
+    await client.join(this.userRoom(user.userId));
 
-      // Admins additionally join the global admin room so they get the
-      // conversation:new + conversation:updated broadcasts for the queue.
-      if (user.role === UserRole.admin || user.role === UserRole.super_admin) {
-        await client.join('admins:all');
-      }
-    } catch (err) {
-      this.logger.warn(`Support socket auth failed: ${(err as Error).message}`);
-      client.emit('error', { message: 'Invalid auth' });
-      client.disconnect(true);
+    // Admins additionally join the global admin room so they get the
+    // conversation:new + conversation:updated broadcasts for the queue.
+    if (user.role === UserRole.admin || user.role === UserRole.super_admin) {
+      await client.join('admins:all');
     }
   }
 
@@ -106,7 +81,7 @@ export class SupportChatGateway
     @MessageBody() data: { conversationId?: string },
     @ConnectedSocket() client: Socket,
   ) {
-    const user = client.data.user as SocketUser | undefined;
+    const user = SocketAuth.user(client);
     if (!user || !data?.conversationId) {
       return { ok: false, reason: 'invalid-request' };
     }
@@ -207,11 +182,6 @@ export class SupportChatGateway
     return `user:${id}`;
   }
 
-  private tokenFromHeader(auth?: string): string | undefined {
-    if (!auth) return undefined;
-    const [scheme, value] = auth.split(' ');
-    return scheme?.toLowerCase() === 'bearer' ? value : auth;
-  }
 
   private async canReadConversation(
     conversationId: string,

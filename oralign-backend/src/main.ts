@@ -8,6 +8,7 @@ import { join } from 'path';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/exceptions/exception.filter';
 import { env } from './common/config/env';
+import { allowedOrigins } from './common/config/cors';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -112,44 +113,8 @@ async function bootstrap(): Promise<void> {
   // Production must whitelist explicit origins from env. Dev includes loopback
   // ports as a convenience. We deliberately do NOT fall through to '*' or
   // accept any origin when env vars are missing.
-  const envOrigins = [env.frontendUrl, ...env.corsOrigins];
-  const devOrigins = isProd
-    ? []
-    : [
-        'http://localhost:3001',
-        'http://localhost:3000',
-        'http://localhost:5173',
-      ];
-
-  // Loopback equivalence: `localhost`, `127.0.0.1` and `[::1]` are the
-  // same machine, but CORS matches the Origin STRING — so allowing only
-  // http://localhost:3001 silently rejected http://127.0.0.1:3001 and
-  // every API call (login included) died in the browser with an opaque
-  // network error. Expanding a loopback origin to all three hosts keeps
-  // local setups working regardless of which alias the browser uses.
-  // Non-loopback origins (real domains in production) pass through
-  // untouched, so the production allowlist stays exactly as configured.
-  const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
-  const expandLoopback = (origin: string): string[] => {
-    try {
-      const u = new URL(origin);
-      if (!LOOPBACK_HOSTS.includes(u.hostname)) return [origin];
-      const port = u.port ? `:${u.port}` : '';
-      return LOOPBACK_HOSTS.map((host) => `${u.protocol}//${host}${port}`);
-    } catch {
-      return [origin];
-    }
-  };
-  const allowedOrigins = Array.from(
-    new Set([...envOrigins, ...devOrigins].flatMap(expandLoopback)),
-  );
-
-  if (allowedOrigins.length === 0 && isProd) {
-    throw new Error(
-      '[security] CORS_ORIGINS or FRONTEND_URL must be set in production',
-    );
-  }
-
+  // Allowlist is computed once in common/config/cors.ts and shared with the
+  // Socket.IO gateways, so HTTP and WS enforce the SAME origins.
   app.enableCors({
     origin: (origin, callback) => {
       // Server-to-server / curl / health-check requests have no Origin —

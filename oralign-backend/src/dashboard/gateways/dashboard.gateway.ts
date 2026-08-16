@@ -5,15 +5,10 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
-import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
 import { UserRole } from '@prisma/client';
-import { requiredSecret } from '../../common/config/required-secret';
-
-interface SocketUser {
-  userId: string;
-  role: UserRole;
-}
+import { SocketAuth } from '../../common/ws/socket-auth';
+import { socketCors } from '../../common/config/cors';
 
 /**
  * Lightweight broadcast gateway for the admin + doctor dashboards.
@@ -33,7 +28,7 @@ interface SocketUser {
  */
 @WebSocketGateway({
   namespace: '/dashboard',
-  cors: { origin: true, credentials: true },
+  cors: socketCors,
 })
 export class DashboardGateway
   implements OnGatewayConnection, OnGatewayDisconnect
@@ -42,40 +37,19 @@ export class DashboardGateway
   server!: Server;
 
   private readonly logger = new Logger(DashboardGateway.name);
-  private readonly jwt = new JwtService({
-    secret: requiredSecret('JWT_SECRET'),
-  });
+  constructor(private readonly socketAuth: SocketAuth) {}
 
   async handleConnection(client: Socket) {
-    try {
-      const token =
-        (client.handshake.auth?.token as string | undefined) ??
-        this.tokenFromHeader(client.handshake.headers.authorization);
-      if (!token) {
-        client.emit('error', { message: 'No auth token' });
-        client.disconnect(true);
-        return;
-      }
-      const payload = this.jwt.verify<{
-        sub: string;
-        role: UserRole;
-      }>(token);
-      const user: SocketUser = { userId: payload.sub, role: payload.role };
-      client.data.user = user;
+    // Handshake auth (token, revocation, expiry cap) is shared across every
+    // gateway — see common/ws/socket-auth.ts. Null means already rejected.
+    const user = await this.socketAuth.authenticate(client, 'dashboard');
+    if (!user) return;
 
-      if (
-        user.role === UserRole.admin ||
-        user.role === UserRole.super_admin
-      ) {
-        await client.join('admins:all');
-      }
-      if (user.role === UserRole.dentist) {
-        await client.join(this.doctorRoom(user.userId));
-      }
-    } catch (err) {
-      this.logger.warn(`Dashboard socket auth failed: ${(err as Error).message}`);
-      client.emit('error', { message: 'Invalid auth' });
-      client.disconnect(true);
+    if (user.role === UserRole.admin || user.role === UserRole.super_admin) {
+      await client.join('admins:all');
+    }
+    if (user.role === UserRole.dentist) {
+      await client.join(this.doctorRoom(user.userId));
     }
   }
 
@@ -122,9 +96,4 @@ export class DashboardGateway
     return `doctor:${id}`;
   }
 
-  private tokenFromHeader(auth?: string): string | undefined {
-    if (!auth) return undefined;
-    const [scheme, value] = auth.split(' ');
-    return scheme?.toLowerCase() === 'bearer' ? value : auth;
-  }
 }

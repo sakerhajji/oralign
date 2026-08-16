@@ -15,7 +15,9 @@ import * as path from 'path';
 import { PrismaService } from '../../prisma/prisma.service';
 import { scanUploadFile } from '../../media/file-security';
 import { OrderFileResponseDto } from '../dto/order.dto';
-import { OrderService, UPLOAD_ROOT } from './order.service';
+import { OrderService } from './order.service';
+import { OrderFilesService } from './order-files.service';
+import { UPLOAD_ROOT } from './order-storage';
 import type { Caller } from '../../common/access/caller';
 
 /** Caller identity forwarded from the JWT guard (mirrors OrderService). */
@@ -62,6 +64,7 @@ export class ChunkedUploadService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly orders: OrderService,
+    private readonly files: OrderFilesService,
   ) {}
 
   // ── Session lifecycle ────────────────────────────────────────────
@@ -82,7 +85,7 @@ export class ChunkedUploadService {
 
     // Same name/size/extension rules as the single-shot path — enforced
     // on the DECLARED metadata before a single byte is transferred.
-    this.orders.validateFile(
+    this.files.validateFile(
       { originalname: dto.fileName, size: dto.size },
       dto.category,
     );
@@ -227,7 +230,7 @@ export class ChunkedUploadService {
         );
       }
 
-      const file = await this.orders.registerAssembledFile(
+      const file = await this.files.registerAssembledFile(
         order,
         session.category,
         {

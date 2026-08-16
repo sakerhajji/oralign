@@ -56,6 +56,9 @@ import {
 } from '../dto/order.dto';
 import { ChunkedUploadService } from '../services/chunked-upload.service';
 import { OrderService } from '../services/order.service';
+import { OrderFilesService } from '../services/order-files.service';
+import { OrderExportService } from '../services/order-export.service';
+import { TreatmentFeeService } from '../services/treatment-fee.service';
 
 @ApiTags('orders')
 @ApiBearerAuth('access-token')
@@ -70,6 +73,9 @@ import { OrderService } from '../services/order.service';
 export class OrderController {
   constructor(
     private readonly orderService: OrderService,
+    private readonly orderFiles: OrderFilesService,
+    private readonly orderExport: OrderExportService,
+    private readonly treatmentFees: TreatmentFeeService,
     private readonly chunkedUploads: ChunkedUploadService,
   ) {}
 
@@ -257,7 +263,7 @@ export class OrderController {
   ): Promise<OrderResponseDto> {
     // Amount is computed server-side (audit M-4) — the client only
     // chooses the payment method.
-    return this.orderService.payTreatmentFee(id, body.method, {
+    return this.treatmentFees.payTreatmentFee(id, body.method, {
       userId: user.sub,
       role: user.role,
     });
@@ -311,7 +317,7 @@ export class OrderController {
     // matches every other media path. The amount is derived server-side
     // (audit M-4), not read from the multipart body.
     const relativePath = `/uploads/treatment-fee-proofs/${proof.filename}`;
-    return this.orderService.uploadTreatmentFeeProof(id, relativePath, {
+    return this.treatmentFees.uploadTreatmentFeeProof(id, relativePath, {
       userId: user.sub,
       role: user.role,
     });
@@ -335,7 +341,7 @@ export class OrderController {
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
   ): Promise<OrderResponseDto> {
-    return this.orderService.confirmTreatmentFeePayment(id, {
+    return this.treatmentFees.confirmTreatmentFeePayment(id, {
       userId: user.sub,
       role: user.role,
     });
@@ -363,7 +369,7 @@ export class OrderController {
     @Query('limit') limit?: string,
     @CurrentUser() user?: JwtPayload,
   ) {
-    return this.orderService.listPendingTreatmentFees({
+    return this.treatmentFees.listPendingTreatmentFees({
       page: page ? Number(page) : undefined,
       limit: limit ? Number(limit) : undefined,
       caller: { userId: user!.sub, role: user!.role },
@@ -389,7 +395,7 @@ export class OrderController {
     @Query('limit') limit?: string,
     @CurrentUser() user?: JwtPayload,
   ) {
-    return this.orderService.listTreatmentFees({
+    return this.treatmentFees.listTreatmentFees({
       page: page ? Number(page) : undefined,
       limit: limit ? Number(limit) : undefined,
       caller: { userId: user!.sub, role: user!.role },
@@ -649,7 +655,7 @@ export class OrderController {
     @CurrentUser() user: JwtPayload,
     @Query('category') category?: OrderFileCategory,
   ) {
-    return this.orderService.uploadFiles(
+    return this.orderFiles.uploadFiles(
       id,
       files,
       category ?? OrderFileCategory.other,
@@ -662,7 +668,7 @@ export class OrderController {
   @ApiOperation({ summary: 'Get order files' })
   @ApiParam({ name: 'id', type: String })
   async getFiles(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
-    return this.orderService.getFiles(id, {
+    return this.orderFiles.getFiles(id, {
       userId: user.sub,
       role: user.role,
     });
@@ -694,7 +700,7 @@ export class OrderController {
     @Res() response: Response,
   ): Promise<void> {
     const { archive, fileName, mimeType } =
-      await this.orderService.downloadAllAsZip(id, {
+      await this.orderExport.downloadAllAsZip(id, {
         userId: user.sub,
         role: user.role,
       });
@@ -749,7 +755,7 @@ export class OrderController {
     @Param('fileId') fileId: string,
     @CurrentUser() user: JwtPayload,
   ): Promise<{ message: string }> {
-    return this.orderService.deleteFile(id, fileId, {
+    return this.orderFiles.deleteFile(id, fileId, {
       userId: user.sub,
       role: user.role,
     });
@@ -780,7 +786,7 @@ export class OrderController {
     @Res() response: Response,
     @Query('variant') variant?: string,
   ): Promise<void> {
-    const dl = await this.orderService.getDownloadFile(
+    const dl = await this.orderFiles.getDownloadFile(
       id,
       fileId,
       { userId: user.sub, role: user.role },

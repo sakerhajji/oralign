@@ -23,6 +23,9 @@ ARG CACHE_BUST=1
 RUN echo "CACHE_BUST=$CACHE_BUST" > /tmp/cache-bust.txt
 
 COPY . .
+# Unit tests gate the image: a broken access rule / guard / error mapping
+# must never produce a deployable build. Fast (no DB): ~10 s.
+RUN npx jest --ci --silent
 RUN npm run build
 
 # ─── Stage 2: Production dependencies ────────────────────────────────────────

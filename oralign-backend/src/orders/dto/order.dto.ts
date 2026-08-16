@@ -751,4 +751,8 @@ export class OrderResponseDto {
     description: 'Number of treatment-plan revisions started for this order.',
   })
   treatmentPlansCount?: number;
+
+  /** Set when the order is in the trash (soft-deleted). */
+  @ApiProperty({ required: false, nullable: true })
+  deletedAt?: Date | null;
 }

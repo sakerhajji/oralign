@@ -219,6 +219,9 @@ export class DentistProfileRepository {
       user: {
         verificationStatus: VerificationStatus.approved,
         isActive: true,
+        // A soft-deleted dentist must vanish from the public directory
+        // even though their profile row (config) is left untouched.
+        deletedAt: null,
       },
     };
 

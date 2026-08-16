@@ -27,6 +27,7 @@ import {
 } from '../dto/treatment-plan.dto';
 import { TreatmentChatGateway } from '../gateways/treatment-chat.gateway';
 import { isAdmin, type Caller } from '../../common/access/caller';
+import { lookupActorName } from '../../common/access/actor-snapshot';
 
 const PLANNER_ROLES: UserRole[] = [
   UserRole.admin,
@@ -118,10 +119,10 @@ export class TreatmentPlanService {
         id: true,
         orderId: true,
         deletedAt: true,
-        order: { select: { assignedDesignerId: true } },
+        order: { select: { assignedDesignerId: true, deletedAt: true } },
       },
     });
-    if (!plan || plan.deletedAt) {
+    if (!plan || plan.deletedAt || plan.order.deletedAt) {
       throw new NotFoundException('Treatment plan not found');
     }
     this.orderAccess.assertCanPlan(plan.order, caller);
@@ -190,6 +191,7 @@ export class TreatmentPlanService {
     });
     const version = (latest?.version ?? 0) + 1;
     const name = dto.name ?? `Treatment Plan ${version}`;
+    const actorName = await lookupActorName(this.prisma, caller.userId);
 
     const plan = await this.prisma.treatmentPlan.create({
       data: {
@@ -201,6 +203,7 @@ export class TreatmentPlanService {
         totalUpperAligners: dto.totalUpperAligners ?? null,
         totalLowerAligners: dto.totalLowerAligners ?? null,
         createdById: caller.userId,
+        createdByName: actorName,
       },
     });
 
@@ -297,6 +300,7 @@ export class TreatmentPlanService {
    */
   async markReady(id: string, caller: Caller) {
     await this.assertCanPlan(id, caller);
+    const actorName = await lookupActorName(this.prisma, caller.userId);
     const plan = await this.prisma.treatmentPlan.findUnique({
       where: { id },
       select: {
@@ -345,6 +349,8 @@ export class TreatmentPlanService {
           data: {
             treatmentPlanId: id,
             senderId: caller.userId,
+            senderName: actorName,
+            senderRole: caller.role,
             message: 'PLAN READY for review',
             type: TreatmentMessageType.system,
           },
@@ -401,6 +407,7 @@ export class TreatmentPlanService {
             dentalTreatmentTableImageSizeBytes:
               plan.dentalTreatmentTableImageSizeBytes,
             createdById: caller.userId,
+            createdByName: actorName,
           },
         });
         if (plan.iprEntries.length > 0) {
@@ -425,6 +432,8 @@ export class TreatmentPlanService {
           data: {
             treatmentPlanId: id,
             senderId: caller.userId,
+            senderName: actorName,
+            senderRole: caller.role,
             message: `Replacement plan created → ${nextName}`,
             type: TreatmentMessageType.system,
           },
@@ -433,6 +442,8 @@ export class TreatmentPlanService {
           data: {
             treatmentPlanId: c.id,
             senderId: caller.userId,
+            senderName: actorName,
+            senderRole: caller.role,
             message: `${nextName} draft created from the rejected plan. Edit it, then mark it ready for doctor review.`,
             type: TreatmentMessageType.system,
           },
@@ -474,10 +485,10 @@ export class TreatmentPlanService {
         orderId: true,
         status: true,
         deletedAt: true,
-        order: { select: { doctorId: true } },
+        order: { select: { doctorId: true, deletedAt: true } },
       },
     });
-    if (!plan || plan.deletedAt) {
+    if (!plan || plan.deletedAt || plan.order.deletedAt) {
       throw new NotFoundException('Treatment plan not found');
     }
     // Doctor (the order's owner) or admin can approve.
@@ -506,6 +517,7 @@ export class TreatmentPlanService {
       );
     }
 
+    const actorName = await lookupActorName(this.prisma, caller.userId);
     const approved = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.treatmentPlan.update({
         where: { id },
@@ -525,6 +537,8 @@ export class TreatmentPlanService {
         data: {
           treatmentPlanId: id,
           senderId: caller.userId,
+          senderName: actorName,
+          senderRole: caller.role,
           message: 'PLAN APPROVED',
           type: TreatmentMessageType.approval,
         },
@@ -556,10 +570,10 @@ export class TreatmentPlanService {
         orderId: true,
         status: true,
         deletedAt: true,
-        order: { select: { doctorId: true } },
+        order: { select: { doctorId: true, deletedAt: true } },
       },
     });
-    if (!plan || plan.deletedAt) {
+    if (!plan || plan.deletedAt || plan.order.deletedAt) {
       throw new NotFoundException('Treatment plan not found');
     }
     const callerIsAdmin = isAdmin(caller);
@@ -586,6 +600,7 @@ export class TreatmentPlanService {
       );
     }
 
+    const actorName = await lookupActorName(this.prisma, caller.userId);
     const { rejected, message } = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.treatmentPlan.update({
         where: { id },
@@ -602,6 +617,8 @@ export class TreatmentPlanService {
         data: {
           treatmentPlanId: id,
           senderId: caller.userId,
+          senderName: actorName,
+          senderRole: caller.role,
           message: `Treatment plan rejected.\nReason: ${reason}`,
           type: TreatmentMessageType.rejection,
         },
@@ -753,10 +770,9 @@ export class TreatmentPlanService {
       where: { id },
       select: { movementTableImagePath: true },
     });
-    if (plan?.movementTableImagePath) {
-      void this.safeUnlink(plan.movementTableImagePath).catch(() => {});
-    }
-    return this.prisma.treatmentPlan.update({
+    // DB first, then disk: if the update fails the row still points at an
+    // existing file; if the unlink fails we only leak a blob (harmless).
+    const updated = await this.prisma.treatmentPlan.update({
       where: { id },
       data: {
         movementTableImagePath: null,
@@ -765,6 +781,10 @@ export class TreatmentPlanService {
         movementTableImageSizeBytes: null,
       },
     });
+    if (plan?.movementTableImagePath) {
+      void this.safeUnlink(plan.movementTableImagePath).catch(() => {});
+    }
+    return updated;
   }
 
   async getMovementTableImageStream(id: string, caller: Caller) {
@@ -870,10 +890,7 @@ export class TreatmentPlanService {
       where: { id },
       select: { dentalTreatmentTableImagePath: true },
     });
-    if (plan?.dentalTreatmentTableImagePath) {
-      void this.safeUnlink(plan.dentalTreatmentTableImagePath).catch(() => {});
-    }
-    return this.prisma.treatmentPlan.update({
+    const updated = await this.prisma.treatmentPlan.update({
       where: { id },
       data: {
         dentalTreatmentTableImagePath: null,
@@ -882,6 +899,10 @@ export class TreatmentPlanService {
         dentalTreatmentTableImageSizeBytes: null,
       },
     });
+    if (plan?.dentalTreatmentTableImagePath) {
+      void this.safeUnlink(plan.dentalTreatmentTableImagePath).catch(() => {});
+    }
+    return updated;
   }
 
   async getDentalTreatmentTableImageStream(id: string, caller: Caller) {
@@ -921,11 +942,11 @@ export class TreatmentPlanService {
         deletedAt: true,
         orderId: true,
         order: {
-          select: { doctorId: true, assignedDesignerId: true },
+          select: { doctorId: true, assignedDesignerId: true, deletedAt: true },
         },
       },
     });
-    if (!plan || plan.deletedAt) {
+    if (!plan || plan.deletedAt || plan.order.deletedAt) {
       throw new NotFoundException('Treatment plan not found');
     }
     // Same read rule as everywhere else (admin / owning dentist / assigned designer).

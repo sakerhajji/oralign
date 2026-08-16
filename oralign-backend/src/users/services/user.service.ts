@@ -16,6 +16,7 @@ import { PaginatedResponse } from '../../common/dto/response.dto';
 import { MailService } from '../../mail/mail.service';
 import { Logger } from '@nestjs/common';
 import { env } from '../../common/config/env';
+import { assertNoDependents } from '../../common/deletion/deletion-blocked';
 
 type UserWithProfile = Prisma.UserGetPayload<{
   include: { dentistProfile: true };
@@ -178,7 +179,18 @@ export class UserService {
     return this.mapToDto(updatedUser);
   }
 
-  async deleteUser(id: string): Promise<{ message: string }> {
+  /**
+   * Soft delete (archive). The account disappears from every normal list
+   * and can no longer sign in; everything it owns or authored stays put
+   * and remains visible to admins. Restore is always possible.
+   */
+  async deleteUser(
+    id: string,
+    callerUserId?: string,
+  ): Promise<{ message: string }> {
+    if (callerUserId && callerUserId === id) {
+      throw new ForbiddenException('You cannot delete your own account.');
+    }
     const user = await this.userRepository.findById(id);
 
     if (!user || user.deletedAt) {
@@ -192,8 +204,10 @@ export class UserService {
 
   async bulkDeleteUsers(
     ids: string[],
+    callerUserId?: string,
   ): Promise<{ message: string; count: number }> {
-    const count = await this.userRepository.bulkDelete(ids);
+    const targets = callerUserId ? ids.filter((id) => id !== callerUserId) : ids;
+    const count = await this.userRepository.bulkDelete(targets);
     return { message: `${count} users deleted successfully`, count };
   }
 
@@ -313,25 +327,81 @@ export class UserService {
     return { message: `${count} users restored successfully`, count };
   }
 
-  async permanentlyDeleteUser(id: string): Promise<{ message: string }> {
+  /**
+   * Permanent (hard) delete. Trash-first: the account must already be
+   * soft-deleted. Refused with 409 while the account owns patients or
+   * orders — that history can only be archived, never destroyed. The DB
+   * enforces the same rule (onDelete: Restrict) as a last line of
+   * defence; this check exists to give a useful message.
+   */
+  async permanentlyDeleteUser(
+    id: string,
+    callerUserId?: string,
+  ): Promise<{ message: string }> {
+    if (callerUserId && callerUserId === id) {
+      throw new ForbiddenException('You cannot delete your own account.');
+    }
     const user = await this.userRepository.findById(id);
 
     if (!user || !user.deletedAt) {
       throw new NotFoundException('Deleted user not found');
     }
 
+    await this.assertUserPurgeable(id);
     await this.userRepository.hardDelete(id);
+    this.logger.warn(`User ${id} PERMANENTLY deleted by ${callerUserId ?? 'system'}`);
     return { message: 'User permanently deleted' };
   }
 
+  /**
+   * Bulk permanent delete. Each id is checked independently; blocked
+   * ones are skipped and counted so the admin sees "3 deleted, 2 kept
+   * (have history)" instead of an all-or-nothing failure.
+   */
   async bulkPermanentlyDeleteUsers(
     ids: string[],
-  ): Promise<{ message: string; count: number }> {
-    const count = await this.userRepository.bulkHardDelete(ids);
+    callerUserId?: string,
+  ): Promise<{ message: string; count: number; blocked: number }> {
+    const purgeable: string[] = [];
+    let blocked = 0;
+    for (const id of ids) {
+      if (callerUserId && id === callerUserId) {
+        blocked += 1;
+        continue;
+      }
+      const deps = await this.userRepository.countProtectedDependents(id);
+      if (!deps) continue; // unknown id → nothing to do
+      if (deps.patients > 0 || deps.orders > 0) {
+        blocked += 1;
+        continue;
+      }
+      purgeable.push(id);
+    }
+    const count = purgeable.length
+      ? await this.userRepository.bulkHardDelete(purgeable)
+      : 0;
+    if (count > 0) {
+      this.logger.warn(
+        `${count} user(s) PERMANENTLY deleted by ${callerUserId ?? 'system'}: ${purgeable.join(', ')}`,
+      );
+    }
     return {
-      message: `${count} users permanently deleted`,
+      message:
+        blocked > 0
+          ? `${count} users permanently deleted, ${blocked} kept because history depends on them`
+          : `${count} users permanently deleted`,
       count,
+      blocked,
     };
+  }
+
+  private async assertUserPurgeable(id: string): Promise<void> {
+    const deps = await this.userRepository.countProtectedDependents(id);
+    if (!deps) throw new NotFoundException('User not found');
+    assertNoDependents('This account', [
+      { label: 'patients', count: deps.patients },
+      { label: 'orders', count: deps.orders },
+    ]);
   }
 
   private mapToDto(user: UserWithProfile): UserResponseDto {

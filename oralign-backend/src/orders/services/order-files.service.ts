@@ -25,11 +25,7 @@ import { MediaVariantInfo } from '../../media/media.types';
 import type { Caller } from '../../common/access/caller';
 import { OrderService } from './order.service';
 import { mapOrderFileToDto, type OrderWithRelations } from './order.mapper';
-import {
-  maxUploadBytesFor,
-  removeFileFromDisk,
-  resolveUploadPath,
-} from './order-storage';
+import { maxUploadBytesFor, resolveUploadPath } from './order-storage';
 
 /**
  * Order file storage: upload, list, delete, download (originals + derived
@@ -141,12 +137,16 @@ export class OrderFilesService {
     this.orders.ensureOrderNotLockedByPayment(parent, caller);
     const file = await this.findOrderFile(id, fileId);
 
+    // Soft delete ONLY: the row is hidden but the blob (and its variants)
+    // stay on disk, so the record remains restorable/auditable. Physical
+    // removal happens when the ORDER is permanently deleted
+    // (OrderService.permanentDeleteOrder → purgeStoredMedia) or when the
+    // retention sweep purges files that have sat in the trash long enough
+    // (UploadCleanupService).
     await this.prisma.orderFile.update({
       where: { id: file.id },
       data: { deletedAt: new Date() },
     });
-
-    await removeFileFromDisk(file.relativePath);
 
     return { message: 'Order file deleted successfully' };
   }

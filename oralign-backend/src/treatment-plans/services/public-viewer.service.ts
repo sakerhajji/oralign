@@ -81,6 +81,7 @@ export class PublicTreatmentViewerService {
         deletedAt: true,
         order: {
           select: {
+            deletedAt: true,
             doctor: {
               select: {
                 fullName: true,
@@ -95,7 +96,7 @@ export class PublicTreatmentViewerService {
       },
     });
 
-    if (!plan || plan.deletedAt) {
+    if (!plan || plan.deletedAt || plan.order.deletedAt) {
       throw new NotFoundException(
         'This treatment link is no longer available.',
         'PUBLIC_LINK_NOT_FOUND',

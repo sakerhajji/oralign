@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma, UserRole } from '@prisma/client';
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   NotFoundException,
 } from '../../common/exceptions/app.exception';
@@ -14,6 +15,7 @@ import {
   UpdatePatientDto,
 } from '../dto/patient.dto';
 import { isAdmin, type Caller } from '../../common/access/caller';
+import { assertNoDependents } from '../../common/deletion/deletion-blocked';
 
 type PatientWithDoctor = Prisma.PatientGetPayload<{
   include: {
@@ -244,6 +246,12 @@ export class PatientService {
     return this.mapToDto(patient);
   }
 
+  /**
+   * Soft delete (archive). Refused with 409 while the patient still has
+   * LIVE orders — an order must not point at a patient the doctor can no
+   * longer see; archive the orders first (or let the admin do it). Orders
+   * already in the trash do not block. Restore is always possible.
+   */
   async deletePatient(
     id: string,
     caller: Caller,
@@ -251,12 +259,46 @@ export class PatientService {
     this.ensureCanManagePatients(caller);
     await this.findAccessiblePatient(id, caller);
 
+    const liveOrders = await this.prisma.dentalOrder.count({
+      where: { patientId: id, deletedAt: null },
+    });
+    if (liveOrders > 0) {
+      throw new ConflictException(
+        `This patient still has ${liveOrders} active order(s). Archive those orders first, then archive the patient.`,
+        'PATIENT_HAS_ACTIVE_ORDERS',
+      );
+    }
+
     await this.prisma.patient.update({
       where: { id },
       data: { deletedAt: new Date() },
     });
 
     return { message: 'Patient deleted successfully' };
+  }
+
+  /** Bring a soft-deleted patient back. Idempotent on a live patient. */
+  async restorePatient(
+    id: string,
+    caller: Caller,
+  ): Promise<{ message: string }> {
+    this.ensureCanManagePatients(caller);
+    const patient = await this.prisma.patient.findFirst({
+      where: {
+        id,
+        ...(isAdmin(caller) ? {} : { doctorId: caller.userId }),
+      },
+      select: { id: true, deletedAt: true },
+    });
+    if (!patient) throw new NotFoundException('Patient not found');
+    if (patient.deletedAt === null) {
+      return { message: 'Patient is already active' };
+    }
+    await this.prisma.patient.update({
+      where: { id },
+      data: { deletedAt: null },
+    });
+    return { message: 'Patient restored successfully' };
   }
 
   /**
@@ -277,16 +319,27 @@ export class PatientService {
 
     const patient = await this.prisma.patient.findUnique({
       where: { id },
-      select: { id: true, _count: { select: { orders: true } } },
+      select: {
+        id: true,
+        deletedAt: true,
+        _count: { select: { orders: true } },
+      },
     });
     if (!patient) {
       throw new NotFoundException('Patient not found');
     }
-    if (patient._count.orders > 0) {
+    // Trash-first: a live patient is never purged directly.
+    if (patient.deletedAt === null) {
       throw new BadRequestException(
-        'This patient still has orders. Permanently delete the patient’s orders first, then delete the patient.',
+        'Archive the patient first; only archived patients can be permanently deleted.',
+        'NOT_ARCHIVED',
       );
     }
+    // Any order — live or archived — is clinical/financial history and
+    // blocks the purge (409). The DB has onDelete: Restrict as backstop.
+    assertNoDependents('This patient', [
+      { label: 'orders', count: patient._count.orders },
+    ]);
 
     await this.prisma.patient.delete({ where: { id } });
     return { message: 'Patient permanently deleted successfully' };
@@ -309,7 +362,7 @@ export class PatientService {
   async bulkDeletePatients(
     ids: string[],
     caller: Caller,
-  ): Promise<{ message: string; deleted: number }> {
+  ): Promise<{ message: string; deleted: number; blocked: number }> {
     this.ensureCanManagePatients(caller);
 
     const results = await Promise.allSettled(
@@ -317,9 +370,17 @@ export class PatientService {
     );
 
     const deleted = results.filter((r) => r.status === 'fulfilled').length;
+    const blocked = results.filter(
+      (r) =>
+        r.status === 'rejected' && r.reason instanceof ConflictException,
+    ).length;
     return {
-      message: `${deleted} patient(s) deleted successfully`,
+      message:
+        blocked > 0
+          ? `${deleted} patient(s) deleted, ${blocked} kept because they still have active orders`
+          : `${deleted} patient(s) deleted successfully`,
       deleted,
+      blocked,
     };
   }
 
@@ -337,7 +398,12 @@ export class PatientService {
     filters: PatientFilterDto,
     caller: Caller,
   ): Prisma.PatientWhereInput {
-    const where: Prisma.PatientWhereInput = { deletedAt: null };
+    // Trash-bin view: admin opted in via includeDeleted=true → ONLY
+    // soft-deleted rows. Everyone else always sees the live set.
+    const showOnlyDeleted = isAdmin(caller) && filters.includeDeleted === true;
+    const where: Prisma.PatientWhereInput = showOnlyDeleted
+      ? { deletedAt: { not: null } }
+      : { deletedAt: null };
 
     if (isAdmin(caller)) {
       if (filters.doctorId) {
@@ -469,6 +535,7 @@ export class PatientService {
         : undefined,
       createdAt: patient.createdAt,
       updatedAt: patient.updatedAt,
+      deletedAt: patient.deletedAt,
     };
   }
 }

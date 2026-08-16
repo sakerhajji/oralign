@@ -306,13 +306,36 @@ export class PackService {
   async permanentDelete(id: string): Promise<{ id: string }> {
     const pack = await this.prisma.pack.findUnique({
       where: { id },
-      select: { id: true },
+      select: { id: true, deletedAt: true },
     });
     if (!pack) {
       throw new NotFoundException('Pack not found');
     }
+    // Trash-first: only an archived pack can be purged. Historical quotes
+    // keep their pack snapshot (packName/archType/.../totalPrice), so no
+    // dependency blocks this — Quotation.packId just goes SetNull.
+    if (pack.deletedAt === null) {
+      throw new BadRequestException(
+        'Archive the pack first; only archived packs can be permanently deleted.',
+        'NOT_ARCHIVED',
+      );
+    }
     await this.prisma.pack.delete({ where: { id } });
     return { id };
+  }
+
+  /** Bring an archived pack back (inactive until explicitly activated). */
+  async restore(id: string): Promise<PackWithPrices> {
+    const pack = await this.prisma.pack.findUnique({
+      where: { id },
+      select: { id: true, deletedAt: true },
+    });
+    if (!pack) throw new NotFoundException('Pack not found');
+    return this.prisma.pack.update({
+      where: { id },
+      data: { deletedAt: null },
+      include: { prices: true },
+    });
   }
 
   async setActive(id: string, active: boolean): Promise<PackWithPrices> {

@@ -237,13 +237,28 @@ export class PatientController {
     });
   }
 
+  @Post(':id/restore')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Restore a soft-deleted patient (owner dentist or admin)' })
+  @ApiParam({ name: 'id', type: String, description: 'Patient ID' })
+  @ApiResponse({ status: 200, description: 'Patient restored' })
+  async restorePatient(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<{ message: string }> {
+    return this.patientService.restorePatient(id, {
+      userId: user.sub,
+      role: user.role,
+    });
+  }
+
   @Delete(':id/permanent')
   @Roles(UserRole.admin, UserRole.super_admin)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Permanently delete a patient (hard delete). Admin-only. Refuses ' +
-      'when the patient still has orders.',
+      'Permanently delete an ARCHIVED patient (hard delete). Admin-only. ' +
+      'Refuses (409) when the patient has any order.',
   })
   @ApiParam({ name: 'id', type: String, description: 'Patient ID' })
   @ApiResponse({ status: 200, description: 'Patient permanently deleted' })

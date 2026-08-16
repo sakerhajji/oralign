@@ -150,6 +150,11 @@ export class PaymentsService {
       },
     });
     if (!row) throw new NotFoundException('Installment not found.');
+    // An archived order or quotation is frozen: nothing can be paid,
+    // declared or recorded against it until it is restored.
+    if (row.quotation.deletedAt || row.quotation.order.deletedAt) {
+      throw new NotFoundException('Installment not found.');
+    }
     const order = row.quotation.order;
     const isOwner =
       caller.role === UserRole.dentist && order.doctorId === caller.userId;
@@ -881,7 +886,10 @@ export class PaymentsService {
     // RBAC scope — dentists see only payments on their own orders.
     // We compose into `order: {...}` so filters that ALSO touch order
     // can layer onto the same nested relational filter.
-    const orderWhere: Prisma.DentalOrderWhereInput = {};
+    // Payments of archived orders stay in the ledger but leave the
+    // working lists (pending queue / history) — the admin trash view of
+    // orders is where archived work is reviewed.
+    const orderWhere: Prisma.DentalOrderWhereInput = { deletedAt: null };
     if (opts.forceScope === 'doctor') {
       orderWhere.doctorId = opts.caller.userId;
     } else if (opts.doctorId) {

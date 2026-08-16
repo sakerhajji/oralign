@@ -27,6 +27,8 @@ import { QuotationPaymentPlanService } from './quotation-payment-plan.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { NotificationEvents } from '../../notifications/events/notification-events';
 import { isAdmin, type Caller } from '../../common/access/caller';
+import { lookupActorName } from '../../common/access/actor-snapshot';
+import { assertNoDependents } from '../../common/deletion/deletion-blocked';
 
 /** Round to 3 decimal places — TND is 3-decimal officially. */
 const round = (n: number): number =>
@@ -353,6 +355,7 @@ export class QuotationService {
         tvaAmount: totals.tvaAmount,
         totalTtc: totals.totalTtc,
         createdById: caller.userId,
+        createdByName: await lookupActorName(this.prisma, caller.userId),
       },
     });
   }
@@ -961,6 +964,18 @@ export class QuotationService {
         })
       : null;
 
+    // DELETION POLICY: cancel is the ONE hard delete of a business
+    // document (the orderId @unique forces it so a fresh quote can be
+    // issued). It is only ever allowed while nothing financial hangs off
+    // the quote: any Payment row - even a failed attempt - blocks it with
+    // 409 (Payment.quotation is onDelete: Restrict as backstop).
+    const paymentCount = await this.prisma.payment.count({
+      where: { quotationId: quote.id },
+    });
+    assertNoDependents(`Quotation ${quote.quotationNumber ?? quote.id}`, [
+      { label: 'payment records', count: paymentCount },
+    ]);
+
     await this.prisma.quotation.delete({ where: { id: quote.id } });
 
     if (wasSent && order) {
@@ -992,6 +1007,7 @@ export class QuotationService {
 
     const where: Prisma.QuotationWhereInput = {
       deletedAt: null,
+      order: { deletedAt: null },
     };
     if (filter.status) where.status = filter.status;
     if (filter.language) where.language = filter.language;

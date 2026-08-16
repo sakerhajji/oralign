@@ -23,6 +23,7 @@ import {
 } from '../dto/support.dto';
 import { MediaProcessingService } from '../../media/media-processing.service';
 import { ADMIN_ROLES, isAdmin, type Caller } from '../../common/access/caller';
+import { lookupActorName } from '../../common/access/actor-snapshot';
 
 // Storage: every conversation gets its own subdirectory under
 // /uploads/support/<convId>/ so cleanup on hard-delete is one rmdir.
@@ -163,6 +164,7 @@ export class SupportService {
       args.dto.body ?? null,
       !!args.attachment,
     );
+    const actorName = await lookupActorName(this.prisma, args.caller.userId);
 
     const { conversation, firstMessage } = await this.prisma.$transaction(
       async (tx) => {
@@ -180,6 +182,7 @@ export class SupportService {
           data: {
             conversationId: conversation.id,
             senderId: args.caller.userId,
+            senderName: actorName,
             senderRole: UserRole.dentist,
             body: args.dto.body ?? null,
             attachmentRelativePath: attachmentMeta?.relativePath ?? null,
@@ -239,12 +242,14 @@ export class SupportService {
       : null;
     const preview = this.buildPreview(args.body ?? null, !!args.attachment);
     const senderIsDoctor = args.caller.role === UserRole.dentist;
+    const actorName = await lookupActorName(this.prisma, args.caller.userId);
 
     const message = await this.prisma.$transaction(async (tx) => {
       const m = await tx.supportMessage.create({
         data: {
           conversationId: conv.id,
           senderId: args.caller.userId,
+          senderName: actorName,
           senderRole: args.caller.role,
           body: args.body ?? null,
           attachmentRelativePath: attachmentMeta?.relativePath ?? null,

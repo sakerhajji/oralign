@@ -30,7 +30,8 @@ import {
   orderInclude,
   type OrderWithRelations,
 } from './order.mapper';
-import { removeFileFromDisk } from './order-storage';
+import { purgeStoredMedia, removeFileFromDisk } from './order-storage';
+import { assertNoDependents } from '../../common/deletion/deletion-blocked';
 
 type ClinicalOrderData = Partial<
   Pick<
@@ -330,33 +331,30 @@ export class OrderService {
     return { message: 'Order restored successfully' };
   }
 
+  /**
+   * Permanent (hard) delete of ONE order. Rules, in order:
+   *   1. admin only;
+   *   2. trash-first — the order must already be soft-deleted;
+   *   3. no protected history: a quotation, any payment or any treatment
+   *      plan blocks the purge with 409 (the DB has onDelete: Restrict on
+   *      those relations as the last line of defence). Such an order can
+   *      only ever be archived.
+   * Only orders that never entered the clinical/financial pipeline are
+   * purgeable; their own children (tooth instructions, files incl. the
+   * ones already in the file trash, upload sessions) go with them, and
+   * the blobs + variants + treatment-fee proof are unlinked AFTER commit.
+   */
   async permanentDeleteOrder(
     id: string,
     caller: Caller,
   ): Promise<{ message: string }> {
     this.ensureCanPermanentDelete(caller);
-
-    const order = await this.prisma.dentalOrder.findFirst({
-      where: { id },
-      select: {
-        id: true,
-        files: { select: { relativePath: true } },
-      },
+    const { purged, blocked } = await this.purgeOrders([id], caller, {
+      throwOnBlocked: true,
     });
-
-    if (!order) {
+    if (purged === 0 && blocked === 0) {
       throw new NotFoundException('Order not found');
     }
-
-    await this.prisma.$transaction(async (tx) => {
-      await tx.orderToothInstruction.deleteMany({ where: { orderId: id } });
-      await tx.orderFile.deleteMany({ where: { orderId: id } });
-      await tx.dentalOrder.delete({ where: { id } });
-    });
-
-    await Promise.all(
-      order.files.map((file) => removeFileFromDisk(file.relativePath)),
-    );
 
     return { message: 'Order permanently deleted successfully' };
   }
@@ -628,53 +626,114 @@ export class OrderService {
    * transaction, then the file blobs are unlinked from disk best-effort.
    * Admin-only; never partially commits.
    */
+  /**
+   * Bulk permanent delete — same rules as the single path, applied per
+   * id. Blocked orders (live, or with quotation / payments / plans) are
+   * counted in `blocked` and left untouched; unknown ids are `skipped`.
+   */
   async bulkPermanentDeleteOrders(
     ids: string[],
     caller: Caller,
-  ): Promise<{ deleted: number; skipped: number }> {
+  ): Promise<{ deleted: number; skipped: number; blocked: number }> {
     this.ensureCanPermanentDelete(caller);
-    if (ids.length === 0) return { deleted: 0, skipped: 0 };
+    if (ids.length === 0) return { deleted: 0, skipped: 0, blocked: 0 };
+    const { purged, blocked, found } = await this.purgeOrders(ids, caller, {
+      throwOnBlocked: false,
+    });
+    return { deleted: purged, skipped: ids.length - found, blocked };
+  }
 
-    // Fetch orders + their files so we can clean up disk blobs after
-    // the DB transaction commits. Orders that don't exist (already
-    // hard-deleted, bogus ids) are simply skipped.
+  /**
+   * THE hard-delete routine for orders (single + bulk share it).
+   * Returns counts; with `throwOnBlocked` the first blocked order throws
+   * a 409 DeletionBlockedException / 400 (not archived) instead.
+   */
+  private async purgeOrders(
+    ids: string[],
+    caller: Caller,
+    opts: { throwOnBlocked: boolean },
+  ): Promise<{ purged: number; blocked: number; found: number }> {
     const candidates = await this.prisma.dentalOrder.findMany({
       where: { id: { in: ids } },
       select: {
         id: true,
-        files: { select: { relativePath: true } },
+        orderCode: true,
+        deletedAt: true,
+        treatmentFeeProofPath: true,
+        files: { select: { relativePath: true, variants: true } },
+        _count: {
+          select: { treatmentPlans: true, payments: true },
+        },
+        quotation: { select: { id: true } },
       },
     });
-    const skipped = ids.length - candidates.length;
-    if (candidates.length === 0) return { deleted: 0, skipped };
 
-    const candidateIds = candidates.map((c) => c.id);
+    const purgeable: typeof candidates = [];
+    let blocked = 0;
+    for (const order of candidates) {
+      if (order.deletedAt === null) {
+        if (opts.throwOnBlocked) {
+          throw new BadRequestException(
+            'Archive the order first; only archived orders can be permanently deleted.',
+            'NOT_ARCHIVED',
+          );
+        }
+        blocked += 1;
+        continue;
+      }
+      const deps = [
+        { label: 'quotation', count: order.quotation ? 1 : 0 },
+        { label: 'payments', count: order._count.payments },
+        { label: 'treatment plans', count: order._count.treatmentPlans },
+      ];
+      if (deps.some((d) => d.count > 0)) {
+        if (opts.throwOnBlocked) {
+          assertNoDependents(`Order ${order.orderCode}`, deps);
+        }
+        blocked += 1;
+        continue;
+      }
+      purgeable.push(order);
+    }
 
+    if (purgeable.length === 0) {
+      return { purged: 0, blocked, found: candidates.length };
+    }
+
+    const purgeIds = purgeable.map((o) => o.id);
     this.logger.warn(
-      `Bulk PERMANENT delete on ${candidates.length} order(s) by user ${caller.userId} — irreversible`,
+      `PERMANENT delete of ${purgeIds.length} order(s) by user ${caller.userId} - irreversible: ${purgeable.map((o) => o.orderCode).join(', ')}`,
     );
 
+    // One transaction: children first (also the ones already in the file
+    // trash), then the order rows. Quotation/payments/plans cannot exist
+    // here (checked above; DB Restrict backs it).
     await this.prisma.$transaction(async (tx) => {
       await tx.orderToothInstruction.deleteMany({
-        where: { orderId: { in: candidateIds } },
+        where: { orderId: { in: purgeIds } },
+      });
+      await tx.uploadSession.deleteMany({
+        where: { orderId: { in: purgeIds } },
       });
       await tx.orderFile.deleteMany({
-        where: { orderId: { in: candidateIds } },
+        where: { orderId: { in: purgeIds } },
       });
-      await tx.dentalOrder.deleteMany({
-        where: { id: { in: candidateIds } },
-      });
+      await tx.dentalOrder.deleteMany({ where: { id: { in: purgeIds } } });
     });
 
-    // Disk cleanup — best-effort, run after the DB commit so a failed
-    // unlink can't roll back the orders. Errors are logged but don't
-    // throw because the order record is already gone.
-    const allFiles = candidates.flatMap((c) => c.files);
-    await Promise.all(
-      allFiles.map((file) => removeFileFromDisk(file.relativePath)),
-    );
+    // Disk cleanup AFTER commit, best-effort: originals + variants of
+    // every file, plus the treatment-fee proof. A failed unlink never
+    // rolls back the purge; the rows are already gone.
+    for (const order of purgeable) {
+      for (const file of order.files) {
+        await purgeStoredMedia(file.relativePath, file.variants);
+      }
+      if (order.treatmentFeeProofPath) {
+        await removeFileFromDisk(order.treatmentFeeProofPath);
+      }
+    }
 
-    return { deleted: candidateIds.length, skipped };
+    return { purged: purgeIds.length, blocked, found: candidates.length };
   }
 
   async updateToothInstructions(

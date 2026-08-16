@@ -5,6 +5,7 @@ import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsDate,
   IsEmail,
   IsEnum,
@@ -239,6 +240,9 @@ export class PatientResponseDto {
   createdAt!: Date;
   @ApiProperty()
   updatedAt!: Date;
+  /** Set when the patient is in the trash (soft-deleted). */
+  @ApiProperty({ required: false, nullable: true })
+  deletedAt?: Date | null;
 }
 
 // Sort fields the patients-list endpoint honours. Narrow enum so a
@@ -316,6 +320,19 @@ export class PatientFilterDto {
   @IsOptional()
   @IsString()
   createdTo?: string;
+
+  // Trash-bin view (mirrors OrderFilterDto.includeDeleted): admins opt in
+  // to see ONLY soft-deleted patients so they can restore / purge from
+  // the same list. Silently ignored for non-admins.
+  @ApiProperty({
+    required: false,
+    description:
+      'Admin only — return only soft-deleted patients (deletedAt is set). Used to render the trash-bin view.',
+  })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  includeDeleted?: boolean;
 }
 
 export class BulkDeletePatientsDto {

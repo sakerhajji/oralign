@@ -242,7 +242,9 @@ export class AuthService {
       where: { email: verifyEmailDto.email },
     });
 
-    if (!user) {
+    // A soft-deleted account must not be able to mint tokens through the
+    // OTP path (sign-in / refresh / reset already refuse it).
+    if (!user || user.deletedAt) {
       throw new NotFoundException('User not found');
     }
 
@@ -345,7 +347,7 @@ export class AuthService {
       where: { email: dto.email },
     });
 
-    if (!user) {
+    if (!user || user.deletedAt) {
       // Return same message to avoid user enumeration
       return { message: 'If that email exists, a new code has been sent.' };
     }

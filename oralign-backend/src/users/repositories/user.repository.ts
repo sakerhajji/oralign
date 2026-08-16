@@ -130,6 +130,27 @@ export class UserRepository {
     });
   }
 
+  /**
+   * The rows that make a user hard-delete unsafe: the clinical /
+   * financial trees rooted at this account. Counted regardless of the
+   * children's own deletedAt — an archived order is still history.
+   * (Actor references — createdQuotations, treatment plans, messages —
+   * are NOT listed: they SetNull and keep a name snapshot.)
+   */
+  async countProtectedDependents(
+    id: string,
+  ): Promise<{ patients: number; orders: number } | null> {
+    const row = await this.prisma.user.findUnique({
+      where: { id },
+      select: {
+        deletedAt: true,
+        _count: { select: { patients: true, doctorOrders: true } },
+      },
+    });
+    if (!row) return null;
+    return { patients: row._count.patients, orders: row._count.doctorOrders };
+  }
+
   async bulkDelete(ids: string[]): Promise<number> {
     const result = await this.prisma.user.updateMany({
       where: { id: { in: ids }, deletedAt: null },
@@ -205,9 +226,14 @@ export class UserRepository {
     return result.count;
   }
 
+  /**
+   * Hard-delete only rows that are ALREADY soft-deleted (trash-first,
+   * same rule as the single-row path) — a live account can never be
+   * purged in bulk by accident.
+   */
   async bulkHardDelete(ids: string[]): Promise<number> {
     const result = await this.prisma.user.deleteMany({
-      where: { id: { in: ids } },
+      where: { id: { in: ids }, deletedAt: { not: null } },
     });
     return result.count;
   }

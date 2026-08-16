@@ -114,8 +114,9 @@ export class UserController {
   @ApiResponse({ status: 200, description: 'User permanently deleted' })
   async permanentlyDeleteUser(
     @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
   ): Promise<{ message: string }> {
-    return this.userService.permanentlyDeleteUser(id);
+    return this.userService.permanentlyDeleteUser(id, user.sub);
   }
 
   @Delete('bulk-permanent')
@@ -128,8 +129,12 @@ export class UserController {
   @ApiResponse({ status: 200, description: 'Users permanently deleted' })
   async bulkPermanentlyDeleteUsers(
     @Body() bulkActionDto: BulkActionDto,
-  ): Promise<{ message: string; count: number }> {
-    return this.userService.bulkPermanentlyDeleteUsers(bulkActionDto.ids);
+    @CurrentUser() user: JwtPayload,
+  ): Promise<{ message: string; count: number; blocked: number }> {
+    return this.userService.bulkPermanentlyDeleteUsers(
+      bulkActionDto.ids,
+      user.sub,
+    );
   }
 
   @Get()
@@ -285,8 +290,11 @@ export class UserController {
   @ApiOperation({ summary: 'Delete user by ID (admin only)' })
   @ApiParam({ name: 'id', type: String, description: 'User ID' })
   @ApiResponse({ status: 200, description: 'User deleted successfully' })
-  async deleteUser(@Param('id') id: string): Promise<{ message: string }> {
-    return this.userService.deleteUser(id);
+  async deleteUser(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<{ message: string }> {
+    return this.userService.deleteUser(id, user.sub);
   }
 
   @Delete()
@@ -296,8 +304,9 @@ export class UserController {
   @ApiResponse({ status: 200, description: 'Users deleted successfully' })
   async bulkDeleteUsers(
     @Body() bulkActionDto: BulkActionDto,
+    @CurrentUser() user: JwtPayload,
   ): Promise<{ message: string; count: number }> {
-    return this.userService.bulkDeleteUsers(bulkActionDto.ids);
+    return this.userService.bulkDeleteUsers(bulkActionDto.ids, user.sub);
   }
 
   @Patch('bulk-status')

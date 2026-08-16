@@ -173,7 +173,11 @@ export class AppointmentsService {
         id: dto.dentistProfileId,
         deletedAt: null,
         isListedPublicly: true,
-        user: { verificationStatus: VerificationStatus.approved, isActive: true },
+        user: {
+          verificationStatus: VerificationStatus.approved,
+          isActive: true,
+          deletedAt: null,
+        },
       },
       select: {
         id: true,
@@ -403,7 +407,11 @@ export class AppointmentsService {
         id: dentistProfileId,
         deletedAt: null,
         isListedPublicly: true,
-        user: { verificationStatus: VerificationStatus.approved, isActive: true },
+        user: {
+          verificationStatus: VerificationStatus.approved,
+          isActive: true,
+          deletedAt: null,
+        },
       },
       select: { id: true },
     });

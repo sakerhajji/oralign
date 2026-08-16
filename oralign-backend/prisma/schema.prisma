@@ -369,7 +369,10 @@ model Patient {
   updatedAt     DateTime  @updatedAt
   deletedAt     DateTime?
 
-  doctor        User      @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  // DELETION POLICY: Restrict. A dentist account that owns patients can
+  // never be hard-deleted (soft-delete via User.deletedAt instead) — the
+  // patient row is the root of the clinical + financial tree.
+  doctor        User      @relation(fields: [doctorId], references: [id], onDelete: Restrict)
   orders        DentalOrder[]
 
   @@index([doctorId])
@@ -482,8 +485,12 @@ model DentalOrder {
   // Approved treatment plan reference — used by the order's lifecycle.
   approvedTreatmentPlanId       String?
 
-  doctor                        User                      @relation("OrderDoctor", fields: [doctorId], references: [id], onDelete: Cascade)
-  patient                       Patient                   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  // DELETION POLICY: Restrict on both parents. Orders own numbered devis,
+  // payments (invoice numbers) and treatment plans — a doctor or patient
+  // hard-delete must be blocked while orders exist, never cascade into
+  // the ledger. Soft-delete (deletedAt) is the normal path.
+  doctor                        User                      @relation("OrderDoctor", fields: [doctorId], references: [id], onDelete: Restrict)
+  patient                       Patient                   @relation(fields: [patientId], references: [id], onDelete: Restrict)
   assignedDesigner              User?                     @relation("OrderDesigner", fields: [assignedDesignerId], references: [id], onDelete: SetNull)
   toothInstructions             OrderToothInstruction[]
   files                         OrderFile[]
@@ -659,7 +666,8 @@ model TreatmentPlan {
   issuedUpperAligners         Int?
   issuedLowerAligners         Int?
 
-  createdById                 String
+  createdById                 String?
+  createdByName               String?             // actor snapshot (survives account deletion)
   approvedAt                  DateTime?
   rejectedAt                  DateTime?
 
@@ -671,8 +679,14 @@ model TreatmentPlan {
   updatedAt                   DateTime            @updatedAt
   deletedAt                   DateTime?
 
-  order                       DentalOrder         @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  createdBy                   User                @relation("TreatmentPlanCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  // DELETION POLICY: Restrict — the plan IS the clinical record. An order
+  // can only be permanently deleted while it has no plan (see
+  // OrderService.permanentDeleteOrder dependency check).
+  order                       DentalOrder         @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  // Actor reference, not ownership: SetNull so hard-deleting a staff
+  // account never removes plans on other doctors' orders. createdByName
+  // is snapshotted at creation so the audit trail survives the SetNull.
+  createdBy                   User?               @relation("TreatmentPlanCreator", fields: [createdById], references: [id], onDelete: SetNull)
   messages                    TreatmentMessage[]
   // Treatment-level IPR / stripping entries — between-tooth contacts.
   // Lives in its own table so it can't collide with the doctor's
@@ -750,7 +764,11 @@ model TreatmentPlanIpr {
 model TreatmentMessage {
   id              String                       @id @default(uuid())
   treatmentPlanId String
-  senderId        String
+  senderId        String?
+  // Actor snapshot: the thread must still read correctly after the
+  // sender's account is hard-deleted (senderId -> SetNull).
+  senderName      String?
+  senderRole      UserRole?
   message         String?
   type            TreatmentMessageType         @default(message)
 
@@ -759,7 +777,7 @@ model TreatmentMessage {
   deletedAt       DateTime?
 
   treatmentPlan   TreatmentPlan                @relation(fields: [treatmentPlanId], references: [id], onDelete: Cascade)
-  sender          User                         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  sender          User?                        @relation(fields: [senderId], references: [id], onDelete: SetNull)
   attachments     TreatmentMessageAttachment[]
 
   @@index([treatmentPlanId])
@@ -771,7 +789,7 @@ model TreatmentMessage {
 model TreatmentMessageAttachment {
   id            String                       @id @default(uuid())
   messageId     String
-  uploadedById  String
+  uploadedById  String?
   fileName      String
   filePath      String                       // relative path under uploads/
   mimeType      String?
@@ -789,7 +807,9 @@ model TreatmentMessageAttachment {
   deletedAt     DateTime?
 
   message       TreatmentMessage             @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  uploadedBy    User                         @relation(fields: [uploadedById], references: [id], onDelete: Cascade)
+  // Uploader is an actor ref, not an owner: a treatment_result deliverable
+  // must not vanish because a designer account was deleted.
+  uploadedBy    User?                        @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
 
   @@index([messageId])
   @@index([category])
@@ -1085,7 +1105,8 @@ model Quotation {
   rejectedAt          DateTime?
   rejectionReason     String?
 
-  createdById         String
+  createdById         String?
+  createdByName       String?          // actor snapshot (survives account deletion)
   approvedById        String?
   rejectedById        String?
 
@@ -1122,8 +1143,13 @@ model Quotation {
   paymentStatus         QuotationPaymentStatus @default(pending)
   doctorApprovedAt      DateTime?
 
-  order               DentalOrder      @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  createdBy           User             @relation("QuotationCreatedBy",  fields: [createdById],  references: [id], onDelete: Cascade)
+  // DELETION POLICY: Restrict — a numbered devis (gapless DEV- counter)
+  // must never disappear through an order hard-delete; the order can only
+  // be purged while no quotation exists. Admin "cancel" of a draft/sent
+  // quote is an explicit, payment-guarded hard delete (see
+  // QuotationService.cancel).
+  order               DentalOrder      @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  createdBy           User?            @relation("QuotationCreatedBy",  fields: [createdById],  references: [id], onDelete: SetNull)
   approvedBy          User?            @relation("QuotationApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
   rejectedBy          User?            @relation("QuotationRejectedBy", fields: [rejectedById], references: [id], onDelete: SetNull)
 
@@ -1284,12 +1310,18 @@ model QuoteStepBatch {
 model Payment {
   id              String              @id @default(uuid())
 
+  // DELETION POLICY: the ledger. Nothing may cascade into Payment:
+  //   • order / quotation → Restrict (a parent with payments cannot be
+  //     hard-deleted; soft-delete only)
+  //   • installment → SetNull (optional): an admin may legitimately
+  //     re-plan installments while only failed/cancelled attempts exist;
+  //     those attempts keep their order + quotation link and amount.
   orderId         String
-  order           DentalOrder         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order           DentalOrder         @relation(fields: [orderId], references: [id], onDelete: Restrict)
   quotationId     String
-  quotation       Quotation           @relation(fields: [quotationId], references: [id], onDelete: Cascade)
-  installmentId   String
-  installment     QuoteInstallment    @relation(fields: [installmentId], references: [id], onDelete: Cascade)
+  quotation       Quotation           @relation(fields: [quotationId], references: [id], onDelete: Restrict)
+  installmentId   String?
+  installment     QuoteInstallment?   @relation(fields: [installmentId], references: [id], onDelete: SetNull)
 
   // Amount is COPIED from the installment at payment-creation time
   // and never trusted from the client. Stored here so the audit row
@@ -1505,8 +1537,11 @@ model SupportMessage {
   conversationId  String
   conversation    SupportConversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
-  senderId        String
-  sender          User                  @relation("SupportMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  // Actor ref: SetNull so deleting an admin account does not punch holes
+  // in doctors' support threads. senderName + senderRole are snapshots.
+  senderId        String?
+  sender          User?                 @relation("SupportMessageSender", fields: [senderId], references: [id], onDelete: SetNull)
+  senderName      String?
   // Snapshot of the sender's role at write-time. Cheaper than a join
   // on every render and keeps the bubble for legacy users intact
   // even if the user's role changes later.

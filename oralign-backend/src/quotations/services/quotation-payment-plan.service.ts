@@ -5,6 +5,7 @@ import {
   InstallmentStatus,
   OrderStatus,
   PaymentMode,
+  PaymentRecordStatus,
   Prisma,
   Quotation,
   QuotationPaymentStatus,
@@ -25,6 +26,18 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { NotificationEvents } from '../../notifications/events/notification-events';
 import { isAdmin, type Caller } from '../../common/access/caller';
+
+/**
+ * Payment attempts that block re-planning the installments: money that
+ * has landed OR that a doctor has declared / a gateway may still settle.
+ * Only failed / rejected / cancelled attempts may be orphaned by a wipe
+ * (Payment.installment is onDelete: SetNull, so even those survive).
+ */
+const LIVE_PAYMENT_STATUSES: PaymentRecordStatus[] = [
+  PaymentRecordStatus.success,
+  PaymentRecordStatus.awaiting_confirmation,
+  PaymentRecordStatus.pending,
+];
 
 const MONEY_EPSILON = new Prisma.Decimal('0.001');
 
@@ -136,7 +149,12 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
     }
     const quote = await this.prisma.quotation.findUnique({
       where: { id: quotationId },
-      include: { payments: { where: { status: 'success' }, select: { id: true } } },
+      include: {
+        payments: {
+          where: { status: { in: LIVE_PAYMENT_STATUSES } },
+          select: { id: true },
+        },
+      },
     });
     if (!quote || quote.deletedAt) {
       throw new NotFoundException('Quotation not found');
@@ -148,7 +166,7 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
     }
     if (quote.payments.length > 0) {
       throw new BadRequestException(
-        'Cannot change the pack — at least one payment has been recorded.',
+        'Cannot change the pack — a payment has been recorded or is awaiting confirmation.',
       );
     }
 
@@ -224,7 +242,12 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
     }
     const quote = await this.prisma.quotation.findUnique({
       where: { id: quotationId },
-      include: { payments: { where: { status: 'success' }, select: { id: true } } },
+      include: {
+        payments: {
+          where: { status: { in: LIVE_PAYMENT_STATUSES } },
+          select: { id: true },
+        },
+      },
     });
     if (!quote || quote.deletedAt) {
       throw new NotFoundException('Quotation not found');
@@ -241,7 +264,7 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
     }
     if (quote.payments.length > 0) {
       throw new BadRequestException(
-        'Cannot edit the payment plan — at least one payment has been recorded.',
+        'Cannot edit the payment plan — a payment has been recorded or is awaiting confirmation.',
       );
     }
 

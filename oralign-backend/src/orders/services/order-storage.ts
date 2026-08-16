@@ -60,6 +60,29 @@ export function resolveUploadPath(relativePath: string): string {
   return absolutePath;
 }
 
+/**
+ * Physical purge of a stored media record: the original blob AND every
+ * derived variant (webp/avif thumbnails, glb models) listed in its
+ * `variants` JSON. Best-effort per file — a missing blob is not an
+ * error. Only permanent-delete paths call this; soft delete never
+ * touches the disk (the row must stay restorable).
+ */
+export async function purgeStoredMedia(
+  relativePath: string,
+  variants: unknown,
+): Promise<void> {
+  await removeFileFromDisk(relativePath);
+  if (!variants || typeof variants !== 'object' || Array.isArray(variants)) {
+    return;
+  }
+  for (const raw of Object.values(variants as Record<string, unknown>)) {
+    const p = (raw as { path?: unknown } | null)?.path;
+    if (typeof p === 'string' && p) {
+      await removeFileFromDisk(p);
+    }
+  }
+}
+
 /** Best-effort unlink; a missing blob is not an error. */
 export async function removeFileFromDisk(relativePath: string): Promise<void> {
   const absolutePath = resolveUploadPath(relativePath);

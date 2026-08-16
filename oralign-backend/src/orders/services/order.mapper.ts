@@ -151,6 +151,7 @@ export function mapOrderToDto(order: OrderWithRelations): OrderResponseDto {
     // ("Awaiting your review", "Approved", "Replanning requested", …).
     latestPlanStatus: order.treatmentPlans?.[0]?.status ?? undefined,
     treatmentPlansCount: order._count?.treatmentPlans ?? 0,
+    deletedAt: order.deletedAt ?? null,
   };
 }
 

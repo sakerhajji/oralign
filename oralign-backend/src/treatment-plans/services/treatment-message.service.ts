@@ -20,6 +20,7 @@ import { MediaProcessingService } from '../../media/media-processing.service';
 import { classifyMedia } from '../../media/media.constants';
 import { MediaVariantInfo } from '../../media/media.types';
 import { isAdmin, type Caller } from '../../common/access/caller';
+import { lookupActorName } from '../../common/access/actor-snapshot';
 
 const PLANNER_ROLES: UserRole[] = [
   UserRole.admin,
@@ -198,6 +199,7 @@ export class TreatmentMessageService {
     for (const f of files) {
       this.validateAttachment(f);
     }
+    const actorName = await lookupActorName(this.prisma, caller.userId);
 
     return this.prisma
       .$transaction(async (tx) => {
@@ -205,6 +207,8 @@ export class TreatmentMessageService {
           data: {
             treatmentPlanId,
             senderId: caller.userId,
+            senderName: actorName,
+            senderRole: caller.role,
             message: text || null,
             type:
               files.length > 0 && !text

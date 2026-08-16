@@ -88,12 +88,21 @@ export class PackController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Permanently delete a pack (hard delete). Admin-only. Cascades ' +
-      'its prices and nulls the reference on historical quotations.',
+      'Permanently delete an ARCHIVED pack (hard delete). Admin-only. ' +
+      'Cascades its prices and nulls the reference on historical quotations ' +
+      '(which keep their pack snapshot).',
   })
   @ApiParam({ name: 'id', type: String })
   async permanentDelete(@Param('id') id: string) {
     return this.packService.permanentDelete(id);
+  }
+
+  @Post(':id/restore')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Restore an archived pack (stays inactive until activated).' })
+  @ApiParam({ name: 'id', type: String })
+  async restore(@Param('id') id: string) {
+    return this.packService.restore(id);
   }
 
   @Patch(':id/activate')

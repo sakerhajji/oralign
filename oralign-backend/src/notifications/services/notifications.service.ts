@@ -12,8 +12,7 @@ import {
 } from '../../common/exceptions/app.exception';
 import { LangText, pickLang, tr } from '../../common/i18n/lang';
 import { PrismaService } from '../../prisma/prisma.service';
-
-type Caller = { userId: string; role: UserRole | string };
+import type { Caller } from '../../common/access/caller';
 
 /**
  * Owner of the Notification table lifecycle.

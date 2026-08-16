@@ -58,6 +58,7 @@ import {
 } from '../../media/file-security';
 import { buildSequentialName } from '../../media/naming';
 import { MediaVariantInfo } from '../../media/media.types';
+import { isAdmin, type Caller } from '../../common/access/caller';
 
 // Callable `archiver('zip', opts)` factory, typed via the named exports
 // (see the import note above). Kept out of the import block so the
@@ -104,8 +105,6 @@ function isAbortedArchiveError(err: unknown): boolean {
     message.includes('queue closed')
   );
 }
-
-type Caller = { userId: string; role: string };
 
 const orderInclude = Prisma.validator<Prisma.DentalOrderInclude>()({
   doctor: {
@@ -194,8 +193,6 @@ type ClinicalOrderData = Partial<
   >
 >;
 
-const ADMIN_ROLES: string[] = [UserRole.admin, UserRole.super_admin];
-
 // ── Per-category upload caps ─────────────────────────────────────────
 // Clinical photos, PDFs and generic attachments fit comfortably under
 // 50 MB and we cap there to keep storage sane.
@@ -254,7 +251,7 @@ export class OrderService {
   ): Promise<OrderResponseDto> {
     this.ensureCanCreateOrModify(caller);
 
-    const doctorId = ADMIN_ROLES.includes(caller.role)
+    const doctorId = isAdmin(caller)
       ? createOrderDto.doctorId
       : caller.userId;
 
@@ -356,7 +353,7 @@ export class OrderService {
     const current = await this.findAccessibleOrder(id, caller);
     this.ensureOrderNotLockedByPayment(current, caller);
 
-    const doctorId = ADMIN_ROLES.includes(caller.role)
+    const doctorId = isAdmin(caller)
       ? updateOrderDto.doctorId
       : current.doctorId;
     const patientId = updateOrderDto.patientId ?? current.patientId;
@@ -374,7 +371,7 @@ export class OrderService {
       data: {
         ...this.buildClinicalData(updateOrderDto),
         ...(await this.cbctSnapshotUpdate(current, updateOrderDto)),
-        ...(ADMIN_ROLES.includes(caller.role) && doctorId ? { doctorId } : {}),
+        ...(isAdmin(caller) && doctorId ? { doctorId } : {}),
         patientId,
         ...(updateOrderDto.orderCode
           ? { orderCode: updateOrderDto.orderCode }
@@ -462,7 +459,7 @@ export class OrderService {
    * admins drive the badge, so non-admins are a harmless no-op.
    */
   async markSeenByAdmin(id: string, caller: Caller): Promise<{ seen: boolean }> {
-    if (!ADMIN_ROLES.includes(caller.role)) return { seen: false };
+    if (!isAdmin(caller)) return { seen: false };
     const res = await this.prisma.dentalOrder.updateMany({
       where: { id, deletedAt: null, adminSeenAt: null },
       data: { adminSeenAt: new Date() },
@@ -484,7 +481,7 @@ export class OrderService {
     id: string,
     caller: Caller,
   ): Promise<{ message: string }> {
-    if (!ADMIN_ROLES.includes(caller.role)) {
+    if (!isAdmin(caller)) {
       throw new ForbiddenException(
         'Only admins can restore deleted orders.',
       );
@@ -641,7 +638,7 @@ export class OrderService {
     // Cash collection is an in-clinic flow — only an admin records it.
     if (
       method === PaymentMethod.cash &&
-      !ADMIN_ROLES.includes(caller.role)
+      !isAdmin(caller)
     ) {
       throw new ForbiddenException(
         'Cash payment can only be recorded by an admin.',
@@ -759,7 +756,7 @@ export class OrderService {
     limit?: number;
     caller: Caller;
   }) {
-    if (!ADMIN_ROLES.includes(args.caller.role)) {
+    if (!isAdmin(args.caller)) {
       throw new ForbiddenException(
         'Only admins can view the treatment-fee queue.',
       );
@@ -804,9 +801,9 @@ export class OrderService {
     limit?: number;
     caller: Caller;
   }) {
-    const isAdmin = ADMIN_ROLES.includes(args.caller.role);
+    const callerIsAdmin = isAdmin(args.caller);
     const isDentist = args.caller.role === UserRole.dentist;
-    if (!isAdmin && !isDentist) {
+    if (!callerIsAdmin && !isDentist) {
       // Only admins and dentists ever ask for the treatment-fee
       // history. Any other role (designer, etc.) gets a 403.
       throw new ForbiddenException(
@@ -912,7 +909,7 @@ export class OrderService {
     id: string,
     caller: Caller,
   ): Promise<OrderResponseDto> {
-    if (!ADMIN_ROLES.includes(caller.role)) {
+    if (!isAdmin(caller)) {
       throw new ForbiddenException(
         'Only admins can confirm a bank-transfer payment.',
       );
@@ -1023,7 +1020,7 @@ export class OrderService {
     reason: string | undefined,
     caller: Caller,
   ): Promise<OrderResponseDto> {
-    if (!ADMIN_ROLES.includes(caller.role)) {
+    if (!isAdmin(caller)) {
       throw new ForbiddenException(
         'Only admins can manually override an order status.',
       );
@@ -1093,7 +1090,7 @@ export class OrderService {
     reason: string | undefined,
     caller: Caller,
   ): Promise<{ updated: number; skipped: number }> {
-    if (!ADMIN_ROLES.includes(caller.role)) {
+    if (!isAdmin(caller)) {
       throw new ForbiddenException(
         'Only admins can bulk-update order statuses.',
       );
@@ -1153,7 +1150,7 @@ export class OrderService {
     ids: string[],
     caller: Caller,
   ): Promise<{ deleted: number; skipped: number }> {
-    if (!ADMIN_ROLES.includes(caller.role)) {
+    if (!isAdmin(caller)) {
       throw new ForbiddenException(
         'Only admins can bulk-delete orders.',
       );
@@ -1194,7 +1191,7 @@ export class OrderService {
     ids: string[],
     caller: Caller,
   ): Promise<{ restored: number; skipped: number }> {
-    if (!ADMIN_ROLES.includes(caller.role)) {
+    if (!isAdmin(caller)) {
       throw new ForbiddenException(
         'Only admins can bulk-restore orders.',
       );
@@ -1598,7 +1595,7 @@ export class OrderService {
     // Planner gate. Designers are allowed but only for their assigned
     // orders, which findAccessibleOrder enforces below via accessWhere.
     const isPlanner =
-      ADMIN_ROLES.includes(caller.role) || caller.role === UserRole.designer;
+      isAdmin(caller) || caller.role === UserRole.designer;
     if (!isPlanner) {
       throw new ForbiddenException(
         'Only admins and designers can download the full order archive.',
@@ -1807,12 +1804,12 @@ export class OrderService {
     // without a second route. Non-admin callers always see the live
     // set — the flag is silently ignored for safety.
     const showOnlyDeleted =
-      ADMIN_ROLES.includes(caller.role) && filters.includeDeleted === true;
+      isAdmin(caller) && filters.includeDeleted === true;
     const where: Prisma.DentalOrderWhereInput = showOnlyDeleted
       ? { deletedAt: { not: null } }
       : { deletedAt: null };
 
-    if (ADMIN_ROLES.includes(caller.role)) {
+    if (isAdmin(caller)) {
       if (filters.doctorId) where.doctorId = filters.doctorId;
     } else if (caller.role === UserRole.dentist) {
       where.doctorId = caller.userId;
@@ -1910,7 +1907,7 @@ export class OrderService {
     }
     if (
       caller.role !== UserRole.dentist &&
-      !ADMIN_ROLES.includes(caller.role)
+      !isAdmin(caller)
     ) {
       throw new ForbiddenException('You cannot manage orders');
     }
@@ -1927,14 +1924,14 @@ export class OrderService {
     if (
       caller.role !== UserRole.dentist &&
       caller.role !== UserRole.designer &&
-      !ADMIN_ROLES.includes(caller.role)
+      !isAdmin(caller)
     ) {
       throw new ForbiddenException('You cannot edit this odontogram');
     }
   }
 
   private ensureCanPermanentDelete(caller: Caller): void {
-    if (!ADMIN_ROLES.includes(caller.role)) {
+    if (!isAdmin(caller)) {
       throw new ForbiddenException('Only admins can permanently delete orders');
     }
   }

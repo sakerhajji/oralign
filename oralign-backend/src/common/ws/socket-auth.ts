@@ -1,18 +1,20 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import type { Socket } from 'socket.io';
+import type { UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { requiredSecret } from '../config/required-secret';
+import { isUserRole } from '../access/caller';
 
 /** The principal attached to an authenticated socket (`client.data.user`). */
 export interface SocketUser {
   userId: string;
-  role: string;
+  role: UserRole;
 }
 
 interface AccessTokenPayload {
   sub: string;
-  role: string;
+  role: unknown;
   /** tokenVersion at issue time — bumped on password change / reset. */
   tv?: number;
   /** JWT expiry, seconds since epoch. */
@@ -64,6 +66,7 @@ export class SocketAuth {
       if (!token) return this.reject(client, 'No auth token');
 
       const payload = this.jwt.verify<AccessTokenPayload>(token);
+      if (!isUserRole(payload.role)) return this.reject(client, 'Invalid auth');
 
       const user = await this.prisma.user.findUnique({
         where: { id: payload.sub },

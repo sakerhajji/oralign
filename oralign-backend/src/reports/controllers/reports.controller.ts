@@ -6,7 +6,6 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { UserRole } from '@prisma/client';
 import { Response } from 'express';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -17,8 +16,7 @@ import {
   ReportSummaryDto,
 } from '../dto/report.dto';
 import { ReportsService } from '../services/reports.service';
-
-const ADMIN_ROLES: UserRole[] = [UserRole.admin, UserRole.super_admin];
+import { ADMIN_ROLES } from '../../common/access/caller';
 
 function contentDisposition(fileName: string): string {
   const asciiName =

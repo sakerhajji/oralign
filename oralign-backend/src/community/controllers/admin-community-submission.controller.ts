@@ -22,7 +22,6 @@ import {
   ApiConsumes,
 } from '@nestjs/swagger';
 import { FilesInterceptor } from '@nestjs/platform-express';
-import { UserRole } from '@prisma/client';
 import {
   CurrentUser,
   JwtPayload,
@@ -38,8 +37,7 @@ import {
 } from '../dto/community-submission.dto';
 import { COMMUNITY_UPLOAD } from './community-submission.controller';
 import { CommunitySubmissionService } from '../services/community-submission.service';
-
-const ADMIN_ROLES: UserRole[] = [UserRole.admin, UserRole.super_admin];
+import { ADMIN_ROLES } from '../../common/access/caller';
 
 @ApiTags('community-admin')
 @ApiBearerAuth('access-token')

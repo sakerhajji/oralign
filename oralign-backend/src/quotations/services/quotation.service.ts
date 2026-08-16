@@ -26,10 +26,7 @@ import { pickTranslation } from './quotation-i18n';
 import { QuotationPaymentPlanService } from './quotation-payment-plan.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { NotificationEvents } from '../../notifications/events/notification-events';
-
-type Caller = { userId: string; role: UserRole };
-
-const ADMIN_ROLES: UserRole[] = [UserRole.admin, UserRole.super_admin];
+import { isAdmin, type Caller } from '../../common/access/caller';
 
 /** Round to 3 decimal places — TND is 3-decimal officially. */
 const round = (n: number): number =>
@@ -70,10 +67,6 @@ export class QuotationService {
   ) {}
 
   // ─── Authorisation helpers ────────────────────────────────────────────────
-
-  private isAdmin(caller: Caller): boolean {
-    return ADMIN_ROLES.includes(caller.role);
-  }
 
   /**
    * Returns the order if the caller can READ it (admin, owning dentist,
@@ -308,7 +301,7 @@ export class QuotationService {
     dto: CreateQuotationDto,
     caller: Caller,
   ): Promise<Quotation> {
-    if (!this.isAdmin(caller)) {
+    if (!isAdmin(caller)) {
       throw new ForbiddenException('Only admins can create a quotation.');
     }
     await this.assertOrderReadable(orderId, caller);
@@ -374,7 +367,7 @@ export class QuotationService {
     dto: UpdateQuotationDto,
     caller: Caller,
   ): Promise<Quotation> {
-    if (!this.isAdmin(caller)) {
+    if (!isAdmin(caller)) {
       throw new ForbiddenException('Only admins can edit a quotation.');
     }
     const quote = await this.loadQuotation(id);
@@ -522,7 +515,7 @@ export class QuotationService {
    * Locks in quotationNumber + companySnapshot + clinicSnapshot.
    */
   async send(id: string, caller: Caller): Promise<Quotation> {
-    if (!this.isAdmin(caller)) {
+    if (!isAdmin(caller)) {
       throw new ForbiddenException('Only admins can send a quotation.');
     }
     let quote = await this.loadQuotation(id);
@@ -619,7 +612,7 @@ export class QuotationService {
 
     const isOwnerDoctor =
       caller.role === UserRole.dentist && order.doctorId === caller.userId;
-    if (!this.isAdmin(caller) && !isOwnerDoctor) {
+    if (!isAdmin(caller) && !isOwnerDoctor) {
       throw new ForbiddenException(
         'Only the order doctor or an admin can approve the quotation.',
       );
@@ -644,24 +637,85 @@ export class QuotationService {
       return fresh;
     }
 
-    const approved = await this.prisma.$transaction(async (tx) => {
-      const u = await tx.quotation.update({
-        where: { id: quote.id },
-        data: {
-          status: QuotationStatus.approved,
-          approvedAt: new Date(),
-          approvedById: caller.userId,
-        },
-      });
-      await tx.dentalOrder.update({
-        where: { id: quote.orderId },
-        data: { status: OrderStatus.fabrication },
-      });
-      return u;
-    });
+    const approved = await this.transitionSentToApproved(
+      quote,
+      caller.userId,
+      OrderStatus.fabrication,
+    );
+    if (!approved) {
+      throw new BadRequestException(
+        'This quotation was already decided by another request.',
+      );
+    }
     // Admin e-mail via the notification listener (QuotationApproved).
     this.emitQuoteDecision(approved, 'approved');
     return approved;
+  }
+
+  /**
+   * Implicit approval: the doctor's FIRST payment on a `sent` quote IS
+   * the approval (the doctor's quote view no longer has an Approve
+   * button — clicking Pay is the acceptance). PaymentsService calls this
+   * before creating the Payment row so there is exactly ONE owner of the
+   * "sent -> approved" mutation instead of a second copy living in the
+   * payments module.
+   *
+   * Idempotent: a quote that is not `sent` (already approved on a prior
+   * installment) is left untouched and `false` is returned. The order
+   * moves to `payment_pending` — "doctor accepted, money not yet in" —
+   * and the payment settlement that follows advances it further
+   * (`payment_review` / `fabrication`). Previously this path jumped the
+   * order straight to `fabrication`, which stuck if the card gateway
+   * then failed.
+   *
+   * No decision e-mail is emitted here on purpose: the payment
+   * notification that follows already tells the admin the doctor acted.
+   */
+  async approveOnFirstPayment(
+    quotationId: string,
+    caller: Caller,
+  ): Promise<boolean> {
+    const quote = await this.prisma.quotation.findUnique({
+      where: { id: quotationId },
+      select: { id: true, orderId: true, status: true },
+    });
+    if (!quote || quote.status !== QuotationStatus.sent) return false;
+    const approved = await this.transitionSentToApproved(
+      quote,
+      caller.userId,
+      OrderStatus.payment_pending,
+    );
+    return approved !== null;
+  }
+
+  /**
+   * THE "sent -> approved" mutation. Guarded on `status = sent` inside the
+   * transaction so two concurrent approvals (explicit + first payment,
+   * or two payments) cannot both "win": the second sees 0 rows and gets
+   * `null`. Both the explicit approve endpoint and the implicit
+   * first-payment path go through here.
+   */
+  private async transitionSentToApproved(
+    quote: { id: string; orderId: string },
+    approvedById: string,
+    nextOrderStatus: OrderStatus,
+  ): Promise<Quotation | null> {
+    return this.prisma.$transaction(async (tx) => {
+      const changed = await tx.quotation.updateMany({
+        where: { id: quote.id, status: QuotationStatus.sent },
+        data: {
+          status: QuotationStatus.approved,
+          approvedAt: new Date(),
+          approvedById,
+        },
+      });
+      if (changed.count === 0) return null;
+      await tx.dentalOrder.update({
+        where: { id: quote.orderId },
+        data: { status: nextOrderStatus },
+      });
+      return tx.quotation.findUniqueOrThrow({ where: { id: quote.id } });
+    });
   }
 
   /**
@@ -679,7 +733,7 @@ export class QuotationService {
 
     const isOwnerDoctor =
       caller.role === UserRole.dentist && order.doctorId === caller.userId;
-    if (!this.isAdmin(caller) && !isOwnerDoctor) {
+    if (!isAdmin(caller) && !isOwnerDoctor) {
       throw new ForbiddenException(
         'Only the order doctor or an admin can reject the quotation.',
       );
@@ -733,7 +787,7 @@ export class QuotationService {
    * "we made a mistake, hold on" correction loop.
    */
   async revertToDraft(id: string, caller: Caller): Promise<Quotation> {
-    if (!this.isAdmin(caller)) {
+    if (!isAdmin(caller)) {
       throw new ForbiddenException(
         'Only admins can recall a sent quotation for correction.',
       );
@@ -828,7 +882,7 @@ export class QuotationService {
     // file on disk doesn't change under their fingertips.
     const isOwningDoctor =
       caller.role === UserRole.dentist && order.doctorId === caller.userId;
-    if (!this.isAdmin(caller) && !isOwningDoctor) {
+    if (!isAdmin(caller) && !isOwningDoctor) {
       throw new ForbiddenException(
         'Only the order doctor or an admin can change the document language.',
       );
@@ -872,7 +926,7 @@ export class QuotationService {
     id: string,
     caller: Caller,
   ): Promise<{ id: string; canceled: true }> {
-    if (!this.isAdmin(caller)) {
+    if (!isAdmin(caller)) {
       throw new ForbiddenException('Only admins can cancel a quotation.');
     }
     const quote = await this.loadQuotation(id);
@@ -929,7 +983,7 @@ export class QuotationService {
    * Admin browses all quotations with filters.
    */
   async listAdmin(filter: QuotationFilterDto, caller: Caller) {
-    if (!this.isAdmin(caller)) {
+    if (!isAdmin(caller)) {
       throw new ForbiddenException('Only admins can list all quotations.');
     }
     const page = filter.page ?? 1;

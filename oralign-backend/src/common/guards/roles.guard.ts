@@ -26,10 +26,10 @@ export class RolesGuard implements CanActivate {
     }
 
     // super_admin has unrestricted access to all role-protected routes
-    if (user.role === 'super_admin') {
+    if (user.role === UserRole.super_admin) {
       return true;
     }
 
-    return requiredRoles.includes(user.role as UserRole);
+    return requiredRoles.includes(user.role);
   }
 }

@@ -36,8 +36,8 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { NotificationEvents } from '../../notifications/events/notification-events';
 import { env } from '../../common/config/env';
-
-type Caller = { userId: string; role: UserRole };
+import { QuotationService } from '../../quotations/services/quotation.service';
+import { isAdmin, type Caller } from '../../common/access/caller';
 
 /**
  * Shape consumed by the shared payment-list executor. Mirrors the
@@ -66,8 +66,6 @@ interface PaymentListOptions {
   sortBy?: 'createdAt' | 'amount' | 'paidAt' | 'status';
   sortOrder?: 'asc' | 'desc';
 }
-
-const ADMIN_ROLES: UserRole[] = [UserRole.admin, UserRole.super_admin];
 
 /** TTL for the idempotency-key → result mapping. 24h matches the spec. */
 const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
@@ -98,14 +96,11 @@ export class PaymentsService {
     private readonly prisma: PrismaService,
     private readonly events: EventEmitter2,
     @Inject(PAYMENT_GATEWAY) private readonly cardGateway: PaymentGateway,
+    private readonly quotations: QuotationService,
     @Optional() @Inject(CACHE_MANAGER) private readonly cache?: Cache,
   ) {}
 
   // ─── Authorisation helpers ─────────────────────────────────────
-
-  private isAdmin(caller: Caller): boolean {
-    return ADMIN_ROLES.includes(caller.role);
-  }
 
   private async ensureBankTransferIsConfigured(): Promise<void> {
     const settings = await this.prisma.companyBillingSettings.findFirst({
@@ -159,10 +154,10 @@ export class PaymentsService {
     const isOwner =
       caller.role === UserRole.dentist && order.doctorId === caller.userId;
     if (opts.adminOnly) {
-      if (!this.isAdmin(caller)) {
+      if (!isAdmin(caller)) {
         throw new ForbiddenException('Admin-only action.');
       }
-    } else if (!this.isAdmin(caller) && !isOwner) {
+    } else if (!isAdmin(caller) && !isOwner) {
       throw new ForbiddenException(
         'You can only act on installments of your own orders.',
       );
@@ -205,7 +200,7 @@ export class PaymentsService {
 
     const row = await this.loadInstallmentForCaller(installmentId, caller);
     this.assertPayable(row);
-    await this.approveQuoteIfSent(row.quotationId, caller.userId);
+    await this.quotations.approveOnFirstPayment(row.quotationId, caller);
 
     // Create the pending row OUTSIDE the gateway call so the row
     // exists even if the gateway throws — the user can retry against
@@ -293,7 +288,7 @@ export class PaymentsService {
     );
     this.assertPayable(row);
     await this.ensureBankTransferIsConfigured();
-    await this.approveQuoteIfSent(row.quotationId, args.caller.userId);
+    await this.quotations.approveOnFirstPayment(row.quotationId, args.caller);
 
     return this.prisma.$transaction(async (tx) => {
       // Cancel any stale `awaiting_confirmation` declarations on the
@@ -350,7 +345,7 @@ export class PaymentsService {
     notes: string | undefined,
     caller: Caller,
   ): Promise<Payment> {
-    if (!this.isAdmin(caller)) {
+    if (!isAdmin(caller)) {
       throw new ForbiddenException(
         'Only admins can confirm bank-transfer payments.',
       );
@@ -382,7 +377,7 @@ export class PaymentsService {
     rejectionReason: string,
     caller: Caller,
   ): Promise<Payment> {
-    if (!this.isAdmin(caller)) {
+    if (!isAdmin(caller)) {
       throw new ForbiddenException(
         'Only admins can reject bank-transfer payments.',
       );
@@ -447,7 +442,7 @@ export class PaymentsService {
     receiptNumber?: string;
     notes?: string;
   }): Promise<Payment> {
-    if (!this.isAdmin(args.caller)) {
+    if (!isAdmin(args.caller)) {
       throw new ForbiddenException(
         'Only admins can record cash payments.',
       );
@@ -458,7 +453,7 @@ export class PaymentsService {
       { adminOnly: true },
     );
     this.assertPayable(row);
-    await this.approveQuoteIfSent(row.quotationId, args.caller.userId);
+    await this.quotations.approveOnFirstPayment(row.quotationId, args.caller);
     const payment = await this.prisma.payment.create({
       data: {
         orderId: row.quotation.orderId,
@@ -524,7 +519,7 @@ export class PaymentsService {
     if (env.isProd) {
       throw new ForbiddenException('Dev endpoint disabled in production.');
     }
-    if (!this.isAdmin(args.actor)) {
+    if (!isAdmin(args.actor)) {
       throw new ForbiddenException('Admin-only.');
     }
     return this.prisma.quoteInstallment.update({
@@ -791,7 +786,7 @@ export class PaymentsService {
    * that's the inbox view.
    */
   async listPendingConfirmations(opts: PaymentListOptions & { caller: Caller }) {
-    if (!this.isAdmin(opts.caller)) {
+    if (!isAdmin(opts.caller)) {
       throw new ForbiddenException('Admin-only.');
     }
     return this.runFilteredQuery({
@@ -812,13 +807,13 @@ export class PaymentsService {
    * payments).
    */
   async listPayments(opts: PaymentListOptions & { caller: Caller }) {
-    const isAdmin = this.isAdmin(opts.caller);
+    const callerIsAdmin = isAdmin(opts.caller);
     return this.runFilteredQuery({
       ...opts,
       // Dentists are always scoped to themselves regardless of what
       // doctorId they send.
-      doctorId: isAdmin ? opts.doctorId : opts.caller.userId,
-      forceScope: isAdmin ? 'all' : 'doctor',
+      doctorId: callerIsAdmin ? opts.doctorId : opts.caller.userId,
+      forceScope: callerIsAdmin ? 'all' : 'doctor',
     });
   }
 
@@ -1018,7 +1013,7 @@ export class PaymentsService {
     const isOwner =
       caller.role === UserRole.dentist &&
       payment.quotation.order.doctorId === caller.userId;
-    if (!this.isAdmin(caller) && !isOwner) {
+    if (!isAdmin(caller) && !isOwner) {
       throw new ForbiddenException('You cannot access this payment.');
     }
     return payment;
@@ -1035,7 +1030,7 @@ export class PaymentsService {
     invoiceNumber: string,
     caller: Caller,
   ): Promise<Payment> {
-    if (!this.isAdmin(caller)) {
+    if (!isAdmin(caller)) {
       throw new ForbiddenException(
         'Only an admin can edit the invoice number.',
       );
@@ -1113,40 +1108,8 @@ export class PaymentsService {
    * the admin can still see the quote was paid even if this update
    * fails for some reason.
    */
-  private async approveQuoteIfSent(
-    quotationId: string,
-    callerUserId: string,
-  ): Promise<void> {
-    try {
-      const updated = await this.prisma.quotation.updateMany({
-        where: { id: quotationId, status: QuotationStatus.sent },
-        data: {
-          status: QuotationStatus.approved,
-          approvedAt: new Date(),
-          approvedById: callerUserId,
-        },
-      });
-      if (updated.count > 0) {
-        // Move the order off "Quote sent" so the doctor's KPI counts
-        // settle into the right bucket immediately. Mirrors the
-        // explicit approve action that previously did this transition.
-        const quote = await this.prisma.quotation.findUnique({
-          where: { id: quotationId },
-          select: { orderId: true },
-        });
-        if (quote?.orderId) {
-          await this.prisma.dentalOrder.update({
-            where: { id: quote.orderId },
-            data: { status: OrderStatus.fabrication },
-          });
-        }
-      }
-    } catch (err) {
-      this.logger.error(
-        `approveQuoteIfSent failed for quotation ${quotationId}: ${(err as Error).message}`,
-      );
-    }
-  }
+  // Implicit "first payment approves the quote" lives in
+  // QuotationService.approveOnFirstPayment — one owner of the transition.
 
   // ─── Idempotency (Redis-backed via Cache Manager) ──────────────
 

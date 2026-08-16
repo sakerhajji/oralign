@@ -26,10 +26,8 @@ import {
   UpdateTreatmentPlanDto,
 } from '../dto/treatment-plan.dto';
 import { TreatmentChatGateway } from '../gateways/treatment-chat.gateway';
+import { isAdmin, type Caller } from '../../common/access/caller';
 
-type Caller = { userId: string; role: UserRole };
-
-const ADMIN_ROLES: UserRole[] = [UserRole.admin, UserRole.super_admin];
 const PLANNER_ROLES: UserRole[] = [
   UserRole.admin,
   UserRole.super_admin,
@@ -178,7 +176,7 @@ export class TreatmentPlanService {
       },
       select: { id: true },
     });
-    if (approved && !ADMIN_ROLES.includes(caller.role)) {
+    if (approved && !isAdmin(caller)) {
       throw new BadRequestException(
         'A treatment plan has already been approved for this order.',
       );
@@ -278,7 +276,6 @@ export class TreatmentPlanService {
         totalLowerAligners: dto.totalLowerAligners,
         issuedUpperAligners: dto.issuedUpperAligners,
         issuedLowerAligners: dto.issuedLowerAligners,
-        status: dto.status,
       },
     });
     this.safeBroadcastPlanChanged(updated.orderId, 'updated', updated.id);
@@ -484,10 +481,10 @@ export class TreatmentPlanService {
       throw new NotFoundException('Treatment plan not found');
     }
     // Doctor (the order's owner) or admin can approve.
-    const isAdmin = ADMIN_ROLES.includes(caller.role);
+    const callerIsAdmin = isAdmin(caller);
     const isOwner =
       caller.role === UserRole.dentist && plan.order.doctorId === caller.userId;
-    if (!isAdmin && !isOwner) {
+    if (!callerIsAdmin && !isOwner) {
       throw new ForbiddenException(
         'Only the order doctor or admin can approve.',
       );
@@ -495,7 +492,7 @@ export class TreatmentPlanService {
     // Doctors must wait for "ready"; admins can bypass the handshake and
     // approve directly (used when admin both planned + signed off, or
     // when fast-tracking a doctor's verbal approval).
-    if (!isAdmin && plan.status !== TreatmentPlanStatus.ready) {
+    if (!callerIsAdmin && plan.status !== TreatmentPlanStatus.ready) {
       throw new BadRequestException(
         'Only a plan in "ready" status can be approved.',
       );
@@ -565,17 +562,17 @@ export class TreatmentPlanService {
     if (!plan || plan.deletedAt) {
       throw new NotFoundException('Treatment plan not found');
     }
-    const isAdmin = ADMIN_ROLES.includes(caller.role);
+    const callerIsAdmin = isAdmin(caller);
     const isOwner =
       caller.role === UserRole.dentist && plan.order.doctorId === caller.userId;
-    if (!isAdmin && !isOwner) {
+    if (!callerIsAdmin && !isOwner) {
       throw new ForbiddenException(
         'Only the order doctor or admin can reject.',
       );
     }
     // Doctors can only reject a READY plan; admins can reject any non-terminal
     // state (e.g. abandon a PENDING plan that's gone stale).
-    if (!isAdmin && plan.status !== TreatmentPlanStatus.ready) {
+    if (!callerIsAdmin && plan.status !== TreatmentPlanStatus.ready) {
       throw new BadRequestException(
         'Only a plan in "ready" status can be rejected.',
       );

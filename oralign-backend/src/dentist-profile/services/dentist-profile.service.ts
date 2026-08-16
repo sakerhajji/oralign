@@ -26,6 +26,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { NotificationEvents } from '../../notifications/events/notification-events';
 import { TTL, dpKey, whKey } from '../../common/cache/cache-keys';
+import { isAdmin, type Caller } from '../../common/access/caller';
 
 type ProfileWithUser = {
   id: string;
@@ -48,10 +49,6 @@ type ProfileWithUser = {
   deletedAt: Date | null;
   user?: { fullName: string; avatarUrl: string | null } | null;
 };
-
-type Caller = { userId: string; role: string };
-
-const ADMIN_ROLES: string[] = [UserRole.admin, UserRole.super_admin];
 
 @Injectable()
 export class DentistProfileService {
@@ -225,7 +222,7 @@ export class DentistProfileService {
   ): DentistProfileResponseDto {
     const privileged =
       !!caller &&
-      (ADMIN_ROLES.includes(caller.role) || dto.userId === caller.userId);
+      (isAdmin(caller) || dto.userId === caller.userId);
     if (privileged) return dto;
     return { ...dto, taxId: undefined, clinicEmail: undefined };
   }
@@ -367,7 +364,7 @@ export class DentistProfileService {
     }
 
     if (
-      !ADMIN_ROLES.includes(caller.role) &&
+      !isAdmin(caller) &&
       profile.userId !== caller.userId
     ) {
       throw new ForbiddenException(
@@ -396,7 +393,7 @@ export class DentistProfileService {
     }
 
     if (
-      !ADMIN_ROLES.includes(caller.role) &&
+      !isAdmin(caller) &&
       profile.userId !== caller.userId
     ) {
       throw new ForbiddenException(

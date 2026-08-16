@@ -13,12 +13,9 @@ import {
   WorkingHoursResponseDto,
 } from '../dto/working-hours.dto';
 import { PrismaService } from '../../prisma/prisma.service';
-import { UserRole, WorkingHours } from '@prisma/client';
+import { WorkingHours } from '@prisma/client';
 import { TTL, whKey } from '../../common/cache/cache-keys';
-
-type Caller = { userId: string; role: string };
-
-const ADMIN_ROLES: string[] = [UserRole.admin, UserRole.super_admin];
+import { isAdmin, type Caller } from '../../common/access/caller';
 
 @Injectable()
 export class WorkingHoursService {
@@ -165,7 +162,7 @@ export class WorkingHoursService {
     dentistProfileId: string,
     caller: Caller,
   ): Promise<void> {
-    if (ADMIN_ROLES.includes(caller.role)) return;
+    if (isAdmin(caller)) return;
 
     const profile = await this.prisma.dentistProfile.findUnique({
       where: { id: dentistProfileId },

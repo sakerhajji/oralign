@@ -5,6 +5,7 @@ import { MockPaymentGateway } from './gateways/mock-payment.gateway';
 import { PAYMENT_GATEWAY } from './gateways/payment-gateway.interface';
 import { PaymentsService } from './services/payments.service';
 import { env } from '../common/config/env';
+import { QuotationModule } from '../quotations/quotation.module';
 
 /**
  * Payments module — owns the unified Payment table, the gateway
@@ -32,6 +33,7 @@ const controllers = [
 ];
 
 @Module({
+  imports: [QuotationModule],
   controllers,
   providers: [
     PaymentsService,

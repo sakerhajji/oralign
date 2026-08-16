@@ -16,9 +16,9 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { scanUploadFile } from '../../media/file-security';
 import { OrderFileResponseDto } from '../dto/order.dto';
 import { OrderService, UPLOAD_ROOT } from './order.service';
+import type { Caller } from '../../common/access/caller';
 
 /** Caller identity forwarded from the JWT guard (mirrors OrderService). */
-type Caller = { userId: string; role: string };
 
 // 8 MiB chunks: 1 GB = 128 requests, each finishing in seconds even on a
 // slow clinic connection — far inside every proxy/server timeout. The

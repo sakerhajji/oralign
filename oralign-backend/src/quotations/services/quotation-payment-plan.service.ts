@@ -9,7 +9,6 @@ import {
   Quotation,
   QuotationPaymentStatus,
   QuotationStatus,
-  UserRole,
 } from '@prisma/client';
 import {
   BadRequestException,
@@ -25,10 +24,7 @@ import {
 } from '../dto/quotation.dto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { NotificationEvents } from '../../notifications/events/notification-events';
-
-type Caller = { userId: string; role: UserRole };
-
-const ADMIN_ROLES: UserRole[] = [UserRole.admin, UserRole.super_admin];
+import { isAdmin, type Caller } from '../../common/access/caller';
 
 const MONEY_EPSILON = new Prisma.Decimal('0.001');
 
@@ -135,7 +131,7 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
     dto: AttachPackToQuotationDto,
     caller: Caller,
   ): Promise<Quotation> {
-    if (!ADMIN_ROLES.includes(caller.role)) {
+    if (!isAdmin(caller)) {
       throw new ForbiddenException('Only admins can attach a pack to a quote.');
     }
     const quote = await this.prisma.quotation.findUnique({
@@ -221,7 +217,7 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
     dto: ConfigurePaymentPlanDto,
     caller: Caller,
   ): Promise<Quotation> {
-    if (!ADMIN_ROLES.includes(caller.role)) {
+    if (!isAdmin(caller)) {
       throw new ForbiddenException(
         'Only admins can configure the payment plan.',
       );
@@ -486,7 +482,7 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
     batchId: string,
     caller: Caller,
   ) {
-    if (!ADMIN_ROLES.includes(caller.role)) {
+    if (!isAdmin(caller)) {
       throw new ForbiddenException(
         'Only admins can mark a batch as delivered.',
       );

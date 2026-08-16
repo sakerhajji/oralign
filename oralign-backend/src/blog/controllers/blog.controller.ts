@@ -27,7 +27,6 @@ import {
   ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
-import { UserRole } from '@prisma/client';
 import {
   CurrentUser,
   JwtPayload,
@@ -37,6 +36,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CreateBlogDto, BlogFilterDto, UpdateBlogDto } from '../dto/blog.dto';
 import { BlogService } from '../services/blog.service';
+import { ADMIN_ROLES } from '../../common/access/caller';
 
 // ─── Multer config (blog image library) ─────────────────────────────────
 //
@@ -86,8 +86,6 @@ const BLOG_MULTER = {
   },
   limits: { fileSize: MAX_BYTES },
 };
-
-const ADMIN_ROLES: UserRole[] = [UserRole.admin, UserRole.super_admin];
 
 /**
  * Admin-only blog management. `JwtAuthGuard` + `RolesGuard` are global on

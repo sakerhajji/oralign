@@ -46,6 +46,7 @@ import {
   UpdateSliderMediaDto,
 } from '../dto/slider-media.dto';
 import { SliderMediaService } from '../services/slider-media.service';
+import { ADMIN_ROLES } from '../../common/access/caller';
 
 // ─── Multer config ─────────────────────────────────────────────────────
 //
@@ -93,8 +94,6 @@ const SLIDER_MULTER = {
   },
   limits: { fileSize: MAX_BYTES },
 };
-
-const ADMIN_ROLES: UserRole[] = [UserRole.admin, UserRole.super_admin];
 
 @ApiTags('slider-media')
 @ApiBearerAuth('access-token')

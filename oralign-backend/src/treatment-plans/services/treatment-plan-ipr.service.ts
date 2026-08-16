@@ -8,10 +8,8 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { OrderAccessPolicy } from '../../common/access/order-access.policy';
 import { UpsertTreatmentPlanIprDto } from '../dto/treatment-plan-ipr.dto';
+import type { Caller } from '../../common/access/caller';
 
-type Caller = { userId: string; role: UserRole };
-
-const ADMIN_ROLES: UserRole[] = [UserRole.admin, UserRole.super_admin];
 const PLANNER_ROLES: UserRole[] = [
   UserRole.admin,
   UserRole.super_admin,
@@ -37,10 +35,6 @@ export class TreatmentPlanIprService {
   ) {}
 
   // ─── Auth helpers ────────────────────────────────────────────────────────
-
-  private isAdmin(caller: Caller): boolean {
-    return ADMIN_ROLES.includes(caller.role);
-  }
 
   private isPlanner(caller: Caller): boolean {
     return PLANNER_ROLES.includes(caller.role);

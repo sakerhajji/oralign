@@ -44,13 +44,13 @@ import {
 } from '../dto/support.dto';
 import { SupportService } from '../services/support.service';
 import { NotFoundException } from '../../common/exceptions/app.exception';
+import { ADMIN_ROLES } from '../../common/access/caller';
 
 const ALL_AUTHED: UserRole[] = [
   UserRole.dentist,
   UserRole.admin,
   UserRole.super_admin,
 ];
-const ADMIN_ROLES: UserRole[] = [UserRole.admin, UserRole.super_admin];
 
 @ApiTags('support')
 @ApiBearerAuth('access-token')

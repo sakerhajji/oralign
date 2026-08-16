@@ -13,8 +13,7 @@ import {
   PatientResponseDto,
   UpdatePatientDto,
 } from '../dto/patient.dto';
-
-type Caller = { userId: string; role: string };
+import { isAdmin, type Caller } from '../../common/access/caller';
 
 type PatientWithDoctor = Prisma.PatientGetPayload<{
   include: {
@@ -28,8 +27,6 @@ type PatientWithDoctor = Prisma.PatientGetPayload<{
   };
 }>;
 
-const ADMIN_ROLES: string[] = [UserRole.admin, UserRole.super_admin];
-
 @Injectable()
 export class PatientService {
   constructor(private readonly prisma: PrismaService) {}
@@ -40,7 +37,7 @@ export class PatientService {
   ): Promise<PatientResponseDto> {
     this.ensureCanManagePatients(caller);
 
-    const doctorId = ADMIN_ROLES.includes(caller.role)
+    const doctorId = isAdmin(caller)
       ? createPatientDto.doctorId
       : caller.userId;
 
@@ -215,7 +212,7 @@ export class PatientService {
     this.ensureCanManagePatients(caller);
     await this.findAccessiblePatient(id, caller);
 
-    const doctorId = ADMIN_ROLES.includes(caller.role)
+    const doctorId = isAdmin(caller)
       ? updatePatientDto.doctorId
       : undefined;
 
@@ -297,7 +294,7 @@ export class PatientService {
 
   /** Admin-only gate for irreversible (hard) deletes. */
   private ensureCanPermanentDelete(caller: Caller): void {
-    if (!ADMIN_ROLES.includes(caller.role)) {
+    if (!isAdmin(caller)) {
       throw new ForbiddenException(
         'Only admins can permanently delete patients',
       );
@@ -342,7 +339,7 @@ export class PatientService {
   ): Prisma.PatientWhereInput {
     const where: Prisma.PatientWhereInput = { deletedAt: null };
 
-    if (ADMIN_ROLES.includes(caller.role)) {
+    if (isAdmin(caller)) {
       if (filters.doctorId) {
         where.doctorId = filters.doctorId;
       }
@@ -396,7 +393,7 @@ export class PatientService {
       where: {
         id,
         deletedAt: null,
-        ...(ADMIN_ROLES.includes(caller.role)
+        ...(isAdmin(caller)
           ? {}
           : { doctorId: caller.userId }),
       },
@@ -417,7 +414,7 @@ export class PatientService {
 
     if (
       caller.role !== UserRole.dentist &&
-      !ADMIN_ROLES.includes(caller.role)
+      !isAdmin(caller)
     ) {
       throw new ForbiddenException('You cannot manage patients');
     }

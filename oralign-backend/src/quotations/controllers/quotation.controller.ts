@@ -38,8 +38,8 @@ import {
 } from '../dto/quotation.dto';
 import { QuotationService } from '../services/quotation.service';
 import { QuotationPdfService } from '../services/quotation-pdf.service';
+import { ADMIN_ROLES } from '../../common/access/caller';
 
-const ADMIN_ROLES: UserRole[] = [UserRole.admin, UserRole.super_admin];
 const ALL_AUTHED: UserRole[] = [
   UserRole.dentist,
   UserRole.admin,

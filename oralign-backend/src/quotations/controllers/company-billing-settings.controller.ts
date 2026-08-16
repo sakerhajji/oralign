@@ -33,8 +33,8 @@ import {
   UpsertCompanyBillingSettingsDto,
 } from '../dto/company-billing-settings.dto';
 import { CompanyBillingSettingsService } from '../services/company-billing-settings.service';
+import { ADMIN_ROLES } from '../../common/access/caller';
 
-const ADMIN_ROLES: UserRole[] = [UserRole.admin, UserRole.super_admin];
 const ALLOWED_LOGO_MIME = new Set([
   'image/png',
   'image/jpeg',

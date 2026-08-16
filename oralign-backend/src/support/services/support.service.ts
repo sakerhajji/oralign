@@ -22,10 +22,7 @@ import {
   CreateSupportConversationDto,
 } from '../dto/support.dto';
 import { MediaProcessingService } from '../../media/media-processing.service';
-
-type Caller = { userId: string; role: UserRole };
-
-const ADMIN_ROLES: UserRole[] = [UserRole.admin, UserRole.super_admin];
+import { ADMIN_ROLES, isAdmin, type Caller } from '../../common/access/caller';
 
 // Storage: every conversation gets its own subdirectory under
 // /uploads/support/<convId>/ so cleanup on hard-delete is one rmdir.
@@ -83,10 +80,6 @@ export class SupportService {
 
   // ─── Helpers ──────────────────────────────────────────────────────
 
-  private isAdmin(caller: Caller): boolean {
-    return ADMIN_ROLES.includes(caller.role);
-  }
-
   /**
    * Load a conversation + permission-check the caller. Throws 404 if
    * the row is missing OR soft-deleted (admins still see deleted via
@@ -105,7 +98,7 @@ export class SupportService {
     if (conv.deletedAt && !opts.allowDeleted) {
       throw new NotFoundException('Conversation not found.');
     }
-    if (this.isAdmin(caller)) return conv;
+    if (isAdmin(caller)) return conv;
     if (caller.role === UserRole.dentist && conv.doctorId === caller.userId) {
       return conv;
     }
@@ -350,7 +343,7 @@ export class SupportService {
       });
       return row._sum.unreadByDoctor ?? 0;
     }
-    if (this.isAdmin(caller)) {
+    if (isAdmin(caller)) {
       const row = await this.prisma.supportConversation.aggregate({
         where: { deletedAt: null },
         _sum: { unreadByAdmin: true },
@@ -371,7 +364,7 @@ export class SupportService {
     // The CALLER reads messages from the OTHER side — so doctor reads
     // admin-sent messages, admin reads doctor-sent messages.
     const senderRoleFilter = isDoctor
-      ? { in: ADMIN_ROLES }
+      ? { in: [...ADMIN_ROLES] }
       : UserRole.dentist;
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -405,7 +398,7 @@ export class SupportService {
     nextStatus: SupportConversationStatus,
     caller: Caller,
   ): Promise<SupportConversation> {
-    if (!this.isAdmin(caller)) {
+    if (!isAdmin(caller)) {
       throw new ForbiddenException(
         'Only admins can change conversation status.',
       );
@@ -435,7 +428,7 @@ export class SupportService {
     priority: SupportPriority,
     caller: Caller,
   ): Promise<SupportConversation> {
-    if (!this.isAdmin(caller)) {
+    if (!isAdmin(caller)) {
       throw new ForbiddenException(
         'Only admins can change conversation priority.',
       );
@@ -454,7 +447,7 @@ export class SupportService {
     assignedAdminId: string | null,
     caller: Caller,
   ): Promise<SupportConversation> {
-    if (!this.isAdmin(caller)) {
+    if (!isAdmin(caller)) {
       throw new ForbiddenException(
         'Only admins can assign a conversation.',
       );
@@ -465,7 +458,7 @@ export class SupportService {
         where: { id: assignedAdminId },
         select: { role: true, deletedAt: true },
       });
-      if (!target || target.deletedAt || !ADMIN_ROLES.includes(target.role)) {
+      if (!target || target.deletedAt || !isAdmin(target)) {
         throw new BadRequestException(
           'Assignee must be an active admin user.',
         );
@@ -489,7 +482,7 @@ export class SupportService {
    * can sweep `deletedAt < now - 30 days` and rm-rf the directories.
    */
   async softDelete(id: string, caller: Caller): Promise<{ id: string }> {
-    if (!this.isAdmin(caller)) {
+    if (!isAdmin(caller)) {
       throw new ForbiddenException(
         'Only admins can delete a support conversation.',
       );
@@ -514,7 +507,7 @@ export class SupportService {
   }
 
   async restore(id: string, caller: Caller): Promise<SupportConversation> {
-    if (!this.isAdmin(caller)) {
+    if (!isAdmin(caller)) {
       throw new ForbiddenException('Only admins can restore a conversation.');
     }
     const conv = await this.prisma.supportConversation.findUnique({
@@ -542,7 +535,7 @@ export class SupportService {
     filters: SupportConversationFilterDto,
   ): Prisma.SupportConversationWhereInput {
     const showOnlyDeleted =
-      this.isAdmin(caller) && filters.includeDeleted === true;
+      isAdmin(caller) && filters.includeDeleted === true;
     const where: Prisma.SupportConversationWhereInput = showOnlyDeleted
       ? { deletedAt: { not: null } }
       : { deletedAt: null };
@@ -559,7 +552,7 @@ export class SupportService {
       where.priority = { in: filters.priorities };
     }
     if (filters.unreadOnly === true) {
-      if (this.isAdmin(caller)) {
+      if (isAdmin(caller)) {
         where.unreadByAdmin = { gt: 0 };
       } else {
         where.unreadByDoctor = { gt: 0 };

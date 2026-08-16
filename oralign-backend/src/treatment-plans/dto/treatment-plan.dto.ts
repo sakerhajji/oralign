@@ -1,6 +1,5 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import {
-  IsEnum,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -59,10 +58,10 @@ export class UpdateTreatmentPlanDto extends PartialType(
   @Max(200)
   issuedLowerAligners?: number;
 
-  @ApiPropertyOptional({ enum: TreatmentPlanStatus })
-  @IsOptional()
-  @IsEnum(TreatmentPlanStatus)
-  status?: TreatmentPlanStatus;
+  // NOTE: no `status` here on purpose. Plan status is a state machine
+  // (pending -> ready -> approved | rejected -> renewed draft) driven by
+  // the dedicated endpoints (mark-ready / approve / reject); letting the
+  // generic PUT set it would bypass every transition rule + notification.
 }
 
 export class UpdateResultViewUrlDto {

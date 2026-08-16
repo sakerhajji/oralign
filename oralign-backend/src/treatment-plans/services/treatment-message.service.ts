@@ -19,10 +19,8 @@ import { TreatmentChatGateway } from '../gateways/treatment-chat.gateway';
 import { MediaProcessingService } from '../../media/media-processing.service';
 import { classifyMedia } from '../../media/media.constants';
 import { MediaVariantInfo } from '../../media/media.types';
+import { isAdmin, type Caller } from '../../common/access/caller';
 
-type Caller = { userId: string; role: UserRole };
-
-const ADMIN_ROLES: UserRole[] = [UserRole.admin, UserRole.super_admin];
 const PLANNER_ROLES: UserRole[] = [
   UserRole.admin,
   UserRole.super_admin,
@@ -397,8 +395,8 @@ export class TreatmentMessageService {
       throw new NotFoundException('Attachment not found.');
     }
     await this.assertPlanReadable(att.message.treatmentPlanId, caller);
-    const isAdmin = ADMIN_ROLES.includes(caller.role);
-    if (!isAdmin && att.uploadedById !== caller.userId) {
+    const callerIsAdmin = isAdmin(caller);
+    if (!callerIsAdmin && att.uploadedById !== caller.userId) {
       throw new ForbiddenException(
         'Only the uploader or an admin can delete this attachment.',
       );

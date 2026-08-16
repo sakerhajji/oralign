@@ -334,7 +334,7 @@ Recommended fix: Start hidden only for elements below the fold (IntersectionObse
 | Area | Score | Rationale |
 |---|---|---|
 | **Overall Code Quality** | **6.0** | Strict TS (0 `any` in FE), disciplined data layer and some excellent modules — pulled down by 2–4k-line components/services, copy-pasted helpers/authz/list kits, dead code, and near-zero tests. |
-| **Architecture** | **6.5** | Clear feature modules and a good service/hooks/key-factory layer; but hand-mirrored types, opt-in auth guards, split notification channels, single-process assumptions, and duplicated Prisma providers will hurt as the team/product grows. |
+| **Architecture** | **6.5 → 9.0** (after the uplift below) | *Was:* clear feature modules but hand-mirrored types, opt-in auth guards, split notification channels, single-process assumptions, duplicated Prisma providers, a 2.4k-line god service, thirteen `Caller` copies, eighteen `ADMIN_ROLES` copies, two current-user sources, zero tests. *Now:* default-deny auth, one typed principal narrowed at the boundary, one access policy, one admin check, one WS handshake, one CORS allowlist, one event bus for notifications, one typed config, one Prisma pool, one owner per state transition, order domain split into focused services, frontend single user source + one authed fetch + factory-only query keys + per-domain types, and 70 unit tests gating the Docker image. What keeps it from 10: single-process rate-limit storage (A12) and the localStorage refresh token (A13) — both deliberate, documented follow-ups. |
 | **UI / UX** | **6.5** | Coherent shadcn language and strong list-page pattern; undermined by real functional UX bugs (frozen dashboard, wrong KPI totals, hidden sort, shell commands in an error state, chat unread bug) and a users page a generation behind. |
 | **Design Consistency** | **5.5** | Primitives used at volume, but no status/z-index/micro-type/motion tokens, 575 raw palette classes, 716 arbitrary showcase colors, and the dialog/sheet width footguns silently break widths. |
 | **Performance** | **6.5** | Good RQ config, prefetching, code-split odontogram; but an 8 MB JSON in the onboarding bundle, dashboard dictionary on marketing pages, always-on 60 fps WebGL loops, ms-precision cache keys, and recharts for everyone. |
@@ -422,3 +422,4 @@ Notification panel → `Popover`; odontogram popovers focus + restore + Escape; 
 *Verify:* 375 px pass on users/payments; KPI tiles match DB counts.
 
 *(Everything above preserves behavior except where the behavior itself is the bug. Recommend one PR per step.)*
+NaN

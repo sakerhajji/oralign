@@ -423,3 +423,22 @@ Notification panel → `Popover`; odontogram popovers focus + restore + Escape; 
 
 *(Everything above preserves behavior except where the behavior itself is the bug. Recommend one PR per step.)*
 NaN
+
+---
+
+## Architecture uplift — status (2026-08-16)
+
+Executed as eight independently verified commits on `main` (each: Docker build → boot → packs 41/41 + CBCT 26/26 → targeted probes). No endpoint, DTO, rule or message changed except where the review named the behaviour itself as the bug.
+
+| # | Commit | What | Review items closed |
+|---|---|---|---|
+| 1 | `66f85d7` | Single global `PrismaModule` (5 duplicate providers removed, one pg pool); `JwtAuthGuard` as `APP_GUARD` honouring `@Public()` (default-deny); Prisma P2002/P2025/P2003 → 409/404/409 in the filter; `PUT /users/:id {password}` admin-only + revokes sessions; working-hours GETs no longer public. | A1, A2, A3, C-1, C-2, L-8 |
+| 2 | `ba44281` | `OrderAccessPolicy` (scope / assertCanRead / assertCanPlan / requireReadable) replaces five inline copies; notifications are event-bus-only (mail fan-out moved to the listener, `QuotationApproved/Rejected` events added, services no longer inject mail); typed, validated `env` config module replaces scattered `process.env`. | A4, A5, A6 |
+| 3 | `5af6aef` | `SocketAuth`: one Socket.IO handshake for the three gateways — verifies, re-checks `isActive`/`tokenVersion`, disconnects at `exp`; `socketCors` shares the HTTP allowlist (was `origin: true`). Probe: revoked token → "Session revoked", evil Origin → blocked. | A8, M-7 (WS side) |
+| 4 | `cbb49e9` | Typed principal: `JwtStrategy.validate()` narrows the role claim once, `JwtPayload.role` / `Caller.role: UserRole`; 13 `type Caller` copies + 18 `ADMIN_ROLES` copies + 4 `isAdmin()` copies folded onto `common/access/caller.ts`; `QuotationService.approveOnFirstPayment()` replaces the second copy of quote approval in payments (both paths share a status-guarded transaction, closing a check-then-update race); `status` stripped from the treatment-plan update DTO. | A7 (part), state-machine bypass |
+| 5 | `92380c1` | `OrderService` 2,422 → 1,067 lines: `OrderFilesService`, `OrderExportService`, `TreatmentFeeService`, pure `order.mapper.ts` + `order-storage.ts`. | A7 |
+| 6 | `369c475` | Frontend: `AuthProvider` is a view over the RQ `currentUser` cache (one `/users/me`, no sync effect); `authedFetch`/`fetchAuthedBlob` (refresh-aware) replaces five raw Bearer fetches; `useDentistOptions()` + `paymentKeys.invoicePdf` / `orderKeys.treatmentFeeInvoicePdf` remove every raw string query key; dead `ManufacturingStep` + helpers, `/test` page, unused scaffold deleted. | A9, Step 4, part of Step 9 |
+| 7 | `a0d96c3` | 70 unit tests (access policy, caller helpers, JwtStrategy, RolesGuard, SocketAuth with real signed JWTs + fake timers, exception filter incl. no-leak 500s); ts-jest transpile-only; `npx jest --ci` runs in the Docker builder before `npm run build`. | Step 12 (unit half) |
+| 8 | `5380e52` | `lib/types/index.ts` (2,085 lines) → 19 bounded-context modules behind the same barrel; explicit inter-domain imports. | A10 |
+
+**Deliberately not done (operational hardening, tracked as follow-ups):** A12 Redis-backed `ThrottlerStorage` (matters only with >1 API replica); A13 HttpOnly refresh cookie (needs a coordinated frontend/backend session change — plan separately); supertest e2e against a live DB (the two bash suites cover the same flows today).

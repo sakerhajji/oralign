@@ -202,13 +202,27 @@ export class UserService {
     return { message: 'User deleted successfully' };
   }
 
+  /**
+   * Bulk archive. The caller's own row is dropped from the target list —
+   * an admin must not lock the platform out of its own account, the same
+   * rule `deleteUser` enforces with a 403.
+   *
+   * `skippedSelf` is REPORTED rather than silently swallowed: "select all
+   * → delete" used to answer "N users deleted" for N+1 selected rows,
+   * which reads as success for something that partly did not happen.
+   */
   async bulkDeleteUsers(
     ids: string[],
     callerUserId?: string,
-  ): Promise<{ message: string; count: number }> {
+  ): Promise<{ message: string; count: number; skippedSelf: boolean }> {
     const targets = callerUserId ? ids.filter((id) => id !== callerUserId) : ids;
+    const skippedSelf = targets.length !== ids.length;
     const count = await this.userRepository.bulkDelete(targets);
-    return { message: `${count} users deleted successfully`, count };
+    return {
+      message: `${count} users deleted successfully`,
+      count,
+      skippedSelf,
+    };
   }
 
   async bulkUpdateStatus(

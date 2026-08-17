@@ -76,10 +76,16 @@ export const usersService = {
   },
 
   /**
-   * Bulk delete users (Admin only)
+   * Bulk delete users (Admin only). `skippedSelf` is true when the
+   * selection contained the caller's own account — the backend refuses to
+   * archive it, so `count` is one lower than the number of rows selected.
    */
-  bulkDeleteUsers: async (data: BulkActionDto): Promise<MessageResponse & { count: number }> => {
-    const response = await apiClient.delete<MessageResponse & { count: number }>('/users', { data });
+  bulkDeleteUsers: async (
+    data: BulkActionDto,
+  ): Promise<MessageResponse & { count: number; skippedSelf?: boolean }> => {
+    const response = await apiClient.delete<
+      MessageResponse & { count: number; skippedSelf?: boolean }
+    >('/users', { data });
     return response.data;
   },
 

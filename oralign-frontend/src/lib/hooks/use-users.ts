@@ -164,17 +164,31 @@ export function useRestoreUser(): UseMutationResult<User, Error, string> {
 }
 
 /**
- * Hook to bulk delete users (Admin only)
+ * Hook to bulk delete users (Admin only).
+ *
+ * The backend refuses to archive the caller's own account and reports it
+ * as `skippedSelf`; say so instead of showing a plain success toast for a
+ * count that is one lower than the selection.
  */
-export function useBulkDeleteUsers(): UseMutationResult<MessageResponse & { count: number }, Error, BulkActionDto> {
+type BulkDeleteResult = MessageResponse & {
+  count: number;
+  skippedSelf?: boolean;
+};
+
+export function useBulkDeleteUsers(): UseMutationResult<BulkDeleteResult, Error, BulkActionDto> {
   const queryClient = useQueryClient();
 
-  return useMutation<MessageResponse & { count: number }, Error, BulkActionDto>({
+  return useMutation<BulkDeleteResult, Error, BulkActionDto>({
     mutationFn: usersService.bulkDeleteUsers,
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: userKeys.lists() });
       queryClient.invalidateQueries({ queryKey: userKeys.deletedLists() });
       toast.success(data.message);
+      if (data.skippedSelf) {
+        toast.warning('Your own account was kept — you cannot delete it.', {
+          duration: 7000,
+        });
+      }
     },
     onError: (error: Error) => {
       toast.error(extractApiErrorMessage(error));

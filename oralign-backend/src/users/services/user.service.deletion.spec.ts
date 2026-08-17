@@ -29,10 +29,21 @@ describe('UserService — deletion policy', () => {
     expect(repo.delete).not.toHaveBeenCalled();
   });
 
-  it('bulk soft delete silently drops the caller from the id list', async () => {
+  it('bulk soft delete drops the caller from the id list AND reports it', async () => {
     const { service, repo } = makeService({});
-    await service.bulkDeleteUsers(['a', 'me', 'b'], 'me');
+    const res = await service.bulkDeleteUsers(['a', 'me', 'b'], 'me');
     expect(repo.bulkDelete).toHaveBeenCalledWith(['a', 'b']);
+    // Not silent: "2 users deleted" for 3 selected rows would read as
+    // success for something that partly did not happen.
+    expect(res).toMatchObject({ count: 2, skippedSelf: true });
+  });
+
+  it('bulk soft delete reports skippedSelf=false when the caller is not in the selection', async () => {
+    const { service } = makeService({});
+    await expect(service.bulkDeleteUsers(['a', 'b'], 'me')).resolves.toMatchObject({
+      count: 2,
+      skippedSelf: false,
+    });
   });
 
   it('permanent delete is trash-first: a live account is a 404 "Deleted user not found"', async () => {

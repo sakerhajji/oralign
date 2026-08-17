@@ -9,7 +9,7 @@ import {
 } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { blogService } from '@/lib/api/blog.service';
-import { extractApiErrorMessage } from '@/lib/api/error';
+import { extractApiErrorMessage, toastMutationError } from '@/lib/api/error';
 import { useT } from '@/lib/i18n/lang-context';
 import type {
   Blog,
@@ -112,6 +112,10 @@ export function useUpdateBlog(): UseMutationResult<
   });
 }
 
+// ── Deletion lifecycle: archive → restore → permanent ─────────────────
+// The backend is the authority: it refuses a permanent delete on a live
+// post (400 NOT_ARCHIVED); `toastMutationError` shows its explanation.
+
 export function useDeleteBlog(): UseMutationResult<
   MessageResponse,
   Error,
@@ -126,7 +130,39 @@ export function useDeleteBlog(): UseMutationResult<
       queryClient.invalidateQueries({ queryKey: blogKeys.lists() });
       toast.success(t('toasts.blog.deleted'));
     },
-    onError: (err) => toast.error(extractApiErrorMessage(err)),
+    onError: (err) => toastMutationError(err),
+  });
+}
+
+export function useRestoreBlog(): UseMutationResult<Blog, Error, string> {
+  const queryClient = useQueryClient();
+  const { t } = useT();
+  return useMutation({
+    mutationFn: (id) => blogService.restorePost(id),
+    onSuccess: (post) => {
+      queryClient.setQueryData(blogKeys.detail(post.id), post);
+      invalidateAll(queryClient);
+      toast.success(t('toasts.blog.restored'));
+    },
+    onError: (err) => toastMutationError(err),
+  });
+}
+
+export function usePermanentDeleteBlog(): UseMutationResult<
+  MessageResponse,
+  Error,
+  string
+> {
+  const queryClient = useQueryClient();
+  const { t } = useT();
+  return useMutation({
+    mutationFn: (id) => blogService.permanentDeletePost(id),
+    onSuccess: (_data, id) => {
+      queryClient.removeQueries({ queryKey: blogKeys.detail(id) });
+      queryClient.invalidateQueries({ queryKey: blogKeys.lists() });
+      toast.success(t('toasts.blog.permanentlyDeleted'));
+    },
+    onError: (err) => toastMutationError(err),
   });
 }
 

@@ -61,8 +61,19 @@ export const communitySubmissionsService = {
     return response.data;
   },
 
+  // Deletion lifecycle: archive → restore → permanent.
   async remove(id: string): Promise<{ id: string }> {
     const response = await apiClient.delete<{ id: string }>(`/admin/community-submissions/${id}`);
+    return response.data;
+  },
+
+  async restore(id: string): Promise<CommunitySubmission> {
+    const response = await apiClient.patch<CommunitySubmission>(`/admin/community-submissions/${id}/restore`);
+    return response.data;
+  },
+
+  async permanentDelete(id: string): Promise<{ message: string }> {
+    const response = await apiClient.delete<{ message: string }>(`/admin/community-submissions/${id}/permanent`);
     return response.data;
   },
 };

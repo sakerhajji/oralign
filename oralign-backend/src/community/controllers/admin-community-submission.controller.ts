@@ -122,10 +122,31 @@ export class AdminCommunitySubmissionController {
     return this.service.reject(id, user.sub, dto);
   }
 
+  // ── Deletion lifecycle: archive → restore → purge ────────────────────
+
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Soft-delete a community submission.' })
+  @ApiOperation({
+    summary: 'Archive a community submission (soft delete, reversible).',
+  })
   async remove(@Param('id') id: string) {
     return this.service.softDelete(id);
+  }
+
+  @Patch(':id/restore')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Restore an archived community submission.' })
+  async restore(@Param('id') id: string) {
+    return this.service.restore(id);
+  }
+
+  @Delete(':id/permanent')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Permanently delete an archived submission, including its media files. Irreversible.',
+  })
+  async permanentDelete(@Param('id') id: string) {
+    return this.service.permanentDelete(id);
   }
 }

@@ -29,6 +29,14 @@ import { lookupActorName, withSenderFallback } from '../../common/access/actor-s
 // /uploads/support/<convId>/ so cleanup on hard-delete is one rmdir.
 const UPLOAD_ROOT = path.join(process.cwd(), 'uploads', 'support');
 
+/**
+ * How long an ADMIN-ARCHIVED conversation sits in the trash before it is
+ * purged for good (row + attachments). Matches the order-file retention
+ * window so the whole app has one trash lifetime.
+ */
+export const DELETED_CONVERSATION_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const PURGE_BATCH = 100;
+
 // Image-only attachments — locked down to four formats the dashboard
 // renders inline without an external viewer. PDF / video / etc would
 // need a separate flow.
@@ -483,8 +491,9 @@ export class SupportService {
    * non-admin callers belt-and-braces. We stamp `deletedAt` +
    * `deletedById` and broadcast so any open client closes the view.
    *
-   * Attachments stay on disk (cheap, audit-friendly). A future cron
-   * can sweep `deletedAt < now - 30 days` and rm-rf the directories.
+   * Attachments stay on disk (cheap, audit-friendly, and a restore is
+   * therefore complete). `purgeExpiredDeletedConversations` below is the
+   * retention job that eventually reclaims them.
    */
   async softDelete(id: string, caller: Caller): Promise<{ id: string }> {
     if (!isAdmin(caller)) {
@@ -531,6 +540,58 @@ export class SupportService {
     });
     this.gateway.broadcastConversationUpdated(restored.id, restored.doctorId);
     return restored;
+  }
+
+  /**
+   * Retention job for the support trash — the counterpart softDelete()
+   * promises. A conversation an admin archived more than
+   * DELETED_CONVERSATION_RETENTION_MS ago is dropped for good: the row
+   * (its messages cascade — a support message means nothing without its
+   * thread) and the whole /uploads/support/<id> directory.
+   *
+   * Called by the periodic UploadCleanupService sweep; public so a test
+   * or an operator script can trigger it with an explicit cutoff. Live
+   * and recently-archived conversations are never touched.
+   */
+  async purgeExpiredDeletedConversations(
+    now: Date = new Date(),
+  ): Promise<{ purged: number }> {
+    const cutoff = new Date(
+      now.getTime() - DELETED_CONVERSATION_RETENTION_MS,
+    );
+    const expired = await this.prisma.supportConversation.findMany({
+      where: { deletedAt: { not: null, lt: cutoff } },
+      select: { id: true },
+      take: PURGE_BATCH,
+    });
+    if (expired.length === 0) return { purged: 0 };
+
+    const ids = expired.map((c) => c.id);
+    // Messages cascade from the conversation (schema); deleteMany keeps
+    // it to a single statement.
+    const { count } = await this.prisma.supportConversation.deleteMany({
+      where: { id: { in: ids } },
+    });
+    // Disk after the commit: an orphan directory is harmless, a row
+    // pointing at deleted attachments is not.
+    for (const id of ids) {
+      await this.purgeConversationDirectory(id);
+    }
+    this.logger.log(
+      `Support trash retention sweep: purged ${count} conversation(s) archived more than ${DELETED_CONVERSATION_RETENTION_MS / 86_400_000} days ago`,
+    );
+    return { purged: count };
+  }
+
+  /** rm -rf /uploads/support/<id>, id-shape guarded and root-checked. */
+  private async purgeConversationDirectory(id: string): Promise<void> {
+    if (!/^[A-Za-z0-9_-]+$/.test(id)) return;
+    const directory = path.resolve(UPLOAD_ROOT, id);
+    const root = path.resolve(UPLOAD_ROOT) + path.sep;
+    if (!directory.startsWith(root)) return;
+    await fs.promises
+      .rm(directory, { recursive: true, force: true })
+      .catch(() => undefined);
   }
 
   // ─── Internals ────────────────────────────────────────────────────

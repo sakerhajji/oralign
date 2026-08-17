@@ -58,6 +58,9 @@ export interface CommunitySubmission {
   reviewNote?: string | null;
   reviewedAt?: string | null;
   publishedAt: string | null;
+  // Set when the story is archived (soft delete). Only ever non-null in
+  // the admin trash view.
+  deletedAt?: string | null;
   createdAt?: string;
   updatedAt?: string;
   media: CommunitySubmissionMedia[];
@@ -86,6 +89,8 @@ export interface CreateCommunitySubmissionInput {
 
 export interface CommunitySubmissionFilters {
   status?: CommunitySubmissionStatus;
+  /** Admin trash view: return ONLY archived stories. */
+  includeDeleted?: boolean;
   page?: number;
   limit?: number;
 }

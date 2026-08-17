@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { communitySubmissionsService } from '@/lib/api/community-submissions.service';
-import { extractApiErrorMessage } from '@/lib/api/error';
+import { extractApiErrorMessage, toastMutationError } from '@/lib/api/error';
 import { useT } from '@/lib/i18n/lang-context';
 import type {
   CommunitySubmission,
@@ -109,6 +109,11 @@ export function useRejectCommunitySubmission() {
   });
 }
 
+// ── Deletion lifecycle: archive → restore → permanent ─────────────────
+// Backend is the authority: it refuses a permanent delete on a live row
+// (400 NOT_ARCHIVED). `toastMutationError` surfaces the backend's own
+// explanation instead of a generic message.
+
 export function useDeleteCommunitySubmission() {
   const queryClient = useQueryClient();
   const { t } = useT();
@@ -118,6 +123,32 @@ export function useDeleteCommunitySubmission() {
       invalidateCommunity(queryClient);
       toast.success(t('communityAdmin.toastDeleted'));
     },
-    onError: (error) => toast.error(extractApiErrorMessage(error)),
+    onError: (err) => toastMutationError(err),
+  });
+}
+
+export function useRestoreCommunitySubmission() {
+  const queryClient = useQueryClient();
+  const { t } = useT();
+  return useMutation({
+    mutationFn: (id: string) => communitySubmissionsService.restore(id),
+    onSuccess: () => {
+      invalidateCommunity(queryClient);
+      toast.success(t('communityAdmin.toastRestored'));
+    },
+    onError: (err) => toastMutationError(err),
+  });
+}
+
+export function usePermanentDeleteCommunitySubmission() {
+  const queryClient = useQueryClient();
+  const { t } = useT();
+  return useMutation({
+    mutationFn: (id: string) => communitySubmissionsService.permanentDelete(id),
+    onSuccess: () => {
+      invalidateCommunity(queryClient);
+      toast.success(t('communityAdmin.toastPermanentlyDeleted'));
+    },
+    onError: (err) => toastMutationError(err),
   });
 }

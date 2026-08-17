@@ -260,6 +260,13 @@ export class BlogService {
     return this.mapToDto(row, row.coverImage);
   }
 
+  // ── Deletion lifecycle: archive → restore → purge ────────────────────
+  // A post is editorial CONTENT — nothing clinical or financial points at
+  // it — so a real purge is legitimate, but only out of the trash. Its
+  // images are NOT touched: they live in the shared BlogImage library and
+  // may still be referenced by other posts (coverImage is SetNull exactly
+  // so an image can outlive a post and vice-versa).
+
   async softDelete(id: string): Promise<{ message: string }> {
     const current = await this.prisma.blog.findUnique({ where: { id } });
     if (!current || current.deletedAt) {
@@ -270,6 +277,38 @@ export class BlogService {
       data: { deletedAt: new Date() },
     });
     return { message: 'Blog post deleted' };
+  }
+
+  /** Bring an archived post back. Idempotent when it is already live. */
+  async restore(id: string): Promise<BlogDto> {
+    const current = await this.prisma.blog.findUnique({ where: { id } });
+    if (!current) throw new NotFoundException('Blog post not found');
+    const row = current.deletedAt
+      ? await this.prisma.blog.update({
+          where: { id },
+          data: { deletedAt: null },
+          include: { coverImage: true },
+        })
+      : await this.prisma.blog.findUniqueOrThrow({
+          where: { id },
+          include: { coverImage: true },
+        });
+    return this.mapToDto(row, row.coverImage);
+  }
+
+  /** Permanent delete — trash-first, post row only. Irreversible. */
+  async permanentDelete(id: string): Promise<{ message: string }> {
+    const current = await this.prisma.blog.findUnique({ where: { id } });
+    if (!current) throw new NotFoundException('Blog post not found');
+    if (!current.deletedAt) {
+      throw new BadRequestException(
+        'Archive this post before deleting it permanently.',
+        'NOT_ARCHIVED',
+      );
+    }
+    await this.prisma.blog.delete({ where: { id } });
+    this.logger.log(`Blog post ${id} permanently deleted.`);
+    return { message: 'Blog post permanently deleted' };
   }
 
   // ── Admin: status transitions ───────────────────────────────────────

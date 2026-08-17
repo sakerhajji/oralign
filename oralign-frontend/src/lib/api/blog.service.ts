@@ -112,9 +112,26 @@ export const blogService = {
     return response.data;
   },
 
+  // Deletion lifecycle: archive (soft) → restore → permanent.
   deletePost: async (id: string): Promise<MessageResponse> => {
     const response = await apiClient.delete<MessageResponse>(
       `/admin/blog/${id}`,
+    );
+    return response.data;
+  },
+
+  restorePost: async (id: string): Promise<Blog> => {
+    const response = await apiClient.patch<Blog>(`/admin/blog/${id}/restore`);
+    return response.data;
+  },
+
+  /**
+   * Purge an archived post for good. The backend refuses a live post
+   * (400 NOT_ARCHIVED) and leaves the shared image library untouched.
+   */
+  permanentDeletePost: async (id: string): Promise<MessageResponse> => {
+    const response = await apiClient.delete<MessageResponse>(
+      `/admin/blog/${id}/permanent`,
     );
     return response.data;
   },

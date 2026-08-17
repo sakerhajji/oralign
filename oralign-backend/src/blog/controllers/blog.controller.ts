@@ -154,12 +154,33 @@ export class BlogController {
     return this.blogService.update(id, dto);
   }
 
+  // ── Deletion lifecycle: archive → restore → purge ────────────────────
+
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Soft-delete a blog post (sets deletedAt).' })
+  @ApiOperation({ summary: 'Archive a blog post (soft delete, reversible).' })
   @ApiParam({ name: 'id', type: String })
   async softDelete(@Param('id') id: string) {
     return this.blogService.softDelete(id);
+  }
+
+  @Patch(':id/restore')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Restore an archived blog post.' })
+  @ApiParam({ name: 'id', type: String })
+  async restore(@Param('id') id: string) {
+    return this.blogService.restore(id);
+  }
+
+  @Delete(':id/permanent')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Permanently delete an archived post. Irreversible; shared images are kept.',
+  })
+  @ApiParam({ name: 'id', type: String })
+  async permanentDelete(@Param('id') id: string) {
+    return this.blogService.permanentDelete(id);
   }
 
   @Patch(':id/publish')

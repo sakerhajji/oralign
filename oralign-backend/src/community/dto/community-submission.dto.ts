@@ -151,6 +151,18 @@ export class CommunitySubmissionListDto {
   @Min(1)
   @Max(100)
   limit?: number;
+
+  // Trash-bin view (mirrors PatientFilterDto.includeDeleted): the archived
+  // rows stay hidden unless an admin opts in explicitly.
+  @ApiPropertyOptional({
+    type: Boolean,
+    description:
+      'Admin only — return ONLY archived submissions (deletedAt is set). Renders the trash-bin view.',
+  })
+  @IsOptional()
+  @Transform(coerceBoolean)
+  @IsBoolean()
+  includeDeleted?: boolean;
 }
 
 export class RejectCommunitySubmissionDto {

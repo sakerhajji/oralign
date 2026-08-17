@@ -3025,7 +3025,19 @@ export const dict = {
     media: { en: 'Attached media', fr: 'Médias joints' } as T,
     toastApproved: { en: 'Story approved and published.', fr: 'Témoignage approuvé et publié.' } as T,
     toastRejected: { en: 'Story rejected.', fr: 'Témoignage refusé.' } as T,
-    toastDeleted: { en: 'Story removed.', fr: 'Témoignage supprimé.' } as T,
+    toastDeleted: { en: 'Story archived.', fr: 'Témoignage archivé.' } as T,
+    // Deletion lifecycle: archive → restore → permanent.
+    trash: { en: 'Archived', fr: 'Archivés' } as T,
+    restore: { en: 'Restore', fr: 'Restaurer' } as T,
+    permanentDelete: { en: 'Delete permanently', fr: 'Supprimer définitivement' } as T,
+    permanentDeleteTitle: { en: 'Delete this story permanently?', fr: 'Supprimer définitivement ce témoignage ?' } as T,
+    permanentDeleteBody: {
+      en: 'This erases the story and every photo or video attached to it. It cannot be undone.',
+      fr: 'Cette action efface le témoignage et toutes les photos ou vidéos jointes. Elle est irréversible.',
+    } as T,
+    archivedOn: { en: 'Archived {date}', fr: 'Archivé le {date}' } as T,
+    toastRestored: { en: 'Story restored.', fr: 'Témoignage restauré.' } as T,
+    toastPermanentlyDeleted: { en: 'Story permanently deleted.', fr: 'Témoignage supprimé définitivement.' } as T,
     add: { en: 'Add story', fr: 'Ajouter un témoignage' } as T,
     edit: { en: 'Edit', fr: 'Modifier' } as T,
     save: { en: 'Save changes', fr: 'Enregistrer les modifications' } as T,
@@ -3709,6 +3721,11 @@ export const dict = {
       published: { en: 'Article published.', fr: 'Article publié.' } as T,
       unpublished: { en: 'Article unpublished.', fr: 'Article dépublié.' } as T,
       archived: { en: 'Article archived.', fr: 'Article archivé.' } as T,
+      restored: { en: 'Article restored.', fr: 'Article restauré.' } as T,
+      permanentlyDeleted: {
+        en: 'Article permanently deleted.',
+        fr: 'Article supprimé définitivement.',
+      } as T,
       imageUploaded: { en: 'Image uploaded.', fr: 'Image téléversée.' } as T,
       error: {
         en: 'Something went wrong with the article. Please try again.',

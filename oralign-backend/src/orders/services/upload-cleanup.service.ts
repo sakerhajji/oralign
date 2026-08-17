@@ -5,6 +5,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { SupportService } from '../../support/services/support.service';
 import { ChunkedUploadService } from './chunked-upload.service';
 import { purgeStoredMedia } from './order-storage';
 
@@ -33,6 +34,9 @@ const PURGE_BATCH = 200;
  *      blob + variants unlinked, row removed. Files of orders that are
  *      themselves archived are left alone — the ORDER's own restore /
  *      permanent-delete decides their fate.
+ *   3. support conversations an admin archived more than 30 days ago:
+ *      delegated to SupportService, which owns the model and the storage
+ *      layout. This class is only the scheduler.
  * Nothing here ever touches a live business row.
  */
 @Injectable()
@@ -44,6 +48,7 @@ export class UploadCleanupService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly chunkedUploads: ChunkedUploadService,
+    private readonly support: SupportService,
   ) {}
 
   onModuleInit(): void {
@@ -72,6 +77,13 @@ export class UploadCleanupService implements OnModuleInit, OnModuleDestroy {
     } catch (error) {
       this.logger.warn(
         `Deleted-file retention sweep failed: ${(error as Error).message}`,
+      );
+    }
+    try {
+      await this.support.purgeExpiredDeletedConversations();
+    } catch (error) {
+      this.logger.warn(
+        `Support-trash retention sweep failed: ${(error as Error).message}`,
       );
     }
   }

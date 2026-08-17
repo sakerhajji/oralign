@@ -8,9 +8,14 @@ import { OrderFilesService } from './services/order-files.service';
 import { OrderExportService } from './services/order-export.service';
 import { TreatmentFeeService } from './services/treatment-fee.service';
 import { UploadCleanupService } from './services/upload-cleanup.service';
+// UploadCleanupService is the app's single retention scheduler; the
+// support-trash sweep itself lives in SupportService (which owns that
+// model and the /uploads/support layout). SupportModule imports only
+// PrismaModule, so there is no cycle.
+import { SupportModule } from '../support/support.module';
 
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, SupportModule],
   controllers: [OrderController],
   providers: [
     // Order domain, one concern per service (see each file's header):

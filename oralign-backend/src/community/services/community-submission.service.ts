@@ -17,6 +17,10 @@ import * as path from 'path';
 import sharp from 'sharp';
 import ffmpegPath from 'ffmpeg-static';
 import { PrismaService } from '../../prisma/prisma.service';
+// Carries an errorCode the frontend can branch on; Nest's own
+// BadRequestException (used elsewhere in this file for plain validation)
+// cannot. Aliased so both keep their existing call sites.
+import { BadRequestException as ArchiveRequiredException } from '../../common/exceptions/app.exception';
 import {
   AdminCreateCommunitySubmissionDto,
   CreateCommunitySubmissionDto,
@@ -132,7 +136,9 @@ export class CommunitySubmissionService {
     const page = filters.page ?? 1;
     const limit = Math.min(filters.limit ?? 20, 100);
     const where: Prisma.CommunitySubmissionWhereInput = {
-      deletedAt: null,
+      // `includeDeleted` is the trash view, so it flips the filter rather
+      // than widening it — an admin browsing the bin wants ONLY the bin.
+      deletedAt: filters.includeDeleted ? { not: null } : null,
       ...(filters.status ? { status: filters.status } : {}),
     };
     const [data, total] = await this.prisma.$transaction([
@@ -208,9 +214,9 @@ export class CommunitySubmissionService {
     });
   }
 
-  async getForAdmin(id: string) {
+  async getForAdmin(id: string, opts: { allowDeleted?: boolean } = {}) {
     const row = await this.prisma.communitySubmission.findFirst({
-      where: { id, deletedAt: null },
+      where: { id, ...(opts.allowDeleted ? {} : { deletedAt: null }) },
       include: {
         media: { orderBy: { createdAt: 'asc' } },
         reviewedBy: { select: { id: true, fullName: true } },
@@ -255,6 +261,17 @@ export class CommunitySubmissionService {
     });
   }
 
+  // ── Deletion lifecycle ───────────────────────────────────────────────
+  // A community story is user-generated CONTENT, not clinical or financial
+  // history: nothing else in the schema depends on it, so it is one of the
+  // few entities where a true permanent delete is legitimate. It also carries
+  // real personal data (first name, phone, e-mail, a child's name and age,
+  // photos and videos of real people), so an erasure request has to be
+  // honourable from the API — the media on disk included.
+  //
+  // Shape mirrors every other entity: archive → restore → purge.
+
+  /** Archive (soft delete). Media stays on disk so a restore is complete. */
   async softDelete(id: string) {
     await this.getForAdmin(id);
     return this.prisma.communitySubmission.update({
@@ -262,6 +279,70 @@ export class CommunitySubmissionService {
       data: { deletedAt: new Date() },
       select: { id: true },
     });
+  }
+
+  /** Bring an archived story back, exactly as it was. */
+  async restore(id: string) {
+    const row = await this.getForAdmin(id, { allowDeleted: true });
+    if (!row.deletedAt) return row; // idempotent
+    return this.prisma.communitySubmission.update({
+      where: { id },
+      data: { deletedAt: null },
+      include: {
+        media: { orderBy: { createdAt: 'asc' } },
+        reviewedBy: { select: { id: true, fullName: true } },
+      },
+    });
+  }
+
+  /**
+   * Permanent delete — trash-first. Refuses a live row (archive it first,
+   * so a purge is always a second, deliberate decision), then drops the
+   * media rows + the submission in one transaction and unlinks the blobs
+   * and the whole /uploads/community/<id> directory afterwards.
+   *
+   * Disk work happens AFTER the commit: a failed unlink leaves an orphan
+   * file (harmless, sweepable) whereas the reverse order could leave a row
+   * pointing at a file that no longer exists.
+   */
+  async permanentDelete(id: string): Promise<{ message: string }> {
+    const row = await this.getForAdmin(id, { allowDeleted: true });
+    if (!row.deletedAt) {
+      throw new ArchiveRequiredException(
+        'Archive this story before deleting it permanently.',
+        'NOT_ARCHIVED',
+      );
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.communitySubmissionMedia.deleteMany({
+        where: { submissionId: id },
+      });
+      await tx.communitySubmission.delete({ where: { id } });
+    });
+
+    for (const media of row.media) {
+      await this.deleteStoredFile(media.relativePath);
+    }
+    await this.purgeSubmissionDirectory(id);
+
+    this.logger.log(`Community submission ${id} permanently deleted.`);
+    return { message: 'Community story permanently deleted' };
+  }
+
+  /**
+   * Remove whatever is left of /uploads/community/<id> — cover images and
+   * transcoded videos that were replaced during editing never had a media
+   * row of their own. Id-shape guarded: this is an rm -rf.
+   */
+  private async purgeSubmissionDirectory(id: string): Promise<void> {
+    if (!/^[A-Za-z0-9_-]+$/.test(id)) return;
+    const directory = path.resolve(UPLOAD_ROOT, 'community', id);
+    const root = path.resolve(UPLOAD_ROOT) + path.sep;
+    if (!directory.startsWith(root)) return;
+    await fs.promises
+      .rm(directory, { recursive: true, force: true })
+      .catch(() => undefined);
   }
 
   private validateFiles(

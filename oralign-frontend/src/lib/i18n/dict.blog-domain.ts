@@ -200,7 +200,10 @@ export const blogDomainDict = {
       all: { en: 'All', fr: 'Tous' } as T,
       draft: { en: 'Drafts', fr: 'Brouillons' } as T,
       published: { en: 'Published', fr: 'Publiés' } as T,
+      // `archived` is the STATUS (kept, just not published); `trash` is
+      // the soft-delete bin (deletedAt set). Two different axes.
       archived: { en: 'Archived', fr: 'Archivés' } as T,
+      trash: { en: 'Trash', fr: 'Corbeille' } as T,
     },
 
     // ─── v2: audience filter strip (admin list) ─────────────────────
@@ -394,6 +397,27 @@ export const blogDomainDict = {
         fr: 'L’article sera placé dans la corbeille. Il n’apparaîtra plus sur le site public. Cette action peut être annulée par un administrateur.',
       } as T,
       confirm: { en: 'Delete article', fr: 'Supprimer l’article' } as T,
+    },
+
+    // ─── Trash: restore + permanent delete ──────────────────────────
+    trash: {
+      restore: { en: 'Restore', fr: 'Restaurer' } as T,
+      permanentDelete: {
+        en: 'Delete permanently',
+        fr: 'Supprimer définitivement',
+      } as T,
+      permanentTitle: {
+        en: 'Delete this article permanently?',
+        fr: 'Supprimer définitivement cet article ?',
+      } as T,
+      permanentBody: {
+        en: 'The article and its content are erased for good. Images stay in the shared library — other articles may still use them.',
+        fr: 'L’article et son contenu sont effacés définitivement. Les images restent dans la bibliothèque partagée — d’autres articles peuvent encore les utiliser.',
+      } as T,
+      empty: {
+        en: 'The trash is empty.',
+        fr: 'La corbeille est vide.',
+      } as T,
     },
   },
 };

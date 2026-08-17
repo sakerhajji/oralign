@@ -36,9 +36,12 @@ import {
   useArchiveBlog,
   useBlogPosts,
   useDeleteBlog,
+  usePermanentDeleteBlog,
   usePublishBlog,
+  useRestoreBlog,
   useUnpublishBlog,
 } from '@/lib/hooks/use-blog';
+import { PermanentDeleteDialog } from '@/components/shared/permanent-delete-dialog';
 import {
   BlogAudience,
   BlogStatus,
@@ -95,11 +98,20 @@ import { BlogEditorDialog } from '@/components/blog/blog-editor-dialog';
 
 const PAGE_SIZE = 20;
 
+/**
+ * The trash tab is NOT a status — it maps to `includeDeleted`, which the
+ * backend reads as "ONLY soft-deleted rows". Kept distinct from
+ * BlogStatus.ARCHIVED, which is a live post that simply isn't published.
+ */
+const TRASH = 'trash' as const;
+type StatusTab = BlogStatus | 'all' | typeof TRASH;
+
 const STATUS_TABS = [
   { key: 'all' as const, labelKey: 'blogAdmin.tabs.all' },
   { key: BlogStatus.DRAFT, labelKey: 'blogAdmin.tabs.draft' },
   { key: BlogStatus.PUBLISHED, labelKey: 'blogAdmin.tabs.published' },
   { key: BlogStatus.ARCHIVED, labelKey: 'blogAdmin.tabs.archived' },
+  { key: TRASH, labelKey: 'blogAdmin.tabs.trash' },
 ] as const;
 
 // v2: audience filter (segmented). 'all' clears the params.audience filter.
@@ -139,7 +151,8 @@ export function BlogPageContent() {
   const [page, setPage] = React.useState(1);
   const [searchInput, setSearchInput] = React.useState('');
   const [debouncedSearch] = useDebounce(searchInput, 300);
-  const [statusTab, setStatusTab] = React.useState<BlogStatus | 'all'>('all');
+  const [statusTab, setStatusTab] = React.useState<StatusTab>('all');
+  const inTrash = statusTab === TRASH;
   const [audienceTab, setAudienceTab] = React.useState<BlogAudience | 'all'>(
     'all',
   );
@@ -153,7 +166,8 @@ export function BlogPageContent() {
       sortOrder: 'desc',
     };
     if (debouncedSearch.trim()) next.search = debouncedSearch.trim();
-    if (statusTab !== 'all') next.status = statusTab;
+    if (statusTab === TRASH) next.includeDeleted = true;
+    else if (statusTab !== 'all') next.status = statusTab;
     if (audienceTab !== 'all') next.audience = audienceTab;
     if (category !== 'all') next.category = category;
     return next;
@@ -180,11 +194,14 @@ export function BlogPageContent() {
   const [editorOpen, setEditorOpen] = React.useState(false);
   const [editingPost, setEditingPost] = React.useState<Blog | null>(null);
   const [confirmDelete, setConfirmDelete] = React.useState<Blog | null>(null);
+  const [confirmPurge, setConfirmPurge] = React.useState<Blog | null>(null);
 
   const publish = usePublishBlog();
   const unpublish = useUnpublishBlog();
   const archive = useArchiveBlog();
   const remove = useDeleteBlog();
+  const restore = useRestoreBlog();
+  const purge = usePermanentDeleteBlog();
 
   const openNew = () => {
     setEditingPost(null);
@@ -247,7 +264,7 @@ export function BlogPageContent() {
         <Tabs
           value={statusTab}
           onValueChange={(v) => {
-            setStatusTab(v as BlogStatus | 'all');
+            setStatusTab(v as StatusTab);
             setPage(1);
           }}
         >
@@ -338,12 +355,14 @@ export function BlogPageContent() {
             <div className="flex flex-col items-center gap-3 p-10 text-center">
               <NewspaperIcon className="size-8 opacity-40" />
               <p className="text-sm text-muted-foreground">
-                {debouncedSearch ||
-                statusTab !== 'all' ||
-                audienceTab !== 'all' ||
-                category !== 'all'
-                  ? t('blogAdmin.emptyFiltered')
-                  : t('blogAdmin.empty')}
+                {inTrash
+                  ? t('blogAdmin.trash.empty')
+                  : debouncedSearch ||
+                      statusTab !== 'all' ||
+                      audienceTab !== 'all' ||
+                      category !== 'all'
+                    ? t('blogAdmin.emptyFiltered')
+                    : t('blogAdmin.empty')}
               </p>
               {!(
                 debouncedSearch ||
@@ -440,11 +459,14 @@ export function BlogPageContent() {
                         <TableCell className="text-right">
                           <RowActions
                             post={post}
+                            inTrash={inTrash}
                             onEdit={() => openEdit(post)}
                             onPublish={() => publish.mutate(post.id)}
                             onUnpublish={() => unpublish.mutate(post.id)}
                             onArchive={() => archive.mutate(post.id)}
                             onDelete={() => setConfirmDelete(post)}
+                            onRestore={() => restore.mutate(post.id)}
+                            onPurge={() => setConfirmPurge(post)}
                             onViewOnSite={() => openOnSite(post)}
                           />
                         </TableCell>
@@ -480,11 +502,14 @@ export function BlogPageContent() {
                       </div>
                       <RowActions
                         post={post}
+                        inTrash={inTrash}
                         onEdit={() => openEdit(post)}
                         onPublish={() => publish.mutate(post.id)}
                         onUnpublish={() => unpublish.mutate(post.id)}
                         onArchive={() => archive.mutate(post.id)}
                         onDelete={() => setConfirmDelete(post)}
+                        onRestore={() => restore.mutate(post.id)}
+                        onPurge={() => setConfirmPurge(post)}
                         onViewOnSite={() => openOnSite(post)}
                       />
                     </div>
@@ -575,6 +600,26 @@ export function BlogPageContent() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* ── Permanent delete (trash only, type-to-confirm) ── */}
+      <PermanentDeleteDialog
+        open={!!confirmPurge}
+        onOpenChange={(o) => !o && setConfirmPurge(null)}
+        title={t('blogAdmin.trash.permanentTitle')}
+        description={
+          confirmPurge
+            ? `${pickLocalized(confirmPurge.title, lang)} — ${t('blogAdmin.trash.permanentBody')}`
+            : t('blogAdmin.trash.permanentBody')
+        }
+        confirmLabel={t('blogAdmin.trash.permanentDelete')}
+        pending={purge.isPending}
+        onConfirm={() => {
+          if (!confirmPurge) return;
+          purge.mutate(confirmPurge.id, {
+            onSuccess: () => setConfirmPurge(null),
+          });
+        }}
+      />
     </div>
   );
 }
@@ -648,23 +693,59 @@ function AudienceBadge({ audience }: { audience: BlogAudience }) {
 
 function RowActions({
   post,
+  inTrash,
   onEdit,
   onPublish,
   onUnpublish,
   onArchive,
   onDelete,
+  onRestore,
+  onPurge,
   onViewOnSite,
 }: {
   post: Blog;
+  inTrash: boolean;
   onEdit: () => void;
   onPublish: () => void;
   onUnpublish: () => void;
   onArchive: () => void;
   onDelete: () => void;
+  onRestore: () => void;
+  onPurge: () => void;
   onViewOnSite: () => void;
 }) {
   const { t } = useT();
   const isPublished = post.status === BlogStatus.PUBLISHED;
+
+  // A trashed post gets exactly two choices: bring it back, or purge it.
+  // Editing / publishing a deleted post makes no sense, and the backend
+  // rejects a permanent delete outside the trash anyway.
+  if (inTrash) {
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon" aria-label={t('blogAdmin.columns.actions')}>
+            <MoreVertical className="size-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-52">
+          <DropdownMenuItem onClick={onRestore} className="gap-2">
+            <ArrowUpFromLineIcon className="size-4" />
+            {t('blogAdmin.trash.restore')}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onClick={onPurge}
+            className="gap-2 text-destructive focus:text-destructive"
+          >
+            <Trash2Icon className="size-4" />
+            {t('blogAdmin.trash.permanentDelete')}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  }
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>

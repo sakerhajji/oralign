@@ -23,7 +23,7 @@ import {
 } from '../dto/support.dto';
 import { MediaProcessingService } from '../../media/media-processing.service';
 import { ADMIN_ROLES, isAdmin, type Caller } from '../../common/access/caller';
-import { lookupActorName } from '../../common/access/actor-snapshot';
+import { lookupActorName, withSenderFallback } from '../../common/access/actor-snapshot';
 
 // Storage: every conversation gets its own subdirectory under
 // /uploads/support/<convId>/ so cleanup on hard-delete is one rmdir.
@@ -334,7 +334,7 @@ export class SupportService {
         },
       },
     });
-    return { conversation: conv, messages };
+    return { conversation: conv, messages: messages.map(withSenderFallback) };
   }
 
   async unreadCount(caller: Caller): Promise<number> {

@@ -20,7 +20,7 @@ import { MediaProcessingService } from '../../media/media-processing.service';
 import { classifyMedia } from '../../media/media.constants';
 import { MediaVariantInfo } from '../../media/media.types';
 import { isAdmin, type Caller } from '../../common/access/caller';
-import { lookupActorName } from '../../common/access/actor-snapshot';
+import { lookupActorName, withSenderFallback } from '../../common/access/actor-snapshot';
 
 const PLANNER_ROLES: UserRole[] = [
   UserRole.admin,
@@ -112,7 +112,7 @@ export class TreatmentMessageService {
    */
   async list(treatmentPlanId: string, caller: Caller) {
     const plan = await this.assertPlanReadable(treatmentPlanId, caller);
-    return this.prisma.treatmentMessage.findMany({
+    const rows = await this.prisma.treatmentMessage.findMany({
       where: {
         treatmentPlan: { orderId: plan.orderId, deletedAt: null },
         deletedAt: null,
@@ -125,13 +125,14 @@ export class TreatmentMessageService {
         },
       },
     });
+    return rows.map(withSenderFallback);
   }
 
   /** Same listing, addressed directly by orderId for the order-scoped chat
    *  endpoint that the frontend now uses. */
   async listByOrder(orderId: string, caller: Caller) {
     await this.assertOrderReadable(orderId, caller);
-    return this.prisma.treatmentMessage.findMany({
+    const rows = await this.prisma.treatmentMessage.findMany({
       where: {
         treatmentPlan: { orderId, deletedAt: null },
         deletedAt: null,
@@ -144,6 +145,7 @@ export class TreatmentMessageService {
         },
       },
     });
+    return rows.map(withSenderFallback);
   }
 
   /**
@@ -287,7 +289,8 @@ export class TreatmentMessageService {
           },
         });
       })
-      .then((created) => {
+      .then((row) => {
+        const created = row ? withSenderFallback(row) : row;
         // Fire-and-forget broadcast — sockets are advisory, not the
         // source of truth, so a transient error here shouldn't break
         // the REST response. Broadcast to the ORDER room (not the plan)

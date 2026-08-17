@@ -24,6 +24,7 @@ import {
 import { CompanyBillingSettingsService } from './company-billing-settings.service';
 import { pickTranslation } from './quotation-i18n';
 import { QuotationPaymentPlanService } from './quotation-payment-plan.service';
+import { QuotationPdfService } from './quotation-pdf.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { NotificationEvents } from '../../notifications/events/notification-events';
 import { isAdmin, type Caller } from '../../common/access/caller';
@@ -65,6 +66,7 @@ export class QuotationService {
     private readonly orderAccess: OrderAccessPolicy,
     private readonly settingsService: CompanyBillingSettingsService,
     private readonly paymentPlan: QuotationPaymentPlanService,
+    private readonly quotationPdf: QuotationPdfService,
     private readonly events: EventEmitter2,
   ) {}
 
@@ -977,6 +979,9 @@ export class QuotationService {
     ]);
 
     await this.prisma.quotation.delete({ where: { id: quote.id } });
+    // The row is gone: its rendered devis PDF has no owner any more.
+    // After the commit, best-effort — never fails the cancel.
+    void this.quotationPdf.deleteStoredPdf(quote.pdfFilePath);
 
     if (wasSent && order) {
       this.events.emit(NotificationEvents.QuotationCanceled, {

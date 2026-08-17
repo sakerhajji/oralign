@@ -208,6 +208,10 @@ export class AdminDashboardService {
     // totals and never double-count proposals as debt.
     const QUALIFYING_QUOTE = {
       deletedAt: null,
+      // An archived (soft-deleted) order is out of the business: its quote
+      // must not appear in revenue, debt or growth. Every aggregate below
+      // spreads this object, so the filter cannot drift between them.
+      order: { deletedAt: null },
       packId: { not: null },
       status: QuotationStatus.approved,
     } as const;
@@ -353,6 +357,7 @@ export class AdminDashboardService {
       _sum: { totalPrice: true },
       where: {
         deletedAt: null,
+        order: { deletedAt: null },
         packId: { not: null },
         paymentStatus: QuotationPaymentStatus.paid,
         sentAt: { gte: range.from, lte: range.to },
@@ -436,6 +441,7 @@ export class AdminDashboardService {
       by: ['createdById'], // creator may or may not be the doctor; use order.doctorId below.
       where: {
         deletedAt: null,
+        order: { deletedAt: null },
         sentAt: { gte: range.from, lte: range.to },
       },
       _count: { _all: true },
@@ -578,6 +584,7 @@ export class AdminDashboardService {
       where: {
         deletedAt: null,
         packId: { not: null },
+        order: { deletedAt: null },
         sentAt: { gte: range.from, lte: range.to },
       },
       _count: { _all: true },

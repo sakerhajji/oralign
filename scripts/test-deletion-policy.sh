@@ -57,6 +57,12 @@ cleanup() {
     fi
   done
   docker compose -p oralign-app exec -T backend sh -c 'rm -rf /app/uploads/orders/TESTDELPOL* 2>/dev/null' >/dev/null 2>&1 || true
+  # Remove ONLY the one seeded order directory, and only when the id is
+  # non-empty: an unset variable inside the container would expand to
+  # /app/uploads/orders/ and wipe every order's uploads.
+  if [ -n "${ORDER_B:-}" ]; then
+    docker compose -p oralign-app exec -T backend sh -c "rm -rf '/app/uploads/orders/$ORDER_B'" >/dev/null 2>&1 || true
+  fi
   rm -f "$TEST_IDS_FILE"
 }
 trap cleanup EXIT
@@ -126,10 +132,12 @@ ORDER_B=$(db_insert "INSERT INTO \"DentalOrder\" (id, \"orderCode\", \"doctorId\
   VALUES (gen_random_uuid(), 'TEST_DELPOL_B_${STAMP}', '$DOCTOR_ID', '$PATIENT_ID', 'draft', NOW(), NOW()) RETURNING id;")
 remember DentalOrder "$ORDER_B"; ok "order B (no history)=$ORDER_B"
 
-REL="orders/TESTDELPOL_${STAMP}/other/blob.txt"
-docker compose -p oralign-app exec -T backend sh -c "mkdir -p /app/uploads/orders/TESTDELPOL_${STAMP}/other && echo hi > /app/uploads/${REL} && echo hi > /app/uploads/orders/TESTDELPOL_${STAMP}/other/blob__thumb.webp"
+# Seed under the REAL order directory so the purge-the-whole-dir check
+# below is meaningful (the order dir is what permanentDelete removes).
+REL="orders/${ORDER_B}/other/blob.txt"
+docker compose -p oralign-app exec -T backend sh -c "mkdir -p /app/uploads/orders/${ORDER_B}/other && echo hi > /app/uploads/${REL} && echo hi > /app/uploads/orders/${ORDER_B}/other/blob__thumb.webp"
 FILE_ID=$(db_insert "INSERT INTO \"OrderFile\" (id, \"orderId\", category, \"originalName\", \"fileName\", \"relativePath\", \"mimeType\", size, variants, \"createdAt\")
-  VALUES (gen_random_uuid(), '$ORDER_B', 'other', 'blob.txt', 'blob.txt', '$REL', 'text/plain', 3, '{\"thumb\":{\"path\":\"orders/TESTDELPOL_${STAMP}/other/blob__thumb.webp\",\"format\":\"webp\",\"sizeBytes\":3}}'::jsonb, NOW()) RETURNING id;")
+  VALUES (gen_random_uuid(), '$ORDER_B', 'other', 'blob.txt', 'blob.txt', '$REL', 'text/plain', 3, '{\"thumb\":{\"path\":\"orders/${ORDER_B}/other/blob__thumb.webp\",\"format\":\"webp\",\"sizeBytes\":3}}'::jsonb, NOW()) RETURNING id;")
 remember OrderFile "$FILE_ID"; ok "order B file=$FILE_ID (+ variant on disk)"
 
 # ─────────────────────────────────────────────────────────────────────
@@ -210,7 +218,36 @@ S=$(req DELETE "$API/orders/$ORDER_B/permanent" "$ADMIN_TOKEN"); [ "$S" = "200" 
 [ "$(db_val "SELECT count(*) FROM \"DentalOrder\" WHERE id='$ORDER_B'")" = "0" ] && ok "order B row gone" || bad "order B still there"
 [ "$(db_val "SELECT count(*) FROM \"OrderFile\" WHERE id='$FILE_ID'")" = "0" ] && ok "order B file row gone" || bad "file row still there"
 docker compose -p oralign-app exec -T backend sh -c "test ! -e /app/uploads/${REL}" && ok "original blob unlinked" || bad "original blob still on disk"
-docker compose -p oralign-app exec -T backend sh -c "test ! -e /app/uploads/orders/TESTDELPOL_${STAMP}/other/blob__thumb.webp" && ok "variant blob unlinked" || bad "variant still on disk"
+docker compose -p oralign-app exec -T backend sh -c "test ! -e /app/uploads/orders/${ORDER_B}/other/blob__thumb.webp" && ok "variant blob unlinked" || bad "variant still on disk"
+docker compose -p oralign-app exec -T backend sh -c "test ! -d /app/uploads/orders/$ORDER_B" && ok "order upload directory removed" || bad "order dir still on disk"
+
+step "12. Archived orders leave the admin dashboard KPIs"
+# Make order A's quote count towards revenue (approved + paid + pack),
+# then read the KPI with the order live and again with it archived.
+$DB -c "UPDATE \"Quotation\" SET status='approved', \"paymentStatus\"='paid', \"packId\"=NULL, \"totalPrice\"=100, \"paidAmount\"=100, \"sentAt\"=NOW() WHERE id='$QUOTE_ID';" >/dev/null
+PACK_ID=$(db_insert "INSERT INTO \"Pack\" (id, name, \"isActive\", \"createdAt\", \"updatedAt\") VALUES (gen_random_uuid(), 'TEST_DELPOL_PACK', true, NOW(), NOW()) RETURNING id;")
+remember Pack "$PACK_ID"
+$DB -c "UPDATE \"Quotation\" SET \"packId\"='$PACK_ID' WHERE id='$QUOTE_ID';" >/dev/null
+
+kpi_revenue() {
+  docker compose -p oralign-app exec -T redis sh -c 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning FLUSHDB' >/dev/null 2>&1
+  req GET "$API/admin/dashboard/kpis" "$ADMIN_TOKEN" >/dev/null
+  body | jget "o.revenue && (o.revenue.total ?? o.revenue.collected)"
+}
+
+S=$(req GET "$API/admin/dashboard/kpis" "$ADMIN_TOKEN")
+[ "$S" = "200" ] && ok "admin dashboard KPIs 200" || bad "admin dashboard -> $S $(body)"
+REV_LIVE=$(kpi_revenue)
+$DB -c "UPDATE \"DentalOrder\" SET \"deletedAt\"=NOW() WHERE id='$ORDER_A';" >/dev/null
+REV_ARCHIVED=$(kpi_revenue)
+$DB -c "UPDATE \"DentalOrder\" SET \"deletedAt\"=NULL WHERE id='$ORDER_A';" >/dev/null
+if [ -n "${REV_LIVE:-}" ] && [ -n "${REV_ARCHIVED:-}" ]; then
+  awk -v a="$REV_LIVE" -v b="$REV_ARCHIVED" 'BEGIN{exit !(a-b >= 99.9)}' \
+    && ok "archiving the order removed its 100 from revenue (live=$REV_LIVE archived=$REV_ARCHIVED)" \
+    || bad "revenue did not drop when the order was archived (live=$REV_LIVE archived=$REV_ARCHIVED)"
+else
+  bad "could not read revenue KPI (live='${REV_LIVE:-}' archived='${REV_ARCHIVED:-}')"
+fi
 
 # ─────────────────────────────────────────────────────────────────────
 log ""; log "── Summary ──"; log "  Passed: $PASS"; log "  Failed: $FAIL"

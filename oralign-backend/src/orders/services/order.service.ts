@@ -30,7 +30,11 @@ import {
   orderInclude,
   type OrderWithRelations,
 } from './order.mapper';
-import { purgeStoredMedia, removeFileFromDisk } from './order-storage';
+import {
+  purgeOrderDirectory,
+  purgeStoredMedia,
+  removeFileFromDisk,
+} from './order-storage';
 import { assertNoDependents } from '../../common/deletion/deletion-blocked';
 
 type ClinicalOrderData = Partial<
@@ -731,6 +735,9 @@ export class OrderService {
       if (order.treatmentFeeProofPath) {
         await removeFileFromDisk(order.treatmentFeeProofPath);
       }
+      // Catch-all: drop what is left of uploads/orders/<id> (empty
+      // category folders, orphaned variants, the quotes/ sub-folder).
+      await purgeOrderDirectory(order.id);
     }
 
     return { purged: purgeIds.length, blocked, found: candidates.length };

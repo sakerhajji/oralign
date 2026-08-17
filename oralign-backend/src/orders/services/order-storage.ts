@@ -83,6 +83,27 @@ export async function purgeStoredMedia(
   }
 }
 
+/**
+ * Remove the ENTIRE upload directory of one order
+ * (`uploads/orders/<orderId>`): the per-category file folders, every
+ * derived variant and the `quotes/` sub-folder that quotation PDFs are
+ * rendered into. Called only after an order row has been permanently
+ * deleted, so nothing in the DB can still point here. Best-effort — a
+ * failed rmdir must never fail the purge that already committed.
+ */
+export async function purgeOrderDirectory(orderId: string): Promise<void> {
+  // Guard against a caller passing something path-like: an order id is a
+  // uuid, and `resolveUploadPath` would also reject traversal, but this
+  // keeps the rm target unambiguous.
+  if (!/^[A-Za-z0-9_-]+$/.test(orderId)) return;
+  const dir = resolveUploadPath(path.posix.join('orders', orderId));
+  try {
+    await fs.promises.rm(dir, { recursive: true, force: true });
+  } catch {
+    return;
+  }
+}
+
 /** Best-effort unlink; a missing blob is not an error. */
 export async function removeFileFromDisk(relativePath: string): Promise<void> {
   const absolutePath = resolveUploadPath(relativePath);

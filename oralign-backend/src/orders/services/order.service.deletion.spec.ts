@@ -16,11 +16,13 @@ import {
 jest.mock('./order-storage', () => ({
   purgeStoredMedia: jest.fn().mockResolvedValue(undefined),
   removeFileFromDisk: jest.fn().mockResolvedValue(undefined),
+  purgeOrderDirectory: jest.fn().mockResolvedValue(undefined),
 }));
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const storage = require('./order-storage') as {
   purgeStoredMedia: jest.Mock;
   removeFileFromDisk: jest.Mock;
+  purgeOrderDirectory: jest.Mock;
 };
 
 const admin: Caller = { userId: 'u-admin', role: UserRole.admin };
@@ -70,6 +72,7 @@ describe('OrderService permanent delete — deletion policy', () => {
   beforeEach(() => {
     storage.purgeStoredMedia.mockClear();
     storage.removeFileFromDisk.mockClear();
+    storage.purgeOrderDirectory.mockClear();
   });
 
   it('refuses non-admins before touching anything', async () => {
@@ -132,6 +135,8 @@ describe('OrderService permanent delete — deletion policy', () => {
     expect(storage.purgeStoredMedia).toHaveBeenCalledTimes(2);
     expect(storage.purgeStoredMedia).toHaveBeenCalledWith('orders/o1/x.jpg', { thumb: { path: 'orders/o1/x__thumb.webp' } });
     expect(storage.removeFileFromDisk).toHaveBeenCalledWith('treatment-fee-proofs/p.png');
+    // catch-all: whatever is left of uploads/orders/<id> goes too
+    expect(storage.purgeOrderDirectory).toHaveBeenCalledWith('o1');
   });
 
   it('bulk: purges the eligible ones and reports blocked + skipped without throwing', async () => {

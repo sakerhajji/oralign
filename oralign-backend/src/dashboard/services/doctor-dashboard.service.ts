@@ -349,6 +349,7 @@ export class DoctorDashboardService {
       by: ['packId'],
       where: {
         deletedAt: null,
+        order: { deletedAt: null },
         packId: { not: null },
         paymentStatus: QuotationPaymentStatus.paid,
       },
@@ -360,8 +361,9 @@ export class DoctorDashboardService {
       .map((p) => p.packId!)
       .filter((id): id is string => !!id && id !== latestPaidWithPack?.packId);
     const suggestedPack = popularPackIds[0]
-      ? await this.prisma.pack.findUnique({
-          where: { id: popularPackIds[0] },
+      ? await this.prisma.pack.findFirst({
+          // Never suggest an archived / deactivated pack.
+          where: { id: popularPackIds[0], deletedAt: null, isActive: true },
           select: { id: true, name: true, description: true, isActive: true },
         })
       : null;

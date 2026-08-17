@@ -39,6 +39,13 @@ cleanup() {
   fi
   # Remove uploaded test files from the container volume.
   docker compose -p oralign-app exec -T backend sh -c 'rm -rf /app/uploads/orders/TESTCBCT* 2>/dev/null' >/dev/null 2>&1
+  # Upload directories are named by order UUID, not by the TESTCBCT tag,
+  # so the glob above never matched them and every run leaked one folder.
+  # Guarded + quoted: an empty id here would expand to the whole
+  # /app/uploads/orders tree inside the container.
+  if [ -n "${ORDER_ID:-}" ]; then
+    docker compose -p oralign-app exec -T backend sh -c "rm -rf '/app/uploads/orders/$ORDER_ID'" >/dev/null 2>&1 || true
+  fi
   local lines=()
   while IFS= read -r line; do [ -n "$line" ] && lines+=("$line"); done < "$TEST_IDS_FILE"
   for ((i = ${#lines[@]} - 1; i >= 0; i--)); do

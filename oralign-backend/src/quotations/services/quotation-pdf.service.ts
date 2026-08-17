@@ -106,6 +106,26 @@ export class QuotationPdfService implements OnModuleDestroy {
     };
   }
 
+  /**
+   * Remove a rendered devis PDF from disk. Called when the row that owns
+   * it is hard-deleted (admin cancel of a draft/sent quote, or an order
+   * purge) — otherwise the file would linger with no DB pointer. Best
+   * effort: a missing file is not an error, and a failure here must never
+   * fail the business operation that already committed.
+   */
+  async deleteStoredPdf(relPath: string | null | undefined): Promise<void> {
+    if (!relPath) return;
+    try {
+      await fs.promises.rm(this.resolveSafe(relPath), { force: true });
+    } catch (err) {
+      this.logger.warn(
+        `Could not remove quotation PDF ${relPath}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
   private async renderToFile(quote: Quotation, absPath: string): Promise<void> {
     let page: Awaited<ReturnType<Browser['newPage']>> | null = null;
     try {

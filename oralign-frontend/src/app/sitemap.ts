@@ -20,38 +20,40 @@ const SITE_URL =
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const now = new Date();
 
-  const staticRoutes: MetadataRoute.Sitemap = [
-    {
-      url: `${SITE_URL}/decouvrir`,
-      lastModified: now,
-      changeFrequency: 'weekly',
-      priority: 1.0,
-    },
-    {
-      url: `${SITE_URL}/trouver-un-praticien`,
-      lastModified: now,
-      changeFrequency: 'monthly',
-      priority: 0.8,
-    },
-    {
-      url: `${SITE_URL}/blog`,
-      lastModified: now,
-      changeFrequency: 'daily',
-      priority: 0.7,
-    },
-    {
-      url: `${SITE_URL}/login`,
-      lastModified: now,
-      changeFrequency: 'yearly',
-      priority: 0.4,
-    },
-    {
-      url: `${SITE_URL}/signup`,
-      lastModified: now,
-      changeFrequency: 'yearly',
-      priority: 0.5,
-    },
+  // Every PUBLIC page, in rough order of how much we want it ranked.
+  // Keep this in step with app/(showcase)/**: a page missing here is a
+  // page the crawlers have no formal reason to fetch. "/" is deliberately
+  // absent — it 308s to /decouvrir, and a sitemap lists canonical targets,
+  // never redirects.
+  const publicPages: [path: string, priority: number, changeFrequency: "daily" | "weekly" | "monthly" | "yearly"][] = [
+    ["/decouvrir", 1.0, "weekly"],   // canonical patient homepage
+    ["/cas", 0.8, "monthly"],        // treated cases
+    ["/trouver-un-praticien", 0.8, "monthly"],
+    ["/blog", 0.7, "daily"],
+    ["/guide", 0.7, "monthly"],
+    ["/shop", 0.7, "weekly"],
+    ["/communaute", 0.6, "weekly"],
+    ["/qui-sommes-nous", 0.5, "yearly"],
+    ["/contact", 0.5, "yearly"],
+    ["/signup", 0.5, "yearly"],
+    ["/login", 0.4, "yearly"],
+    // Legal / compliance surfaces. Low priority but they MUST be
+    // crawlable: payment providers check that they resolve publicly.
+    ["/mentions-legales", 0.3, "yearly"],
+    ["/politique-confidentialite", 0.3, "yearly"],
+    ["/conditions-utilisation", 0.3, "yearly"],
+    ["/conditions-vente", 0.3, "yearly"],
+    ["/reclamations-remboursements", 0.3, "yearly"],
   ];
+
+  const staticRoutes: MetadataRoute.Sitemap = publicPages.map(
+    ([path, priority, changeFrequency]) => ({
+      url: `${SITE_URL}${path}`,
+      lastModified: now,
+      changeFrequency,
+      priority,
+    }),
+  );
 
   // The single public blog serves every published post (no audience filter),
   // all mounted under /blog/<slug>. Fails soft to an empty list.

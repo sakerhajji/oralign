@@ -21,11 +21,15 @@ const ALWAYS_PUBLIC_PREFIXES = ['/auth/verify-email', '/reset-password', '/verif
 export default function proxy(request: NextRequest): NextResponse {
   const { pathname } = request.nextUrl;
 
-  // Skip Next.js internals and static assets
+  // Skip Next.js internals and static assets. html|txt|xml are here for the
+  // files crawlers fetch straight off the site root — public/google*.html
+  // (Search Console ownership proof), robots.txt, sitemap.xml. None of them
+  // is ever auth-gated, and running the cookie logic over them only creates
+  // a way to break verification by accident later.
   if (
     pathname.startsWith('/_next') ||
     pathname.startsWith('/api') ||
-    /\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js)$/.test(pathname)
+    /\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js|html|txt|xml)$/.test(pathname)
   ) {
     return NextResponse.next();
   }

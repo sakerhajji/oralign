@@ -16,6 +16,12 @@ export type InvoiceLanguage = 'fr' | 'en';
 export interface InvoiceLabels {
   // Document
   documentTitle: string;
+  /**
+   * Title of a MANUAL invoice. The two original flows are receipts for a
+   * payment already made; a manual invoice is a demand for payment, and
+   * calling it a receipt would be wrong on a fiscal document.
+   */
+  invoiceTitle: string;
   number: string;
   date: string;
   // Parties
@@ -75,6 +81,7 @@ export interface InvoiceLabels {
 
 const FR: InvoiceLabels = {
   documentTitle: 'Reçu de paiement',
+  invoiceTitle: 'Facture',
   number: 'Numéro',
   date: 'Date',
   issuedBy: 'Émis par',
@@ -128,6 +135,7 @@ const FR: InvoiceLabels = {
 
 const EN: InvoiceLabels = {
   documentTitle: 'Payment receipt',
+  invoiceTitle: 'Invoice',
   number: 'Number',
   date: 'Date',
   issuedBy: 'Issued by',

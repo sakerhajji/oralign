@@ -127,6 +127,15 @@ export interface InvoiceRenderPayload {
   // when it synthesises a Payment row that never existed.
   rows?: InvoiceLineRow[];
   totals?: InvoiceTotalLine[];
+  /** Overrides the "Reçu de paiement" heading (a manual invoice is not a receipt). */
+  documentTitle?: string;
+  /**
+   * Replaces the two leading lines of the "Facturé à" box — the
+   * "Médecin: …" / "Pour le patient: … (Commande: …)" pair, which is
+   * meaningless on an invoice that has neither a practitioner nor an
+   * order. The rest of the box (address, phone, tax id) is unchanged.
+   */
+  billedToLead?: { text: string; strong?: boolean }[];
 }
 
 /**
@@ -283,7 +292,9 @@ export class InvoicePdfService implements OnModuleDestroy {
     // doctor profile, so this renders a manual client and a linked
     // practitioner through the very same markup.
     const clientSnapshot = {
-      clinicName: invoice.clientName,
+      // NOT the client name: `billedToLead` already prints it in bold at
+      // the top of the box, and repeating it here showed it twice.
+      clinicName: null,
       clinicAddress: invoice.clientAddress,
       city: invoice.clientCity,
       country: invoice.clientCountry,
@@ -364,7 +375,9 @@ export class InvoicePdfService implements OnModuleDestroy {
         companySnapshot: invoice.companySnapshot,
         clinicSnapshot: clientSnapshot as unknown as Prisma.JsonValue,
         order: {
-          orderCode: invoice.order?.orderCode ?? invoice.invoiceNumber,
+          // Real order code when the invoice is attached to one, empty
+          // otherwise — never the invoice number dressed up as an order.
+          orderCode: invoice.order?.orderCode ?? '',
           doctor: {
             id: invoice.doctorId ?? '',
             fullName: invoice.clientName,
@@ -380,6 +393,10 @@ export class InvoicePdfService implements OnModuleDestroy {
       language: lang,
       rows,
       totals,
+      documentTitle: labels.invoiceTitle,
+      // Only the client's own name leads the box. The address, phone and
+      // tax id below it come from the same clinicSnapshot seam.
+      billedToLead: [{ text: invoice.clientName, strong: true }],
     };
   }
 
@@ -1016,7 +1033,7 @@ export class InvoicePdfService implements OnModuleDestroy {
 
       <section class="docrow">
         <div>
-          <h1 class="title">${this.html(labels.documentTitle.toUpperCase())}</h1>
+          <h1 class="title">${this.html((payload.documentTitle ?? labels.documentTitle).toUpperCase())}</h1>
         </div>
         <div class="doc-meta">
           <div class="meta-line">${this.html(labels.number)}: <strong>${this.html(this.invoiceNumber(payment, numberFallbackPrefix))}</strong></div>
@@ -1045,13 +1062,17 @@ export class InvoicePdfService implements OnModuleDestroy {
         <article class="box">
           <h2 class="section-title">${this.html(labels.billedTo)}</h2>
           ${this.renderBoxLines([
-            {
-              text: `${labels.doctor}: ${clinic.doctorFullName}`,
-              strong: true,
-            },
-            {
-              text: `${labels.forPatient}: ${quotation.order.patient.fullName} (${labels.order}: ${quotation.order.orderCode})`,
-            },
+            // A manual invoice supplies its own lead lines; the receipt
+            // flows keep the practitioner + patient/order pair.
+            ...(payload.billedToLead ?? [
+              {
+                text: `${labels.doctor}: ${clinic.doctorFullName}`,
+                strong: true,
+              },
+              {
+                text: `${labels.forPatient}: ${quotation.order.patient.fullName} (${labels.order}: ${quotation.order.orderCode})`,
+              },
+            ]),
             { text: clinic.clinicName ?? '' },
             { text: clinic.clinicAddress ?? '' },
             { text: clinicCity },

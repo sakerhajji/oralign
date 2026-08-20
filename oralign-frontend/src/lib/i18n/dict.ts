@@ -1954,6 +1954,7 @@ export const dict = {
 
     create: { en: 'New invoice', fr: 'Nouvelle facture' } as T,
     edit: { en: 'Edit', fr: 'Modifier' } as T,
+    view: { en: 'View invoice', fr: 'Voir la facture' } as T,
     downloadPdf: { en: 'Download PDF', fr: 'Télécharger le PDF' } as T,
     archive: { en: 'Archive', fr: 'Archiver' } as T,
     restore: { en: 'Restore', fr: 'Restaurer' } as T,

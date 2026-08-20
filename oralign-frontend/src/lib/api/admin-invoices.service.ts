@@ -166,6 +166,22 @@ export const adminInvoicesService = {
     return res.data;
   },
 
+  /**
+   * The PDF as a Blob, for on-screen preview. Same endpoint as the
+   * download — the file is auth-gated, so an `<iframe src>` pointed at
+   * the API would arrive without the Authorization header.
+   */
+  fetchPdfBlob: async (id: string): Promise<Blob> => {
+    try {
+      const res = await apiClient.get(`/admin/invoices/${id}/pdf`, {
+        responseType: 'blob',
+      });
+      return asBlob(res.data, 'application/pdf');
+    } catch (error) {
+      throw await blobError(error, 'Could not load the invoice PDF.');
+    }
+  },
+
   downloadPdf: async (id: string, invoiceNumber: string): Promise<void> => {
     try {
       const res = await apiClient.get(`/admin/invoices/${id}/pdf`, {

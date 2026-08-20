@@ -34,6 +34,7 @@ import {
 import { InvoiceExportService } from '../services/invoice-export.service';
 import { InvoicePdfService } from '../services/invoice-pdf.service';
 import { InvoiceService } from '../services/invoice.service';
+import { InvoiceAutoService } from '../services/invoice-auto.service';
 import { InvoiceLanguage } from '../services/invoice-i18n';
 
 /** RFC 5987 Content-Disposition, same helper the invoice download uses. */
@@ -72,6 +73,7 @@ export class AdminInvoiceController {
     private readonly invoices: InvoiceService,
     private readonly exports: InvoiceExportService,
     private readonly invoicePdf: InvoicePdfService,
+    private readonly autoInvoices: InvoiceAutoService,
     private readonly prisma: PrismaService,
   ) {}
 
@@ -167,6 +169,16 @@ export class AdminInvoiceController {
     });
 
     return { data: patients };
+  }
+
+  @Post('backfill')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Genere les factures manquantes pour les paiements deja encaisses (avant la generation automatique, ou si un listener a echoue). Idempotent.',
+  })
+  async backfill(): Promise<{ scanned: number; created: number }> {
+    return this.autoInvoices.backfill();
   }
 
   @Get(':id')

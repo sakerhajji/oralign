@@ -1346,6 +1346,10 @@ model Payment {
   // Null for pending/legacy rows. Admin can override it; unique so two
   // receipts never print the same number.
   invoiceNumber   String?             @unique
+  // Invoice row generated automatically when this payment succeeded.
+  // The receipt PDF and this invoice deliberately share invoiceNumber:
+  // one payment, one document number.
+  invoice         Invoice?            @relation("PaymentInvoice")
 
   status          PaymentRecordStatus
   paymentMethod   PaymentMethod
@@ -1979,6 +1983,13 @@ model Invoice {
   // document and must outlive the rows it references (see DELETION-POLICY).
   orderId        String?
   order          DentalOrder?  @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  // Payment this invoice was generated FROM, for the automatic flow.
+  // @unique is what makes generation idempotent: a replayed gateway
+  // callback, a double click on "confirm", or a retried listener can
+  // never mint a second invoice for the same payment.
+  // SetNull, never Cascade — an invoice outlives everything it points at.
+  paymentId      String?       @unique
+  payment        Payment?      @relation("PaymentInvoice", fields: [paymentId], references: [id], onDelete: SetNull)
   patientId      String?
   patient        Patient?      @relation(fields: [patientId], references: [id], onDelete: Restrict)
   doctorId       String?

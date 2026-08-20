@@ -6,6 +6,7 @@ import { useDebounce } from 'use-debounce';
 import {
   ArchiveIcon,
   DownloadIcon,
+  EyeIcon,
   FileTextIcon,
   Loader2Icon,
   MoreVertical,
@@ -59,6 +60,7 @@ import {
 } from '@/lib/hooks';
 import { InvoiceStatus, type Invoice, type InvoiceFilters } from '@/lib/types';
 import { InvoiceEditorDialog } from './invoice-editor';
+import { InvoicePreviewDialog } from './invoice-preview';
 
 const PAGE_SIZE = 25;
 
@@ -135,6 +137,7 @@ export function InvoicesContent() {
   const [editorOpen, setEditorOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<Invoice | null>(null);
   const [purgeTarget, setPurgeTarget] = React.useState<Invoice | null>(null);
+  const [previewTarget, setPreviewTarget] = React.useState<Invoice | null>(null);
 
   const filters = React.useMemo<InvoiceFilters>(() => {
     const next: InvoiceFilters = { page, limit: PAGE_SIZE };
@@ -454,7 +457,15 @@ export function InvoicesContent() {
                           aria-label={invoice.invoiceNumber}
                         />
                       </TableCell>
-                      <TableCell className="font-medium">{invoice.invoiceNumber}</TableCell>
+                      <TableCell className="font-medium">
+                        <button
+                          type="button"
+                          onClick={() => setPreviewTarget(invoice)}
+                          className="underline-offset-4 hover:text-primary hover:underline"
+                        >
+                          {invoice.invoiceNumber}
+                        </button>
+                      </TableCell>
                       <TableCell>
                         <div className="min-w-0">
                           <p className="truncate">{invoice.clientName}</p>
@@ -493,6 +504,13 @@ export function InvoicesContent() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="w-56">
+                            <DropdownMenuItem
+                              className="gap-2"
+                              onClick={() => setPreviewTarget(invoice)}
+                            >
+                              <EyeIcon className="size-4" />
+                              {t('invoicesAdmin.view')}
+                            </DropdownMenuItem>
                             <DropdownMenuItem
                               className="gap-2"
                               onClick={() =>
@@ -591,6 +609,13 @@ export function InvoicesContent() {
         onOpenChange={(open) => {
           setEditorOpen(open);
           if (!open) setEditing(null);
+        }}
+      />
+
+      <InvoicePreviewDialog
+        invoice={previewTarget}
+        onOpenChange={(open) => {
+          if (!open) setPreviewTarget(null);
         }}
       />
 

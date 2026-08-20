@@ -8,6 +8,7 @@ import { AdminInvoiceController } from './controllers/admin-invoice.controller';
 import { InvoicePdfService } from './services/invoice-pdf.service';
 import { InvoiceService } from './services/invoice.service';
 import { InvoiceExportService } from './services/invoice-export.service';
+import { InvoiceAutoService } from './services/invoice-auto.service';
 
 /**
  * Invoices module — owns the bilingual (FR/EN) payment-receipt PDF
@@ -41,7 +42,15 @@ import { InvoiceExportService } from './services/invoice-export.service';
   // original InvoicesController keeps the two on-the-fly PDF routes it
   // always had, untouched.
   controllers: [InvoicesController, AdminInvoiceController],
-  providers: [InvoicePdfService, InvoiceService, InvoiceExportService],
-  exports: [InvoicePdfService, InvoiceService],
+  // InvoiceAutoService listens on the payment success events and mints
+  // the invoice row. It is a provider like any other — @OnEvent wires it
+  // to the global EventEmitter at bootstrap.
+  providers: [
+    InvoicePdfService,
+    InvoiceService,
+    InvoiceExportService,
+    InvoiceAutoService,
+  ],
+  exports: [InvoicePdfService, InvoiceService, InvoiceAutoService],
 })
 export class InvoicesModule {}

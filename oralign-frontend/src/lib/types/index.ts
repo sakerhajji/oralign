@@ -17,6 +17,7 @@ export * from './working-hours';
 export * from './patient';
 export * from './api';
 export * from './notifications';
+export * from './invoice';
 export * from './query-params';
 export * from './support';
 export * from './dashboard';

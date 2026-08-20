@@ -18,5 +18,6 @@ export * from './use-dashboard-socket';
 export * from './use-slider-media';
 export * from './use-reports';
 export * from './use-blog';
+export * from './use-admin-invoices';
 export * from './use-authed-image';
 export * from './use-community-submissions';

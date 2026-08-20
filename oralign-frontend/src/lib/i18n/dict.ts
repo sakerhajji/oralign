@@ -1910,6 +1910,140 @@ export const dict = {
     phaseTerminal: { en: 'Terminal', fr: 'Final' } as T,
   },
 
+  // ─── ANCHOR · admin invoices ───────────────────────────────────
+  // Poste de facturation admin (/dashboard/invoices). Les recus de
+  // paiement gardent leurs propres cles dans le cluster payments.
+  invoicesAdmin: {
+    title: { en: 'Invoices', fr: 'Factures' } as T,
+    intro: {
+      en: 'Every invoice issued by the company — automatic receipts and manual invoices alike.',
+      fr: 'Toutes les factures émises par la société — reçus automatiques et factures manuelles.',
+    } as T,
+    loading: { en: 'Loading invoices…', fr: 'Chargement des factures…' } as T,
+    error: { en: 'Could not load invoices.', fr: 'Impossible de charger les factures.' } as T,
+    empty: { en: 'No invoice yet.', fr: 'Aucune facture pour le moment.' } as T,
+    emptyFiltered: { en: 'No invoice matches these filters.', fr: 'Aucune facture ne correspond à ces filtres.' } as T,
+
+    colNumber: { en: 'Number', fr: 'Numéro' } as T,
+    colClient: { en: 'Client', fr: 'Client' } as T,
+    colDate: { en: 'Date', fr: 'Date' } as T,
+    colOrder: { en: 'Order', fr: 'Commande' } as T,
+    colStatus: { en: 'Status', fr: 'Statut' } as T,
+    colHt: { en: 'Net', fr: 'HT' } as T,
+    colTva: { en: 'VAT', fr: 'TVA' } as T,
+    colTtc: { en: 'Total', fr: 'TTC' } as T,
+    colActions: { en: 'Actions', fr: 'Actions' } as T,
+
+    statusDraft: { en: 'Draft', fr: 'Brouillon' } as T,
+    statusIssued: { en: 'Issued', fr: 'Émise' } as T,
+    statusPaid: { en: 'Paid', fr: 'Payée' } as T,
+    statusCancelled: { en: 'Cancelled', fr: 'Annulée' } as T,
+
+    searchPlaceholder: { en: 'Number, client, order…', fr: 'Numéro, client, commande…' } as T,
+    allStatuses: { en: 'All statuses', fr: 'Tous les statuts' } as T,
+    from: { en: 'From', fr: 'Du' } as T,
+    to: { en: 'To', fr: 'Au' } as T,
+    thisMonth: { en: 'This month', fr: 'Ce mois-ci' } as T,
+    lastMonth: { en: 'Last month', fr: 'Mois dernier' } as T,
+    clearFilters: { en: 'Clear', fr: 'Réinitialiser' } as T,
+    trash: { en: 'Archived', fr: 'Archivées' } as T,
+    refresh: { en: 'Refresh', fr: 'Actualiser' } as T,
+
+    periodTotal: { en: 'Filtered total', fr: 'Total du filtre' } as T,
+    periodCount: { en: '{count} invoice(s)', fr: '{count} facture(s)' } as T,
+
+    create: { en: 'New invoice', fr: 'Nouvelle facture' } as T,
+    edit: { en: 'Edit', fr: 'Modifier' } as T,
+    downloadPdf: { en: 'Download PDF', fr: 'Télécharger le PDF' } as T,
+    archive: { en: 'Archive', fr: 'Archiver' } as T,
+    restore: { en: 'Restore', fr: 'Restaurer' } as T,
+    permanentDelete: { en: 'Delete permanently', fr: 'Supprimer définitivement' } as T,
+    permanentTitle: { en: 'Delete this invoice permanently?', fr: 'Supprimer définitivement cette facture ?' } as T,
+    permanentBody: {
+      en: 'Only a draft can be erased. An invoice that was ever issued stays archived — a fiscal sequence may not have holes.',
+      fr: 'Seul un brouillon peut être effacé. Une facture déjà émise reste archivée — une séquence fiscale ne peut pas avoir de trous.',
+    } as T,
+    selected: { en: '{count} selected', fr: '{count} sélectionnée(s)' } as T,
+    exportCsv: { en: 'Export CSV (Excel)', fr: 'Exporter CSV (Excel)' } as T,
+    exportZip: { en: 'Export PDFs (ZIP)', fr: 'Exporter les PDF (ZIP)' } as T,
+    bulkArchive: { en: 'Archive selection', fr: 'Archiver la sélection' } as T,
+
+    editorCreateTitle: { en: 'New invoice', fr: 'Nouvelle facture' } as T,
+    editorEditTitle: { en: 'Invoice {number}', fr: 'Facture {number}' } as T,
+    editorIntro: {
+      en: 'Totals are always recomputed by the server from the lines below.',
+      fr: 'Les totaux sont toujours recalculés par le serveur à partir des lignes ci-dessous.',
+    } as T,
+    clientSection: { en: 'Client', fr: 'Client' } as T,
+    clientSearch: { en: 'Search an existing patient', fr: 'Rechercher un patient existant' } as T,
+    clientSearchHint: {
+      en: 'Type at least 2 characters. Pick a patient to prefill, or fill the fields by hand.',
+      fr: 'Saisissez au moins 2 caractères. Choisissez un patient pour préremplir, ou remplissez les champs à la main.',
+    } as T,
+    clientSearching: { en: 'Searching…', fr: 'Recherche…' } as T,
+    clientNoMatch: { en: 'No patient found — fill the client in by hand.', fr: 'Aucun patient trouvé — saisissez le client à la main.' } as T,
+    clientClear: { en: 'Detach', fr: 'Détacher' } as T,
+    ordersOf: { en: 'Orders of {name}', fr: 'Commandes de {name}' } as T,
+    prefillFromOrder: { en: 'Prefill from this order', fr: 'Préremplir depuis cette commande' } as T,
+    noOrders: { en: 'This patient has no order.', fr: 'Ce patient n’a aucune commande.' } as T,
+
+    fieldClientName: { en: 'Name / company', fr: 'Nom / société' } as T,
+    fieldEmail: { en: 'Email', fr: 'E-mail' } as T,
+    fieldPhone: { en: 'Phone', fr: 'Téléphone' } as T,
+    fieldAddress: { en: 'Address', fr: 'Adresse' } as T,
+    fieldCity: { en: 'City', fr: 'Ville' } as T,
+    fieldCountry: { en: 'Country', fr: 'Pays' } as T,
+    fieldTaxId: { en: 'Tax number', fr: 'Matricule fiscal' } as T,
+    fieldIssueDate: { en: 'Issue date', fr: 'Date d’émission' } as T,
+    fieldDueDate: { en: 'Due date', fr: 'Date d’échéance' } as T,
+    fieldNumber: { en: 'Invoice number', fr: 'Numéro de facture' } as T,
+    fieldNumberHint: {
+      en: 'Leave empty to take the next number in the FAC sequence.',
+      fr: 'Laissez vide pour prendre le prochain numéro de la séquence FAC.',
+    } as T,
+    fieldStatus: { en: 'Status', fr: 'Statut' } as T,
+    fieldLanguage: { en: 'PDF language', fr: 'Langue du PDF' } as T,
+    fieldNotes: { en: 'Notes', fr: 'Notes' } as T,
+
+    linesSection: { en: 'Lines', fr: 'Lignes' } as T,
+    lineDescription: { en: 'Description', fr: 'Description' } as T,
+    lineQuantity: { en: 'Qty', fr: 'Qté' } as T,
+    lineUnitPrice: { en: 'Unit price', fr: 'Prix unitaire' } as T,
+    lineTva: { en: 'VAT %', fr: 'TVA %' } as T,
+    lineTotal: { en: 'Net', fr: 'HT' } as T,
+    addLine: { en: 'Add a line', fr: 'Ajouter une ligne' } as T,
+    removeLine: { en: 'Remove this line', fr: 'Supprimer cette ligne' } as T,
+    noLines: { en: 'Add at least one line.', fr: 'Ajoutez au moins une ligne.' } as T,
+
+    totalsSection: { en: 'Totals', fr: 'Totaux' } as T,
+    fieldTvaRate: { en: 'VAT rate (%)', fr: 'Taux de TVA (%)' } as T,
+    fieldDiscount: { en: 'Discount', fr: 'Remise' } as T,
+    fieldStampDuty: { en: 'Stamp duty', fr: 'Droit de timbre' } as T,
+    previewHt: { en: 'Net', fr: 'Total HT' } as T,
+    previewTva: { en: 'VAT', fr: 'TVA' } as T,
+    previewTtc: { en: 'Total', fr: 'Total TTC' } as T,
+    previewHint: {
+      en: 'Preview — the server recomputes and stores the authoritative figures.',
+      fr: 'Aperçu — le serveur recalcule et enregistre les montants faisant foi.',
+    } as T,
+
+    auditSection: { en: 'Change log', fr: 'Journal des modifications' } as T,
+    auditEmpty: { en: 'No change recorded.', fr: 'Aucune modification enregistrée.' } as T,
+    auditBy: { en: 'by {actor}', fr: 'par {actor}' } as T,
+
+    cancel: { en: 'Cancel', fr: 'Annuler' } as T,
+    save: { en: 'Save', fr: 'Enregistrer' } as T,
+    saving: { en: 'Saving…', fr: 'Enregistrement…' } as T,
+
+    toastCreated: { en: 'Invoice {number} created.', fr: 'Facture {number} créée.' } as T,
+    toastUpdated: { en: 'Invoice updated.', fr: 'Facture mise à jour.' } as T,
+    toastArchived: { en: 'Invoice archived.', fr: 'Facture archivée.' } as T,
+    toastRestored: { en: 'Invoice restored.', fr: 'Facture restaurée.' } as T,
+    toastPermanentlyDeleted: { en: 'Invoice permanently deleted.', fr: 'Facture supprimée définitivement.' } as T,
+    toastBulkArchived: { en: '{count} invoice(s) archived.', fr: '{count} facture(s) archivée(s).' } as T,
+    toastExported: { en: 'Export ready.', fr: 'Export prêt.' } as T,
+  },
+
   // ─── ANCHOR · payments cluster ─────────────────────────────────
   // Reserved for the dedicated /dashboard/payments translation pass.
   // Agent inserts a `paymentsHistory`, `paymentsMine`, `paymentsPending`
@@ -3418,6 +3552,7 @@ export const dict = {
       reports: { en: 'Reports', fr: 'Rapports' } as T,
       settings: { en: 'Settings', fr: 'Paramètres' } as T,
       paymentHistory: { en: 'Payment History', fr: 'Historique des paiements' } as T,
+      invoices: { en: 'Invoices', fr: 'Factures' } as T,
       getHelp: { en: 'Get Help', fr: 'Obtenir de l’aide' } as T,
       newOrder: { en: 'New Order', fr: 'Nouvelle commande' } as T,
       newOrderAria: { en: 'Create a new order', fr: 'Créer une nouvelle commande' } as T,

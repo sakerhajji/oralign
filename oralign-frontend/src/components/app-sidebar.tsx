@@ -33,6 +33,7 @@ import {
   CircleHelpIcon,
   CreditCardIcon,
   FileBarChartIcon,
+  FileTextIcon,
   GalleryHorizontalIcon,
   HeartIcon,
   LayoutDashboardIcon,
@@ -132,6 +133,13 @@ const NAV_MAIN: NavItemDef[] = [
     url: "/dashboard/payments/pending",
     icon: <CreditCardIcon />,
     // Admin queue: pending bank-transfer confirmations + recent activity.
+    roles: [UserRole.ADMIN, UserRole.SUPER_ADMIN],
+  },
+  {
+    titleKey: "chrome.nav.invoices",
+    url: "/dashboard/invoices",
+    icon: <FileTextIcon />,
+    // Admin invoicing desk: list, manual creation, exports.
     roles: [UserRole.ADMIN, UserRole.SUPER_ADMIN],
   },
   {

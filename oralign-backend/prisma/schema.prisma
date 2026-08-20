@@ -326,6 +326,12 @@ model User {
   // Patient community submissions reviewed by an admin before publication.
   reviewedCommunitySubmissions CommunitySubmission[] @relation("CommunitySubmissionReviewedBy")
 
+  // Manual/admin invoicing. All three are SetNull on the Invoice side:
+  // a financial document outlives the account that issued or was billed.
+  invoicesAsDoctor         Invoice[]           @relation("InvoiceDoctor")
+  invoicesCreated          Invoice[]           @relation("InvoiceCreatedBy")
+  invoiceAuditEntries      InvoiceAuditLog[]   @relation("InvoiceAuditActor")
+
   @@index([email])
   @@index([role])
   @@index([verificationStatus])
@@ -374,6 +380,9 @@ model Patient {
   // patient row is the root of the clinical + financial tree.
   doctor        User      @relation(fields: [doctorId], references: [id], onDelete: Restrict)
   orders        DentalOrder[]
+  // Manual invoices billed to this patient (Restrict: a patient with an
+  // invoice can be archived but never purged).
+  invoices      Invoice[]
 
   @@index([doctorId])
   @@index([deletedAt])
@@ -501,6 +510,9 @@ model DentalOrder {
   quotation                     Quotation?
   payments                      Payment[]
   uploadSessions                UploadSession[]
+  // Manual invoices attached to this order (Restrict: an order with an
+  // invoice cannot be purged, only archived).
+  invoices                      Invoice[]
 
   @@index([doctorId])
   @@index([patientId])
@@ -1926,4 +1938,148 @@ model CommunitySubmissionMedia {
   createdAt      DateTime            @default(now())
 
   @@index([submissionId])
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Manual / admin invoicing
+//
+// The two ORIGINAL invoice flows stay exactly as they were: a receipt for
+// a Payment and the treatment-fee invoice for a DentalOrder are still
+// computed on the fly, and neither is touched by these models.
+//
+// What they could NOT express is what the admin desk actually needs:
+//   • an invoice for a walk-in client with no order and no quotation
+//     (Payment.orderId / .quotationId are NOT NULL),
+//   • free line items (Payment carries a single scalar `amount`),
+//   • an editable status, notes and a billing address,
+//   • a trace of who changed an invoice after it was issued.
+//
+// So: one record, its lines, and an audit trail. Everything else — the
+// PDF template, the FAC-xxxxxx counter, the company header — is reused.
+// ─────────────────────────────────────────────────────────────────────
+
+enum InvoiceStatus {
+  draft      // editable freely, no number consumed yet in spirit
+  issued     // sent to the client
+  paid       // settled
+  cancelled  // voided, kept for the sequence's continuity
+}
+
+model Invoice {
+  id             String        @id @default(uuid())
+  // Allocated from CompanyBillingSettings.invoicePrefix/invoiceNextNumber,
+  // the same counter the payment receipts use, so a single sequence covers
+  // every document the company issues.
+  invoiceNumber  String        @unique
+  status         InvoiceStatus @default(draft)
+
+  // ── Optional links to existing business rows ──────────────────────
+  // All three are OPTIONAL: a manual invoice may have none of them. They
+  // are Restrict/SetNull, never Cascade — an invoice is a financial
+  // document and must outlive the rows it references (see DELETION-POLICY).
+  orderId        String?
+  order          DentalOrder?  @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  patientId      String?
+  patient        Patient?      @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  doctorId       String?
+  doctor         User?         @relation("InvoiceDoctor", fields: [doctorId], references: [id], onDelete: SetNull)
+
+  // ── Client block (always a snapshot) ──────────────────────────────
+  // Copied from the patient/doctor when one was picked, typed by hand
+  // otherwise. Snapshotted either way so editing a patient later never
+  // rewrites an invoice that has already been issued.
+  clientName     String
+  clientEmail    String?
+  clientPhone    String?
+  clientAddress  String?
+  clientCity     String?
+  clientCountry  String?
+  clientTaxId    String?       // matricule fiscal of the client
+
+  issueDate      DateTime      @default(now())
+  dueDate        DateTime?
+  currency       String        @default("TND")
+
+  // ── Money. Decimal(12,3) like the rest of the ledger (TND has 3
+  // decimals). Every one of these is COMPUTED SERVER-SIDE from the
+  // lines — the frontend never gets to post a total.
+  tvaRate        Float         @default(19)
+  discountAmount Decimal       @default(0) @db.Decimal(12, 3)
+  // Snapshotted, not read live at render time: changing the company's
+  // stamp duty must not silently rewrite invoices already issued.
+  stampDuty      Decimal       @default(0) @db.Decimal(12, 3)
+  subTotalHt     Decimal       @default(0) @db.Decimal(12, 3)
+  tvaAmount      Decimal       @default(0) @db.Decimal(12, 3)
+  totalTtc       Decimal       @default(0) @db.Decimal(12, 3)
+
+  notes          String?
+  language       String        @default("fr") // 'fr' | 'en', drives the PDF
+  // Company header frozen at issue time, same idea as Quotation.companySnapshot.
+  companySnapshot Json?
+
+  createdById    String?
+  createdBy      User?         @relation("InvoiceCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdByName  String?
+
+  issuedAt       DateTime?
+  paidAt         DateTime?
+  deletedAt      DateTime?     // archive; a financial document is never hard-deleted casually
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  lines          InvoiceLine[]
+  auditLogs      InvoiceAuditLog[]
+
+  // Hot paths: the admin list (status + date), the search by number,
+  // and the per-client / per-order lookups.
+  @@index([status, deletedAt, issueDate(sort: Desc)])
+  @@index([issueDate(sort: Desc)])
+  @@index([orderId])
+  @@index([patientId])
+  @@index([doctorId])
+  @@index([deletedAt])
+}
+
+model InvoiceLine {
+  id          String   @id @default(uuid())
+  invoiceId   String
+  // Cascade is correct here and only here: a line has no meaning without
+  // its invoice, and the invoice itself is Restrict-protected upstream.
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  position    Int      @default(0) // display order, 0-based
+  description String
+  quantity    Decimal  @default(1) @db.Decimal(12, 3)
+  unitPrice   Decimal  @default(0) @db.Decimal(12, 3)
+  // Per-line VAT override. NULL means "use the invoice rate" — which is
+  // the normal case, so a simple invoice stays simple.
+  tvaRate     Float?
+  // Persisted so the stored total can be re-derived and audited without
+  // recomputing from scratch. Always written by the server.
+  lineHt      Decimal  @default(0) @db.Decimal(12, 3)
+
+  createdAt   DateTime @default(now())
+
+  @@index([invoiceId, position])
+}
+
+model InvoiceAuditLog {
+  id        String   @id @default(uuid())
+  invoiceId String
+  invoice   Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  // Actor ref: SetNull + name snapshot, the pattern every other audit
+  // column in this schema uses.
+  actorId   String?
+  actor     User?    @relation("InvoiceAuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  actorName String?
+
+  action    String   // 'updated' | 'status_changed' | 'lines_changed' | …
+  // { field: { from, to } } — only the fields that actually moved.
+  changes   Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([invoiceId, createdAt(sort: Desc)])
+  @@index([actorId])
 }

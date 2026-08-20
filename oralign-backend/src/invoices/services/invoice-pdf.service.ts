@@ -23,7 +23,7 @@ const UPLOAD_ROOT = path.join(process.cwd(), 'uploads');
 
 type JsonRecord = Record<string, unknown>;
 
-interface InvoiceLineRow {
+export interface InvoiceLineRow {
   description: string;
   note?: string;
   quantity: number;
@@ -31,7 +31,7 @@ interface InvoiceLineRow {
   amount: number;
 }
 
-interface InvoiceTotalLine {
+export interface InvoiceTotalLine {
   label: string;
   value: string;
   /** Visual treatment: dark final row for totals, green row for paid-amount. */
@@ -118,6 +118,15 @@ export interface InvoiceRenderPayload {
    * a treatment-fee invoice. Ignored once a real number exists.
    */
   numberFallbackPrefix?: 'INV' | 'TF';
+
+  // ── Injection points for a stored Invoice record ──────────────────
+  // A manual invoice has real line items and real totals, instead of the
+  // single `payment.amount` the two original flows derive everything
+  // from. Supplying them reuses the template, the CSS and every helper
+  // untouched — exactly what `loadTreatmentFeeForRender` already does
+  // when it synthesises a Payment row that never existed.
+  rows?: InvoiceLineRow[];
+  totals?: InvoiceTotalLine[];
 }
 
 /**
@@ -209,7 +218,170 @@ export class InvoicePdfService implements OnModuleDestroy {
     return { buffer, fileName, mimeType: 'application/pdf' };
   }
 
+  /**
+   * Render a STORED Invoice record (the manual / admin invoicing flow).
+   *
+   * Same template, same CSS, same helpers as the two original flows — the
+   * only difference is where the data comes from. Two seams make that
+   * possible without touching the markup:
+   *   • `payload.rows` / `payload.totals` carry the real line items and
+   *     the real totals instead of deriving them from a single amount;
+   *   • the "Facturé à" block reads `clinicSnapshot` FIRST (mergeClinic),
+   *     so a hand-typed client renders through the very same box a
+   *     doctor's clinic does.
+   *
+   * Totals are read from the row, never recomputed here: InvoiceService
+   * owns that maths, and a PDF must show exactly what was stored.
+   */
+  async renderInvoiceRecordBuffer(args: {
+    invoiceId: string;
+    language?: InvoiceLanguage;
+  }): Promise<{ buffer: Buffer; fileName: string; mimeType: string }> {
+    const payload = await this.loadInvoiceRecordForRender(
+      args.invoiceId,
+      args.language,
+    );
+    const html = this.renderHtml(payload);
+    const buffer = await this.renderHtmlToBuffer(html);
+    const fileName = this.safePdfFileName(
+      `${payload.payment.invoiceNumber ?? 'invoice'}-${payload.language}`,
+    );
+    return { buffer, fileName, mimeType: 'application/pdf' };
+  }
+
   // ─── Loaders ───────────────────────────────────────────────────
+
+  /**
+   * Build a render payload from a stored Invoice. Mirrors
+   * `loadTreatmentFeeForRender`, which likewise synthesises a Payment
+   * view for a row that has no Payment at all.
+   */
+  private async loadInvoiceRecordForRender(
+    invoiceId: string,
+    language: InvoiceLanguage | undefined,
+  ): Promise<InvoiceRenderPayload> {
+    const invoice = await this.prisma.invoice.findFirst({
+      where: { id: invoiceId, deletedAt: null },
+      include: {
+        lines: { orderBy: { position: 'asc' } },
+        order: { select: { orderCode: true } },
+        patient: { select: { fullName: true } },
+      },
+    });
+    if (!invoice) {
+      throw new NotFoundException('Invoice not found');
+    }
+
+    const settings = await this.settingsService.requireActive();
+    const lang: InvoiceLanguage =
+      language ?? ((invoice.language === 'en' ? 'en' : 'fr') as InvoiceLanguage);
+    const labels = getInvoiceLabels(lang);
+    const currency = invoice.currency || settings.defaultCurrency || 'TND';
+    const n = (v: unknown): number => Number(v ?? 0);
+
+    // The client block. mergeClinic prefers the snapshot over the live
+    // doctor profile, so this renders a manual client and a linked
+    // practitioner through the very same markup.
+    const clientSnapshot = {
+      clinicName: invoice.clientName,
+      clinicAddress: invoice.clientAddress,
+      city: invoice.clientCity,
+      country: invoice.clientCountry,
+      clinicPhone: invoice.clientPhone,
+      clinicEmail: invoice.clientEmail,
+      taxId: invoice.clientTaxId,
+    };
+
+    const rows: InvoiceLineRow[] = invoice.lines.map((line) => ({
+      description: line.description,
+      quantity: n(line.quantity),
+      unitPrice: n(line.unitPrice),
+      amount: n(line.lineHt),
+    }));
+
+    const money = (v: number): string =>
+      this.formatMoney(v, currency, lang);
+
+    const discount = n(invoice.discountAmount);
+    const stamp = n(invoice.stampDuty);
+    const subTotalHt = n(invoice.subTotalHt);
+    const totals: InvoiceTotalLine[] = [];
+
+    // With a discount the reader needs to see all three steps:
+    // gross HT, the discount taken off, then the net HT that VAT applies
+    // to. Without one, a single "Total HT" line — the usual case.
+    if (discount > 0) {
+      totals.push({
+        label: labels.subtotalHt,
+        value: money(subTotalHt + discount),
+      });
+      totals.push({ label: labels.discount, value: `- ${money(discount)}` });
+    }
+    totals.push({ label: labels.subtotalHt, value: money(subTotalHt) });
+    totals.push({
+      label: `${labels.vatAmount} (${n(invoice.tvaRate)}%)`,
+      value: money(n(invoice.tvaAmount)),
+    });
+    if (stamp > 0) {
+      totals.push({ label: labels.stampDuty, value: money(stamp) });
+    }
+    totals.push({
+      label: labels.totalTtc,
+      value: money(n(invoice.totalTtc)),
+      kind: 'final',
+    });
+    if (invoice.status === 'paid') {
+      totals.push({
+        label: labels.amountPaid,
+        value: money(n(invoice.totalTtc)),
+        kind: 'paid',
+      });
+    }
+
+    return {
+      payment: {
+        id: invoice.id,
+        amount: invoice.totalTtc,
+        // Drives the status pill + the green "paid" treatment.
+        status:
+          invoice.status === 'paid'
+            ? PaymentRecordStatus.success
+            : invoice.status === 'cancelled'
+              ? PaymentRecordStatus.failed
+              : PaymentRecordStatus.pending,
+        paymentMethod: PaymentMethod.cash,
+        transactionId: null,
+        paidAt: invoice.paidAt,
+        createdAt: invoice.issueDate,
+        invoiceNumber: invoice.invoiceNumber,
+      },
+      quotation: {
+        id: invoice.id,
+        currency,
+        tvaRate: n(invoice.tvaRate),
+        totalTtc: n(invoice.totalTtc),
+        packName: null,
+        companySnapshot: invoice.companySnapshot,
+        clinicSnapshot: clientSnapshot as unknown as Prisma.JsonValue,
+        order: {
+          orderCode: invoice.order?.orderCode ?? invoice.invoiceNumber,
+          doctor: {
+            id: invoice.doctorId ?? '',
+            fullName: invoice.clientName,
+            email: invoice.clientEmail ?? '',
+            phone: invoice.clientPhone,
+            dentistProfile: null,
+          },
+          patient: { fullName: invoice.patient?.fullName ?? invoice.clientName },
+        },
+      },
+      installment: null,
+      settings,
+      language: lang,
+      rows,
+      totals,
+    };
+  }
 
   private async loadPaymentForRender(
     paymentId: string,
@@ -585,8 +757,10 @@ export class InvoicePdfService implements OnModuleDestroy {
       clinicSnapshot,
     );
     const logo = this.resolveImageDataUrl(company.companyLogoPath);
-    const rows = this.buildLineItems(payload, labels);
-    const totals = this.buildTotals(payload, labels);
+    // Caller-supplied rows/totals win (stored Invoice record); otherwise
+    // they are derived from the payment, exactly as they always were.
+    const rows = payload.rows ?? this.buildLineItems(payload, labels);
+    const totals = payload.totals ?? this.buildTotals(payload, labels);
     const legal = pickInvoiceTranslation(
       (settings.legalTextTranslations as unknown) ??
         companySnapshot?.legalTextTranslations,

@@ -4,7 +4,10 @@ import { PaymentsModule } from '../payments/payments.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { QuotationModule } from '../quotations/quotation.module';
 import { InvoicesController } from './invoices.controller';
+import { AdminInvoiceController } from './controllers/admin-invoice.controller';
 import { InvoicePdfService } from './services/invoice-pdf.service';
+import { InvoiceService } from './services/invoice.service';
+import { InvoiceExportService } from './services/invoice-export.service';
 
 /**
  * Invoices module — owns the bilingual (FR/EN) payment-receipt PDF
@@ -34,8 +37,11 @@ import { InvoicePdfService } from './services/invoice-pdf.service';
  */
 @Module({
   imports: [PrismaModule, PaymentsModule, QuotationModule, OrderModule],
-  controllers: [InvoicesController],
-  providers: [InvoicePdfService],
-  exports: [InvoicePdfService],
+  // AdminInvoiceController owns the manual/admin invoicing desk; the
+  // original InvoicesController keeps the two on-the-fly PDF routes it
+  // always had, untouched.
+  controllers: [InvoicesController, AdminInvoiceController],
+  providers: [InvoicePdfService, InvoiceService, InvoiceExportService],
+  exports: [InvoicePdfService, InvoiceService],
 })
 export class InvoicesModule {}

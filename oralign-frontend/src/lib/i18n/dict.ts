@@ -2498,7 +2498,7 @@ export const dict = {
     uploadLogo: { en: 'Upload logo', fr: 'Téléverser le logo' } as T,
     removeLogo: { en: 'Remove', fr: 'Supprimer' } as T,
     companyName: { en: 'Company name', fr: 'Raison sociale' } as T,
-    taxRegistrationNumber: { en: 'Tax registration number', fr: 'Numéro RNE' } as T,
+    taxRegistrationNumber: { en: 'Tax registration number', fr: 'Matricule fiscal' } as T,
     phone: { en: 'Phone', fr: 'Téléphone' } as T,
     email: { en: 'Email', fr: 'E-mail' } as T,
     address: { en: 'Address', fr: 'Adresse' } as T,

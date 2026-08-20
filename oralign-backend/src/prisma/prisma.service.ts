@@ -148,6 +148,19 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     return this.prisma.communitySubmissionMedia;
   }
 
+  // Manual / admin invoicing.
+  get invoice() {
+    return this.prisma.invoice;
+  }
+
+  get invoiceLine() {
+    return this.prisma.invoiceLine;
+  }
+
+  get invoiceAuditLog() {
+    return this.prisma.invoiceAuditLog;
+  }
+
   // ─── Prisma utilities ─────────────────────────────────────────────────────
 
   /**

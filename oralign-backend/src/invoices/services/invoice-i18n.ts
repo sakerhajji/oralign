@@ -37,6 +37,8 @@ export interface InvoiceLabels {
   installmentLine: (n: number, total: number) => string;
   // Totals
   subtotalHt: string;
+  /** Global discount line — only rendered when a manual invoice has one. */
+  discount: string;
   vatRate: string;
   vatAmount: string;
   totalTtc: string;
@@ -91,6 +93,7 @@ const FR: InvoiceLabels = {
   packLabel: 'Pack',
   installmentLine: (n, total) => `Échéance ${n} sur ${total}`,
   subtotalHt: 'Total HT',
+  discount: 'Remise',
   vatRate: 'TVA',
   vatAmount: 'Montant TVA',
   totalTtc: 'Total TTC',
@@ -143,6 +146,7 @@ const EN: InvoiceLabels = {
   packLabel: 'Pack',
   installmentLine: (n, total) => `Installment ${n} of ${total}`,
   subtotalHt: 'Subtotal',
+  discount: 'Discount',
   // Even in English we use "TVA" — the platform operates in Tunisia
   // (TND), the bills carry Tunisian tax registration, and TVA is the
   // term clinics and labs actually invoice with. Keeping the label

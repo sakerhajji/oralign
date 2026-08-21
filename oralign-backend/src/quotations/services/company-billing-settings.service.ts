@@ -319,14 +319,14 @@ export class CompanyBillingSettingsService {
       // Fast path: patient slug is empty → fall back to the legacy
       // counter-based number so we still produce *something* sensible.
       if (!slug) {
-        const prefix = settings.devisPrefix || 'DEV';
-        const next = settings.devisNextNumber;
-        const numberString = `${prefix}-${String(next).padStart(6, '0')}`;
-        await tx.companyBillingSettings.update({
+        // Atomic bump — same READ COMMITTED race as the FAC counter had.
+        const bumped = await tx.companyBillingSettings.update({
           where: { id: settings.id },
-          data: { devisNextNumber: next + 1 },
+          data: { devisNextNumber: { increment: 1 } },
+          select: { devisPrefix: true, devisNextNumber: true },
         });
-        return numberString;
+        const next = bumped.devisNextNumber - 1;
+        return `${bumped.devisPrefix || 'DEV'}-${String(next).padStart(6, '0')}`;
       }
 
       const stem = `dv_${slug}_${datePart}`;
@@ -349,24 +349,28 @@ export class CompanyBillingSettingsService {
    * same value.
    */
   async allocateInvoiceNumber(): Promise<string> {
-    return this.prisma.$transaction(async (tx) => {
-      const settings = await tx.companyBillingSettings.findFirst({
-        where: { isActive: true },
-        orderBy: { updatedAt: 'desc' },
-      });
-      if (!settings) {
-        throw new NotFoundException(
-          'Cannot allocate invoice number — company billing settings missing.',
-        );
-      }
-      const prefix = settings.invoicePrefix || 'FAC';
-      const next = settings.invoiceNextNumber;
-      await tx.companyBillingSettings.update({
-        where: { id: settings.id },
-        data: { invoiceNextNumber: next + 1 },
-      });
-      return `${prefix}-${String(next).padStart(6, '0')}`;
+    const settings = await this.prisma.companyBillingSettings.findFirst({
+      where: { isActive: true },
+      orderBy: { updatedAt: 'desc' },
+      select: { id: true },
     });
+    if (!settings) {
+      throw new NotFoundException(
+        'Cannot allocate invoice number — company billing settings missing.',
+      );
+    }
+    // Atomic bump. The previous read-then-write ran inside an interactive
+    // transaction at READ COMMITTED, where plain reads do not lock: two
+    // concurrent allocators could read the same `next` and hand out the
+    // SAME number. `increment` takes the row lock, serialises them, and
+    // reading the post-increment value back gives each caller its own.
+    const bumped = await this.prisma.companyBillingSettings.update({
+      where: { id: settings.id },
+      data: { invoiceNextNumber: { increment: 1 } },
+      select: { invoicePrefix: true, invoiceNextNumber: true },
+    });
+    const next = bumped.invoiceNextNumber - 1;
+    return `${bumped.invoicePrefix || 'FAC'}-${String(next).padStart(6, '0')}`;
   }
 
   /**
@@ -376,24 +380,24 @@ export class CompanyBillingSettingsService {
    * concurrent renders can't collide on the same value.
    */
   async allocateTreatmentFeeInvoiceNumber(): Promise<string> {
-    return this.prisma.$transaction(async (tx) => {
-      const settings = await tx.companyBillingSettings.findFirst({
-        where: { isActive: true },
-        orderBy: { updatedAt: 'desc' },
-      });
-      if (!settings) {
-        throw new NotFoundException(
-          'Cannot allocate treatment-fee invoice number — company billing settings missing.',
-        );
-      }
-      const prefix = settings.treatmentFeeInvoicePrefix || 'TF';
-      const next = settings.treatmentFeeInvoiceNextNumber;
-      await tx.companyBillingSettings.update({
-        where: { id: settings.id },
-        data: { treatmentFeeInvoiceNextNumber: next + 1 },
-      });
-      return `${prefix}-${String(next).padStart(6, '0')}`;
+    const settings = await this.prisma.companyBillingSettings.findFirst({
+      where: { isActive: true },
+      orderBy: { updatedAt: 'desc' },
+      select: { id: true },
     });
+    if (!settings) {
+      throw new NotFoundException(
+        'Cannot allocate treatment-fee invoice number — company billing settings missing.',
+      );
+    }
+    // Same atomic-increment fix as allocateInvoiceNumber — see there.
+    const bumped = await this.prisma.companyBillingSettings.update({
+      where: { id: settings.id },
+      data: { treatmentFeeInvoiceNextNumber: { increment: 1 } },
+      select: { treatmentFeeInvoicePrefix: true, treatmentFeeInvoiceNextNumber: true },
+    });
+    const next = bumped.treatmentFeeInvoiceNextNumber - 1;
+    return `${bumped.treatmentFeeInvoicePrefix || 'TF'}-${String(next).padStart(6, '0')}`;
   }
 
   /**

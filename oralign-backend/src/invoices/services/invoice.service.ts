@@ -32,6 +32,13 @@ export interface InvoiceTotals {
   subTotalHt: number;
   tvaAmount: number;
   totalTtc: number;
+  /**
+   * The discount ACTUALLY applied — clamped to the gross HT. This is the
+   * value that gets persisted: storing the raw request value while
+   * computing with the clamped one made the PDF reconstruct a gross HT
+   * (subTotalHt + discount) that no line ever added up to.
+   */
+  discountApplied: number;
   /** Per-line HT, index-aligned with the input lines. */
   lineHt: number[];
 }
@@ -120,7 +127,13 @@ export class InvoiceService {
     const stamp = round(Math.max(0, stampDuty));
     const totalTtc = round(subTotalHt + tvaAmount + stamp);
 
-    return { subTotalHt, tvaAmount, totalTtc, lineHt };
+    return {
+      subTotalHt,
+      tvaAmount,
+      totalTtc,
+      discountApplied: round(discount),
+      lineHt,
+    };
   }
 
   // ─── Reads ──────────────────────────────────────────────────────────
@@ -157,6 +170,10 @@ export class InvoiceService {
    */
   async summarise(filters: InvoiceFilterDto) {
     const where = this.buildWhere(filters);
+    // Tab badges need the split per status WITHOUT the status filter —
+    // clicking "Payées" must not zero the other tabs' counts. Everything
+    // else (search, period, trash) still applies.
+    const whereNoStatus = this.buildWhere({ ...filters, statuses: undefined });
     const [all, billable] = await this.prisma.$transaction([
       this.prisma.invoice.aggregate({ where, _count: { _all: true } }),
       this.prisma.invoice.aggregate({
@@ -165,12 +182,30 @@ export class InvoiceService {
         _count: { _all: true },
       }),
     ]);
+    // Separate call: groupBy's strict generics don't fit the PrismaPromise
+    // array of $transaction, and `_count: true` types each group count as
+    // a plain number. Tab counts one request behind the totals is fine.
+    const grouped = await this.prisma.invoice.groupBy({
+      by: ['status'],
+      where: whereNoStatus,
+      _count: true,
+    });
+
+    const byStatus: Record<string, number> = {};
+    let totalAllStatuses = 0;
+    for (const g of grouped) {
+      byStatus[g.status] = g._count;
+      totalAllStatuses += g._count;
+    }
+
     return {
       count: all._count._all,
       billableCount: billable._count._all,
       subTotalHt: num(billable._sum.subTotalHt),
       tvaAmount: num(billable._sum.tvaAmount),
       totalTtc: num(billable._sum.totalTtc),
+      byStatus,
+      totalAllStatuses,
     };
   }
 
@@ -231,8 +266,14 @@ export class InvoiceService {
   ): Prisma.InvoiceOrderByWithRelationInput[] {
     const dir = filters.sortOrder ?? InvoiceSortOrder.desc;
     const field = filters.sortBy ?? InvoiceSortBy.issueDate;
-    // Secondary key keeps pagination stable when many rows share a date.
-    return [{ [field]: dir } as Prisma.InvoiceOrderByWithRelationInput, { createdAt: 'desc' }];
+    // Secondary + unique final key: rows sharing the same date must have
+    // a total order, or offset pagination can show one row twice and
+    // drop another at page boundaries.
+    return [
+      { [field]: dir } as Prisma.InvoiceOrderByWithRelationInput,
+      { createdAt: 'desc' },
+      { id: 'desc' },
+    ];
   }
 
   // ─── Writes ─────────────────────────────────────────────────────────
@@ -267,7 +308,9 @@ export class InvoiceService {
     const status = dto.status ?? InvoiceStatus.draft;
     const now = new Date();
 
-    const created = await this.prisma.invoice.create({
+    let created;
+    try {
+      created = await this.prisma.invoice.create({
       data: {
         invoiceNumber,
         status,
@@ -286,7 +329,7 @@ export class InvoiceService {
         currency: settings.defaultCurrency || 'TND',
         language: dto.language ?? 'fr',
         tvaRate,
-        discountAmount: dto.discountAmount ?? 0,
+        discountAmount: totals.discountApplied,
         stampDuty,
         subTotalHt: totals.subTotalHt,
         tvaAmount: totals.tvaAmount,
@@ -295,7 +338,13 @@ export class InvoiceService {
         companySnapshot: this.buildCompanySnapshot(settings),
         createdById: caller.userId,
         createdByName: await lookupActorName(this.prisma, caller.userId),
-        issuedAt: status === InvoiceStatus.draft ? null : now,
+        // Only an invoice that actually reaches issued/paid was issued;
+        // creating one straight as "cancelled" stamps nothing, so it
+        // stays purgeable like any never-issued draft.
+        issuedAt:
+          status === InvoiceStatus.issued || status === InvoiceStatus.paid
+            ? now
+            : null,
         paidAt: status === InvoiceStatus.paid ? now : null,
         lines: {
           create: lines.map((line, i) => ({
@@ -308,8 +357,23 @@ export class InvoiceService {
           })),
         },
       },
-      include: INVOICE_INCLUDE,
-    });
+        include: INVOICE_INCLUDE,
+      });
+    } catch (error) {
+      // TOCTOU on the manual-number pre-check: another writer committed
+      // the same number between assertNumberFree and here. A clean 409
+      // instead of a raw 500.
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new ConflictException(
+          `Invoice number ${invoiceNumber} is already used.`,
+          'INVOICE_NUMBER_TAKEN',
+        );
+      }
+      throw error;
+    }
 
     this.logger.log(`Invoice ${created.invoiceNumber} created by ${caller.userId}`);
     return created;
@@ -325,48 +389,89 @@ export class InvoiceService {
    * moved and stores who changed what.
    */
   async update(id: string, dto: UpdateInvoiceDto, caller: Caller) {
-    const before = await this.getById(id);
-    await this.assertLinksExist(dto);
-
-    const settings = await this.billingSettings.requireActive();
-
-    // Lines: the payload when given, otherwise the stored ones re-fed
-    // through the SAME maths so totals can never drift from the lines.
-    const lines: InvoiceLineInputDto[] =
-      dto.lines ??
-      before.lines.map((l) => ({
-        description: l.description,
-        quantity: num(l.quantity),
-        unitPrice: num(l.unitPrice),
-        tvaRate: l.tvaRate ?? undefined,
-      }));
-
-    if (lines.length === 0) {
-      throw new BadRequestException(
-        'An invoice needs at least one line.',
-        'INVOICE_NO_LINES',
+    const before = await this.getById(id, { allowDeleted: true });
+    // GET shows an archived invoice (the trash detail); WRITING to one is
+    // refused with an explanation instead of a misleading 404.
+    if (before.deletedAt) {
+      throw new ConflictException(
+        `Invoice ${before.invoiceNumber} is archived. Restore it before editing.`,
+        'INVOICE_ARCHIVED',
       );
     }
+    await this.assertLinksExist(dto);
+
+    // Money is only RECOMPUTED when a money field was actually touched.
+    // Editing notes or the client block must not move a millime — that
+    // matters most for automatic invoices, whose HT/TVA were derived
+    // BACKWARDS from the paid amount: re-deriving forwards from the
+    // stored line can land 0.001 away from what was actually charged.
+    const moneyTouched =
+      dto.lines !== undefined ||
+      dto.tvaRate !== undefined ||
+      dto.discountAmount !== undefined ||
+      dto.stampDuty !== undefined;
 
     const tvaRate = dto.tvaRate ?? num(before.tvaRate);
     const discountAmount = dto.discountAmount ?? num(before.discountAmount);
     const stampDuty = dto.stampDuty ?? num(before.stampDuty);
-    const totals = InvoiceService.computeTotals(
-      lines,
-      tvaRate,
-      discountAmount,
-      stampDuty,
-    );
+
+    let totals: InvoiceTotals;
+    // The replacement line set, only when the payload actually carries one.
+    let pendingLines: InvoiceLineInputDto[] | null = null;
+    if (moneyTouched) {
+      const lines: InvoiceLineInputDto[] =
+        dto.lines ??
+        before.lines.map((l) => ({
+          description: l.description,
+          quantity: num(l.quantity),
+          unitPrice: num(l.unitPrice),
+          tvaRate: l.tvaRate ?? undefined,
+        }));
+      if (lines.length === 0) {
+        throw new BadRequestException(
+          'An invoice needs at least one line.',
+          'INVOICE_NO_LINES',
+        );
+      }
+      totals = InvoiceService.computeTotals(
+        lines,
+        tvaRate,
+        discountAmount,
+        stampDuty,
+      );
+      pendingLines = dto.lines ? lines : null;
+    } else {
+      totals = {
+        subTotalHt: num(before.subTotalHt),
+        tvaAmount: num(before.tvaAmount),
+        totalTtc: num(before.totalTtc),
+        discountApplied: num(before.discountAmount),
+        lineHt: [],
+      };
+    }
 
     let invoiceNumber = before.invoiceNumber;
-    if (dto.invoiceNumber && dto.invoiceNumber.trim() !== before.invoiceNumber) {
-      invoiceNumber = await this.assertNumberFree(dto.invoiceNumber.trim());
+    const numberChanged =
+      Boolean(dto.invoiceNumber) &&
+      dto.invoiceNumber!.trim() !== before.invoiceNumber;
+    if (numberChanged) {
+      invoiceNumber = await this.assertNumberFree(dto.invoiceNumber!.trim());
     }
 
     const status = dto.status ?? before.status;
     const now = new Date();
+    const entersIssuedOrPaid =
+      status === InvoiceStatus.issued || status === InvoiceStatus.paid;
 
-    const data: Prisma.InvoiceUpdateInput = {
+    // Lifecycle stamps as a real state machine:
+    //   issuedAt — set the first time the invoice actually reaches
+    //     issued/paid, kept afterwards (it WAS issued). Cancelling a
+    //     draft that was never issued stamps nothing, so such a draft
+    //     stays purgeable.
+    //   paidAt — meaningful ONLY while status is paid: entering paid
+    //     stamps now, staying paid keeps the original date, leaving paid
+    //     clears it. A "paid on" date on an unpaid invoice is a lie.
+    const data: Prisma.InvoiceUncheckedUpdateInput = {
       invoiceNumber,
       status,
       clientName: dto.clientName ?? before.clientName,
@@ -380,63 +485,99 @@ export class InvoiceService {
       dueDate: dto.dueDate ? new Date(dto.dueDate) : before.dueDate,
       language: dto.language ?? (before.language as 'fr' | 'en'),
       tvaRate,
-      discountAmount,
+      discountAmount: totals.discountApplied,
       stampDuty,
       subTotalHt: totals.subTotalHt,
       tvaAmount: totals.tvaAmount,
       totalTtc: totals.totalTtc,
       notes: dto.notes ?? before.notes,
-      // Stamp the lifecycle dates the first time each state is reached.
-      issuedAt:
-        before.issuedAt ??
-        (status === InvoiceStatus.draft ? null : now),
+      issuedAt: before.issuedAt ?? (entersIssuedOrPaid ? now : null),
       paidAt:
-        status === InvoiceStatus.paid ? (before.paidAt ?? now) : before.paidAt,
+        status === InvoiceStatus.paid
+          ? before.status === InvoiceStatus.paid
+            ? before.paidAt
+            : now
+          : null,
     };
+    // Scalar FKs (unchecked input) so the optimistic updateMany below can
+    // carry them; assertLinksExist has already vetted the targets.
+    if (dto.orderId !== undefined) data.orderId = dto.orderId || null;
+    if (dto.patientId !== undefined) data.patientId = dto.patientId || null;
+    if (dto.doctorId !== undefined) data.doctorId = dto.doctorId || null;
 
-    if (dto.orderId !== undefined) {
-      data.order = dto.orderId ? { connect: { id: dto.orderId } } : { disconnect: true };
-    }
-    if (dto.patientId !== undefined) {
-      data.patient = dto.patientId ? { connect: { id: dto.patientId } } : { disconnect: true };
-    }
-    if (dto.doctorId !== undefined) {
-      data.doctor = dto.doctorId ? { connect: { id: dto.doctorId } } : { disconnect: true };
-    }
-
-    const updated = await this.prisma.$transaction(async (tx) => {
-      if (dto.lines) {
-        await tx.invoiceLine.deleteMany({ where: { invoiceId: id } });
-        await tx.invoiceLine.createMany({
-          data: lines.map((line, i) => ({
-            invoiceId: id,
-            position: i,
-            description: line.description,
-            quantity: line.quantity ?? 1,
-            unitPrice: line.unitPrice ?? 0,
-            tvaRate: line.tvaRate ?? null,
-            lineHt: totals.lineHt[i],
-          })),
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        if (pendingLines) {
+          await tx.invoiceLine.deleteMany({ where: { invoiceId: id } });
+          await tx.invoiceLine.createMany({
+            data: pendingLines.map((line, i) => ({
+              invoiceId: id,
+              position: i,
+              description: line.description,
+              quantity: line.quantity ?? 1,
+              unitPrice: line.unitPrice ?? 0,
+              tvaRate: line.tvaRate ?? null,
+              lineHt: totals.lineHt[i],
+            })),
+          });
+        }
+        // Optimistic guard: the row must still be the one this edit was
+        // computed FROM. Two admins saving concurrently would otherwise
+        // silently combine half of each edit (lost update); the loser
+        // now gets a 409 and refreshes instead.
+        const guarded = await tx.invoice.updateMany({
+          where: { id, updatedAt: before.updatedAt },
+          data,
         });
+        if (guarded.count === 0) {
+          throw new ConflictException(
+            'This invoice was modified by someone else. Reload and retry.',
+            'INVOICE_MODIFIED',
+          );
+        }
+        // An automatic invoice and its payment receipt must never show
+        // two different numbers: renumbering one renames both, in the
+        // same transaction.
+        if (numberChanged && before.paymentId) {
+          await tx.payment.update({
+            where: { id: before.paymentId },
+            data: { invoiceNumber },
+          });
+        }
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        // TOCTOU on the number check: another writer took it between the
+        // pre-check and the commit. Same 409 as the pre-check.
+        throw new ConflictException(
+          `Invoice number ${invoiceNumber} is already used.`,
+          'INVOICE_NUMBER_TAKEN',
+        );
       }
-      return tx.invoice.update({ where: { id }, data, include: INVOICE_INCLUDE });
-    });
+      throw error;
+    }
 
-    // Audit only where it earns its keep: an invoice already issued or
-    // paid. Editing a draft is normal work, not an event.
-    if (LOCKED_STATUSES.includes(before.status)) {
+    const updated = await this.getById(id);
+
+    // Audit whenever the invoice IS or BECOMES issued/paid. Gating only
+    // on the previous status let paid → draft → edit → paid launder a
+    // money change without a trace.
+    if (
+      LOCKED_STATUSES.includes(before.status) ||
+      LOCKED_STATUSES.includes(updated.status)
+    ) {
       await this.writeAuditLog(id, caller, before, updated, Boolean(dto.lines));
     }
-
-    // A settings row is required above; keep the reference so a future
-    // reader sees the snapshot is intentionally NOT refreshed on update.
-    void settings;
 
     return updated;
   }
 
   async archive(id: string, caller: Caller): Promise<{ id: string }> {
-    const row = await this.getById(id);
+    const row = await this.getById(id, { allowDeleted: true });
+    if (row.deletedAt) return { id: row.id }; // already archived — idempotent
     await this.prisma.invoice.update({
       where: { id: row.id },
       data: { deletedAt: new Date() },
@@ -496,6 +637,32 @@ export class InvoiceService {
         `Invoice number ${candidate} is already used.`,
         'INVOICE_NUMBER_TAKEN',
       );
+    }
+
+    // The FUTURE range of the automatic counters is reserved. Accepting
+    // FAC-000150 by hand while the counter sits at 100 would make the
+    // 50th automatic allocation collide — and an automatic invoice that
+    // cannot be created is a payment left without its document.
+    const settings = await this.billingSettings.getActive();
+    if (settings) {
+      const counters: [prefix: string, next: number][] = [
+        [settings.invoicePrefix || 'FAC', settings.invoiceNextNumber],
+        [
+          settings.treatmentFeeInvoicePrefix || 'TF',
+          settings.treatmentFeeInvoiceNextNumber,
+        ],
+      ];
+      for (const [prefix, next] of counters) {
+        const head = `${prefix}-`;
+        if (!candidate.startsWith(head)) continue;
+        const tail = candidate.slice(head.length);
+        if (/^\d+$/.test(tail) && Number(tail) >= next) {
+          throw new ConflictException(
+            `Invoice number ${candidate} is inside the automatic ${prefix} sequence (next: ${head}${String(next).padStart(6, '0')}). Pick a number below it or a different prefix.`,
+            'INVOICE_NUMBER_RESERVED',
+          );
+        }
+      }
     }
     return candidate;
   }
@@ -570,6 +737,9 @@ export class InvoiceService {
     linesReplaced: boolean,
   ): Promise<void> {
     const watched = [
+      'orderId',
+      'patientId',
+      'doctorId',
       'invoiceNumber',
       'status',
       'clientName',

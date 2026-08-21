@@ -110,11 +110,15 @@ export class InvoiceExportService {
     );
 
     // Trailing totals row — what the accountant reconciles against.
+    // Cancelled invoices stay VISIBLE as detail lines (their status says
+    // so) but are excluded from the sums, exactly like /summary: two
+    // different totals for the same filter is how reconciliation dies.
+    const billable = rows.filter((r) => r.status !== 'cancelled');
     const sum = (pick: (r: (typeof rows)[number]) => unknown): string =>
-      this.money(rows.reduce((acc, r) => acc + Number(pick(r) ?? 0), 0));
+      this.money(billable.reduce((acc, r) => acc + Number(pick(r) ?? 0), 0));
     lines.push(
       [
-        this.cell(`TOTAL (${rows.length})`),
+        this.cell(`TOTAL hors annulees (${billable.length}/${rows.length})`),
         '', '', '', '', '', '', '', '', '',
         sum((r) => r.subTotalHt),
         sum((r) => r.discountAmount),
@@ -162,6 +166,13 @@ export class InvoiceExportService {
     archive.on('warning', (err) =>
       this.logger.warn(`Invoice ZIP warning: ${err.message}`),
     );
+    // Flipped by abort() — the controller aborts on client disconnect and
+    // on stream error. Checked before every render so a cancelled download
+    // does not burn one Puppeteer render per remaining id.
+    let aborted = false;
+    archive.on('abort', () => {
+      aborted = true;
+    });
 
     // Detached: the controller pipes the stream immediately and the
     // renders fill it as they complete. Mirrors OrderExportService.
@@ -170,6 +181,12 @@ export class InvoiceExportService {
       let appended = 0;
       try {
         for (const id of ids) {
+          if (aborted) {
+            this.logger.log(
+              `Invoice ZIP aborted by the client after ${appended}/${ids.length} PDF(s)`,
+            );
+            return;
+          }
           try {
             const { buffer, fileName } =
               await this.invoicePdf.renderInvoiceRecordBuffer({ invoiceId: id });
@@ -194,7 +211,7 @@ export class InvoiceExportService {
         }
         this.logger.log(`Invoice ZIP: ${appended}/${ids.length} PDF(s) appended`);
       } finally {
-        void archive.finalize();
+        if (!aborted) void archive.finalize();
       }
     })();
 

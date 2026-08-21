@@ -233,7 +233,12 @@ export class InvoiceAutoService {
           where: { paymentId: payment.id },
           select: { id: true },
         });
-        return { created: false, invoiceId: winner?.id };
+        // Race lost on paymentId: the invoice exists — that is success.
+        if (winner) return { created: false, invoiceId: winner.id };
+        // No winner => the collision was on invoiceNumber, not paymentId.
+        // Swallowing it would leave this payment invoiceless FOREVER
+        // (every retry reuses the same conflicting number). Surface it.
+        throw error;
       }
       throw error;
     }

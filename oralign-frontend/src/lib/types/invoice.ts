@@ -37,6 +37,8 @@ export interface Invoice {
   orderId: string | null;
   patientId: string | null;
   doctorId: string | null;
+  /** Set when this invoice was generated automatically from a payment. */
+  paymentId?: string | null;
   order?: { id: string; orderCode: string } | null;
   patient?: { id: string; fullName: string } | null;
   doctor?: { id: string; fullName: string; email: string } | null;
@@ -130,6 +132,9 @@ export interface InvoiceSummary {
   subTotalHt: number;
   tvaAmount: number;
   totalTtc: number;
+  /** Per-status counts of the current filter, IGNORING the status tab. */
+  byStatus: Partial<Record<InvoiceStatus, number>>;
+  totalAllStatuses: number;
 }
 
 /** A patient found by the create form, with the orders it can prefill from. */

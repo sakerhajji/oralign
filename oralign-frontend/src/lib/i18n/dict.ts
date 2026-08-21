@@ -1950,6 +1950,24 @@ export const dict = {
     refresh: { en: 'Refresh', fr: 'Actualiser' } as T,
 
     periodTotal: { en: 'Filtered total', fr: 'Total du filtre' } as T,
+    // KPI row + status tabs + source badges (redesign)
+    tabAll: { en: 'All', fr: 'Toutes' } as T,
+    kpiCount: { en: 'Invoices', fr: 'Factures' } as T,
+    kpiHt: { en: 'Net total', fr: 'Total HT' } as T,
+    kpiTva: { en: 'VAT', fr: 'TVA' } as T,
+    kpiTtc: { en: 'Grand total', fr: 'Total TTC' } as T,
+    kpiBillableHint: { en: 'excl. cancelled', fr: 'hors annulées' } as T,
+    sourceAuto: { en: 'Auto', fr: 'Auto' } as T,
+    sourceAutoTitle: {
+      en: 'Generated automatically from a payment',
+      fr: 'Générée automatiquement depuis un paiement',
+    } as T,
+    sourceManual: { en: 'Manual', fr: 'Manuelle' } as T,
+    sourceManualTitle: {
+      en: 'Created by hand from this desk',
+      fr: 'Créée à la main depuis cette page',
+    } as T,
+    period: { en: 'Period', fr: 'Période' } as T,
     periodCount: { en: '{count} invoice(s)', fr: '{count} facture(s)' } as T,
 
     create: { en: 'New invoice', fr: 'Nouvelle facture' } as T,

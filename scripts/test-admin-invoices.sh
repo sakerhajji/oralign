@@ -187,6 +187,51 @@ NAUDIT_DRAFT=$(db1 "SELECT count(*) FROM \"InvoiceAuditLog\" WHERE \"invoiceId\"
 [ "$NAUDIT_DRAFT" = "0" ] && ok "editer un BROUILLON n'ecrit rien (bruit evite)" || bad "audit sur brouillon: $NAUDIT_DRAFT"
 
 # ─────────────────────────────────────────────────────────────────────
+step "6b. Correctifs de la revue: remise clampee, plage reservee, etats"
+
+# Remise superieure au brut: le calcul clampe ET la valeur PERSISTEE est
+# clampee — sinon le PDF reconstruit un HT brut que les lignes ne totalisent pas.
+S=$(req POST "$API/admin/invoices" "$AT" '{"clientName":"TEST_INV Clamp","discountAmount":150,"lines":[{"description":"x","quantity":1,"unitPrice":100}]}')
+CLAMP_ID=$(body | jget 'o.id')
+CLAMP_DISC=$(body | jget 'o.discountAmount')
+CLAMP_HT=$(body | jget 'o.subTotalHt')
+{ [ "$CLAMP_DISC" = "100" ] && [ "$CLAMP_HT" = "0" ]; } \
+  && ok "remise 150 sur 100 HT -> persistee clampee a 100, HT=0" \
+  || bad "remise persistee=$CLAMP_DISC HT=$CLAMP_HT (attendu 100 / 0)"
+
+# La plage FUTURE du compteur FAC est reservee: squatter FAC-999999 ferait
+# exploser l'allocation automatique plus tard.
+S=$(req POST "$API/admin/invoices" "$AT" '{"clientName":"TEST_INV Squat","invoiceNumber":"FAC-999999","lines":[{"description":"x","quantity":1,"unitPrice":10}]}')
+CODE=$(body | jget 'o.errorCode')
+{ [ "$S" = "409" ] && [ "$CODE" = "INVOICE_NUMBER_RESERVED" ]; } \
+  && ok "numero dans la plage future du compteur -> 409 INVOICE_NUMBER_RESERVED" \
+  || bad "squat -> $S / $CODE"
+
+# Machine a etats: paid -> issued efface paidAt (une date de paiement sur
+# une facture non payee est un mensonge).
+req PATCH "$API/admin/invoices/$CLAMP_ID" "$AT" '{"status":"paid"}' >/dev/null
+PAIDAT1=$(db1 "SELECT CASE WHEN \"paidAt\" IS NULL THEN 'null' ELSE 'set' END FROM \"Invoice\" WHERE id='$CLAMP_ID';")
+req PATCH "$API/admin/invoices/$CLAMP_ID" "$AT" '{"status":"issued"}' >/dev/null
+PAIDAT2=$(db1 "SELECT CASE WHEN \"paidAt\" IS NULL THEN 'null' ELSE 'set' END FROM \"Invoice\" WHERE id='$CLAMP_ID';")
+{ [ "$PAIDAT1" = "set" ] && [ "$PAIDAT2" = "null" ]; } \
+  && ok "paid -> issued efface paidAt ($PAIDAT1 -> $PAIDAT2)" \
+  || bad "paidAt: $PAIDAT1 -> $PAIDAT2 (attendu set -> null)"
+
+# Un brouillon passe a "cancelled" sans jamais etre emis reste purgeable.
+S=$(req POST "$API/admin/invoices" "$AT" '{"clientName":"TEST_INV Annulee","status":"cancelled","lines":[{"description":"x","quantity":1,"unitPrice":5}]}')
+CANC_ID=$(body | jget 'o.id')
+ISSUED_AT=$(db1 "SELECT CASE WHEN \"issuedAt\" IS NULL THEN 'null' ELSE 'set' END FROM \"Invoice\" WHERE id='$CANC_ID';")
+[ "$ISSUED_AT" = "null" ] && ok "creee annulee: issuedAt reste null (jamais emise)" || bad "issuedAt=$ISSUED_AT sur une facture jamais emise"
+
+# Editer une facture ARCHIVEE -> 409 explicite, pas un 404 trompeur.
+req DELETE "$API/admin/invoices/$CANC_ID" "$AT" >/dev/null
+S=$(req PATCH "$API/admin/invoices/$CANC_ID" "$AT" '{"notes":"modif"}')
+CODE=$(body | jget 'o.errorCode')
+{ [ "$S" = "409" ] && [ "$CODE" = "INVOICE_ARCHIVED" ]; } \
+  && ok "editer une facture archivee -> 409 INVOICE_ARCHIVED" \
+  || bad "edition archivee -> $S / $CODE"
+
+# ─────────────────────────────────────────────────────────────────────
 step "7. Numero en double refuse"
 
 S=$(req POST "$API/admin/invoices" "$AT" "{\"clientName\":\"Doublon\",\"invoiceNumber\":\"$NUMBER\",\"lines\":[{\"description\":\"x\",\"quantity\":1,\"unitPrice\":10}]}")
@@ -295,9 +340,9 @@ esac
 # ─────────────────────────────────────────────────────────────────────
 echo
 echo "== Nettoyage =="
-$DB -c "DELETE FROM \"InvoiceAuditLog\" WHERE \"invoiceId\" IN ('$INVOICE_ID','$DRAFT_ID');" >/dev/null 2>&1
-$DB -c "DELETE FROM \"InvoiceLine\" WHERE \"invoiceId\" IN ('$INVOICE_ID','$DRAFT_ID');" >/dev/null 2>&1
-$DB -c "DELETE FROM \"Invoice\" WHERE id IN ('$INVOICE_ID','$DRAFT_ID');" >/dev/null 2>&1
+$DB -c "DELETE FROM \"InvoiceAuditLog\" WHERE \"invoiceId\" IN ('$INVOICE_ID','$DRAFT_ID','$CLAMP_ID','$CANC_ID');" >/dev/null 2>&1
+$DB -c "DELETE FROM \"InvoiceLine\" WHERE \"invoiceId\" IN ('$INVOICE_ID','$DRAFT_ID','$CLAMP_ID','$CANC_ID');" >/dev/null 2>&1
+$DB -c "DELETE FROM \"Invoice\" WHERE id IN ('$INVOICE_ID','$DRAFT_ID','$CLAMP_ID','$CANC_ID');" >/dev/null 2>&1
 $DB -c "DELETE FROM \"DentalOrder\" WHERE id='$ORDER_ID';" >/dev/null 2>&1
 $DB -c "DELETE FROM \"Patient\" WHERE id='$PATIENT_ID';" >/dev/null 2>&1
 $DB -c "DELETE FROM \"User\" WHERE id IN ('$ADMIN_ID','$DOCTOR_ID');" >/dev/null 2>&1

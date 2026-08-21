@@ -292,6 +292,21 @@ export class AdminInvoiceController {
     const { archive, fileName } = await this.exports.buildPdfZip(dto.ids);
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', contentDisposition(fileName));
+
+    // Same teardown pattern as the order ZIP export (order.controller.ts):
+    // an archiver stream with NO 'error' listener crashes the process on
+    // the first emitted error, and a cancelled download only unpipes —
+    // without abort() the detached render loop keeps feeding Puppeteer
+    // output into an archive nobody drains.
+    archive.on('error', (err) => {
+      if (!res.headersSent) res.status(HttpStatus.INTERNAL_SERVER_ERROR);
+      archive.abort();
+      res.destroy(err);
+    });
+    res.on('close', () => {
+      if (!res.writableFinished) archive.abort();
+    });
+
     archive.pipe(res);
   }
 

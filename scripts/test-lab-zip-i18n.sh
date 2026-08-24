@@ -58,14 +58,31 @@ ok "commande=$ORDER_ID"
 
 # Trois fichiers reels sous le repertoire de la commande, dans les trois
 # categories qui nous interessent: droite, gauche, other (CBCT).
-docker compose -p oralign-app exec -T backend sh -c "mkdir -p '/app/uploads/orders/$ORDER_ID/x' && printf 'DROITE' > '/app/uploads/orders/$ORDER_ID/x/cote-droit.jpg' && printf 'GAUCHE' > '/app/uploads/orders/$ORDER_ID/x/cote-gauche.jpg' && printf 'DICOMZIP' > '/app/uploads/orders/$ORDER_ID/x/scan-cbct.zip'"
-mkfile() { # category originalName relName
-  db1 "INSERT INTO \"OrderFile\" (id,\"orderId\",category,\"originalName\",\"fileName\",\"relativePath\",\"mimeType\",size,\"createdAt\") VALUES (gen_random_uuid(),'$ORDER_ID','$1','$2','$2','orders/$ORDER_ID/x/$3','application/octet-stream',6,NOW()) RETURNING id;"
+# De VRAIES images 1x1 pour les photos (la fiche les INTEGRE desormais),
+# plus un pseudo-original de 3 Mo pour prouver le plafond d'integration.
+docker compose -p oralign-app exec -T backend node -e "
+const fs=require('fs'),zlib=require('zlib');
+// PNG 1x1 minimal d'une couleur donnee — trois couleurs differentes pour
+// que Chromium n'en deduplique pas les objets image dans le PDF.
+function crc32(buf){let t=[];for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0}let c=0xFFFFFFFF;for(const b of buf)c=t[(c^b)&0xFF]^(c>>>8);return (c^0xFFFFFFFF)>>>0}
+function chunk(type,data){const len=Buffer.alloc(4);len.writeUInt32BE(data.length);const td=Buffer.concat([Buffer.from(type),data]);const crc=Buffer.alloc(4);crc.writeUInt32BE(crc32(td));return Buffer.concat([len,td,crc])}
+function png(r,g,b){const sig=Buffer.from([137,80,78,71,13,10,26,10]);const ihdr=Buffer.alloc(13);ihdr.writeUInt32BE(1,0);ihdr.writeUInt32BE(1,4);ihdr[8]=8;ihdr[9]=2;const idat=zlib.deflateSync(Buffer.from([0,r,g,b]));return Buffer.concat([sig,chunk('IHDR',ihdr),chunk('IDAT',idat),chunk('IEND',Buffer.alloc(0))])}
+fs.mkdirSync('/app/uploads/orders/$ORDER_ID/x',{recursive:true});
+fs.writeFileSync('/app/uploads/orders/$ORDER_ID/x/cote-droit.png',png(200,40,40));
+fs.writeFileSync('/app/uploads/orders/$ORDER_ID/x/cote-gauche.png',png(40,160,60));
+fs.writeFileSync('/app/uploads/orders/$ORDER_ID/x/pano.png',png(40,80,200));
+fs.writeFileSync('/app/uploads/orders/$ORDER_ID/x/lourde.png',Buffer.concat([png(120,120,120),Buffer.alloc(3*1024*1024)]));
+fs.writeFileSync('/app/uploads/orders/$ORDER_ID/x/scan-cbct.zip',Buffer.from('DICOMZIP'));
+console.log('fichiers seed ecrits');" 2>&1 | tr -d '\r' | tail -1
+mkfile() { # category originalName relName mime
+  db1 "INSERT INTO \"OrderFile\" (id,\"orderId\",category,\"originalName\",\"fileName\",\"relativePath\",\"mimeType\",size,\"createdAt\") VALUES (gen_random_uuid(),'$ORDER_ID','$1','$2','$2','orders/$ORDER_ID/x/$3','${4:-application/octet-stream}',6,NOW()) RETURNING id;"
 }
-F_RIGHT=$(mkfile right_photo photo-droite.jpg cote-droit.jpg)
-F_LEFT=$(mkfile left_photo photo-gauche.jpg cote-gauche.jpg)
+F_RIGHT=$(mkfile right_photo photo-droite.png cote-droit.png image/png)
+F_LEFT=$(mkfile left_photo photo-gauche.png cote-gauche.png image/png)
+F_PANO=$(mkfile orthopantomography panoramique.png pano.png image/png)
+F_HEAVY=$(mkfile front_photo enorme-photo.png lourde.png image/png)
 F_OTHER=$(mkfile other cbct-dicom.zip scan-cbct.zip)
-ok "3 fichiers: right_photo, left_photo, other"
+ok "5 fichiers: right/left/pano/front(3Mo)/other"
 
 # Deux petites images PNG (1x1) pour les tableaux du plan.
 docker compose -p oralign-app exec -T backend node -e "
@@ -97,10 +114,10 @@ echo "$LISTING_FR" | grep -q "FICHE COMMANDE - TEST_LZIP_${STAMP}.pdf" && ok "fi
 echo "$LISTING_FR" | grep -qE "(^|\s)(right_photo|left_photo|other)/" && bad "noms de categorie bruts encore presents" || ok "aucun nom de categorie brut"
 
 # LE SWAP: le fichier uploade en right_photo doit etre dans PHOTO DENTS GAUCHE.
-echo "$LISTING_FR" | grep "PHOTO DENTS GAUCHE/" | grep -q "photo-droite.jpg" \
+echo "$LISTING_FR" | grep "PHOTO DENTS GAUCHE/" | grep -q "photo-droite.png" \
   && ok "SWAP: le fichier right_photo est dans PHOTO DENTS GAUCHE" \
   || bad "swap manquant (right_photo pas dans GAUCHE)"
-echo "$LISTING_FR" | grep "PHOTO DENTS DROITE/" | grep -q "photo-gauche.jpg" \
+echo "$LISTING_FR" | grep "PHOTO DENTS DROITE/" | grep -q "photo-gauche.png" \
   && ok "SWAP: le fichier left_photo est dans PHOTO DENTS DROITE" \
   || bad "swap manquant (left_photo pas dans DROITE)"
 echo "$LISTING_FR" | grep "CBCT DICOM/" | grep -q "cbct-dicom.zip" \
@@ -116,7 +133,7 @@ echo "$LISTING_EN" | grep -q "LEFT TEETH PHOTO/" && ok "dossier LEFT TEETH PHOTO
 echo "$LISTING_EN" | grep -q "RIGHT TEETH PHOTO/" && ok "dossier RIGHT TEETH PHOTO present" || bad "RIGHT TEETH PHOTO absent"
 echo "$LISTING_EN" | grep -q "CBCT DICOM/" && ok "CBCT DICOM aussi en anglais" || bad "CBCT DICOM absent en EN"
 echo "$LISTING_EN" | grep -q "ORDER SHEET - TEST_LZIP_${STAMP}.pdf" && ok "fiche nommee en anglais" || bad "fiche EN absente"
-echo "$LISTING_EN" | grep "LEFT TEETH PHOTO/" | grep -q "photo-droite.jpg" \
+echo "$LISTING_EN" | grep "LEFT TEETH PHOTO/" | grep -q "photo-droite.png" \
   && ok "SWAP identique en anglais" || bad "swap EN manquant"
 
 # Sans ?lang= -> francais par defaut.
@@ -146,6 +163,24 @@ if [ -s "$SHEET" ]; then
   grep -q "TEST_LZIP_DESIGNER" "$T" && ok "concepteur du plan imprime" || bad "concepteur absent"
 else
   bad "fiche introuvable dans le zip"
+fi
+
+# ─────────────────────────────────────────────────────────────────────
+step "4b. La fiche INTEGRE les photos cliniques"
+
+if [ -s "$SHEET" ]; then
+  # Les libelles de la grille photos, avec le swap droite/gauche.
+  tr -d ' ' < "$T" | grep -qi "Photoscliniques" && ok "section Photos cliniques presente" || bad "section photos absente"
+  grep -q "Photo dents gauche" "$T" && ok "legende 'Photo dents gauche' (swap) presente" || bad "legende gauche absente"
+  grep -q "Photo dents droite" "$T" && ok "legende 'Photo dents droite' (swap) presente" || bad "legende droite absente"
+  grep -qi "panoramique" "$T" && ok "legende radio panoramique presente" || bad "legende pano absente"
+  # L'original de 3 Mo n'est PAS integre: liste par son nom a la place.
+  grep -q "enorme-photo.png" "$T" && ok "photo de 3 Mo listee mais non integree (plafond)" || bad "plafond 2 Mo non applique"
+  # Le PDF contient bien des images embarquees (data URIs -> objets image).
+  IMGS=$(strings "$SHEET" 2>/dev/null | grep -c "/Subtype */Image" || true)
+  [ "${IMGS:-0}" -ge 3 ] && ok "au moins 3 images embarquees dans le PDF ($IMGS)" || bad "images embarquees: $IMGS (attendu >= 3)"
+else
+  bad "fiche absente pour l'etape photos"
 fi
 
 # ─────────────────────────────────────────────────────────────────────
@@ -199,7 +234,7 @@ echo
 echo "== Nettoyage =="
 $DB -c "DELETE FROM \"TreatmentPlanIpr\" WHERE id IN ('$IPR1','$IPR2');" >/dev/null 2>&1
 $DB -c "DELETE FROM \"TreatmentPlan\" WHERE id IN ('$PLAN_ID','$DRAFT_PLAN');" >/dev/null 2>&1
-$DB -c "DELETE FROM \"OrderFile\" WHERE id IN ('$F_RIGHT','$F_LEFT','$F_OTHER');" >/dev/null 2>&1
+$DB -c "DELETE FROM \"OrderFile\" WHERE id IN ('$F_RIGHT','$F_LEFT','$F_PANO','$F_HEAVY','$F_OTHER');" >/dev/null 2>&1
 $DB -c "DELETE FROM \"DentalOrder\" WHERE id IN ('$ORDER_ID','$ORDER2');" >/dev/null 2>&1
 $DB -c "DELETE FROM \"Patient\" WHERE id='$PATIENT_ID';" >/dev/null 2>&1
 $DB -c "DELETE FROM \"User\" WHERE id IN ('$ADMIN_ID','$DOCTOR_ID','$STRANGER_ID');" >/dev/null 2>&1

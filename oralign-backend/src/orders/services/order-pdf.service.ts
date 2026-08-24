@@ -4,7 +4,7 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
-import { ToothInstructionType , TreatmentPlanStatus, type TreatmentPlan, type TreatmentPlanIpr } from '@prisma/client';
+import { OrderFileCategory, ToothInstructionType, TreatmentPlanStatus, type TreatmentPlan, type TreatmentPlanIpr } from '@prisma/client';
 import * as fs from 'fs';
 import * as path from 'path';
 import puppeteer, { Browser } from 'puppeteer-core';
@@ -67,6 +67,40 @@ const MARK_STYLES: Record<ToothInstructionType, MarkStyle> = {
     labelEn: 'IPR (mm)',
   },
 };
+
+// Photo categories embedded as IMAGES in the sheet (everything else —
+// STL/PLY/OBJ scans, CBCT bundles, PDFs — stays in the files table: a
+// mesh has no meaningful thumbnail). Labels carry the same RIGHT/LEFT
+// SWAP as the lab ZIP folders: intraoral side photos are mirrored, so
+// the file stored as right_photo shows the patient's LEFT side.
+const PHOTO_CATEGORIES: OrderFileCategory[] = [
+  OrderFileCategory.right_photo,
+  OrderFileCategory.left_photo,
+  OrderFileCategory.front_photo,
+  OrderFileCategory.upper_photo,
+  OrderFileCategory.lower_photo,
+  OrderFileCategory.orthopantomography,
+  OrderFileCategory.image,
+];
+
+const PHOTO_LABELS: Record<string, string> = {
+  right_photo: 'Photo dents gauche · Left teeth photo',
+  left_photo: 'Photo dents droite · Right teeth photo',
+  front_photo: 'Photo de face · Front photo',
+  upper_photo: 'Arcade supérieure · Upper arch',
+  lower_photo: 'Arcade inférieure · Lower arch',
+  orthopantomography: 'Radio panoramique · Panoramic X-ray',
+  image: 'Image',
+};
+
+/** A photo row as re-read from the DB for embedding (variants included). */
+interface SheetPhotoFile {
+  category: string;
+  relativePath: string;
+  mimeType: string;
+  originalName: string | null;
+  variants: unknown;
+}
 
 // FDI display order — patient's right on the reader's left, the
 // convention every dental chart (and the clinic's reference sheet) uses.
@@ -256,9 +290,27 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
         iprEntries: { orderBy: [{ fromTooth: 'asc' }] },
       },
     });
+    // Photo files re-read from the DB rather than the DTO: the variant
+    // PATHS are deliberately stripped from the API shape, and the sheet
+    // wants the compressed md/thumb renditions, not multi-MB originals.
+    const photoFiles = await this.prisma.orderFile.findMany({
+      where: {
+        orderId: dto.id,
+        deletedAt: null,
+        category: { in: PHOTO_CATEGORIES },
+      },
+      orderBy: [{ category: 'asc' }, { orderIndex: 'asc' }],
+      select: {
+        category: true,
+        relativePath: true,
+        mimeType: true,
+        originalName: true,
+        variants: true,
+      },
+    });
     const logo = this.resolveImageDataUrl(settings?.companyLogoPath ?? null);
     const brandName = (settings?.companyName ?? 'ORALIGN').trim() || 'ORALIGN';
-    const html = this.renderHtml(dto, { logo, brandName }, approvedPlan);
+    const html = this.renderHtml(dto, { logo, brandName }, approvedPlan, photoFiles);
     return this.renderHtmlToBuffer(html);
   }
 
@@ -270,6 +322,7 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
     approvedPlan:
       | (TreatmentPlan & { iprEntries: TreatmentPlanIpr[] })
       | null = null,
+    photoFiles: SheetPhotoFile[] = [],
   ): string {
     const esc = this.escapeHtml.bind(this);
     const statusLabel = STATUS_FR[dto.status] ?? dto.status;
@@ -382,6 +435,12 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
         font-size: 9px; font-weight: 700;
       }
       .section { margin-top: 12px; }
+      .photo-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+      .photo-cell { break-inside: avoid; page-break-inside: avoid; margin: 0; width: calc(33.33% - 6px); }
+      .photo-cell.wide { width: 100%; }
+      .photo-cell img { width: 100%; height: auto; border: 1px solid #e2e4e8; border-radius: 8px; display: block; }
+      .photo-cell figcaption { text-align: center; font-size: 8px; color: #555; margin-top: 3px; }
+      .photo-skipped { font-size: 8px; color: #888; margin-top: 6px; }
       .plan-ipr { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 9.5px; }
       .plan-ipr th { background: #111; color: #fff; padding: 4px 8px; text-align: left; font-size: 8.5px; letter-spacing: .08em; text-transform: uppercase; }
       .plan-ipr td { border-bottom: 1px solid #ddd; padding: 4px 8px; }
@@ -504,6 +563,8 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       <div class="box">${manufacturingRows}</div>
     </div>
 
+    ${this.renderClinicalPhotosSection(photoFiles)}
+
     ${this.renderApprovedPlanSection(approvedPlan)}
 
     ${filesTable}
@@ -514,6 +575,85 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
     </div>
   </body>
 </html>`;
+  }
+
+  // ─── Clinical photos ───────────────────────────────────────────
+
+  /**
+   * The uploaded clinical photos, embedded as actual images — the sheet
+   * is meant to travel with the order, so the lab must SEE the case, not
+   * read a filename list. Three rules keep the PDF sane:
+   *
+   *   • the compressed `md` variant is preferred, then `thumb`, then the
+   *     original — but an original heavier than 2 MB is listed by name
+   *     instead of embedded, so one phone photo can't balloon the file;
+   *   • labels reuse the ZIP's mirrored RIGHT/LEFT swap, so the folder a
+   *     lab tech opens and the caption they read never disagree;
+   *   • the panoramic X-ray spans the full width; intraoral photos flow
+   *     three to a row.
+   */
+  private renderClinicalPhotosSection(files: SheetPhotoFile[]): string {
+    if (!files.length) return '';
+    const esc = this.escapeHtml.bind(this);
+    const MAX_ORIGINAL_BYTES = 2 * 1024 * 1024;
+
+    const pickPath = (f: SheetPhotoFile): string | null => {
+      const variants = (f.variants ?? {}) as Record<
+        string,
+        { path?: string } | undefined
+      >;
+      for (const name of ['md', 'thumb']) {
+        const p = variants[name]?.path;
+        if (p) return p;
+      }
+      // Original only when it is an image and not oversized.
+      if (!/^image\//.test(f.mimeType)) return null;
+      try {
+        const normalized = f.relativePath.replace(/^[/\\]+/, '');
+        const abs = path.resolve(UPLOAD_ROOT, normalized);
+        if (!abs.startsWith(path.resolve(UPLOAD_ROOT))) return null;
+        const stat = fs.statSync(abs);
+        if (stat.size > MAX_ORIGINAL_BYTES) return null;
+      } catch {
+        return null;
+      }
+      return f.relativePath;
+    };
+
+    // Group by category so multiple shots of one view stay together and
+    // get numbered captions.
+    const counts = new Map<string, number>();
+    const cells: string[] = [];
+    const skipped: string[] = [];
+    for (const f of files) {
+      const src = this.resolveImageDataUrl(pickPath(f));
+      const n = (counts.get(f.category) ?? 0) + 1;
+      counts.set(f.category, n);
+      const base = PHOTO_LABELS[f.category] ?? f.category;
+      const label = n > 1 ? `${base} (${n})` : base;
+      if (!src) {
+        skipped.push(`${label} — ${f.originalName ?? f.relativePath}`);
+        continue;
+      }
+      const wide = f.category === 'orthopantomography';
+      cells.push(`<figure class="photo-cell${wide ? ' wide' : ''}">
+        <img src="${src}" alt="" />
+        <figcaption>${esc(label)}</figcaption>
+      </figure>`);
+    }
+    if (!cells.length && !skipped.length) return '';
+
+    const skippedNote = skipped.length
+      ? `<div class="photo-skipped">Non intégrées (fichier lourd ou illisible) · Not embedded: ${esc(
+          skipped.join(' ; '),
+        )}</div>`
+      : '';
+
+    return `<div class="section">
+      <h2 class="section-title">Photos cliniques · Clinical photos</h2>
+      <div class="photo-grid">${cells.join('')}</div>
+      ${skippedNote}
+    </div>`;
   }
 
   // ─── Approved treatment plan ───────────────────────────────────

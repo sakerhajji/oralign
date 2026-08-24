@@ -73,6 +73,13 @@ fs.writeFileSync('/app/uploads/orders/$ORDER_ID/x/cote-gauche.png',png(40,160,60
 fs.writeFileSync('/app/uploads/orders/$ORDER_ID/x/pano.png',png(40,80,200));
 fs.writeFileSync('/app/uploads/orders/$ORDER_ID/x/lourde.png',Buffer.concat([png(120,120,120),Buffer.alloc(3*1024*1024)]));
 fs.writeFileSync('/app/uploads/orders/$ORDER_ID/x/scan-cbct.zip',Buffer.from('DICOMZIP'));
+// Un STL binaire minimal (cube 12 triangles) pour l'apercu 3D.
+const tris=[];const q=[[0,0,0],[1,0,0],[1,1,0],[0,1,0],[0,0,1],[1,0,1],[1,1,1],[0,1,1]];
+const faces=[[0,1,2,3],[4,7,6,5],[0,4,5,1],[1,5,6,2],[2,6,7,3],[3,7,4,0]];
+for(const f of faces){tris.push([q[f[0]],q[f[1]],q[f[2]]]);tris.push([q[f[0]],q[f[2]],q[f[3]]]);}
+const stl=Buffer.alloc(84+tris.length*50);stl.writeUInt32LE(tris.length,80);
+tris.forEach((t,i)=>{const o=84+i*50+12;for(let v=0;v<3;v++)for(let c=0;c<3;c++)stl.writeFloatLE(t[v][c]*20,o+(v*3+c)*4);});
+fs.writeFileSync('/app/uploads/orders/$ORDER_ID/x/arcade.stl',stl);
 console.log('fichiers seed ecrits');" 2>&1 | tr -d '\r' | tail -1
 mkfile() { # category originalName relName mime
   db1 "INSERT INTO \"OrderFile\" (id,\"orderId\",category,\"originalName\",\"fileName\",\"relativePath\",\"mimeType\",size,\"createdAt\") VALUES (gen_random_uuid(),'$ORDER_ID','$1','$2','$2','orders/$ORDER_ID/x/$3','${4:-application/octet-stream}',6,NOW()) RETURNING id;"
@@ -82,7 +89,8 @@ F_LEFT=$(mkfile left_photo photo-gauche.png cote-gauche.png image/png)
 F_PANO=$(mkfile orthopantomography panoramique.png pano.png image/png)
 F_HEAVY=$(mkfile front_photo enorme-photo.png lourde.png image/png)
 F_OTHER=$(mkfile other cbct-dicom.zip scan-cbct.zip)
-ok "5 fichiers: right/left/pano/front(3Mo)/other"
+F_STL=$(mkfile stl arcade-sup.stl arcade.stl model/stl)
+ok "6 fichiers: right/left/pano/front(3Mo)/other/stl"
 
 # Deux petites images PNG (1x1) pour les tableaux du plan.
 docker compose -p oralign-app exec -T backend node -e "
@@ -97,7 +105,7 @@ console.log('png ecrits');" 2>&1 | tr -d '\r' | tail -1
 # (celui qui ne doit PAS figurer).
 PLAN_ID=$(db1 "INSERT INTO \"TreatmentPlan\" (id,\"orderId\",version,name,status,\"totalUpperAligners\",\"totalLowerAligners\",\"createdByName\",\"approvedAt\",\"movementTableImagePath\",\"dentalTreatmentTableImagePath\",\"createdAt\",\"updatedAt\") VALUES (gen_random_uuid(),'$ORDER_ID',1,'TEST_LZIP_PLAN_APPROUVE','approved',32,30,'TEST_LZIP_DESIGNER',NOW(),'treatment-plans/TEST_LZIP/movement.png','treatment-plans/TEST_LZIP/dental.png',NOW(),NOW()) RETURNING id;")
 DRAFT_PLAN=$(db1 "INSERT INTO \"TreatmentPlan\" (id,\"orderId\",version,name,status,\"createdAt\",\"updatedAt\") VALUES (gen_random_uuid(),'$ORDER_ID',2,'TEST_LZIP_PLAN_BROUILLON','pending',NOW(),NOW()) RETURNING id;")
-IPR1=$(db1 "INSERT INTO \"TreatmentPlanIpr\" (id,\"treatmentPlanId\",\"fromTooth\",\"toTooth\",value,note,\"createdAt\",\"updatedAt\") VALUES (gen_random_uuid(),'$PLAN_ID',11,21,'0.20','contact median','$(date -u +%Y-%m-%dT%H:%M:%SZ)',NOW()) RETURNING id;")
+IPR1=$(db1 "INSERT INTO \"TreatmentPlanIpr\" (id,\"treatmentPlanId\",\"fromTooth\",\"toTooth\",value,note,\"createdAt\",\"updatedAt\") VALUES (gen_random_uuid(),'$PLAN_ID',11,21,'0.20','3','$(date -u +%Y-%m-%dT%H:%M:%SZ)',NOW()) RETURNING id;")
 IPR2=$(db1 "INSERT INTO \"TreatmentPlanIpr\" (id,\"treatmentPlanId\",\"fromTooth\",\"toTooth\",value,\"createdAt\",\"updatedAt\") VALUES (gen_random_uuid(),'$PLAN_ID',41,31,'0.15',NOW(),NOW()) RETURNING id;")
 ok "plan approuve (32/30 aligneurs, 2 IPR) + brouillon v2"
 
@@ -156,9 +164,9 @@ if [ -s "$SHEET" ]; then
   grep -q "TEST_LZIP_PLAN_BROUILLON" "$T" && bad "le BROUILLON figure sur la fiche (interdit)" || ok "le brouillon v2 n'apparait pas"
   grep -qE "32" "$T" && ok "aligneurs maxillaire: 32" || bad "compteur 32 absent"
   grep -qE "30" "$T" && ok "aligneurs mandibule: 30" || bad "compteur 30 absent"
-  grep -qE "11.*21" "$T" && ok "IPR 11 -> 21 imprime" || bad "IPR 11->21 absent"
-  grep -q "0.20" "$T" && ok "valeur IPR 0.20 mm imprimee" || bad "valeur IPR absente"
-  grep -q "contact median" "$T" && ok "note IPR imprimee" || bad "note IPR absente"
+  tr -d ' ' < "$T" | grep -qi "IPR&" && ok "odontogramme 'IPR & etapes' present" || bad "odontogramme IPR absent"
+  grep -q "0.20" "$T" && ok "valeur IPR 0.20 mm sur l'odontogramme" || bad "valeur 0.20 absente"
+  grep -q "0.15" "$T" && ok "valeur IPR 0.15 mm sur l'odontogramme" || bad "valeur 0.15 absente"
   grep -qi "Tableau des mouvements" "$T" && ok "bloc image 'Tableau des mouvements' present" || bad "bloc mouvements absent"
   grep -q "TEST_LZIP_DESIGNER" "$T" && ok "concepteur du plan imprime" || bad "concepteur absent"
 else
@@ -176,9 +184,11 @@ if [ -s "$SHEET" ]; then
   grep -qi "panoramique" "$T" && ok "legende radio panoramique presente" || bad "legende pano absente"
   # L'original de 3 Mo n'est PAS integre: liste par son nom a la place.
   grep -q "enorme-photo.png" "$T" && ok "photo de 3 Mo listee mais non integree (plafond)" || bad "plafond 2 Mo non applique"
+  # L'apercu du scan 3D est integre en tete de la grille.
+  grep -qi "Scan 3D" "$T" && ok "apercu 'Scan 3D' present dans la grille" || bad "apercu STL absent"
   # Le PDF contient bien des images embarquees (data URIs -> objets image).
   IMGS=$(strings "$SHEET" 2>/dev/null | grep -c "/Subtype */Image" || true)
-  [ "${IMGS:-0}" -ge 3 ] && ok "au moins 3 images embarquees dans le PDF ($IMGS)" || bad "images embarquees: $IMGS (attendu >= 3)"
+  [ "${IMGS:-0}" -ge 4 ] && ok "au moins 4 images embarquees dans le PDF ($IMGS)" || bad "images embarquees: $IMGS (attendu >= 4)"
 else
   bad "fiche absente pour l'etape photos"
 fi
@@ -234,7 +244,7 @@ echo
 echo "== Nettoyage =="
 $DB -c "DELETE FROM \"TreatmentPlanIpr\" WHERE id IN ('$IPR1','$IPR2');" >/dev/null 2>&1
 $DB -c "DELETE FROM \"TreatmentPlan\" WHERE id IN ('$PLAN_ID','$DRAFT_PLAN');" >/dev/null 2>&1
-$DB -c "DELETE FROM \"OrderFile\" WHERE id IN ('$F_RIGHT','$F_LEFT','$F_PANO','$F_HEAVY','$F_OTHER');" >/dev/null 2>&1
+$DB -c "DELETE FROM \"OrderFile\" WHERE id IN ('$F_RIGHT','$F_LEFT','$F_PANO','$F_HEAVY','$F_OTHER','$F_STL');" >/dev/null 2>&1
 $DB -c "DELETE FROM \"DentalOrder\" WHERE id IN ('$ORDER_ID','$ORDER2');" >/dev/null 2>&1
 $DB -c "DELETE FROM \"Patient\" WHERE id='$PATIENT_ID';" >/dev/null 2>&1
 $DB -c "DELETE FROM \"User\" WHERE id IN ('$ADMIN_ID','$DOCTOR_ID','$STRANGER_ID');" >/dev/null 2>&1

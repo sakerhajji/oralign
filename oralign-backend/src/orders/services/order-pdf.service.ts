@@ -5,6 +5,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { OrderFileCategory, ToothInstructionType, TreatmentPlanStatus, type TreatmentPlan, type TreatmentPlanIpr } from '@prisma/client';
+import { renderStlPreviewPng } from './stl-preview';
 import * as fs from 'fs';
 import * as path from 'path';
 import puppeteer, { Browser } from 'puppeteer-core';
@@ -100,6 +101,23 @@ interface SheetPhotoFile {
   mimeType: string;
   originalName: string | null;
   variants: unknown;
+}
+
+// Crown outlines by FDI tooth type, occlusal edge at the TOP of the
+// 24×36 viewBox. Shared by the order odontogram and the treatment-plan
+// IPR odontogram so the two figures speak one visual language.
+const CROWN_PATHS: Record<'incisor' | 'canine' | 'premolar' | 'molar', string> = {
+  incisor: 'M7 4 L17 4 Q18 4 18 6 L18 25 Q18 33 12 33 Q6 33 6 25 L6 6 Q6 4 7 4 Z',
+  canine: 'M12 3 Q13 3 14 5 L19 12 Q19.5 13 19.5 15 L19.5 25 Q19.5 33 12 33 Q4.5 33 4.5 25 L4.5 15 Q4.5 13 5 12 L10 5 Q11 3 12 3 Z',
+  premolar: 'M8 6 Q10 3.5 12 6 Q14 3.5 16 6 Q19 7 19 11 L19 25 Q19 33 12 33 Q5 33 5 25 L5 11 Q5 7 8 6 Z',
+  molar: 'M6 6.5 Q8 3.5 10 6 Q12 4 14 6 Q16 3.5 18 6.5 Q21 8 21 12 L21 26 Q21 33 12 33 Q3 33 3 26 L3 12 Q3 8 6 6.5 Z',
+};
+
+function crownPathFor(toothNumber: number): string {
+  const digit = toothNumber % 10;
+  const kind =
+    digit <= 2 ? 'incisor' : digit === 3 ? 'canine' : digit <= 5 ? 'premolar' : 'molar';
+  return CROWN_PATHS[kind];
 }
 
 // FDI display order — patient's right on the reader's left, the
@@ -308,9 +326,47 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
         variants: true,
       },
     });
+    // 3D scans get a server-rendered preview so the sheet SHOWS the case
+    // geometry instead of naming an .stl file. Capped at 4 — a sheet is a
+    // summary, and each preview is a full mesh rasterisation.
+    const stlFiles = await this.prisma.orderFile.findMany({
+      where: {
+        orderId: dto.id,
+        deletedAt: null,
+        category: OrderFileCategory.stl,
+      },
+      orderBy: { orderIndex: 'asc' },
+      take: 4,
+      select: { relativePath: true, originalName: true },
+    });
+    const scanPreviews: { label: string; dataUrl: string }[] = [];
+    for (const scan of stlFiles) {
+      try {
+        const abs = path.resolve(
+          UPLOAD_ROOT,
+          scan.relativePath.replace(/^[/\\]+/, ''),
+        );
+        if (!abs.startsWith(path.resolve(UPLOAD_ROOT))) continue;
+        const png = await renderStlPreviewPng(abs);
+        if (png) {
+          scanPreviews.push({
+            label: scan.originalName ?? 'Scan 3D',
+            dataUrl: `data:image/png;base64,${png.toString('base64')}`,
+          });
+        }
+      } catch {
+        // Preview is garnish — the scan stays listed in the files table.
+      }
+    }
     const logo = this.resolveImageDataUrl(settings?.companyLogoPath ?? null);
     const brandName = (settings?.companyName ?? 'ORALIGN').trim() || 'ORALIGN';
-    const html = this.renderHtml(dto, { logo, brandName }, approvedPlan, photoFiles);
+    const html = this.renderHtml(
+      dto,
+      { logo, brandName },
+      approvedPlan,
+      photoFiles,
+      scanPreviews,
+    );
     return this.renderHtmlToBuffer(html);
   }
 
@@ -323,6 +379,7 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       | (TreatmentPlan & { iprEntries: TreatmentPlanIpr[] })
       | null = null,
     photoFiles: SheetPhotoFile[] = [],
+    scanPreviews: { label: string; dataUrl: string }[] = [],
   ): string {
     const esc = this.escapeHtml.bind(this);
     const statusLabel = STATUS_FR[dto.status] ?? dto.status;
@@ -436,11 +493,23 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       }
       .section { margin-top: 12px; }
       .photo-grid { display: flex; flex-wrap: wrap; gap: 8px; }
-      .photo-cell { break-inside: avoid; page-break-inside: avoid; margin: 0; width: calc(33.33% - 6px); }
-      .photo-cell.wide { width: 100%; }
-      .photo-cell img { width: 100%; height: auto; border: 1px solid #e2e4e8; border-radius: 8px; display: block; }
-      .photo-cell figcaption { text-align: center; font-size: 8px; color: #555; margin-top: 3px; }
+      /* Uniform squares: four per row, every cell identical. cover crops
+         mixed portrait/landscape uploads instead of distorting them. */
+      .photo-cell { break-inside: avoid; page-break-inside: avoid; margin: 0; width: calc(25% - 6px); }
+      .photo-cell img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border: 1px solid #e2e4e8; border-radius: 8px; display: block; background: #f5f4f0; }
+      .photo-cell.scan img { object-fit: contain; background: #23252d; border-color: #1a1c22; }
+      .photo-cell figcaption { text-align: center; font-size: 7.5px; color: #555; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .photo-skipped { font-size: 8px; color: #888; margin-top: 6px; }
+      .plan-odo { border: 1px solid #e2e4e8; border-radius: 10px; padding: 8px 10px 6px; margin-top: 8px; break-inside: avoid; page-break-inside: avoid; }
+      .plan-odo-title { font-weight: 700; font-size: 9.5px; margin-bottom: 2px; }
+      .plan-odo-hint { font-weight: 400; color: #888; font-size: 8px; margin-left: 6px; }
+      .plan-odo-svg { width: 100%; height: auto; display: block; }
+      .plan-odo-svg .odo-num { font-size: 8px; fill: #555; text-anchor: middle; font-family: inherit; }
+      .plan-odo-svg .ipr-line { stroke: #d97706; stroke-width: 1.6; stroke-dasharray: 3 2; }
+      .plan-odo-svg .ipr-value { font-size: 8.5px; font-weight: 700; fill: #b45309; text-anchor: middle; }
+      .plan-odo-svg .ipr-step-bg { fill: #eef2ff; stroke: #6366f1; stroke-width: 0.8; }
+      .plan-odo-svg .ipr-step { font-size: 7px; font-weight: 700; fill: #4338ca; text-anchor: middle; }
+      .plan-odo-svg .odo-mid { stroke: #d4d7dd; stroke-width: 1; stroke-dasharray: 5 4; }
       .plan-ipr { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 9.5px; }
       .plan-ipr th { background: #111; color: #fff; padding: 4px 8px; text-align: left; font-size: 8.5px; letter-spacing: .08em; text-transform: uppercase; }
       .plan-ipr td { border-bottom: 1px solid #ddd; padding: 4px 8px; }
@@ -563,7 +632,7 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       <div class="box">${manufacturingRows}</div>
     </div>
 
-    ${this.renderClinicalPhotosSection(photoFiles)}
+    ${this.renderClinicalPhotosSection(photoFiles, scanPreviews)}
 
     ${this.renderApprovedPlanSection(approvedPlan)}
 
@@ -592,8 +661,11 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
    *   • the panoramic X-ray spans the full width; intraoral photos flow
    *     three to a row.
    */
-  private renderClinicalPhotosSection(files: SheetPhotoFile[]): string {
-    if (!files.length) return '';
+  private renderClinicalPhotosSection(
+    files: SheetPhotoFile[],
+    scanPreviews: { label: string; dataUrl: string }[] = [],
+  ): string {
+    if (!files.length && !scanPreviews.length) return '';
     const esc = this.escapeHtml.bind(this);
     const MAX_ORIGINAL_BYTES = 2 * 1024 * 1024;
 
@@ -606,25 +678,33 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
         const p = variants[name]?.path;
         if (p) return p;
       }
-      // Original only when it is an image and not oversized.
       if (!/^image\//.test(f.mimeType)) return null;
       try {
         const normalized = f.relativePath.replace(/^[/\\]+/, '');
         const abs = path.resolve(UPLOAD_ROOT, normalized);
         if (!abs.startsWith(path.resolve(UPLOAD_ROOT))) return null;
-        const stat = fs.statSync(abs);
-        if (stat.size > MAX_ORIGINAL_BYTES) return null;
+        if (fs.statSync(abs).size > MAX_ORIGINAL_BYTES) return null;
       } catch {
         return null;
       }
       return f.relativePath;
     };
 
-    // Group by category so multiple shots of one view stay together and
-    // get numbered captions.
+    // 3D scan previews FIRST — the geometry is what the lab acts on —
+    // then the clinical photos. Every cell is the same square: mixed
+    // portrait/landscape uploads previously produced a ragged staircase
+    // layout; object-fit:cover crops instead of distorting.
     const counts = new Map<string, number>();
     const cells: string[] = [];
     const skipped: string[] = [];
+
+    for (const scan of scanPreviews) {
+      cells.push(`<figure class="photo-cell scan">
+        <img src="${scan.dataUrl}" alt="" />
+        <figcaption>Scan 3D · ${esc(scan.label)}</figcaption>
+      </figure>`);
+    }
+
     for (const f of files) {
       const src = this.resolveImageDataUrl(pickPath(f));
       const n = (counts.get(f.category) ?? 0) + 1;
@@ -635,8 +715,7 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
         skipped.push(`${label} — ${f.originalName ?? f.relativePath}`);
         continue;
       }
-      const wide = f.category === 'orthopantomography';
-      cells.push(`<figure class="photo-cell${wide ? ' wide' : ''}">
+      cells.push(`<figure class="photo-cell">
         <img src="${src}" alt="" />
         <figcaption>${esc(label)}</figcaption>
       </figure>`);
@@ -650,7 +729,7 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       : '';
 
     return `<div class="section">
-      <h2 class="section-title">Photos cliniques · Clinical photos</h2>
+      <h2 class="section-title">Photos cliniques &amp; scans · Clinical photos &amp; scans</h2>
       <div class="photo-grid">${cells.join('')}</div>
       ${skippedNote}
     </div>`;
@@ -698,30 +777,11 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       )
       .join('');
 
-    // IPR: one row per interproximal contact, mm kept as the exact
-    // string the planner typed (trailing zeros are meaningful to them).
-    const ipr = plan.iprEntries.length
-      ? `<table class="plan-ipr">
-          <thead>
-            <tr>
-              <th>Contact (FDI)</th>
-              <th>IPR (mm)</th>
-              <th>Note</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${plan.iprEntries
-              .map(
-                (e) => `<tr>
-                  <td>${e.fromTooth} → ${e.toTooth}</td>
-                  <td>${esc(e.value)}</td>
-                  <td>${esc(e.note ?? '')}</td>
-                </tr>`,
-              )
-              .join('')}
-          </tbody>
-        </table>`
-      : '';
+    // IPR + STEP drawn ON the odontogram — one figure instead of a
+    // table, matching how the planner records contacts in the app and
+    // how the clinic's reference sheet presents them (X.X mm between
+    // the crowns, stage pill underneath).
+    const ipr = this.renderPlanIprOdontogram(plan.iprEntries);
 
     // The planner's own tables, embedded as full-width images — this is
     // what the reference document the clinic supplied shows on its last
@@ -749,6 +809,106 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       ${ipr}
     </div>
     ${tables ? `<div class="section">${tables}</div>` : ''}`;
+  }
+
+  // ─── Treatment-plan IPR odontogram ─────────────────────────────
+
+  /**
+   * Both arches as one SVG, with each IPR contact drawn AT its
+   * interproximal position: a marker line between the two crowns, the
+   * millimetre value beside it, and the STEP (the stage the planner
+   * recorded in `note`) as a pill. One figure carries what the previous
+   * table split across rows — and it reads like the app's own editor.
+   *
+   * Built as a single SVG rather than flex cells so the between-teeth
+   * markers are positioned exactly, print-stable, and immune to line
+   * wrapping.
+   */
+  private renderPlanIprOdontogram(entries: TreatmentPlanIpr[]): string {
+    if (!entries.length) return '';
+    const esc = this.escapeHtml.bind(this);
+
+    const CELL = 30;
+    const CROWN_W = 24;
+    const PAD_X = 14;
+    const width = PAD_X * 2 + UPPER_ROW.length * CELL;
+    const ROW_UPPER_Y = 22;
+    const ROW_LOWER_Y = 96;
+    const height = 168;
+
+    // Contact key — order-insensitive: the planner may have stored
+    // (11,21) or (21,11); both mean the same interproximal gap.
+    const byPair = new Map<string, TreatmentPlanIpr>();
+    for (const e of entries) {
+      byPair.set(
+        [Math.min(e.fromTooth, e.toTooth), Math.max(e.fromTooth, e.toTooth)].join('-'),
+        e,
+      );
+    }
+    const pairAt = (row: number[], i: number): TreatmentPlanIpr | undefined => {
+      const a = row[i];
+      const b = row[i + 1];
+      return byPair.get([Math.min(a, b), Math.max(a, b)].join('-'));
+    };
+
+    const crown = (tooth: number, x: number, y: number, flip: boolean) =>
+      `<g transform="translate(${x},${y})${flip ? ' scale(1,-1) translate(0,-36)' : ''}">
+        <path d="${crownPathFor(tooth)}" fill="${DEFAULT_TOOTH}" stroke="${DEFAULT_OUTLINE}" stroke-width="1.3" />
+      </g>`;
+
+    const parts: string[] = [];
+    const renderRow = (row: number[], y: number, upper: boolean) => {
+      row.forEach((tooth, i) => {
+        const x = PAD_X + i * CELL + (CELL - CROWN_W) / 2;
+        parts.push(crown(tooth, x, y, upper));
+        // FDI number: above the upper row, below the lower one.
+        const numY = upper ? y - 6 : y + 36 + 11;
+        parts.push(
+          `<text x="${PAD_X + i * CELL + CELL / 2}" y="${numY}" class="odo-num">${tooth}</text>`,
+        );
+      });
+      // IPR markers between adjacent crowns.
+      for (let i = 0; i < row.length - 1; i += 1) {
+        const entry = pairAt(row, i);
+        if (!entry) continue;
+        const xMid = PAD_X + (i + 1) * CELL;
+        const yTop = y + 2;
+        const yBottom = y + 34;
+        // Value on the occlusal side (between the arches); the STEP badge
+        // as a disc ON the contact line at mid-crown height — the one spot
+        // that can never collide with the FDI numbers or the mm values.
+        const valueY = upper ? yBottom + 12 : yTop - 5;
+        const stepY = y + 18;
+        parts.push(
+          `<line x1="${xMid}" y1="${yTop}" x2="${xMid}" y2="${yBottom}" class="ipr-line" />`,
+          `<text x="${xMid}" y="${valueY}" class="ipr-value">${esc(entry.value)}</text>`,
+        );
+        const step = entry.note?.trim();
+        if (step) {
+          const label = step.length > 3 ? step.slice(0, 3) : step;
+          parts.push(
+            `<g transform="translate(${xMid},${stepY})">
+              <circle r="6.5" class="ipr-step-bg" />
+              <text x="0" y="2.3" class="ipr-step">${esc(label)}</text>
+            </g>`,
+          );
+        }
+      }
+    };
+
+    renderRow(UPPER_ROW, ROW_UPPER_Y, true);
+    renderRow(LOWER_ROW, ROW_LOWER_Y, false);
+
+    // Midline between the arches, as on every dental chart.
+    const midY = (ROW_UPPER_Y + 36 + ROW_LOWER_Y) / 2;
+    parts.push(
+      `<line x1="${PAD_X}" y1="${midY}" x2="${width - PAD_X}" y2="${midY}" class="odo-mid" />`,
+    );
+
+    return `<div class="plan-odo">
+      <div class="plan-odo-title">IPR &amp; étapes · IPR &amp; steps <span class="plan-odo-hint">valeurs en mm · values in mm</span></div>
+      <svg viewBox="0 0 ${width} ${height}" class="plan-odo-svg" role="img">${parts.join('')}</svg>
+    </div>`;
   }
 
   // ─── Odontogram rendering ──────────────────────────────────────
@@ -859,17 +1019,7 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
     marks: MarkStyle[],
     rowClass: 'upper' | 'lower',
   ): string {
-    // Crown outlines, occlusal edge at the TOP of the 24×36 viewBox.
-    const CROWNS: Record<'incisor' | 'canine' | 'premolar' | 'molar', string> = {
-      incisor: 'M7 4 L17 4 Q18 4 18 6 L18 25 Q18 33 12 33 Q6 33 6 25 L6 6 Q6 4 7 4 Z',
-      canine: 'M12 3 Q13 3 14 5 L19 12 Q19.5 13 19.5 15 L19.5 25 Q19.5 33 12 33 Q4.5 33 4.5 25 L4.5 15 Q4.5 13 5 12 L10 5 Q11 3 12 3 Z',
-      premolar: 'M8 6 Q10 3.5 12 6 Q14 3.5 16 6 Q19 7 19 11 L19 25 Q19 33 12 33 Q5 33 5 25 L5 11 Q5 7 8 6 Z',
-      molar: 'M6 6.5 Q8 3.5 10 6 Q12 4 14 6 Q16 3.5 18 6.5 Q21 8 21 12 L21 26 Q21 33 12 33 Q3 33 3 26 L3 12 Q3 8 6 6.5 Z',
-    };
-    const digit = toothNumber % 10;
-    const kind =
-      digit <= 2 ? 'incisor' : digit === 3 ? 'canine' : digit <= 5 ? 'premolar' : 'molar';
-    const d = CROWNS[kind];
+    const d = crownPathFor(toothNumber);
     const clipId = `odo-clip-${toothNumber}`;
 
     // Fill: neutral ivory when unmarked; the instruction colour(s) when

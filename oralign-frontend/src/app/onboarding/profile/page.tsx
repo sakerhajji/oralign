@@ -5,7 +5,11 @@ import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { OnboardingShell } from '@/components/onboarding/onboarding-shell';
 import { ProfileForm } from '@/components/account/profile-form';
-import { useAccountData, useOnboardingStatus } from '@/lib/hooks';
+import {
+  nextOnboardingPath,
+  useAccountData,
+  useOnboardingStatus,
+} from '@/lib/hooks';
 import { useT } from '@/lib/i18n/lang-context';
 
 export default function OnboardingProfilePage() {
@@ -16,10 +20,15 @@ export default function OnboardingProfilePage() {
 
   useEffect(() => {
     if (isLoading || !user) return;
-    if (!status.emailVerified) {
-      router.replace('/auth/verify-email');
+    const next = nextOnboardingPath(status);
+
+    // A completed dentist can still reach this URL from browser history or a
+    // stale bookmark. Keep the onboarding routes self-healing and return the
+    // user to their dashboard instead of showing a redundant profile form.
+    if (next !== '/onboarding/profile') {
+      router.replace(next ?? '/dashboard');
     }
-  }, [isLoading, user, status.emailVerified, router]);
+  }, [isLoading, user, status, router]);
 
   const handleSaved = () => {
     if (status.isDentist) {

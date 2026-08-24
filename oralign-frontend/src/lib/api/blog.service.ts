@@ -1,4 +1,5 @@
 import apiClient from './client';
+export { resolveBlogMediaUrl } from '@/lib/blog-media';
 import { BlogAudience } from '@/lib/types';
 import type {
   Blog,
@@ -55,26 +56,6 @@ export function blogShowcaseUrl(
   slug: string,
 ): string {
   return `/blog/${encodeURIComponent(slug)}`;
-}
-
-/**
- * Turn a backend-stored `/uploads/blog/<file>` (or any other relative
- * `/uploads/...` path the blog DTOs return) into an absolute URL the
- * browser can load directly. Already-absolute http(s) URLs pass
- * through unchanged.
- *
- * Mirrors `resolveSliderMediaUrl`: strip the `/api` suffix off
- * `NEXT_PUBLIC_API_URL` to get the file-serving origin, then prefix.
- *
- * NOTE: API-origin images served this way are NOT run through the
- * Next.js image optimizer — render them with next/image `unoptimized`.
- */
-export function resolveBlogMediaUrl(path: string | null): string | null {
-  if (!path) return null;
-  if (/^https?:\/\//i.test(path)) return path;
-  const base = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000/api';
-  const apiOrigin = base.replace(/\/api\/?$/, '');
-  return `${apiOrigin}${path.startsWith('/') ? '' : '/'}${path}`;
 }
 
 export const blogService = {

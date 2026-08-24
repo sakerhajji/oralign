@@ -21,6 +21,17 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+/**
+ * `/auth/sign-in` intentionally returns a compact session payload. It does
+ * not contain the dentist profile or working hours used by the onboarding
+ * guard, whereas `/users/me` always does. Do not mark a compact response as
+ * the current-user cache entry or the guard can briefly mistake a completed
+ * dentist profile for an empty one after login.
+ */
+function isCurrentUserSnapshot(user: User): boolean {
+  return Object.prototype.hasOwnProperty.call(user, 'dentistProfile');
+}
+
 interface AuthProviderProps {
   children: React.ReactNode;
   initialUser?: User | null;
@@ -82,10 +93,24 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
 
   const isDentist = useMemo(() => user?.role === UserRole.DENTIST, [user]);
 
-  /** Seed the cache with the user object the sign-in / profile call returned. */
+  /**
+   * Start a session from an auth or profile response.
+   *
+   * Profile endpoints return the full `/users/me` shape and can safely seed
+   * the cache. Auth endpoints return only identity/token fields, so we clear
+   * any old snapshot and let the enabled current-user query hydrate the full
+   * account before onboarding access is evaluated.
+   */
   const login = useCallback(
     (userData: User) => {
-      queryClient.setQueryData<User>(userKeys.currentUser(), userData);
+      if (isCurrentUserSnapshot(userData)) {
+        queryClient.setQueryData<User>(userKeys.currentUser(), userData);
+      } else {
+        queryClient.removeQueries({
+          queryKey: userKeys.currentUser(),
+          exact: true,
+        });
+      }
       setHasSession(true);
     },
     [queryClient],

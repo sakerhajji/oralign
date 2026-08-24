@@ -685,6 +685,37 @@ export class OrderController {
    * archive can be large enough that the anti-abuse bucket would be a
    * false positive.
    */
+  @Get(':id/sheet')
+  @Roles(UserRole.dentist, UserRole.admin, UserRole.super_admin, UserRole.designer)
+  @SkipThrottle()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      "Telecharger la fiche de commande seule (PDF) — donnees de la commande + plan de traitement approuve. Le dentiste proprietaire y a acces; les commandes d'autrui restent en 403.",
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiQuery({ name: 'lang', required: false, enum: ['fr', 'en'] })
+  async downloadOrderSheet(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @Res() response: Response,
+    @Query('lang') lang?: string,
+  ): Promise<void> {
+    const { buffer, fileName, mimeType } =
+      await this.orderExport.renderOrderSheetPdf(
+        id,
+        { userId: user.sub, role: user.role },
+        lang === 'en' ? 'en' : 'fr',
+      );
+    response.setHeader('Content-Type', mimeType);
+    response.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${fileName.replace(/[^\x20-\x7E]+/g, '_')}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+    );
+    response.setHeader('Content-Length', buffer.length.toString());
+    response.status(HttpStatus.OK).end(buffer);
+  }
+
   @Get(':id/download-all')
   @Roles(UserRole.admin, UserRole.super_admin, UserRole.designer)
   @SkipThrottle()

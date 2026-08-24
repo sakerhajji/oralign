@@ -173,6 +173,30 @@ export class OrderExportService {
    * a logged warning rather than aborting the whole archive — a half-
    * migrated order should still yield a usable zip of what survives.
    */
+  /**
+   * The order sheet ALONE, as a direct PDF download — the same document
+   * the lab ZIP embeds, for the "Fiche commande" button on the order
+   * page. Unlike the ZIP (planner-only, it carries every clinical file),
+   * the sheet is the doctor's own data plus the plan THEY approved, so
+   * the owning dentist may download it too; findAccessibleOrder already
+   * refuses anyone else's order with a 403.
+   */
+  async renderOrderSheetPdf(
+    orderId: string,
+    caller: Caller,
+    language: LabZipLanguage = 'fr',
+  ): Promise<{ buffer: Buffer; fileName: string; mimeType: string }> {
+    const order = await this.orders.findAccessibleOrder(orderId, caller);
+    const dto = mapOrderToDto(order);
+    const buffer = await this.orderPdf.renderOrderSheet(dto);
+    const safeCode = (dto.orderCode || orderId).replace(/[^\w.-]+/g, '_');
+    return {
+      buffer,
+      fileName: SHEET_NAMES[language](safeCode),
+      mimeType: 'application/pdf',
+    };
+  }
+
   async downloadAllAsZip(
     orderId: string,
     caller: Caller,

@@ -46,6 +46,12 @@ AT=$(curl -sS -X POST "$API/auth/sign-in" -H 'Content-Type: application/json' \
   -d "{\"email\":\"test_lzip_admin_${STAMP}@oralign.test\",\"password\":\"$PW\"}" | jget 'o.authToken && o.authToken.accessToken')
 [ -n "$AT" ] && ok "admin connecte" || { bad "login"; exit 1; }
 
+STRANGER_ID=$(db1 "INSERT INTO \"User\" (id,\"fullName\",email,\"passwordHash\",role,\"isActive\",\"isEmailVerified\",\"verificationStatus\",\"createdAt\",\"updatedAt\") VALUES (gen_random_uuid(),'TEST_LZIP_STRANGER','test_lzip_stranger_${STAMP}@oralign.test','$HASH','dentist',true,true,'approved',NOW(),NOW()) RETURNING id;")
+DT=$(curl -sS -X POST "$API/auth/sign-in" -H 'Content-Type: application/json' -d "{\"email\":\"test_lzip_doc_${STAMP}@oralign.test\",\"password\":\"$PW\"}" | jget 'o.authToken && o.authToken.accessToken')
+ST=$(curl -sS -X POST "$API/auth/sign-in" -H 'Content-Type: application/json' -d "{\"email\":\"test_lzip_stranger_${STAMP}@oralign.test\",\"password\":\"$PW\"}" | jget 'o.authToken && o.authToken.accessToken')
+[ -n "$DT" ] && ok "dentiste proprietaire connecte" || bad "login dentiste"
+[ -n "$ST" ] && ok "dentiste etranger connecte" || bad "login etranger"
+
 PATIENT_ID=$(db1 "INSERT INTO \"Patient\" (id,\"fullName\",\"doctorId\",\"createdAt\",\"updatedAt\") VALUES (gen_random_uuid(),'TEST_LZIP_PATIENT','$DOCTOR_ID',NOW(),NOW()) RETURNING id;")
 ORDER_ID=$(db1 "INSERT INTO \"DentalOrder\" (id,\"orderCode\",\"doctorId\",\"patientId\",status,\"createdAt\",\"updatedAt\") VALUES (gen_random_uuid(),'TEST_LZIP_${STAMP}','$DOCTOR_ID','$PATIENT_ID','submitted',NOW(),NOW()) RETURNING id;")
 ok "commande=$ORDER_ID"
@@ -160,6 +166,35 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────
+step "6. Route directe /sheet: fiche seule, dentiste proprietaire inclus"
+
+# Le dentiste PROPRIETAIRE telecharge sa fiche (contrairement au ZIP labo).
+S=$(curl -sS -o "$WORK/sheet-doc.pdf" -w '%{http_code}' "$API/orders/$ORDER_ID/sheet?lang=fr" -H "Authorization: Bearer $DT")
+MAGIC=$(head -c 4 "$WORK/sheet-doc.pdf")
+{ [ "$S" = "200" ] && [ "$MAGIC" = "%PDF" ]; } && ok "dentiste proprietaire -> 200 (PDF)" || bad "sheet dentiste -> $S $MAGIC"
+
+# Un dentiste ETRANGER est refuse (pas de fuite d'existence: 403/404).
+S=$(curl -sS -o /dev/null -w '%{http_code}' "$API/orders/$ORDER_ID/sheet" -H "Authorization: Bearer $ST")
+{ [ "$S" = "403" ] || [ "$S" = "404" ]; } && ok "dentiste etranger -> $S" || bad "etranger -> $S (attendu 403/404)"
+
+# Le ZIP complet, lui, reste interdit au dentiste (planner-only).
+S=$(curl -sS -o /dev/null -w '%{http_code}' "$API/orders/$ORDER_ID/download-all" -H "Authorization: Bearer $DT")
+[ "$S" = "403" ] && ok "le ZIP labo reste interdit au dentiste (403)" || bad "zip dentiste -> $S"
+
+# La fiche directe porte bien le plan approuve.
+pdftotext -layout "$WORK/sheet-doc.pdf" "$WORK/sheet-doc.txt" 2>/dev/null
+grep -q "TEST_LZIP_PLAN_APPROUVE" "$WORK/sheet-doc.txt" && ok "la fiche directe porte le plan approuve" || bad "plan absent de la fiche directe"
+
+# L'odontogramme vectoriel a remplace le sprite de 2 Mo: la fiche doit
+# etre LEGERE (le sprite seul pesait ~2 Mo une fois inline).
+SIZE=$(wc -c < "$WORK/sheet-doc.pdf")
+[ "$SIZE" -lt 1500000 ] && ok "fiche legere: $SIZE octets (sprite 2 Mo retire)" || bad "fiche encore lourde: $SIZE octets"
+
+# Nom de fichier localise dans Content-Disposition.
+CD=$(curl -sS -o /dev/null -D - "$API/orders/$ORDER_ID/sheet?lang=en" -H "Authorization: Bearer $AT" | grep -iE "^content-disposition:" | head -1)
+echo "$CD" | grep -q "ORDER%20SHEET" && ok "Content-Disposition anglais (ORDER SHEET)" || bad "disposition: $CD"
+
+# ─────────────────────────────────────────────────────────────────────
 echo
 echo "== Nettoyage =="
 $DB -c "DELETE FROM \"TreatmentPlanIpr\" WHERE id IN ('$IPR1','$IPR2');" >/dev/null 2>&1
@@ -167,7 +202,7 @@ $DB -c "DELETE FROM \"TreatmentPlan\" WHERE id IN ('$PLAN_ID','$DRAFT_PLAN');" >
 $DB -c "DELETE FROM \"OrderFile\" WHERE id IN ('$F_RIGHT','$F_LEFT','$F_OTHER');" >/dev/null 2>&1
 $DB -c "DELETE FROM \"DentalOrder\" WHERE id IN ('$ORDER_ID','$ORDER2');" >/dev/null 2>&1
 $DB -c "DELETE FROM \"Patient\" WHERE id='$PATIENT_ID';" >/dev/null 2>&1
-$DB -c "DELETE FROM \"User\" WHERE id IN ('$ADMIN_ID','$DOCTOR_ID');" >/dev/null 2>&1
+$DB -c "DELETE FROM \"User\" WHERE id IN ('$ADMIN_ID','$DOCTOR_ID','$STRANGER_ID');" >/dev/null 2>&1
 if [ -n "${ORDER_ID:-}" ]; then
   docker compose -p oralign-app exec -T backend sh -c "rm -rf '/app/uploads/orders/$ORDER_ID'" >/dev/null 2>&1 || true
 fi

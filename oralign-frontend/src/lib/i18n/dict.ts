@@ -853,6 +853,16 @@ export const dict = {
     editOrder: { en: 'Edit order', fr: 'Modifier la commande' } as T,
 
     // Admin / designer bulk export — one ZIP of every order file + data
+    // Fiche de commande seule (PDF) — visible aussi par le dentiste.
+    sheet: {
+      label: { en: 'Order sheet (PDF)', fr: 'Fiche commande (PDF)' } as T,
+      preparing: { en: 'Generating the sheet…', fr: 'Génération de la fiche…' } as T,
+      success: { en: 'Order sheet downloaded', fr: 'Fiche commande téléchargée' } as T,
+      error: {
+        en: 'Could not generate the order sheet.',
+        fr: 'Impossible de générer la fiche commande.',
+      } as T,
+    },
     downloadAll: {
       label: { en: 'Download all (ZIP)', fr: 'Tout télécharger (ZIP)' } as T,
       preparing: {

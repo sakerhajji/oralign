@@ -12,62 +12,6 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { OrderResponseDto } from '../dto/order.dto';
 
 const UPLOAD_ROOT = path.join(process.cwd(), 'uploads');
-const SPRITE_PATH = path.join(process.cwd(), 'assets', 'teeth-sprite.svg');
-
-// ── Odontogram geometry (mirrors the frontend odontogram-selector) ──
-// FDI display order, patient's right on the left of the sheet — the
-// same orientation the doctor sees in the wizard.
-const UPPER_ROW = [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28];
-const LOWER_ROW = [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38];
-
-// The sprite ships only the 16 right-side symbols; left-side teeth are
-// the same artwork flipped horizontally (see canonicalSpriteTooth).
-const MIRRORED = new Set<number>([
-  21, 22, 23, 24, 25, 26, 27, 28, 41, 42, 43, 44, 45, 46, 47, 48,
-]);
-
-function canonicalSpriteTooth(toothNumber: number): number {
-  if (toothNumber >= 21 && toothNumber <= 28) return toothNumber - 10;
-  if (toothNumber >= 41 && toothNumber <= 48) return toothNumber - 10;
-  return toothNumber;
-}
-
-// Copied from the frontend's auto-generated tooth-viewboxes.ts — the
-// per-symbol source viewBox (used to derive each glyph's aspect ratio).
-const TOOTH_VIEWBOXES: Readonly<Record<number, string>> = {
-  11: '-0.152 0.171 7.904 23.085',
-  12: '-0.043 0.120 7.896 24.370',
-  13: '-0.157 0.112 8.108 22.756',
-  14: '-0.182 0.280 9.429 22.588',
-  15: '-0.185 0.280 9.564 22.588',
-  16: '-0.202 0.170 13.313 22.923',
-  17: '22.564 0.626 12.835 22.589',
-  18: '-0.172 0.729 11.037 22.140',
-  21: '-0.152 0.171 7.904 23.085',
-  22: '-0.043 0.120 7.896 24.370',
-  23: '-0.157 0.112 8.108 22.756',
-  24: '-0.182 0.280 9.429 22.588',
-  25: '-0.185 0.280 9.564 22.588',
-  26: '-0.202 0.170 13.313 22.923',
-  27: '22.564 0.626 12.835 22.589',
-  28: '-0.172 0.729 11.037 22.140',
-  31: '-0.138 0.163 7.101 21.971',
-  32: '-0.138 0.218 7.155 22.008',
-  33: '-0.157 0.285 8.107 22.991',
-  34: '-0.182 0.285 9.428 22.991',
-  35: '-0.185 0.114 9.620 23.162',
-  36: '-0.198 1.384 13.306 23.167',
-  37: '22.582 0.691 12.870 22.810',
-  38: '0.067 1.364 11.167 22.830',
-  41: '-0.138 0.163 7.101 21.971',
-  42: '-0.138 0.218 7.155 22.008',
-  43: '-0.157 0.285 8.107 22.991',
-  44: '-0.182 0.285 9.428 22.991',
-  45: '-0.185 0.114 9.620 23.162',
-  46: '-0.198 1.384 13.306 23.167',
-  47: '22.582 0.691 12.870 22.810',
-  48: '0.067 1.364 11.167 22.830',
-};
 
 // Same palette as the frontend odontogram (COLORS in
 // odontogram-selector.tsx) so the printed chart reads identically to
@@ -123,6 +67,11 @@ const MARK_STYLES: Record<ToothInstructionType, MarkStyle> = {
     labelEn: 'IPR (mm)',
   },
 };
+
+// FDI display order — patient's right on the reader's left, the
+// convention every dental chart (and the clinic's reference sheet) uses.
+const UPPER_ROW = [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28];
+const LOWER_ROW = [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38];
 
 const DEFAULT_TOOTH = '#f1e8d4';
 const DEFAULT_OUTLINE = '#f3eeea';
@@ -250,7 +199,6 @@ const FILE_CATEGORY_FR: Record<string, string> = {
 export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(OrderPdfService.name);
   private browserPromise: Promise<Browser> | null = null;
-  private spriteCache: string | null | undefined;
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -271,9 +219,6 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
           }`,
         );
       });
-    // Read the tooth sprite off disk once, now, rather than on the first
-    // export — it is ~2 MB and the read is otherwise inside the request.
-    this.loadSprite();
   }
 
   async onModuleDestroy(): Promise<void> {
@@ -506,7 +451,6 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
     </style>
   </head>
   <body>
-    ${this.spriteMarkup()}
     <div class="masthead">
       ${
         branding.logo
@@ -677,10 +621,9 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       marksByTooth.set(inst.toothNumber, arr);
     }
 
-    const sprite = this.spriteMarkupAvailable();
     const row = (teeth: number[], rowClass: 'upper' | 'lower') =>
       `<div class="odo-row ${rowClass}">${teeth
-        .map((n) => this.renderTooth(n, rowClass, marksByTooth.get(n) ?? [], sprite))
+        .map((n) => this.renderTooth(n, rowClass, marksByTooth.get(n) ?? []))
         .join('')}</div>`;
 
     // Legend: only the instruction types actually present on the order.
@@ -733,7 +676,6 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
     toothNumber: number,
     rowClass: 'upper' | 'lower',
     types: ToothInstructionType[],
-    spriteAvailable: boolean,
   ): string {
     const marks = types.map((tp) => MARK_STYLES[tp]);
     const first = marks[0];
@@ -751,9 +693,7 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       first && marks.length === 1 ? `&nbsp;${first.short}` : ''
     }${marks.length > 1 ? `&nbsp;×${marks.length}` : ''}</span>`;
 
-    const glyph = spriteAvailable
-      ? this.renderSpriteGlyph(toothNumber, marks, rowClass)
-      : this.renderFallbackGlyph(toothNumber, marks);
+    const glyph = this.renderVectorGlyph(toothNumber, marks, rowClass);
 
     return `<div class="odo-cell">
       ${rowClass === 'upper' ? chip : ''}
@@ -763,79 +703,60 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * One tooth as the real sprite artwork. A single mark fills the whole
-   * tooth; 2–4 marks split it into equal horizontal bands via clip-path
-   * (same treatment as the frontend's SegmentedToothGlyph).
+   * One tooth as a clean vector crown, shaped by its FDI type — incisor,
+   * canine, premolar, molar. This replaced the photographic sprite: the
+   * ~2 MB artwork rasterised muddy and distorted in print, while a
+   * stylised crown (the convention of the clinic's own reference sheet)
+   * stays crisp at any size and costs a few hundred bytes.
+   *
+   * Upper teeth point their occlusal edge DOWN (toward the opposing
+   * arch), lower teeth up — standard dental-chart orientation. One mark
+   * fills the crown with the instruction colour; several marks split it
+   * into equal horizontal bands inside a clipPath of the crown outline.
    */
-  private renderSpriteGlyph(
+  private renderVectorGlyph(
     toothNumber: number,
     marks: MarkStyle[],
     rowClass: 'upper' | 'lower',
   ): string {
-    const raw = TOOTH_VIEWBOXES[toothNumber] ?? '0 0 11 22';
-    const parts = raw.split(/\s+/);
-    const w = Number(parts[2]) || 11;
-    const h = Number(parts[3]) || 22;
-    const height = 40;
-    const width = Math.round((height * w) / h);
-    const viewBox = `0 0 ${parts[2]} ${parts[3]}`;
-    const href = `#tooth-${canonicalSpriteTooth(toothNumber)}`;
-    const flip = MIRRORED.has(toothNumber) ? 'transform:scaleX(-1);' : '';
-    // Upper teeth hang from the occlusal plane (roots up in the source
-    // artwork already, so no vertical flip needed — the sprite is drawn
-    // per-arch and the frontend renders it the same way).
-    const svgFor = (color: MarkStyle | undefined, clip?: string) =>
-      `<svg viewBox="${viewBox}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid meet" style="--tooth-color:${color?.hex ?? DEFAULT_TOOTH};--tooth-outline:${color?.outline ?? DEFAULT_OUTLINE};${flip}${clip ? `clip-path:${clip};` : ''}"><use href="${href}" xlink:href="${href}"/></svg>`;
+    // Crown outlines, occlusal edge at the TOP of the 24×36 viewBox.
+    const CROWNS: Record<'incisor' | 'canine' | 'premolar' | 'molar', string> = {
+      incisor: 'M7 4 L17 4 Q18 4 18 6 L18 25 Q18 33 12 33 Q6 33 6 25 L6 6 Q6 4 7 4 Z',
+      canine: 'M12 3 Q13 3 14 5 L19 12 Q19.5 13 19.5 15 L19.5 25 Q19.5 33 12 33 Q4.5 33 4.5 25 L4.5 15 Q4.5 13 5 12 L10 5 Q11 3 12 3 Z',
+      premolar: 'M8 6 Q10 3.5 12 6 Q14 3.5 16 6 Q19 7 19 11 L19 25 Q19 33 12 33 Q5 33 5 25 L5 11 Q5 7 8 6 Z',
+      molar: 'M6 6.5 Q8 3.5 10 6 Q12 4 14 6 Q16 3.5 18 6.5 Q21 8 21 12 L21 26 Q21 33 12 33 Q3 33 3 26 L3 12 Q3 8 6 6.5 Z',
+    };
+    const digit = toothNumber % 10;
+    const kind =
+      digit <= 2 ? 'incisor' : digit === 3 ? 'canine' : digit <= 5 ? 'premolar' : 'molar';
+    const d = CROWNS[kind];
+    const clipId = `odo-clip-${toothNumber}`;
 
-    if (marks.length <= 1) return svgFor(marks[0]);
-    // Banded fill: stack one clipped copy per mark.
-    const layers = marks
-      .map((m, i) => {
-        const top = (i / marks.length) * 100;
-        const bottom = 100 - ((i + 1) / marks.length) * 100;
-        const clip = `inset(${top.toFixed(1)}% 0 ${bottom.toFixed(1)}% 0)`;
-        return i === 0
-          ? svgFor(m, clip)
-          : `<span class="odo-band">${svgFor(m, clip)}</span>`;
-      })
-      .join('');
-    return layers;
-  }
-
-  /** Plain rounded-rect fallback when the sprite asset is missing. */
-  private renderFallbackGlyph(toothNumber: number, marks: MarkStyle[]): string {
-    void toothNumber;
-    const fill = marks[0]?.hex ?? DEFAULT_TOOTH;
-    const stroke = marks[0]?.outline ?? '#d8d2c2';
-    return `<svg viewBox="0 0 20 40" width="20" height="40"><rect x="2" y="2" width="16" height="36" rx="7" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/></svg>`;
-  }
-
-  private spriteMarkup(): string {
-    const sprite = this.loadSprite();
-    return sprite ?? '';
-  }
-
-  private spriteMarkupAvailable(): boolean {
-    return !!this.loadSprite();
-  }
-
-  private loadSprite(): string | null {
-    if (this.spriteCache !== undefined) return this.spriteCache;
-    try {
-      let content = fs.readFileSync(SPRITE_PATH, 'utf8');
-      // The file is standalone XML — strip the prolog before inlining
-      // into the HTML document.
-      content = content.replace(/^<\?xml[^>]*\?>\s*/, '');
-      this.spriteCache = content;
-    } catch (err) {
-      this.logger.warn(
-        `Tooth sprite not found at ${SPRITE_PATH} — odontogram falls back to plain glyphs: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-      this.spriteCache = null;
+    // Fill: neutral ivory when unmarked; the instruction colour(s) when
+    // marked — banded horizontally for multiple instructions.
+    let fill: string;
+    if (marks.length === 0) {
+      fill = `<path d="${d}" fill="${DEFAULT_TOOTH}" />`;
+    } else if (marks.length === 1) {
+      fill = `<path d="${d}" fill="${marks[0].hex}" fill-opacity="0.85" />`;
+    } else {
+      const bandH = 36 / marks.length;
+      fill = `<g clip-path="url(#${clipId})">${marks
+        .map(
+          (m, i) =>
+            `<rect x="0" y="${(i * bandH).toFixed(1)}" width="24" height="${bandH.toFixed(1)}" fill="${m.hex}" fill-opacity="0.85" />`,
+        )
+        .join('')}</g>`;
     }
-    return this.spriteCache;
+
+    const outline = marks[0]?.outline ?? DEFAULT_OUTLINE;
+    // Upper arch: occlusal edge faces down => flip the crown vertically.
+    const flip = rowClass === 'upper' ? ' transform="scale(1,-1) translate(0,-36)"' : '';
+
+    return `<svg viewBox="0 0 24 36" width="26" height="38" aria-hidden="true">
+      <defs><clipPath id="${clipId}"><path d="${d}" /></clipPath></defs>
+      <g${flip}>${fill}<path d="${d}" fill="none" stroke="${outline}" stroke-width="1.4" /></g>
+    </svg>`;
   }
 
   // ─── Field formatting ──────────────────────────────────────────

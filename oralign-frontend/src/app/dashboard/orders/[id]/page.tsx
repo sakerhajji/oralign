@@ -203,6 +203,32 @@ export default function OrderDetailPage() {
   // save. State guards against a double-click while a large CBCT order
   // is still streaming.
   const [downloadingZip, setDownloadingZip] = useState(false);
+  const [downloadingSheet, setDownloadingSheet] = useState(false);
+  // Fiche commande seule (PDF): donnees + plan approuve. Contrairement au
+  // ZIP labo, le dentiste proprietaire y a droit — le backend refuse les
+  // commandes d'autrui.
+  const handleDownloadSheet = async () => {
+    const current = orderQuery.data;
+    if (!current || downloadingSheet) return;
+    setDownloadingSheet(true);
+    const pendingToast = toast.loading(t('orderDetail.sheet.preparing'));
+    try {
+      const blob = await ordersService.downloadOrderSheet(current.id, lang);
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = `${lang === 'en' ? 'ORDER SHEET' : 'FICHE COMMANDE'} - ${current.orderCode}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(blobUrl);
+      toast.success(t('orderDetail.sheet.success'), { id: pendingToast });
+    } catch {
+      toast.error(t('orderDetail.sheet.error'), { id: pendingToast });
+    } finally {
+      setDownloadingSheet(false);
+    }
+  };
   const handleDownloadAllZip = async () => {
     const current = orderQuery.data;
     if (!current || downloadingZip) return;
@@ -452,6 +478,22 @@ export default function OrderDetailPage() {
           </p>
         </div>
         <div className="grid w-full grid-cols-1 gap-2 sm:w-auto sm:grid-cols-none sm:flex sm:flex-wrap sm:justify-end">
+          {/* Fiche commande (PDF) — pour TOUS les roles, y compris le
+              dentiste: c'est sa commande et le plan qu'il a approuve. */}
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleDownloadSheet}
+            disabled={downloadingSheet}
+            className="h-10 w-full justify-center sm:w-auto"
+          >
+            {downloadingSheet ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <FileText className="mr-2 h-4 w-4" />
+            )}
+            {t('orderDetail.sheet.label')}
+          </Button>
           {/* Admin / designer bulk export — pulls EVERY order file plus
               an order-data.json into a single ZIP. Hidden from doctors:
               the backend also rejects them (planner-only RBAC). */}

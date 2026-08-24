@@ -58,6 +58,7 @@ const SHEET_L10N = {
     filesCategory: 'Catégorie',
     filesFile: 'Fichier',
     filesSize: 'Taille',
+    cbctFiles: 'Fichiers CBCT / DICOM',
     scan3d: 'Scan 3D',
     notEmbedded: 'Non intégrées (fichier lourd ou illisible)',
     planPlan: 'Plan',
@@ -105,6 +106,7 @@ const SHEET_L10N = {
     filesCategory: 'Category',
     filesFile: 'File',
     filesSize: 'Size',
+    cbctFiles: 'CBCT / DICOM files',
     scan3d: '3D scan',
     notEmbedded: 'Not embedded (file too large or unreadable)',
     planPlan: 'Plan',
@@ -179,12 +181,12 @@ const MARK_STYLES: Record<ToothInstructionType, MarkStyle> = {
 
 // Photo categories embedded as IMAGES in the sheet (everything else —
 // STL/PLY/OBJ scans, CBCT bundles, PDFs — stays in the files table: a
-// mesh has no meaningful thumbnail). Folder-to-category mapping is
-// DIRECT — right means right — matching the lab ZIP folders.
+// mesh has no meaningful thumbnail). Captions use the clinical protocol's
+// requested right-side terminology while the stored category remains stable.
 // Same reading order as the ORDER-CREATION upload grid
 // (order-file-upload.tsx patientImageSlots): row 1 extraoral starts with
 // the profile (left_photo) then face at rest (image) then smile (front),
-// row 2 intraoral left/front/right, row 3 occlusal upper/lower, then the
+// row 2 intraoral protocol/front/right, row 3 occlusal upper/lower, then the
 // panoramic X-ray. Categories are shared between rows, so the per-slot
 // orderIndex (secondary sort) keeps multiple shots of one category in
 // their upload order.
@@ -201,7 +203,7 @@ const PHOTO_CATEGORIES: OrderFileCategory[] = [
 const PHOTO_LABELS: Record<SheetLanguage, Record<string, string>> = {
   fr: {
     right_photo: 'Photo dents droite',
-    left_photo: 'Photo dents gauche',
+    left_photo: 'Photo dents droite',
     front_photo: 'Photo de face',
     upper_photo: 'Arcade supérieure',
     lower_photo: 'Arcade inférieure',
@@ -210,7 +212,7 @@ const PHOTO_LABELS: Record<SheetLanguage, Record<string, string>> = {
   },
   en: {
     right_photo: 'Right teeth photo',
-    left_photo: 'Left teeth photo',
+    left_photo: 'Right teeth photo',
     front_photo: 'Front photo',
     upper_photo: 'Upper arch',
     lower_photo: 'Lower arch',
@@ -402,7 +404,7 @@ const ARCH_FR: Record<string, string> = {
 const FILE_CATEGORY_FR: Record<string, string> = {
   right_photo: 'Photo droite',
   front_photo: 'Photo de face',
-  left_photo: 'Photo gauche',
+  left_photo: 'Photo droite',
   upper_photo: 'Photo occlusale sup.',
   lower_photo: 'Photo occlusale inf.',
   pano_xray: 'Radio panoramique',
@@ -714,9 +716,9 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       }
       .section { margin-top: 12px; }
       .photo-grid { display: flex; flex-wrap: wrap; gap: 8px; }
-      /* Uniform squares: four per row, every cell identical. cover crops
+      /* Uniform squares: three per row, matching the order summary. cover crops
          mixed portrait/landscape uploads instead of distorting them. */
-      .photo-cell { break-inside: avoid; page-break-inside: avoid; margin: 0; width: calc(25% - 6px); }
+      .photo-cell { break-inside: avoid; page-break-inside: avoid; margin: 0; width: calc((100% - 16px) / 3); }
       .photo-cell img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border: 1px solid #e2e4e8; border-radius: 8px; display: block; background: #f5f4f0; }
       .photo-cell.scan img { object-fit: contain; background: #23252d; border-color: #1a1c22; }
       .photo-cell figcaption { text-align: center; font-size: 7.5px; color: #555; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1386,6 +1388,7 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
     const L = SHEET_L10N[lang];
     const files = dto.files ?? [];
     if (!files.length) return '';
+    const cbctFileCount = this.countCbctFiles(files);
     const rows = files
       .map((f) => {
         const cat =
@@ -1400,7 +1403,9 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       })
       .join('');
     return `<div class="section keep">
-      <h2 class="section-title">${L.sectionFiles} (${files.length})</h2>
+      <h2 class="section-title">${L.sectionFiles} (${files.length})${
+        cbctFileCount ? ` · ${L.cbctFiles}: ${cbctFileCount}` : ''
+      }</h2>
       <div class="box" style="padding:6px 8px">
         <table class="files">
           <thead><tr><th>${this.escapeHtml(L.filesCategory)}</th><th>${this.escapeHtml(L.filesFile)}</th><th style="text-align:right">${this.escapeHtml(L.filesSize)}</th></tr></thead>
@@ -1408,6 +1413,29 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
         </table>
       </div>
     </div>`;
+  }
+
+  /**
+   * Count CBCT/DICOM attachments for the PDF summary. A processed ZIP
+   * exposes its safe central-directory entry count, so one CBCT bundle is
+   * represented by the number of files it contains. Until processing
+   * completes, count the uploaded archive itself to avoid hiding it.
+   */
+  private countCbctFiles(files: OrderResponseDto['files']): number {
+    return files.reduce((count, file) => {
+      if (file.category === OrderFileCategory.other) return count + 1;
+      if (file.category !== OrderFileCategory.zip) return count;
+
+      const entryCount = file.mediaMetadata?.entryCount;
+      return (
+        count +
+        (typeof entryCount === 'number' &&
+        Number.isFinite(entryCount) &&
+        entryCount > 0
+          ? Math.floor(entryCount)
+          : 1)
+      );
+    }, 0);
   }
 
   // ─── Small helpers ─────────────────────────────────────────────

@@ -97,7 +97,7 @@ const categories = [
 
 // Slot order is meaningful — on a 3-column grid the rows read as:
 //   Row 1 (extraoral):  profile      | face-at-rest | smile
-//   Row 2 (intraoral):  left lateral | frontal occl | right lateral
+//   Row 2 (intraoral):  protocol lateral | frontal occl | right lateral
 //   Row 3 (occlusal):   upper occl   | lower occl
 // On 2-column screens they pair into natural left/right couples instead.
 // Each slot now carries an i18n LABEL KEY (not a raw title string) so

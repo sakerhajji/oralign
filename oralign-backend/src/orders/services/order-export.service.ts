@@ -42,6 +42,68 @@ const PRECOMPRESSED_ARCHIVE_EXTENSIONS = new Set([
   '.mp4', '.mov', '.webm', '.pdf',
 ]);
 
+/** Language of the ZIP entry names, driven by the doctor's UI language. */
+export type LabZipLanguage = 'fr' | 'en';
+
+/**
+ * Human folder names for the lab ZIP, per language. Two deliberate
+ * decisions, both requested by the clinic:
+ *
+ *   • `other` is where the CBCT DICOM bundles land (the chunked CBCT
+ *     upload stores its archives under this category), so the folder is
+ *     labelled "CBCT DICOM" — a lab tech looking for the scan should not
+ *     have to guess what "other" means.
+ *
+ *   • the RIGHT/LEFT photo labels are SWAPPED relative to the category
+ *     names: intraoral side photos are taken through a mirror, so the
+ *     file uploaded as `right_photo` actually shows the patient's LEFT
+ *     side. The upload categories keep their historical names (nothing
+ *     stored changes); only the label the lab sees is corrected.
+ *
+ * Accent-free on purpose: the ZIP spec's UTF-8 flag is honoured by
+ * modern tools, but accentless names survive even the legacy ones.
+ */
+const LAB_FOLDER_LABELS: Record<LabZipLanguage, Record<string, string>> = {
+  fr: {
+    right_photo: 'PHOTO DENTS GAUCHE',
+    left_photo: 'PHOTO DENTS DROITE',
+    front_photo: 'PHOTO DENTS FACE',
+    upper_photo: 'PHOTO ARCADE SUPERIEURE',
+    lower_photo: 'PHOTO ARCADE INFERIEURE',
+    orthopantomography: 'RADIO PANORAMIQUE',
+    stl: 'SCAN STL',
+    ply: 'SCAN PLY',
+    obj: 'SCAN OBJ',
+    zip: 'ARCHIVES ZIP',
+    pdf: 'DOCUMENTS PDF',
+    image: 'IMAGES',
+    video: 'VIDEOS',
+    other: 'CBCT DICOM',
+  },
+  en: {
+    right_photo: 'LEFT TEETH PHOTO',
+    left_photo: 'RIGHT TEETH PHOTO',
+    front_photo: 'FRONT TEETH PHOTO',
+    upper_photo: 'UPPER ARCH PHOTO',
+    lower_photo: 'LOWER ARCH PHOTO',
+    orthopantomography: 'PANORAMIC XRAY',
+    stl: 'STL SCAN',
+    ply: 'PLY SCAN',
+    obj: 'OBJ SCAN',
+    zip: 'ZIP ARCHIVES',
+    pdf: 'PDF DOCUMENTS',
+    image: 'IMAGES',
+    video: 'VIDEOS',
+    other: 'CBCT DICOM',
+  },
+};
+
+/** Localised name of the order-sheet PDF inside the archive. */
+const SHEET_NAMES: Record<LabZipLanguage, (code: string) => string> = {
+  fr: (code) => `FICHE COMMANDE - ${code}.pdf`,
+  en: (code) => `ORDER SHEET - ${code}.pdf`,
+};
+
 function isPrecompressedEntry(name: string): boolean {
   return PRECOMPRESSED_ARCHIVE_EXTENSIONS.has(path.extname(name).toLowerCase());
 }
@@ -114,6 +176,7 @@ export class OrderExportService {
   async downloadAllAsZip(
     orderId: string,
     caller: Caller,
+    language: LabZipLanguage = 'fr',
   ): Promise<{ archive: Archiver; fileName: string; mimeType: string }> {
     // Planner gate. Designers are allowed but only for their assigned
     // orders, which findAccessibleOrder enforces below via accessWhere.
@@ -212,7 +275,9 @@ export class OrderExportService {
         continue;
       }
 
-      const folder = file.category; // e.g. "front_photo", "stl", "zip"
+      // Localised folder label; unknown categories fall back to the raw
+      // enum value so a future category never breaks the export.
+      const folder = LAB_FOLDER_LABELS[language][file.category] ?? file.category;
       const baseName =
         file.originalName?.trim() ||
         file.generatedName?.trim() ||
@@ -242,7 +307,13 @@ export class OrderExportService {
     // immediately; the PDF (which has been rendering since the top of
     // this method) lands as the last entry whenever it is ready. The
     // export therefore costs max(render, streaming) instead of their sum.
-    void this.appendOrderSheetAndFinalize(archive, dto, sheetRender, orderId);
+    void this.appendOrderSheetAndFinalize(
+      archive,
+      dto,
+      sheetRender,
+      orderId,
+      language,
+    );
 
     return {
       archive,
@@ -271,6 +342,7 @@ export class OrderExportService {
       { ok: true; pdf: Buffer } | { ok: false; err: unknown }
     >,
     orderId: string,
+    language: LabZipLanguage = 'fr',
   ): Promise<void> {
     const safeCode = (dto.orderCode || orderId).replace(/[^\w.-]+/g, '_');
     try {
@@ -283,7 +355,7 @@ export class OrderExportService {
         // Deflated, NOT stored: the sheet is mostly uncompressed vector
         // path data from the odontogram, so zip shrinks it by about half
         // (measured 6.4 MB -> 3.0 MB) for a fraction of a second of CPU.
-        archive.append(result.pdf, { name: `fiche-commande-${safeCode}.pdf` });
+        archive.append(result.pdf, { name: SHEET_NAMES[language](safeCode) });
       } else {
         this.logger.error(
           `Order sheet PDF failed for order ${orderId} — falling back to order-data.json: ${

@@ -694,16 +694,28 @@ export class OrderController {
       'Download ALL of an order’s files + its data as a single ZIP (planner-only)',
   })
   @ApiParam({ name: 'id', type: String })
+  @ApiQuery({
+    name: 'lang',
+    required: false,
+    enum: ['fr', 'en'],
+    description:
+      "Langue des noms de dossiers et de la fiche dans le ZIP. Suit la langue de l'interface du demandeur; francais par defaut.",
+  })
   async downloadAll(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
     @Res() response: Response,
+    @Query('lang') lang?: string,
   ): Promise<void> {
     const { archive, fileName, mimeType } =
-      await this.orderExport.downloadAllAsZip(id, {
-        userId: user.sub,
-        role: user.role,
-      });
+      await this.orderExport.downloadAllAsZip(
+        id,
+        {
+          userId: user.sub,
+          role: user.role,
+        },
+        lang === 'en' ? 'en' : 'fr',
+      );
 
     response.setHeader('Content-Type', mimeType);
     response.setHeader(

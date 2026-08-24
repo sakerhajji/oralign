@@ -224,7 +224,7 @@ export default function OrderDetailPage() {
           }),
           { id: pendingToast },
         );
-      });
+      }, lang);
       const blobUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = blobUrl;

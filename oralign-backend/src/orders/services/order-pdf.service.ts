@@ -4,7 +4,7 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
-import { ToothInstructionType } from '@prisma/client';
+import { ToothInstructionType , TreatmentPlanStatus, type TreatmentPlan, type TreatmentPlanIpr } from '@prisma/client';
 import * as fs from 'fs';
 import * as path from 'path';
 import puppeteer, { Browser } from 'puppeteer-core';
@@ -297,9 +297,23 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       where: { isActive: true },
       orderBy: { updatedAt: 'desc' },
     });
+    // The sheet is the lab's reference document, so it carries the plan
+    // the doctor ACTUALLY approved — not a draft, not a rejected one.
+    // Latest approval wins when several versions were approved over time.
+    const approvedPlan = await this.prisma.treatmentPlan.findFirst({
+      where: {
+        orderId: dto.id,
+        status: TreatmentPlanStatus.approved,
+        deletedAt: null,
+      },
+      orderBy: [{ approvedAt: 'desc' }, { version: 'desc' }],
+      include: {
+        iprEntries: { orderBy: [{ fromTooth: 'asc' }] },
+      },
+    });
     const logo = this.resolveImageDataUrl(settings?.companyLogoPath ?? null);
     const brandName = (settings?.companyName ?? 'ORALIGN').trim() || 'ORALIGN';
-    const html = this.renderHtml(dto, { logo, brandName });
+    const html = this.renderHtml(dto, { logo, brandName }, approvedPlan);
     return this.renderHtmlToBuffer(html);
   }
 
@@ -308,6 +322,9 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
   private renderHtml(
     dto: OrderResponseDto,
     branding: { logo: string | null; brandName: string },
+    approvedPlan:
+      | (TreatmentPlan & { iprEntries: TreatmentPlanIpr[] })
+      | null = null,
   ): string {
     const esc = this.escapeHtml.bind(this);
     const statusLabel = STATUS_FR[dto.status] ?? dto.status;
@@ -420,6 +437,13 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
         font-size: 9px; font-weight: 700;
       }
       .section { margin-top: 12px; }
+      .plan-ipr { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 9.5px; }
+      .plan-ipr th { background: #111; color: #fff; padding: 4px 8px; text-align: left; font-size: 8.5px; letter-spacing: .08em; text-transform: uppercase; }
+      .plan-ipr td { border-bottom: 1px solid #ddd; padding: 4px 8px; }
+      .plan-table-block { break-inside: avoid; page-break-inside: avoid; margin-top: 10px; }
+      .plan-table-title { font-weight: 700; font-size: 10px; margin-bottom: 4px; }
+      /* Full width, natural height: these are wide spreadsheet captures. */
+      .plan-table-img { width: 100%; height: auto; border: 1px solid #ddd; border-radius: 6px; }
       .section.keep { break-inside: avoid; page-break-inside: avoid; }
       .section-title {
         margin: 0 0 6px; color: #666666; font-size: 8.5px; font-weight: 800;
@@ -536,6 +560,8 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       <div class="box">${manufacturingRows}</div>
     </div>
 
+    ${this.renderApprovedPlanSection(approvedPlan)}
+
     ${filesTable}
 
     <div class="footer">
@@ -544,6 +570,101 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
     </div>
   </body>
 </html>`;
+  }
+
+  // ─── Approved treatment plan ───────────────────────────────────
+
+  /**
+   * The treatment plan the DOCTOR APPROVED, rendered into the order
+   * sheet so the lab works from one reference document: aligner counts,
+   * the per-contact IPR table, and the planner's movement/treatment
+   * table images embedded full-width (the same tables the doctor saw
+   * when approving). Absent plan => absent section — a draft must never
+   * masquerade as an approval.
+   */
+  private renderApprovedPlanSection(
+    plan: (TreatmentPlan & { iprEntries: TreatmentPlanIpr[] }) | null,
+  ): string {
+    if (!plan) return '';
+    const esc = this.escapeHtml.bind(this);
+
+    const metaRows: [string, string][] = [
+      ['Plan · Plan', `${plan.name} (v${plan.version})`],
+      [
+        'Approuvé le · Approved on',
+        plan.approvedAt ? this.fmtDate(plan.approvedAt) : '—',
+      ],
+      [
+        'Aligneurs maxillaire · Upper aligners',
+        plan.totalUpperAligners != null ? String(plan.totalUpperAligners) : '—',
+      ],
+      [
+        'Aligneurs mandibule · Lower aligners',
+        plan.totalLowerAligners != null ? String(plan.totalLowerAligners) : '—',
+      ],
+    ];
+    if (plan.createdByName) {
+      metaRows.push(['Conçu par · Planned by', plan.createdByName]);
+    }
+
+    const meta = metaRows
+      .map(
+        ([k, v]) =>
+          `<div class="meta-line">${esc(k)} : <b>${esc(v)}</b></div>`,
+      )
+      .join('');
+
+    // IPR: one row per interproximal contact, mm kept as the exact
+    // string the planner typed (trailing zeros are meaningful to them).
+    const ipr = plan.iprEntries.length
+      ? `<table class="plan-ipr">
+          <thead>
+            <tr>
+              <th>Contact (FDI)</th>
+              <th>IPR (mm)</th>
+              <th>Note</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${plan.iprEntries
+              .map(
+                (e) => `<tr>
+                  <td>${e.fromTooth} → ${e.toTooth}</td>
+                  <td>${esc(e.value)}</td>
+                  <td>${esc(e.note ?? '')}</td>
+                </tr>`,
+              )
+              .join('')}
+          </tbody>
+        </table>`
+      : '';
+
+    // The planner's own tables, embedded as full-width images — this is
+    // what the reference document the clinic supplied shows on its last
+    // page. Missing file on disk => the block is simply skipped.
+    const tables = [
+      ['Tableau des mouvements · Movement table', plan.movementTableImagePath],
+      [
+        'Tableau de traitement dentaire · Dental treatment table',
+        plan.dentalTreatmentTableImagePath,
+      ],
+    ]
+      .map(([title, rel]) => {
+        const src = this.resolveImageDataUrl(rel ?? null);
+        if (!src) return '';
+        return `<div class="plan-table-block">
+          <div class="plan-table-title">${esc(title ?? '')}</div>
+          <img class="plan-table-img" src="${src}" alt="" />
+        </div>`;
+      })
+      .join('');
+
+    return `<div class="section keep">
+      <h2 class="section-title">Plan de traitement approuvé · Approved treatment plan</h2>
+      <div class="box">${meta}</div>
+      ${ipr}
+    </div>
+    ${tables ? `<div class="section">${tables}</div>` : ''}`;
   }
 
   // ─── Odontogram rendering ──────────────────────────────────────

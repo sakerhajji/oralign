@@ -371,8 +371,11 @@ export const ordersService = {
     // with no Content-Length (entries are appended as they're read), so
     // there is no total to compute a percentage against.
     onProgress?: (loadedBytes: number) => void,
+    // UI language of the requester — drives the folder names and the
+    // order-sheet filename INSIDE the archive (fr by default).
+    lang: 'fr' | 'en' = 'fr',
   ): Promise<Blob> => {
-    const response = await apiClient.get<Blob>(`/orders/${id}/download-all`, {
+    const response = await apiClient.get<Blob>(`/orders/${id}/download-all?lang=${lang}`, {
       responseType: 'blob',
       timeout: 0,
       onDownloadProgress: onProgress

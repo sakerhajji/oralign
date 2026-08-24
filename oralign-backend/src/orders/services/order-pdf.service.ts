@@ -181,12 +181,12 @@ const MARK_STYLES: Record<ToothInstructionType, MarkStyle> = {
 
 // Photo categories embedded as IMAGES in the sheet (everything else —
 // STL/PLY/OBJ scans, CBCT bundles, PDFs — stays in the files table: a
-// mesh has no meaningful thumbnail). Captions use the clinical protocol's
-// requested right-side terminology while the stored category remains stable.
+// mesh has no meaningful thumbnail). Folder-to-category mapping is
+// DIRECT — right means right — matching the lab ZIP folders.
 // Same reading order as the ORDER-CREATION upload grid
 // (order-file-upload.tsx patientImageSlots): row 1 extraoral starts with
 // the profile (left_photo) then face at rest (image) then smile (front),
-// row 2 intraoral protocol/front/right, row 3 occlusal upper/lower, then the
+// row 2 intraoral left/front/right, row 3 occlusal upper/lower, then the
 // panoramic X-ray. Categories are shared between rows, so the per-slot
 // orderIndex (secondary sort) keeps multiple shots of one category in
 // their upload order.
@@ -203,7 +203,7 @@ const PHOTO_CATEGORIES: OrderFileCategory[] = [
 const PHOTO_LABELS: Record<SheetLanguage, Record<string, string>> = {
   fr: {
     right_photo: 'Photo dents droite',
-    left_photo: 'Photo dents droite',
+    left_photo: 'Photo dents gauche',
     front_photo: 'Photo de face',
     upper_photo: 'Arcade supérieure',
     lower_photo: 'Arcade inférieure',
@@ -212,7 +212,7 @@ const PHOTO_LABELS: Record<SheetLanguage, Record<string, string>> = {
   },
   en: {
     right_photo: 'Right teeth photo',
-    left_photo: 'Right teeth photo',
+    left_photo: 'Left teeth photo',
     front_photo: 'Front photo',
     upper_photo: 'Upper arch',
     lower_photo: 'Lower arch',
@@ -404,7 +404,7 @@ const ARCH_FR: Record<string, string> = {
 const FILE_CATEGORY_FR: Record<string, string> = {
   right_photo: 'Photo droite',
   front_photo: 'Photo de face',
-  left_photo: 'Photo droite',
+  left_photo: 'Photo gauche',
   upper_photo: 'Photo occlusale sup.',
   lower_photo: 'Photo occlusale inf.',
   pano_xray: 'Radio panoramique',

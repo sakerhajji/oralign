@@ -364,10 +364,7 @@ export const dict = {
         profilePhoto: { en: 'Profile photo', fr: 'Photo de profil' } as T,
         faceRest: { en: 'Face at rest photo', fr: 'Photo du visage au repos' } as T,
         smile: { en: 'Smile photo', fr: 'Photo du sourire' } as T,
-        // The clinical protocol supplied by the lab requests the right-side
-        // lateral view in this position. Keep the persisted file category
-        // unchanged; this is deliberately a display-label correction only.
-        leftLateral: { en: 'Right lateral view', fr: 'Vue latérale droite' } as T,
+        leftLateral: { en: 'Left lateral view', fr: 'Vue latérale gauche' } as T,
         frontalOcclusion: { en: 'Frontal occlusion view', fr: 'Vue frontale en occlusion' } as T,
         rightLateral: { en: 'Right lateral view', fr: 'Vue latérale droite' } as T,
         upperOcclusal: { en: 'Upper occlusal view', fr: 'Vue occlusale supérieure' } as T,

@@ -54,10 +54,11 @@ export type LabZipLanguage = 'fr' | 'en';
  *     labelled "CBCT DICOM" — a lab tech looking for the scan should not
  *     have to guess what "other" means.
  *
- *   • The current clinical protocol labels the `left_photo` lateral slot
- *     as the right-side view. Its persisted category stays `left_photo`
- *     for backwards compatibility, while the ZIP uses the requested
- *     right-side label so the lab sees the same wording as the order UI.
+ *   • the RIGHT/LEFT folders map DIRECTLY to their categories: the
+ *     folder named RIGHT holds what the doctor uploaded as right_photo.
+ *     (An earlier revision swapped them on a mirror-photo theory; real
+ *     exports proved the uploads are already labelled correctly, so the
+ *     swap moved files into the WRONG folder and was removed.)
  *
  * Accent-free on purpose: the ZIP spec's UTF-8 flag is honoured by
  * modern tools, but accentless names survive even the legacy ones.
@@ -65,7 +66,7 @@ export type LabZipLanguage = 'fr' | 'en';
 const LAB_FOLDER_LABELS: Record<LabZipLanguage, Record<string, string>> = {
   fr: {
     right_photo: 'PHOTO DENTS DROITE',
-    left_photo: 'PHOTO DENTS DROITE',
+    left_photo: 'PHOTO DENTS GAUCHE',
     front_photo: 'PHOTO DENTS FACE',
     upper_photo: 'PHOTO ARCADE SUPERIEURE',
     lower_photo: 'PHOTO ARCADE INFERIEURE',
@@ -81,7 +82,7 @@ const LAB_FOLDER_LABELS: Record<LabZipLanguage, Record<string, string>> = {
   },
   en: {
     right_photo: 'RIGHT TEETH PHOTO',
-    left_photo: 'RIGHT TEETH PHOTO',
+    left_photo: 'LEFT TEETH PHOTO',
     front_photo: 'FRONT TEETH PHOTO',
     upper_photo: 'UPPER ARCH PHOTO',
     lower_photo: 'LOWER ARCH PHOTO',

@@ -54,19 +54,17 @@ export type LabZipLanguage = 'fr' | 'en';
  *     labelled "CBCT DICOM" — a lab tech looking for the scan should not
  *     have to guess what "other" means.
  *
- *   • the RIGHT/LEFT folders map DIRECTLY to their categories: the
- *     folder named RIGHT holds what the doctor uploaded as right_photo.
- *     (An earlier revision swapped them on a mirror-photo theory; real
- *     exports proved the uploads are already labelled correctly, so the
- *     swap moved files into the WRONG folder and was removed.)
+ *   • The intraoral photos are mirrored in the doctor's capture protocol.
+ *     Keep their stored categories stable, but swap the human-facing ZIP
+ *     folder labels so the export matches the labels in the order form.
  *
  * Accent-free on purpose: the ZIP spec's UTF-8 flag is honoured by
  * modern tools, but accentless names survive even the legacy ones.
  */
 const LAB_FOLDER_LABELS: Record<LabZipLanguage, Record<string, string>> = {
   fr: {
-    right_photo: 'PHOTO DENTS DROITE',
-    left_photo: 'PHOTO DENTS GAUCHE',
+    right_photo: 'PHOTO DENTS GAUCHE',
+    left_photo: 'PHOTO DENTS DROITE',
     front_photo: 'PHOTO DENTS FACE',
     upper_photo: 'PHOTO ARCADE SUPERIEURE',
     lower_photo: 'PHOTO ARCADE INFERIEURE',
@@ -81,8 +79,8 @@ const LAB_FOLDER_LABELS: Record<LabZipLanguage, Record<string, string>> = {
     other: 'CBCT DICOM',
   },
   en: {
-    right_photo: 'RIGHT TEETH PHOTO',
-    left_photo: 'LEFT TEETH PHOTO',
+    right_photo: 'LEFT TEETH PHOTO',
+    left_photo: 'RIGHT TEETH PHOTO',
     front_photo: 'FRONT TEETH PHOTO',
     upper_photo: 'UPPER ARCH PHOTO',
     lower_photo: 'LOWER ARCH PHOTO',

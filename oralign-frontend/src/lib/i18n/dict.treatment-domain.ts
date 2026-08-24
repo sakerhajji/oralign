@@ -211,14 +211,14 @@ export const treatmentDomainDict = {
     clinical: {
       // Slot labels — resolved with t() inside the component (no t at module scope).
       slots: {
-        leftLateral: { en: 'Left lateral view', fr: 'Vue latérale gauche' } as T,
+        leftLateral: { en: 'Right lateral view', fr: 'Vue latérale droite' } as T,
         frontalOcclusion: {
           en: 'Frontal occlusion view',
           fr: 'Vue d’occlusion frontale',
         } as T,
         rightLateral: {
-          en: 'Right lateral view',
-          fr: 'Vue latérale droite',
+          en: 'Left lateral view',
+          fr: 'Vue latérale gauche',
         } as T,
         upperOcclusal: {
           en: 'Upper occlusal view',

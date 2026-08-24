@@ -228,9 +228,25 @@ interface SheetPhotoFile {
   variants: unknown;
 }
 
-const SPRITE_PATH = path.join(process.cwd(), 'assets', 'teeth-sprite.svg');
 
-// ── Odontogram geometry (mirrors the frontend odontogram-selector) ──
+// Crown outlines by FDI tooth type, occlusal edge at the TOP of the
+// 24×36 viewBox. Shared by the order odontogram and the treatment-plan
+// IPR odontogram so the two figures speak one visual language.
+const CROWN_PATHS: Record<'incisor' | 'canine' | 'premolar' | 'molar', string> = {
+  incisor: 'M7 4 L17 4 Q18 4 18 6 L18 25 Q18 33 12 33 Q6 33 6 25 L6 6 Q6 4 7 4 Z',
+  canine: 'M12 3 Q13 3 14 5 L19 12 Q19.5 13 19.5 15 L19.5 25 Q19.5 33 12 33 Q4.5 33 4.5 25 L4.5 15 Q4.5 13 5 12 L10 5 Q11 3 12 3 Z',
+  premolar: 'M8 6 Q10 3.5 12 6 Q14 3.5 16 6 Q19 7 19 11 L19 25 Q19 33 12 33 Q5 33 5 25 L5 11 Q5 7 8 6 Z',
+  molar: 'M6 6.5 Q8 3.5 10 6 Q12 4 14 6 Q16 3.5 18 6.5 Q21 8 21 12 L21 26 Q21 33 12 33 Q3 33 3 26 L3 12 Q3 8 6 6.5 Z',
+};
+
+function crownPathFor(toothNumber: number): string {
+  const digit = toothNumber % 10;
+  const kind =
+    digit <= 2 ? 'incisor' : digit === 3 ? 'canine' : digit <= 5 ? 'premolar' : 'molar';
+  return CROWN_PATHS[kind];
+}
+
+
 // FDI display order, patient's right on the left of the sheet — the
 // same orientation the doctor sees in the wizard.
 const UPPER_ROW = [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28];
@@ -285,22 +301,6 @@ const TOOTH_VIEWBOXES: Readonly<Record<number, string>> = {
   48: '0.067 1.364 11.167 22.830',
 };
 
-// Crown outlines by FDI tooth type, occlusal edge at the TOP of the
-// 24×36 viewBox. Shared by the order odontogram and the treatment-plan
-// IPR odontogram so the two figures speak one visual language.
-const CROWN_PATHS: Record<'incisor' | 'canine' | 'premolar' | 'molar', string> = {
-  incisor: 'M7 4 L17 4 Q18 4 18 6 L18 25 Q18 33 12 33 Q6 33 6 25 L6 6 Q6 4 7 4 Z',
-  canine: 'M12 3 Q13 3 14 5 L19 12 Q19.5 13 19.5 15 L19.5 25 Q19.5 33 12 33 Q4.5 33 4.5 25 L4.5 15 Q4.5 13 5 12 L10 5 Q11 3 12 3 Z',
-  premolar: 'M8 6 Q10 3.5 12 6 Q14 3.5 16 6 Q19 7 19 11 L19 25 Q19 33 12 33 Q5 33 5 25 L5 11 Q5 7 8 6 Z',
-  molar: 'M6 6.5 Q8 3.5 10 6 Q12 4 14 6 Q16 3.5 18 6.5 Q21 8 21 12 L21 26 Q21 33 12 33 Q3 33 3 26 L3 12 Q3 8 6 6.5 Z',
-};
-
-function crownPathFor(toothNumber: number): string {
-  const digit = toothNumber % 10;
-  const kind =
-    digit <= 2 ? 'incisor' : digit === 3 ? 'canine' : digit <= 5 ? 'premolar' : 'molar';
-  return CROWN_PATHS[kind];
-}
 
 
 const DEFAULT_TOOTH = '#f1e8d4';
@@ -427,7 +427,6 @@ const FILE_CATEGORY_FR: Record<string, string> = {
  */
 @Injectable()
 export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
-  private spriteCache: string | null | undefined;
   private readonly logger = new Logger(OrderPdfService.name);
   private browserPromise: Promise<Browser> | null = null;
 
@@ -450,9 +449,6 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
           }`,
         );
       });
-    // Read the tooth sprite off disk once at boot — ~2 MB, better paid
-    // here than inside the first export request.
-    this.loadSprite();
   }
 
   async onModuleDestroy(): Promise<void> {
@@ -557,14 +553,7 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
     // the invoices, where the company identity is the point.
     const logo = this.loadAppLogoDataUrl();
     const brandName = (settings?.companyName ?? 'ORALIGN').trim() || 'ORALIGN';
-    // TWO passes. Pass 1 renders the odontograms with the app's sprite
-    // artwork and SCREENSHOTS them; pass 2 renders the final sheet with
-    // those two PNGs in place of the live sprite. Chromium rasterises
-    // the sprite's embedded bitmaps once per <use>, which ballooned the
-    // PDF to ~14 MB — two screenshots keep the exact app look at a
-    // fraction of the size. If capture fails, the sprite version ships:
-    // heavy beats wrong.
-    const captureHtml = this.renderHtml(
+    const html = this.renderHtml(
       dto,
       { logo, brandName },
       approvedPlan,
@@ -572,59 +561,7 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       scanPreviews,
       language,
     );
-    const shots = await this.captureOdontogramShots(captureHtml);
-    const html = shots
-      ? this.renderHtml(
-          dto,
-          { logo, brandName },
-          approvedPlan,
-          photoFiles,
-          scanPreviews,
-          language,
-          shots,
-        )
-      : captureHtml;
     return this.renderHtmlToBuffer(html);
-  }
-
-  /**
-   * Screenshot the two odontogram figures out of a fully rendered sheet.
-   * Returns null when anything goes wrong — the caller then ships the
-   * live-sprite HTML instead.
-   */
-  private async captureOdontogramShots(
-    html: string,
-  ): Promise<{ order: string; plan: string | null } | null> {
-    try {
-      const browser = await this.getBrowser();
-      const page = await browser.newPage();
-      try {
-        // scale 2: the PNGs are downscaled into ~700px-wide slots on the
-        // sheet, so a 2x capture stays crisp in print.
-        // 4x on a wide viewport: the shot lands in a ~750pt slot printed
-        // at 300 dpi, so anything below ~3000 device pixels reads soft.
-        await page.setViewport({ width: 1400, height: 1600, deviceScaleFactor: 4 });
-        await page.setContent(html, { waitUntil: 'load', timeout: 45_000 });
-        const shot = async (selector: string): Promise<string | null> => {
-          const el = await page.$(selector);
-          if (!el) return null;
-          const png = (await el.screenshot({ type: 'png' })) as Buffer;
-          return `data:image/png;base64,${png.toString('base64')}`;
-        };
-        const order = await shot('.odo-wrap');
-        if (!order) return null;
-        return { order, plan: null };
-      } finally {
-        await page.close();
-      }
-    } catch (err) {
-      this.logger.warn(
-        `Odontogram capture failed — shipping live-sprite sheet: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-      return null;
-    }
   }
 
   // ─── HTML template ─────────────────────────────────────────────
@@ -638,7 +575,6 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
     photoFiles: SheetPhotoFile[] = [],
     scanPreviews: { label: string; dataUrl: string }[] = [],
     lang: SheetLanguage = 'fr',
-    odontogramShots: { order: string; plan: string | null } | null = null,
   ): string {
     const esc = this.escapeHtml.bind(this);
     const L = SHEET_L10N[lang];
@@ -730,9 +666,7 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
         : ['', undefined],
     ]);
 
-    const odontogram = odontogramShots
-      ? `<img class="odo-shot" src="${odontogramShots.order}" alt="" />`
-      : this.renderOdontogram(dto, lang);
+    const odontogram = this.renderOdontogram(dto, lang);
     const filesTable = this.renderFilesTable(dto, lang);
 
     return `<!doctype html>
@@ -787,7 +721,6 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       .photo-cell.scan img { object-fit: contain; background: #23252d; border-color: #1a1c22; }
       .photo-cell figcaption { text-align: center; font-size: 7.5px; color: #555; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .photo-skipped { font-size: 8px; color: #888; margin-top: 6px; }
-      .odo-shot { width: 100%; height: auto; display: block; }
       .plan-odo { border: 1px solid #e2e4e8; border-radius: 10px; padding: 8px 10px 6px; margin-top: 8px; break-inside: avoid; page-break-inside: avoid; }
       .plan-odo-title { font-weight: 700; font-size: 9.5px; margin-bottom: 2px; }
       .plan-odo-hint { font-weight: 400; color: #888; font-size: 8px; margin-left: 6px; }
@@ -874,7 +807,7 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
     </style>
   </head>
   <body>
-    ${odontogramShots ? '' : this.spriteMarkup()}
+
     <div class="masthead">
       ${
         branding.logo
@@ -929,7 +862,7 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
 
     ${this.renderClinicalPhotosSection(photoFiles, scanPreviews, lang)}
 
-    ${this.renderApprovedPlanSection(approvedPlan, lang, odontogramShots?.plan ?? null)}
+    ${this.renderApprovedPlanSection(approvedPlan, lang)}
 
     ${filesTable}
 
@@ -1045,7 +978,6 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
   private renderApprovedPlanSection(
     plan: (TreatmentPlan & { iprEntries: TreatmentPlanIpr[] }) | null,
     lang: SheetLanguage = 'fr',
-    planShot: string | null = null,
   ): string {
     if (!plan) return '';
     const esc = this.escapeHtml.bind(this);
@@ -1078,7 +1010,6 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
     // table, matching how the planner records contacts in the app and
     // how the clinic's reference sheet presents them (X.X mm between
     // the crowns, stage pill underneath).
-    void planShot;
     const ipr = this.renderPlanIprOdontogram(plan.iprEntries, lang);
 
     // The planner's own tables, embedded as full-width images — this is
@@ -1225,90 +1156,6 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
     </div>`;
   }
 
-  /**
-   * One tooth as the real sprite artwork. A single mark fills the whole
-   * tooth; 2–4 marks split it into equal horizontal bands via clip-path
-   * (same treatment as the frontend's SegmentedToothGlyph).
-   */
-  private renderSpriteGlyph(
-    toothNumber: number,
-    marks: MarkStyle[],
-    rowClass: 'upper' | 'lower',
-  ): string {
-    const raw = TOOTH_VIEWBOXES[toothNumber] ?? '0 0 11 22';
-    const parts = raw.split(/\s+/);
-    const w = Number(parts[2]) || 11;
-    const h = Number(parts[3]) || 22;
-    const height = 40;
-    const width = Math.round((height * w) / h);
-    const viewBox = `0 0 ${parts[2]} ${parts[3]}`;
-    const href = `#tooth-${canonicalSpriteTooth(toothNumber)}`;
-    const flip = MIRRORED.has(toothNumber) ? 'transform:scaleX(-1);' : '';
-    // Upper teeth hang from the occlusal plane (roots up in the source
-    // artwork already, so no vertical flip needed — the sprite is drawn
-    // per-arch and the frontend renders it the same way).
-    const svgFor = (color: MarkStyle | undefined, clip?: string) =>
-      `<svg viewBox="${viewBox}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid meet" style="--tooth-color:${color?.hex ?? DEFAULT_TOOTH};--tooth-outline:${color?.outline ?? DEFAULT_OUTLINE};${flip}${clip ? `clip-path:${clip};` : ''}"><use href="${href}" xlink:href="${href}"/></svg>`;
-
-    if (marks.length <= 1) return svgFor(marks[0]);
-    // Banded fill: stack one clipped copy per mark.
-    const layers = marks
-      .map((m, i) => {
-        const top = (i / marks.length) * 100;
-        const bottom = 100 - ((i + 1) / marks.length) * 100;
-        const clip = `inset(${top.toFixed(1)}% 0 ${bottom.toFixed(1)}% 0)`;
-        return i === 0
-          ? svgFor(m, clip)
-          : `<span class="odo-band">${svgFor(m, clip)}</span>`;
-      })
-      .join('');
-    return layers;
-  }
-
-
-  private appLogoCache: string | null | undefined;
-
-  /** The app logo shipped in assets/ — cached after the first read. */
-  private loadAppLogoDataUrl(): string | null {
-    if (this.appLogoCache !== undefined) return this.appLogoCache;
-    try {
-      const abs = path.join(process.cwd(), 'assets', 'app-logo.svg');
-      const svg = fs.readFileSync(abs, 'utf8');
-      this.appLogoCache = `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
-    } catch {
-      this.appLogoCache = null;
-    }
-    return this.appLogoCache;
-  }
-
-  private spriteMarkup(): string {
-    const sprite = this.loadSprite();
-    return sprite ?? '';
-  }
-
-  private spriteMarkupAvailable(): boolean {
-    return !!this.loadSprite();
-  }
-
-  private loadSprite(): string | null {
-    if (this.spriteCache !== undefined) return this.spriteCache;
-    try {
-      let content = fs.readFileSync(SPRITE_PATH, 'utf8');
-      // The file is standalone XML — strip the prolog before inlining
-      // into the HTML document.
-      content = content.replace(/^<\?xml[^>]*\?>\s*/, '');
-      this.spriteCache = content;
-    } catch (err) {
-      this.logger.warn(
-        `Tooth sprite not found at ${SPRITE_PATH} — odontogram falls back to plain glyphs: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-      this.spriteCache = null;
-    }
-    return this.spriteCache;
-  }
-
   // ─── Odontogram rendering ──────────────────────────────────────
 
   private renderOdontogram(
@@ -1395,12 +1242,10 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       first && marks.length === 1 ? `&nbsp;${first.short}` : ''
     }${marks.length > 1 ? `&nbsp;×${marks.length}` : ''}</span>`;
 
-    // The APP's order page draws the realistic sprite artwork — the
-    // sheet mirrors it so doctor and lab look at the same picture. The
-    // stylised crowns only step in when the sprite asset is missing.
-    const glyph = this.spriteMarkupAvailable()
-      ? this.renderSpriteGlyph(toothNumber, marks, rowClass)
-      : this.renderVectorGlyph(toothNumber, marks, rowClass);
+    // Stylised vector crowns — the same visual language as the IPR
+    // figure below. True vectors in the PDF: crisp at any zoom, a few
+    // hundred bytes, and never the rasterisation cost the sprite paid.
+    const glyph = this.renderVectorGlyph(toothNumber, marks, rowClass);
 
     return `<div class="odo-cell">
       ${rowClass === 'upper' ? chip : ''}
@@ -1454,6 +1299,21 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       <defs><clipPath id="${clipId}"><path d="${d}" /></clipPath></defs>
       <g${flip}>${fill}<path d="${d}" fill="none" stroke="${outline}" stroke-width="1.4" /></g>
     </svg>`;
+  }
+
+  private appLogoCache: string | null | undefined;
+
+  /** The app logo shipped in assets/ — cached after the first read. */
+  private loadAppLogoDataUrl(): string | null {
+    if (this.appLogoCache !== undefined) return this.appLogoCache;
+    try {
+      const abs = path.join(process.cwd(), 'assets', 'app-logo.svg');
+      const svg = fs.readFileSync(abs, 'utf8');
+      this.appLogoCache = `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
+    } catch {
+      this.appLogoCache = null;
+    }
+    return this.appLogoCache;
   }
 
   // ─── Field formatting ──────────────────────────────────────────

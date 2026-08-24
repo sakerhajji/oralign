@@ -4,13 +4,14 @@
 #
 # Lab ZIP export + enriched order sheet, against the running stack:
 #
-#   folders FR    → PHOTO DENTS GAUCHE / DROITE (SWAPPED vs category:
-#                   intraoral side photos are mirrored), CBCT DICOM for
-#                   the `other` category, FICHE COMMANDE - <code>.pdf
-#   folders EN    → LEFT/RIGHT TEETH PHOTO (same swap), CBCT DICOM,
-#                   ORDER SHEET - <code>.pdf
-#   swap proof    → the file UPLOADED as right_photo lands in the
-#                   LEFT-labelled folder, and vice versa
+#   folders FR    → PHOTO DENTS DROITE / GAUCHE (DIRECT mapping: the
+#                   folder named RIGHT holds the right_photo uploads),
+#                   CBCT DICOM for `other`, FICHE COMMANDE - <code>.pdf
+#   folders EN    → RIGHT/LEFT TEETH PHOTO (same direct mapping),
+#                   CBCT DICOM, ORDER SHEET - <code>.pdf
+#   direct proof  → the file UPLOADED as right_photo lands in the
+#                   RIGHT-labelled folder (an earlier swap put real
+#                   exports in the wrong folder and was reverted)
 #   order sheet   → carries the APPROVED treatment plan: name, version,
 #                   aligner counts, the IPR table, and the movement /
 #                   dental-table images; a draft plan must NOT appear
@@ -121,13 +122,13 @@ echo "$LISTING_FR" | grep -q "PHOTO DENTS DROITE/" && ok "dossier PHOTO DENTS DR
 echo "$LISTING_FR" | grep -q "FICHE COMMANDE - TEST_LZIP_${STAMP}.pdf" && ok "fiche nommee en francais" || bad "fiche FR absente"
 echo "$LISTING_FR" | grep -qE "(^|\s)(right_photo|left_photo|other)/" && bad "noms de categorie bruts encore presents" || ok "aucun nom de categorie brut"
 
-# LE SWAP: le fichier uploade en right_photo doit etre dans PHOTO DENTS GAUCHE.
-echo "$LISTING_FR" | grep "PHOTO DENTS GAUCHE/" | grep -q "photo-droite.png" \
-  && ok "SWAP: le fichier right_photo est dans PHOTO DENTS GAUCHE" \
-  || bad "swap manquant (right_photo pas dans GAUCHE)"
-echo "$LISTING_FR" | grep "PHOTO DENTS DROITE/" | grep -q "photo-gauche.png" \
-  && ok "SWAP: le fichier left_photo est dans PHOTO DENTS DROITE" \
-  || bad "swap manquant (left_photo pas dans DROITE)"
+# MAPPING DIRECT: le fichier uploade en right_photo va dans DROITE.
+echo "$LISTING_FR" | grep "PHOTO DENTS DROITE/" | grep -q "photo-droite.png" \
+  && ok "DIRECT: le fichier right_photo est dans PHOTO DENTS DROITE" \
+  || bad "mapping direct casse (right_photo pas dans DROITE)"
+echo "$LISTING_FR" | grep "PHOTO DENTS GAUCHE/" | grep -q "photo-gauche.png" \
+  && ok "DIRECT: le fichier left_photo est dans PHOTO DENTS GAUCHE" \
+  || bad "mapping direct casse (left_photo pas dans GAUCHE)"
 echo "$LISTING_FR" | grep "CBCT DICOM/" | grep -q "cbct-dicom.zip" \
   && ok "le bundle CBCT est dans CBCT DICOM" || bad "bundle CBCT mal range"
 
@@ -141,8 +142,8 @@ echo "$LISTING_EN" | grep -q "LEFT TEETH PHOTO/" && ok "dossier LEFT TEETH PHOTO
 echo "$LISTING_EN" | grep -q "RIGHT TEETH PHOTO/" && ok "dossier RIGHT TEETH PHOTO present" || bad "RIGHT TEETH PHOTO absent"
 echo "$LISTING_EN" | grep -q "CBCT DICOM/" && ok "CBCT DICOM aussi en anglais" || bad "CBCT DICOM absent en EN"
 echo "$LISTING_EN" | grep -q "ORDER SHEET - TEST_LZIP_${STAMP}.pdf" && ok "fiche nommee en anglais" || bad "fiche EN absente"
-echo "$LISTING_EN" | grep "LEFT TEETH PHOTO/" | grep -q "photo-droite.png" \
-  && ok "SWAP identique en anglais" || bad "swap EN manquant"
+echo "$LISTING_EN" | grep "RIGHT TEETH PHOTO/" | grep -q "photo-droite.png" \
+  && ok "mapping direct identique en anglais" || bad "mapping EN casse"
 
 # Sans ?lang= -> francais par defaut.
 curl -sS -o "$WORK/defaut.zip" "$API/orders/$ORDER_ID/download-all" -H "Authorization: Bearer $AT"
@@ -179,8 +180,10 @@ step "4b. La fiche INTEGRE les photos cliniques"
 if [ -s "$SHEET" ]; then
   # Les libelles de la grille photos, avec le swap droite/gauche.
   tr -d ' ' < "$T" | grep -qi "Photoscliniques" && ok "section Photos cliniques presente" || bad "section photos absente"
-  grep -q "Photo dents gauche" "$T" && ok "legende 'Photo dents gauche' (swap) presente" || bad "legende gauche absente"
-  grep -q "Photo dents droite" "$T" && ok "legende 'Photo dents droite' (swap) presente" || bad "legende droite absente"
+  grep -q "Photo dents droite" "$T" && ok "legende 'Photo dents droite' presente" || bad "legende droite absente"
+  grep -q "Photo dents gauche" "$T" && ok "legende 'Photo dents gauche' presente" || bad "legende gauche absente"
+  # Fiche FR monolingue: plus d'anglais dans les titres de section.
+  grep -q "Dental chart" "$T" && bad "titre anglais dans la fiche FR" || ok "fiche FR monolingue (pas de 'Dental chart')"
   grep -qi "panoramique" "$T" && ok "legende radio panoramique presente" || bad "legende pano absente"
   # L'original de 3 Mo n'est PAS integre: liste par son nom a la place.
   grep -q "enorme-photo.png" "$T" && ok "photo de 3 Mo listee mais non integree (plafond)" || bad "plafond 2 Mo non applique"
@@ -229,6 +232,14 @@ S=$(curl -sS -o /dev/null -w '%{http_code}' "$API/orders/$ORDER_ID/download-all"
 # La fiche directe porte bien le plan approuve.
 pdftotext -layout "$WORK/sheet-doc.pdf" "$WORK/sheet-doc.txt" 2>/dev/null
 grep -q "TEST_LZIP_PLAN_APPROUVE" "$WORK/sheet-doc.txt" && ok "la fiche directe porte le plan approuve" || bad "plan absent de la fiche directe"
+
+# La fiche en ANGLAIS est entierement anglaise.
+curl -sS -o "$WORK/sheet-en.pdf" "$API/orders/$ORDER_ID/sheet?lang=en" -H "Authorization: Bearer $AT"
+pdftotext -layout "$WORK/sheet-en.pdf" "$WORK/sheet-en.txt" 2>/dev/null
+tr -d ' ' < "$WORK/sheet-en.txt" | grep -qi "ORDERSHEET" && ok "fiche EN: titre ORDER SHEET" || bad "titre EN absent"
+tr -d ' ' < "$WORK/sheet-en.txt" | grep -qi "Approvedtreatmentplan" && ok "fiche EN: 'Approved treatment plan'" || bad "section plan EN absente"
+grep -q "Right teeth photo" "$WORK/sheet-en.txt" && ok "fiche EN: legende 'Right teeth photo'" || bad "legende photo EN absente"
+grep -qi "FICHE DE COMMANDE" "$WORK/sheet-en.txt" && bad "du francais dans la fiche EN" || ok "fiche EN monolingue (pas de 'FICHE DE COMMANDE')"
 
 # L'odontogramme vectoriel a remplace le sprite de 2 Mo: la fiche doit
 # etre LEGERE (le sprite seul pesait ~2 Mo une fois inline).

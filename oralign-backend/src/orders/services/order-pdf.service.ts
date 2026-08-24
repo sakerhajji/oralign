@@ -17,6 +17,114 @@ const UPLOAD_ROOT = path.join(process.cwd(), 'uploads');
 // Same palette as the frontend odontogram (COLORS in
 // odontogram-selector.tsx) so the printed chart reads identically to
 // the on-screen one.
+/** Language of the WHOLE sheet — sections, labels, captions, legend. */
+export type SheetLanguage = 'fr' | 'en';
+
+/**
+ * Every user-visible string of the sheet, per language. The sheet used
+ * to print both languages side by side ("Odontogramme · Dental chart");
+ * the clinic asked for a single-language document that follows the
+ * admin's UI language — which also halves the visual noise.
+ */
+const SHEET_L10N = {
+  fr: {
+    title: 'FICHE DE COMMANDE',
+    orderLabel: 'Commande',
+    createdOn: 'Créée le',
+    submittedOn: 'Soumise le',
+    patient: 'Patient',
+    practitioner: 'Praticien',
+    name: 'Nom',
+    email: 'Email',
+    phone: 'Téléphone',
+    yes: 'Oui',
+    no: 'Non',
+    cbctSupplement: 'Oui — supplément',
+    sectionOdontogram: 'Odontogramme',
+    sectionClinical: 'Données cliniques',
+    sectionOptions: 'Options de traitement',
+    sectionInstructions: 'Instructions',
+    sectionManufacturing: 'Fabrication & imagerie',
+    sectionPhotos: 'Photos cliniques & scans',
+    sectionPlan: 'Plan de traitement approuvé',
+    sectionFiles: 'Fichiers joints',
+    noToothInstructions: 'Aucune instruction dentaire',
+    upperArch: 'Maxillaire',
+    lowerArch: 'Mandibule',
+    notesTooth: 'Dent',
+    notesInstruction: 'Instruction',
+    notesValue: 'Valeur',
+    notesNote: 'Note',
+    filesCategory: 'Catégorie',
+    filesFile: 'Fichier',
+    filesSize: 'Taille',
+    scan3d: 'Scan 3D',
+    notEmbedded: 'Non intégrées (fichier lourd ou illisible)',
+    planPlan: 'Plan',
+    planApprovedOn: 'Approuvé le',
+    planUpper: 'Aligneurs maxillaire',
+    planLower: 'Aligneurs mandibule',
+    planBy: 'Conçu par',
+    planMovement: 'Tableau des mouvements',
+    planDental: 'Tableau de traitement dentaire',
+    iprTitle: 'IPR & étapes',
+    iprHint: 'valeurs en mm',
+    iprContact: 'Contact IPR',
+    iprReduction: 'Réduction en mm',
+    iprStep: 'Étape (aligneur n°)',
+    footerGenerated: 'fiche générée le',
+  },
+  en: {
+    title: 'ORDER SHEET',
+    orderLabel: 'Order',
+    createdOn: 'Created on',
+    submittedOn: 'Submitted on',
+    patient: 'Patient',
+    practitioner: 'Practitioner',
+    name: 'Name',
+    email: 'Email',
+    phone: 'Phone',
+    yes: 'Yes',
+    no: 'No',
+    cbctSupplement: 'Yes — supplement',
+    sectionOdontogram: 'Dental chart',
+    sectionClinical: 'Clinical data',
+    sectionOptions: 'Treatment options',
+    sectionInstructions: 'Instructions',
+    sectionManufacturing: 'Manufacturing & imaging',
+    sectionPhotos: 'Clinical photos & scans',
+    sectionPlan: 'Approved treatment plan',
+    sectionFiles: 'Attached files',
+    noToothInstructions: 'No per-tooth instructions',
+    upperArch: 'Upper',
+    lowerArch: 'Lower',
+    notesTooth: 'Tooth',
+    notesInstruction: 'Instruction',
+    notesValue: 'Value',
+    notesNote: 'Note',
+    filesCategory: 'Category',
+    filesFile: 'File',
+    filesSize: 'Size',
+    scan3d: '3D scan',
+    notEmbedded: 'Not embedded (file too large or unreadable)',
+    planPlan: 'Plan',
+    planApprovedOn: 'Approved on',
+    planUpper: 'Upper aligners',
+    planLower: 'Lower aligners',
+    planBy: 'Planned by',
+    planMovement: 'Movement table',
+    planDental: 'Dental treatment table',
+    iprTitle: 'IPR & steps',
+    iprHint: 'values in mm',
+    iprContact: 'IPR contact',
+    iprReduction: 'Reduction in mm',
+    iprStep: 'Step (aligner #)',
+    footerGenerated: 'sheet generated on',
+  },
+} as const;
+
+type SheetLabels = (typeof SHEET_L10N)['fr'];
+
 type MarkStyle = {
   hex: string;
   outline: string;
@@ -71,28 +179,40 @@ const MARK_STYLES: Record<ToothInstructionType, MarkStyle> = {
 
 // Photo categories embedded as IMAGES in the sheet (everything else —
 // STL/PLY/OBJ scans, CBCT bundles, PDFs — stays in the files table: a
-// mesh has no meaningful thumbnail). Labels carry the same RIGHT/LEFT
-// SWAP as the lab ZIP folders: intraoral side photos are mirrored, so
-// the file stored as right_photo shows the patient's LEFT side.
+// mesh has no meaningful thumbnail). Folder-to-category mapping is
+// DIRECT — right means right — matching the lab ZIP folders.
+// Same slot order as the app's order summary (order-file-upload.tsx):
+// right, front, left, upper, lower, panoramic, then loose images.
 const PHOTO_CATEGORIES: OrderFileCategory[] = [
   OrderFileCategory.right_photo,
-  OrderFileCategory.left_photo,
   OrderFileCategory.front_photo,
+  OrderFileCategory.left_photo,
   OrderFileCategory.upper_photo,
   OrderFileCategory.lower_photo,
   OrderFileCategory.orthopantomography,
   OrderFileCategory.image,
 ];
 
-const PHOTO_LABELS: Record<string, string> = {
-  right_photo: 'Photo dents gauche · Left teeth photo',
-  left_photo: 'Photo dents droite · Right teeth photo',
-  front_photo: 'Photo de face · Front photo',
-  upper_photo: 'Arcade supérieure · Upper arch',
-  lower_photo: 'Arcade inférieure · Lower arch',
-  orthopantomography: 'Radio panoramique · Panoramic X-ray',
-  image: 'Image',
-};
+const PHOTO_LABELS: Record<SheetLanguage, Record<string, string>> = {
+  fr: {
+    right_photo: 'Photo dents droite',
+    left_photo: 'Photo dents gauche',
+    front_photo: 'Photo de face',
+    upper_photo: 'Arcade supérieure',
+    lower_photo: 'Arcade inférieure',
+    orthopantomography: 'Radio panoramique',
+    image: 'Image',
+  },
+  en: {
+    right_photo: 'Right teeth photo',
+    left_photo: 'Left teeth photo',
+    front_photo: 'Front photo',
+    upper_photo: 'Upper arch',
+    lower_photo: 'Lower arch',
+    orthopantomography: 'Panoramic X-ray',
+    image: 'Image',
+  },
+}
 
 /** A photo row as re-read from the DB for embedding (variants included). */
 interface SheetPhotoFile {
@@ -102,6 +222,63 @@ interface SheetPhotoFile {
   originalName: string | null;
   variants: unknown;
 }
+
+const SPRITE_PATH = path.join(process.cwd(), 'assets', 'teeth-sprite.svg');
+
+// ── Odontogram geometry (mirrors the frontend odontogram-selector) ──
+// FDI display order, patient's right on the left of the sheet — the
+// same orientation the doctor sees in the wizard.
+const UPPER_ROW = [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28];
+const LOWER_ROW = [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38];
+
+// The sprite ships only the 16 right-side symbols; left-side teeth are
+// the same artwork flipped horizontally (see canonicalSpriteTooth).
+const MIRRORED = new Set<number>([
+  21, 22, 23, 24, 25, 26, 27, 28, 41, 42, 43, 44, 45, 46, 47, 48,
+]);
+
+function canonicalSpriteTooth(toothNumber: number): number {
+  if (toothNumber >= 21 && toothNumber <= 28) return toothNumber - 10;
+  if (toothNumber >= 41 && toothNumber <= 48) return toothNumber - 10;
+  return toothNumber;
+}
+
+// Copied from the frontend's auto-generated tooth-viewboxes.ts — the
+// per-symbol source viewBox (used to derive each glyph's aspect ratio).
+const TOOTH_VIEWBOXES: Readonly<Record<number, string>> = {
+  11: '-0.152 0.171 7.904 23.085',
+  12: '-0.043 0.120 7.896 24.370',
+  13: '-0.157 0.112 8.108 22.756',
+  14: '-0.182 0.280 9.429 22.588',
+  15: '-0.185 0.280 9.564 22.588',
+  16: '-0.202 0.170 13.313 22.923',
+  17: '22.564 0.626 12.835 22.589',
+  18: '-0.172 0.729 11.037 22.140',
+  21: '-0.152 0.171 7.904 23.085',
+  22: '-0.043 0.120 7.896 24.370',
+  23: '-0.157 0.112 8.108 22.756',
+  24: '-0.182 0.280 9.429 22.588',
+  25: '-0.185 0.280 9.564 22.588',
+  26: '-0.202 0.170 13.313 22.923',
+  27: '22.564 0.626 12.835 22.589',
+  28: '-0.172 0.729 11.037 22.140',
+  31: '-0.138 0.163 7.101 21.971',
+  32: '-0.138 0.218 7.155 22.008',
+  33: '-0.157 0.285 8.107 22.991',
+  34: '-0.182 0.285 9.428 22.991',
+  35: '-0.185 0.114 9.620 23.162',
+  36: '-0.198 1.384 13.306 23.167',
+  37: '22.582 0.691 12.870 22.810',
+  38: '0.067 1.364 11.167 22.830',
+  41: '-0.138 0.163 7.101 21.971',
+  42: '-0.138 0.218 7.155 22.008',
+  43: '-0.157 0.285 8.107 22.991',
+  44: '-0.182 0.285 9.428 22.991',
+  45: '-0.185 0.114 9.620 23.162',
+  46: '-0.198 1.384 13.306 23.167',
+  47: '22.582 0.691 12.870 22.810',
+  48: '0.067 1.364 11.167 22.830',
+};
 
 // Crown outlines by FDI tooth type, occlusal edge at the TOP of the
 // 24×36 viewBox. Shared by the order odontogram and the treatment-plan
@@ -120,10 +297,6 @@ function crownPathFor(toothNumber: number): string {
   return CROWN_PATHS[kind];
 }
 
-// FDI display order — patient's right on the reader's left, the
-// convention every dental chart (and the clinic's reference sheet) uses.
-const UPPER_ROW = [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28];
-const LOWER_ROW = [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38];
 
 const DEFAULT_TOOTH = '#f1e8d4';
 const DEFAULT_OUTLINE = '#f3eeea';
@@ -249,6 +422,7 @@ const FILE_CATEGORY_FR: Record<string, string> = {
  */
 @Injectable()
 export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
+  private spriteCache: string | null | undefined;
   private readonly logger = new Logger(OrderPdfService.name);
   private browserPromise: Promise<Browser> | null = null;
 
@@ -271,6 +445,9 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
           }`,
         );
       });
+    // Read the tooth sprite off disk once at boot — ~2 MB, better paid
+    // here than inside the first export request.
+    this.loadSprite();
   }
 
   async onModuleDestroy(): Promise<void> {
@@ -287,7 +464,10 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
 
   // ─── Public API ────────────────────────────────────────────────
 
-  async renderOrderSheet(dto: OrderResponseDto): Promise<Buffer> {
+  async renderOrderSheet(
+    dto: OrderResponseDto,
+    language: SheetLanguage = 'fr',
+  ): Promise<Buffer> {
     // Same active-settings row getActive() resolves — queried directly
     // so this module doesn't need to import the quotations module.
     const settings = await this.prisma.companyBillingSettings.findFirst({
@@ -317,7 +497,7 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
         deletedAt: null,
         category: { in: PHOTO_CATEGORIES },
       },
-      orderBy: [{ category: 'asc' }, { orderIndex: 'asc' }],
+      orderBy: { orderIndex: 'asc' },
       select: {
         category: true,
         relativePath: true,
@@ -326,6 +506,13 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
         variants: true,
       },
     });
+    // The DB cannot sort by our display order — sort in memory so the
+    // grid reads exactly like the app's order summary.
+    photoFiles.sort(
+      (a, b) =>
+        PHOTO_CATEGORIES.indexOf(a.category) -
+        PHOTO_CATEGORIES.indexOf(b.category),
+    );
     // 3D scans get a server-rendered preview so the sheet SHOWS the case
     // geometry instead of naming an .stl file. Capped at 4 — a sheet is a
     // summary, and each preview is a full mesh rasterisation.
@@ -360,14 +547,72 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
     }
     const logo = this.resolveImageDataUrl(settings?.companyLogoPath ?? null);
     const brandName = (settings?.companyName ?? 'ORALIGN').trim() || 'ORALIGN';
-    const html = this.renderHtml(
+    // TWO passes. Pass 1 renders the odontograms with the app's sprite
+    // artwork and SCREENSHOTS them; pass 2 renders the final sheet with
+    // those two PNGs in place of the live sprite. Chromium rasterises
+    // the sprite's embedded bitmaps once per <use>, which ballooned the
+    // PDF to ~14 MB — two screenshots keep the exact app look at a
+    // fraction of the size. If capture fails, the sprite version ships:
+    // heavy beats wrong.
+    const captureHtml = this.renderHtml(
       dto,
       { logo, brandName },
       approvedPlan,
       photoFiles,
       scanPreviews,
+      language,
     );
+    const shots = await this.captureOdontogramShots(captureHtml);
+    const html = shots
+      ? this.renderHtml(
+          dto,
+          { logo, brandName },
+          approvedPlan,
+          photoFiles,
+          scanPreviews,
+          language,
+          shots,
+        )
+      : captureHtml;
     return this.renderHtmlToBuffer(html);
+  }
+
+  /**
+   * Screenshot the two odontogram figures out of a fully rendered sheet.
+   * Returns null when anything goes wrong — the caller then ships the
+   * live-sprite HTML instead.
+   */
+  private async captureOdontogramShots(
+    html: string,
+  ): Promise<{ order: string; plan: string | null } | null> {
+    try {
+      const browser = await this.getBrowser();
+      const page = await browser.newPage();
+      try {
+        // scale 2: the PNGs are downscaled into ~700px-wide slots on the
+        // sheet, so a 2x capture stays crisp in print.
+        await page.setViewport({ width: 1100, height: 1400, deviceScaleFactor: 2 });
+        await page.setContent(html, { waitUntil: 'load', timeout: 45_000 });
+        const shot = async (selector: string): Promise<string | null> => {
+          const el = await page.$(selector);
+          if (!el) return null;
+          const png = (await el.screenshot({ type: 'png' })) as Buffer;
+          return `data:image/png;base64,${png.toString('base64')}`;
+        };
+        const order = await shot('.odo-wrap');
+        if (!order) return null;
+        return { order, plan: null };
+      } finally {
+        await page.close();
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Odontogram capture failed — shipping live-sprite sheet: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return null;
+    }
   }
 
   // ─── HTML template ─────────────────────────────────────────────
@@ -380,76 +625,106 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       | null = null,
     photoFiles: SheetPhotoFile[] = [],
     scanPreviews: { label: string; dataUrl: string }[] = [],
+    lang: SheetLanguage = 'fr',
+    odontogramShots: { order: string; plan: string | null } | null = null,
   ): string {
     const esc = this.escapeHtml.bind(this);
-    const statusLabel = STATUS_FR[dto.status] ?? dto.status;
+    const L = SHEET_L10N[lang];
+    const statusLabel =
+      lang === 'fr'
+        ? (STATUS_FR[dto.status] ?? dto.status)
+        : dto.status.replace(/_/g, ' ');
 
     const metaRows = [
-      ['Commande', dto.orderCode],
-      ['Créée le', this.fmtDate(dto.createdAt)],
-      dto.submittedAt ? ['Soumise le', this.fmtDate(dto.submittedAt)] : null,
+      [L.orderLabel, dto.orderCode],
+      [L.createdOn, this.fmtDate(dto.createdAt)],
+      dto.submittedAt ? [L.submittedOn, this.fmtDate(dto.submittedAt)] : null,
     ].filter(Boolean) as [string, string][];
 
     // ── Parties ──
     const patientBox = this.box(
-      'Patient',
+      L.patient,
       this.kvRows([
-        ['Nom', dto.patient?.fullName],
-        ['Email', dto.patient?.email],
-        ['Téléphone', dto.patient?.phone],
+        [L.name, dto.patient?.fullName],
+        [L.email, dto.patient?.email],
+        [L.phone, dto.patient?.phone],
       ]),
     );
     const doctorBox = this.box(
-      'Praticien',
+      L.practitioner,
       this.kvRows([
-        ['Nom', dto.doctor?.fullName],
-        ['Email', dto.doctor?.email],
+        [L.name, dto.doctor?.fullName],
+        [L.email, dto.doctor?.email],
       ]),
     );
 
     // ── Clinical + treatment fields ──
     const clinicalRows = this.kvRows([
-      ['Motif de consultation', this.formatChiefComplaint(dto.chiefComplaint)],
-      ['Stade', dto.patientStage ? (STAGE_FR[dto.patientStage] ?? dto.patientStage) : undefined],
-      ['Arcades à traiter', dto.archTreatment ? (ARCH_FR[dto.archTreatment] ?? dto.archTreatment) : undefined],
-      ['Plan de traitement', dto.treatmentPlan],
-      ['Relation antéro-postérieure', dto.anteroposteriorRelationship ?? dto.apRelationship],
-      ['Ne pas déplacer', dto.dontMoveOption],
+      [
+        lang === 'fr' ? 'Motif de consultation' : 'Chief complaint',
+        this.formatChiefComplaint(dto.chiefComplaint, lang),
+      ],
+      [
+        lang === 'fr' ? 'Stade' : 'Stage',
+        dto.patientStage
+          ? lang === 'fr'
+            ? (STAGE_FR[dto.patientStage] ?? dto.patientStage)
+            : dto.patientStage
+          : undefined,
+      ],
+      [
+        lang === 'fr' ? 'Arcades à traiter' : 'Arches to treat',
+        dto.archTreatment
+          ? lang === 'fr'
+            ? (ARCH_FR[dto.archTreatment] ?? dto.archTreatment)
+            : dto.archTreatment
+          : undefined,
+      ],
+      [lang === 'fr' ? 'Plan de traitement' : 'Treatment plan', dto.treatmentPlan],
+      [
+        lang === 'fr' ? 'Relation antéro-postérieure' : 'Anteroposterior relationship',
+        dto.anteroposteriorRelationship ?? dto.apRelationship,
+      ],
+      [lang === 'fr' ? 'Ne pas déplacer' : 'Do not move', dto.dontMoveOption],
     ]);
 
     const advancedRows = this.kvRows([
-      ['Élastiques', this.formatElastics(dto.elastics)],
-      ['Béance', this.frValue(dto.openBite)],
-      ['Ligne médiane', this.frValue(dto.midline)],
-      ['IPR', this.frValue(dto.ipr)],
-      ['Plans de morsure', this.frValue(dto.biteRamps)],
-      ['Expansion', this.frValue(dto.expansion)],
-      ['Articulé inversé', this.frValue(dto.crossbite)],
-      ['Espaces', this.frValue(dto.spaces)],
+      [lang === 'fr' ? 'Élastiques' : 'Elastics', this.formatElastics(dto.elastics)],
+      [lang === 'fr' ? 'Béance' : 'Open bite', this.localValue(lang, dto.openBite)],
+      [lang === 'fr' ? 'Ligne médiane' : 'Midline', this.localValue(lang, dto.midline)],
+      ['IPR', this.localValue(lang, dto.ipr)],
+      [lang === 'fr' ? 'Plans de morsure' : 'Bite ramps', this.localValue(lang, dto.biteRamps)],
+      ['Expansion', this.localValue(lang, dto.expansion)],
+      [lang === 'fr' ? 'Articulé inversé' : 'Crossbite', this.localValue(lang, dto.crossbite)],
+      [lang === 'fr' ? 'Espaces' : 'Spaces', this.localValue(lang, dto.spaces)],
       ['Extractions', dto.extractions],
     ]);
 
     const instructionRows = this.kvRows([
-      ['Instructions particulières', dto.specialInstructions],
-      ['Instructions complémentaires', dto.additionalInstructions],
+      [lang === 'fr' ? 'Instructions particulières' : 'Special instructions', dto.specialInstructions],
+      [lang === 'fr' ? 'Instructions complémentaires' : 'Additional instructions', dto.additionalInstructions],
     ]);
 
     const cbctLine = dto.useCbctWithScans
       ? dto.cbctFeeAmount && dto.cbctFeeAmount > 0
-        ? `Oui — supplément ${this.fmtAmount(dto.cbctFeeAmount)} ${esc(dto.cbctFeeCurrency ?? 'TND')}`
-        : 'Oui'
-      : 'Non';
+        ? `${L.cbctSupplement} ${this.fmtAmount(dto.cbctFeeAmount)} ${esc(dto.cbctFeeCurrency ?? 'TND')}`
+        : L.yes
+      : L.no;
     const manufacturingRows = this.kvRows([
-      ['CBCT avec scans', cbctLine],
-      ['Fabrication demandée', dto.wantsManufacturing ? 'Oui' : 'Non'],
-      dto.materials?.length ? ['Matériaux', dto.materials.join(', ')] : ['', undefined],
+      [lang === 'fr' ? 'CBCT avec scans' : 'CBCT with scans', cbctLine],
+      [lang === 'fr' ? 'Fabrication demandée' : 'Manufacturing requested', dto.wantsManufacturing ? L.yes : L.no],
+      dto.materials?.length
+        ? [lang === 'fr' ? 'Matériaux' : 'Materials', dto.materials.join(', ')]
+        : ['', undefined],
     ]);
 
-    const odontogram = this.renderOdontogram(dto);
-    const filesTable = this.renderFilesTable(dto);
+    const odontogram = odontogramShots
+      ? `<img class="odo-shot" src="${odontogramShots.order}" alt="" />`
+      : this.renderOdontogram(dto, lang);
+    const filesTable = this.renderFilesTable(dto, lang);
 
     return `<!doctype html>
-<html lang="fr" dir="ltr">
+<html lang="${lang}" dir="ltr">
   <head>
     <meta charset="utf-8" />
     <style>
@@ -500,6 +775,7 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       .photo-cell.scan img { object-fit: contain; background: #23252d; border-color: #1a1c22; }
       .photo-cell figcaption { text-align: center; font-size: 7.5px; color: #555; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .photo-skipped { font-size: 8px; color: #888; margin-top: 6px; }
+      .odo-shot { width: 100%; height: auto; display: block; }
       .plan-odo { border: 1px solid #e2e4e8; border-radius: 10px; padding: 8px 10px 6px; margin-top: 8px; break-inside: avoid; page-break-inside: avoid; }
       .plan-odo-title { font-weight: 700; font-size: 9.5px; margin-bottom: 2px; }
       .plan-odo-hint { font-weight: 400; color: #888; font-size: 8px; margin-left: 6px; }
@@ -510,6 +786,13 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       .plan-odo-svg .ipr-step-bg { fill: #eef2ff; stroke: #6366f1; stroke-width: 0.8; }
       .plan-odo-svg .ipr-step { font-size: 7px; font-weight: 700; fill: #4338ca; text-anchor: middle; }
       .plan-odo-svg .odo-mid { stroke: #d4d7dd; stroke-width: 1; stroke-dasharray: 5 4; }
+      .plan-odo-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; justify-content: center; margin-top: 6px; padding-top: 5px; border-top: 1px dashed #e2e4e8; }
+      .plan-odo-key { display: inline-flex; align-items: center; gap: 5px; font-size: 8px; color: #444; }
+      .plan-odo-key svg { overflow: visible; }
+      .plan-odo-key .ipr-line { stroke: #d97706; stroke-width: 1.6; stroke-dasharray: 3 2; }
+      .plan-odo-key .ipr-step-bg { fill: #eef2ff; stroke: #6366f1; stroke-width: 0.8; }
+      .plan-odo-key .ipr-step { font-size: 7px; font-weight: 700; fill: #4338ca; text-anchor: middle; }
+      .plan-odo-mm { color: #b45309; font-weight: 700; font-size: 8.5px; }
       .plan-ipr { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 9.5px; }
       .plan-ipr th { background: #111; color: #fff; padding: 4px 8px; text-align: left; font-size: 8.5px; letter-spacing: .08em; text-transform: uppercase; }
       .plan-ipr td { border-bottom: 1px solid #ddd; padding: 4px 8px; }
@@ -579,6 +862,7 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
     </style>
   </head>
   <body>
+    ${odontogramShots ? '' : this.spriteMarkup()}
     <div class="masthead">
       ${
         branding.logo
@@ -588,8 +872,7 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
     </div>
     <div class="docrow">
       <div>
-        <h1 class="title">Fiche de commande</h1>
-        <div class="subtitle">Order sheet</div>
+        <h1 class="title">${esc(L.title)}</h1>
         <span class="status">${esc(statusLabel)}</span>
       </div>
       <div class="doc-meta">
@@ -604,42 +887,42 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
     </div>
 
     <div class="section keep">
-      <h2 class="section-title">Odontogramme · Dental chart</h2>
+      <h2 class="section-title">${esc(L.sectionOdontogram)}</h2>
       ${odontogram}
     </div>
 
     <div class="section keep">
-      <h2 class="section-title">Données cliniques · Clinical data</h2>
+      <h2 class="section-title">${esc(L.sectionClinical)}</h2>
       <div class="box">${clinicalRows}</div>
     </div>
 
     <div class="section keep">
-      <h2 class="section-title">Options de traitement · Treatment options</h2>
+      <h2 class="section-title">${esc(L.sectionOptions)}</h2>
       <div class="box">${advancedRows}</div>
     </div>
 
     ${
       instructionRows
         ? `<div class="section keep">
-      <h2 class="section-title">Instructions · Instructions</h2>
+      <h2 class="section-title">${esc(L.sectionInstructions)}</h2>
       <div class="box">${instructionRows}</div>
     </div>`
         : ''
     }
 
     <div class="section keep">
-      <h2 class="section-title">Fabrication &amp; imagerie · Manufacturing &amp; imaging</h2>
+      <h2 class="section-title">${esc(L.sectionManufacturing)}</h2>
       <div class="box">${manufacturingRows}</div>
     </div>
 
-    ${this.renderClinicalPhotosSection(photoFiles, scanPreviews)}
+    ${this.renderClinicalPhotosSection(photoFiles, scanPreviews, lang)}
 
-    ${this.renderApprovedPlanSection(approvedPlan)}
+    ${this.renderApprovedPlanSection(approvedPlan, lang, odontogramShots?.plan ?? null)}
 
     ${filesTable}
 
     <div class="footer">
-      <span>${esc(branding.brandName)} — fiche générée le ${this.fmtDate(new Date())}</span>
+      <span>${esc(branding.brandName)} — ${esc(L.footerGenerated)} ${this.fmtDate(new Date())}</span>
       <span>${esc(dto.orderCode)}</span>
     </div>
   </body>
@@ -664,9 +947,11 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
   private renderClinicalPhotosSection(
     files: SheetPhotoFile[],
     scanPreviews: { label: string; dataUrl: string }[] = [],
+    lang: SheetLanguage = 'fr',
   ): string {
     if (!files.length && !scanPreviews.length) return '';
     const esc = this.escapeHtml.bind(this);
+    const L = SHEET_L10N[lang];
     const MAX_ORIGINAL_BYTES = 2 * 1024 * 1024;
 
     const pickPath = (f: SheetPhotoFile): string | null => {
@@ -701,7 +986,7 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
     for (const scan of scanPreviews) {
       cells.push(`<figure class="photo-cell scan">
         <img src="${scan.dataUrl}" alt="" />
-        <figcaption>Scan 3D · ${esc(scan.label)}</figcaption>
+        <figcaption>${esc(L.scan3d)} · ${esc(scan.label)}</figcaption>
       </figure>`);
     }
 
@@ -709,7 +994,7 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       const src = this.resolveImageDataUrl(pickPath(f));
       const n = (counts.get(f.category) ?? 0) + 1;
       counts.set(f.category, n);
-      const base = PHOTO_LABELS[f.category] ?? f.category;
+      const base = PHOTO_LABELS[lang][f.category] ?? f.category;
       const label = n > 1 ? `${base} (${n})` : base;
       if (!src) {
         skipped.push(`${label} — ${f.originalName ?? f.relativePath}`);
@@ -723,13 +1008,13 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
     if (!cells.length && !skipped.length) return '';
 
     const skippedNote = skipped.length
-      ? `<div class="photo-skipped">Non intégrées (fichier lourd ou illisible) · Not embedded: ${esc(
+      ? `<div class="photo-skipped">${esc(L.notEmbedded)}: ${esc(
           skipped.join(' ; '),
         )}</div>`
       : '';
 
     return `<div class="section">
-      <h2 class="section-title">Photos cliniques &amp; scans · Clinical photos &amp; scans</h2>
+      <h2 class="section-title">${esc(L.sectionPhotos)}</h2>
       <div class="photo-grid">${cells.join('')}</div>
       ${skippedNote}
     </div>`;
@@ -747,27 +1032,27 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
    */
   private renderApprovedPlanSection(
     plan: (TreatmentPlan & { iprEntries: TreatmentPlanIpr[] }) | null,
+    lang: SheetLanguage = 'fr',
+    planShot: string | null = null,
   ): string {
     if (!plan) return '';
     const esc = this.escapeHtml.bind(this);
+    const L = SHEET_L10N[lang];
 
     const metaRows: [string, string][] = [
-      ['Plan · Plan', `${plan.name} (v${plan.version})`],
+      [L.planPlan, `${plan.name} (v${plan.version})`],
+      [L.planApprovedOn, plan.approvedAt ? this.fmtDate(plan.approvedAt) : '—'],
       [
-        'Approuvé le · Approved on',
-        plan.approvedAt ? this.fmtDate(plan.approvedAt) : '—',
-      ],
-      [
-        'Aligneurs maxillaire · Upper aligners',
+        L.planUpper,
         plan.totalUpperAligners != null ? String(plan.totalUpperAligners) : '—',
       ],
       [
-        'Aligneurs mandibule · Lower aligners',
+        L.planLower,
         plan.totalLowerAligners != null ? String(plan.totalLowerAligners) : '—',
       ],
     ];
     if (plan.createdByName) {
-      metaRows.push(['Conçu par · Planned by', plan.createdByName]);
+      metaRows.push([L.planBy, plan.createdByName]);
     }
 
     const meta = metaRows
@@ -781,17 +1066,15 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
     // table, matching how the planner records contacts in the app and
     // how the clinic's reference sheet presents them (X.X mm between
     // the crowns, stage pill underneath).
-    const ipr = this.renderPlanIprOdontogram(plan.iprEntries);
+    void planShot;
+    const ipr = this.renderPlanIprOdontogram(plan.iprEntries, lang);
 
     // The planner's own tables, embedded as full-width images — this is
     // what the reference document the clinic supplied shows on its last
     // page. Missing file on disk => the block is simply skipped.
     const tables = [
-      ['Tableau des mouvements · Movement table', plan.movementTableImagePath],
-      [
-        'Tableau de traitement dentaire · Dental treatment table',
-        plan.dentalTreatmentTableImagePath,
-      ],
+      [L.planMovement, plan.movementTableImagePath],
+      [L.planDental, plan.dentalTreatmentTableImagePath],
     ]
       .map(([title, rel]) => {
         const src = this.resolveImageDataUrl(rel ?? null);
@@ -804,7 +1087,7 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       .join('');
 
     return `<div class="section keep">
-      <h2 class="section-title">Plan de traitement approuvé · Approved treatment plan</h2>
+      <h2 class="section-title">${esc(L.sectionPlan)}</h2>
       <div class="box">${meta}</div>
       ${ipr}
     </div>
@@ -824,9 +1107,13 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
    * markers are positioned exactly, print-stable, and immune to line
    * wrapping.
    */
-  private renderPlanIprOdontogram(entries: TreatmentPlanIpr[]): string {
+  private renderPlanIprOdontogram(
+    entries: TreatmentPlanIpr[],
+    lang: SheetLanguage = 'fr',
+  ): string {
     if (!entries.length) return '';
     const esc = this.escapeHtml.bind(this);
+    const L = SHEET_L10N[lang];
 
     const CELL = 30;
     const CROWN_W = 24;
@@ -851,8 +1138,14 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       return byPair.get([Math.min(a, b), Math.max(a, b)].join('-'));
     };
 
-    const crown = (tooth: number, x: number, y: number, flip: boolean) =>
-      `<g transform="translate(${x},${y})${flip ? ' scale(1,-1) translate(0,-36)' : ''}">
+    // Deliberately the stylised vector crowns here, NOT the sprite: the
+    // sprite's embedded bitmaps rasterise per tooth and ballooned the
+    // PDF, and screenshotting this figure would turn the mm values into
+    // pixels. Vector crowns keep the values as REAL text (selectable,
+    // searchable, accessible) at a few hundred bytes. The order
+    // odontogram above carries the app's sprite look via its screenshot.
+    const crown = (tooth: number, x: number, y: number) =>
+      `<g transform="translate(${x},${y})">
         <path d="${crownPathFor(tooth)}" fill="${DEFAULT_TOOTH}" stroke="${DEFAULT_OUTLINE}" stroke-width="1.3" />
       </g>`;
 
@@ -860,7 +1153,7 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
     const renderRow = (row: number[], y: number, upper: boolean) => {
       row.forEach((tooth, i) => {
         const x = PAD_X + i * CELL + (CELL - CROWN_W) / 2;
-        parts.push(crown(tooth, x, y, upper));
+        parts.push(crown(tooth, x, y));
         // FDI number: above the upper row, below the lower one.
         const numY = upper ? y - 6 : y + 36 + 11;
         parts.push(
@@ -905,15 +1198,97 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       `<line x1="${PAD_X}" y1="${midY}" x2="${width - PAD_X}" y2="${midY}" class="odo-mid" />`,
     );
 
-    return `<div class="plan-odo">
-      <div class="plan-odo-title">IPR &amp; étapes · IPR &amp; steps <span class="plan-odo-hint">valeurs en mm · values in mm</span></div>
-      <svg viewBox="0 0 ${width} ${height}" class="plan-odo-svg" role="img">${parts.join('')}</svg>
+    // Guide: every symbol of the figure, spelled out — a document that
+    // travels to a lab must not assume the reader knows the app.
+    const legend = `<div class="plan-odo-legend">
+      <span class="plan-odo-key"><svg viewBox="0 0 14 14" width="11" height="11"><line x1="7" y1="1" x2="7" y2="13" class="ipr-line" /></svg> ${esc(L.iprContact)}</span>
+      <span class="plan-odo-key"><span class="plan-odo-mm">0.20</span> ${esc(L.iprReduction)}</span>
+      <span class="plan-odo-key"><svg viewBox="0 0 16 16" width="12" height="12"><circle cx="8" cy="8" r="6.5" class="ipr-step-bg" /><text x="8" y="10.5" class="ipr-step">3</text></svg> ${esc(L.iprStep)}</span>
     </div>`;
+
+    return `<div class="plan-odo">
+      <div class="plan-odo-title">${esc(L.iprTitle)} <span class="plan-odo-hint">${esc(L.iprHint)}</span></div>
+      <svg viewBox="0 0 ${width} ${height}" class="plan-odo-svg" role="img">${parts.join('')}</svg>
+      ${legend}
+    </div>`;
+  }
+
+  /**
+   * One tooth as the real sprite artwork. A single mark fills the whole
+   * tooth; 2–4 marks split it into equal horizontal bands via clip-path
+   * (same treatment as the frontend's SegmentedToothGlyph).
+   */
+  private renderSpriteGlyph(
+    toothNumber: number,
+    marks: MarkStyle[],
+    rowClass: 'upper' | 'lower',
+  ): string {
+    const raw = TOOTH_VIEWBOXES[toothNumber] ?? '0 0 11 22';
+    const parts = raw.split(/\s+/);
+    const w = Number(parts[2]) || 11;
+    const h = Number(parts[3]) || 22;
+    const height = 40;
+    const width = Math.round((height * w) / h);
+    const viewBox = `0 0 ${parts[2]} ${parts[3]}`;
+    const href = `#tooth-${canonicalSpriteTooth(toothNumber)}`;
+    const flip = MIRRORED.has(toothNumber) ? 'transform:scaleX(-1);' : '';
+    // Upper teeth hang from the occlusal plane (roots up in the source
+    // artwork already, so no vertical flip needed — the sprite is drawn
+    // per-arch and the frontend renders it the same way).
+    const svgFor = (color: MarkStyle | undefined, clip?: string) =>
+      `<svg viewBox="${viewBox}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid meet" style="--tooth-color:${color?.hex ?? DEFAULT_TOOTH};--tooth-outline:${color?.outline ?? DEFAULT_OUTLINE};${flip}${clip ? `clip-path:${clip};` : ''}"><use href="${href}" xlink:href="${href}"/></svg>`;
+
+    if (marks.length <= 1) return svgFor(marks[0]);
+    // Banded fill: stack one clipped copy per mark.
+    const layers = marks
+      .map((m, i) => {
+        const top = (i / marks.length) * 100;
+        const bottom = 100 - ((i + 1) / marks.length) * 100;
+        const clip = `inset(${top.toFixed(1)}% 0 ${bottom.toFixed(1)}% 0)`;
+        return i === 0
+          ? svgFor(m, clip)
+          : `<span class="odo-band">${svgFor(m, clip)}</span>`;
+      })
+      .join('');
+    return layers;
+  }
+
+
+  private spriteMarkup(): string {
+    const sprite = this.loadSprite();
+    return sprite ?? '';
+  }
+
+  private spriteMarkupAvailable(): boolean {
+    return !!this.loadSprite();
+  }
+
+  private loadSprite(): string | null {
+    if (this.spriteCache !== undefined) return this.spriteCache;
+    try {
+      let content = fs.readFileSync(SPRITE_PATH, 'utf8');
+      // The file is standalone XML — strip the prolog before inlining
+      // into the HTML document.
+      content = content.replace(/^<\?xml[^>]*\?>\s*/, '');
+      this.spriteCache = content;
+    } catch (err) {
+      this.logger.warn(
+        `Tooth sprite not found at ${SPRITE_PATH} — odontogram falls back to plain glyphs: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      this.spriteCache = null;
+    }
+    return this.spriteCache;
   }
 
   // ─── Odontogram rendering ──────────────────────────────────────
 
-  private renderOdontogram(dto: OrderResponseDto): string {
+  private renderOdontogram(
+    dto: OrderResponseDto,
+    lang: SheetLanguage = 'fr',
+  ): string {
+    const L = SHEET_L10N[lang];
     const marksByTooth = new Map<number, ToothInstructionType[]>();
     for (const inst of dto.toothInstructions ?? []) {
       const arr = marksByTooth.get(inst.toothNumber) ?? [];
@@ -935,11 +1310,11 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
           .map((tp) => {
             const s = MARK_STYLES[tp];
             return `<span class="odo-legend-item"><span class="odo-swatch" style="background:${s.hex}"></span>${this.escapeHtml(
-              `${s.labelFr} (${s.short})`,
+              `${lang === 'fr' ? s.labelFr : s.labelEn} (${s.short})`,
             )}</span>`;
           })
           .join('')}</div>`
-      : `<div class="odo-legend"><span class="odo-legend-item">Aucune instruction dentaire — no per-tooth instructions</span></div>`;
+      : `<div class="odo-legend"><span class="odo-legend-item">${this.escapeHtml(L.noToothInstructions)}</span></div>`;
 
     // Per-tooth notes / values table (IPR mm, free-text notes).
     const noted = (dto.toothInstructions ?? []).filter(
@@ -947,13 +1322,13 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
     );
     const notesTable = noted.length
       ? `<table class="notes">
-          <thead><tr><th>Dent</th><th>Instruction</th><th>Valeur</th><th>Note</th></tr></thead>
+          <thead><tr><th>${this.escapeHtml(L.notesTooth)}</th><th>${this.escapeHtml(L.notesInstruction)}</th><th>${this.escapeHtml(L.notesValue)}</th><th>${this.escapeHtml(L.notesNote)}</th></tr></thead>
           <tbody>${noted
             .map((i) => {
               const s = MARK_STYLES[i.type];
               return `<tr>
                 <td>${i.toothNumber}</td>
-                <td><span class="odo-swatch" style="background:${s.hex};margin-right:4px"></span>${this.escapeHtml(s.labelFr)}</td>
+                <td><span class="odo-swatch" style="background:${s.hex};margin-right:4px"></span>${this.escapeHtml(lang === 'fr' ? s.labelFr : s.labelEn)}</td>
                 <td>${this.escapeHtml(i.value ? String(i.value) : '—')}</td>
                 <td>${this.escapeHtml(i.note?.trim() || '—')}</td>
               </tr>`;
@@ -963,10 +1338,10 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       : '';
 
     return `<div class="odo-wrap">
-      <div class="odo-side-label">Maxillaire · Upper</div>
+      <div class="odo-side-label">${this.escapeHtml(L.upperArch)}</div>
       ${row(UPPER_ROW, 'upper')}
       ${row(LOWER_ROW, 'lower')}
-      <div class="odo-side-label">Mandibule · Lower</div>
+      <div class="odo-side-label">${this.escapeHtml(L.lowerArch)}</div>
       ${legend}
       ${notesTable}
     </div>`;
@@ -993,7 +1368,12 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       first && marks.length === 1 ? `&nbsp;${first.short}` : ''
     }${marks.length > 1 ? `&nbsp;×${marks.length}` : ''}</span>`;
 
-    const glyph = this.renderVectorGlyph(toothNumber, marks, rowClass);
+    // The APP's order page draws the realistic sprite artwork — the
+    // sheet mirrors it so doctor and lab look at the same picture. The
+    // stylised crowns only step in when the sprite asset is missing.
+    const glyph = this.spriteMarkupAvailable()
+      ? this.renderSpriteGlyph(toothNumber, marks, rowClass)
+      : this.renderVectorGlyph(toothNumber, marks, rowClass);
 
     return `<div class="odo-cell">
       ${rowClass === 'upper' ? chip : ''}
@@ -1052,6 +1432,20 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
   // ─── Field formatting ──────────────────────────────────────────
 
   /** French label for a stored English option value; falls back to raw. */
+  /**
+   * Stored option values are English; French output translates them via
+   * VALUE_FR, English output returns them as stored.
+   */
+  private localValue(
+    lang: SheetLanguage,
+    value?: string | null,
+  ): string | undefined {
+    const v = value?.trim();
+    if (!v) return undefined;
+    if (lang === 'en') return v;
+    return VALUE_FR[v] ?? v;
+  }
+
   private frValue(value?: string | null): string | undefined {
     const v = value?.trim();
     if (!v) return undefined;
@@ -1063,7 +1457,15 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
    * labels joined with ", ", free-text "Other" trailing) into French
    * labels. Legacy prose rows pass through untouched.
    */
-  private formatChiefComplaint(packed?: string | null): string | undefined {
+  private formatChiefComplaint(
+    packed?: string | null,
+    lang: SheetLanguage = 'fr',
+  ): string | undefined {
+    if (lang === 'en') return packed?.trim() || undefined;
+    return this.formatChiefComplaintFr(packed);
+  }
+
+  private formatChiefComplaintFr(packed?: string | null): string | undefined {
     const raw = packed?.trim();
     if (!raw) return undefined;
     const segments = raw.split(',').map((s) => s.trim()).filter(Boolean);
@@ -1090,12 +1492,19 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
     return `${VALUE_FR[type] ?? type}${notes ? ` — ${notes}` : ''}`;
   }
 
-  private renderFilesTable(dto: OrderResponseDto): string {
+  private renderFilesTable(
+    dto: OrderResponseDto,
+    lang: SheetLanguage = 'fr',
+  ): string {
+    const L = SHEET_L10N[lang];
     const files = dto.files ?? [];
     if (!files.length) return '';
     const rows = files
       .map((f) => {
-        const cat = FILE_CATEGORY_FR[f.category] ?? f.category;
+        const cat =
+          lang === 'fr'
+            ? (FILE_CATEGORY_FR[f.category] ?? f.category)
+            : f.category.replace(/_/g, ' ');
         return `<tr>
           <td>${this.escapeHtml(cat)}</td>
           <td>${this.escapeHtml(f.originalName ?? f.generatedName ?? '—')}</td>
@@ -1104,10 +1513,10 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       })
       .join('');
     return `<div class="section keep">
-      <h2 class="section-title">Fichiers joints · Attached files (${files.length})</h2>
+      <h2 class="section-title">${L.sectionFiles} (${files.length})</h2>
       <div class="box" style="padding:6px 8px">
         <table class="files">
-          <thead><tr><th>Catégorie</th><th>Fichier</th><th style="text-align:right">Taille</th></tr></thead>
+          <thead><tr><th>${this.escapeHtml(L.filesCategory)}</th><th>${this.escapeHtml(L.filesFile)}</th><th style="text-align:right">${this.escapeHtml(L.filesSize)}</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>

@@ -54,19 +54,19 @@ export type LabZipLanguage = 'fr' | 'en';
  *     labelled "CBCT DICOM" — a lab tech looking for the scan should not
  *     have to guess what "other" means.
  *
- *   • the RIGHT/LEFT photo labels are SWAPPED relative to the category
- *     names: intraoral side photos are taken through a mirror, so the
- *     file uploaded as `right_photo` actually shows the patient's LEFT
- *     side. The upload categories keep their historical names (nothing
- *     stored changes); only the label the lab sees is corrected.
+ *   • the RIGHT/LEFT folders map DIRECTLY to their categories: the
+ *     folder named RIGHT holds what the doctor uploaded as right_photo.
+ *     (An earlier revision swapped them on a mirror-photo theory; real
+ *     exports proved the uploads are already labelled correctly, so the
+ *     swap moved files into the WRONG folder and was removed.)
  *
  * Accent-free on purpose: the ZIP spec's UTF-8 flag is honoured by
  * modern tools, but accentless names survive even the legacy ones.
  */
 const LAB_FOLDER_LABELS: Record<LabZipLanguage, Record<string, string>> = {
   fr: {
-    right_photo: 'PHOTO DENTS GAUCHE',
-    left_photo: 'PHOTO DENTS DROITE',
+    right_photo: 'PHOTO DENTS DROITE',
+    left_photo: 'PHOTO DENTS GAUCHE',
     front_photo: 'PHOTO DENTS FACE',
     upper_photo: 'PHOTO ARCADE SUPERIEURE',
     lower_photo: 'PHOTO ARCADE INFERIEURE',
@@ -81,8 +81,8 @@ const LAB_FOLDER_LABELS: Record<LabZipLanguage, Record<string, string>> = {
     other: 'CBCT DICOM',
   },
   en: {
-    right_photo: 'LEFT TEETH PHOTO',
-    left_photo: 'RIGHT TEETH PHOTO',
+    right_photo: 'RIGHT TEETH PHOTO',
+    left_photo: 'LEFT TEETH PHOTO',
     front_photo: 'FRONT TEETH PHOTO',
     upper_photo: 'UPPER ARCH PHOTO',
     lower_photo: 'LOWER ARCH PHOTO',
@@ -188,7 +188,7 @@ export class OrderExportService {
   ): Promise<{ buffer: Buffer; fileName: string; mimeType: string }> {
     const order = await this.orders.findAccessibleOrder(orderId, caller);
     const dto = mapOrderToDto(order);
-    const buffer = await this.orderPdf.renderOrderSheet(dto);
+    const buffer = await this.orderPdf.renderOrderSheet(dto, language);
     const safeCode = (dto.orderCode || orderId).replace(/[^\w.-]+/g, '_');
     return {
       buffer,
@@ -224,7 +224,7 @@ export class OrderExportService {
     // never reject, so nothing can become an unhandled rejection while
     // the archive streams.
     const sheetRender = this.orderPdf
-      .renderOrderSheet(dto)
+      .renderOrderSheet(dto, language)
       .then((pdf) => ({ ok: true as const, pdf }))
       .catch((err: unknown) => ({ ok: false as const, err }));
 

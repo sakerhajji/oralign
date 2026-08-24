@@ -181,16 +181,21 @@ const MARK_STYLES: Record<ToothInstructionType, MarkStyle> = {
 // STL/PLY/OBJ scans, CBCT bundles, PDFs — stays in the files table: a
 // mesh has no meaningful thumbnail). Folder-to-category mapping is
 // DIRECT — right means right — matching the lab ZIP folders.
-// Same slot order as the app's order summary (order-file-upload.tsx):
-// right, front, left, upper, lower, panoramic, then loose images.
+// Same reading order as the ORDER-CREATION upload grid
+// (order-file-upload.tsx patientImageSlots): row 1 extraoral starts with
+// the profile (left_photo) then face at rest (image) then smile (front),
+// row 2 intraoral left/front/right, row 3 occlusal upper/lower, then the
+// panoramic X-ray. Categories are shared between rows, so the per-slot
+// orderIndex (secondary sort) keeps multiple shots of one category in
+// their upload order.
 const PHOTO_CATEGORIES: OrderFileCategory[] = [
-  OrderFileCategory.right_photo,
-  OrderFileCategory.front_photo,
   OrderFileCategory.left_photo,
+  OrderFileCategory.image,
+  OrderFileCategory.front_photo,
+  OrderFileCategory.right_photo,
   OrderFileCategory.upper_photo,
   OrderFileCategory.lower_photo,
   OrderFileCategory.orthopantomography,
-  OrderFileCategory.image,
 ];
 
 const PHOTO_LABELS: Record<SheetLanguage, Record<string, string>> = {
@@ -545,7 +550,12 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
         // Preview is garnish — the scan stays listed in the files table.
       }
     }
-    const logo = this.resolveImageDataUrl(settings?.companyLogoPath ?? null);
+    // The sheet wears the APP's own logo (shipped in assets/, present on
+    // every install) rather than the billing-settings upload: the fiche
+    // is a product document, and the header must not depend on whether
+    // an admin remembered to upload a logo. Billing settings still brand
+    // the invoices, where the company identity is the point.
+    const logo = this.loadAppLogoDataUrl();
     const brandName = (settings?.companyName ?? 'ORALIGN').trim() || 'ORALIGN';
     // TWO passes. Pass 1 renders the odontograms with the app's sprite
     // artwork and SCREENSHOTS them; pass 2 renders the final sheet with
@@ -591,7 +601,9 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       try {
         // scale 2: the PNGs are downscaled into ~700px-wide slots on the
         // sheet, so a 2x capture stays crisp in print.
-        await page.setViewport({ width: 1100, height: 1400, deviceScaleFactor: 2 });
+        // 4x on a wide viewport: the shot lands in a ~750pt slot printed
+        // at 300 dpi, so anything below ~3000 device pixels reads soft.
+        await page.setViewport({ width: 1400, height: 1600, deviceScaleFactor: 4 });
         await page.setContent(html, { waitUntil: 'load', timeout: 45_000 });
         const shot = async (selector: string): Promise<string | null> => {
           const el = await page.$(selector);
@@ -1253,6 +1265,21 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
     return layers;
   }
 
+
+  private appLogoCache: string | null | undefined;
+
+  /** The app logo shipped in assets/ — cached after the first read. */
+  private loadAppLogoDataUrl(): string | null {
+    if (this.appLogoCache !== undefined) return this.appLogoCache;
+    try {
+      const abs = path.join(process.cwd(), 'assets', 'app-logo.svg');
+      const svg = fs.readFileSync(abs, 'utf8');
+      this.appLogoCache = `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
+    } catch {
+      this.appLogoCache = null;
+    }
+    return this.appLogoCache;
+  }
 
   private spriteMarkup(): string {
     const sprite = this.loadSprite();

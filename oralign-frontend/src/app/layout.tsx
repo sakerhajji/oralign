@@ -46,12 +46,18 @@ export const metadata: Metadata = {
   ],
   authors: [{ name: "Oralign" }],
   icons: {
+    // Google's crawler wants a real raster favicon (48px multiples);
+    // src/app/favicon.ico is the auto-served multi-size ICO built from
+    // the site icon (it used to be the Next.js default logo, which is
+    // what search results were showing). SVG stays for modern browsers.
     icon: [
-      // Modern browsers + Google preview — pulled from public/.
+      { url: "/favicon.ico", sizes: "16x16 32x32 48x48" },
+      { url: "/icon-192.png", type: "image/png", sizes: "192x192" },
+      { url: "/icon-512.png", type: "image/png", sizes: "512x512" },
       { url: "/iconLogo.svg", type: "image/svg+xml" },
     ],
-    shortcut: ["/iconLogo.svg"],
-    apple: [{ url: "/iconLogo.svg" }],
+    shortcut: ["/favicon.ico"],
+    apple: [{ url: "/icon-192.png" }],
   },
   openGraph: {
     type: "website",

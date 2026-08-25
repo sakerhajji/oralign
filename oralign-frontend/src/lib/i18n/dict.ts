@@ -334,6 +334,22 @@ export const dict = {
         en: 'CBCT supplement: {price} — added to the order total.',
         fr: 'Supplément CBCT : {price} — ajouté au total de la commande.',
       } as T,
+      stagedLeaveTitle: {
+        en: 'Files not uploaded yet',
+        fr: 'Fichiers pas encore téléversés',
+      } as T,
+      stagedLeaveDesc: {
+        en: 'You picked {count} file(s) but have not uploaded them. Leaving this step discards them — nothing is sent to the lab.',
+        fr: 'Vous avez sélectionné {count} fichier(s) sans les téléverser. Quitter cette étape les abandonne — rien ne part vers le laboratoire.',
+      } as T,
+      stagedLeaveStay: {
+        en: 'Stay and upload',
+        fr: 'Rester et téléverser',
+      } as T,
+      stagedLeaveDiscard: {
+        en: 'Discard the files',
+        fr: 'Abandonner les fichiers',
+      } as T,
 
       // ── Section headers shown by ClinicalOrderFiles ──────────────
       // The order wizard renders three sub-sections that each have
@@ -835,6 +851,10 @@ export const dict = {
       patientRequired: { en: 'Please pick or create a patient first.', fr: 'Veuillez choisir ou créer un patient.' } as T,
       chiefComplaintRequired: { en: 'Please describe the chief complaint.', fr: 'Veuillez décrire le motif de consultation.' } as T,
       archRequired: { en: 'Pick at least one arch to treat.', fr: 'Choisissez au moins une arcade à traiter.' } as T,
+      cbctFilesRequired: {
+        en: 'Upload the CBCT volume, or turn the CBCT option off.',
+        fr: 'Téléversez le volume CBCT, ou désactivez l’option CBCT.',
+      } as T,
       saveFailed: { en: 'Could not save — please try again.', fr: 'Échec de l’enregistrement — veuillez réessayer.' } as T,
       loadFailed: { en: 'Could not load — please reload the page.', fr: 'Échec du chargement — rechargez la page.' } as T,
     },

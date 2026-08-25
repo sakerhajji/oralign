@@ -37,6 +37,16 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 // The odontogram pulls a 4 MB anatomical SVG sprite (cached after the
 // first request) — defer the component chunk until step 5 is shown so
@@ -73,6 +83,7 @@ import {
   useCreateOrder,
   useCreatePatient,
   useDentistOptions,
+  useOrderFiles,
   useUploadPatientProfilePhoto,
   useSubmitOrder,
   useUpdateOrder,
@@ -87,6 +98,7 @@ import {
   CreateOrderDto,
   DentalOrder,
   Gender,
+  OrderFileCategory,
   OrderStatus,
   Patient,
   PatientFilterParams,
@@ -412,6 +424,41 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
   // Once the treatment fee is paid, the owning doctor can no longer edit
   // the order — only an admin can. Mirrors the backend guard
   // (ensureOrderNotLockedByPayment). Admins are never locked.
+  // Files already attached to the order. Same query key the upload
+  // panel uses, so React Query serves it from cache — no extra request.
+  const orderFilesQuery = useOrderFiles(savedOrder?.id);
+
+  /**
+   * Does the order carry a CBCT / DICOM volume?
+   *
+   * Mirrors the upload panel's own routing (ZipUploadAction): a ZIP
+   * bundle lands in `zip`, loose companion files in `other`, and
+   * individual slices in `image` with a .dcm name. Checking only `zip`
+   * would reject a perfectly valid DICOM upload.
+   */
+  const hasCbctBundle = useMemo(
+    () =>
+      (orderFilesQuery.data ?? []).some(
+        (f) =>
+          f.category === OrderFileCategory.ZIP ||
+          f.category === OrderFileCategory.OTHER ||
+          f.originalName?.toLowerCase().endsWith('.dcm'),
+      ),
+    [orderFilesQuery.data],
+  );
+
+  /**
+   * CBCT files the doctor picked but never uploaded. The upload panel is
+   * inline, so "closing" it means leaving the step or the wizard — and
+   * the staged list dies with the component. Surfacing the count here
+   * lets us stop and ask instead of dropping an 800 MB pick silently.
+   */
+  const [stagedCbctCount, setStagedCbctCount] = useState(0);
+  /** Where to go once the doctor confirms abandoning the staged files. */
+  const [pendingLeave, setPendingLeave] = useState<
+    { kind: 'step'; step: number } | { kind: 'submit' } | null
+  >(null);
+
   const paidLocked = !!savedOrder?.treatmentFeePaidAt && !isAdmin;
   const canModify = !paidLocked;
   const isDraftForSubmit = !savedOrder || savedOrder.status === OrderStatus.DRAFT;
@@ -613,8 +660,32 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
       return false;
     }
 
+    // The CBCT toggle promises the lab a volume — and bills the doctor a
+    // supplement for it. Submitting with the toggle on and nothing
+    // attached produces an order nobody can work on, so this is checked
+    // LAST (after the step-3 fields) and sends the doctor back to the
+    // step that owns the upload. The server enforces the same rule.
+    if (form.useCbctWithScans && !hasCbctBundle) {
+      setFieldErrors({ cbctFiles: t('orderForm.errors.cbctFilesRequired') });
+      setStep(2);
+      return false;
+    }
+
     setFieldErrors({});
     return true;
+  };
+
+  /**
+   * Step changes go through here so a doctor who picked CBCT files but
+   * never pressed Upload is asked before those files are dropped —
+   * leaving the step unmounts the panel and the staged list dies with it.
+   */
+  const requestStep = (next: number) => {
+    if (step === 2 && next !== 2 && stagedCbctCount > 0) {
+      setPendingLeave({ kind: 'step', step: next });
+      return;
+    }
+    setStep(next);
   };
 
   const saveDraft = async () => {
@@ -694,7 +765,7 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
 
   return (
     <div className="mx-auto w-full max-w-[1220px] space-y-7">
-      <OrderStepper currentStep={step} onStepChange={setStep} />
+      <OrderStepper currentStep={step} onStepChange={requestStep} />
 
       <header className="mx-auto max-w-5xl text-center">
         <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-primary/10 text-primary">
@@ -753,6 +824,7 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
               readOnly={!canModify}
               section="radiography-stl"
               cbctRequested={!!form.useCbctWithScans}
+              onStagedCountChange={setStagedCbctCount}
               cbctToggle={
                 <div className="space-y-2">
                   <ToggleTile
@@ -764,6 +836,9 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
                       updateField('useCbctWithScans', value)
                     }
                   />
+                  {/* Blocking error from the submit attempt: without
+                      this the doctor is bounced to a silent page. */}
+                  <FieldError message={fieldErrors.cbctFiles} />
                   {/* Paid-supplement notice — shown the moment the
                       toggle is on so the price is never a surprise. */}
                   {form.useCbctWithScans && cbctSupplement && (
@@ -937,7 +1012,7 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
                   const order = await saveDraft();
                   if (!order) return;
                 }
-                setStep((current) => Math.min(steps.length - 1, current + 1));
+                requestStep(Math.min(steps.length - 1, step + 1));
               }}
             >
               {t('common.continue')}
@@ -973,6 +1048,43 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
           )}
         </div>
       </footer>
+
+      {/* Staged-but-not-uploaded CBCT files. Cancel keeps the doctor on
+          the step so they can finish the upload; the destructive action
+          drops the picks (the panel unmounts on the way out). */}
+      <AlertDialog
+        open={!!pendingLeave}
+        onOpenChange={(open) => !open && setPendingLeave(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t('orderForm.files.stagedLeaveTitle')}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('orderForm.files.stagedLeaveDesc', {
+                count: stagedCbctCount,
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>
+              {t('orderForm.files.stagedLeaveStay')}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => {
+                const target = pendingLeave;
+                setPendingLeave(null);
+                setStagedCbctCount(0);
+                if (target?.kind === 'step') setStep(target.step);
+              }}
+            >
+              {t('orderForm.files.stagedLeaveDiscard')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Treatment fee payment dialog — shown after Submit succeeds.
           The doctor (or admin) picks card / bank transfer / cash, the

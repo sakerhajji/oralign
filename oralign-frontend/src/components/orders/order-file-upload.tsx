@@ -331,6 +331,7 @@ export function ClinicalOrderFiles({
   section,
   cbctRequested,
   cbctToggle,
+  onStagedCountChange,
 }: {
   orderId?: string;
   readOnly?: boolean;
@@ -351,6 +352,12 @@ export function ClinicalOrderFiles({
    * Read-only surfaces (review / order detail) omit it.
    */
   cbctToggle?: ReactNode;
+  /**
+   * Reports how many CBCT files are picked but NOT yet uploaded. The
+   * panel is inline, so navigating away unmounts it and the staged list
+   * is gone; the wizard uses this to warn before that happens.
+   */
+  onStagedCountChange?: (count: number) => void;
 }) {
   const { t } = useT();
   const filesQuery = useOrderFiles(orderId);
@@ -590,6 +597,7 @@ export function ClinicalOrderFiles({
               : (fileId) => deleteFile.mutate({ id: orderId, fileId })
           }
           readOnly={readOnly}
+          onStagedCountChange={onStagedCountChange}
         />
       )}
     </div>
@@ -2218,6 +2226,7 @@ function ZipUploadAction({
   files,
   onDelete,
   readOnly,
+  onStagedCountChange,
 }: {
   orderId: string;
   title: string;
@@ -2240,6 +2249,8 @@ function ZipUploadAction({
    * see what was provided.
    */
   readOnly?: boolean;
+  /** Reports the staged-but-not-uploaded count to the parent. */
+  onStagedCountChange?: (count: number) => void;
 }) {
   const uploadFiles = useUploadOrderFiles();
   const fileInputId = useMemo(
@@ -2278,6 +2289,29 @@ function ZipUploadAction({
   // and surface a removable list so the user reviews the batch before
   // it uploads.
   const [staged, setStaged] = useState<File[]>([]);
+
+  // Tell the parent how many files are waiting. Picking a CBCT volume
+  // costs the doctor a long walk to the scanner's export; losing it to a
+  // stray click on the stepper is the kind of thing people do not
+  // forgive, so the wizard needs to know in order to ask first.
+  useEffect(() => {
+    onStagedCountChange?.(staged.length);
+  }, [staged.length, onStagedCountChange]);
+
+  // Same protection against the browser itself — closing the tab or
+  // hitting reload with files still staged. Browsers ignore custom text
+  // here and show their own wording; setting returnValue is what arms
+  // the prompt at all.
+  useEffect(() => {
+    if (staged.length === 0) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [staged.length]);
+
   const stagedKind: 'zip' | 'files' | null = staged.length
     ? extOf(staged[0]) === 'zip'
       ? 'zip'

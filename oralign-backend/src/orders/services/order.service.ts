@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
+  OrderFileCategory,
   OrderStatus,
   Prisma,
   ToothInstructionType,
@@ -382,6 +383,32 @@ export class OrderService {
       throw new BadRequestException(
         'You must accept the General Terms & Conditions to submit the order.',
       );
+    }
+
+    // CBCT gate — an order flagged as using a CBCT / DICOM volume must
+    // actually carry one. Without it the lab receives an order that claims
+    // "CBCT included", billed with the CBCT supplement, and nothing to open.
+    // The wizard blocks its submit button too; this is the authoritative
+    // guard, since the endpoint is callable directly.
+    //
+    // The accepted shapes mirror exactly what the upload panel produces:
+    // a ZIP bundle, loose files filed under "other", or individual .dcm
+    // slices routed to "image". current.files is already loaded by
+    // findAccessibleOrder (orderInclude.files, deleted rows excluded), so
+    // this costs no extra query.
+    if (current.useCbctWithScans) {
+      const hasCbctBundle = current.files.some(
+        (f) =>
+          f.category === OrderFileCategory.zip ||
+          f.category === OrderFileCategory.other ||
+          f.originalName?.toLowerCase().endsWith('.dcm'),
+      );
+      if (!hasCbctBundle) {
+        throw new BadRequestException(
+          'This order is marked as using a CBCT volume but carries no CBCT file. Upload the CBCT bundle, or turn the CBCT option off.',
+          'CBCT_FILES_MISSING',
+        );
+      }
     }
 
     const order = await this.prisma.dentalOrder.update({

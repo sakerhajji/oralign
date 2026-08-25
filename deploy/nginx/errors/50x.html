@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="fr" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Maintenance · ORALIGN</title>
+<!--
+  Served by nginx when the Next.js upstream is unreachable (502), being
+  restarted (503) or too slow (504). It therefore CANNOT depend on the
+  app: no external font, no stylesheet, no image file, no framework —
+  everything is inline, because at the moment this page is needed the
+  only thing still running is nginx.
+  The wording mirrors ERROR_COPY.offline in
+  oralign-frontend/src/lib/error-pages/copy.ts — by hand, not by a
+  generator: when you change one, change the other.
+-->
+<style>
+  :root {
+    --black: #191919;
+    --white: #f2f5ef;
+    --sun: #feca16;
+    --muted: rgba(242, 245, 239, 0.62);
+    --faint: rgba(242, 245, 239, 0.34);
+    --hairline: rgba(242, 245, 239, 0.14);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    min-height: 100svh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 48px 24px;
+    background: var(--black);
+    color: var(--white);
+    font-family: "DM Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    text-align: center;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 44px;
+  }
+  .wordmark {
+    font-family: "Century Gothic", Jost, system-ui, sans-serif;
+    font-size: 1.1rem;
+    letter-spacing: 0.22em;
+  }
+  .eyebrow {
+    font-size: 0.58rem;
+    letter-spacing: 0.42em;
+    text-transform: uppercase;
+    color: var(--sun);
+  }
+  .code {
+    font-family: "Century Gothic", Jost, system-ui, sans-serif;
+    font-size: clamp(4.5rem, 15vw, 9rem);
+    font-weight: 300;
+    line-height: 1;
+    color: var(--sun);
+    margin-top: 12px;
+    direction: ltr;
+  }
+  h1 {
+    font-family: "Century Gothic", Jost, system-ui, sans-serif;
+    font-size: clamp(1.5rem, 3.4vw, 2.2rem);
+    font-weight: 300;
+    line-height: 1.2;
+    margin: 20px 0 0;
+    max-width: 620px;
+  }
+  p {
+    margin: 16px 0 0;
+    max-width: 480px;
+    font-size: 0.95rem;
+    line-height: 1.8;
+    color: var(--muted);
+  }
+  .actions { margin-top: 40px; }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 52px;
+    padding: 0 28px;
+    background: var(--sun);
+    color: var(--black);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    text-decoration: none;
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .btn:focus-visible, a:focus-visible {
+    outline: 3px solid var(--sun);
+    outline-offset: 3px;
+  }
+  .foot {
+    margin-top: 36px;
+    padding-top: 20px;
+    border-top: 1px solid var(--hairline);
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+  }
+  [dir="rtl"] body { text-align: center; }
+</style>
+</head>
+<body>
+  <div class="brand">
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#feca16" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+      <circle cx="12" cy="14" r="4" fill="#feca16" stroke="none"></circle>
+      <path d="M12 6V3"></path>
+      <path d="M6.3 8.3 4.2 6.2"></path>
+      <path d="M17.7 8.3l2.1-2.1"></path>
+      <path d="M4 14H1"></path>
+      <path d="M23 14h-3"></path>
+    </svg>
+    <span class="wordmark">ORALIGN</span>
+  </div>
+
+  <div class="eyebrow" id="eyebrow">Maintenance en cours</div>
+  <div class="code" aria-hidden="true">503</div>
+  <h1 id="title">Le site revient dans un instant.</h1>
+  <p id="body">Nous effectuons une mise à jour. Merci de réessayer dans quelques minutes — vos données ne sont pas affectées.</p>
+
+  <div class="actions">
+    <button type="button" class="btn" id="retry" onclick="location.reload()">Réessayer</button>
+  </div>
+
+  <div class="foot" id="foot">oralign.com.tn</div>
+
+<script>
+/* Progressive enhancement only: the French copy above is the baseline and
+   stands on its own with JavaScript disabled. If the visitor already chose
+   English or Arabic on the site, mirror that choice. */
+(function () {
+  var COPY = {
+    en: {
+      eyebrow: "Under maintenance",
+      title: "The site will be back shortly.",
+      body: "We’re running an update. Please try again in a few minutes — your data is unaffected.",
+      retry: "Try again",
+      docTitle: "Maintenance · ORALIGN",
+      dir: "ltr"
+    },
+    ar: {
+      eyebrow: "صيانة جارية",
+      title: "سيعود الموقع بعد قليل.",
+      body: "نقوم بتحديث الموقع. يُرجى المحاولة بعد بضع دقائق — بياناتك لم تتأثر.",
+      retry: "إعادة المحاولة",
+      docTitle: "صيانة · ORALIGN",
+      dir: "rtl"
+    }
+  };
+  var lang = null;
+  try { lang = localStorage.getItem("oralign.showcase.lang"); } catch (e) { /* private mode */ }
+  var path = location.pathname;
+  // Exact segment match: a bare indexOf("/en") would also catch
+  // /entreprise and mislabel a French page as English.
+  if (path === "/en" || path.indexOf("/en/") === 0) lang = "en";
+  if (path === "/ar" || path.indexOf("/ar/") === 0) lang = "ar";
+  var c = COPY[lang];
+  if (!c) return;
+  document.documentElement.lang = lang;
+  document.documentElement.dir = c.dir;
+  if (c.docTitle) document.title = c.docTitle;
+  document.getElementById("eyebrow").textContent = c.eyebrow;
+  document.getElementById("title").textContent = c.title;
+  document.getElementById("body").textContent = c.body;
+  document.getElementById("retry").textContent = c.retry;
+})();
+</script>
+</body>
+</html>

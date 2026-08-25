@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="fr" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Requête invalide · ORALIGN</title>
+<!--
+  Served by nginx for the client errors it rejects BEFORE ever reaching
+  Next.js: malformed request (400), wrong method (405), timed-out client
+  (408), body over client_max_body_size (413), oversized URI (414) or
+  headers (431). Next never sees these, so this page is the only thing a
+  visitor would otherwise get as bare nginx text.
+  Self-contained on purpose — see 50x.html for the same rationale.
+-->
+<style>
+  :root {
+    --black: #191919;
+    --white: #f2f5ef;
+    --sun: #feca16;
+    --muted: rgba(242, 245, 239, 0.62);
+    --faint: rgba(242, 245, 239, 0.34);
+    --hairline: rgba(242, 245, 239, 0.14);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    min-height: 100svh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 48px 24px;
+    background: var(--black);
+    color: var(--white);
+    font-family: "DM Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    text-align: center;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 44px; }
+  .wordmark {
+    font-family: "Century Gothic", Jost, system-ui, sans-serif;
+    font-size: 1.1rem;
+    letter-spacing: 0.22em;
+  }
+  .eyebrow {
+    font-size: 0.58rem;
+    letter-spacing: 0.42em;
+    text-transform: uppercase;
+    color: var(--sun);
+  }
+  .code {
+    font-family: "Century Gothic", Jost, system-ui, sans-serif;
+    font-size: clamp(4.5rem, 15vw, 9rem);
+    font-weight: 300;
+    line-height: 1;
+    color: var(--sun);
+    margin-top: 12px;
+    direction: ltr;
+  }
+  h1 {
+    font-family: "Century Gothic", Jost, system-ui, sans-serif;
+    font-size: clamp(1.5rem, 3.4vw, 2.2rem);
+    font-weight: 300;
+    line-height: 1.2;
+    margin: 20px 0 0;
+    max-width: 620px;
+  }
+  p {
+    margin: 16px 0 0;
+    max-width: 480px;
+    font-size: 0.95rem;
+    line-height: 1.8;
+    color: var(--muted);
+  }
+  .actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 40px; }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 52px;
+    padding: 0 28px;
+    background: var(--sun);
+    color: var(--black);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    text-decoration: none;
+    border: none;
+    font-family: inherit;
+  }
+  .btn.ghost {
+    background: transparent;
+    color: var(--white);
+    font-weight: 500;
+    border: 1px solid var(--hairline);
+  }
+  .btn:focus-visible, a:focus-visible {
+    outline: 3px solid var(--sun);
+    outline-offset: 3px;
+  }
+  .foot {
+    margin-top: 36px;
+    padding-top: 20px;
+    border-top: 1px solid var(--hairline);
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+  <div class="brand">
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#feca16" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+      <circle cx="12" cy="14" r="4" fill="#feca16" stroke="none"></circle>
+      <path d="M12 6V3"></path>
+      <path d="M6.3 8.3 4.2 6.2"></path>
+      <path d="M17.7 8.3l2.1-2.1"></path>
+      <path d="M4 14H1"></path>
+      <path d="M23 14h-3"></path>
+    </svg>
+    <span class="wordmark">ORALIGN</span>
+  </div>
+
+  <div class="eyebrow" id="eyebrow">Requête invalide</div>
+  <div class="code" aria-hidden="true">400</div>
+  <h1 id="title">Cette requête n’a pas pu être traitée.</h1>
+  <p id="body">La demande envoyée par votre navigateur est incorrecte ou trop volumineuse. Revenez à l’accueil et réessayez.</p>
+
+  <div class="actions">
+    <a class="btn" href="/decouvrir" id="home">Retour à l’accueil</a>
+    <a class="btn ghost" href="/contact" id="contact">Nous contacter</a>
+  </div>
+
+  <div class="foot">oralign.com.tn</div>
+
+<script>
+/* Progressive enhancement only — the French copy above is the baseline. */
+(function () {
+  var COPY = {
+    en: {
+      eyebrow: "Invalid request",
+      title: "This request could not be handled.",
+      body: "The request your browser sent is malformed or too large. Head back to the homepage and try again.",
+      home: "Back to homepage",
+      contact: "Contact us",
+      homeHref: "/en/discover",
+      contactHref: "/en/contact",
+      docTitle: "Invalid request · ORALIGN",
+      dir: "ltr"
+    },
+    ar: {
+      eyebrow: "طلب غير صالح",
+      title: "تعذّرت معالجة هذا الطلب.",
+      body: "الطلب الذي أرسله متصفحك غير صحيح أو كبير جداً. عد إلى الصفحة الرئيسية وحاول مجدداً.",
+      home: "العودة إلى الرئيسية",
+      contact: "اتصل بنا",
+      homeHref: "/ar/discover",
+      contactHref: "/contact",
+      docTitle: "طلب غير صالح · ORALIGN",
+      dir: "rtl"
+    }
+  };
+  var lang = null;
+  try { lang = localStorage.getItem("oralign.showcase.lang"); } catch (e) { /* private mode */ }
+  var path = location.pathname;
+  // Exact segment match: a bare indexOf("/en") would also catch
+  // /entreprise and mislabel a French page as English.
+  if (path === "/en" || path.indexOf("/en/") === 0) lang = "en";
+  if (path === "/ar" || path.indexOf("/ar/") === 0) lang = "ar";
+  var c = COPY[lang];
+  if (!c) return;
+  document.documentElement.lang = lang;
+  document.documentElement.dir = c.dir;
+  if (c.docTitle) document.title = c.docTitle;
+  document.getElementById("eyebrow").textContent = c.eyebrow;
+  document.getElementById("title").textContent = c.title;
+  document.getElementById("body").textContent = c.body;
+  var home = document.getElementById("home");
+  home.textContent = c.home;
+  home.href = c.homeHref;
+  var contact = document.getElementById("contact");
+  contact.textContent = c.contact;
+  contact.href = c.contactHref;
+})();
+</script>
+</body>
+</html>

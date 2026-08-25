@@ -47,9 +47,13 @@
 ├── docker-compose.production.yml        ← overlay applied on top of docker-compose.yml
 ├── deploy/nginx/
 │   ├── oralign.com.tn.conf              ← copy to /etc/nginx/sites-available/
-│   └── api.oralign.com.tn.conf          ← copy to /etc/nginx/sites-available/
+│   ├── api.oralign.com.tn.conf          ← copy to /etc/nginx/sites-available/
+│   └── errors/                          ← copy to /var/www/oralign-errors/
+│       ├── 50x.html                     ← shown when the app is down (502/503/504)
+│       └── 4xx.html                     ← shown for requests nginx rejects itself
 ├── scripts/
 │   ├── setup-vps.sh                     ← one-time VPS prep
+│   ├── apply-nginx.sh                   ← sync vhosts + error pages, validate, reload
 │   ├── deploy.sh                        ← every-deploy entry point
 │   ├── rollback.sh                      ← revert to previous commit
 │   └── backup.sh                        ← Postgres + uploads backup
@@ -97,7 +101,23 @@ openssl rand -base64 48
 
 ### 3.3 Install Nginx server blocks (without touching viewer)
 
+Use the script — it installs the branded error pages **before** reloading,
+which matters: `oralign.com.tn.conf` points `error_page` at files under
+`/var/www/oralign-errors/`, `nginx -t` does **not** check that they exist,
+and a missing file turns every 502 into a bare 500 at request time.
+
 ```bash
+sudo bash /opt/oralign-app/scripts/apply-nginx.sh
+```
+
+<details>
+<summary>Equivalent manual steps</summary>
+
+```bash
+sudo install -d -m 755 /var/www/oralign-errors
+sudo install -m 644 /opt/oralign-app/deploy/nginx/errors/50x.html /var/www/oralign-errors/
+sudo install -m 644 /opt/oralign-app/deploy/nginx/errors/4xx.html /var/www/oralign-errors/
+
 sudo cp /opt/oralign-app/deploy/nginx/oralign.com.tn.conf      /etc/nginx/sites-available/
 sudo cp /opt/oralign-app/deploy/nginx/api.oralign.com.tn.conf  /etc/nginx/sites-available/
 
@@ -106,6 +126,15 @@ sudo ln -sf /etc/nginx/sites-available/api.oralign.com.tn  /etc/nginx/sites-enab
 
 sudo nginx -t            # MUST be ok before reload
 sudo systemctl reload nginx
+```
+</details>
+
+Check the pages are actually on disk where nginx will look for them.
+`nginx -t` does NOT verify `error_page` targets — it only parses the
+config — so test the files themselves:
+
+```bash
+test -r /var/www/oralign-errors/50x.html && test -r /var/www/oralign-errors/4xx.html && echo "error pages OK"
 ```
 
 Verify viewer is still alive:

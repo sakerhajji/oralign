@@ -11,13 +11,28 @@
 # geolocation ended up blocked in production (the live server kept the
 # old "Permissions-Policy: geolocation=()" header for weeks).
 #
-# Idempotent: copy both vhosts, ensure the symlinks, validate, reload,
-# then VERIFY the served headers so drift is caught immediately.
+# Idempotent: install the error pages, copy both vhosts, ensure the
+# symlinks, validate, reload, then VERIFY the served headers so drift is
+# caught immediately.
 # ─────────────────────────────────────────────────────────────────
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SITES=(oralign.com.tn api.oralign.com.tn)
+ERROR_DIR=/var/www/oralign-errors
+
+# ── Static error pages FIRST ─────────────────────────────────────
+# oralign.com.tn.conf points error_page at these files. nginx -t does
+# NOT check that they exist, and a missing file turns every 502 into a
+# bare 500 at request time — so they must land before the reload, not
+# after it.
+install -d -m 755 "$ERROR_DIR"
+for page in 50x.html 4xx.html; do
+  src="$REPO_DIR/deploy/nginx/errors/$page"
+  [[ -f "$src" ]] || { echo "ERROR: missing $src" >&2; exit 1; }
+  install -m 644 "$src" "$ERROR_DIR/$page"
+  echo "synced: error page $page"
+done
 
 for site in "${SITES[@]}"; do
   src="$REPO_DIR/deploy/nginx/$site.conf"

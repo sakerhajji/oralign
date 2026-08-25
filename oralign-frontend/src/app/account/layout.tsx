@@ -1,8 +1,15 @@
+import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import { AppSidebar } from '@/components/app-sidebar';
 import { SiteHeader } from '@/components/site-header';
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
 import { AccountNavTabs } from '@/components/account/account-nav-tabs';
+
+// Auth-gated product surface — same noindex rationale as /dashboard.
+export const metadata: Metadata = {
+  title: { default: 'Mon compte', template: '%s · Oralign' },
+  robots: { index: false, follow: false },
+};
 
 export default function AccountLayout({ children }: { children: ReactNode }) {
   return (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import { DEFAULT_LANG, LANGS, type Lang } from "./dict";
 
 const STORAGE_KEY = "oralign.showcase.lang";
@@ -31,14 +31,13 @@ function subscribe(cb: () => void): () => void {
   };
 }
 
+/**
+ * The STORED language preference. The document-level lang/dir reflection
+ * lives in LangProvider, keyed on the ACTIVE language — which may differ
+ * from the stored one on the /en and /ar trees where the URL wins.
+ */
 export function useLang(): { lang: Lang; setLang: (l: Lang) => void } {
   const lang = useSyncExternalStore(subscribe, readLang, () => DEFAULT_LANG);
-
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    document.documentElement.lang = lang;
-    document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
-  }, [lang]);
 
   const setLang = useCallback((l: Lang) => {
     try {

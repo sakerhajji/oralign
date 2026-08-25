@@ -1,70 +1,119 @@
 import type { MetadataRoute } from 'next';
 import { getPublishedPosts } from './(showcase)/blog/_lib/fetch';
-
-const SITE_URL =
-  process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') ?? 'https://oralign.com.tn';
+import { absoluteUrl, SITE_URL } from './(showcase)/_lib/seo/meta';
+import {
+  MARKETING_PAGES,
+  MARKETING_PAGE_KEYS,
+  PAGE_LANGS,
+  pathFor,
+  type MarketingPageKey,
+} from './(showcase)/_lib/seo/routes';
+import { resolveBlogMediaUrl } from '@/lib/api/blog.service';
 
 /**
  * /sitemap.xml
  *
- * Only PUBLIC marketing URLs go here. Authenticated surfaces
- * (/dashboard, /account, /onboarding, …) are intentionally omitted —
- * they're blocked in robots.ts and would just leak product paths.
+ * Only PUBLIC, INDEXABLE URLs belong here. Deliberately absent:
+ *  - authenticated surfaces (/dashboard, /account, /onboarding, …) —
+ *    blocked in robots.ts and noindexed;
+ *  - auth pages (/login, /signup, …) — crawlable but noindexed, and a
+ *    sitemap must never list URLs it doesn't want indexed;
+ *  - /shop — placeholder page, noindexed until it has real content;
+ *  - "/" and "/en", "/ar" — they 308 to the localized homes, and a
+ *    sitemap lists canonical targets, never redirects.
  *
- * The public site is the patient website served at "/decouvrir". Published blog
- * posts (both patient- and practitioner-authored — the blog is unified)
- * are appended dynamically under the single /blog path. The fetch
- * fails SOFT: if the API is unreachable the sitemap still ships every
- * static marketing route.
+ * Every marketing page ships in its three language versions, each entry
+ * carrying the full hreflang set (Google reads sitemap alternates as
+ * first-class hreflang annotations). Blog posts are appended dynamically;
+ * the fetch fails SOFT so the sitemap still ships if the API is down.
  */
+
+type Alternates = { languages: Record<string, string> };
+
+function marketingAlternates(key: MarketingPageKey): Alternates {
+  const langs = PAGE_LANGS[key];
+  const fr = absoluteUrl(pathFor(key, 'fr'));
+  const languages: Record<string, string> = { fr, 'fr-TN': fr };
+  if (langs.includes('en')) languages.en = absoluteUrl(pathFor(key, 'en'));
+  if (langs.includes('ar')) {
+    languages.ar = absoluteUrl(pathFor(key, 'ar'));
+    languages['ar-TN'] = absoluteUrl(pathFor(key, 'ar'));
+  }
+  languages['x-default'] = fr;
+  return { languages };
+}
+
+/** Ranking intent per page: how hard we want each surface pushed. */
+const PAGE_RANK: Record<
+  MarketingPageKey,
+  { priority: number; changeFrequency: 'daily' | 'weekly' | 'monthly' | 'yearly' }
+> = {
+  home: { priority: 1.0, changeFrequency: 'weekly' },
+  practitioners: { priority: 0.9, changeFrequency: 'monthly' },
+  cases: { priority: 0.8, changeFrequency: 'monthly' },
+  finder: { priority: 0.8, changeFrequency: 'monthly' },
+  guide: { priority: 0.7, changeFrequency: 'monthly' },
+  community: { priority: 0.6, changeFrequency: 'weekly' },
+  about: { priority: 0.5, changeFrequency: 'yearly' },
+  contact: { priority: 0.5, changeFrequency: 'yearly' },
+};
+
+// Legal / compliance surfaces. Low priority but they MUST be crawlable:
+// payment providers check that they resolve publicly. FR-only.
+const LEGAL_PAGES = [
+  '/mentions-legales',
+  '/politique-confidentialite',
+  '/conditions-utilisation',
+  '/conditions-vente',
+  '/reclamations-remboursements',
+];
+
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const now = new Date();
 
-  // Every PUBLIC page, in rough order of how much we want it ranked.
-  // Keep this in step with app/(showcase)/**: a page missing here is a
-  // page the crawlers have no formal reason to fetch. "/" is deliberately
-  // absent — it 308s to /decouvrir, and a sitemap lists canonical targets,
-  // never redirects.
-  const publicPages: [path: string, priority: number, changeFrequency: "daily" | "weekly" | "monthly" | "yearly"][] = [
-    ["/decouvrir", 1.0, "weekly"],   // canonical patient homepage
-    ["/cas", 0.8, "monthly"],        // treated cases
-    ["/trouver-un-praticien", 0.8, "monthly"],
-    ["/blog", 0.7, "daily"],
-    ["/guide", 0.7, "monthly"],
-    ["/shop", 0.7, "weekly"],
-    ["/communaute", 0.6, "weekly"],
-    ["/qui-sommes-nous", 0.5, "yearly"],
-    ["/contact", 0.5, "yearly"],
-    ["/signup", 0.5, "yearly"],
-    ["/login", 0.4, "yearly"],
-    // Legal / compliance surfaces. Low priority but they MUST be
-    // crawlable: payment providers check that they resolve publicly.
-    ["/mentions-legales", 0.3, "yearly"],
-    ["/politique-confidentialite", 0.3, "yearly"],
-    ["/conditions-utilisation", 0.3, "yearly"],
-    ["/conditions-vente", 0.3, "yearly"],
-    ["/reclamations-remboursements", 0.3, "yearly"],
-  ];
-
-  const staticRoutes: MetadataRoute.Sitemap = publicPages.map(
-    ([path, priority, changeFrequency]) => ({
-      url: `${SITE_URL}${path}`,
+  const marketingRoutes: MetadataRoute.Sitemap = MARKETING_PAGE_KEYS.flatMap((key) => {
+    const rank = PAGE_RANK[key];
+    const alternates = marketingAlternates(key);
+    return PAGE_LANGS[key].map((lang) => ({
+      url: absoluteUrl(MARKETING_PAGES[key][lang].path),
       lastModified: now,
-      changeFrequency,
-      priority,
-    }),
-  );
+      changeFrequency: rank.changeFrequency,
+      priority: lang === 'fr' ? rank.priority : Math.max(rank.priority - 0.1, 0.1),
+      alternates,
+    }));
+  });
 
-  // The single public blog serves every published post (no audience filter),
-  // all mounted under /blog/<slug>. Fails soft to an empty list.
-  const { posts } = await getPublishedPosts({ page: 1, limit: 1000 });
-
-  const blogRoutes: MetadataRoute.Sitemap = posts.map((post) => ({
-    url: `${SITE_URL}/blog/${post.slug}`,
-    lastModified: post.publishedAt ? new Date(post.publishedAt) : now,
-    changeFrequency: 'weekly',
-    priority: 0.6,
+  const legalRoutes: MetadataRoute.Sitemap = LEGAL_PAGES.map((path) => ({
+    url: `${SITE_URL}${path}`,
+    lastModified: now,
+    changeFrequency: 'yearly',
+    priority: 0.3,
   }));
 
-  return [...staticRoutes, ...blogRoutes];
+  const blogIndex: MetadataRoute.Sitemap = [
+    {
+      url: `${SITE_URL}/blog`,
+      lastModified: now,
+      changeFrequency: 'daily',
+      priority: 0.7,
+    },
+  ];
+
+  // The single public blog serves every published post (no audience
+  // filter), all mounted under /blog/<slug>. Fails soft to an empty list.
+  const { posts } = await getPublishedPosts({ page: 1, limit: 1000 });
+
+  const blogRoutes: MetadataRoute.Sitemap = posts.map((post) => {
+    const cover = post.cover?.lgUrl ?? post.cover?.mdUrl ?? post.cover?.url;
+    const coverAbs = cover ? resolveBlogMediaUrl(cover) : null;
+    return {
+      url: `${SITE_URL}/blog/${post.slug}`,
+      lastModified: post.publishedAt ? new Date(post.publishedAt) : now,
+      changeFrequency: 'weekly' as const,
+      priority: 0.6,
+      ...(coverAbs ? { images: [coverAbs] } : {}),
+    };
+  });
+
+  return [...marketingRoutes, ...legalRoutes, ...blogIndex, ...blogRoutes];
 }

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { dict } from "../_lib/i18n/dict";
-import { useShowcaseLang } from "../_lib/i18n/lang-context";
+import { useLocalizedHref, useShowcaseLang } from "../_lib/i18n/lang-context";
 import {
   companyFooterLinks,
   legalFooterLinks,
@@ -19,10 +19,12 @@ type FooterLink = { label: string; href: string };
  */
 export function Footer() {
   const { lang } = useShowcaseLang();
+  const l = useLocalizedHref();
 
   const companyLinks: FooterLink[] = companyFooterLinks(lang);
   const legalLinks: FooterLink[] = legalFooterLinks(lang);
   const accessLinks: FooterLink[] = [
+    { label: dict.footer.partner[lang], href: "/praticiens" },
     { label: dict.nav.blogs[lang], href: "/blog" },
     { label: dict.footer.access[lang], href: "/login" },
   ];
@@ -39,7 +41,7 @@ export function Footer() {
           {/* Brand */}
           <div className="max-w-[300px]">
             <Link
-              href="/decouvrir"
+              href={l("/decouvrir")}
               className="sc-serif inline-block text-[1.7rem] font-medium leading-none tracking-[0.22em] text-[var(--sc-white)] no-underline"
             >
               ORALIGN
@@ -107,6 +109,7 @@ export function Footer() {
 }
 
 function FCol({ title, items }: { title: string; items: FooterLink[] }) {
+  const l = useLocalizedHref();
   return (
     <div>
       <h4
@@ -124,7 +127,7 @@ function FCol({ title, items }: { title: string; items: FooterLink[] }) {
         {items.map((it) => (
           <li key={`${it.label}-${it.href}`}>
             <Link
-              href={it.href}
+              href={l(it.href)}
               className="text-[rgba(242,245,239,0.55)] no-underline transition-colors hover:text-[var(--sc-white)]"
               style={{ fontSize: "0.82rem" }}
             >

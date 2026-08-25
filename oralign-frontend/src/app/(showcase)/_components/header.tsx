@@ -7,17 +7,20 @@ import { useEffect, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { NAV_ITEMS, type NavItem } from "../_lib/nav";
 import { dict } from "../_lib/i18n/dict";
-import { useShowcaseLang } from "../_lib/i18n/lang-context";
+import { useLocalizedHref, useShowcaseLang } from "../_lib/i18n/lang-context";
 import { MobileNav } from "./mobile-nav";
 
 // The public site is the patient website with one nav. Two clear actions
 // live in the header: "Trouver un praticien" (the public finder) and
-// "Espace praticien" (the secured platform sign-in / sign-up).
+// "Espace praticien" — the B2B landing that presents the partner program
+// before funnelling to /signup and /login (a crawlable marketing page
+// beats a bare login form, for practitioners and for search engines).
 const FINDER_HREF = "/trouver-un-praticien";
-const PRACTITIONER_SPACE_HREF = "/login";
+const PRACTITIONER_SPACE_HREF = "/praticiens";
 
 export function Header() {
   const { lang } = useShowcaseLang();
+  const l = useLocalizedHref();
   const pathname = usePathname();
   const [scrolled, setScrolled] = useState(false);
   const [active, setActive] = useState<string | null>(null);
@@ -26,16 +29,17 @@ export function Header() {
     dict.nav[key as keyof typeof dict.nav]?.[lang] ?? key;
 
   // Anchor sections to observe on the CURRENT page = the `#hash` of any
-  // dropdown child whose route is the active pathname (e.g. on
-  // /decouvrir we watch #oralign, #oralign-prime, …).
+  // dropdown child whose LOCALIZED route is the active pathname (on
+  // /en/discover we watch the same #oralign, #oralign-prime, … ids).
   const sectionIds = (() => {
     const ids: string[] = [];
     for (const item of navItems) {
       const collect = (href: string) => {
-        const i = href.indexOf("#");
+        const localized = l(href);
+        const i = localized.indexOf("#");
         if (i < 0) return;
-        const route = href.slice(0, i);
-        if (route === "" || route === pathname) ids.push(href.slice(i + 1));
+        const route = localized.slice(0, i);
+        if (route === "" || route === pathname) ids.push(localized.slice(i + 1));
       };
       collect(item.href);
       for (const child of item.children ?? []) collect(child.href);
@@ -51,8 +55,8 @@ export function Header() {
   // children lives on the current page); a dropdown child is active when
   // its section is the one in view (tracked by the observer below).
   const isItemActive = (item: NavItem): boolean =>
-    pathname === item.href ||
-    (item.children ?? []).some((c) => c.href.split("#")[0] === pathname);
+    pathname === l(item.href).split("#")[0] ||
+    (item.children ?? []).some((c) => l(c.href).split("#")[0] === pathname);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
@@ -95,7 +99,7 @@ export function Header() {
       <div className="relative mx-auto flex h-16 max-w-[1400px] items-center px-4 sm:h-[72px] sm:px-6 lg:h-20 lg:px-12">
         {/* Logo — absolute-centered on <lg, inline on lg+ */}
         <Link
-          href="/decouvrir"
+          href={l("/decouvrir")}
           aria-label="Oralign — home"
           className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 lg:static lg:translate-x-0 lg:translate-y-0 flex shrink-0 items-center outline-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--sc-sun)]"
         >
@@ -122,7 +126,7 @@ export function Header() {
 
               const trigger = (
                 <Link
-                  href={item.href}
+                  href={l(item.href)}
                   aria-current={isActive ? "true" : undefined}
                   aria-haspopup={hasChildren ? "true" : undefined}
                   className={[
@@ -168,7 +172,7 @@ export function Header() {
                         return (
                           <li key={child.id}>
                             <Link
-                              href={child.href}
+                              href={l(child.href)}
                               aria-current={childActive ? "true" : undefined}
                               className={[
                                 "block rounded-md px-3 py-2.5 text-[0.88rem] font-medium leading-snug no-underline transition-colors",
@@ -193,13 +197,13 @@ export function Header() {
         {/* Right cluster — the two public actions on lg+; hamburger on <lg */}
         <div className="ms-auto flex shrink-0 items-center gap-2 sm:gap-3">
           <Link
-            href={PRACTITIONER_SPACE_HREF}
+            href={l(PRACTITIONER_SPACE_HREF)}
             className="hidden items-center px-2 py-2 text-[0.68rem] font-medium uppercase tracking-[0.16em] text-[var(--sc-text-mid)] no-underline transition-colors hover:text-[var(--sc-black)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sc-sun)] lg:inline-flex xl:px-3 xl:text-[0.72rem]"
           >
             {dict.nav.practitionerSpace[lang]}
           </Link>
           <Link
-            href={FINDER_HREF}
+            href={l(FINDER_HREF)}
             className="hidden min-h-11 items-center bg-[var(--sc-sun)] px-4 py-3 text-[0.68rem] font-semibold uppercase tracking-[0.15em] text-[var(--sc-black)] no-underline transition-colors hover:bg-[var(--sc-sun-2,#f9d96a)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sc-black)] lg:inline-flex xl:px-5 xl:text-[0.72rem]"
           >
             {dict.nav.findPractitionerCta[lang]}

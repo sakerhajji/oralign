@@ -1,12 +1,9 @@
 import type { Metadata } from "next";
-import { GuidePage } from "./_components/guide-page";
+import { marketingMetadata } from "../_lib/seo/meta";
+import { MarketingPageBody } from "../_lib/seo/page-bodies";
 
-export const metadata: Metadata = {
-  title: "Guide d'utilisation des aligneurs Oralign | ORALIGN",
-  description: "Le guide pratique pour porter, nettoyer et entretenir vos aligneurs invisibles Oralign au quotidien.",
-  alternates: { canonical: "/guide" },
-};
+export const metadata: Metadata = marketingMetadata("guide", "fr");
 
 export default function Page() {
-  return <GuidePage />;
+  return <MarketingPageBody page="guide" lang="fr" />;
 }

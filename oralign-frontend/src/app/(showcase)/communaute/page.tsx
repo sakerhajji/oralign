@@ -1,23 +1,9 @@
 import type { Metadata } from "next";
-import {
-  CommunauteCta,
-  TemoignagesSection,
-  PartagerSection,
-} from "../_components/patient/communaute-sections";
+import { marketingMetadata } from "../_lib/seo/meta";
+import { MarketingPageBody } from "../_lib/seo/page-bodies";
 
-export const metadata: Metadata = {
-  title: "Communauté Oralign — Témoignages & partage d'expérience | ORALIGN",
-  description:
-    "La communauté Oralign : témoignages de patients et partagez votre propre expérience de traitement par aligneurs invisibles.",
-  alternates: { canonical: "/communaute" },
-};
+export const metadata: Metadata = marketingMetadata("community", "fr");
 
 export default function CommunautePage() {
-  return (
-    <>
-      <TemoignagesSection />
-      <PartagerSection />
-      <CommunauteCta />
-    </>
-  );
+  return <MarketingPageBody page="community" lang="fr" />;
 }

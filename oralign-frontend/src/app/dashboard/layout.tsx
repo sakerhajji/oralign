@@ -1,9 +1,19 @@
+import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import { AppSidebar } from '@/components/app-sidebar';
 import { SiteHeader } from '@/components/site-header';
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
 import { OnboardingGuard } from '@/components/dashboard/onboarding-guard';
 import { SupportBubble } from '@/components/support/support-bubble';
+
+// Auth-gated product surface: robots.txt already disallows /dashboard,
+// and the noindex is belt-and-braces for anything that slips through
+// (e.g. a shared link fetched before the auth redirect).
+export const metadata: Metadata = {
+  // The root template suffixes the default; children get our own template.
+  title: { default: 'Dashboard', template: '%s · Oralign' },
+  robots: { index: false, follow: false },
+};
 
 export default function DashboardLayout({
   children,

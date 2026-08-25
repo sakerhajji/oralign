@@ -34,7 +34,14 @@ const copy = {
   },
 } satisfies Record<string, Record<Lang, string>>;
 
-export function DashboardPreview({ id = "dashboard-preview" }: { id?: string }) {
+export function DashboardPreview({
+  id = "dashboard-preview",
+  headingAs = "h2",
+}: {
+  id?: string;
+  /** "h1" when this is the first section of a page (one H1 per page). */
+  headingAs?: "h1" | "h2";
+}) {
   const { lang } = useShowcaseLang();
   const [activeIndex, setActiveIndex] = useState(0);
 
@@ -64,7 +71,7 @@ export function DashboardPreview({ id = "dashboard-preview" }: { id?: string }) 
       <div className="relative z-10 mx-auto max-w-[1440px]">
         <Reveal>
           <div className="max-w-3xl">
-            <SectionHeading eyebrow={copy.eyebrow[lang]} tone="light" align="start" id="preview-h2">
+            <SectionHeading eyebrow={copy.eyebrow[lang]} tone="light" align="start" id="preview-h2" as={headingAs}>
               {copy.titleA[lang]}{" "}
               <em className="text-[var(--sc-sun)]" style={{ fontStyle: "italic" }}>
                 {copy.titleB[lang]}

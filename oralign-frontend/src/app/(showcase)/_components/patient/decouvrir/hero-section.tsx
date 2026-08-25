@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { ArrowDown, MapPin, Play } from "lucide-react";
 import type { Lang } from "../../../_lib/i18n/dict";
-import { useShowcaseLang } from "../../../_lib/i18n/lang-context";
+import { useLocalizedHref, useShowcaseLang } from "../../../_lib/i18n/lang-context";
 
 const heroCopy: Record<
   Lang,
@@ -21,7 +21,7 @@ const heroCopy: Record<
   }
 > = {
   fr: {
-    eyebrow: "Made to Shine.",
+    eyebrow: "Aligneurs dentaires invisibles — Made to Shine.",
     intro:
       "Bienvenue dans l’univers ORALIGN — la marque d’aligneurs invisibles premium qui transforme chaque sourire en une expression de confiance et de lumière.",
     origin: "Conçus en Allemagne. Fabriqués en Tunisie.",
@@ -33,7 +33,7 @@ const heroCopy: Record<
     imageAlt: "Trois amies souriant ensemble au soleil",
   },
   en: {
-    eyebrow: "Made to Shine.",
+    eyebrow: "Clear dental aligners — Made to Shine.",
     intro:
       "Welcome to the ORALIGN universe — the premium clear aligner brand that turns every smile into an expression of confidence and light.",
     origin: "Designed in Germany. Manufactured in Tunisia.",
@@ -45,7 +45,7 @@ const heroCopy: Record<
     imageAlt: "Three friends smiling together in the sunlight",
   },
   ar: {
-    eyebrow: "Made to Shine.",
+    eyebrow: "تقويم أسنان شفاف — Made to Shine.",
     intro:
       "مرحباً بكم في عالم ORALIGN — العلامة المتميزة للتقويم الشفاف التي تحوّل كل ابتسامة إلى تعبير عن الثقة والإشراق.",
     origin: "تصميم ألماني. صناعة تونسية.",
@@ -60,6 +60,7 @@ const heroCopy: Record<
 
 export function OralignHeroSection() {
   const { lang } = useShowcaseLang();
+  const localizedHref = useLocalizedHref();
   const copy = heroCopy[lang];
 
   return (
@@ -78,15 +79,17 @@ export function OralignHeroSection() {
 
           <div className="max-w-[570px]">
             <div className="mb-12 sm:mb-16 lg:mb-[clamp(4rem,9vh,7rem)]">
-              <h1
-                id="oralign-title"
-                className="sc-serif text-[clamp(2.65rem,6vw,4.8rem)] leading-none text-[var(--sc-sun)]"
-              >
-                ORALIGN
+              {/* The tagline is PART of the H1 (same visual spot as the old
+                  eyebrow <p>): a brand-only H1 tells search engines nothing
+                  about what the page offers. */}
+              <h1 id="oralign-title">
+                <span className="block sc-serif text-[clamp(2.65rem,6vw,4.8rem)] leading-none text-[var(--sc-sun)]">
+                  ORALIGN
+                </span>
+                <span className="mt-2 block text-[0.72rem] font-medium tracking-[0.08em] text-[var(--sc-white)] sm:text-[0.78rem]">
+                  {copy.eyebrow}
+                </span>
               </h1>
-              <p className="mt-2 text-[0.72rem] font-medium tracking-[0.08em] text-[var(--sc-white)] sm:text-[0.78rem]">
-                {copy.eyebrow}
-              </p>
             </div>
 
             <p className="max-w-[540px] text-pretty text-[clamp(1.05rem,1.55vw,1.28rem)] leading-[1.75] text-[rgba(242,245,239,0.92)]">
@@ -98,7 +101,7 @@ export function OralignHeroSection() {
 
             <div className="mt-10 grid max-w-[550px] gap-3 sm:mt-12 sm:grid-cols-2">
               <Link
-                href="/trouver-un-praticien"
+                href={localizedHref("/trouver-un-praticien")}
                 className="group inline-flex min-h-14 items-center justify-between gap-4 bg-[var(--sc-white)] px-5 py-3 text-[var(--sc-black)] no-underline transition-colors hover:bg-white"
               >
                 <span className="flex min-w-0 items-center gap-3">

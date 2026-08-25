@@ -14,13 +14,14 @@ import {
 } from "@/components/ui/sheet";
 import { NAV_ITEMS } from "../_lib/nav";
 import { dict, LANGS, type Lang } from "../_lib/i18n/dict";
-import { useShowcaseLang } from "../_lib/i18n/lang-context";
+import { useLocalizedHref, useShowcaseLang } from "../_lib/i18n/lang-context";
 
 const FINDER_HREF = "/trouver-un-praticien";
-const PRACTITIONER_SPACE_HREF = "/login";
+const PRACTITIONER_SPACE_HREF = "/praticiens";
 
 export function MobileNav() {
   const { lang, setLang } = useShowcaseLang();
+  const l = useLocalizedHref();
   const [open, setOpen] = useState(false);
   const navItems = NAV_ITEMS;
   const [openId, setOpenId] = useState<string | null>(null);
@@ -70,7 +71,7 @@ export function MobileNav() {
         <SheetHeader className="grid grid-cols-[44px_1fr_44px] items-center gap-3 border-b border-[var(--sc-grey)] px-5 py-4">
           <span aria-hidden="true" />
           <SheetTitle className="sr-only">ORALIGN menu</SheetTitle>
-          <Link href="/decouvrir" aria-label="Oralign home" className="col-start-2 mx-auto flex items-center justify-center no-underline">
+          <Link href={l("/decouvrir")} aria-label="Oralign home" className="col-start-2 mx-auto flex items-center justify-center no-underline">
             <Image
               src="/mainlogo.svg"
               alt="Oralign"
@@ -98,7 +99,7 @@ export function MobileNav() {
                   <li key={item.id}>
                     <SheetClose asChild>
                       <Link
-                        href={item.href}
+                        href={l(item.href)}
                         className="group flex min-h-16 items-center justify-between gap-4 border-b border-[var(--sc-grey)] py-4 no-underline text-[var(--sc-text-dark)]/70 transition-colors hover:text-[var(--sc-black)]"
                       >
                         <span className="text-[0.98rem] font-medium leading-snug">
@@ -142,7 +143,7 @@ export function MobileNav() {
                         <li key={child.id}>
                           <SheetClose asChild>
                             <Link
-                              href={child.href}
+                              href={l(child.href)}
                               className="flex min-h-12 items-center gap-3 py-2.5 ps-3 text-[0.9rem] leading-snug text-[var(--sc-text-mid)] no-underline transition-colors hover:text-[var(--sc-black)]"
                             >
                               <span
@@ -186,7 +187,7 @@ export function MobileNav() {
           <div className="mt-auto flex flex-col gap-3 pt-8">
             <SheetClose asChild>
               <Link
-                href={FINDER_HREF}
+                href={l(FINDER_HREF)}
                 className="block w-full bg-[var(--sc-sun)] px-5 py-4 text-center text-[0.76rem] font-bold uppercase tracking-[0.14em] text-[var(--sc-black)] no-underline transition-colors hover:bg-[var(--sc-sun-2)]"
               >
                 {dict.nav.findPractitionerCta[lang]}
@@ -194,7 +195,7 @@ export function MobileNav() {
             </SheetClose>
             <SheetClose asChild>
               <Link
-                href={PRACTITIONER_SPACE_HREF}
+                href={l(PRACTITIONER_SPACE_HREF)}
                 className="block w-full border border-[var(--sc-black)] px-5 py-4 text-center text-[0.76rem] font-medium uppercase tracking-[0.14em] text-[var(--sc-black)] no-underline transition-colors hover:bg-[var(--sc-black)] hover:text-[var(--sc-white)]"
               >
                 {dict.nav.practitionerSpace[lang]}

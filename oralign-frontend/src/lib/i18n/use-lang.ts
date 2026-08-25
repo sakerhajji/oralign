@@ -83,6 +83,13 @@ export function useLang(): { lang: Lang; setLang: (l: Lang) => void } {
   // a previous build doesn't strand the layout in RTL.
   useEffect(() => {
     if (typeof document === 'undefined') return;
+    // The public showcase (and the created_for_you viewer) has its own
+    // trilingual provider that owns <html> lang/dir — including RTL for
+    // Arabic. This dashboard provider is mounted at the root, ABOVE the
+    // showcase one, so its effect runs last and would overwrite the
+    // showcase values (forcing lang="en" dir="ltr" onto /ar pages).
+    // Cede ownership whenever a showcase surface is on screen.
+    if (document.querySelector('[data-theme="showcase"]')) return;
     document.documentElement.lang = lang;
     document.documentElement.dir = 'ltr';
   }, [lang]);

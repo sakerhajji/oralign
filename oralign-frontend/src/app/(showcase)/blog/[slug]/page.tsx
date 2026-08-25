@@ -1,15 +1,11 @@
 import type { Metadata } from "next";
-import Script from "next/script";
 import { notFound } from "next/navigation";
 import { resolveBlogMediaUrl } from "@/lib/api/blog.service";
 import type { BlogDetail } from "@/lib/types";
 import { getPostBySlug } from "../_lib/fetch";
 import { BlogArticle } from "../_components/blog-article";
-
-// Mirrors the SITE_URL constant in the (showcase) layout. Kept in sync by
-// hand because the layout doesn't export it; the canonical / OG / JSON-LD
-// absolute URLs all derive from this.
-const SITE_URL = "https://oralign.com.tn";
+import { SITE_NAME, SITE_URL } from "../../_lib/seo/meta";
+import { JsonLd } from "../../_lib/seo/jsonld";
 
 export const revalidate = 60;
 
@@ -88,35 +84,33 @@ export default async function PatientBlogPostPage({
   const cover = coverAbsoluteUrl(post);
 
   // JSON-LD describes the FR version (matches the server metadata locale).
+  // BlogPosting (the Article subtype crawlers expect for blog content),
+  // rendered INLINE server-side so it ships in the initial HTML — the
+  // previous next/script afterInteractive injection was invisible to
+  // crawlers that don't execute JS.
   const ldArticle = {
     "@context": "https://schema.org",
-    "@type": "Article",
+    "@type": "BlogPosting",
     headline: pickFr(post.title),
     description: pickFr(post.seoDescription) || pickFr(post.excerpt) || undefined,
     image: cover ? [cover] : undefined,
     datePublished: post.publishedAt ?? undefined,
+    inLanguage: "fr",
     articleSection: post.category || undefined,
     author: post.authorName
       ? { "@type": "Person", name: post.authorName }
-      : { "@type": "Organization", name: "ORALIGN by Aura Aligners" },
+      : { "@type": "Organization", name: SITE_NAME },
     publisher: {
       "@type": "Organization",
-      name: "ORALIGN by Aura Aligners",
-      logo: { "@type": "ImageObject", url: `${SITE_URL}/mainlogo.svg` },
+      name: SITE_NAME,
+      logo: { "@type": "ImageObject", url: `${SITE_URL}/icon-512.png` },
     },
     mainEntityOfPage: { "@type": "WebPage", "@id": canonicalUrl },
   };
 
   return (
     <article className="bg-[var(--sc-white)] text-[var(--sc-black)]">
-      <Script
-        id={`ld-article-${post.slug}`}
-        type="application/ld+json"
-        strategy="afterInteractive"
-      >
-        {JSON.stringify(ldArticle)}
-      </Script>
-
+      <JsonLd data={ldArticle} />
       <BlogArticle post={post} canonicalUrl={canonicalUrl} />
     </article>
   );

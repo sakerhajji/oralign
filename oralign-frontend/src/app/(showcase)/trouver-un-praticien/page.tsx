@@ -1,13 +1,9 @@
 import type { Metadata } from "next";
-import { PractitionerFinder } from "../_components/practitioner-finder";
+import { marketingMetadata } from "../_lib/seo/meta";
+import { MarketingPageBody } from "../_lib/seo/page-bodies";
 
-export const metadata: Metadata = {
-  title: "Trouver un praticien | ORALIGN®",
-  description:
-    "Trouvez un praticien certifié ORALIGN près de chez vous et demandez un rendez-vous.",
-  alternates: { canonical: "/trouver-un-praticien" },
-};
+export const metadata: Metadata = marketingMetadata("finder", "fr");
 
 export default function FindPractitionerPage() {
-  return <PractitionerFinder />;
+  return <MarketingPageBody page="finder" lang="fr" />;
 }

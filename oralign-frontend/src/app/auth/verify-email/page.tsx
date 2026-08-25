@@ -1,6 +1,12 @@
+import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import { VerifyEmailCard } from '@/components/auth/verify-email-card';
 import { Loader2 } from 'lucide-react';
+
+export const metadata: Metadata = {
+  title: 'Vérification de l’email',
+  robots: { index: false, follow: false },
+};
 
 export default function VerifyEmailPage() {
   return (

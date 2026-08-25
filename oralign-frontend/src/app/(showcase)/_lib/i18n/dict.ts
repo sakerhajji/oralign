@@ -3,8 +3,11 @@ export type Lang = "fr" | "en" | "ar";
 export const LANGS: readonly Lang[] = ["fr", "en", "ar"] as const;
 // Language a visitor sees before they pick one (and the SSR/first-paint
 // value). A stored choice always wins — see readLang() in use-lang.ts —
-// so this only affects first-time visitors.
-export const DEFAULT_LANG: Lang = "en";
+// so this only affects first-time visitors AND crawlers. French, because
+// the French root pages (/decouvrir, …) are the canonical indexable
+// surface: their metadata is French, so their SSR body must be too.
+// English/Arabic SSR live on their own /en and /ar URLs (forced lang).
+export const DEFAULT_LANG: Lang = "fr";
 
 type T = Record<Lang, string>;
 
@@ -860,6 +863,11 @@ export const dict = {
       ar: "ORALIGN® من Aura Aligners — أجهزة تقويم دقيقة. مصمَّمة في ألمانيا، مصنوعة في تونس.",
     } as T,
     access: { fr: "Espace praticien", en: "Practitioner area", ar: "فضاء الطبيب" } as T,
+    partner: {
+      fr: "Devenir praticien partenaire",
+      en: "Become a partner practitioner",
+      ar: "كن طبيباً شريكاً",
+    } as T,
     backToTop: { fr: "Haut de page", en: "Back to top", ar: "أعلى الصفحة" } as T,
     company: { fr: "Société", en: "Company", ar: "الشركة" } as T,
     legal: { fr: "Mentions légales", en: "Legal", ar: "قانوني" } as T,

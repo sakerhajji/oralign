@@ -1,3 +1,10 @@
+import type { Metadata } from 'next';
+
+export const metadata: Metadata = {
+  title: 'QR Code',
+  robots: { index: false, follow: false },
+};
+
 export default function QRPage() {
   return (
     <div className="@container/main flex flex-1 flex-col gap-6">

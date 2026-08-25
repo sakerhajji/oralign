@@ -1,41 +1,32 @@
 import type { MetadataRoute } from 'next';
-
-const SITE_URL =
-  process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') ?? 'https://oralign.com.tn';
+import { SITE_URL } from './(showcase)/_lib/seo/meta';
 
 /**
  * /robots.txt
  *
- * Tells crawlers (Google, Bing, etc.) which paths are fair game and
- * where to find the sitemap. Without this, Google has no formal hook
- * for re-crawling — which is why stale title/description text from a
- * previous deploy (e.g. the "Nova Studio" template card) can linger
- * for weeks in search results.
+ * One wildcard rule for every crawler (Google, Bing, Yandex, DuckDuckGo,
+ * …): the public marketing site is fully crawlable, the authenticated
+ * product surfaces are not. Two deliberate subtleties:
  *
- * Allow: public marketing surfaces (showcase, login/signup, forgot-
- * password). Disallow: every authenticated area (dashboard, account,
- * onboarding, verify/reset flows, public-link viewer, API). Those
- * shouldn't show up in search and would just leak product surface.
+ *  - /login, /signup and the other auth pages are NOT disallowed even
+ *    though we don't want them indexed: their meta robots noindex only
+ *    works if crawlers are allowed to fetch the page and read it.
+ *    Disallowing them here would freeze whatever Google already has.
+ *  - The disallowed prefixes are the surfaces that leak product paths
+ *    or are plain private (dashboard, account, onboarding, the tokened
+ *    patient viewer, the API).
  */
 export default function robots(): MetadataRoute.Robots {
   return {
     rules: [
       {
         userAgent: '*',
-        allow: [
-          '/',
-          '/trouver-un-praticien',
-          '/login',
-          '/signup',
-          '/forgot-password',
-        ],
+        allow: '/',
         disallow: [
           '/api/',
           '/dashboard/',
           '/account/',
           '/onboarding/',
-          '/verify-email',
-          '/reset-password',
           '/created_for_you/',
           '/qr',
           '/_next/',

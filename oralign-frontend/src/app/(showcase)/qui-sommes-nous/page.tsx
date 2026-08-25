@@ -1,17 +1,9 @@
 import type { Metadata } from "next";
-import { legalDocMeta } from "@/lib/legal/legal-content";
-import { LegalDocView } from "../_components/legal/legal-doc-view";
-import { getLegalCompany } from "../_lib/legal-info";
+import { marketingMetadata } from "../_lib/seo/meta";
+import { MarketingPageBody } from "../_lib/seo/page-bodies";
 
-const meta = legalDocMeta("about", "fr");
+export const metadata: Metadata = marketingMetadata("about", "fr");
 
-export const metadata: Metadata = {
-  title: meta.title,
-  description: meta.description,
-  alternates: { canonical: meta.href },
-};
-
-export default async function QuiSommesNousPage() {
-  const company = await getLegalCompany();
-  return <LegalDocView docKey="about" company={company} />;
+export default function QuiSommesNousPage() {
+  return <MarketingPageBody page="about" lang="fr" />;
 }

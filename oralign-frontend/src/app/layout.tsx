@@ -101,13 +101,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    // `lang` + `dir` are seeded as `en` / `ltr` so the SSR HTML stays
-    // identical for every request. LangProvider then hydrates the
-    // user's saved language on the client and flips both attributes
-    // via the `useLang` effect — see `lib/i18n/use-lang.ts`. The
-    // `suppressHydrationWarning` on `<html>` keeps React quiet about
-    // that attribute swap on the first client commit.
-    <html lang="en" dir="ltr" suppressHydrationWarning className="h-full antialiased">
+    // `lang` + `dir` are seeded as `fr` / `ltr` so the SSR HTML stays
+    // identical for every request. French, because the indexable surface
+    // (the showcase at the root paths) server-renders in French; the
+    // /en and /ar trees + the app declare their own language on a
+    // wrapper element and the language providers flip these attributes
+    // client-side after hydration. `suppressHydrationWarning` keeps
+    // React quiet about that attribute swap on the first client commit.
+    <html lang="fr" dir="ltr" suppressHydrationWarning className="h-full antialiased">
       <body suppressHydrationWarning className="min-h-full flex flex-col">
         <QueryProvider>
           <AuthProvider>

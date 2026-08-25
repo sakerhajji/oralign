@@ -34,9 +34,20 @@ const SHEET_L10N = {
     submittedOn: 'Soumise le',
     patient: 'Patient',
     practitioner: 'Praticien',
+    sectionPatientInfo: 'Informations du patient',
+    sectionPrescription: 'Prescription clinique',
+    sectionMovement: 'Mouvements & mécanique',
+    sectionImaging: 'Imagerie demandée',
     name: 'Nom',
     email: 'Email',
     phone: 'Téléphone',
+    patientStage: 'Stade du patient',
+    gender: 'Sexe',
+    dateOfBirth: 'Date de naissance',
+    age: 'Âge',
+    arches: 'Arcades traitées',
+    years: 'ans',
+    notProvided: 'Non renseigné',
     yes: 'Oui',
     no: 'Non',
     cbctSupplement: 'Oui — supplément',
@@ -45,7 +56,9 @@ const SHEET_L10N = {
     sectionOptions: 'Options de traitement',
     sectionInstructions: 'Instructions',
     sectionManufacturing: 'Fabrication & imagerie',
-    sectionPhotos: 'Photos cliniques & scans',
+    sectionPhotos: 'Photos du patient',
+    sectionRadiography: 'Radiographies',
+    sectionScans: 'Scans 3D',
     sectionPlan: 'Plan de traitement approuvé',
     sectionFiles: 'Fichiers joints',
     noToothInstructions: 'Aucune instruction dentaire',
@@ -82,9 +95,20 @@ const SHEET_L10N = {
     submittedOn: 'Submitted on',
     patient: 'Patient',
     practitioner: 'Practitioner',
+    sectionPatientInfo: 'Patient information',
+    sectionPrescription: 'Clinical prescription',
+    sectionMovement: 'Movement & mechanics',
+    sectionImaging: 'Requested imaging',
     name: 'Name',
     email: 'Email',
     phone: 'Phone',
+    patientStage: 'Patient stage',
+    gender: 'Sex',
+    dateOfBirth: 'Date of birth',
+    age: 'Age',
+    arches: 'Arches treated',
+    years: 'yrs',
+    notProvided: 'Not provided',
     yes: 'Yes',
     no: 'No',
     cbctSupplement: 'Yes — supplement',
@@ -93,7 +117,9 @@ const SHEET_L10N = {
     sectionOptions: 'Treatment options',
     sectionInstructions: 'Instructions',
     sectionManufacturing: 'Manufacturing & imaging',
-    sectionPhotos: 'Clinical photos & scans',
+    sectionPhotos: 'Patient images',
+    sectionRadiography: 'Radiography',
+    sectionScans: '3D scans',
     sectionPlan: 'Approved treatment plan',
     sectionFiles: 'Attached files',
     noToothInstructions: 'No per-tooth instructions',
@@ -124,8 +150,6 @@ const SHEET_L10N = {
     footerGenerated: 'sheet generated on',
   },
 } as const;
-
-type SheetLabels = (typeof SHEET_L10N)['fr'];
 
 type MarkStyle = {
   hex: string;
@@ -219,6 +243,34 @@ const PHOTO_LABELS: Record<SheetLanguage, Record<string, string>> = {
     orthopantomography: 'Panoramic X-ray',
     image: 'Image',
   },
+};
+
+type SheetMediaGroup = 'patient' | 'radiography';
+
+/** Slot order and captions shared with the order review screen. */
+const SHEET_MEDIA_SLOTS: ReadonlyArray<{
+  key: string;
+  group: SheetMediaGroup;
+  label: Record<SheetLanguage, string>;
+}> = [
+  { key: 'profile', group: 'patient', label: { fr: 'Photo de profil', en: 'Profile photo' } },
+  { key: 'face-rest', group: 'patient', label: { fr: 'Photo du visage au repos', en: 'Face at rest photo' } },
+  { key: 'smile', group: 'patient', label: { fr: 'Photo du sourire', en: 'Smile photo' } },
+  { key: 'left-lateral', group: 'patient', label: { fr: 'Vue latérale droite', en: 'Right lateral view' } },
+  { key: 'frontal-occlusion', group: 'patient', label: { fr: 'Vue d’occlusion frontale', en: 'Frontal occlusion view' } },
+  { key: 'right-lateral', group: 'patient', label: { fr: 'Vue latérale gauche', en: 'Left lateral view' } },
+  { key: 'upper-occlusal', group: 'patient', label: { fr: 'Vue occlusale supérieure', en: 'Upper occlusal view' } },
+  { key: 'lower-occlusal', group: 'patient', label: { fr: 'Vue occlusale inférieure', en: 'Lower occlusal view' } },
+  { key: 'panoramic', group: 'radiography', label: { fr: 'Radiographie panoramique', en: 'Panoramic radiography' } },
+  { key: 'profile-tele', group: 'radiography', label: { fr: 'Téléradiographie de profil', en: 'Profile teleradiography' } },
+];
+
+function sheetMediaSlot(originalName?: string | null) {
+  if (!originalName) return undefined;
+  const separator = originalName.indexOf('__');
+  if (separator < 1) return undefined;
+  const key = originalName.slice(0, separator);
+  return SHEET_MEDIA_SLOTS.find((slot) => slot.key === key);
 }
 
 /** A photo row as re-read from the DB for embedding (variants included). */
@@ -227,6 +279,7 @@ interface SheetPhotoFile {
   relativePath: string;
   mimeType: string;
   originalName: string | null;
+  orderIndex: number;
   variants: unknown;
 }
 
@@ -254,57 +307,6 @@ function crownPathFor(toothNumber: number): string {
 const UPPER_ROW = [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28];
 const LOWER_ROW = [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38];
 
-// The sprite ships only the 16 right-side symbols; left-side teeth are
-// the same artwork flipped horizontally (see canonicalSpriteTooth).
-const MIRRORED = new Set<number>([
-  21, 22, 23, 24, 25, 26, 27, 28, 41, 42, 43, 44, 45, 46, 47, 48,
-]);
-
-function canonicalSpriteTooth(toothNumber: number): number {
-  if (toothNumber >= 21 && toothNumber <= 28) return toothNumber - 10;
-  if (toothNumber >= 41 && toothNumber <= 48) return toothNumber - 10;
-  return toothNumber;
-}
-
-// Copied from the frontend's auto-generated tooth-viewboxes.ts — the
-// per-symbol source viewBox (used to derive each glyph's aspect ratio).
-const TOOTH_VIEWBOXES: Readonly<Record<number, string>> = {
-  11: '-0.152 0.171 7.904 23.085',
-  12: '-0.043 0.120 7.896 24.370',
-  13: '-0.157 0.112 8.108 22.756',
-  14: '-0.182 0.280 9.429 22.588',
-  15: '-0.185 0.280 9.564 22.588',
-  16: '-0.202 0.170 13.313 22.923',
-  17: '22.564 0.626 12.835 22.589',
-  18: '-0.172 0.729 11.037 22.140',
-  21: '-0.152 0.171 7.904 23.085',
-  22: '-0.043 0.120 7.896 24.370',
-  23: '-0.157 0.112 8.108 22.756',
-  24: '-0.182 0.280 9.429 22.588',
-  25: '-0.185 0.280 9.564 22.588',
-  26: '-0.202 0.170 13.313 22.923',
-  27: '22.564 0.626 12.835 22.589',
-  28: '-0.172 0.729 11.037 22.140',
-  31: '-0.138 0.163 7.101 21.971',
-  32: '-0.138 0.218 7.155 22.008',
-  33: '-0.157 0.285 8.107 22.991',
-  34: '-0.182 0.285 9.428 22.991',
-  35: '-0.185 0.114 9.620 23.162',
-  36: '-0.198 1.384 13.306 23.167',
-  37: '22.582 0.691 12.870 22.810',
-  38: '0.067 1.364 11.167 22.830',
-  41: '-0.138 0.163 7.101 21.971',
-  42: '-0.138 0.218 7.155 22.008',
-  43: '-0.157 0.285 8.107 22.991',
-  44: '-0.182 0.285 9.428 22.991',
-  45: '-0.185 0.114 9.620 23.162',
-  46: '-0.198 1.384 13.306 23.167',
-  47: '22.582 0.691 12.870 22.810',
-  48: '0.067 1.364 11.167 22.830',
-};
-
-
-
 const DEFAULT_TOOTH = '#f1e8d4';
 const DEFAULT_OUTLINE = '#f3eeea';
 
@@ -313,6 +315,14 @@ const DEFAULT_OUTLINE = '#f3eeea';
 // only the printed label is localized. Unknown values fall through and
 // print as stored, so legacy free-text rows still render.
 const VALUE_FR: Record<string, string> = {
+  // treatment plan / AP relationship
+  'Full Arch': 'Arcade complète',
+  'Anterior Only': 'Secteur antérieur uniquement',
+  '4 - 4 only': 'De 4 à 4 uniquement',
+  'Dont Move 6 - 7 only': 'Ne pas déplacer les 6 et 7',
+  'Improve canine only': 'Améliorer les canines uniquement',
+  'Improve canine and molar': 'Améliorer les canines et les molaires',
+  'Correct both Molar and Canine': 'Corriger les molaires et les canines',
   // open bite / crossbite / midline
   Correct: 'Corriger',
   Maintain: 'Maintenir',
@@ -506,15 +516,24 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
         relativePath: true,
         mimeType: true,
         originalName: true,
+        orderIndex: true,
         variants: true,
       },
     });
-    // The DB cannot sort by our display order — sort in memory so the
-    // grid reads exactly like the app's order summary.
+    // Sort by the form's semantic slot order; legacy files fall back to
+    // category order and their persisted upload sequence.
     photoFiles.sort(
-      (a, b) =>
-        PHOTO_CATEGORIES.indexOf(a.category) -
-        PHOTO_CATEGORIES.indexOf(b.category),
+      (a, b) => {
+        const aSlot = sheetMediaSlot(a.originalName);
+        const bSlot = sheetMediaSlot(b.originalName);
+        const aIndex = aSlot
+          ? SHEET_MEDIA_SLOTS.indexOf(aSlot)
+          : SHEET_MEDIA_SLOTS.length + PHOTO_CATEGORIES.indexOf(a.category);
+        const bIndex = bSlot
+          ? SHEET_MEDIA_SLOTS.indexOf(bSlot)
+          : SHEET_MEDIA_SLOTS.length + PHOTO_CATEGORIES.indexOf(b.category);
+        return aIndex - bIndex || a.orderIndex - b.orderIndex;
+      },
     );
     // 3D scans get a server-rendered preview so the sheet SHOWS the case
     // geometry instead of naming an .stl file. Capped at 4 — a sheet is a
@@ -591,82 +610,89 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       dto.submittedAt ? [L.submittedOn, this.fmtDate(dto.submittedAt)] : null,
     ].filter(Boolean) as [string, string][];
 
-    // ── Parties ──
-    const patientBox = this.box(
-      L.patient,
-      this.kvRows([
-        [L.name, dto.patient?.fullName],
+    const patientStage = dto.patientStage
+      ? lang === 'fr'
+        ? (STAGE_FR[dto.patientStage] ?? dto.patientStage)
+        : dto.patientStage
+      : undefined;
+    const arches = dto.archTreatment
+      ? lang === 'fr'
+        ? (ARCH_FR[dto.archTreatment] ?? dto.archTreatment)
+        : dto.archTreatment
+      : undefined;
+    const patientInfo = this.infoGrid(
+      [
+        [L.patient, dto.patient?.fullName],
+        [L.practitioner, dto.doctor?.fullName],
+        [L.patientStage, patientStage],
+        [L.gender, this.formatGender(dto.patient?.gender, lang)],
+        [L.dateOfBirth, dto.patient?.dateOfBirth ? this.fmtDate(dto.patient.dateOfBirth) : undefined],
+        [L.age, this.formatAge(dto.patient?.dateOfBirth, L.years)],
         [L.email, dto.patient?.email],
         [L.phone, dto.patient?.phone],
-      ]),
-    );
-    const doctorBox = this.box(
-      L.practitioner,
-      this.kvRows([
-        [L.name, dto.doctor?.fullName],
-        [L.email, dto.doctor?.email],
-      ]),
+        [L.arches, arches],
+      ],
+      L.notProvided,
     );
 
     // ── Clinical + treatment fields ──
-    const clinicalRows = this.kvRows([
+    const clinicalRows = this.infoGrid([
       [
         lang === 'fr' ? 'Motif de consultation' : 'Chief complaint',
         this.formatChiefComplaint(dto.chiefComplaint, lang),
+        3,
       ],
-      [
-        lang === 'fr' ? 'Stade' : 'Stage',
-        dto.patientStage
-          ? lang === 'fr'
-            ? (STAGE_FR[dto.patientStage] ?? dto.patientStage)
-            : dto.patientStage
-          : undefined,
-      ],
-      [
-        lang === 'fr' ? 'Arcades à traiter' : 'Arches to treat',
-        dto.archTreatment
-          ? lang === 'fr'
-            ? (ARCH_FR[dto.archTreatment] ?? dto.archTreatment)
-            : dto.archTreatment
-          : undefined,
-      ],
-      [lang === 'fr' ? 'Plan de traitement' : 'Treatment plan', dto.treatmentPlan],
+      [lang === 'fr' ? 'Plan de traitement' : 'Treatment plan', this.localValue(lang, dto.treatmentPlan), 2],
       [
         lang === 'fr' ? 'Relation antéro-postérieure' : 'Anteroposterior relationship',
-        dto.anteroposteriorRelationship ?? dto.apRelationship,
+        this.localValue(lang, dto.anteroposteriorRelationship ?? dto.apRelationship),
       ],
-      [lang === 'fr' ? 'Ne pas déplacer' : 'Do not move', dto.dontMoveOption],
-    ]);
+      [
+        dto.dontMoveOption
+          ? lang === 'fr'
+            ? 'Ne pas déplacer'
+            : 'Do not move'
+          : '',
+        this.localValue(lang, dto.dontMoveOption),
+        3,
+      ],
+    ], L.notProvided);
 
-    const advancedRows = this.kvRows([
-      [lang === 'fr' ? 'Élastiques' : 'Elastics', this.formatElastics(dto.elastics)],
+    const advancedRows = this.infoGrid([
+      [lang === 'fr' ? 'Élastiques' : 'Elastics', this.formatElastics(dto.elastics, lang), 2],
       [lang === 'fr' ? 'Béance' : 'Open bite', this.localValue(lang, dto.openBite)],
       [lang === 'fr' ? 'Ligne médiane' : 'Midline', this.localValue(lang, dto.midline)],
       ['IPR', this.localValue(lang, dto.ipr)],
       [lang === 'fr' ? 'Plans de morsure' : 'Bite ramps', this.localValue(lang, dto.biteRamps)],
       ['Expansion', this.localValue(lang, dto.expansion)],
       [lang === 'fr' ? 'Articulé inversé' : 'Crossbite', this.localValue(lang, dto.crossbite)],
-      [lang === 'fr' ? 'Espaces' : 'Spaces', this.localValue(lang, dto.spaces)],
-      ['Extractions', dto.extractions],
-    ]);
+      [lang === 'fr' ? 'Espaces' : 'Spaces', this.formatPackedChoice(dto.spaces, lang), 2],
+      ['Extractions', this.formatExtractions(dto, lang), 3],
+    ], L.notProvided);
 
-    const instructionRows = this.kvRows([
-      [lang === 'fr' ? 'Instructions particulières' : 'Special instructions', dto.specialInstructions],
-      [lang === 'fr' ? 'Instructions complémentaires' : 'Additional instructions', dto.additionalInstructions],
-    ]);
+    const instructionRows = this.infoGrid(
+      [
+        [lang === 'fr' ? 'Instructions particulières' : 'Special instructions', dto.specialInstructions, 3],
+        [lang === 'fr' ? 'Instructions complémentaires' : 'Additional instructions', dto.additionalInstructions, 3],
+      ],
+      L.notProvided,
+      true,
+    );
 
     const cbctLine = dto.useCbctWithScans
       ? dto.cbctFeeAmount && dto.cbctFeeAmount > 0
         ? `${L.cbctSupplement} ${this.fmtAmount(dto.cbctFeeAmount)} ${esc(dto.cbctFeeCurrency ?? 'TND')}`
         : L.yes
       : L.no;
-    const manufacturingRows = this.kvRows([
-      [lang === 'fr' ? 'CBCT avec scans' : 'CBCT with scans', cbctLine],
-      [lang === 'fr' ? 'Fabrication demandée' : 'Manufacturing requested', dto.wantsManufacturing ? L.yes : L.no],
+    const manufacturingRows = this.infoGrid([
+      [lang === 'fr' ? 'CBCT avec scans' : 'CBCT with scans', cbctLine, 3],
+      dto.wantsManufacturing
+        ? [lang === 'fr' ? 'Fabrication demandée' : 'Manufacturing requested', L.yes]
+        : ['', undefined],
       dto.materials?.length
         ? [lang === 'fr' ? 'Matériaux' : 'Materials', dto.materials.join(', ')]
         : ['', undefined],
-    ]);
+    ], L.notProvided);
 
     const odontogram = this.renderOdontogram(dto, lang);
     const filesTable = this.renderFilesTable(dto, lang);
@@ -688,18 +714,19 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
         line-height: 1.42;
       }
       .masthead {
-        display: flex; flex-direction: column; align-items: center;
-        padding-bottom: 12px; margin-bottom: 13px;
-        border-bottom: 1.5px solid #111111; break-inside: avoid;
+        display: flex; align-items: center;
+        padding-bottom: 8px; margin-bottom: 8px;
+        border-bottom: 1px solid #dfe1e5; break-inside: avoid;
       }
-      .logo-img { max-width: 168px; max-height: 66px; object-fit: contain; }
+      .logo-img { max-width: 118px; max-height: 44px; object-fit: contain; }
       .masthead-name {
         font-size: 22px; font-weight: 800; letter-spacing: .16em;
         text-transform: uppercase; text-align: center;
       }
       .docrow {
         display: grid; grid-template-columns: 1fr auto; gap: 16px;
-        align-items: start; break-inside: avoid;
+        align-items: center; break-inside: avoid;
+        border: 1px solid #dfe1e5; border-radius: 10px; padding: 11px 13px;
       }
       .title {
         margin: 0; font-size: 20px; line-height: 1.1; letter-spacing: .12em;
@@ -714,15 +741,28 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
         border: 1px solid #111111; border-radius: 999px; padding: 2px 10px;
         font-size: 9px; font-weight: 700;
       }
-      .section { margin-top: 12px; }
+      .section {
+        margin-top: 10px; border: 1px solid #dfe1e5; border-radius: 10px;
+        overflow: hidden; background: #ffffff;
+      }
+      .section-body { padding: 10px 11px; }
       .photo-grid { display: flex; flex-wrap: wrap; gap: 8px; }
-      /* Uniform squares: three per row, matching the order summary. cover crops
-         mixed portrait/landscape uploads instead of distorting them. */
-      .photo-cell { break-inside: avoid; page-break-inside: avoid; margin: 0; width: calc((100% - 16px) / 3); }
-      .photo-cell img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border: 1px solid #e2e4e8; border-radius: 8px; display: block; background: #f5f4f0; }
-      .photo-cell.scan img { object-fit: contain; background: #23252d; border-color: #1a1c22; }
-      .photo-cell figcaption { text-align: center; font-size: 7.5px; color: #555; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .photo-skipped { font-size: 8px; color: #888; margin-top: 6px; }
+      .photo-cell {
+        break-inside: avoid; page-break-inside: avoid; margin: 0;
+        width: calc((100% - 16px) / 3); border: 1px solid #e2e4e8;
+        border-radius: 8px; padding: 7px; background: #ffffff;
+      }
+      .photo-cell.wide { width: calc((100% - 8px) / 2); }
+      .photo-label { text-align: center; min-height: 18px; font-size: 8px; font-weight: 700; color: #111; margin-bottom: 5px; }
+      .photo-cell img {
+        width: 100%; height: 116px; object-fit: contain;
+        border: 1px solid #e7e8eb; border-radius: 6px; display: block;
+        background: #f7f7f7;
+      }
+      .photo-cell.wide img { height: 148px; }
+      .photo-cell.scan img { height: 164px; background: #eef1f5; border-color: #d9dde3; }
+      .photo-cell figcaption { text-align: center; font-size: 7px; color: #777; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .photo-skipped { font-size: 8px; color: #777; margin-top: 7px; }
       .plan-odo { border: 1px solid #e2e4e8; border-radius: 10px; padding: 8px 10px 6px; margin-top: 8px; break-inside: avoid; page-break-inside: avoid; }
       .plan-odo-title { font-weight: 700; font-size: 9.5px; margin-bottom: 2px; }
       .plan-odo-hint { font-weight: 400; color: #888; font-size: 8px; margin-left: 6px; }
@@ -749,10 +789,36 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       .plan-table-img { width: 100%; height: auto; border: 1px solid #ddd; border-radius: 6px; }
       .section.keep { break-inside: avoid; page-break-inside: avoid; }
       .section-title {
-        margin: 0 0 6px; color: #666666; font-size: 8.5px; font-weight: 800;
-        letter-spacing: .12em; text-transform: uppercase;
+        margin: 0; min-height: 36px; padding: 8px 11px;
+        display: flex; align-items: center; gap: 8px;
+        color: #111111; background: #fafafa; border-bottom: 1px solid #e2e4e8;
+        font-size: 9.5px; font-weight: 800; letter-spacing: .04em;
+        text-transform: uppercase;
       }
-      .party-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      .section-title::before {
+        content: ''; width: 7px; height: 7px; flex: 0 0 auto;
+        border-radius: 999px; background: #111111;
+      }
+      .info-grid {
+        display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+        border: 1px solid #e2e4e8; border-radius: 8px; overflow: hidden;
+      }
+      .info-cell {
+        min-width: 0; min-height: 49px; padding: 7px 9px;
+        border-right: 1px solid #e7e8eb; border-bottom: 1px solid #e7e8eb;
+      }
+      .info-cell:nth-child(3n) { border-right: 0; }
+      .info-cell.span-2 { grid-column: span 2; }
+      .info-cell.span-3 { grid-column: 1 / -1; border-right: 0; }
+      .info-label {
+        color: #717171; font-size: 7.4px; font-weight: 700;
+        letter-spacing: .06em; text-transform: uppercase;
+      }
+      .info-value {
+        margin-top: 3px; color: #111111; font-size: 9.5px; font-weight: 600;
+        line-height: 1.35; overflow-wrap: anywhere; white-space: pre-wrap;
+      }
+      .info-value.empty { color: #9a9a9a; font-weight: 500; font-style: italic; }
       .box {
         min-width: 0; border: 1px solid #e2e4e8; border-radius: 10px;
         padding: 10px 11px; break-inside: avoid; page-break-inside: avoid;
@@ -767,7 +833,7 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: start; }
 
       /* ── Odontogram ── */
-      .odo-wrap { border: 1px solid #e2e4e8; border-radius: 10px; padding: 12px 10px 8px; }
+      .odo-wrap { padding: 7px 4px 3px; }
       .odo-row { display: flex; justify-content: center; align-items: flex-end; gap: 2px; }
       .odo-row.upper { align-items: flex-end; margin-bottom: 3px; }
       .odo-row.lower { align-items: flex-start; padding-top: 3px; border-top: 1px dashed #d4d7dd; }
@@ -830,36 +896,37 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
     </div>
 
     <div class="section keep">
-      <div class="party-grid">${patientBox}${doctorBox}</div>
+      <h2 class="section-title">${esc(L.sectionPatientInfo)}</h2>
+      <div class="section-body">${patientInfo}</div>
     </div>
 
     <div class="section keep">
       <h2 class="section-title">${esc(L.sectionOdontogram)}</h2>
-      ${odontogram}
+      <div class="section-body">${odontogram}</div>
     </div>
 
     <div class="section keep">
-      <h2 class="section-title">${esc(L.sectionClinical)}</h2>
-      <div class="box">${clinicalRows}</div>
+      <h2 class="section-title">${esc(L.sectionPrescription)}</h2>
+      <div class="section-body">${clinicalRows}</div>
     </div>
 
     <div class="section keep">
-      <h2 class="section-title">${esc(L.sectionOptions)}</h2>
-      <div class="box">${advancedRows}</div>
+      <h2 class="section-title">${esc(L.sectionMovement)}</h2>
+      <div class="section-body">${advancedRows}</div>
     </div>
 
     ${
       instructionRows
         ? `<div class="section keep">
       <h2 class="section-title">${esc(L.sectionInstructions)}</h2>
-      <div class="box">${instructionRows}</div>
+      <div class="section-body">${instructionRows}</div>
     </div>`
         : ''
     }
 
     <div class="section keep">
-      <h2 class="section-title">${esc(L.sectionManufacturing)}</h2>
-      <div class="box">${manufacturingRows}</div>
+      <h2 class="section-title">${esc(L.sectionImaging)}</h2>
+      <div class="section-body">${manufacturingRows}</div>
     </div>
 
     ${this.renderClinicalPhotosSection(photoFiles, scanPreviews, lang)}
@@ -878,19 +945,7 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
 
   // ─── Clinical photos ───────────────────────────────────────────
 
-  /**
-   * The uploaded clinical photos, embedded as actual images — the sheet
-   * is meant to travel with the order, so the lab must SEE the case, not
-   * read a filename list. Three rules keep the PDF sane:
-   *
-   *   • the compressed `md` variant is preferred, then `thumb`, then the
-   *     original — but an original heavier than 2 MB is listed by name
-   *     instead of embedded, so one phone photo can't balloon the file;
-   *   • labels reuse the ZIP's mirrored RIGHT/LEFT swap, so the folder a
-   *     lab tech opens and the caption they read never disagree;
-   *   • the panoramic X-ray spans the full width; intraoral photos flow
-   *     three to a row.
-   */
+  /** Patient photos, radiography and rendered meshes as separate sections. */
   private renderClinicalPhotosSection(
     files: SheetPhotoFile[],
     scanPreviews: { label: string; dataUrl: string }[] = [],
@@ -922,49 +977,67 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       return f.relativePath;
     };
 
-    // 3D scan previews FIRST — the geometry is what the lab acts on —
-    // then the clinical photos. Every cell is the same square: mixed
-    // portrait/landscape uploads previously produced a ragged staircase
-    // layout; object-fit:cover crops instead of distorting.
     const counts = new Map<string, number>();
-    const cells: string[] = [];
-    const skipped: string[] = [];
-
-    for (const scan of scanPreviews) {
-      cells.push(`<figure class="photo-cell scan">
-        <img src="${scan.dataUrl}" alt="" />
-        <figcaption>${esc(L.scan3d)} · ${esc(scan.label)}</figcaption>
-      </figure>`);
-    }
+    const patientCells: string[] = [];
+    const radiographyCells: string[] = [];
+    const patientSkipped: string[] = [];
+    const radiographySkipped: string[] = [];
 
     for (const f of files) {
       const src = this.resolveImageDataUrl(pickPath(f));
-      const n = (counts.get(f.category) ?? 0) + 1;
-      counts.set(f.category, n);
-      const base = PHOTO_LABELS[lang][f.category] ?? f.category;
+      const slot = sheetMediaSlot(f.originalName);
+      const group: SheetMediaGroup =
+        slot?.group ??
+        (f.category === OrderFileCategory.orthopantomography
+          ? 'radiography'
+          : 'patient');
+      const countKey = slot?.key ?? f.category;
+      const n = (counts.get(countKey) ?? 0) + 1;
+      counts.set(countKey, n);
+      const base = slot?.label[lang] ?? PHOTO_LABELS[lang][f.category] ?? f.category;
       const label = n > 1 ? `${base} (${n})` : base;
+      const cleanName = (f.originalName ?? f.relativePath).replace(/^[a-z0-9-]+__/i, '');
       if (!src) {
-        skipped.push(`${label} — ${f.originalName ?? f.relativePath}`);
+        (group === 'radiography' ? radiographySkipped : patientSkipped).push(
+          `${label} - ${cleanName}`,
+        );
         continue;
       }
-      cells.push(`<figure class="photo-cell">
+      const cell = `<figure class="photo-cell${group === 'radiography' ? ' wide' : ''}">
+        <div class="photo-label">${esc(label)}</div>
         <img src="${src}" alt="" />
-        <figcaption>${esc(label)}</figcaption>
-      </figure>`);
+        <figcaption>${esc(cleanName)}</figcaption>
+      </figure>`;
+      (group === 'radiography' ? radiographyCells : patientCells).push(cell);
     }
-    if (!cells.length && !skipped.length) return '';
 
-    const skippedNote = skipped.length
-      ? `<div class="photo-skipped">${esc(L.notEmbedded)}: ${esc(
-          skipped.join(' ; '),
-        )}</div>`
-      : '';
+    const renderSection = (title: string, cells: string[], skipped: string[]) => {
+      if (!cells.length && !skipped.length) return '';
+      const skippedNote = skipped.length
+        ? `<div class="photo-skipped">${esc(L.notEmbedded)}: ${esc(skipped.join(' ; '))}</div>`
+        : '';
+      return `<div class="section">
+        <h2 class="section-title">${esc(title)}</h2>
+        <div class="section-body">
+          <div class="photo-grid">${cells.join('')}</div>
+          ${skippedNote}
+        </div>
+      </div>`;
+    };
 
-    return `<div class="section">
-      <h2 class="section-title">${esc(L.sectionPhotos)}</h2>
-      <div class="photo-grid">${cells.join('')}</div>
-      ${skippedNote}
-    </div>`;
+    const scanCells = scanPreviews.map(
+      (scan) => `<figure class="photo-cell wide scan">
+        <div class="photo-label">${esc(L.scan3d)}</div>
+        <img src="${scan.dataUrl}" alt="" />
+        <figcaption>${esc(scan.label)}</figcaption>
+      </figure>`,
+    );
+
+    return [
+      renderSection(L.sectionPhotos, patientCells, patientSkipped),
+      renderSection(L.sectionRadiography, radiographyCells, radiographySkipped),
+      renderSection(L.sectionScans, scanCells, []),
+    ].join('');
   }
 
   // ─── Approved treatment plan ───────────────────────────────────
@@ -1033,10 +1106,12 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
 
     return `<div class="section keep">
       <h2 class="section-title">${esc(L.sectionPlan)}</h2>
-      <div class="box">${meta}</div>
-      ${ipr}
+      <div class="section-body">
+        <div class="box">${meta}</div>
+        ${ipr}
+      </div>
     </div>
-    ${tables ? `<div class="section">${tables}</div>` : ''}`;
+    ${tables ? `<div class="section"><div class="section-body">${tables}</div></div>` : ''}`;
   }
 
   // ─── Treatment-plan IPR odontogram ─────────────────────────────
@@ -1370,15 +1445,73 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
     return parts.join(', ');
   }
 
-  /** "Class II elastics — full-time wear" → "Élastiques classe II — full-time wear" */
-  private formatElastics(value?: string | null): string | undefined {
-    const v = value?.trim();
-    if (!v) return undefined;
-    const sep = v.indexOf(' — ');
-    if (sep === -1) return VALUE_FR[v] ?? v;
-    const type = v.slice(0, sep).trim();
-    const notes = v.slice(sep + 3).trim();
-    return `${VALUE_FR[type] ?? type}${notes ? ` — ${notes}` : ''}`;
+  private formatPackedChoice(
+    value?: string | null,
+    lang: SheetLanguage = 'fr',
+  ): string | undefined {
+    const raw = value?.trim();
+    if (!raw) return undefined;
+    if (lang === 'en') return raw;
+    const [choice, ...detailParts] = raw.split(/\s+[—-]\s+/);
+    const detail = detailParts.join(' - ').trim();
+    const label = VALUE_FR[choice.trim()] ?? choice.trim();
+    return detail ? `${label} - ${detail}` : label;
+  }
+
+  private formatElastics(
+    value?: string | null,
+    lang: SheetLanguage = 'fr',
+  ): string | undefined {
+    return this.formatPackedChoice(value, lang);
+  }
+
+  private formatGender(
+    value?: string | null,
+    lang: SheetLanguage = 'fr',
+  ): string | undefined {
+    const gender = value?.trim().toLowerCase();
+    if (!gender) return undefined;
+    const labels: Record<string, Record<SheetLanguage, string>> = {
+      male: { fr: 'Homme', en: 'Male' },
+      female: { fr: 'Femme', en: 'Female' },
+      other: { fr: 'Autre', en: 'Other' },
+    };
+    return labels[gender]?.[lang] ?? value?.trim();
+  }
+
+  private formatAge(
+    value: Date | string | undefined,
+    unit: string,
+  ): string | undefined {
+    if (!value) return undefined;
+    const birthDate = typeof value === 'string' ? new Date(value) : value;
+    if (Number.isNaN(birthDate.getTime())) return undefined;
+    const today = new Date();
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const birthdayPassed =
+      today.getMonth() > birthDate.getMonth() ||
+      (today.getMonth() === birthDate.getMonth() &&
+        today.getDate() >= birthDate.getDate());
+    if (!birthdayPassed) age -= 1;
+    return age >= 0 ? `${age} ${unit}` : undefined;
+  }
+
+  private formatExtractions(
+    dto: OrderResponseDto,
+    lang: SheetLanguage,
+  ): string | undefined {
+    const teeth = Array.from(
+      new Set(
+        (dto.toothInstructions ?? [])
+          .filter((item) => item.type === ToothInstructionType.extract)
+          .map((item) => item.toothNumber),
+      ),
+    ).sort((a, b) => a - b);
+    const notes = dto.extractions?.trim();
+    const toothText = teeth.length
+      ? `${lang === 'fr' ? 'Dents' : 'Teeth'}: ${teeth.join(', ')}`
+      : '';
+    return [toothText, notes].filter(Boolean).join(' - ') || undefined;
   }
 
   private renderFilesTable(
@@ -1406,11 +1539,13 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       <h2 class="section-title">${L.sectionFiles} (${files.length})${
         cbctFileCount ? ` · ${L.cbctFiles}: ${cbctFileCount}` : ''
       }</h2>
-      <div class="box" style="padding:6px 8px">
-        <table class="files">
-          <thead><tr><th>${this.escapeHtml(L.filesCategory)}</th><th>${this.escapeHtml(L.filesFile)}</th><th style="text-align:right">${this.escapeHtml(L.filesSize)}</th></tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
+      <div class="section-body">
+        <div class="box" style="padding:6px 8px">
+          <table class="files">
+            <thead><tr><th>${this.escapeHtml(L.filesCategory)}</th><th>${this.escapeHtml(L.filesFile)}</th><th style="text-align:right">${this.escapeHtml(L.filesSize)}</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
       </div>
     </div>`;
   }
@@ -1440,20 +1575,27 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
 
   // ─── Small helpers ─────────────────────────────────────────────
 
-  /** Key/value grid rows; rows with empty values are dropped. */
-  private kvRows(pairs: [string, string | null | undefined][]): string {
-    const kept = pairs.filter(([k, v]) => k && v && String(v).trim());
-    if (!kept.length) return '';
-    return `<div class="kv">${kept
-      .map(
-        ([k, v]) =>
-          `<span class="k">${this.escapeHtml(k)}</span><span class="v">${this.escapeHtml(String(v))}</span>`,
-      )
-      .join('')}</div>`;
-  }
+  /** Three-column definition grid matching the order review cards. */
+  private infoGrid(
+    fields: Array<[string, string | null | undefined, number?]>,
+    emptyLabel: string,
+    omitWhenAllEmpty = false,
+  ): string {
+    const visible = fields.filter(([label]) => label.trim().length > 0);
+    const hasAnyValue = visible.some(([, value]) => Boolean(value && String(value).trim()));
+    if (!visible.length || (omitWhenAllEmpty && !hasAnyValue)) return '';
 
-  private box(title: string, body: string): string {
-    return `<div class="box"><h3 class="box-title">${this.escapeHtml(title)}</h3>${body || '<div class="kv"><span class="k">—</span><span class="v"></span></div>'}</div>`;
+    const cells = visible
+      .map(([label, value, span]) => {
+        const normalized = value ? String(value).trim() : '';
+        const spanClass = span === 3 ? ' span-3' : span === 2 ? ' span-2' : '';
+        return `<div class="info-cell${spanClass}">
+          <div class="info-label">${this.escapeHtml(label)}</div>
+          <div class="info-value${normalized ? '' : ' empty'}">${this.escapeHtml(normalized || emptyLabel)}</div>
+        </div>`;
+      })
+      .join('');
+    return `<div class="info-grid">${cells}</div>`;
   }
 
   private fmtDate(value: Date | string): string {

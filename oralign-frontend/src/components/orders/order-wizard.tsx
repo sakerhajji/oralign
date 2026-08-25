@@ -2112,22 +2112,28 @@ function AdvancedMovementStep({
   const openBiteNeeded: boolean | undefined =
     openBiteAnswer !== null
       ? openBiteAnswer === 'yes'
-      : (form.openBite ?? '').trim()
-        ? true
-        : undefined;
+      : (form.openBite ?? '').trim() === 'No'
+        ? false
+        : (form.openBite ?? '').trim()
+          ? true
+          : undefined;
   const crossbiteNeeded: boolean | undefined =
     crossbiteAnswer !== null
       ? crossbiteAnswer === 'yes'
-      : (form.crossbite ?? '').trim()
-        ? true
-        : undefined;
+      : (form.crossbite ?? '').trim() === 'No'
+        ? false
+        : (form.crossbite ?? '').trim()
+          ? true
+          : undefined;
   const answerOpenBite = (yes: boolean) => {
     setOpenBiteAnswer(yes ? 'yes' : 'no');
-    if (!yes && (form.openBite ?? '').trim()) updateField('openBite', '');
+    if (yes && (form.openBite ?? '').trim() === 'No') updateField('openBite', '');
+    if (!yes) updateField('openBite', 'No');
   };
   const answerCrossbite = (yes: boolean) => {
     setCrossbiteAnswer(yes ? 'yes' : 'no');
-    if (!yes && (form.crossbite ?? '').trim()) updateField('crossbite', '');
+    if (yes && (form.crossbite ?? '').trim() === 'No') updateField('crossbite', '');
+    if (!yes) updateField('crossbite', 'No');
   };
 
   // ── Option-pill label resolvers ─────────────────────────────────────

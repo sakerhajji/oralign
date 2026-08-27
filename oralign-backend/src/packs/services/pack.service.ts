@@ -360,15 +360,18 @@ export class PackService {
     dto: CreatePackPriceDto,
   ): Promise<PackPrice> {
     await this.get(packId); // 404s if the pack is missing / soft-deleted
-    // The (packId, archType, isActive) unique index lets multiple
-    // archived prices co-exist with a single active one. If the
-    // caller is trying to add a new active price for an arch that
-    // already has one, archive the previous before inserting.
+    // The (packId, archType, isActive) unique index holds ONE active
+    // and ONE archived price per (pack, arch). Archiving the current
+    // active row therefore EVICTS the previously archived one first —
+    // quotes snapshot their amounts, so nothing references the row.
     return this.prisma.$transaction(async (tx) => {
       const existing = await tx.packPrice.findFirst({
         where: { packId, archType: dto.archType, isActive: true },
       });
       if (existing) {
+        await tx.packPrice.deleteMany({
+          where: { packId, archType: dto.archType, isActive: false },
+        });
         await tx.packPrice.update({
           where: { id: existing.id },
           data: { isActive: false },
@@ -410,12 +413,14 @@ export class PackService {
         },
       });
       if (conflict) {
+        // Swapping active/archived in place trips the unique index
+        // (constraints are checked per statement, and priceId still
+        // occupies the archived slot while the conflict is archived).
+        // Delete the conflict, activate priceId, then re-create the
+        // conflict as the archived row.
         return this.prisma.$transaction(async (tx) => {
-          await tx.packPrice.update({
-            where: { id: conflict.id },
-            data: { isActive: false },
-          });
-          return tx.packPrice.update({
+          await tx.packPrice.delete({ where: { id: conflict.id } });
+          const activated = await tx.packPrice.update({
             where: { id: priceId },
             data: {
               price:
@@ -426,19 +431,43 @@ export class PackService {
               isActive: true,
             },
           });
+          await tx.packPrice.create({
+            data: {
+              packId: conflict.packId,
+              archType: conflict.archType,
+              price: conflict.price,
+              currency: conflict.currency,
+              isActive: false,
+              createdAt: conflict.createdAt,
+            },
+          });
+          return activated;
         });
       }
     }
-    return this.prisma.packPrice.update({
-      where: { id: priceId },
-      data: {
-        price:
-          dto.price !== undefined
-            ? new Prisma.Decimal(dto.price.toFixed(3))
-            : undefined,
-        currency: dto.currency,
-        isActive: dto.isActive,
-      },
+    return this.prisma.$transaction(async (tx) => {
+      if (dto.isActive === false && existing.isActive) {
+        // Evict the previously archived row — the unique index only
+        // keeps one archived price per (pack, arch).
+        await tx.packPrice.deleteMany({
+          where: {
+            packId: existing.packId,
+            archType: existing.archType,
+            isActive: false,
+          },
+        });
+      }
+      return tx.packPrice.update({
+        where: { id: priceId },
+        data: {
+          price:
+            dto.price !== undefined
+              ? new Prisma.Decimal(dto.price.toFixed(3))
+              : undefined,
+          currency: dto.currency,
+          isActive: dto.isActive,
+        },
+      });
     });
   }
 
@@ -456,9 +485,20 @@ export class PackService {
       // Idempotent — already archived.
       return { id: priceId, isActive: false };
     }
-    await this.prisma.packPrice.update({
-      where: { id: priceId },
-      data: { isActive: false },
+    await this.prisma.$transaction(async (tx) => {
+      // Evict the previously archived row — the unique index only
+      // keeps one archived price per (pack, arch).
+      await tx.packPrice.deleteMany({
+        where: {
+          packId: existing.packId,
+          archType: existing.archType,
+          isActive: false,
+        },
+      });
+      await tx.packPrice.update({
+        where: { id: priceId },
+        data: { isActive: false },
+      });
     });
     return { id: priceId, isActive: false };
   }

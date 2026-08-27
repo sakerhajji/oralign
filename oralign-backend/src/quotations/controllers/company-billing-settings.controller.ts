@@ -204,6 +204,10 @@ export class PublicBillingDefaultsController {
     defaultCurrency: string;
     cbctSupplementEnabled: boolean;
     cbctSupplementFee: number;
+    refinementTwoArchesFee: number;
+    refinementSingleArchFee: number;
+    replacementAlignerFee: number;
+    retainersFee: number;
     companyName: string | null;
     companyAddress: string | null;
     companyCity: string | null;
@@ -253,6 +257,18 @@ export class PublicBillingDefaultsController {
       cbctSupplementFee: settings
         ? Number(settings.cbctSupplementFee)
         : 0,
+      // Beyond-the-pack tariffs (grille 2026) — informational for the
+      // doctor-facing catalogue; 0 means "not configured, hide the line".
+      refinementTwoArchesFee: settings
+        ? Number(settings.refinementTwoArchesFee)
+        : 0,
+      refinementSingleArchFee: settings
+        ? Number(settings.refinementSingleArchFee)
+        : 0,
+      replacementAlignerFee: settings
+        ? Number(settings.replacementAlignerFee)
+        : 0,
+      retainersFee: settings ? Number(settings.retainersFee) : 0,
       companyName: settings?.companyName ?? null,
       companyAddress: settings?.companyAddress ?? null,
       companyCity: settings?.companyCity ?? null,

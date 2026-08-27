@@ -25,3 +25,4 @@ export * from './slider-media';
 export * from './community';
 export * from './reports';
 export * from './blog';
+export * from './loyalty';

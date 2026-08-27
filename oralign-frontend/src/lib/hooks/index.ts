@@ -21,3 +21,4 @@ export * from './use-blog';
 export * from './use-admin-invoices';
 export * from './use-authed-image';
 export * from './use-community-submissions';
+export * from './use-loyalty';

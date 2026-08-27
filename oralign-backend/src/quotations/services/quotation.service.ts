@@ -442,6 +442,17 @@ export class QuotationService {
                 remainingAmount: newTotalDecimal,
               }
             : {}),
+          // The loyalty snapshot documents the discount granted at
+          // pack-attach. If the admin manually overrides the discount
+          // to a DIFFERENT figure, the snapshot no longer describes
+          // this quote (and would inflate the loyalty KPI) — clear it.
+          ...(dto.discountAmount !== undefined &&
+          quote.loyaltyDiscountAmount != null &&
+          !quote.loyaltyDiscountAmount.equals(
+            new Prisma.Decimal(dto.discountAmount.toFixed(3)),
+          )
+            ? { loyaltyDiscountPercent: null, loyaltyDiscountAmount: null }
+            : {}),
         },
       });
     });
@@ -712,6 +723,11 @@ export class QuotationService {
           status: QuotationStatus.approved,
           approvedAt: new Date(),
           approvedById,
+          // Paying a SENT quote IS the doctor's acceptance (the doctor
+          // view has no Approve button) — stamp the moment the same way
+          // the explicit approve endpoint does. The loyalty program
+          // counts treatments by this timestamp.
+          doctorApprovedAt: new Date(),
         },
       });
       if (changed.count === 0) return null;

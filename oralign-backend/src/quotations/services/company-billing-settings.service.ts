@@ -187,6 +187,11 @@ export class CompanyBillingSettingsService {
           stampDuty: dto.stampDuty ?? 1,
           cbctSupplementEnabled: dto.cbctSupplementEnabled ?? false,
           cbctSupplementFee: dto.cbctSupplementFee ?? 0,
+          refinementTwoArchesFee: dto.refinementTwoArchesFee ?? 0,
+          refinementSingleArchFee: dto.refinementSingleArchFee ?? 0,
+          replacementAlignerFee: dto.replacementAlignerFee ?? 0,
+          retainersFee: dto.retainersFee ?? 0,
+          loyaltyEnabled: dto.loyaltyEnabled ?? true,
           defaultCurrency: dto.defaultCurrency ?? 'TND',
           devisPrefix: dto.devisPrefix ?? 'DEV',
           devisNextNumber: dto.devisNextNumber ?? 1,
@@ -231,6 +236,14 @@ export class CompanyBillingSettingsService {
           dto.cbctSupplementEnabled ?? current.cbctSupplementEnabled,
         cbctSupplementFee:
           dto.cbctSupplementFee ?? current.cbctSupplementFee,
+        refinementTwoArchesFee:
+          dto.refinementTwoArchesFee ?? current.refinementTwoArchesFee,
+        refinementSingleArchFee:
+          dto.refinementSingleArchFee ?? current.refinementSingleArchFee,
+        replacementAlignerFee:
+          dto.replacementAlignerFee ?? current.replacementAlignerFee,
+        retainersFee: dto.retainersFee ?? current.retainersFee,
+        loyaltyEnabled: dto.loyaltyEnabled ?? current.loyaltyEnabled,
         defaultCurrency: dto.defaultCurrency ?? current.defaultCurrency,
         devisPrefix: dto.devisPrefix ?? current.devisPrefix,
         devisNextNumber: dto.devisNextNumber ?? current.devisNextNumber,
@@ -441,6 +454,11 @@ export class CompanyBillingSettingsService {
       cbctSupplementEnabled: settings.cbctSupplementEnabled,
       // Decimal → Number at the API boundary, same as defaultTreatmentFee.
       cbctSupplementFee: Number(settings.cbctSupplementFee),
+      refinementTwoArchesFee: Number(settings.refinementTwoArchesFee),
+      refinementSingleArchFee: Number(settings.refinementSingleArchFee),
+      replacementAlignerFee: Number(settings.replacementAlignerFee),
+      retainersFee: Number(settings.retainersFee),
+      loyaltyEnabled: settings.loyaltyEnabled,
       defaultCurrency: settings.defaultCurrency,
       devisPrefix: settings.devisPrefix,
       devisNextNumber: settings.devisNextNumber,

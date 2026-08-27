@@ -286,6 +286,7 @@ model User {
   createdTreatmentPlanIprs TreatmentPlanIpr[] @relation("TreatmentPlanIprCreator")
   sentTreatmentMessages TreatmentMessage[]
   uploadedTreatmentAttachments TreatmentMessageAttachment[]
+  loyaltyQuarters      LoyaltyQuarterResult[]
   createdQuotations    Quotation[]       @relation("QuotationCreatedBy")
   approvedQuotations   Quotation[]       @relation("QuotationApprovedBy")
   rejectedQuotations   Quotation[]       @relation("QuotationRejectedBy")
@@ -1027,6 +1028,20 @@ model CompanyBillingSettings {
   cbctSupplementEnabled   Boolean       @default(false)
   cbctSupplementFee       Decimal       @default(0) @db.Decimal(12, 3)
 
+  // ── Beyond-the-pack price list (grille 2026) ─────────────────────
+  // Informational tariffs the admin edits without code: extra
+  // refinements, replacement aligner, end-of-treatment retainers.
+  // Like the CBCT supplement they follow defaultCurrency; a value of
+  // 0 simply hides the line on doctor-facing surfaces.
+  refinementTwoArchesFee   Decimal      @default(0) @db.Decimal(12, 3)
+  refinementSingleArchFee  Decimal      @default(0) @db.Decimal(12, 3)
+  replacementAlignerFee    Decimal      @default(0) @db.Decimal(12, 3)
+  retainersFee             Decimal      @default(0) @db.Decimal(12, 3)
+
+  // Master switch of the quarterly loyalty program. Off = no discount
+  // is ever applied at pack-attach time; history stays intact.
+  loyaltyEnabled           Boolean      @default(true)
+
   // Devis numbering. Incremented inside a transaction when each quote
   // is first assigned a number, so two concurrent quote-creations can't
   // collide on the same DEV-XXXXXX value.
@@ -1150,6 +1165,15 @@ model Quotation {
   paidAmount            Decimal           @default(0) @db.Decimal(12, 3)
   remainingAmount       Decimal?          @db.Decimal(12, 3)
 
+  // ── Loyalty discount snapshot ───────────────────────────────────
+  // Set once when a pack is attached, from the doctor's loyalty tier
+  // earned in the PREVIOUS quarter. Frozen on the quote — the amount
+  // also feeds the legacy discountAmount so the PDF shows the line —
+  // so later rule changes never rewrite an issued devis (same idiom
+  // as the pack snapshot above).
+  loyaltyDiscountPercent Decimal?         @db.Decimal(5, 2)
+  loyaltyDiscountAmount  Decimal?         @db.Decimal(12, 3)
+
   // ── Payment plan + status ───────────────────────────────────────
   paymentMode           PaymentMode?
   paymentStatus         QuotationPaymentStatus @default(pending)
@@ -1244,6 +1268,53 @@ model PackPrice {
 
   @@unique([packId, archType, isActive])
   @@index([packId])
+}
+
+// ─────────────────────────────────────────
+// LOYALTY PROGRAM
+// ─────────────────────────────────────────
+// Quarterly practitioner loyalty (grille 2026): N approved treatments
+// during a quarter earn a percentage discount on every pack quote of
+// the FOLLOWING quarter. Tiers are admin-editable rows (variable
+// count — same idiom as PackPrice rather than fixed settings
+// columns); closed quarters are persisted per doctor with the awarded
+// percent SNAPSHOTTED, so future tier edits never rewrite history.
+
+model LoyaltyTier {
+  id              String   @id @default(uuid())
+  // Treatments required within one quarter to reach this tier.
+  minTreatments   Int
+  // Discount granted on the following quarter's pack quotes (0-100).
+  discountPercent Decimal  @db.Decimal(5, 2)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([isActive, minTreatments])
+}
+
+model LoyaltyQuarterResult {
+  id              String   @id @default(uuid())
+  doctorId        String
+  // Calendar quarter the TREATMENTS were counted in (UTC). The awarded
+  // discount applies to the quarter that FOLLOWS this one.
+  year            Int
+  quarter         Int      // 1..4
+  treatmentCount  Int
+  // Snapshot of the highest tier reached when the quarter was closed.
+  // Zero when no tier was reached. Kept as literal values (not a tier
+  // FK) so deleting or editing tiers never mutates a closed quarter.
+  tierMinTreatments Int?
+  discountPercent Decimal  @default(0) @db.Decimal(5, 2)
+  computedAt      DateTime @default(now())
+
+  // DELETION POLICY: Restrict — a closed quarter is a financial record
+  // backing discounts on issued quotes; purge the results explicitly
+  // before ever hard-deleting a practitioner.
+  doctor          User     @relation(fields: [doctorId], references: [id], onDelete: Restrict)
+
+  @@unique([doctorId, year, quarter])
+  @@index([year, quarter])
 }
 
 // ─────────────────────────────────────────

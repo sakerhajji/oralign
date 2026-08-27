@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { PackModule } from '../packs/pack.module';
+import { LoyaltyModule } from '../loyalty/loyalty.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { StorageModule } from '../storage/storage.module';
 import {
@@ -27,7 +28,7 @@ import { QuotationPdfService } from './services/quotation-pdf.service';
  * behaviour they need.
  */
 @Module({
-  imports: [PrismaModule, StorageModule, PackModule],
+  imports: [PrismaModule, StorageModule, PackModule, LoyaltyModule],
   controllers: [
     CompanyBillingSettingsController,
     PublicBillingDefaultsController,

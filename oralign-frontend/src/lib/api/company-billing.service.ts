@@ -30,6 +30,11 @@ export interface BillingPublicDefaults {
    *  and the breakdown in the treatment-fee payment dialog. */
   cbctSupplementEnabled: boolean;
   cbctSupplementFee: number;
+  /** Beyond-the-pack tariffs (grille 2026); 0 = not configured. */
+  refinementTwoArchesFee: number;
+  refinementSingleArchFee: number;
+  replacementAlignerFee: number;
+  retainersFee: number;
   companyName: string | null;
   companyAddress: string | null;
   companyCity: string | null;

@@ -68,6 +68,14 @@ export interface CompanyBillingSettings {
   // follows defaultCurrency.
   cbctSupplementEnabled: boolean;
   cbctSupplementFee: number;
+  // Beyond-the-pack tariffs (grille 2026) — informational price list the
+  // admin edits; 0 hides the line on doctor-facing surfaces.
+  refinementTwoArchesFee: number;
+  refinementSingleArchFee: number;
+  replacementAlignerFee: number;
+  retainersFee: number;
+  // Master switch of the quarterly loyalty program.
+  loyaltyEnabled: boolean;
   defaultCurrency: string;
   devisPrefix: string;
   devisNextNumber: number;
@@ -102,6 +110,13 @@ export interface UpsertCompanyBillingSettingsDto {
   /** CBCT paid supplement toggle + fee (currency = defaultCurrency). */
   cbctSupplementEnabled?: boolean;
   cbctSupplementFee?: number;
+  /** Beyond-the-pack tariffs (grille 2026). */
+  refinementTwoArchesFee?: number;
+  refinementSingleArchFee?: number;
+  replacementAlignerFee?: number;
+  retainersFee?: number;
+  /** Master switch of the quarterly loyalty program. */
+  loyaltyEnabled?: boolean;
   defaultCurrency?: string;
   devisPrefix?: string;
   devisNextNumber?: number;

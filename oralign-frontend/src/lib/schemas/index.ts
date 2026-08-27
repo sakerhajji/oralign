@@ -318,6 +318,12 @@ export const companyBillingSettingsSchema = z.object({
     .number()
     .min(0, 'CBCT supplement must be 0 or greater')
     .optional(),
+  // Beyond-the-pack tariffs (grille 2026) + loyalty master switch.
+  refinementTwoArchesFee: z.number().min(0).optional(),
+  refinementSingleArchFee: z.number().min(0).optional(),
+  replacementAlignerFee: z.number().min(0).optional(),
+  retainersFee: z.number().min(0).optional(),
+  loyaltyEnabled: z.boolean().optional(),
   defaultCurrency: z.string().min(1, 'Currency is required'),
   devisPrefix: z.string().min(1, 'Devis prefix is required'),
   devisNextNumber: z.number().int().min(1, 'Next number must be at least 1'),

@@ -19,6 +19,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { OrderAccessPolicy } from '../../common/access/order-access.policy';
 import { PackService } from '../../packs/services/pack.service';
+import { LoyaltyService } from '../../loyalty/services/loyalty.service';
 import {
   AttachPackToQuotationDto,
   ConfigurePaymentPlanDto,
@@ -62,6 +63,7 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
     private readonly prisma: PrismaService,
     private readonly orderAccess: OrderAccessPolicy,
     private readonly packs: PackService,
+    private readonly loyalty: LoyaltyService,
     private readonly events: EventEmitter2,
   ) {}
 
@@ -150,6 +152,7 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
     const quote = await this.prisma.quotation.findUnique({
       where: { id: quotationId },
       include: {
+        order: { select: { doctorId: true } },
         payments: {
           where: { status: { in: LIVE_PAYMENT_STATUSES } },
           select: { id: true },
@@ -179,6 +182,25 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
       archType,
     );
 
+    // Loyalty discount (grille 2026): the tier the doctor EARNED last
+    // quarter applies to every pack quote of the current one. Derived
+    // fresh from the gross pack price on every attach, so re-attaching
+    // a pack can never stack discounts; the percent AND amount are
+    // snapshotted on the quote so later tier edits never rewrite it.
+    // The rest of the pipeline needs no change: installments validate
+    // against the NET totalPrice, Payment.amount copies installments,
+    // and auto-invoices derive from the paid amount.
+    const loyaltyPercent = await this.loyalty.activeDiscountPercentFor(
+      quote.order.doctorId,
+    );
+    const grossPrice = Number(price.price);
+    const loyaltyAmount =
+      loyaltyPercent > 0
+        ? Math.round(grossPrice * (loyaltyPercent / 100) * 1000) / 1000
+        : 0;
+    const netPrice = Math.round((grossPrice - loyaltyAmount) * 1000) / 1000;
+    const netDecimal = new Prisma.Decimal(netPrice.toFixed(3));
+
     // Reset any previously-configured plan because the totals just
     // changed. Doing this inside the same transaction guarantees the
     // new snapshot + new totalPrice land atomically with the wiped
@@ -197,24 +219,34 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
           isUnlimitedSteps: pack.isUnlimitedSteps,
           isUnlimitedCorrections: pack.isUnlimitedCorrections,
           isForOrthodontists: pack.isForOrthodontists,
-          totalPrice: price.price,
+          totalPrice: netDecimal,
           paidAmount: new Prisma.Decimal(0),
-          remainingAmount: price.price,
+          remainingAmount: netDecimal,
           paymentMode: null,
           paymentStatus: QuotationPaymentStatus.pending,
           currency: price.currency,
-          // Mirror the new price onto the legacy Float column too so the
+          loyaltyDiscountPercent:
+            loyaltyAmount > 0
+              ? new Prisma.Decimal(loyaltyPercent.toFixed(2))
+              : null,
+          loyaltyDiscountAmount:
+            loyaltyAmount > 0
+              ? new Prisma.Decimal(loyaltyAmount.toFixed(3))
+              : null,
+          // Mirror the new price onto the legacy Float columns too so the
           // PDF renderer + existing UI stay in sync. The legacy treatment/
           // fab/delivery breakdown is set to zero — for pack-based quotes
-          // the price IS the bundle.
-          treatmentFees: Number(price.price),
+          // the price IS the bundle. The loyalty discount rides the
+          // existing discountAmount column, which the PDF already renders
+          // as a negative line.
+          treatmentFees: grossPrice,
           fabricationFees: 0,
           deliveryFees: 0,
-          discountAmount: 0,
-          subTotalHt: Number(price.price),
+          discountAmount: loyaltyAmount,
+          subTotalHt: netPrice,
           tvaAmount: 0,
           tvaRate: 0,
-          totalTtc: Number(price.price),
+          totalTtc: netPrice,
         },
       });
     });

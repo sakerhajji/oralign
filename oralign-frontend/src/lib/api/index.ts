@@ -32,3 +32,4 @@ export {
   refreshAccessToken,
   ensureValidAccessToken,
 } from './client';
+export * from './loyalty.service';

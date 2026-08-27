@@ -25,6 +25,7 @@ import { PackModule } from './packs/pack.module';
 import { QuotationModule } from './quotations/quotation.module';
 import { PaymentsModule } from './payments/payments.module';
 import { InvoicesModule } from './invoices/invoices.module';
+import { LoyaltyModule } from './loyalty/loyalty.module';
 import { NotificationsModule } from './notifications/notification.module';
 import { SupportModule } from './support/support.module';
 import { DashboardModule } from './dashboard/dashboard.module';
@@ -120,6 +121,7 @@ function buildRedisUrl(): string {
     PackModule,
     PaymentsModule,
     InvoicesModule,
+    LoyaltyModule,
     NotificationsModule,
     SupportModule,
     SliderMediaModule,

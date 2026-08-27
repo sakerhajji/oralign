@@ -42,6 +42,11 @@ interface FormState extends UpsertCompanyBillingSettingsDto {
   stampDuty: number;
   cbctSupplementEnabled: boolean;
   cbctSupplementFee: number;
+  refinementTwoArchesFee: number;
+  refinementSingleArchFee: number;
+  replacementAlignerFee: number;
+  retainersFee: number;
+  loyaltyEnabled: boolean;
   defaultCurrency: string;
   devisPrefix: string;
   devisNextNumber: number;
@@ -73,6 +78,11 @@ const emptyState: FormState = {
   // requests on NEW orders only (existing orders keep their snapshot).
   cbctSupplementEnabled: false,
   cbctSupplementFee: 0,
+  refinementTwoArchesFee: 0,
+  refinementSingleArchFee: 0,
+  replacementAlignerFee: 0,
+  retainersFee: 0,
+  loyaltyEnabled: true,
   defaultCurrency: 'TND',
   devisPrefix: 'DEV',
   devisNextNumber: 1,
@@ -105,6 +115,11 @@ function formFromBillingSettings(
     stampDuty: settings.stampDuty ?? 1,
     cbctSupplementEnabled: settings.cbctSupplementEnabled ?? false,
     cbctSupplementFee: settings.cbctSupplementFee ?? 0,
+    refinementTwoArchesFee: settings.refinementTwoArchesFee ?? 0,
+    refinementSingleArchFee: settings.refinementSingleArchFee ?? 0,
+    replacementAlignerFee: settings.replacementAlignerFee ?? 0,
+    retainersFee: settings.retainersFee ?? 0,
+    loyaltyEnabled: settings.loyaltyEnabled ?? true,
     defaultCurrency: settings.defaultCurrency ?? 'TND',
     devisPrefix: settings.devisPrefix ?? 'DEV',
     devisNextNumber: settings.devisNextNumber ?? 1,
@@ -228,6 +243,11 @@ export function CompanyBillingSettingsForm() {
       stampDuty: form.stampDuty,
       cbctSupplementEnabled: form.cbctSupplementEnabled,
       cbctSupplementFee: Math.max(0, form.cbctSupplementFee),
+      refinementTwoArchesFee: Math.max(0, form.refinementTwoArchesFee),
+      refinementSingleArchFee: Math.max(0, form.refinementSingleArchFee),
+      replacementAlignerFee: Math.max(0, form.replacementAlignerFee),
+      retainersFee: Math.max(0, form.retainersFee),
+      loyaltyEnabled: form.loyaltyEnabled,
       defaultCurrency: form.defaultCurrency.trim() || 'TND',
       devisPrefix: form.devisPrefix.trim() || 'DEV',
       devisNextNumber: form.devisNextNumber,
@@ -517,6 +537,93 @@ export function CompanyBillingSettingsForm() {
               helper={t('accountBillingSettings.cbctFeeHelp')}
             />
           </div>
+          {/* ── Beyond-the-pack tariffs (grille 2026) ────────────────
+              Informational price list shown on the packs page and in
+              doctor-facing surfaces. 0 = not configured → hidden. */}
+          <div className="space-y-3 rounded-lg border p-4">
+            <div className="space-y-0.5">
+              <p className="font-medium">
+                {t('accountBillingSettings.beyondPackTitle')}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {t('accountBillingSettings.beyondPackHelp')}
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field
+                label={t('accountBillingSettings.refinementTwoLabel', {
+                  currency: form.defaultCurrency || 'TND',
+                })}
+                value={String(form.refinementTwoArchesFee)}
+                type="number"
+                step="0.001"
+                min="0"
+                onChange={(v) =>
+                  updateField('refinementTwoArchesFee', Math.max(0, Number(v) || 0))
+                }
+                placeholder="0"
+              />
+              <Field
+                label={t('accountBillingSettings.refinementOneLabel', {
+                  currency: form.defaultCurrency || 'TND',
+                })}
+                value={String(form.refinementSingleArchFee)}
+                type="number"
+                step="0.001"
+                min="0"
+                onChange={(v) =>
+                  updateField('refinementSingleArchFee', Math.max(0, Number(v) || 0))
+                }
+                placeholder="0"
+              />
+              <Field
+                label={t('accountBillingSettings.replacementLabel', {
+                  currency: form.defaultCurrency || 'TND',
+                })}
+                value={String(form.replacementAlignerFee)}
+                type="number"
+                step="0.001"
+                min="0"
+                onChange={(v) =>
+                  updateField('replacementAlignerFee', Math.max(0, Number(v) || 0))
+                }
+                placeholder="0"
+              />
+              <Field
+                label={t('accountBillingSettings.retainersLabel', {
+                  currency: form.defaultCurrency || 'TND',
+                })}
+                value={String(form.retainersFee)}
+                type="number"
+                step="0.001"
+                min="0"
+                onChange={(v) =>
+                  updateField('retainersFee', Math.max(0, Number(v) || 0))
+                }
+                placeholder="0"
+              />
+            </div>
+          </div>
+
+          {/* ── Loyalty program master switch ────────────────────────
+              Off = attachPack never applies a loyalty discount; closed
+              quarters and issued quotes keep their snapshots. */}
+          <div className="flex items-center justify-between gap-3 rounded-lg border p-4">
+            <div className="space-y-0.5">
+              <Label htmlFor="loyalty-enabled" className="font-medium">
+                {t('accountBillingSettings.loyaltyEnabledLabel')}
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                {t('accountBillingSettings.loyaltyEnabledHelp')}
+              </p>
+            </div>
+            <Switch
+              id="loyalty-enabled"
+              checked={form.loyaltyEnabled}
+              onCheckedChange={(checked) => updateField('loyaltyEnabled', checked)}
+            />
+          </div>
+
           <Field
             label={t('accountBillingSettings.defaultCurrencyLabel')}
             value={form.defaultCurrency}

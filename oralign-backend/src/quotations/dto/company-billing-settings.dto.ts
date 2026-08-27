@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
   IsEmail,
@@ -204,6 +204,58 @@ export class UpsertCompanyBillingSettingsDto {
   @Min(0)
   cbctSupplementFee?: number;
 
+  // ── Beyond-the-pack price list (grille 2026) ────────────────────
+  // Informational tariffs shown to doctors; 0 hides the line. Same
+  // Number-in / Decimal-in-DB treatment as the CBCT supplement.
+  @ApiPropertyOptional({ minimum: 0, maximum: 999999999.999, default: 0 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 3 })
+  @Min(0)
+  @Max(999999999.999)
+  refinementTwoArchesFee?: number;
+
+  @ApiPropertyOptional({ minimum: 0, maximum: 999999999.999, default: 0 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 3 })
+  @Min(0)
+  @Max(999999999.999)
+  refinementSingleArchFee?: number;
+
+  @ApiPropertyOptional({ minimum: 0, maximum: 999999999.999, default: 0 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 3 })
+  @Min(0)
+  @Max(999999999.999)
+  replacementAlignerFee?: number;
+
+  @ApiPropertyOptional({ minimum: 0, maximum: 999999999.999, default: 0 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 3 })
+  @Min(0)
+  @Max(999999999.999)
+  retainersFee?: number;
+
+  @ApiPropertyOptional({
+    default: true,
+    description: 'Master switch of the quarterly loyalty program.',
+  })
+  @IsOptional()
+  // enableImplicitConversion coerces ANY string through Boolean() before
+  // @IsBoolean runs, so "false" would silently become true. Read the raw
+  // value; garbage falls through to @IsBoolean → 400.
+  @Transform(({ obj }) => {
+    const v = (obj as Record<string, unknown>).loyaltyEnabled;
+    if (v === 'true') return true;
+    if (v === 'false') return false;
+    return v;
+  })
+  @IsBoolean()
+  loyaltyEnabled?: boolean;
+
   @ApiPropertyOptional({
     default: 'TND',
     description: 'ISO 4217 currency code',
@@ -288,6 +340,11 @@ export class CompanyBillingSettingsResponseDto {
   @ApiProperty() stampDuty!: number;
   @ApiProperty() cbctSupplementEnabled!: boolean;
   @ApiProperty() cbctSupplementFee!: number;
+  @ApiProperty() refinementTwoArchesFee!: number;
+  @ApiProperty() refinementSingleArchFee!: number;
+  @ApiProperty() replacementAlignerFee!: number;
+  @ApiProperty() retainersFee!: number;
+  @ApiProperty() loyaltyEnabled!: boolean;
   @ApiProperty() defaultCurrency!: string;
   @ApiProperty() devisPrefix!: string;
   @ApiProperty() devisNextNumber!: number;

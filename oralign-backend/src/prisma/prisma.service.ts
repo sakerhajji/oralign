@@ -161,6 +161,15 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     return this.prisma.invoiceAuditLog;
   }
 
+  // Quarterly loyalty program.
+  get loyaltyTier() {
+    return this.prisma.loyaltyTier;
+  }
+
+  get loyaltyQuarterResult() {
+    return this.prisma.loyaltyQuarterResult;
+  }
+
   // ─── Prisma utilities ─────────────────────────────────────────────────────
 
   /**

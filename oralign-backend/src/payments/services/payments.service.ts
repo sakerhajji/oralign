@@ -674,13 +674,18 @@ export class PaymentsService {
       });
       const totalPaid = aggregate._sum.amount ?? new Prisma.Decimal(0);
       const totalPrice = installment.quotation.totalPrice ?? new Prisma.Decimal(0);
-      const remaining = Prisma.Decimal.max(
-        totalPrice.minus(totalPaid),
-        new Prisma.Decimal(0),
-      );
+      // The plan validator accepts installments within 0.001 of the
+      // total (MONEY_EPSILON in quotation-payment-plan.service.ts), so
+      // settlement must honor the same tolerance — otherwise a plan one
+      // millime short of a fractional loyalty net can never reach
+      // `paid`. A tolerated shortfall reports remainingAmount 0.
+      const settled = totalPaid.gte(totalPrice.minus(new Prisma.Decimal('0.001')));
+      const remaining = settled
+        ? new Prisma.Decimal(0)
+        : Prisma.Decimal.max(totalPrice.minus(totalPaid), new Prisma.Decimal(0));
       const newStatus: QuotationPaymentStatus = totalPaid.eq(0)
         ? QuotationPaymentStatus.pending
-        : totalPaid.gte(totalPrice)
+        : settled
           ? QuotationPaymentStatus.paid
           : QuotationPaymentStatus.partially_paid;
 

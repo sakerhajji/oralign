@@ -17,6 +17,9 @@ import {
   useDeactivatePack,
 } from '@/lib/hooks';
 import { useBillingPublicDefaults } from '@/lib/hooks/use-company-billing';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { LoyaltyContent } from './loyalty-content';
+import { formatPrice } from '@/lib/utils/currency';
 import { pickLocalized } from '@/lib/api/blog.service';
 import {
   ArchType,
@@ -142,7 +145,7 @@ export function PacksPageContent() {
   }
 
   if (isAdmin) {
-    return <AdminPacksManager />;
+    return <AdminPacksArea />;
   }
 
   if (user.role === UserRole.DENTIST) {
@@ -194,7 +197,133 @@ function DoctorPacksCatalogue() {
   );
 }
 
-function AdminPacksManager() {
+/**
+ * Admin surface of /dashboard/packs: two tabs — the pack catalogue
+ * (grille 2026) and the quarterly loyalty program. The dentist
+ * catalogue below is untouched.
+ */
+function AdminPacksArea() {
+  const { t } = useT();
+  return (
+    <div className="flex flex-col gap-4 p-3 sm:p-4 md:p-6">
+      <Tabs defaultValue="packs">
+        <TabsList>
+          <TabsTrigger value="packs">{t('packsAdmin.tabPacks')}</TabsTrigger>
+          <TabsTrigger value="loyalty">{t('packsAdmin.tabLoyalty')}</TabsTrigger>
+        </TabsList>
+        <TabsContent value="packs" className="mt-2 flex flex-col gap-5">
+          <AdminPacksManager embedded />
+          <BeyondPackCard />
+        </TabsContent>
+        <TabsContent value="loyalty" className="mt-2">
+          <LoyaltyContent />
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+
+/**
+ * Read-only "Au-delà du forfait" price list (grille 2026). The values
+ * live on CompanyBillingSettings — edited from the billing settings
+ * page, surfaced here so the whole tariff sheet reads in one place.
+ */
+function BeyondPackCard() {
+  const { t } = useT();
+  const { data: defaults, isPending, isError, refetch } = useBillingPublicDefaults();
+
+  const money = (amount: number | undefined): string =>
+    amount && amount > 0
+      ? formatPrice(amount, defaults?.defaultCurrency ?? 'TND')
+      : t('packsAdmin.beyondPackNotSet');
+
+  const rows: { label: string; value: string; hint?: string }[] = [
+    {
+      label: t('packsAdmin.beyondPackStudy'),
+      value: money(defaults?.defaultTreatmentFee),
+      hint: t('packsAdmin.beyondPackStudyHint'),
+    },
+    {
+      label: t('packsAdmin.beyondPackDicom'),
+      value: defaults?.cbctSupplementEnabled
+        ? defaults.cbctSupplementFee > 0
+          ? '+' + money(defaults.cbctSupplementFee)
+          : t('packsAdmin.beyondPackNotSet')
+        : t('packsAdmin.beyondPackDicomOff'),
+    },
+    {
+      label: t('packsAdmin.beyondPackRefinementTwo'),
+      value: money(defaults?.refinementTwoArchesFee),
+    },
+    {
+      label: t('packsAdmin.beyondPackRefinementOne'),
+      value: money(defaults?.refinementSingleArchFee),
+    },
+    {
+      label: t('packsAdmin.beyondPackReplacement'),
+      value: money(defaults?.replacementAlignerFee),
+    },
+    {
+      label: t('packsAdmin.beyondPackRetainers'),
+      value: money(defaults?.retainersFee),
+    },
+  ];
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+        <div>
+          <CardTitle>{t('packsAdmin.beyondPackTitle')}</CardTitle>
+          <CardDescription>{t('packsAdmin.beyondPackIntro')}</CardDescription>
+        </div>
+        <Button asChild variant="outline" size="sm">
+          <Link href="/account/billing-settings">
+            {t('packsAdmin.beyondPackEdit')}
+          </Link>
+        </Button>
+      </CardHeader>
+      <CardContent>
+        {isPending ? (
+          <div className="grid gap-2 sm:grid-cols-2">
+            {rows.map((row) => (
+              <Skeleton key={row.label} className="h-12 rounded-lg" />
+            ))}
+          </div>
+        ) : isError ? (
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2">
+            <p className="text-sm text-muted-foreground">
+              {t('packsAdmin.beyondPackLoadError')}
+            </p>
+            <Button variant="outline" size="sm" onClick={() => refetch()}>
+              {t('packsAdmin.beyondPackRetry')}
+            </Button>
+          </div>
+        ) : (
+        <div className="grid gap-2 sm:grid-cols-2">
+          {rows.map((row) => (
+            <div
+              key={row.label}
+              className="flex items-start justify-between gap-3 rounded-lg border bg-muted/30 px-3 py-2"
+            >
+              <div className="min-w-0">
+                <div className="text-sm">{row.label}</div>
+                {row.hint && (
+                  <div className="text-xs text-muted-foreground">{row.hint}</div>
+                )}
+              </div>
+              <div className="shrink-0 text-sm font-medium tabular-nums">
+                {row.value}
+              </div>
+            </div>
+          ))}
+        </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function AdminPacksManager({ embedded = false }: { embedded?: boolean } = {}) {
   const { t, lang } = useT();
   const [includeInactive, setIncludeInactive] = useState(false);
   const { data: packsResponse, isLoading } = usePacks({
@@ -216,7 +345,13 @@ function AdminPacksManager() {
   const deactivatePack = useDeactivatePack();
 
   return (
-    <div className="flex flex-col gap-4 p-3 sm:gap-6 sm:p-4 md:p-6">
+    <div
+      className={
+        embedded
+          ? 'flex flex-col gap-4 sm:gap-6'
+          : 'flex flex-col gap-4 p-3 sm:gap-6 sm:p-4 md:p-6'
+      }
+    >
       <header className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div className="space-y-1">
           <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">

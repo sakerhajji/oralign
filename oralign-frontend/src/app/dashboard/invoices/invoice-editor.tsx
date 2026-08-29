@@ -627,12 +627,9 @@ export function InvoiceEditorDialog({
                 />
               </Field>
               <Field label={t('invoicesAdmin.fieldDiscount')}>
-                <Input
-                  type="number"
-                  min={0}
-                  step="0.001"
+                <DecimalInput
                   value={form.discountAmount}
-                  onChange={(e) => set('discountAmount', Number(e.target.value))}
+                  onValueChange={(v) => set('discountAmount', v)}
                 />
               </Field>
               <Field label={t('invoicesAdmin.fieldStampDuty')}>
@@ -710,6 +707,50 @@ export function InvoiceEditorDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * Free-typing decimal amount — a plain text input (no number spinner),
+ * accepting "12.5" or "12,5". Intermediate states like "12." keep the
+ * caret; the parent only ever receives a valid non-negative number.
+ */
+function DecimalInput({
+  value,
+  onValueChange,
+}: {
+  value: number;
+  onValueChange: (value: number) => void;
+}) {
+  const [text, setText] = React.useState(() => String(value));
+  const lastParsed = React.useRef(value);
+  React.useEffect(() => {
+    // Re-sync only on external changes (form hydration/reset) so typing
+    // "12." is not rewritten to "12" under the caret.
+    if (value !== lastParsed.current) {
+      lastParsed.current = value;
+      setText(String(value));
+    }
+  }, [value]);
+  return (
+    <Input
+      type="text"
+      inputMode="decimal"
+      value={text}
+      onChange={(e) => {
+        const typed = e.target.value;
+        const normalized = typed.replace(',', '.');
+        if (!/^\d*\.?\d{0,3}$/.test(normalized)) return;
+        setText(typed);
+        const parsed = normalized === '' || normalized === '.' ? 0 : Number(normalized);
+        lastParsed.current = parsed;
+        onValueChange(parsed);
+      }}
+      onBlur={() => {
+        // Tidy the display once editing is done ("12." → "12", "" → "0").
+        setText(String(lastParsed.current));
+      }}
+    />
   );
 }
 

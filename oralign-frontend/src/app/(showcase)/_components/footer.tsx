@@ -41,7 +41,7 @@ export function Footer() {
           {/* Brand */}
           <div className="max-w-[300px]">
             <Link
-              href={l("/decouvrir")}
+              href={l("/")}
               className="sc-serif inline-block text-[1.7rem] font-medium leading-none tracking-[0.22em] text-[var(--sc-white)] no-underline"
             >
               ORALIGN
@@ -81,6 +81,17 @@ export function Footer() {
             </span>
             <p style={{ fontSize: "0.68rem", color: "var(--sc-sun)" }}>
               {dict.footer.sub[lang]}
+            </p>
+            <span
+              className="hidden text-[rgba(242,245,239,0.2)] sm:inline"
+              aria-hidden="true"
+            >
+              ·
+            </span>
+            {/* The one brand formulation, identical to the Organization
+                JSON-LD — a human-visible name search engines can match. */}
+            <p style={{ fontSize: "0.68rem" }}>
+              {dict.brand.fullName[lang]}
             </p>
           </div>
 

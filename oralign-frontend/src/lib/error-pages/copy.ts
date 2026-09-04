@@ -39,7 +39,7 @@ export const LANG_SOURCES: Record<
 
 /** Homepage per language — the localized trees own their own URLs. */
 export const HOME_HREF: Record<ErrorLang, string> = {
-  fr: '/decouvrir',
+  fr: '/',
   en: '/en/discover',
   ar: '/ar/discover',
 };

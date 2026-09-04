@@ -24,11 +24,14 @@ export type MarketingPageKey =
   | "guide"
   | "community"
   | "practitioners"
+  | "pricing"
+  | "comparison"
+  | "teens"
   | "about"
   | "contact";
 
 export type PageSeo = {
-  /** Absolute path on the site, e.g. "/decouvrir" or "/en/discover". */
+  /** Absolute path on the site, e.g. "/" or "/en/clinical-cases". */
   path: string;
   /** Full <title>, brand included. */
   title: string;
@@ -54,6 +57,9 @@ export const PAGE_SLUGS: Record<MarketingPageKey, string> = {
   guide: "guide",
   community: "community",
   practitioners: "for-dentists",
+  pricing: "aligner-cost",
+  comparison: "oralign-vs-invisalign",
+  teens: "teen-aligners",
   about: "about-us",
   contact: "contact",
 };
@@ -77,6 +83,9 @@ export const PAGE_LANGS: Record<MarketingPageKey, readonly Lang[]> = {
   guide: ["fr", "en", "ar"],
   community: ["fr", "en", "ar"],
   practitioners: ["fr", "en", "ar"],
+  pricing: ["fr", "en", "ar"],
+  comparison: ["fr", "en", "ar"],
+  teens: ["fr", "en", "ar"],
   about: ["fr", "en"],
   contact: ["fr", "en"],
 };
@@ -88,8 +97,8 @@ export function hasLang(key: MarketingPageKey, lang: Lang): boolean {
 export const MARKETING_PAGES: Record<MarketingPageKey, Record<Lang, PageSeo>> = {
   home: {
     fr: {
-      path: "/decouvrir",
-      title: "Aligneurs dentaires invisibles en Tunisie | ORALIGN®",
+      path: "/",
+      title: "Aligneurs transparents en Tunisie | ORALIGN®",
       description:
         "Aligneurs transparents ORALIGN® : orthodontie invisible supervisée par un praticien certifié en Tunisie, pour adultes, ados et enfants. Trouvez un praticien.",
       keywords: [
@@ -106,7 +115,7 @@ export const MARKETING_PAGES: Record<MarketingPageKey, Record<Lang, PageSeo>> = 
       breadcrumb: "Découvrir",
     },
     en: {
-      path: "/en/discover",
+      path: "/en",
       title: "Clear Aligners in Tunisia — Invisible Braces | ORALIGN®",
       description:
         "ORALIGN® clear aligners: dentist-supervised invisible orthodontics made in Tunisia, for adults, teens and kids. Find a certified practitioner near you.",
@@ -123,7 +132,7 @@ export const MARKETING_PAGES: Record<MarketingPageKey, Record<Lang, PageSeo>> = 
       breadcrumb: "Discover",
     },
     ar: {
-      path: "/ar/discover",
+      path: "/ar",
       title: "تقويم الأسنان الشفاف في تونس | ORALIGN®",
       description:
         "مصففات أسنان شفافة من ORALIGN®: تقويم غير مرئي بإشراف طبيب أسنان معتمد في تونس. علاج تقويم الأسنان للكبار والمراهقين والأطفال — ابحث عن طبيب قريب منك.",
@@ -366,6 +375,134 @@ export const MARKETING_PAGES: Record<MarketingPageKey, Record<Lang, PageSeo>> = 
         "شريك طبيب أسنان",
       ],
       breadcrumb: "للأطباء",
+    },
+  },
+  pricing: {
+    fr: {
+      path: "/prix",
+      title: "Prix des aligneurs dentaires en Tunisie | ORALIGN®",
+      description:
+        "Ce qui détermine le prix d'un traitement par aligneurs transparents en Tunisie, ce que couvre le devis de votre praticien et les questions à poser avant de vous engager.",
+      keywords: [
+        "prix aligneurs Tunisie",
+        "prix aligneurs dentaires",
+        "tarif aligneur transparent",
+        "combien coûte un aligneur dentaire",
+        "coût orthodontie invisible Tunisie",
+        "devis aligneurs",
+        "ORALIGN prix",
+      ],
+      breadcrumb: "Prix",
+    },
+    en: {
+      path: "/en/aligner-cost",
+      title: "Clear Aligner Prices in Tunisia — What Drives the Cost | ORALIGN®",
+      description:
+        "What determines the price of clear aligner treatment in Tunisia, what a practitioner's quote covers, and the questions to ask before you commit.",
+      keywords: [
+        "clear aligner price Tunisia",
+        "aligner cost",
+        "how much do clear aligners cost",
+        "invisible braces price",
+        "orthodontic treatment cost Tunisia",
+        "ORALIGN price",
+      ],
+      breadcrumb: "Pricing",
+    },
+    ar: {
+      path: "/ar/aligner-cost",
+      title: "أسعار مصففات الأسنان الشفافة في تونس | ORALIGN®",
+      description:
+        "ما الذي يحدّد سعر العلاج بالمصففات الشفافة في تونس، وما الذي يشمله عرض السعر لدى طبيبك، والأسئلة التي ينبغي طرحها قبل البدء.",
+      keywords: [
+        "سعر المصففات الشفافة",
+        "أسعار تقويم الأسنان الشفاف",
+        "تكلفة تقويم الأسنان تونس",
+        "ORALIGN سعر",
+      ],
+      breadcrumb: "الأسعار",
+    },
+  },
+  comparison: {
+    fr: {
+      path: "/oralign-ou-invisalign",
+      title: "Oralign ou Invisalign : quelles différences ? | ORALIGN®",
+      description:
+        "Comparer deux systèmes d'aligneurs transparents : ce qui les rapproche, ce qui distingue ORALIGN® et comment choisir avec votre praticien plutôt que depuis un site web.",
+      keywords: [
+        "Oralign ou Invisalign",
+        "alternative Invisalign Tunisie",
+        "comparatif aligneurs",
+        "différence aligneurs transparents",
+        "quel aligneur choisir",
+      ],
+      breadcrumb: "Comparatif",
+    },
+    en: {
+      path: "/en/oralign-vs-invisalign",
+      title: "Oralign vs Invisalign — How to Compare | ORALIGN®",
+      description:
+        "Comparing two clear aligner systems: what they share, what makes ORALIGN® distinctive, and why the real comparison happens with your practitioner.",
+      keywords: [
+        "Oralign vs Invisalign",
+        "Invisalign alternative Tunisia",
+        "clear aligner comparison",
+        "which clear aligner to choose",
+      ],
+      breadcrumb: "Comparison",
+    },
+    ar: {
+      path: "/ar/oralign-vs-invisalign",
+      title: "ORALIGN أم Invisalign: ما الفرق؟ | ORALIGN®",
+      description:
+        "مقارنة بين نظامي مصففات شفافة: ما يجمعهما، وما يميّز ORALIGN®، ولماذا تتم المقارنة الحقيقية مع طبيبك.",
+      keywords: [
+        "ORALIGN أم Invisalign",
+        "بديل Invisalign",
+        "مقارنة المصففات الشفافة",
+      ],
+      breadcrumb: "مقارنة",
+    },
+  },
+  teens: {
+    fr: {
+      path: "/aligneurs-adolescents",
+      title: "Aligneurs transparents pour adolescents | ORALIGN®",
+      description:
+        "Les aligneurs transparents conviennent-ils à votre adolescent ? Ce que le praticien évalue, la discipline de port nécessaire et le rôle des parents au quotidien.",
+      keywords: [
+        "aligneurs adolescents",
+        "orthodontie adolescent Tunisie",
+        "appareil invisible ado",
+        "aligneur transparent adolescent",
+        "orthodontie invisible jeune",
+      ],
+      breadcrumb: "Adolescents",
+    },
+    en: {
+      path: "/en/teen-aligners",
+      title: "Clear Aligners for Teenagers | ORALIGN®",
+      description:
+        "Are clear aligners right for your teenager? What the practitioner assesses, the wear discipline it takes, and the parent's role day to day.",
+      keywords: [
+        "clear aligners for teens",
+        "teen orthodontics Tunisia",
+        "invisible braces teenager",
+        "aligners for teenagers",
+      ],
+      breadcrumb: "Teenagers",
+    },
+    ar: {
+      path: "/ar/teen-aligners",
+      title: "المصففات الشفافة للمراهقين | ORALIGN®",
+      description:
+        "هل تناسب المصففات الشفافة ابنك المراهق؟ ما الذي يقيّمه الطبيب، والانضباط المطلوب في الارتداء، ودور الأولياء.",
+      keywords: [
+        "مصففات شفافة للمراهقين",
+        "تقويم أسنان للمراهقين",
+        "تقويم شفاف للمراهق",
+      ],
+      breadcrumb: "المراهقون",
     },
   },
   about: {

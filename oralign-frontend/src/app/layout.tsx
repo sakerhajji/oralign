@@ -28,8 +28,20 @@ const APP_DESCRIPTION =
 const APP_URL =
   process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? "https://oralign.com.tn";
 
+/**
+ * Google Search Console ownership token (the `content` value of the
+ * "HTML tag" verification method). Set NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION
+ * in the deployment env and the meta tag ships on every page — no code
+ * change, and the property stays verified across redeploys. Unset in
+ * dev, so nothing is emitted locally.
+ */
+const GOOGLE_SITE_VERIFICATION = process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION;
+
 export const metadata: Metadata = {
   metadataBase: new URL(APP_URL),
+  ...(GOOGLE_SITE_VERIFICATION
+    ? { verification: { google: GOOGLE_SITE_VERIFICATION } }
+    : {}),
   title: {
     default: `${APP_NAME} — Clear aligner care`,
     template: `%s · ${APP_NAME}`,

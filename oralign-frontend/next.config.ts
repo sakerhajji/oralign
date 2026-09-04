@@ -32,6 +32,13 @@ const nextConfig: NextConfig = {
   // most relevant surviving destination (specific rules before the catch-all).
   async redirects() {
     return [
+      // The homepage moved from /decouvrir to the site root, and the
+      // localized homes from /<lang>/discover to /<lang>. One 308 each,
+      // so bookmarks and anything already crawled consolidate onto the
+      // canonical home instead of dead-ending.
+      { source: "/decouvrir", destination: "/", permanent: true },
+      { source: "/en/discover", destination: "/en", permanent: true },
+      { source: "/ar/discover", destination: "/ar", permanent: true },
       // Patient home now lives at "/" (the audience chooser is gone).
       { source: "/patient", destination: "/", permanent: true },
       // The whole /patient/* subtree was flattened to top-level routes

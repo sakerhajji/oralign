@@ -21,6 +21,9 @@ import {
   TemoignagesSection,
 } from "../../_components/patient/communaute-sections";
 import { PractitionerFinder } from "../../_components/practitioner-finder";
+import { PrixPage } from "../../_components/patient/prix-sections";
+import { ComparatifPage } from "../../_components/patient/comparatif-sections";
+import { AdosPage } from "../../_components/patient/ados-sections";
 import { PractitionerLanding } from "../../_components/practitioner-landing/practitioner-landing";
 import { GuidePage } from "../../guide/_components/guide-page";
 import { LegalDocView } from "../../_components/legal/legal-doc-view";
@@ -92,6 +95,12 @@ async function pageSections(page: MarketingPageKey) {
       );
     case "practitioners":
       return <PractitionerLanding />;
+    case "pricing":
+      return <PrixPage />;
+    case "comparison":
+      return <ComparatifPage />;
+    case "teens":
+      return <AdosPage />;
     case "about":
       return <LegalDocView docKey="about" company={await getLegalCompany()} />;
     case "contact":

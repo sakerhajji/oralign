@@ -27,7 +27,10 @@ export const dynamicParams = false;
  */
 export function generateStaticParams({ params }: { params: { lang: string } }) {
   return MARKETING_PAGE_KEYS.filter(
-    (key) => isLocalizedLang(params.lang) && hasLang(key, params.lang),
+    // "home" is served at /<lang> itself, not /<lang>/discover — the old
+    // slug 308s there (next.config.ts), so building it would be a dead
+    // duplicate of the localized homepage.
+    (key) => key !== "home" && isLocalizedLang(params.lang) && hasLang(key, params.lang),
   ).map((key) => ({ slug: PAGE_SLUGS[key] }));
 }
 

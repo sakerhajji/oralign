@@ -71,7 +71,7 @@ export function MobileNav() {
         <SheetHeader className="grid grid-cols-[44px_1fr_44px] items-center gap-3 border-b border-[var(--sc-grey)] px-5 py-4">
           <span aria-hidden="true" />
           <SheetTitle className="sr-only">ORALIGN menu</SheetTitle>
-          <Link href={l("/decouvrir")} aria-label="Oralign home" className="col-start-2 mx-auto flex items-center justify-center no-underline">
+          <Link href={l("/")} aria-label="Oralign home" className="col-start-2 mx-auto flex items-center justify-center no-underline">
             <Image
               src="/mainlogo.svg"
               alt="Oralign"

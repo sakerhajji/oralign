@@ -4,6 +4,7 @@ import "../showcase.css";
 import type { Lang } from "../_lib/i18n/dict";
 import { LangProvider } from "../_lib/i18n/lang-context";
 import { JsonLd, organizationLd, webSiteLd } from "../_lib/seo/jsonld";
+import { getLegalCompany } from "../_lib/legal-info";
 import { Header } from "./header";
 import { Footer } from "./footer";
 import { FloatingLang } from "./floating-lang";
@@ -44,7 +45,7 @@ const sans = DM_Sans({
  * content language even though the root <html> element is shared with
  * the (non-indexed) app surfaces.
  */
-export function ShowcaseChrome({
+export async function ShowcaseChrome({
   children,
   forcedLang,
 }: {
@@ -78,7 +79,7 @@ export function ShowcaseChrome({
         <main id="main">{children}</main>
         <Footer />
       </LangProvider>
-      <JsonLd data={organizationLd()} />
+      <JsonLd data={organizationLd(await getLegalCompany())} />
       <JsonLd data={webSiteLd()} />
     </div>
   );

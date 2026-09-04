@@ -25,6 +25,22 @@ export const dict = {
       en: "Designed in Germany · Manufactured in Tunisia",
       ar: "مصمَّم في ألمانيا · صُنع في تونس",
     } as T,
+    /**
+     * The full brand formulation, used wherever the site names itself to
+     * a reader. Kept identical to BRAND.full in _lib/seo/meta.ts (which
+     * feeds the Organization JSON-LD) so the human-visible name and the
+     * structured data tell search engines the same story.
+     */
+    fullName: {
+      fr: "ORALIGN® Tunisie — by Aura Aligners",
+      en: "ORALIGN® Tunisia — by Aura Aligners",
+      ar: "ORALIGN® تونس — by Aura Aligners",
+    } as T,
+    claim: {
+      fr: "Aligneurs transparents conçus en Allemagne et fabriqués en Tunisie",
+      en: "Clear aligners designed in Germany and manufactured in Tunisia",
+      ar: "مصففات شفافة مصمَمة في ألمانيا ومصنوعة في تونس",
+    } as T,
   },
   nav: {
     confidence: { fr: "Confiance", en: "Trust", ar: "الثقة" } as T,
@@ -49,6 +65,13 @@ export const dict = {
     clinicalCases: { fr: "Cas", en: "Cases", ar: "حالات" } as T,
     community: { fr: "Communauté", en: "Community", ar: "المجتمع" } as T,
     guide: { fr: "Guide", en: "Guide", ar: "دليل" } as T,
+    navPricing: { fr: "Prix", en: "Pricing", ar: "الأسعار" } as T,
+    navComparison: {
+      fr: "Oralign ou Invisalign",
+      en: "Oralign vs Invisalign",
+      ar: "ORALIGN أم Invisalign",
+    } as T,
+    navTeens: { fr: "Adolescents", en: "Teenagers", ar: "المراهقون" } as T,
     shop: { fr: "Shop", en: "Shop", ar: "المتجر" } as T,
     blogs: { fr: "Blog", en: "Blog", ar: "مدوّنة" } as T,
     navOralign: { fr: "Oralign", en: "Oralign", ar: "أورالاين" } as T,

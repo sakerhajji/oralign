@@ -27,11 +27,11 @@ export const PATIENT_NAV_ITEMS: readonly NavItem[] = [
   {
     id: "why-oralign",
     labelKey: "whyOralign",
-    href: "/decouvrir",
+    href: "/",
     children: [
-      { id: "oralign", labelKey: "navOralign", href: "/decouvrir#oralign" },
-      { id: "oralign-prime", labelKey: "oralignPrime", href: "/decouvrir#oralign-prime" },
-      { id: "parcours", labelKey: "howItWorks", href: "/decouvrir#parcours" },
+      { id: "oralign", labelKey: "navOralign", href: "/#oralign" },
+      { id: "oralign-prime", labelKey: "oralignPrime", href: "/#oralign-prime" },
+      { id: "parcours", labelKey: "howItWorks", href: "/#parcours" },
       // Points at the public practitioner finder, not an in-page anchor.
       { id: "find-practitioner", labelKey: "findPractitioner", href: "/trouver-un-praticien" },
     ],
@@ -54,7 +54,19 @@ export const PATIENT_NAV_ITEMS: readonly NavItem[] = [
       { id: "share-experience", labelKey: "shareExperience", href: "/communaute#partager" },
     ],
   },
-  { id: "guide", labelKey: "guide", href: "/guide" },
+  {
+    id: "guide",
+    labelKey: "guide",
+    href: "/guide",
+    children: [
+      // High-intent patient questions. Linking them from the nav is what
+      // makes them discoverable — an orphan page is one Google has to be
+      // told about through the sitemap alone.
+      { id: "pricing", labelKey: "navPricing", href: "/prix" },
+      { id: "comparison", labelKey: "navComparison", href: "/oralign-ou-invisalign" },
+      { id: "teens", labelKey: "navTeens", href: "/aligneurs-adolescents" },
+    ],
+  },
   { id: "blogs", labelKey: "blogs", href: "/blog" },
 ] as const;
 

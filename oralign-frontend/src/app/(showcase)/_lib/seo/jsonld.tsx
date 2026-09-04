@@ -1,6 +1,7 @@
 import { dict, type Lang } from "../i18n/dict";
 import { MARKETING_PAGES, pathFor, type MarketingPageKey } from "./routes";
-import { SITE_NAME, SITE_URL, absoluteUrl } from "./meta";
+import { BRAND, SITE_NAME, SITE_URL, SOCIAL_PROFILES, absoluteUrl } from "./meta";
+import type { LegalCompany } from "@/lib/legal/legal-content";
 
 /**
  * Server-rendered JSON-LD. The previous implementation used next/script
@@ -23,28 +24,69 @@ export function JsonLd({ data }: { data: object }) {
 
 const ORG_ID = `${SITE_URL}/#organization`;
 
-export function organizationLd() {
+/**
+ * The publisher entity. Identity fields (address, phone, email, legal
+ * name) come from the SAME admin-managed company record the legal pages
+ * render — passing `company` keeps the structured data and the mentions
+ * légales from ever disagreeing. It is optional so a caller without the
+ * fetch still emits a valid node; every field is omitted when unknown,
+ * because an empty string in JSON-LD is a validation error, not a blank.
+ */
+export function organizationLd(company?: LegalCompany | null) {
+  const street = company?.address?.trim();
+  const city = company?.city?.trim();
+  const phone = company?.phone?.trim();
+  const email = company?.email?.trim();
+  const legalName = company?.companyName?.trim() || BRAND.legalName;
+
   return {
     "@context": "https://schema.org",
     "@type": "MedicalOrganization",
     "@id": ORG_ID,
     name: SITE_NAME,
-    alternateName: "ORALIGN",
+    // Every spelling the brand is searched by, so the entity resolves
+    // whichever one a person types.
+    alternateName: ["ORALIGN", "ORALIGN®", BRAND.full, "Oralign Tunisie"],
+    legalName,
+    slogan: BRAND.claim.fr,
     url: SITE_URL,
     // Raster logo — Google's guidelines ask for a crawlable raster image.
     logo: `${SITE_URL}/icon-512.png`,
     image: `${SITE_URL}/icon-512.png`,
     description:
       "Aligneurs orthodontiques invisibles ORALIGN® — conçus en Allemagne, fabriqués en Tunisie. Clear aligners designed in Germany, manufactured in Tunisia.",
+    brand: {
+      "@type": "Brand",
+      name: "ORALIGN®",
+      logo: `${SITE_URL}/icon-512.png`,
+    },
+    // The brand is operated by Aura Aligners — stating the link is what
+    // separates this entity from the unrelated oralign.co.
+    parentOrganization: { "@type": "Organization", name: BRAND.legalName },
     address: {
       "@type": "PostalAddress",
-      streetAddress: "Les Jardins de Carthage",
-      addressLocality: "Tunis",
+      ...(street ? { streetAddress: street } : {}),
+      addressLocality: city || "Tunis",
       addressCountry: "TN",
     },
+    ...(phone ? { telephone: phone } : {}),
+    ...(email ? { email } : {}),
+    ...(phone || email
+      ? {
+          contactPoint: {
+            "@type": "ContactPoint",
+            contactType: "customer support",
+            ...(phone ? { telephone: phone } : {}),
+            ...(email ? { email } : {}),
+            areaServed: "TN",
+            availableLanguage: ["French", "Arabic", "English"],
+          },
+        }
+      : {}),
     areaServed: { "@type": "Country", name: "Tunisia" },
     knowsLanguage: ["fr", "en", "ar"],
-    sameAs: [],
+    // Empty until the official accounts exist — see SOCIAL_PROFILES.
+    ...(SOCIAL_PROFILES.length > 0 ? { sameAs: [...SOCIAL_PROFILES] } : {}),
   };
 }
 

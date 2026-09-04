@@ -12,7 +12,7 @@ export default function manifest(): MetadataRoute.Manifest {
     short_name: "ORALIGN",
     description:
       "Aligneurs dentaires invisibles conçus en Allemagne et fabriqués en Tunisie, supervisés par des praticiens certifiés.",
-    start_url: "/decouvrir",
+    start_url: "/",
     display: "browser",
     background_color: "#0a0a0a",
     theme_color: "#feca16",

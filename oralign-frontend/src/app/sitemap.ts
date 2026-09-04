@@ -51,6 +51,10 @@ const PAGE_RANK: Record<
   home: { priority: 1.0, changeFrequency: 'weekly' },
   practitioners: { priority: 0.9, changeFrequency: 'monthly' },
   cases: { priority: 0.8, changeFrequency: 'monthly' },
+  // High-intent patient queries — the pages we actively want ranked.
+  pricing: { priority: 0.9, changeFrequency: 'monthly' },
+  comparison: { priority: 0.8, changeFrequency: 'monthly' },
+  teens: { priority: 0.8, changeFrequency: 'monthly' },
   finder: { priority: 0.8, changeFrequency: 'monthly' },
   guide: { priority: 0.7, changeFrequency: 'monthly' },
   community: { priority: 0.6, changeFrequency: 'weekly' },

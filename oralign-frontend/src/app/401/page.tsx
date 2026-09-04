@@ -23,7 +23,7 @@ export default function UnauthorizedPage() {
       langSource="app"
       extraAction={{
         labels: { fr: 'Retour au site', en: 'Back to the site', ar: 'العودة إلى الموقع' },
-        href: '/decouvrir',
+        href: '/',
       }}
     />
   );

@@ -86,6 +86,27 @@ export class OrderAccessPolicy {
   }
 
   /**
+   * The DELIVERY rule (write side of aligner delivery tracking): admin /
+   * super_admin, or the dentist who owns the order — it is the clinic that
+   * hands the aligners to the patient. Designers can read the history but
+   * never record a delivery. Pure, like assertCanRead, so callers holding
+   * the row do not re-query; `canRecordDelivery` lets a read endpoint tell
+   * the UI whether to offer the action without duplicating this rule.
+   */
+  canRecordDelivery(order: { doctorId: string }, caller: Caller): boolean {
+    if (isAdmin(caller)) return true;
+    return caller.role === UserRole.dentist && order.doctorId === caller.userId;
+  }
+
+  assertCanRecordDelivery(order: { doctorId: string }, caller: Caller): void {
+    if (!this.canRecordDelivery(order, caller)) {
+      throw new ForbiddenException(
+        'Only an admin or the dentist who owns this order can record aligner deliveries.',
+      );
+    }
+  }
+
+  /**
    * Load the minimal order projection and enforce read access in one call.
    * 404 when the order does not exist or is soft-deleted; 403 when it
    * exists but the caller may not see it.

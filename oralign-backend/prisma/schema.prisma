@@ -296,6 +296,7 @@ model User {
   createdTreatmentPlans TreatmentPlan[]  @relation("TreatmentPlanCreator")
   createdToothInstructions OrderToothInstruction[] @relation("ToothInstructionCreator")
   createdTreatmentPlanIprs TreatmentPlanIpr[] @relation("TreatmentPlanIprCreator")
+  recordedAlignerDeliveries AlignerDelivery[] @relation("AlignerDeliveryCreatedBy")
   sentTreatmentMessages TreatmentMessage[]
   uploadedTreatmentAttachments TreatmentMessageAttachment[]
   loyaltyQuarters      LoyaltyQuarterResult[]
@@ -507,6 +508,15 @@ model DentalOrder {
   // Approved treatment plan reference — used by the order's lifecycle.
   approvedTreatmentPlanId       String?
 
+  // ── Aligner delivery tracking ───────────────────────────────────
+  // Size of the aligner series handed to the patient: ONE numbering,
+  // 1..totalAligners. Entered with the first delivery (null until
+  // then) and correctable, never below the highest aligner already
+  // delivered. Deliberately NOT TreatmentPlan.totalUpper/LowerAligners
+  // (per-arch, per plan version, never filled by any UI) nor the pack's
+  // maxStepsPerArch (a purchased allowance, not a clinical count).
+  totalAligners                 Int?
+
   // DELETION POLICY: Restrict on both parents. Orders own numbered devis,
   // payments (invoice numbers) and treatment plans — a doctor or patient
   // hard-delete must be blocked while orders exist, never cascade into
@@ -515,6 +525,7 @@ model DentalOrder {
   patient                       Patient                   @relation(fields: [patientId], references: [id], onDelete: Restrict)
   assignedDesigner              User?                     @relation("OrderDesigner", fields: [assignedDesignerId], references: [id], onDelete: SetNull)
   toothInstructions             OrderToothInstruction[]
+  alignerDeliveries             AlignerDelivery[]
   files                         OrderFile[]
   treatmentPlans                TreatmentPlan[]
   // One active quotation per order. Cancelled quotes stay in history but
@@ -627,6 +638,53 @@ enum UploadSessionStatus {
   assembling
   completed
   failed
+}
+
+// ─────────────────────────────────────────
+// ALIGNER DELIVERIES
+// ─────────────────────────────────────────
+// Append-only log of the aligners physically handed to the patient.
+// One row per delivery batch — "aligners 1 → 3 on 07/09, 4 → 7 on
+// 20/09" is two rows; the order's delivered set is derived from ALL
+// rows, never stored. Rows are never updated or deleted by the app
+// (no updatedAt on purpose): a history that can be rewritten is not a
+// history.
+//
+// Distinct from QuoteStepBatch, which is the PAYMENT schedule (one
+// range per installment, unlocked by payment, rewritten on re-plan).
+// Physical delivery is independent of billing: a quote-less order can
+// still record deliveries, and a delivery never changes order status.
+//
+// Invariants (enforced in AlignerDeliveryService under a FOR UPDATE
+// lock on the parent order): 1 <= fromAligner <= toAligner <=
+// DentalOrder.totalAligners, and ranges of one order never overlap.
+// @@unique([orderId, fromAligner]) is the DB-level backstop for the
+// one duplicate a race could still produce.
+//
+// DELETION POLICY: the order relation is Restrict — deliveries are
+// clinical history, so an order that has any is never purgeable (the
+// purge guard reports them as a 409 dependency). The actor is an
+// audit reference: SetNull + createdByName snapshot.
+model AlignerDelivery {
+  id            String      @id @default(uuid())
+  orderId       String
+  order         DentalOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  fromAligner   Int
+  toAligner     Int
+  // toAligner - fromAligner + 1, computed server-side at write time and
+  // stored so totals are a plain SUM over persisted rows.
+  quantity      Int
+  // Calendar date the aligners were handed over (no time component).
+  deliveredAt   DateTime    @db.Date
+
+  createdById   String?
+  createdBy     User?       @relation("AlignerDeliveryCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdByName String?     // actor snapshot (survives account deletion)
+  createdAt     DateTime    @default(now())
+
+  @@unique([orderId, fromAligner])
+  @@index([orderId, deliveredAt])
 }
 
 model UploadSession {

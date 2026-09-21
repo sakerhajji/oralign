@@ -41,12 +41,13 @@ import { OrderStatusBadge } from '@/components/orders/order-status-badge';
 import { OrderStatusChangeDialog } from '@/components/orders/order-status-change-dialog';
 import { TreatmentPlanReview } from '@/components/orders/treatment-plan-review';
 import { QuoteReview } from '@/components/orders/quote-review';
+import { AlignerDeliveriesPanel } from '@/components/orders/aligner-deliveries-panel';
 import {
   useCreateTreatmentPlan,
   useTreatmentPlansByOrder,
 } from '@/lib/hooks/use-treatment-plans';
 import { useTreatmentChatSocket } from '@/lib/hooks/use-treatment-chat-socket';
-import { FileText, Plus, Sparkles } from 'lucide-react';
+import { FileText, PackageCheck, Plus, Sparkles } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   dashboardKeys,
@@ -748,6 +749,13 @@ export default function OrderDetailPage() {
             </div>
           )}
         </div>
+      </Section>
+
+      {/* Aligners physically handed to the patient: summary (click to
+          open the delivery log) and, for an admin or the owning dentist,
+          recording a new batch. */}
+      <Section icon={PackageCheck} title={t('alignerDeliveries.sectionTitle')}>
+        <AlignerDeliveriesPanel orderId={order.id} />
       </Section>
 
       {/* Bottom meta block — small, low-priority info that used to be

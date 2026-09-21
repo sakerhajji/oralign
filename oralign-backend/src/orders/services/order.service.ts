@@ -693,7 +693,11 @@ export class OrderService {
         treatmentFeeProofPath: true,
         files: { select: { relativePath: true, variants: true } },
         _count: {
-          select: { treatmentPlans: true, payments: true },
+          select: {
+            treatmentPlans: true,
+            payments: true,
+            alignerDeliveries: true,
+          },
         },
         quotation: { select: { id: true } },
       },
@@ -716,6 +720,7 @@ export class OrderService {
         { label: 'quotation', count: order.quotation ? 1 : 0 },
         { label: 'payments', count: order._count.payments },
         { label: 'treatment plans', count: order._count.treatmentPlans },
+        { label: 'aligner deliveries', count: order._count.alignerDeliveries },
       ];
       if (deps.some((d) => d.count > 0)) {
         if (opts.throwOnBlocked) {

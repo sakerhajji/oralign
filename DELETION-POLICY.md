@@ -26,7 +26,7 @@ history preserved                                dependency check (409 DELETION_
 
 | Class | Entities | Delete behaviour |
 |---|---|---|
-| **Business roots** (clinical / financial) | User, Patient, DentalOrder | Soft delete only in day-to-day use. Permanent delete = trash-first + blocked (409) while anything below depends on them: User → patients / orders; Patient → orders (any, incl. archived); DentalOrder → quotation / payments / treatment plans. |
+| **Business roots** (clinical / financial) | User, Patient, DentalOrder | Soft delete only in day-to-day use. Permanent delete = trash-first + blocked (409) while anything below depends on them: User → patients / orders; Patient → orders (any, incl. archived); DentalOrder → quotation / payments / treatment plans / aligner deliveries. |
 | **Ledger / issued documents** | Quotation, QuoteInstallment, QuoteStepBatch, Payment (invoice/receipt numbers, proofs, snapshots) | Never deleted by a parent's deletion (`Restrict`). The only hard delete is admin **cancel** of a draft/sent quotation, forced by `Quotation.orderId @unique`, and refused (409) once *any* payment record exists. Plan wipes (attach-pack / configure-plan / draft total change) refuse while a success / pending / awaiting_confirmation payment exists; failed attempts keep their row (`Payment.installment` → SetNull). |
 | **Clinical children** | TreatmentPlan, TreatmentPlanIpr, TreatmentMessage, TreatmentMessageAttachment, OrderToothInstruction, OrderFile | Owned by their root and only removed with it. Because the root cannot be purged while plans/quotes/payments exist, they only cascade for orders that never entered the clinical/financial pipeline. OrderFile soft delete keeps the blob (restorable); the 30-day retention sweep purges trashed files. |
 | **Actor references** (audit) | `createdBy`, `sender`, `uploadedBy`, `approvedBy`, `rejectedBy`, `confirmedBy`, `initiatedBy`, `deliveredBy`, `assignedDesigner`, `assignedAdmin`, `reviewedBy` | `onDelete: SetNull`; the record survives the account. Name snapshots (`createdByName`, `senderName`/`senderRole`) are written at create time so history still reads after an account is purged. |
@@ -41,11 +41,13 @@ history preserved                                dependency check (409 DELETION_
 | DentalOrder.doctor → User | Cascade | **Restrict** | orders own devis, payments, plans |
 | DentalOrder.patient → Patient | Cascade | **Restrict** | idem |
 | TreatmentPlan.order → DentalOrder | Cascade | **Restrict** | the plan is the clinical record |
+| AlignerDelivery.order → DentalOrder | — (new) | **Restrict** | append-only log of aligners handed to the patient; an order with deliveries is never purged (409 lists them) |
 | Quotation.order → DentalOrder | Cascade | **Restrict** | numbered devis must survive |
 | Payment.order → DentalOrder | Cascade | **Restrict** | ledger |
 | Payment.quotation → Quotation | Cascade | **Restrict** | ledger |
 | Payment.installment → QuoteInstallment | Cascade | **SetNull** (optional) | re-planning never destroys a payment record |
 | TreatmentPlan.createdBy → User | Cascade | **SetNull** (optional) + `createdByName` | actor ref, not ownership |
+| AlignerDelivery.createdBy → User | — (new) | **SetNull** (optional) + `createdByName` | the delivery log outlives whoever recorded it |
 | TreatmentMessage.sender → User | Cascade | **SetNull** (optional) + `senderName`, `senderRole` | staff purge must not punch holes in a doctor's clinical thread |
 | TreatmentMessageAttachment.uploadedBy → User | Cascade | **SetNull** (optional) | deliverables outlive the uploader |
 | Quotation.createdBy → User | Cascade | **SetNull** (optional) + `createdByName` | staff purge must not wipe devis + ledger |

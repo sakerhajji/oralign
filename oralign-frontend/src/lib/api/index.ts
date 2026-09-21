@@ -33,3 +33,4 @@ export {
   ensureValidAccessToken,
 } from './client';
 export * from './loyalty.service';
+export * from './aligner-deliveries.service';

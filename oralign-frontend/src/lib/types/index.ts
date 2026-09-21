@@ -26,3 +26,4 @@ export * from './community';
 export * from './reports';
 export * from './blog';
 export * from './loyalty';
+export * from './aligner-delivery';

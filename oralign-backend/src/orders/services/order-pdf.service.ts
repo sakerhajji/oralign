@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { OrderFileCategory, ToothInstructionType, TreatmentPlanStatus, type TreatmentPlan, type TreatmentPlanIpr } from '@prisma/client';
 import { renderStlPreviewPng } from './stl-preview';
+import { splitUploadSlot } from './upload-slot';
 import * as fs from 'fs';
 import * as path from 'path';
 import puppeteer, { Browser } from 'puppeteer-core';
@@ -267,10 +268,10 @@ const SHEET_MEDIA_SLOTS: ReadonlyArray<{
 
 function sheetMediaSlot(originalName?: string | null) {
   if (!originalName) return undefined;
-  const separator = originalName.indexOf('__');
-  if (separator < 1) return undefined;
-  const key = originalName.slice(0, separator);
-  return SHEET_MEDIA_SLOTS.find((slot) => slot.key === key);
+  const { slotKey } = splitUploadSlot(originalName);
+  return slotKey
+    ? SHEET_MEDIA_SLOTS.find((slot) => slot.key === slotKey)
+    : undefined;
 }
 
 /** A photo row as re-read from the DB for embedding (variants included). */
@@ -996,7 +997,7 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       counts.set(countKey, n);
       const base = slot?.label[lang] ?? PHOTO_LABELS[lang][f.category] ?? f.category;
       const label = n > 1 ? `${base} (${n})` : base;
-      const cleanName = (f.originalName ?? f.relativePath).replace(/^[a-z0-9-]+__/i, '');
+      const cleanName = splitUploadSlot(f.originalName ?? f.relativePath).rest;
       if (!src) {
         (group === 'radiography' ? radiographySkipped : patientSkipped).push(
           `${label} - ${cleanName}`,

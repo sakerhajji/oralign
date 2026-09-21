@@ -106,6 +106,11 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     return this.prisma.quoteStepBatch;
   }
 
+  // Physical aligner hand-overs — distinct from the payment schedule above.
+  get alignerDelivery() {
+    return this.prisma.alignerDelivery;
+  }
+
   get payment() {
     return this.prisma.payment;
   }

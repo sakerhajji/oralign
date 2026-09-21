@@ -461,4 +461,166 @@ export const treatmentDomainDict = {
       fr: 'Échec de l’ouverture de la pièce jointe',
     } as T,
   },
+  // ════════════════════════════════════════════════════════════════════
+  // aligner-deliveries-panel.tsx — aligners handed to the patient
+  // ════════════════════════════════════════════════════════════════════
+  alignerDeliveries: {
+    sectionTitle: { en: 'Aligner deliveries', fr: 'Livraison des aligneurs' } as T,
+    deliveredLabel: { en: 'Delivered aligners', fr: 'Aligneurs livrés' } as T,
+    progressLabel: { en: 'Progress', fr: 'Avancement' } as T,
+    nextLabel: { en: 'Next aligner', fr: 'Prochain aligneur' } as T,
+    progress: {
+      en: '{delivered} / {total} aligners delivered',
+      fr: '{delivered} / {total} aligneurs livrés',
+    } as T,
+    progressNoTotal: {
+      en: '{delivered} aligners delivered',
+      fr: '{delivered} aligneurs livrés',
+    } as T,
+    remaining: { en: 'Remaining: {count}', fr: 'Restants : {count}' } as T,
+    complete: { en: 'Series complete', fr: 'Série complète' } as T,
+    none: { en: 'None yet', fr: 'Aucun pour l’instant' } as T,
+    totalUnknown: {
+      en: 'The total number of aligners is entered with the first delivery.',
+      fr: 'Le nombre total d’aligneurs est saisi lors de la première livraison.',
+    } as T,
+    notDeliverable: {
+      en: 'Deliveries cannot be recorded for an order in this status.',
+      fr: 'Aucune livraison ne peut être enregistrée pour une commande dans ce statut.',
+    } as T,
+    viewHistory: { en: 'History ({count})', fr: 'Historique ({count})' } as T,
+    openHistory: {
+      en: 'Show the delivery history',
+      fr: 'Afficher l’historique des livraisons',
+    } as T,
+    recordAction: { en: 'Record a delivery', fr: 'Enregistrer une livraison' } as T,
+    editTotal: { en: 'Edit total', fr: 'Modifier le total' } as T,
+    loadError: {
+      en: 'Could not load the aligner deliveries.',
+      fr: 'Impossible de charger les livraisons d’aligneurs.',
+    } as T,
+    retry: { en: 'Retry', fr: 'Réessayer' } as T,
+    history: {
+      title: { en: 'Delivery history', fr: 'Historique des livraisons' } as T,
+      description: {
+        en: 'Every batch of aligners handed to the patient, oldest first.',
+        fr: 'Chaque lot d’aligneurs remis au patient, du plus ancien au plus récent.',
+      } as T,
+      empty: { en: 'No delivery recorded yet.', fr: 'Aucune livraison enregistrée.' } as T,
+      date: { en: 'Delivery date', fr: 'Date de livraison' } as T,
+      from: { en: 'From', fr: 'Du n°' } as T,
+      to: { en: 'To', fr: 'Au n°' } as T,
+      quantity: { en: 'Quantity', fr: 'Quantité' } as T,
+      recordedBy: { en: 'Recorded by', fr: 'Enregistré par' } as T,
+      total: { en: 'Total delivered', fr: 'Total livré' } as T,
+      close: { en: 'Close', fr: 'Fermer' } as T,
+    },
+    form: {
+      title: { en: 'Record a delivery', fr: 'Enregistrer une livraison' } as T,
+      description: {
+        en: 'Enter the aligners handed to the patient. An aligner already delivered cannot be delivered again.',
+        fr: 'Indiquez les aligneurs remis au patient. Un aligneur déjà livré ne peut pas l’être une seconde fois.',
+      } as T,
+      date: { en: 'Delivery date', fr: 'Date de livraison' } as T,
+      from: { en: 'From aligner', fr: 'Du n°' } as T,
+      to: { en: 'To aligner', fr: 'Au n°' } as T,
+      total: { en: 'Total aligners in the series', fr: 'Nombre total d’aligneurs de la série' } as T,
+      totalHint: {
+        en: 'Asked once, on the first delivery.',
+        fr: 'Demandé une seule fois, à la première livraison.',
+      } as T,
+      quantity: { en: 'Quantity: {count}', fr: 'Quantité : {count}' } as T,
+      submit: { en: 'Record delivery', fr: 'Enregistrer' } as T,
+      cancel: { en: 'Cancel', fr: 'Annuler' } as T,
+    },
+    validation: {
+      required: { en: 'Required.', fr: 'Obligatoire.' } as T,
+      order: {
+        en: '“From” cannot be greater than “To”.',
+        fr: 'Le n° de départ ne peut pas dépasser le n° d’arrivée.',
+      } as T,
+      total: {
+        en: 'Enter the total number of aligners (1 to {max}).',
+        fr: 'Indiquez le nombre total d’aligneurs (1 à {max}).',
+      } as T,
+      beyondTotal: {
+        en: 'The series has only {total} aligners.',
+        fr: 'La série ne compte que {total} aligneurs.',
+      } as T,
+      overlap: {
+        en: 'Aligners {from} → {to} were already delivered on {date}.',
+        fr: 'Les aligneurs {from} → {to} ont déjà été livrés le {date}.',
+      } as T,
+      future: {
+        en: 'The delivery date cannot be in the future.',
+        fr: 'La date de livraison ne peut pas être dans le futur.',
+      } as T,
+      totalBelow: {
+        en: 'Cannot be below {min}: aligner {min} has already been delivered.',
+        fr: 'Impossible sous {min} : l’aligneur {min} a déjà été livré.',
+      } as T,
+    },
+    totalForm: {
+      title: { en: 'Edit the series size', fr: 'Modifier le nombre total d’aligneurs' } as T,
+      description: {
+        en: 'Correct the total if it was entered wrongly. It can never be lower than the highest aligner already delivered.',
+        fr: 'Corrigez le total s’il a été mal saisi. Il ne peut jamais être inférieur au dernier aligneur livré.',
+      } as T,
+      label: { en: 'Total aligners', fr: 'Nombre total d’aligneurs' } as T,
+      submit: { en: 'Save', fr: 'Enregistrer' } as T,
+    },
+    toasts: {
+      recorded: {
+        en: 'Aligners {from} → {to} recorded as delivered.',
+        fr: 'Aligneurs {from} → {to} enregistrés comme livrés.',
+      } as T,
+      totalUpdated: {
+        en: 'Series size set to {total} aligners.',
+        fr: 'Nombre total d’aligneurs fixé à {total}.',
+      } as T,
+    },
+    // Keyed by the backend errorCode (AlignerDeliveryErrorCode).
+    errors: {
+      ALIGNER_RANGE_INVALID: {
+        en: 'Invalid range: “from” must be at least 1 and not greater than “to”.',
+        fr: 'Plage invalide : le n° de départ doit être au moins 1 et ne pas dépasser le n° d’arrivée.',
+      } as T,
+      ALIGNER_RANGE_OUT_OF_BOUNDS: {
+        en: 'This range goes beyond the aligners of the series.',
+        fr: 'Cette plage dépasse le nombre d’aligneurs de la série.',
+      } as T,
+      ALIGNER_TOTAL_REQUIRED: {
+        en: 'Enter the total number of aligners for this first delivery.',
+        fr: 'Indiquez le nombre total d’aligneurs pour cette première livraison.',
+      } as T,
+      ALIGNER_TOTAL_ALREADY_SET: {
+        en: 'The series size is already set — use “Edit total” to correct it.',
+        fr: 'Le nombre total est déjà défini — utilisez « Modifier le total » pour le corriger.',
+      } as T,
+      ALIGNER_TOTAL_BELOW_DELIVERED: {
+        en: 'The total cannot be lower than an aligner already delivered.',
+        fr: 'Le total ne peut pas être inférieur à un aligneur déjà livré.',
+      } as T,
+      ALIGNER_DELIVERY_DUPLICATE: {
+        en: 'These aligners have already been delivered.',
+        fr: 'Ces aligneurs ont déjà été livrés.',
+      } as T,
+      ALIGNER_DELIVERY_OVERLAP: {
+        en: 'Some of these aligners have already been delivered.',
+        fr: 'Certains de ces aligneurs ont déjà été livrés.',
+      } as T,
+      ALIGNER_DELIVERY_DATE_INVALID: {
+        en: 'Invalid delivery date.',
+        fr: 'Date de livraison invalide.',
+      } as T,
+      ALIGNER_DELIVERY_DATE_IN_FUTURE: {
+        en: 'A delivery cannot be dated in the future.',
+        fr: 'Une livraison ne peut pas être datée dans le futur.',
+      } as T,
+      ORDER_NOT_DELIVERABLE: {
+        en: 'Deliveries cannot be recorded for this order in its current status.',
+        fr: 'Aucune livraison ne peut être enregistrée pour cette commande dans son statut actuel.',
+      } as T,
+    },
+  },
 };

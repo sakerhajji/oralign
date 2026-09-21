@@ -16,6 +16,7 @@ import { OrderResponseDto } from '../dto/order.dto';
 import { OrderPdfService } from './order-pdf.service';
 import { OrderService } from './order.service';
 import { mapOrderToDto } from './order.mapper';
+import { labZipFileName } from './upload-slot';
 import { resolveUploadPath } from './order-storage';
 
 // Callable `archiver('zip', opts)` factory, typed via the named exports
@@ -300,10 +301,9 @@ export class OrderExportService {
       // Localised folder label; unknown categories fall back to the raw
       // enum value so a future category never breaks the export.
       const folder = LAB_FOLDER_LABELS[language][file.category] ?? file.category;
-      const baseName =
-        file.originalName?.trim() ||
-        file.generatedName?.trim() ||
-        path.basename(file.relativePath);
+      // Side-free file name: the folder already states the side (see
+      // labZipFileName for why the internal slot key must not repeat it).
+      const baseName = labZipFileName(file);
       const entryName = uniqueName(folder, baseName);
 
       // Typed as ZipEntryData: `store` is honoured by the zip backend for

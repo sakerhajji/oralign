@@ -153,6 +153,10 @@ NEXT_PUBLIC_APP_URL=http://localhost:3001
 FRONTEND_URL=http://localhost:3001
 ```
 
+For hosted card payments, also configure the six `CLICTOPAY_*` values shown in
+[`oralign-backend/CLICTOPAY.md`](oralign-backend/CLICTOPAY.md). Keep merchant
+credentials only in the untracked `.env`; the example files contain no secrets.
+
 ⚠️ **IMPORTANT**: In production, change all secrets to strong random values!
 
 ## 🔍 Troubleshooting

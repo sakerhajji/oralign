@@ -5,7 +5,7 @@
  * admin/doctor surface to handle:
  *   • Admin: attach pack, build the installment plan (2/3/N tranches
  *     with explicit step ranges), record cash, deliver unlocked batches.
- *   • Doctor: pay by card (mock), declare a bank transfer with proof
+ *   • Doctor: pay by card through ClicToPay, declare a bank transfer with proof
  *     upload, view installments + batch progress.
  *
  * The component is intentionally self-contained — it reads the quote
@@ -1707,7 +1707,9 @@ function PaymentMethodDialog({
   // adds `allowedPaymentMethods` on the quote, swap this constant for
   // `quote.allowedPaymentMethods ?? QUOTE_PAYMENT_METHODS`.
   const [method, setMethod] = useState<PaymentMethod>(PaymentMethod.CARD);
-  const [scope, setScope] = useState<PayScope>(defaultScope);
+  const [scope, setScope] = useState<PayScope>(
+    defaultScope === 'all' ? 'single' : defaultScope,
+  );
 
   const payCard = usePayByCard();
   const declareBT = useDeclareBankTransfer();
@@ -1766,7 +1768,7 @@ function PaymentMethodDialog({
     setBankReference('');
     setProofFile(null);
     setMethod(PaymentMethod.CARD);
-    setScope(defaultScope);
+    setScope(defaultScope === 'all' ? 'single' : defaultScope);
     onClose();
   };
 
@@ -1780,37 +1782,48 @@ function PaymentMethodDialog({
       return;
     }
 
-    // Sequential loop — per-installment idempotency keys so a retry on
+    if (activeMethod === PaymentMethod.CARD) {
+      setProgress({ done: 0, total: 1 });
+      try {
+        const idempotencyKey =
+          typeof crypto !== 'undefined' && 'randomUUID' in crypto
+            ? crypto.randomUUID()
+            : `${quote.id}-${installment.id}`;
+        const session = await payCard.mutateAsync({
+          quotationId: quote.id,
+          installmentId: installment.id,
+          idempotencyKey,
+          orderId: quote.orderId,
+          language: lang === 'en' ? 'en' : 'fr',
+        });
+        setProgress({ done: 1, total: 1 });
+        const verificationUrl = `/payment/return?paymentId=${encodeURIComponent(
+          session.paymentId,
+        )}`;
+        window.location.assign(session.paymentUrl ?? verificationUrl);
+      } catch {
+        setProgress(null);
+      }
+      return;
+    }
+
+    // Sequential loop — per-installment declarations so a retry on
     // the same row never double-charges, and we surface partial
     // progress to the doctor in case one tranche fails mid-way.
     setProgress({ done: 0, total: targets.length });
     try {
       for (let i = 0; i < targets.length; i++) {
         const t = targets[i]!;
-        if (activeMethod === PaymentMethod.CARD) {
-          const idempotencyKey =
-            typeof crypto !== 'undefined' && 'randomUUID' in crypto
-              ? crypto.randomUUID()
-              : `${quote.id}-${t.id}-${i}`;
-          await payCard.mutateAsync({
-            quotationId: quote.id,
-            installmentId: t.id,
-            idempotencyKey,
-            orderId: quote.orderId,
-            mockOutcome: 'success',
-          });
-        } else {
-          // BANK_TRANSFER — one declaration per installment, same
-          // reference + proof so the admin can match them to the
-          // doctor's single bank wire.
-          await declareBT.mutateAsync({
-            quotationId: quote.id,
-            installmentId: t.id,
-            orderId: quote.orderId,
-            bankReference: bankReference.trim() || undefined,
-            proofFile,
-          });
-        }
+        // BANK_TRANSFER — one declaration per installment, same
+        // reference + proof so the admin can match them to the
+        // doctor's single bank wire.
+        await declareBT.mutateAsync({
+          quotationId: quote.id,
+          installmentId: t.id,
+          orderId: quote.orderId,
+          bankReference: bankReference.trim() || undefined,
+          proofFile,
+        });
         setProgress({ done: i + 1, total: targets.length });
       }
       close();
@@ -2009,7 +2022,9 @@ function PaymentMethodDialog({
                       type="button"
                       aria-pressed={scope === 'all'}
                       onClick={() => setScope('all')}
-                      disabled={isPending}
+                      disabled={
+                        isPending || activeMethod === PaymentMethod.CARD
+                      }
                       className={cn(
                         'min-w-0 rounded-md px-3 py-2.5 text-left text-xs transition',
                         scope === 'all'
@@ -2060,7 +2075,10 @@ function PaymentMethodDialog({
                           key={m}
                           type="button"
                           aria-pressed={isSelected}
-                          onClick={() => setMethod(m)}
+                          onClick={() => {
+                            setMethod(m);
+                            if (m === PaymentMethod.CARD) setScope('single');
+                          }}
                           disabled={isPending}
                           className={cn(
                             'flex min-h-16 items-center gap-3 rounded-lg border bg-card p-3 text-left transition',

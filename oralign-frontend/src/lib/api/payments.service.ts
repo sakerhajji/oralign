@@ -1,9 +1,11 @@
 import apiClient from './client';
 import type {
   ConfirmPaymentDto,
+  HostedPaymentSession,
   PaginatedResponse,
   Payment,
   PaymentFilterDto,
+  PaymentPurpose,
   RecordCashPaymentDto,
   RejectPaymentDto,
 } from '@/lib/types';
@@ -15,6 +17,37 @@ import type {
  * lock to defeat tampering.
  */
 export const paymentsService = {
+  createClicToPaySession: async (args: {
+    orderId: string;
+    purpose: PaymentPurpose;
+    installmentId?: string;
+    idempotencyKey: string;
+    language?: 'fr' | 'en' | 'ar';
+    pageView?: 'DESKTOP' | 'MOBILE';
+  }): Promise<HostedPaymentSession> => {
+    const res = await apiClient.post<HostedPaymentSession>(
+      '/payments/clictopay/session',
+      {
+        orderId: args.orderId,
+        purpose: args.purpose,
+        installmentId: args.installmentId,
+        language: args.language,
+        pageView: args.pageView,
+      },
+      { headers: { 'Idempotency-Key': args.idempotencyKey } },
+    );
+    return res.data;
+  },
+
+  verifyClicToPayPayment: async (
+    paymentId: string,
+  ): Promise<HostedPaymentSession> => {
+    const res = await apiClient.get<HostedPaymentSession>(
+      `/payments/clictopay/${paymentId}/status`,
+    );
+    return res.data;
+  },
+
   // ─── Doctor — CARD ────────────────────────────────────────────────
   // Idempotency-Key header MUST be set by the caller. Replays with
   // the same key return the same Payment row idempotently. The

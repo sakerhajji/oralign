@@ -31,6 +31,7 @@ import { useT } from '@/lib/i18n/lang-context';
 import { hasUsableBankTransferDetails } from '@/lib/payments/bank-transfer';
 import {
   useBillingPublicDefaults,
+  useCreateTreatmentFeeCardSession,
   usePayTreatmentFee,
   useUploadTreatmentFeeProof,
 } from '@/lib/hooks';
@@ -92,7 +93,7 @@ export function TreatmentFeePaymentDialog({
   /** Fired after a terminal success so the parent can navigate. */
   onPaid?: () => void;
 }) {
-  const { t } = useT();
+  const { t, lang } = useT();
   // Doctor-safe defaults endpoint. The previous version called
   // `useCompanyBilling()` which hits `/admin/company-billing-settings`
   // and returned 403 for dentists, so the modal silently showed 0
@@ -102,6 +103,7 @@ export function TreatmentFeePaymentDialog({
   const { data: defaults, isLoading: defaultsLoading } =
     useBillingPublicDefaults();
   const pay = usePayTreatmentFee();
+  const cardSession = useCreateTreatmentFeeCardSession();
   const uploadProof = useUploadTreatmentFeeProof();
 
   // Settings-driven amount + currency so the doctor sees what the
@@ -160,11 +162,33 @@ export function TreatmentFeePaymentDialog({
     return () => URL.revokeObjectURL(proofPreview);
   }, [proofPreview]);
 
-  const busy = pay.isPending || uploadProof.isPending;
+  const busy = pay.isPending || cardSession.isPending || uploadProof.isPending;
 
   // Card / Cash → single backend call, stamps paidAt and closes.
   const handleInstantPay = () => {
     if (!selectedMethod || selectedMethod === 'bank_transfer') return;
+    if (selectedMethod === 'card') {
+      const idempotencyKey =
+          typeof crypto !== 'undefined' && 'randomUUID' in crypto
+            ? crypto.randomUUID()
+          : `${order.id}-treatment-fee`;
+      cardSession.mutate(
+        {
+          orderId: order.id,
+          idempotencyKey,
+          language: lang === 'en' ? 'en' : 'fr',
+        },
+        {
+          onSuccess: (session) => {
+            const verificationUrl = `/payment/return?paymentId=${encodeURIComponent(
+              session.paymentId,
+            )}`;
+            window.location.assign(session.paymentUrl ?? verificationUrl);
+          },
+        },
+      );
+      return;
+    }
     pay.mutate(
       { id: order.id, method: selectedMethod, amount },
       {
@@ -484,7 +508,9 @@ export function TreatmentFeePaymentDialog({
               onClick={handleInstantPay}
               className="gap-2"
             >
-              {pay.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+              {(pay.isPending || cardSession.isPending) && (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              )}
               {selectedMethod === 'cash'
                 ? t('feeUi.payDialog.recordCashBtn')
                 : t('feeUi.payDialog.payAmountBtn', {

@@ -1,5 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { PaymentMethod, PaymentRecordStatus } from '@prisma/client';
+import {
+  PaymentMethod,
+  PaymentPurpose,
+  PaymentRecordStatus,
+} from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -14,7 +18,39 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
+
+export class CreateClicToPaySessionDto {
+  @ApiProperty({ description: 'Order being paid. Amount is resolved server-side.' })
+  @IsString()
+  @MaxLength(64)
+  orderId!: string;
+
+  @ApiProperty({ enum: PaymentPurpose })
+  @IsEnum(PaymentPurpose)
+  purpose!: PaymentPurpose;
+
+  @ApiPropertyOptional({
+    description: 'Required when purpose is installment.',
+  })
+  @ValidateIf((dto: CreateClicToPaySessionDto) =>
+    dto.purpose === PaymentPurpose.installment,
+  )
+  @IsString()
+  @MaxLength(64)
+  installmentId?: string;
+
+  @ApiPropertyOptional({ enum: ['fr', 'en', 'ar'], default: 'fr' })
+  @IsOptional()
+  @IsIn(['fr', 'en', 'ar'])
+  language?: 'fr' | 'en' | 'ar';
+
+  @ApiPropertyOptional({ enum: ['DESKTOP', 'MOBILE'] })
+  @IsOptional()
+  @IsIn(['DESKTOP', 'MOBILE'])
+  pageView?: 'DESKTOP' | 'MOBILE';
+}
 
 export enum PaymentSortBy {
   createdAt = 'createdAt',

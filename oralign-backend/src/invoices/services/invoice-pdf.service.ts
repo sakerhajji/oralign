@@ -452,6 +452,12 @@ export class InvoicePdfService implements OnModuleDestroy {
       },
     });
     if (!payment) throw new NotFoundException('Payment not found.');
+    // Treatment-fee card attempts also live in Payment for provider
+    // reconciliation, but their receipt uses the dedicated order-level
+    // renderer below. This path is strictly for quotation installments.
+    if (!payment.quotation) {
+      throw new NotFoundException('Installment payment receipt not found.');
+    }
 
     // Lazily allocate a stable, sequential receipt number the first
     // time a *successful* payment's receipt is rendered, then persist

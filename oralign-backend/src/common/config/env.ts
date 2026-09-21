@@ -59,6 +59,17 @@ function url(name: string, fallback: string): string {
   return raw.replace(/\/+$/, '');
 }
 
+function optionalUrl(name: string): string | undefined {
+  const raw = str(name);
+  if (!raw) return undefined;
+  try {
+    new URL(raw);
+  } catch {
+    throw new Error(`[config] ${name} must be an absolute URL, got "${raw}"`);
+  }
+  return raw;
+}
+
 const nodeEnvRaw = str('NODE_ENV', 'development')!;
 const nodeEnv: NodeEnv =
   nodeEnvRaw === 'production' || nodeEnvRaw === 'test'
@@ -138,6 +149,25 @@ export const env = Object.freeze({
     mockControllable: bool('MOCK_PAYMENT_CONTROLLABLE', false),
     /** Explicit opt-in to let the mock gateway "succeed" in production. */
     allowMockInProduction: bool('ALLOW_MOCK_PAYMENTS', false),
+  },
+
+  clicToPay: {
+    apiUrl: optionalUrl('CLICTOPAY_API_URL'),
+    username: str('CLICTOPAY_USERNAME'),
+    password: str('CLICTOPAY_PASSWORD'),
+    currency: str('CLICTOPAY_CURRENCY', '788')!,
+    returnUrl: optionalUrl('CLICTOPAY_RETURN_URL'),
+    failUrl: optionalUrl('CLICTOPAY_FAIL_URL'),
+    timeoutMs: int('CLICTOPAY_TIMEOUT_MS', 15_000),
+    get configured(): boolean {
+      return !!(
+        this.apiUrl &&
+        this.username &&
+        this.password &&
+        this.returnUrl &&
+        this.failUrl
+      );
+    },
   },
 
   /** Optional embedded Arabic font for PDFs (Puppeteer). */

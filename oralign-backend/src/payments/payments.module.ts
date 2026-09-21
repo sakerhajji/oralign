@@ -4,6 +4,8 @@ import { PaymentsController } from './controllers/payments.controller';
 import { MockPaymentGateway } from './gateways/mock-payment.gateway';
 import { PAYMENT_GATEWAY } from './gateways/payment-gateway.interface';
 import { PaymentsService } from './services/payments.service';
+import { ClicToPayClient } from './clictopay/clictopay.client';
+import { ClicToPayPaymentsService } from './services/clictopay-payments.service';
 import { env } from '../common/config/env';
 import { QuotationModule } from '../quotations/quotation.module';
 
@@ -37,11 +39,13 @@ const controllers = [
   controllers,
   providers: [
     PaymentsService,
+    ClicToPayClient,
+    ClicToPayPaymentsService,
     {
       provide: PAYMENT_GATEWAY,
       useClass: MockPaymentGateway,
     },
   ],
-  exports: [PaymentsService],
+  exports: [PaymentsService, ClicToPayPaymentsService],
 })
 export class PaymentsModule {}

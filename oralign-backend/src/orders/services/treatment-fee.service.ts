@@ -71,6 +71,12 @@ export class TreatmentFeeService {
     caller: Caller,
   ): Promise<OrderResponseDto> {
     this.orders.ensureCanCreateOrModify(caller);
+    if (method === PaymentMethod.card) {
+      throw new BadRequestException(
+        'Card payments must use the secure hosted checkout.',
+        'CARD_PAYMENT_REQUIRES_HOSTED_CHECKOUT',
+      );
+    }
     const current = await this.orders.findAccessibleOrder(id, caller);
 
     if (current.treatmentFeePaidAt) {
@@ -117,7 +123,8 @@ export class TreatmentFeeService {
       return mapOrderToDto(order);
     }
 
-    // CARD or CASH — instant success.
+    // CASH — instant success. Card payments use ClicToPay and reach this
+    // aggregate only after server-side provider verification.
     const order = await this.prisma.dentalOrder.update({
       where: { id },
       data: {

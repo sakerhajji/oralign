@@ -46,7 +46,7 @@ services:
     # Production-safe migration: applies pending migrations from
     # prisma/migrations/, never drops data. Idempotent.
     command: >
-      sh -c "node node_modules/.bin/prisma migrate deploy &&
+      sh -c "node ./scripts/migrate.mjs &&
              node dist/src/main"
 
     # Vars NOT already declared in the base compose's environment
@@ -65,6 +65,13 @@ services:
       # the practitioner emails are built from it — without it they fall
       # back to http://localhost:3000 and are dead outside the server.
       API_PUBLIC_URL: ${API_PUBLIC_URL:-https://api.oralign.com.tn}
+      CLICTOPAY_API_URL: ${CLICTOPAY_API_URL:?CLICTOPAY_API_URL not set}
+      CLICTOPAY_USERNAME: ${CLICTOPAY_USERNAME:?CLICTOPAY_USERNAME not set}
+      CLICTOPAY_PASSWORD: ${CLICTOPAY_PASSWORD:?CLICTOPAY_PASSWORD not set}
+      CLICTOPAY_CURRENCY: ${CLICTOPAY_CURRENCY:-788}
+      CLICTOPAY_RETURN_URL: ${CLICTOPAY_RETURN_URL:?CLICTOPAY_RETURN_URL not set}
+      CLICTOPAY_FAIL_URL: ${CLICTOPAY_FAIL_URL:?CLICTOPAY_FAIL_URL not set}
+      CLICTOPAY_TIMEOUT_MS: ${CLICTOPAY_TIMEOUT_MS:-15000}
 
     # !override REPLACES the base's "3000:3000" (which binds 0.0.0.0 and
     # would conflict with our 127.0.0.1 binding when merged).

@@ -2112,6 +2112,10 @@ export const dict = {
         fr: 'En attente de confirmation',
       } as T,
       pending: { en: 'Pending', fr: 'En attente' } as T,
+      unknown: {
+        en: 'Verification required',
+        fr: 'Vérification requise',
+      } as T,
       rejected: { en: 'Rejected', fr: 'Rejetée' } as T,
       failed: { en: 'Failed', fr: 'Échouée' } as T,
       cancelled: { en: 'Cancelled', fr: 'Annulée' } as T,

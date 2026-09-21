@@ -212,12 +212,24 @@ enum PaymentMethod {
   cash
 }
 
+enum PaymentPurpose {
+  installment
+  treatment_fee
+}
+
+enum PaymentProvider {
+  manual
+  mock
+  clictopay
+}
+
 // Lifecycle states for a Payment record. CARD goes pending → success
 // (gateway) or pending → failed. BANK_TRANSFER goes awaiting_confirmation
 // → success (admin confirm) or → rejected (admin reject). CASH goes
 // straight to success (admin records).
 enum PaymentRecordStatus {
   pending
+  unknown
   awaiting_confirmation
   success
   failed
@@ -1401,8 +1413,8 @@ model Payment {
   //     those attempts keep their order + quotation link and amount.
   orderId         String
   order           DentalOrder         @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  quotationId     String
-  quotation       Quotation           @relation(fields: [quotationId], references: [id], onDelete: Restrict)
+  quotationId     String?
+  quotation       Quotation?          @relation(fields: [quotationId], references: [id], onDelete: Restrict)
   installmentId   String?
   installment     QuoteInstallment?   @relation(fields: [installmentId], references: [id], onDelete: SetNull)
 
@@ -1411,6 +1423,22 @@ model Payment {
   // is self-contained even if the installment is later edited (only
   // possible before approval).
   amount          Decimal             @db.Decimal(12, 3)
+  currency        String              @default("TND")
+  purpose         PaymentPurpose      @default(installment)
+  provider        PaymentProvider     @default(manual)
+
+  // Hosted-payment provider references. Credentials and raw card data are
+  // deliberately never persisted. merchantOrderNumber is our idempotent
+  // reference; providerOrderId is ClicToPay's returned identifier.
+  merchantOrderNumber String?         @unique
+  providerOrderId     String?         @unique
+  paymentUrl          String?
+  attemptNumber       Int             @default(1)
+  providerStatus      Int?
+  providerErrorCode   String?
+  providerErrorMessage String?
+  lastProviderCheckAt DateTime?
+  verificationCount  Int             @default(0)
 
   // Sequential receipt/invoice number (e.g. FAC-000001), allocated
   // lazily the first time a successful payment's receipt is rendered.
@@ -1461,6 +1489,8 @@ model Payment {
   @@index([installmentId])
   @@index([status])
   @@index([paymentMethod])
+  @@index([provider, merchantOrderNumber])
+  @@index([purpose, orderId, status])
   // Added 2026-05-25 for the payment-history filter UI at scale.
   //  • (status, createdAt DESC)   — admin queue narrowing + default sort
   //  • (paymentMethod, status)    — method-filtered queries

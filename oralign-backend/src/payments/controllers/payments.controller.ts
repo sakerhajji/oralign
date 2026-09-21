@@ -29,11 +29,13 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import {
   ConfirmPaymentDto,
+  CreateClicToPaySessionDto,
   DeclareBankTransferDto,
   PaymentFilterDto,
   RecordCashPaymentDto,
   RejectPaymentDto,
 } from '../dto/payment.dto';
+import { ClicToPayPaymentsService } from '../services/clictopay-payments.service';
 import { PaymentsService } from '../services/payments.service';
 
 const PROOF_UPLOAD_ROOT = join(process.cwd(), 'uploads', 'payments');
@@ -63,7 +65,48 @@ const PROOF_MAX_BYTES = 5 * 1024 * 1024;
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller()
 export class PaymentsController {
-  constructor(private readonly payments: PaymentsService) {}
+  constructor(
+    private readonly payments: PaymentsService,
+    private readonly clicToPayPayments: ClicToPayPaymentsService,
+  ) {}
+
+  // ─── Doctor-facing — ClicToPay hosted checkout ────────────────
+
+  @Post('payments/clictopay/session')
+  @Roles(UserRole.dentist, UserRole.admin, UserRole.super_admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Create or reuse a ClicToPay hosted-payment session. The amount is always resolved server-side.',
+  })
+  async createClicToPaySession(
+    @Body() dto: CreateClicToPaySessionDto,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.clicToPayPayments.createSession(
+      dto,
+      { userId: user.sub, role: user.role as UserRole },
+      idempotencyKey,
+    );
+  }
+
+  @Get('payments/clictopay/:paymentId/status')
+  @Roles(UserRole.dentist, UserRole.admin, UserRole.super_admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Verify a hosted payment directly with ClicToPay. Browser return parameters are never trusted.',
+  })
+  async verifyClicToPayPayment(
+    @Param('paymentId') paymentId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.clicToPayPayments.verify(paymentId, {
+      userId: user.sub,
+      role: user.role as UserRole,
+    });
+  }
 
   // ─── Doctor-facing — CARD ──────────────────────────────────────
 
@@ -76,18 +119,17 @@ export class PaymentsController {
       'installment row under FOR UPDATE — the client never provides it.',
   })
   async payByCard(
-    @Param('quotationId') _quotationId: string,
+    @Param('quotationId') quotationId: string,
     @Param('installmentId') installmentId: string,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
-    @Headers('x-mock-outcome') mockOutcome: string | undefined,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.payments.payByCard({
+    return this.clicToPayPayments.createLegacyInstallmentSession(
+      quotationId,
       installmentId,
-      caller: { userId: user.sub, role: user.role as UserRole },
+      { userId: user.sub, role: user.role as UserRole },
       idempotencyKey,
-      headers: { 'x-mock-outcome': mockOutcome },
-    });
+    );
   }
 
   // ─── Doctor-facing — BANK_TRANSFER ─────────────────────────────

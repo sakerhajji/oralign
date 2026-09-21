@@ -745,7 +745,7 @@ export class PaymentsService {
       // unwind it. Failures in the listener get logged and swallowed.
       const sharedPayload = {
         paymentId: payment.id,
-        quotationId: payment.quotationId,
+        quotationId: payment.quotationId!,
         orderId: payment.orderId,
         orderCode: order.orderCode,
         doctorId: order.doctorId,
@@ -773,7 +773,7 @@ export class PaymentsService {
       if (batchUnlocked) {
         this.events.emit(NotificationEvents.BatchUnlocked, {
           batchId: batchUnlocked.id,
-          quotationId: payment.quotationId,
+          quotationId: payment.quotationId!,
           orderId: payment.orderId,
           orderCode: order.orderCode,
           doctorId: order.doctorId,
@@ -1019,13 +1019,13 @@ export class PaymentsService {
     const payment = await this.prisma.payment.findUnique({
       where: { id },
       include: {
-        quotation: { include: { order: { select: { doctorId: true } } } },
+        order: { select: { doctorId: true } },
       },
     });
     if (!payment) throw new NotFoundException('Payment not found.');
     const isOwner =
       caller.role === UserRole.dentist &&
-      payment.quotation.order.doctorId === caller.userId;
+      payment.order.doctorId === caller.userId;
     if (!isAdmin(caller) && !isOwner) {
       throw new ForbiddenException('You cannot access this payment.');
     }

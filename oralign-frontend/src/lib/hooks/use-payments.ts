@@ -15,8 +15,10 @@ import { useT } from '@/lib/i18n/lang-context';
 import { paymentPlanKeys } from './use-quotation-payment-plan';
 import { quotationKeys } from './use-quotations';
 import { orderKeys } from './use-orders';
+import { PaymentPurpose } from '@/lib/types';
 import type {
   ConfirmPaymentDto,
+  HostedPaymentSession,
   PaginatedResponse,
   Payment,
   PaymentFilterDto,
@@ -111,15 +113,17 @@ function invalidateAfterPayment(
   orderId?: string,
 ) {
   queryClient.invalidateQueries({ queryKey: paymentKeys.all });
-  queryClient.invalidateQueries({
-    queryKey: paymentPlanKeys.installments(payment.quotationId),
-  });
-  queryClient.invalidateQueries({
-    queryKey: paymentPlanKeys.batches(payment.quotationId),
-  });
-  queryClient.invalidateQueries({
-    queryKey: quotationKeys.detail(payment.quotationId),
-  });
+  if (payment.quotationId) {
+    queryClient.invalidateQueries({
+      queryKey: paymentPlanKeys.installments(payment.quotationId),
+    });
+    queryClient.invalidateQueries({
+      queryKey: paymentPlanKeys.batches(payment.quotationId),
+    });
+    queryClient.invalidateQueries({
+      queryKey: quotationKeys.detail(payment.quotationId),
+    });
+  }
   if (orderId) {
     queryClient.invalidateQueries({ queryKey: orderKeys.detail(orderId) });
   }
@@ -152,36 +156,50 @@ export function useUpdateInvoiceNumber(): UseMutationResult<
 }
 
 export function usePayByCard(): UseMutationResult<
-  Payment,
+  HostedPaymentSession,
   Error,
   {
     quotationId: string;
     installmentId: string;
     idempotencyKey: string;
-    orderId?: string;
-    mockOutcome?: 'success' | 'failed' | 'pending';
+    orderId: string;
+    language?: 'fr' | 'en' | 'ar';
   }
 > {
-  const queryClient = useQueryClient();
-  const { t } = useT();
   return useMutation({
-    mutationFn: ({ quotationId, installmentId, idempotencyKey, mockOutcome }) =>
-      paymentsService.payByCard({
-        quotationId,
+    mutationFn: ({ orderId, installmentId, idempotencyKey, language }) =>
+      paymentsService.createClicToPaySession({
+        orderId,
         installmentId,
         idempotencyKey,
-        mockOutcome,
+        purpose: PaymentPurpose.INSTALLMENT,
+        language,
+        pageView:
+          typeof window !== 'undefined' && window.innerWidth < 768
+            ? 'MOBILE'
+            : 'DESKTOP',
       }),
-    onSuccess: (payment, { orderId }) => {
-      invalidateAfterPayment(queryClient, payment, orderId);
-      if (payment.status === 'success') {
-        toast.success(t('toasts.payments.paymentSuccess'));
-      } else if (payment.status === 'pending') {
-        toast.info(t('toasts.payments.paymentPending'));
-      } else {
-        toast.error(t('toasts.payments.paymentFailed'));
-      }
-    },
+    onError: (err) => toast.error(extractApiErrorMessage(err)),
+  });
+}
+
+export function useCreateTreatmentFeeCardSession(): UseMutationResult<
+  HostedPaymentSession,
+  Error,
+  { orderId: string; idempotencyKey: string; language?: 'fr' | 'en' | 'ar' }
+> {
+  return useMutation({
+    mutationFn: ({ orderId, idempotencyKey, language }) =>
+      paymentsService.createClicToPaySession({
+        orderId,
+        idempotencyKey,
+        purpose: PaymentPurpose.TREATMENT_FEE,
+        language,
+        pageView:
+          typeof window !== 'undefined' && window.innerWidth < 768
+            ? 'MOBILE'
+            : 'DESKTOP',
+      }),
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
 }

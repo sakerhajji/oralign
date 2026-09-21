@@ -132,6 +132,8 @@ function StatusBadge({ status }: { status: PaymentRecordStatus }) {
       return <Badge className="bg-amber-500">{label}</Badge>;
     case PaymentRecordStatus.PENDING:
       return <Badge variant="secondary">{label}</Badge>;
+    case PaymentRecordStatus.UNKNOWN:
+      return <Badge className="bg-amber-100 text-amber-900">{label}</Badge>;
     case PaymentRecordStatus.REJECTED:
       return <Badge variant="destructive">{label}</Badge>;
     case PaymentRecordStatus.FAILED:

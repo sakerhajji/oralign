@@ -59,11 +59,17 @@ export enum PaymentMethod {
  */
 export enum PaymentRecordStatus {
   PENDING = 'pending',
+  UNKNOWN = 'unknown',
   AWAITING_CONFIRMATION = 'awaiting_confirmation',
   SUCCESS = 'success',
   FAILED = 'failed',
   REJECTED = 'rejected',
   CANCELLED = 'cancelled',
+}
+
+export enum PaymentPurpose {
+  INSTALLMENT = 'installment',
+  TREATMENT_FEE = 'treatment_fee',
 }
 
 export interface Pack {
@@ -193,10 +199,12 @@ export interface QuoteStepBatch {
 
 export interface Payment {
   id: string;
-  quotationId: string;
-  installmentId: string;
+  quotationId: string | null;
+  installmentId: string | null;
+  orderId: string;
   amount: string;
   currency: string;
+  purpose?: PaymentPurpose;
   // Backend serialises the Prisma column verbatim as `paymentMethod`.
   // `method` is kept as an optional alias for any legacy consumer
   // that still reads it; the table + every new caller should rely
@@ -222,6 +230,21 @@ export interface Payment {
   rejectedAt?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface HostedPaymentSession {
+  paymentId: string;
+  orderId: string;
+  quotationId: string | null;
+  installmentId: string | null;
+  purpose: PaymentPurpose;
+  status: PaymentRecordStatus;
+  providerStatus: number | null;
+  amount: string;
+  currency: string;
+  paymentUrl: string | null;
+  errorCode: string | null;
+  errorMessage: string | null;
 }
 
 export interface DeclareBankTransferDto {

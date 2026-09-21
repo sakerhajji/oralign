@@ -72,6 +72,9 @@ COPY --from=builder --chown=nodejs:nodejs /app/package*.json ./
 COPY --from=builder --chown=nodejs:nodejs /app/prisma ./prisma/
 # Runtime assets used by generated documents, including optional PDF fonts.
 COPY --from=builder --chown=nodejs:nodejs /app/assets ./assets/
+# Migration bootstrap supports both fresh databases and legacy local/hosted
+# databases that were historically maintained with `prisma db push`.
+COPY --from=builder --chown=nodejs:nodejs /app/scripts ./scripts/
 # Prisma 7 requires prisma.config.ts in the working directory for migrate deploy.
 # Prisma has a built-in TypeScript executor so the .ts source works directly.
 COPY --from=builder --chown=nodejs:nodejs /app/prisma.config.ts ./prisma.config.ts
@@ -84,6 +87,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD node -e "require('http').get('http://localhost:3000/api/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"
 
 ENTRYPOINT ["dumb-init", "--"]
-# Push schema changes (idempotent: safe on fresh and existing databases)
-# then start the application.
-CMD ["sh", "-c", "node node_modules/.bin/prisma db push --accept-data-loss && node dist/src/main"]
+# Apply checked-in, forward-only migrations before starting the application.
+CMD ["sh", "-c", "node ./scripts/migrate.mjs && node dist/src/main"]

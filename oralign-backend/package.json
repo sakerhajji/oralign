@@ -6,7 +6,7 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
-    "prebuild": "prisma generate",
+    "prebuild": "node ./node_modules/prisma/build/index.js generate",
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
@@ -19,8 +19,8 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
-    "db:migrate": "prisma migrate deploy",
-    "db:generate": "prisma generate",
+    "db:migrate": "node ./node_modules/prisma/build/index.js migrate deploy",
+    "db:generate": "node ./node_modules/prisma/build/index.js generate",
     "create-super-admin": "node dist/scripts/create-super-admin",
     "create-super-admin:dev": "ts-node -r tsconfig-paths/register src/scripts/create-super-admin.ts"
   },

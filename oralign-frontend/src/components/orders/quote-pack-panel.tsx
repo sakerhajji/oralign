@@ -1113,6 +1113,10 @@ function AdminPlanView({
   const { t } = useT();
   const deliver = useDeliverBatch();
   const [cashTarget, setCashTarget] = useState<QuoteInstallment | null>(null);
+  const [now] = useState(() => Date.now());
+  const quoteIsPayable =
+    quote.status === QuotationStatus.SENT ||
+    quote.status === QuotationStatus.APPROVED;
 
   // Index batches by installment id so each row can show its linked
   // delivery range without an O(n²) lookup.
@@ -1156,8 +1160,10 @@ function AdminPlanView({
               {installments.map((inst) => {
                 const batch = batchByInstallment.get(inst.id);
                 const isPayable =
-                  inst.status === InstallmentStatus.PENDING ||
-                  inst.status === InstallmentStatus.OVERDUE;
+                  quoteIsPayable &&
+                  (inst.status === InstallmentStatus.PENDING ||
+                    inst.status === InstallmentStatus.OVERDUE) &&
+                  new Date(inst.availableFrom).getTime() <= now;
                 return (
                   <TableRow key={inst.id}>
                     <TableCell>{inst.installmentNumber}</TableCell>
@@ -1184,16 +1190,13 @@ function AdminPlanView({
                         : '—'}
                     </TableCell>
                     <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
+                      <div className="flex flex-wrap justify-end gap-2">
                         {isPayable ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setCashTarget(inst)}
-                          >
-                            <Wallet className="mr-1 h-3 w-3" />
-                            {t('quoteUi.adminPlan.recordCash')}
-                          </Button>
+                          <AdminInstallmentActions
+                            quote={quote}
+                            installment={inst}
+                            onRecordCash={() => setCashTarget(inst)}
+                          />
                         ) : null}
                         {batch?.status === BatchStatus.UNLOCKED ? (
                           <Button
@@ -1223,8 +1226,10 @@ function AdminPlanView({
             {installments.map((inst) => {
               const batch = batchByInstallment.get(inst.id);
               const isPayable =
-                inst.status === InstallmentStatus.PENDING ||
-                inst.status === InstallmentStatus.OVERDUE;
+                quoteIsPayable &&
+                (inst.status === InstallmentStatus.PENDING ||
+                  inst.status === InstallmentStatus.OVERDUE) &&
+                new Date(inst.availableFrom).getTime() <= now;
               return (
                 <div
                   key={inst.id}
@@ -1268,15 +1273,12 @@ function AdminPlanView({
                   {(isPayable || batch?.status === BatchStatus.UNLOCKED) && (
                     <div className="mt-4 grid gap-2">
                       {isPayable ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-10 w-full justify-center"
-                          onClick={() => setCashTarget(inst)}
-                        >
-                          <Wallet className="mr-2 h-4 w-4" />
-                          {t('quoteUi.adminPlan.recordCash')}
-                        </Button>
+                        <AdminInstallmentActions
+                          quote={quote}
+                          installment={inst}
+                          onRecordCash={() => setCashTarget(inst)}
+                          fullWidth
+                        />
                       ) : null}
                       {batch?.status === BatchStatus.UNLOCKED ? (
                         <Button
@@ -1311,6 +1313,77 @@ function AdminPlanView({
         onClose={() => setCashTarget(null)}
       />
     </>
+  );
+}
+
+function AdminInstallmentActions({
+  quote,
+  installment,
+  onRecordCash,
+  fullWidth = false,
+}: {
+  quote: Quotation;
+  installment: QuoteInstallment;
+  onRecordCash: () => void;
+  fullWidth?: boolean;
+}) {
+  const { t, lang } = useT();
+  const payCard = usePayByCard();
+
+  const startCardPayment = async () => {
+    const idempotencyKey =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `${quote.id}-${installment.id}-${Date.now()}`;
+
+    try {
+      const session = await payCard.mutateAsync({
+        quotationId: quote.id,
+        installmentId: installment.id,
+        idempotencyKey,
+        orderId: quote.orderId,
+        language: lang === 'en' ? 'en' : 'fr',
+      });
+      const verificationUrl = `/payment/return?paymentId=${encodeURIComponent(
+        session.paymentId,
+      )}`;
+      window.location.assign(session.paymentUrl ?? verificationUrl);
+    } catch {
+      // The mutation hook owns the localized API error toast.
+    }
+  };
+
+  return (
+    <div
+      className={cn(
+        'flex flex-wrap justify-end gap-2',
+        fullWidth && 'grid w-full grid-cols-1 sm:grid-cols-2',
+      )}
+    >
+      <Button
+        size="sm"
+        className={cn('min-h-10', fullWidth && 'w-full justify-center')}
+        onClick={startCardPayment}
+        disabled={payCard.isPending}
+      >
+        {payCard.isPending ? (
+          <Loader2 className="mr-2 h-4 w-4 shrink-0 animate-spin" />
+        ) : (
+          <CreditCard className="mr-2 h-4 w-4 shrink-0" />
+        )}
+        {t('quoteUi.adminPlan.payByCard')}
+      </Button>
+      <Button
+        size="sm"
+        variant="outline"
+        className={cn('min-h-10', fullWidth && 'w-full justify-center')}
+        onClick={onRecordCash}
+        disabled={payCard.isPending}
+      >
+        <Wallet className="mr-2 h-4 w-4 shrink-0" />
+        {t('quoteUi.adminPlan.recordCash')}
+      </Button>
+    </div>
   );
 }
 

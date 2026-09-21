@@ -628,7 +628,9 @@ export function PaymentHistoryContent() {
                     value={row.invoiceNumber}
                     canEdit={isAdmin}
                   />
-                  <ViewInvoiceButton paymentId={row.id} />
+                  {row.status === PaymentRecordStatus.SUCCESS ? (
+                    <ViewInvoiceButton paymentId={row.id} />
+                  ) : null}
                 </div>
               )}
             />

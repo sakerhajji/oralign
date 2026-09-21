@@ -129,8 +129,8 @@ export const commerceDomainDict = {
       // `descAfter` carries its own leading space in EN so the FR
       // variant can end with a bare period (no space before it).
       descBefore: {
-        en: 'Confirm cash payments inline; unlocked batches get a "Mark delivered" button. Bank transfers come in through the',
-        fr: 'Confirmez les paiements en espèces directement ; les lots débloqués affichent un bouton « Marquer comme livré ». Les virements bancaires arrivent via la file',
+        en: 'Collect available installments by card or record received cash. Unlocked batches get a "Mark delivered" button. Bank transfers come in through the',
+        fr: 'Encaissez les échéances disponibles par carte ou enregistrez les espèces reçues. Les lots débloqués affichent un bouton « Marquer comme livré ». Les virements bancaires arrivent via la file',
       } as T,
       descAfter: { en: ' queue.', fr: '.' } as T,
       colAmount: { en: 'Amount', fr: 'Montant' } as T,
@@ -139,6 +139,7 @@ export const commerceDomainDict = {
       colBatch: { en: 'Batch', fr: 'Lot' } as T,
       colAvailable: { en: 'Available', fr: 'Disponible' } as T,
       colDue: { en: 'Due', fr: 'Échéance' } as T,
+      payByCard: { en: 'Pay by card', fr: 'Payer par carte' } as T,
       recordCash: { en: 'Record cash', fr: 'Enregistrer espèces' } as T,
       markDelivered: { en: 'Mark delivered', fr: 'Marquer comme livré' } as T,
     },

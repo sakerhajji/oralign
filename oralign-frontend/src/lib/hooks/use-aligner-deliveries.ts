@@ -49,10 +49,10 @@ function isDeliveryErrorCode(code: string | null): code is AlignerDeliveryErrorC
  * business errors carry a stable errorCode, mapped to a localized
  * sentence; anything else falls back to the shared toastMutationError.
  *
- * A 409 means the log moved under us (another delivery was recorded
- * meanwhile): the summary is refetched, so the still-open form re-runs
- * its pre-check against fresh data and names the exact clash inline —
- * in the user's language, unlike the server's English message.
+ * A business refusal usually means the data moved under us — another
+ * user recorded a delivery, set or corrected the total: the summary is
+ * refetched, so the still-open form re-runs its pre-check against fresh
+ * data and names the exact problem inline, in the user's language.
  */
 function useDeliveryErrorHandler(orderId: string) {
   const { t } = useT();
@@ -60,12 +60,13 @@ function useDeliveryErrorHandler(orderId: string) {
   return useCallback(
     (error: unknown) => {
       const info = extractApiError(error);
-      if (info.status === 409) {
+      const isDeliveryError = isDeliveryErrorCode(info.errorCode);
+      if (isDeliveryError || info.status === 409) {
         queryClient.invalidateQueries({
           queryKey: alignerDeliveryKeys.summary(orderId),
         });
       }
-      if (!isDeliveryErrorCode(info.errorCode)) {
+      if (!isDeliveryError) {
         toastMutationError(error);
         return;
       }

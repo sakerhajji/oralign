@@ -83,7 +83,8 @@ cleanup() {
   rm -rf "$TMP_DIR"
   echo
   echo "RESULT: $PASS passed, $FAIL failed"
-  [ "$FAIL" -eq 0 ]
+  # A bare test here would NOT set the script's exit status (EXIT trap).
+  [ "$FAIL" -eq 0 ] || exit 1
 }
 trap cleanup EXIT
 
@@ -110,7 +111,7 @@ DESIGNER_ID=$(seed_user designer TEST_ALD_DESIGNER "test_ald_designer_${STAMP}@o
 PATIENT_ID=$(db_insert "INSERT INTO \"Patient\" (id, \"fullName\", \"doctorId\", \"createdAt\", \"updatedAt\") VALUES (gen_random_uuid(), 'TEST_ALD_PATIENT', '$OWNER_ID', NOW(), NOW()) RETURNING id;")
 remember "Patient" "$PATIENT_ID"
 new_order() { # status
-  db_insert "INSERT INTO \"DentalOrder\" (id, \"orderCode\", \"doctorId\", \"patientId\", \"assignedDesignerId\", status, \"createdAt\", \"updatedAt\") VALUES (gen_random_uuid(), 'TEST_ALD_${STAMP}_$RANDOM', '$OWNER_ID', '$PATIENT_ID', '$DESIGNER_ID', '$1', NOW(), NOW()) RETURNING id;"
+  db_insert "INSERT INTO \"DentalOrder\" (id, \"orderCode\", \"doctorId\", \"patientId\", \"assignedDesignerId\", status, \"createdAt\", \"updatedAt\") VALUES (gen_random_uuid(), 'TEST_ALD_${STAMP}_$RANDOM', '$OWNER_ID', '$PATIENT_ID', '$DESIGNER_ID', '$1', '2026-08-01T09:00:00Z', NOW()) RETURNING id;"
 }
 ORDER_ID=$(new_order fabrication); remember "DentalOrder" "$ORDER_ID"
 DRAFT_ORDER_ID=$(new_order draft); remember "DentalOrder" "$DRAFT_ORDER_ID"
@@ -151,6 +152,7 @@ step "3. Validation before anything is stored"
 expect_code "from > to (7 → 4)" 400 ALIGNER_RANGE_INVALID "$(req POST "$D" "$OWNER_T" '{"fromAligner":7,"toAligner":4,"totalAligners":20}')"
 expect_code "first delivery without the series size" 400 ALIGNER_TOTAL_REQUIRED "$(req POST "$D" "$OWNER_T" '{"fromAligner":1,"toAligner":3}')"
 expect_code "future date" 400 ALIGNER_DELIVERY_DATE_IN_FUTURE "$(req POST "$D" "$OWNER_T" '{"fromAligner":1,"toAligner":3,"totalAligners":20,"deliveredAt":"2099-01-01"}')"
+expect_code "date before the order existed" 400 ALIGNER_DELIVERY_DATE_BEFORE_ORDER "$(req POST "$D" "$OWNER_T" '{"fromAligner":1,"toAligner":3,"totalAligners":20,"deliveredAt":"2020-01-15"}')"
 expect_code "impossible date 2026-02-30" 400 ALIGNER_DELIVERY_DATE_INVALID "$(req POST "$D" "$OWNER_T" '{"fromAligner":1,"toAligner":3,"totalAligners":20,"deliveredAt":"2026-02-30"}')"
 expect_code "non-numeric aligner (DTO)" 400 "" "$(req POST "$D" "$OWNER_T" '{"fromAligner":"abc","toAligner":3,"totalAligners":20}')"
 expect_code "unknown field (DTO whitelist)" 400 "" "$(req POST "$D" "$OWNER_T" '{"fromAligner":1,"toAligner":3,"totalAligners":20,"quantity":99}')"
@@ -166,7 +168,7 @@ ROW=$(DB -c "SELECT \"fromAligner\"||'|'||\"toAligner\"||'|'||quantity||'|'||\"d
 [ "$ROW" = "1|3|3|2026-09-07|true" ] && ok "row persisted: $ROW" || bad "first row: '$ROW'"
 [ "$(DB -c "SELECT \"totalAligners\" FROM \"DentalOrder\" WHERE id='$ORDER_ID';" | tr -d ' \r')" = "20" ] && ok "series size stored on the order" || bad "totalAligners not stored"
 
-expect_code "second delivery 4 → 7 on 2026-09-20" 201 "" "$(req POST "$D" "$OWNER_T" '{"fromAligner":4,"toAligner":7,"deliveredAt":"2026-09-20"}')"
+expect_code "second delivery 4 → 7 on 2026-09-20 (explicit null total = omitted)" 201 "" "$(req POST "$D" "$OWNER_T" '{"fromAligner":4,"toAligner":7,"deliveredAt":"2026-09-20","totalAligners":null}')"
 
 # ─────────────────────────────────────────────────────────────────
 step "5. History and totals come from persisted rows"
@@ -206,11 +208,14 @@ expect_code "admin records 8 → 10" 201 "" "$(req POST "$D" "$ADMIN_T" '{"fromA
 # ─────────────────────────────────────────────────────────────────
 step "8. Concurrency — 8 identical requests at once"
 
+# One output file per request (concurrent appends to a single file lose
+# lines on Windows) and NO retry: a retried 500 would come back as a 409.
 for i in 1 2 3 4 5 6 7 8; do
-  ( $CURL -o /dev/null -w '%{http_code}\n' -X POST "$API$D" -H "Authorization: Bearer $OWNER_T" \
-      -H "Content-Type: application/json" -d '{"fromAligner":11,"toAligner":12}' >> "$TMP_DIR/race.txt" ) &
+  curl -sS -o /dev/null -w '%{http_code}\n' -X POST "$API$D" -H "Authorization: Bearer $OWNER_T" \
+    -H "Content-Type: application/json" -d '{"fromAligner":11,"toAligner":12}' > "$TMP_DIR/race.$i" &
 done
 wait
+cat "$TMP_DIR"/race.[1-8] > "$TMP_DIR/race.txt"
 CREATED=$(grep -c '^201$' "$TMP_DIR/race.txt"); REFUSED=$(grep -c '^409$' "$TMP_DIR/race.txt")
 [ "$CREATED" = "1" ] && [ "$REFUSED" = "7" ] && ok "exactly one 201, seven 409" || bad "race: $CREATED created, $REFUSED refused ($(tr '\n' ' ' < "$TMP_DIR/race.txt"))"
 [ "$(DB -c "SELECT count(*) FROM \"AlignerDelivery\" WHERE \"orderId\"='$ORDER_ID' AND \"fromAligner\"=11;" | tr -d ' \r')" = "1" ] \
@@ -235,18 +240,19 @@ const fs=require('fs');
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==','base64');
 const dir='/app/uploads/orders/$ORDER_ID/x';
 fs.mkdirSync(dir,{recursive:true});
-for (const n of ['left.png','right.png','profile.png']) fs.writeFileSync(dir+'/'+n,png);
+for (const n of ['left.png','right.png','profile.png','reedit.png']) fs.writeFileSync(dir+'/'+n,png);
 for (const n of ['upper.stl','lower.stl']) fs.writeFileSync(dir+'/'+n,Buffer.alloc(84));
 console.log('blobs ok');" >/dev/null 2>&1
 for spec in "left_photo|left-lateral__IMG_1234.png|left.png|image/png" \
             "right_photo|right-lateral__IMG_5678.png|right.png|image/png" \
             "left_photo|profile__portrait.png|profile.png|image/png" \
+            "right_photo|right-lateral__Dr-Test_Patient_right-photo_004.png|reedit.png|image/png" \
             "stl|upper-stl__scan.stl|upper.stl|model/stl" \
             "stl|lower-stl__scan.stl|lower.stl|model/stl"; do
   IFS='|' read -r c o r m <<< "$spec"
   FID=$(mkfile "$c" "$o" "$r" "$m"); remember "OrderFile" "$FID"
 done
-ok "5 slot-prefixed files seeded (lateral L/R, profile, upper/lower STL)"
+ok "6 slot-prefixed files seeded (lateral L/R, re-edited lateral, profile, upper/lower STL)"
 
 $CURL -o "$TMP_DIR/fr.zip" "$API/orders/$ORDER_ID/download-all?lang=fr" -H "Authorization: Bearer $ADMIN_T"
 $CURL -o "$TMP_DIR/en.zip" "$API/orders/$ORDER_ID/download-all?lang=en" -H "Authorization: Bearer $ADMIN_T"
@@ -254,6 +260,7 @@ LIST_FR=$(unzip -Z1 "$TMP_DIR/fr.zip" 2>/dev/null)
 LIST_EN=$(unzip -Z1 "$TMP_DIR/en.zip" 2>/dev/null)
 echo "$LIST_FR" | grep -qx "PHOTO DENTS DROITE/IMG_1234.png" && ok "FR: PHOTO DENTS DROITE/IMG_1234.png (slot key dropped)" || bad "FR lateral: $(echo "$LIST_FR" | tr '\n' ' ')"
 echo "$LIST_FR" | grep -qx "PHOTO DENTS GAUCHE/IMG_5678.png" && ok "FR: PHOTO DENTS GAUCHE/IMG_5678.png" || bad "FR other lateral missing"
+echo "$LIST_FR" | grep -qx "PHOTO DENTS GAUCHE/Dr-Test_Patient_004.png" && ok "re-edited photo: generated side segment dropped" || bad "re-edited name: $(echo "$LIST_FR" | grep GAUCHE | tr '\n' ' ')"
 echo "$LIST_EN" | grep -qx "RIGHT TEETH PHOTO/IMG_1234.png" && ok "EN: RIGHT TEETH PHOTO/IMG_1234.png" || bad "EN lateral: $(echo "$LIST_EN" | tr '\n' ' ')"
 if echo "$LIST_FR$LIST_EN" | sed 's|.*/||' | grep -qiE 'left|right'; then
   bad "a file name still contains left/right: $(echo "$LIST_FR$LIST_EN" | sed 's|.*/||' | grep -iE 'left|right' | tr '\n' ' ')"

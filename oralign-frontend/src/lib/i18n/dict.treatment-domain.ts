@@ -555,6 +555,14 @@ export const treatmentDomainDict = {
         en: 'The delivery date cannot be in the future.',
         fr: 'La date de livraison ne peut pas être dans le futur.',
       } as T,
+      beforeOrder: {
+        en: 'The delivery cannot be dated before the order was created ({date}).',
+        fr: 'La livraison ne peut pas être antérieure à la création de la commande ({date}).',
+      } as T,
+      min: {
+        en: 'Aligner numbers start at 1.',
+        fr: 'La numérotation des aligneurs commence à 1.',
+      } as T,
       totalBelow: {
         en: 'Cannot be below {min}: aligner {min} has already been delivered.',
         fr: 'Impossible sous {min} : l’aligneur {min} a déjà été livré.',
@@ -616,6 +624,10 @@ export const treatmentDomainDict = {
       ALIGNER_DELIVERY_DATE_IN_FUTURE: {
         en: 'A delivery cannot be dated in the future.',
         fr: 'Une livraison ne peut pas être datée dans le futur.',
+      } as T,
+      ALIGNER_DELIVERY_DATE_BEFORE_ORDER: {
+        en: 'A delivery cannot be dated before its order was created.',
+        fr: 'Une livraison ne peut pas être antérieure à la création de sa commande.',
       } as T,
       ORDER_NOT_DELIVERABLE: {
         en: 'Deliveries cannot be recorded for this order in its current status.',

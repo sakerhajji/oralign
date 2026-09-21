@@ -104,6 +104,34 @@ describe('upload slots', () => {
       ).toBe('Dr-Hajji_Marie-Dupont_004.jpg');
     });
 
+    it('drops the generated side segment a re-edited photo carries behind its slot key', () => {
+      expect(
+        labZipFileName(
+          file({
+            category: 'left_photo',
+            originalName:
+              'left-lateral__Dr-Hajji_Marie-Dupont_left-photo_004.png',
+          }),
+        ),
+      ).toBe('Dr-Hajji_Marie-Dupont_004.png');
+      expect(
+        labZipFileName(
+          file({
+            category: 'left_photo',
+            originalName: 'profile__Dr-Hajji_Marie-Dupont_left-photo_002.jpg',
+          }),
+        ),
+      ).toBe('profile__Dr-Hajji_Marie-Dupont_002.jpg');
+    });
+
+    it("keeps a doctor's name that merely mentions a side (not a generated segment)", () => {
+      expect(
+        labZipFileName(
+          file({ category: 'left_photo', originalName: 'left-photo.jpg' }),
+        ),
+      ).toBe('left-photo.jpg');
+    });
+
     it('keeps a generated name whose category names no side', () => {
       expect(
         labZipFileName(

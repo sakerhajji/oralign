@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { History, Loader2, PackageCheck, Pencil, Plus, RotateCw } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -42,6 +42,7 @@ import {
 } from '@/lib/utils/calendar-date';
 
 type Translate = ReturnType<typeof useT>['t'];
+type PanelDialog = 'history' | 'record' | 'total';
 
 /** "1 → 7", "1 → 3, 8 → 10"; a single aligner reads "5". */
 function formatRanges(ranges: readonly AlignerRange[]): string {
@@ -70,16 +71,28 @@ export function AlignerDeliveriesPanel({ orderId }: { orderId: string }) {
   const { t } = useT();
   const { data: summary, isPending, isError, isFetching, refetch } =
     useAlignerDeliveries(orderId);
-  const [dialog, setDialog] = useState<'history' | 'record' | 'total' | null>(null);
+  const [dialog, setDialog] = useState<PanelDialog | null>(null);
   // Bumped on every open so each form starts from fresh defaults.
   const [formSeq, setFormSeq] = useState(0);
+  // The control that opened a dialog gets focus back when it closes:
+  // these dialogs are controlled, with no DialogTrigger for Radix to
+  // restore focus to.
+  const openerRef = useRef<HTMLElement | null>(null);
 
-  const open = (which: 'history' | 'record' | 'total') => {
+  const open = (which: PanelDialog) => {
+    openerRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (which !== 'history') setFormSeq((n) => n + 1);
     setDialog(which);
   };
-  const closeTo = (which: 'history' | 'record' | 'total') => (isOpen: boolean) => {
-    if (!isOpen && dialog === which) setDialog(null);
+  // Functional update: a save that resolves after the user moved on to
+  // another dialog must not close THAT one.
+  const closeTo = (which: PanelDialog) => (isOpen: boolean) => {
+    if (!isOpen) setDialog((current) => (current === which ? null : current));
+  };
+  const restoreFocus = (event: Event) => {
+    event.preventDefault();
+    openerRef.current?.focus();
   };
 
   if (isPending) {
@@ -204,6 +217,7 @@ export function AlignerDeliveriesPanel({ orderId }: { orderId: string }) {
       <DeliveryHistoryDialog
         open={dialog === 'history'}
         onOpenChange={closeTo('history')}
+        onCloseAutoFocus={restoreFocus}
         summary={summary}
       />
       {canWrite ? (
@@ -211,6 +225,7 @@ export function AlignerDeliveriesPanel({ orderId }: { orderId: string }) {
           key={`record-${formSeq}`}
           open={dialog === 'record'}
           onOpenChange={closeTo('record')}
+          onCloseAutoFocus={restoreFocus}
           orderId={orderId}
           summary={summary}
         />
@@ -220,6 +235,7 @@ export function AlignerDeliveriesPanel({ orderId }: { orderId: string }) {
           key={`total-${formSeq}`}
           open={dialog === 'total'}
           onOpenChange={closeTo('total')}
+          onCloseAutoFocus={restoreFocus}
           orderId={orderId}
           summary={summary}
         />
@@ -245,10 +261,12 @@ function Stat({ label, children }: { label: string; children: ReactNode }) {
 function DeliveryHistoryDialog({
   open,
   onOpenChange,
+  onCloseAutoFocus,
   summary,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onCloseAutoFocus: (event: Event) => void;
   summary: AlignerDeliverySummary;
 }) {
   const { t, lang } = useT();
@@ -258,7 +276,7 @@ function DeliveryHistoryDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="sm:max-w-2xl" onCloseAutoFocus={onCloseAutoFocus}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <History className="h-5 w-5" />
@@ -366,12 +384,20 @@ function validateDelivery(
   const needsTotal = summary.totalAligners === null;
   const total = needsTotal ? toInt(input.total) : summary.totalAligners;
 
+  const earliest = summary.earliestDeliveryDate;
   if (!input.date) errors.date = t('alignerDeliveries.validation.required');
   // 'YYYY-MM-DD' strings compare chronologically.
   else if (input.date > today) errors.date = t('alignerDeliveries.validation.future');
+  else if (earliest && input.date < earliest) {
+    errors.date = t('alignerDeliveries.validation.beforeOrder', {
+      date: formatCalendarDate(earliest, lang),
+    });
+  }
 
-  if (from === null || from < 1) errors.from = t('alignerDeliveries.validation.required');
-  if (to === null || to < 1) errors.to = t('alignerDeliveries.validation.required');
+  if (from === null) errors.from = t('alignerDeliveries.validation.required');
+  else if (from < 1) errors.from = t('alignerDeliveries.validation.min');
+  if (to === null) errors.to = t('alignerDeliveries.validation.required');
+  else if (to < 1) errors.to = t('alignerDeliveries.validation.min');
 
   if (needsTotal && (total === null || total < 1 || total > MAX_ALIGNERS_PER_ORDER)) {
     errors.total = t('alignerDeliveries.validation.total', { max: MAX_ALIGNERS_PER_ORDER });
@@ -401,11 +427,13 @@ function validateDelivery(
 function RecordDeliveryDialog({
   open,
   onOpenChange,
+  onCloseAutoFocus,
   orderId,
   summary,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onCloseAutoFocus: (event: Event) => void;
   orderId: string;
   summary: AlignerDeliverySummary;
 }) {
@@ -451,7 +479,7 @@ function RecordDeliveryDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md" onCloseAutoFocus={onCloseAutoFocus}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <PackageCheck className="h-5 w-5" />
@@ -473,6 +501,7 @@ function RecordDeliveryDialog({
               id="delivery-date"
               type="date"
               value={date}
+              min={summary.earliestDeliveryDate ?? undefined}
               max={today}
               onChange={(event) => setDate(event.target.value)}
               aria-invalid={!!shown('date')}
@@ -529,11 +558,13 @@ function RecordDeliveryDialog({
 function EditTotalDialog({
   open,
   onOpenChange,
+  onCloseAutoFocus,
   orderId,
   summary,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onCloseAutoFocus: (event: Event) => void;
   orderId: string;
   summary: AlignerDeliverySummary;
 }) {
@@ -553,7 +584,7 @@ function EditTotalDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md" onCloseAutoFocus={onCloseAutoFocus}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Pencil className="h-5 w-5" />

@@ -2,11 +2,13 @@ import { OrderStatus } from '@prisma/client';
 import {
   ALIGNER_DELIVERY_ERROR,
   assertNoConflict,
+  assertNotBeforeOrder,
   assertOrderAcceptsDeliveries,
   assertRangeWellFormed,
   assertTotalCoversDeliveries,
   assertWithinTotal,
   countDelivered,
+  earliestDeliveryDate,
   findConflict,
   firstUndelivered,
   mergeRanges,
@@ -170,6 +172,14 @@ describe('aligner delivery rules', () => {
       expect(resolveTotal(null, 20)).toBe(20);
     });
 
+    it('treats an explicit null total exactly like an omitted one', () => {
+      expect(resolveTotal(20, null)).toBe(20);
+      expect(thrownBy(() => resolveTotal(null, null))).toMatchObject({
+        statusCode: 400,
+        errorCode: ALIGNER_DELIVERY_ERROR.TOTAL_REQUIRED,
+      });
+    });
+
     it('keeps the stored total and refuses a different one from a delivery request', () => {
       expect(resolveTotal(20, undefined)).toBe(20);
       expect(resolveTotal(20, 20)).toBe(20);
@@ -220,6 +230,12 @@ describe('aligner delivery rules', () => {
   describe('delivery date', () => {
     const now = new Date('2026-09-21T10:00:00.000Z');
 
+    it('treats a null date like an omitted one (today)', () => {
+      expect(parseDeliveryDate(null, now).toISOString()).toBe(
+        '2026-09-21T00:00:00.000Z',
+      );
+    });
+
     it('defaults to today (UTC calendar date)', () => {
       expect(parseDeliveryDate(undefined, now).toISOString()).toBe(
         '2026-09-21T00:00:00.000Z',
@@ -232,8 +248,19 @@ describe('aligner delivery rules', () => {
       );
     });
 
-    it("allows tomorrow's date (a clinic east of UTC just after local midnight)", () => {
+    it("allows tomorrow's date once it is already today somewhere (UTC+14)", () => {
+      // 10:00 UTC = 00:00 the next day in UTC+14.
       expect(() => parseDeliveryDate('2026-09-22', now)).not.toThrow();
+    });
+
+    it("refuses tomorrow's date while it is not yet today anywhere", () => {
+      const earlier = new Date('2026-09-21T09:00:00.000Z'); // 23:00 in UTC+14
+      expect(
+        thrownBy(() => parseDeliveryDate('2026-09-22', earlier)),
+      ).toMatchObject({
+        statusCode: 400,
+        errorCode: ALIGNER_DELIVERY_ERROR.DATE_IN_FUTURE,
+      });
     });
 
     it('rejects a date further in the future', () => {
@@ -251,6 +278,38 @@ describe('aligner delivery rules', () => {
         expect(thrownBy(() => parseDeliveryDate(value, now))).toMatchObject({
           statusCode: 400,
           errorCode: ALIGNER_DELIVERY_ERROR.DATE_INVALID,
+        });
+      },
+    );
+  });
+  describe('delivery date lower bound (order creation)', () => {
+    const createdAt = new Date('2026-09-01T05:00:00.000Z');
+
+    it('is the creation date as seen anywhere on Earth (UTC-12)', () => {
+      expect(earliestDeliveryDate(createdAt).toISOString()).toBe(
+        '2026-08-31T00:00:00.000Z',
+      );
+    });
+
+    it('accepts a delivery on or after that date', () => {
+      expect(() =>
+        assertNotBeforeOrder(new Date('2026-08-31T00:00:00.000Z'), createdAt),
+      ).not.toThrow();
+      expect(() =>
+        assertNotBeforeOrder(new Date('2026-09-07T00:00:00.000Z'), createdAt),
+      ).not.toThrow();
+    });
+
+    it.each(['2026-08-30', '0226-09-20'])(
+      'refuses %s, before the order existed',
+      (value) => {
+        expect(
+          thrownBy(() =>
+            assertNotBeforeOrder(new Date(`${value}T00:00:00.000Z`), createdAt),
+          ),
+        ).toMatchObject({
+          statusCode: 400,
+          errorCode: ALIGNER_DELIVERY_ERROR.DATE_BEFORE_ORDER,
         });
       },
     );

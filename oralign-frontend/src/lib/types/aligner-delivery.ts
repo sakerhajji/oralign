@@ -38,6 +38,8 @@ export interface AlignerDeliverySummary {
   /** Lowest undelivered aligner; null once the series is complete. */
   nextAligner: number | null;
   isComplete: boolean;
+  /** Earliest date a delivery can carry ('YYYY-MM-DD'): the order's creation day. */
+  earliestDeliveryDate: string | null;
   /** The order status still allows recording deliveries. */
   acceptsDeliveries: boolean;
   /** The current user may record deliveries (admin or owning dentist). */
@@ -64,6 +66,7 @@ export const ALIGNER_DELIVERY_ERROR_CODES = [
   'ALIGNER_DELIVERY_OVERLAP',
   'ALIGNER_DELIVERY_DATE_INVALID',
   'ALIGNER_DELIVERY_DATE_IN_FUTURE',
+  'ALIGNER_DELIVERY_DATE_BEFORE_ORDER',
   'ORDER_NOT_DELIVERABLE',
 ] as const;
 

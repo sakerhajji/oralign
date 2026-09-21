@@ -127,6 +127,15 @@ export class AlignerDeliverySummaryDto {
   @ApiProperty() isComplete!: boolean;
 
   @ApiProperty({
+    type: String,
+    nullable: true,
+    example: '2026-08-31',
+    description:
+      'Earliest date a delivery can carry (YYYY-MM-DD): the day the order was created, anywhere on Earth.',
+  })
+  earliestDeliveryDate!: string | null;
+
+  @ApiProperty({
     description: 'The order status still allows recording deliveries.',
   })
   acceptsDeliveries!: boolean;

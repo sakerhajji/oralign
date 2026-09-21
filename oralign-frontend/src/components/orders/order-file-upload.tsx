@@ -1234,7 +1234,10 @@ function ClinicalMediaSlot({
     setReEditing(true);
     try {
       const blob = await fetchOriginalBlob(orderId, file.id);
-      const reconstructed = new File([blob], displayFileName(file), {
+      // The doctor's own filename, NOT the generated one: a generated
+      // name carries the raw category ("…_left-photo_004"), which the
+      // re-upload would then store behind its slot prefix.
+      const reconstructed = new File([blob], clientFileName(file), {
         type: blob.type || file.mimeType || 'image/jpeg',
       });
       setPendingFile(reconstructed);
@@ -1260,9 +1263,11 @@ function ClinicalMediaSlot({
     setCopying(true);
     try {
       const blob = await fetchOriginalBlob(orderId, file.id);
-      const ext = file.mimeType.split('/')[1] || 'jpg';
-      const safeTitle = title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-      const reconstructed = new File([blob], `${safeTitle}.${ext}`, {
+      // Keep the doctor's filename: naming the copy after the SOURCE slot
+      // title ("vue-laterale-droite") would put that slot's side on a
+      // photo pasted into another slot. The UI shows the backend's
+      // generated name anyway.
+      const reconstructed = new File([blob], clientFileName(file), {
         type: blob.type || file.mimeType || 'image/jpeg',
       });
       onClipboard({ file: reconstructed, sourceTitle: title });
@@ -3272,7 +3277,21 @@ function displayFileName(file: OrderFile) {
   // (no generatedName) fall back to the original with the slot prefix
   // stripped.
   if (file.generatedName) return file.generatedName;
-  return file.originalName.replace(/^[a-z0-9-]+__/i, '');
+  return stripSlotPrefix(file.originalName);
+}
+
+/** The upload-slot key the form prefixes onto originalName ("left-lateral__"). */
+function stripSlotPrefix(name: string) {
+  return name.replace(/^[a-z0-9-]+__/i, '');
+}
+
+/**
+ * The doctor's own filename (slot prefix removed) — what a re-upload of
+ * an existing file should be named, so it never inherits a generated
+ * name's category segment.
+ */
+function clientFileName(file: OrderFile) {
+  return stripSlotPrefix(file.originalName) || displayFileName(file);
 }
 
 function downloadOrderFile(orderId: string, file: OrderFile) {

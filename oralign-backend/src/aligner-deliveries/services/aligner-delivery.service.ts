@@ -7,11 +7,13 @@ import { PrismaService } from '../../prisma/prisma.service';
 import {
   ALIGNER_DELIVERY_ERROR,
   assertNoConflict,
+  assertNotBeforeOrder,
   assertOrderAcceptsDeliveries,
   assertRangeWellFormed,
   assertTotalCoversDeliveries,
   assertWithinTotal,
   countDelivered,
+  earliestDeliveryDate,
   firstUndelivered,
   formatRange,
   mergeRanges,
@@ -98,6 +100,7 @@ export class AlignerDeliveryService {
       await this.prisma.$transaction(async (tx) => {
         const order = await this.lockOrder(tx, orderId);
         assertOrderAcceptsDeliveries(order.status);
+        assertNotBeforeOrder(deliveredAt, order.createdAt);
 
         const total = resolveTotal(order.totalAligners, dto.totalAligners);
         assertWithinTotal(range, total);
@@ -192,7 +195,12 @@ export class AlignerDeliveryService {
     await tx.$queryRaw`SELECT id FROM "DentalOrder" WHERE id = ${orderId} FOR UPDATE`;
     const order = await tx.dentalOrder.findUnique({
       where: { id: orderId },
-      select: { status: true, totalAligners: true, deletedAt: true },
+      select: {
+        status: true,
+        totalAligners: true,
+        createdAt: true,
+        deletedAt: true,
+      },
     });
     if (!order || order.deletedAt) {
       throw new NotFoundException('Order not found');
@@ -207,7 +215,7 @@ export class AlignerDeliveryService {
     const [series, rows] = await Promise.all([
       this.prisma.dentalOrder.findUnique({
         where: { id: order.id },
-        select: { totalAligners: true },
+        select: { totalAligners: true, createdAt: true },
       }),
       this.prisma.alignerDelivery.findMany({
         where: { orderId: order.id },
@@ -218,6 +226,9 @@ export class AlignerDeliveryService {
     return buildSummary({
       orderId: order.id,
       totalAligners: series?.totalAligners ?? null,
+      earliestDeliveryDate: series
+        ? toIsoDate(earliestDeliveryDate(series.createdAt))
+        : null,
       rows,
       acceptsDeliveries: orderAcceptsDeliveries(order.status),
       canRecord: this.access.canRecordDelivery(order, caller),
@@ -232,6 +243,7 @@ export class AlignerDeliveryService {
 export function buildSummary(input: {
   orderId: string;
   totalAligners: number | null;
+  earliestDeliveryDate: string | null;
   rows: readonly DeliveryRow[];
   acceptsDeliveries: boolean;
   canRecord: boolean;
@@ -250,6 +262,7 @@ export function buildSummary(input: {
     deliveredRanges: mergeRanges(rows),
     nextAligner,
     isComplete: totalAligners !== null && nextAligner === null,
+    earliestDeliveryDate: input.earliestDeliveryDate,
     acceptsDeliveries: input.acceptsDeliveries,
     canRecord: input.canRecord,
     deliveries: rows.map((row) => ({

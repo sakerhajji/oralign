@@ -68,7 +68,8 @@ cleanup() {
   rm -rf "$TMP_DIR"
   echo
   echo "RESULT: $PASS passed, $FAIL failed"
-  [ "$FAIL" -eq 0 ]
+  # A bare test here would NOT set the script's exit status (EXIT trap).
+  [ "$FAIL" -eq 0 ] || exit 1
 }
 trap cleanup EXIT
 

@@ -1,4 +1,5 @@
 import * as path from 'path';
+import { OrderFileCategory } from '@prisma/client';
 
 /**
  * Upload slots and what they mean for the filenames a human sees.
@@ -35,6 +36,30 @@ function namesSide(token: string): boolean {
 }
 
 /**
+ * The side-bearing categories as generated names spell them ("left-photo",
+ * "right-photo" — order-files.service derives the segment with
+ * `category.replace(/_/g, '-')`), read off the enum so a future category
+ * is covered without touching this file.
+ */
+const SIDE_CATEGORY_TOKENS: ReadonlySet<string> = new Set(
+  Object.values(OrderFileCategory)
+    .map((category) => category.replace(/_/g, '-'))
+    .filter(namesSide),
+);
+
+/**
+ * Drop generated side segments from a `_`-separated name. They also turn
+ * up AFTER a slot prefix: re-editing a photo re-uploads it under its
+ * generated name ("left-lateral__Dr-X_Patient_left-photo_004.jpg").
+ */
+function dropSideCategorySegments(name: string): string {
+  const kept = name
+    .split('_')
+    .filter((part) => !SIDE_CATEGORY_TOKENS.has(part.toLowerCase()));
+  return kept.some((part) => part.length > 0) ? kept.join('_') : name;
+}
+
+/**
  * The file's name inside the lab ZIP (its folder is chosen separately,
  * from the category — see LAB_FOLDER_LABELS in order-export.service.ts).
  *
@@ -42,8 +67,9 @@ function namesSide(token: string): boolean {
  * mirrored convention (`left_photo` → "PHOTO DENTS DROITE"). Two internal
  * names used to restate it inside the file name — and name the OPPOSITE
  * side: the upload-slot key (`PHOTO DENTS DROITE/left-lateral__IMG.jpg`)
- * and, when there is no client name, the raw category segment of the
- * generated name (`…_left-photo_001.jpg`). Both are dropped here.
+ * and the raw category segment of a generated name (`…_left-photo_004.jpg`,
+ * which a re-edited photo carries even behind its slot prefix). Both are
+ * dropped here, for files already stored as well as new ones.
  *
  * Every other slot prefix is kept on purpose: it carries what the folder
  * cannot — upper vs lower STL scan, first vs second occlusion, the
@@ -59,22 +85,13 @@ export function labZipFileName(file: {
   const original = file.originalName?.trim();
   if (original) {
     const { slotKey, rest } = splitUploadSlot(original);
-    return slotKey && namesSide(slotKey) && rest.trim()
-      ? rest.trim()
-      : original;
+    const name =
+      slotKey && namesSide(slotKey) && rest.trim() ? rest.trim() : original;
+    return dropSideCategorySegments(name);
   }
 
   const generated = file.generatedName?.trim();
-  if (generated) {
-    // Same derivation as the generated name itself (order-files.service:
-    // `category.replace(/_/g, '-')`); fields are `_`-separated there.
-    const categoryToken = file.category.replace(/_/g, '-').toLowerCase();
-    if (!namesSide(categoryToken)) return generated;
-    const kept = generated
-      .split('_')
-      .filter((part) => part.toLowerCase() !== categoryToken);
-    return kept.length > 0 ? kept.join('_') : generated;
-  }
+  if (generated) return dropSideCategorySegments(generated);
 
   return path.basename(file.relativePath);
 }

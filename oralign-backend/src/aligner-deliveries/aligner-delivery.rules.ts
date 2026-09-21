@@ -34,6 +34,7 @@ export const ALIGNER_DELIVERY_ERROR = {
   OVERLAP: 'ALIGNER_DELIVERY_OVERLAP',
   DATE_INVALID: 'ALIGNER_DELIVERY_DATE_INVALID',
   DATE_IN_FUTURE: 'ALIGNER_DELIVERY_DATE_IN_FUTURE',
+  DATE_BEFORE_ORDER: 'ALIGNER_DELIVERY_DATE_BEFORE_ORDER',
   ORDER_NOT_DELIVERABLE: 'ORDER_NOT_DELIVERABLE',
 } as const;
 
@@ -161,10 +162,11 @@ export function assertRangeWellFormed(range: AlignerRange): void {
  */
 export function resolveTotal(
   storedTotal: number | null,
-  requestedTotal: number | undefined,
+  requestedTotal: number | null | undefined,
 ): number {
+  // An explicit null is "no value", exactly like an omitted field.
   if (storedTotal !== null) {
-    if (requestedTotal !== undefined && requestedTotal !== storedTotal) {
+    if (requestedTotal != null && requestedTotal !== storedTotal) {
       throw new BadRequestException(
         `This order's series is already set to ${storedTotal} aligners; correct it with the total endpoint instead.`,
         ALIGNER_DELIVERY_ERROR.TOTAL_ALREADY_SET,
@@ -172,7 +174,7 @@ export function resolveTotal(
     }
     return storedTotal;
   }
-  if (requestedTotal === undefined) {
+  if (requestedTotal == null) {
     throw new BadRequestException(
       'The total number of aligners is required for the first delivery of an order.',
       ALIGNER_DELIVERY_ERROR.TOTAL_REQUIRED,
@@ -242,23 +244,54 @@ export function assertTotalCoversDeliveries(
   }
 }
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+/**
+ * A delivery date is a CALENDAR date the clinic types in its local time,
+ * while the server clock is UTC. Civil time zones span UTC−12 to UTC+14,
+ * so the plausible window is exact rather than a blanket day of slack:
+ *   • latest   = the date it already is somewhere on Earth (now + 14 h);
+ *   • earliest = the date the order was created, as seen anywhere on
+ *                Earth (createdAt − 12 h) — no aligner is handed over
+ *                before its order exists, and a typo such as 0226-09-20
+ *                cannot slip through.
+ */
+const HOUR_MS = 60 * 60 * 1000;
+const WESTMOST_UTC_OFFSET_HOURS = -12;
+const EASTMOST_UTC_OFFSET_HOURS = 14;
+
+function utcCalendarDate(instant: Date): Date {
+  return new Date(
+    Date.UTC(
+      instant.getUTCFullYear(),
+      instant.getUTCMonth(),
+      instant.getUTCDate(),
+    ),
+  );
+}
+
+/** The latest calendar date that is already "today" somewhere on Earth. */
+export function latestDeliveryDate(now: Date): Date {
+  return utcCalendarDate(
+    new Date(now.getTime() + EASTMOST_UTC_OFFSET_HOURS * HOUR_MS),
+  );
+}
+
+/** The earliest calendar date a delivery of an order can carry. */
+export function earliestDeliveryDate(orderCreatedAt: Date): Date {
+  return utcCalendarDate(
+    new Date(orderCreatedAt.getTime() + WESTMOST_UTC_OFFSET_HOURS * HOUR_MS),
+  );
+}
 
 /**
- * Parse a delivery calendar date ('YYYY-MM-DD') to UTC midnight,
- * defaulting to today. Rejects impossible dates and dates in the future.
- * Clients send their LOCAL date while `now` is the server clock, so one
- * day of slack is allowed — without it a clinic east of UTC (Tunisia is
- * UTC+1) could not record "today" just after local midnight.
+ * Parse a delivery calendar date ('YYYY-MM-DD') to UTC midnight; an
+ * omitted (or null) date means today. Rejects impossible dates and dates
+ * that are not yet "today" anywhere on Earth.
  */
 export function parseDeliveryDate(
-  isoDate: string | undefined,
+  isoDate: string | null | undefined,
   now: Date,
 ): Date {
-  const today = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-  );
-  if (isoDate === undefined) return today;
+  if (isoDate == null) return utcCalendarDate(now);
 
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate);
   const parsed = match
@@ -274,11 +307,24 @@ export function parseDeliveryDate(
       ALIGNER_DELIVERY_ERROR.DATE_INVALID,
     );
   }
-  if (parsed.getTime() > today.getTime() + DAY_MS) {
+  if (parsed.getTime() > latestDeliveryDate(now).getTime()) {
     throw new BadRequestException(
       `A delivery cannot be dated in the future (${isoDate}).`,
       ALIGNER_DELIVERY_ERROR.DATE_IN_FUTURE,
     );
   }
   return parsed;
+}
+
+export function assertNotBeforeOrder(
+  deliveredAt: Date,
+  orderCreatedAt: Date,
+): void {
+  const earliest = earliestDeliveryDate(orderCreatedAt);
+  if (deliveredAt.getTime() < earliest.getTime()) {
+    throw new BadRequestException(
+      `A delivery cannot be dated before its order was created (${toIsoDate(earliest)}).`,
+      ALIGNER_DELIVERY_ERROR.DATE_BEFORE_ORDER,
+    );
+  }
 }

@@ -47,6 +47,7 @@ function makeWorld(
     status: over.status ?? OrderStatus.fabrication,
     totalAligners: over.totalAligners ?? null,
     deletedAt: over.deletedAt ?? null,
+    createdAt: new Date('2026-09-01T08:00:00.000Z'),
   };
   const rows: Row[] = [...(over.rows ?? [])];
 
@@ -319,6 +320,42 @@ describe('AlignerDeliveryService', () => {
       expect(create).not.toHaveBeenCalled();
     });
 
+    it('refuses a delivery dated before the order was created', async () => {
+      const { service, create } = makeWorld({ totalAligners: 20 });
+
+      await expect(
+        service.record(
+          'o1',
+          { fromAligner: 1, toAligner: 3, deliveredAt: '2026-08-15' },
+          owner,
+          NOW,
+        ),
+      ).rejects.toMatchObject({
+        statusCode: 400,
+        errorCode: ALIGNER_DELIVERY_ERROR.DATE_BEFORE_ORDER,
+      });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('accepts an explicit null total on a later delivery (same as omitted)', async () => {
+      const { service, create } = makeWorld({
+        totalAligners: 20,
+        rows: [persisted(1, 3, '2026-09-07')],
+      });
+      const summary = await service.record(
+        'o1',
+        {
+          fromAligner: 4,
+          toAligner: 7,
+          totalAligners: null as unknown as undefined,
+        },
+        owner,
+        NOW,
+      );
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(summary.deliveredCount).toBe(7);
+    });
+
     it('maps a unique-index race (P2002) to a 409 duplicate', async () => {
       const { service, create } = makeWorld({ totalAligners: 20 });
       create.mockRejectedValueOnce(
@@ -391,6 +428,7 @@ describe('AlignerDeliveryService', () => {
         deliveredRanges: [],
         nextAligner: 1,
         isComplete: false,
+        earliestDeliveryDate: '2026-08-31',
         acceptsDeliveries: true,
         canRecord: true,
         deliveries: [],

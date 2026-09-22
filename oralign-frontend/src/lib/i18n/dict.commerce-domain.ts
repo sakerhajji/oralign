@@ -4,6 +4,48 @@ type T = Record<Lang, string>;
 
 /** Quote/fee dialogs, zip dialog, new-order page, my-payments, users admin — spread into dict. */
 export const commerceDomainDict = {
+  // ─── Searchable pack picker (components/billing/pack-picker.tsx) ──
+  // Shared by the quote "attach pack" card and the invoice editor.
+  packPicker: {
+    placeholder: { en: 'Choose a pack and an arcade mode…', fr: 'Choisir un pack et un mode d’arcade…' } as T,
+    loading: { en: 'Loading packs…', fr: 'Chargement des packs…' } as T,
+    searchPlaceholder: {
+      en: 'Search by name, arcade or price…',
+      fr: 'Rechercher par nom, arcade ou prix…',
+    } as T,
+    clearSearch: { en: 'Clear search', fr: 'Effacer la recherche' } as T,
+    listLabel: { en: 'Pack catalogue', fr: 'Catalogue des packs' } as T,
+    resultCount: { en: 'Options: {count}', fr: 'Options : {count}' } as T,
+    navigate: { en: 'navigate', fr: 'naviguer' } as T,
+    choose: { en: 'select', fr: 'choisir' } as T,
+    noMatch: { en: 'No pack matches “{query}”', fr: 'Aucun pack ne correspond à « {query} »' } as T,
+    noMatchHint: {
+      en: 'Try a shorter word, an arcade (“single”) or a price.',
+      fr: 'Essayez un mot plus court, une arcade (« unique ») ou un prix.',
+    } as T,
+    emptyCatalogue: { en: 'No active pack with a price', fr: 'Aucun pack actif avec un prix' } as T,
+    emptyCatalogueHint: {
+      en: 'Create or activate one in Packs first.',
+      fr: 'Créez ou activez-en un d’abord dans Packs.',
+    } as T,
+    loadError: { en: 'Could not load the packs.', fr: 'Impossible de charger les packs.' } as T,
+    retry: { en: 'Retry', fr: 'Réessayer' } as T,
+    orthodontists: { en: 'Orthodontists', fr: 'Orthodontistes' } as T,
+    stepsUnlimited: { en: 'Unlimited aligners', fr: 'Aligneurs illimités' } as T,
+    steps: { en: '{count} aligners / arch', fr: '{count} aligneurs / arcade' } as T,
+    refinementsUnlimited: { en: 'Unlimited refinements', fr: 'Corrections illimitées' } as T,
+    refinements: { en: '{count} refinements', fr: '{count} corrections' } as T,
+    validity: { en: 'Valid for {period}', fr: 'Validité {period}' } as T,
+    // invoice-editor.tsx
+    addPack: { en: 'Add a pack', fr: 'Ajouter un pack' } as T,
+    invoiceLine: { en: '{name} pack — {arch}', fr: 'Pack {name} — {arch}' } as T,
+    packAdded: { en: 'Pack line added', fr: 'Ligne du pack ajoutée' } as T,
+    packAddedHint: {
+      en: 'Unit price excl. VAT derived from the {price} pack price at {rate} % VAT.',
+      fr: 'Prix unitaire HT déduit du prix du pack ({price} TTC) à {rate} % de TVA.',
+    } as T,
+  },
+
   // ─── Quote surface (quote-review.tsx + quote-pack-panel.tsx) ─────
   quoteUi: {
     // quote-pack-panel.tsx — admin "attach pack" card

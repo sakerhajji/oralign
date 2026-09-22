@@ -2,7 +2,16 @@
 
 import * as React from 'react';
 import { useDebounce } from 'use-debounce';
-import { Loader2Icon, PlusIcon, SearchIcon, Trash2Icon, XIcon } from 'lucide-react';
+import { toast } from 'sonner';
+import {
+  Loader2Icon,
+  PackageIcon,
+  PlusIcon,
+  SearchIcon,
+  Trash2Icon,
+  XIcon,
+} from 'lucide-react';
+import { PackPicker, type PackSelection } from '@/components/billing/pack-picker';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -23,6 +32,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { pickLocalized } from '@/lib/api/blog.service';
+import { translate } from '@/lib/i18n/dict';
 import { useT } from '@/lib/i18n/lang-context';
 import {
   useCreateInvoice,
@@ -30,7 +41,9 @@ import {
   useInvoiceClientSearch,
   useUpdateInvoice,
 } from '@/lib/hooks';
+import { formatPrice } from '@/lib/utils/currency';
 import {
+  ArchType,
   InvoiceStatus,
   type CreateInvoiceInput,
   type Invoice,
@@ -242,6 +255,43 @@ export function InvoiceEditorDialog({
         unitPrice: amount,
       });
       return next.length > 0 ? next : [blankLine()];
+    });
+  };
+
+  /**
+   * Append a line for a catalogue pack. A pack price is what the
+   * practitioner pays (TTC) while invoice lines are HT, so the unit price
+   * is derived backwards at the invoice VAT rate — as the automatic
+   * payment invoices do — and the line lands on the pack price. The label
+   * is written in the invoice's language, not the dashboard's.
+   */
+  const addPackLine = ({ pack, price }: PackSelection) => {
+    const docLang = form.language;
+    const name = pickLocalized(pack.nameI18n ?? pack.name, docLang) || pack.name;
+    const arch = translate(
+      price.archType === ArchType.ONE_ARCH
+        ? 'quoteUi.attachPack.singleArch'
+        : 'quoteUi.attachPack.twoArches',
+      docLang,
+    );
+    const ttc = n(price.price);
+    const rate = Number.isFinite(form.tvaRate)
+      ? Math.max(0, Math.min(100, form.tvaRate))
+      : 0;
+    const unitPrice = Math.round((ttc / (1 + rate / 100)) * 1000) / 1000;
+    setLines((prev) => [
+      ...prev.filter((l) => l.description.trim() !== ''),
+      {
+        description: translate('packPicker.invoiceLine', docLang, { name, arch }),
+        quantity: 1,
+        unitPrice,
+      },
+    ]);
+    toast.success(t('packPicker.packAdded'), {
+      description: t('packPicker.packAddedHint', {
+        price: formatPrice(ttc, price.currency),
+        rate,
+      }),
     });
   };
 
@@ -531,14 +581,26 @@ export function InvoiceEditorDialog({
           <section className="space-y-2">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold">{t('invoicesAdmin.linesSection')}</h3>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setLines((prev) => [...prev, blankLine()])}
-              >
-                <PlusIcon className="mr-2 size-4" />
-                {t('invoicesAdmin.addLine')}
-              </Button>
+              <div className="flex flex-wrap justify-end gap-2">
+                <PackPicker
+                  align="end"
+                  onSelect={addPackLine}
+                  trigger={
+                    <Button type="button" variant="outline" size="sm">
+                      <PackageIcon className="mr-2 size-4" />
+                      {t('packPicker.addPack')}
+                    </Button>
+                  }
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setLines((prev) => [...prev, blankLine()])}
+                >
+                  <PlusIcon className="mr-2 size-4" />
+                  {t('invoicesAdmin.addLine')}
+                </Button>
+              </div>
             </div>
 
             <div className="space-y-2">

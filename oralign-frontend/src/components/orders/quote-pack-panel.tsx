@@ -57,13 +57,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { PackPicker, packFeatures } from '@/components/billing/pack-picker';
 import {
   Dialog,
   DialogContent,
@@ -250,19 +244,20 @@ function AttachPackCard({
   const packsQ = usePacks({ limit: 100 });
   const attach = useAttachPackToQuotation();
   // Prefill from the current snapshot when editing so the admin sees the
-  // pack / arcade mode they're changing FROM.
+  // pack / arcade mode they're changing FROM. A first attach starts empty:
+  // the pack sets the quote's price, so it must be an explicit choice.
   const [packId, setPackId] = useState<string>(quote.packId ?? '');
   const [archMode, setArchMode] = useState<ArchType>(
     quote.archType ?? ArchType.TWO_ARCHES,
   );
 
-  const activePacks = (packsQ.data?.data ?? []).filter((p) => p.isActive);
-  const effectiveId = packId || activePacks[0]?.id || '';
-  const selectedPack = activePacks.find((p) => p.id === effectiveId);
+  const selectedPack = (packsQ.data?.data ?? []).find(
+    (p) => p.id === packId && p.isActive,
+  );
 
-  // Arch-based pricing: the admin picks the arcade mode; each mode maps to
-  // its own active PackPrice. "Single arch" is only available when the
-  // pack actually has an active single-arch price.
+  // Arch-based pricing: each arcade mode maps to its own active PackPrice.
+  // "Single arch" is only available when the pack has an active
+  // single-arch price.
   const activePrices = (selectedPack?.prices ?? []).filter((p) => p.isActive);
   const twoPrice =
     activePrices.find((p) => p.archType === ArchType.TWO_ARCHES) ?? null;
@@ -281,17 +276,36 @@ function AttachPackCard({
         : archMode;
   const activePrice =
     effectiveArch === ArchType.ONE_ARCH ? singlePrice : twoPrice;
+  const features = selectedPack ? packFeatures(selectedPack, t, lang) : [];
+  // Re-submitting the pack + arcade the quote already has is a no-op.
+  const unchanged =
+    !!editing &&
+    selectedPack?.id === quote.packId &&
+    effectiveArch === quote.archType;
 
   const submit = () => {
-    if (!effectiveId || !activePrice) return;
+    if (!selectedPack || !activePrice) return;
     attach.mutate(
       {
         quotationId: quote.id,
-        dto: { packId: effectiveId, archType: effectiveArch },
+        dto: { packId: selectedPack.id, archType: effectiveArch },
       },
       { onSuccess: () => onAttached?.() },
     );
   };
+
+  const archOptions = [
+    {
+      arch: ArchType.TWO_ARCHES,
+      label: t('quoteUi.attachPack.twoArches'),
+      price: twoPrice,
+    },
+    {
+      arch: ArchType.ONE_ARCH,
+      label: t('quoteUi.attachPack.singleArch'),
+      price: singlePrice,
+    },
+  ];
 
   return (
     <Card size="sm">
@@ -304,93 +318,77 @@ function AttachPackCard({
           {t('quoteUi.attachPack.desc')}
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-3">
-        {/* Row 1 — pack + its active price, side by side so the number
-            reads right next to the selection. */}
-        <div className="grid gap-3 sm:grid-cols-3">
-          <div className="grid gap-1.5 sm:col-span-2">
-            <Label className="text-xs font-medium text-muted-foreground">
-              {t('quoteUi.attachPack.packLabel')}
-            </Label>
-            <Select value={effectiveId} onValueChange={setPackId}>
-              <SelectTrigger className="h-10">
-                <SelectValue
-                  placeholder={t('quoteUi.attachPack.packPlaceholder')}
-                />
-              </SelectTrigger>
-              <SelectContent>
-                {activePacks.length === 0 ? (
-                  <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                    {t('quoteUi.attachPack.noActivePack')}
-                  </div>
-                ) : (
-                  activePacks.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {pickLocalized(p.nameI18n ?? p.name, lang) || p.name}
-                    </SelectItem>
-                  ))
-                )}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid gap-1.5">
-            <Label className="text-xs font-medium text-muted-foreground">
-              {t('quoteUi.attachPack.activePrice')}
-            </Label>
-            <div className="flex h-10 items-center rounded-md border bg-muted/40 px-3">
-              {selectedPack ? (
-                activePrice ? (
-                  <span className="text-base font-semibold tabular-nums">
-                    {money(activePrice.price, activePrice.currency)}
-                  </span>
-                ) : (
-                  <span className="text-sm text-destructive">
-                    {t('quoteUi.attachPack.noActivePrice')}
-                  </span>
-                )
-              ) : (
-                <span className="text-muted-foreground">—</span>
-              )}
+      <CardContent className="space-y-4">
+        {/* Searchable catalogue — one option per (pack, arcade price), so a
+            single pick settles both. */}
+        <div className="grid gap-1.5">
+          <Label className="text-xs font-medium text-muted-foreground">
+            {t('quoteUi.attachPack.packLabel')}
+          </Label>
+          <PackPicker
+            value={
+              selectedPack
+                ? { packId: selectedPack.id, archType: effectiveArch }
+                : null
+            }
+            onSelect={({ pack, price }) => {
+              setPackId(pack.id);
+              setArchMode(price.archType);
+            }}
+            disabled={attach.isPending}
+          />
+          {features.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              {features.map((feature) => (
+                <span
+                  key={feature}
+                  className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground"
+                >
+                  {feature}
+                </span>
+              ))}
             </div>
-          </div>
+          ) : null}
         </div>
 
-        {/* Row 2 — arcade mode + the primary Attach action on the same
-            line, so the CTA sits right beside the choice it commits. */}
+        {/* Arcade mode — quick switch between the pack's prices, with the
+            primary action on the same line as the choice it commits. */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div className="grid gap-1.5">
             <Label className="text-xs font-medium text-muted-foreground">
               {t('quoteUi.attachPack.archModeLabel')}
             </Label>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                variant={
-                  effectiveArch === ArchType.TWO_ARCHES ? 'default' : 'outline'
-                }
-                disabled={!hasTwo}
-                onClick={() => setArchMode(ArchType.TWO_ARCHES)}
-                className="h-10"
-              >
-                {t('quoteUi.attachPack.twoArches')}
-                {twoPrice
-                  ? ` · ${money(twoPrice.price, twoPrice.currency)}`
-                  : ''}
-              </Button>
-              <Button
-                type="button"
-                variant={
-                  effectiveArch === ArchType.ONE_ARCH ? 'default' : 'outline'
-                }
-                disabled={!hasSingle}
-                onClick={() => hasSingle && setArchMode(ArchType.ONE_ARCH)}
-                className="h-10"
-              >
-                {t('quoteUi.attachPack.singleArch')}
-                {singlePrice
-                  ? ` · ${money(singlePrice.price, singlePrice.currency)}`
-                  : ''}
-              </Button>
+            <div
+              role="radiogroup"
+              aria-label={t('quoteUi.attachPack.archModeLabel')}
+              className="inline-flex w-full rounded-lg border bg-muted/40 p-1 sm:w-auto"
+            >
+              {archOptions.map(({ arch, label, price }) => {
+                const checked = !!selectedPack && effectiveArch === arch;
+                return (
+                  <button
+                    key={arch}
+                    type="button"
+                    role="radio"
+                    aria-checked={checked}
+                    disabled={!price || attach.isPending}
+                    onClick={() => setArchMode(arch)}
+                    className={cn(
+                      'flex flex-1 flex-col items-start rounded-md px-3 py-1.5 text-left transition-colors sm:min-w-[9.5rem]',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                      'disabled:cursor-not-allowed disabled:opacity-50',
+                      checked
+                        ? 'bg-background shadow-sm ring-1 ring-border'
+                        : 'text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    <span className="text-xs font-medium">{label}</span>
+                    <span className="text-sm font-semibold tabular-nums">
+                      {price ? money(price.price, price.currency) : '—'}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
           <div className="flex gap-2">
@@ -407,10 +405,16 @@ function AttachPackCard({
             ) : null}
             <Button
               onClick={submit}
-              disabled={!effectiveId || !activePrice || attach.isPending}
+              disabled={
+                !selectedPack || !activePrice || unchanged || attach.isPending
+              }
               className="h-10 min-w-[150px] gap-2"
             >
-              <Package className="h-4 w-4" />
+              {attach.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Package className="h-4 w-4" />
+              )}
               {editing
                 ? t('quoteUi.attachPack.updateBtn')
                 : t('quoteUi.attachPack.attachBtn')}

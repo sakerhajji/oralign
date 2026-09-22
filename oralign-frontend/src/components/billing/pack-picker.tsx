@@ -46,7 +46,9 @@ interface PackOption {
   price: PackPrice;
   archLabel: string;
   priceLabel: string;
-  /** Accent-folded text the search runs against. */
+  /** Accent-folded name, arcade and price: what a query is usually about. */
+  primary: string;
+  /** `primary` plus description and facts: everything a query may match. */
   haystack: string;
 }
 
@@ -124,7 +126,7 @@ function buildPackGroups(
         .sort(
           (a, b) => ARCH_ORDER.indexOf(a.archType) - ARCH_ORDER.indexOf(b.archType),
         );
-      const groupText = [name, pack.name, description, ...features].join(' ');
+      const detailText = foldForSearch([description, ...features].join(' '));
       const options = prices.map((price): PackOption => {
         const archLabel =
           price.archType === ArchType.ONE_ARCH
@@ -132,15 +134,17 @@ function buildPackGroups(
             : t('quoteUi.attachPack.twoArches');
         const priceLabel = formatPrice(price.price, price.currency);
         const amount = Number(price.price);
+        const primary = foldForSearch(
+          `${name} ${pack.name} ${archLabel} ${ARCH_SEARCH_TERMS[price.archType] ?? ''} ${priceLabel} ${amount} ${Math.round(amount)}`,
+        );
         return {
           id: price.id,
           pack,
           price,
           archLabel,
           priceLabel,
-          haystack: foldForSearch(
-            `${groupText} ${archLabel} ${ARCH_SEARCH_TERMS[price.archType] ?? ''} ${priceLabel} ${amount} ${Math.round(amount)}`,
-          ),
+          primary,
+          haystack: `${primary} ${detailText}`,
         };
       });
       return {
@@ -201,17 +205,28 @@ export function PackPicker({
   );
   const allOptions = useMemo(() => groups.flatMap((g) => g.options), [groups]);
 
+  // Every token must match somewhere; hits on the name / arcade / price
+  // rank above hits found only in the description ("leger" lists Léger
+  // before a pack described as "corrections légères").
   const visibleGroups = useMemo(() => {
     const tokens = foldForSearch(query).split(/\s+/).filter(Boolean);
     if (tokens.length === 0) return groups;
+    const score = (option: PackOption) =>
+      tokens.filter((token) => option.primary.includes(token)).length;
     return groups
-      .map((group) => ({
-        ...group,
-        options: group.options.filter((option) =>
-          tokens.every((token) => option.haystack.includes(token)),
-        ),
-      }))
-      .filter((group) => group.options.length > 0);
+      .map((group) => {
+        const ranked = group.options
+          .filter((option) => tokens.every((token) => option.haystack.includes(token)))
+          .map((option) => ({ option, score: score(option) }))
+          .sort((a, b) => b.score - a.score);
+        return {
+          group: { ...group, options: ranked.map((r) => r.option) },
+          score: ranked[0]?.score ?? 0,
+        };
+      })
+      .filter(({ group }) => group.options.length > 0)
+      .sort((a, b) => b.score - a.score)
+      .map(({ group }) => group);
   }, [groups, query]);
   const visibleOptions = useMemo(
     () => visibleGroups.flatMap((g) => g.options),
@@ -386,7 +401,10 @@ export function PackPicker({
                 </div>
               ))}
             </div>
-          ) : packsQ.isError ? (
+          ) : packsQ.isError && !packsQ.data ? (
+            // Only when nothing is cached: `usePacks` refetches on every
+            // mount, and a failed background refresh must not hide a list
+            // that is still perfectly usable.
             <EmptyState
               title={t('packPicker.loadError')}
               action={

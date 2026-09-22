@@ -46,6 +46,81 @@ export const commerceDomainDict = {
     } as T,
   },
 
+  // ─── Admin quote editor layout (quote-review.tsx, quote-pack-panel.tsx)
+  quoteEditor: {
+    createDesc: {
+      en: 'Choose the pack and the PDF language. You set adjustments and the payment plan next.',
+      fr: 'Choisissez le pack et la langue du PDF. Les ajustements et le plan de paiement viennent ensuite.',
+    } as T,
+    packStep: { en: 'Pack', fr: 'Pack' } as T,
+    packStepDesc: {
+      en: 'Its price is locked on the quote when you attach it.',
+      fr: 'Son prix est figé sur le devis au moment où vous l’associez.',
+    } as T,
+    change: { en: 'Change', fr: 'Modifier' } as T,
+    changeWipesPlan: {
+      en: 'Changing the pack resets the payment plan.',
+      fr: 'Changer de pack réinitialise le plan de paiement.',
+    } as T,
+    needsPack: { en: 'Choose a pack first.', fr: 'Choisissez d’abord un pack.' } as T,
+    adjustStep: { en: 'Adjustments', fr: 'Ajustements' } as T,
+    adjustStepDesc: {
+      en: 'Delivery fees and discount, applied to the pack price.',
+      fr: 'Frais de livraison et remise, appliqués au prix du pack.',
+    } as T,
+    optional: { en: 'optional', fr: 'facultatif' } as T,
+    deliveryFees: { en: 'Delivery fees', fr: 'Frais de livraison' } as T,
+    discount: { en: 'Discount', fr: 'Remise' } as T,
+    adjustWipesPlan: {
+      en: 'Saving a new total resets the payment plan.',
+      fr: 'Enregistrer un nouveau total réinitialise le plan de paiement.',
+    } as T,
+    saveBeforePlan: {
+      en: 'Save before setting the payment plan.',
+      fr: 'Enregistrez avant de définir le plan de paiement.',
+    } as T,
+    planStep: { en: 'Payment', fr: 'Paiement' } as T,
+    planStepDesc: {
+      en: 'Collect {total} at once or in tranches. Each paid tranche unlocks its aligners.',
+      fr: 'Encaissez {total} en une fois ou en plusieurs échéances. Chaque échéance payée débloque ses aligneurs.',
+    } as T,
+    planViewDesc: {
+      en: 'Collect the tranches and deliver the aligners they unlock. Bank transfers arrive in',
+      fr: 'Encaissez les échéances et livrez les aligneurs qu’elles débloquent. Les virements arrivent dans',
+    } as T,
+    pendingTransfers: { en: 'pending payments', fr: 'les paiements en attente' } as T,
+    notesTitle: { en: 'Notes', fr: 'Notes' } as T,
+    notesDesc: {
+      en: 'Shown to the practitioner and printed on the PDF.',
+      fr: 'Visibles par le praticien et imprimées sur le PDF.',
+    } as T,
+    notesAdd: { en: 'Add', fr: 'Ajouter' } as T,
+    notesHide: { en: 'Hide', fr: 'Masquer' } as T,
+    pdfLanguage: { en: 'PDF language', fr: 'Langue du PDF' } as T,
+    quoteLabel: { en: 'Quote', fr: 'Devis' } as T,
+    order: { en: 'Order {code}', fr: 'Commande {code}' } as T,
+    created: { en: 'created {date}', fr: 'créé le {date}' } as T,
+    sentOn: { en: 'Sent {date}', fr: 'Envoyé le {date}' } as T,
+    noPack: { en: 'No pack yet', fr: 'Aucun pack' } as T,
+    unsaved: { en: 'Unsaved changes', fr: 'Modifications non enregistrées' } as T,
+    downloadPdf: { en: 'Download PDF', fr: 'Télécharger le PDF' } as T,
+    sendNeedsPack: {
+      en: 'Choose a pack to send the quote.',
+      fr: 'Choisissez un pack pour envoyer le devis.',
+    } as T,
+    sendNeedsPlan: {
+      en: 'Set the payment plan to send the quote.',
+      fr: 'Définissez le plan de paiement pour envoyer le devis.',
+    } as T,
+    cancelQuote: { en: 'Cancel quote', fr: 'Annuler le devis' } as T,
+    cancelTitle: { en: 'Cancel this quote?', fr: 'Annuler ce devis ?' } as T,
+    cancelDesc: {
+      en: 'The quote is closed and can no longer be paid. You can create a new one afterwards.',
+      fr: 'Le devis est clôturé et ne peut plus être payé. Vous pourrez en créer un nouveau ensuite.',
+    } as T,
+    keepQuote: { en: 'Keep it', fr: 'Conserver' } as T,
+  },
+
   // ─── Quote surface (quote-review.tsx + quote-pack-panel.tsx) ─────
   quoteUi: {
     // quote-pack-panel.tsx — admin "attach pack" card

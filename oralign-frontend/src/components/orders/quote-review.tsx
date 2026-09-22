@@ -1,27 +1,29 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
-import { format } from 'date-fns';
+import { useId, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
+import { Download, Globe, Loader2, RotateCcw, Send } from 'lucide-react';
 import {
-  Calendar,
-  Check,
-  ChevronDown,
-  ChevronUp,
-  Download,
-  FileText,
-  Globe,
-  Loader2,
-  RotateCcw,
-  Send,
-  Sparkles,
-  Trash2,
-  User as UserIcon,
-} from 'lucide-react';
+  PackChoiceFields,
+  useResolvedPackChoice,
+  type PackChoice,
+} from '@/components/billing/pack-choice';
+import { archLabel, packName } from '@/components/billing/pack-picker';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
+import { Card, CardContent } from '@/components/ui/card';
+import { DecimalInput } from '@/components/ui/decimal-input';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -32,13 +34,10 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+import { formatTimestampDay } from '@/lib/utils/calendar-date';
+import { formatPrice } from '@/lib/utils/currency';
 import { useT } from '@/lib/i18n/lang-context';
 import { quotationsService } from '@/lib/api/quotations.service';
-// Approve / Reject hooks were removed alongside the doctor's Approve
-// / Reject card — paying the first installment now implicitly
-// approves the quote on the backend. The admin's quote view in this
-// file uses Cancel + Revert-to-draft for the equivalent "no longer
-// valid" affordance, so those stay imported.
 import {
   useCancelQuotation,
   useCreateQuotation,
@@ -48,17 +47,18 @@ import {
   useSendQuotation,
   useUpdateQuotation,
 } from '@/lib/hooks/use-quotations';
+import { useAttachPackToQuotation } from '@/lib/hooks/use-quotation-payment-plan';
 import { useCompanyBilling } from '@/lib/hooks/use-company-billing';
 import { useOrder } from '@/lib/hooks/use-orders';
 import {
+  ArchType,
   DevisLanguage,
   type Quotation,
   QuotationStatus,
   UserRole,
 } from '@/lib/types';
 import { QuotePackPanel } from './quote-pack-panel';
-
-// ─── Visual tokens ────────────────────────────────────────────────────────
+import { QuoteStep } from './quote-step';
 
 interface Props {
   orderId: string;
@@ -89,17 +89,7 @@ const LANG_LABEL: Record<DevisLanguage, string> = {
   [DevisLanguage.AR]: 'العربية',
 };
 
-function formatMoney(amount: number, currency: string): string {
-  const formatted = Math.abs(amount).toLocaleString('fr-FR', {
-    minimumFractionDigits: 3,
-    maximumFractionDigits: 3,
-  });
-  const signed = amount < 0 ? `-${formatted}` : formatted;
-  return `${signed} ${currency}`;
-}
-
-const dateOrDash = (iso?: string | null) =>
-  iso ? format(new Date(iso), 'MMM d, yyyy') : '—';
+const LANGUAGES = [DevisLanguage.FR, DevisLanguage.EN, DevisLanguage.AR];
 
 // ─────────────────────────────────────────────────────────────────────────
 // Entry point
@@ -112,30 +102,21 @@ export function QuoteReview({ orderId, role }: Props) {
 
   const { data: quote, isLoading } = useQuotationForOrder(orderId);
   const { data: settings } = useCompanyBilling(isAdmin);
-  // Order fetch is shared by both admin + doctor — we use it for the
-  // patient name + creation date in the new header. It's already in
-  // the React-Query cache after the page's main order query, so this
-  // is effectively free.
+  // Order fetch is shared by both admin + doctor — used for the patient
+  // name and order code. It's already in the React-Query cache after the
+  // page's main order query, so this is effectively free.
   const { data: order } = useOrder(orderId);
 
   if (!isAdmin && !isDoctor) {
-    return (
-      <Card>
-        <CardContent className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">
-          {t('quoteUi.review.notPartOfWorkflow')}
-        </CardContent>
-      </Card>
-    );
+    return <EmptyCard>{t('quoteUi.review.notPartOfWorkflow')}</EmptyCard>;
   }
 
   if (isLoading) {
     return (
-      <Card>
-        <CardContent className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">
-          <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-          {t('quoteUi.review.loading')}
-        </CardContent>
-      </Card>
+      <EmptyCard>
+        <Loader2 className="mr-2 size-5 animate-spin" />
+        {t('quoteUi.review.loading')}
+      </EmptyCard>
     );
   }
 
@@ -149,22 +130,13 @@ export function QuoteReview({ orderId, role }: Props) {
   }
 
   if (!quote) {
-    return (
-      <Card>
-        <CardContent className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">
-          {t('quoteUi.review.noQuoteYet')}
-        </CardContent>
-      </Card>
-    );
+    return <EmptyCard>{t('quoteUi.review.noQuoteYet')}</EmptyCard>;
   }
 
   const patientName =
     order?.patient?.fullName ?? t('quoteUi.review.patientFallback');
   const orderCode = order?.orderCode ?? '';
 
-  // Both roles get the same header → controls → pack panel → footer
-  // structure. The pack panel is the centerpiece; the admin's controls
-  // shrink to one compact row (language + optional discount + notes).
   return isAdmin ? (
     <AdminLayout
       key={`${quote.id}:${quote.updatedAt ?? quote.status}`}
@@ -183,8 +155,73 @@ export function QuoteReview({ orderId, role }: Props) {
   );
 }
 
+function EmptyCard({ children }: { children: ReactNode }) {
+  return (
+    <Card>
+      <CardContent className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">
+        {children}
+      </CardContent>
+    </Card>
+  );
+}
+
+function StatusBadge({ status }: { status: QuotationStatus }) {
+  const { t } = useT();
+  return (
+    <Badge variant="outline" className={cn('shrink-0 text-xs', STATUS_TONE[status])}>
+      {t(STATUS_LABEL_KEY[status])}
+    </Badge>
+  );
+}
+
+function LanguageSelect({
+  id,
+  value,
+  onChange,
+  disabled,
+}: {
+  id?: string;
+  value: DevisLanguage;
+  onChange: (language: DevisLanguage) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <Select
+      value={value}
+      onValueChange={(v) => onChange(v as DevisLanguage)}
+      disabled={disabled}
+    >
+      <SelectTrigger id={id} className="w-full">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {LANGUAGES.map((language) => (
+          <SelectItem key={language} value={language}>
+            {LANG_LABEL[language]}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+/** "Order ORD-… · created 18 Sept 2026" — the quote's context line. */
+function quoteContext(
+  quote: Quotation,
+  orderCode: string,
+  t: ReturnType<typeof useT>['t'],
+  lang: ReturnType<typeof useT>['lang'],
+): string {
+  return [
+    orderCode ? t('quoteEditor.order', { code: orderCode }) : null,
+    t('quoteEditor.created', { date: formatTimestampDay(quote.createdAt, lang) }),
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
 // ─────────────────────────────────────────────────────────────────────────
-// Shared header — patient + dates + status
+// Shared header — doctor view
 // ─────────────────────────────────────────────────────────────────────────
 
 function QuoteHeader({
@@ -198,76 +235,40 @@ function QuoteHeader({
   orderCode: string;
   rightSlot?: ReactNode;
 }) {
-  const { t } = useT();
+  const { t, lang } = useT();
+  const milestones = [
+    quote.sentAt ? t('quoteUi.review.sentDate', { date: formatTimestampDay(quote.sentAt, lang) }) : null,
+    quote.approvedAt
+      ? t('quoteUi.review.approvedDate', { date: formatTimestampDay(quote.approvedAt, lang) })
+      : null,
+    quote.rejectedAt
+      ? t('quoteUi.review.rejectedDate', { date: formatTimestampDay(quote.rejectedAt, lang) })
+      : null,
+  ].filter(Boolean);
   return (
-    <Card className="overflow-hidden">
-      <div className="bg-gradient-to-r from-primary/8 via-primary/4 to-transparent">
-        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
-              <UserIcon className="h-3 w-3" />
-              {t('quoteUi.review.patient')}
-            </div>
-            <h2 className="mt-0.5 break-words text-2xl font-semibold tracking-tight">
-              {patientName}
-            </h2>
-            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-              {orderCode ? (
-                <span className="flex items-center gap-1">
-                  <FileText className="h-3 w-3" />
-                  {t('quoteUi.review.orderNum', { code: orderCode })}
-                </span>
-              ) : null}
-              <span className="flex items-center gap-1">
-                <Calendar className="h-3 w-3" />
-                {t('quoteUi.review.createdDate', {
-                  date: dateOrDash(quote.createdAt),
-                })}
-              </span>
-              {quote.sentAt ? (
-                <span>
-                  {t('quoteUi.review.sentDate', {
-                    date: dateOrDash(quote.sentAt),
-                  })}
-                </span>
-              ) : null}
-              {quote.approvedAt ? (
-                <span>
-                  {t('quoteUi.review.approvedDate', {
-                    date: dateOrDash(quote.approvedAt),
-                  })}
-                </span>
-              ) : null}
-              {quote.rejectedAt ? (
-                <span>
-                  {t('quoteUi.review.rejectedDate', {
-                    date: dateOrDash(quote.rejectedAt),
-                  })}
-                </span>
-              ) : null}
-            </div>
-          </div>
-          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end [&>button]:h-9 [&>button]:w-full sm:[&>button]:w-auto">
-            <Badge
-              variant="outline"
-              className={cn('text-xs', STATUS_TONE[quote.status])}
-            >
-              {t(STATUS_LABEL_KEY[quote.status])}
-            </Badge>
-            <Badge variant="outline" className="text-xs">
-              <Globe className="mr-1 h-3 w-3" />
-              {LANG_LABEL[quote.language]}
-            </Badge>
-            {rightSlot}
-          </div>
-        </CardContent>
-      </div>
+    <Card>
+      <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h2 className="text-xl font-semibold tracking-tight break-words">{patientName}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {[quoteContext(quote, orderCode, t, lang), ...milestones].join(' · ')}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+          <StatusBadge status={quote.status} />
+          <Badge variant="outline" className="gap-1 text-xs">
+            <Globe className="size-3" />
+            {LANG_LABEL[quote.language]}
+          </Badge>
+          {rightSlot}
+        </div>
+      </CardContent>
     </Card>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Admin: empty-state create form
+// Admin: new quote — pack and language in one go
 // ─────────────────────────────────────────────────────────────────────────
 
 function AdminCreate({
@@ -279,68 +280,69 @@ function AdminCreate({
 }) {
   const { t } = useT();
   const create = useCreateQuotation();
+  const attach = useAttachPackToQuotation();
+  const languageId = useId();
   const [language, setLanguage] = useState<DevisLanguage>(DevisLanguage.FR);
+  const [choice, setChoice] = useState<PackChoice | null>(null);
+  const resolved = useResolvedPackChoice(choice);
+  const pending = create.isPending || attach.isPending;
+
+  const submit = async () => {
+    if (!resolved?.price) return;
+    try {
+      const quote = await create.mutateAsync({
+        orderId,
+        // VAT stays at the billing-settings default; the pack sets the price.
+        dto: { language, currency: defaultCurrency },
+      });
+      await attach.mutateAsync({
+        quotationId: quote.id,
+        dto: { packId: resolved.pack.id, archType: resolved.archType },
+      });
+    } catch {
+      /* both hooks toast their own errors */
+    }
+  };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <FileText className="h-4 w-4 text-primary" />
-          {t('quoteUi.review.newQuote')}
-        </CardTitle>
-        <p className="text-sm text-muted-foreground">
-          {t('quoteUi.review.newQuoteDesc')}
-        </p>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid gap-2 sm:max-w-xs">
-          <Label>{t('language.label')}</Label>
-          <Select
+    <QuoteStep
+      title={t('quoteUi.review.newQuote')}
+      description={t('quoteEditor.createDesc')}
+    >
+      <div className="grid max-w-xl gap-5">
+        <PackChoiceFields value={choice} onChange={setChoice} disabled={pending} />
+        <div className="grid gap-2 sm:max-w-60">
+          <Label htmlFor={languageId}>{t('quoteEditor.pdfLanguage')}</Label>
+          <LanguageSelect
+            id={languageId}
             value={language}
-            onValueChange={(v) => setLanguage(v as DevisLanguage)}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={DevisLanguage.FR}>Français</SelectItem>
-              <SelectItem value={DevisLanguage.EN}>English</SelectItem>
-              <SelectItem value={DevisLanguage.AR}>العربية</SelectItem>
-            </SelectContent>
-          </Select>
+            onChange={setLanguage}
+            disabled={pending}
+          />
         </div>
-        <Button
-          type="button"
-          size="lg"
-          onClick={() =>
-            create.mutate({
-              orderId,
-              dto: {
-                language,
-                currency: defaultCurrency,
-                // VAT rate stays at billing-config default — admin
-                // doesn't tweak it on the quote anymore.
-              },
-            })
-          }
-          disabled={create.isPending}
-          className="gap-2"
-        >
-          {create.isPending ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Sparkles className="h-4 w-4" />
-          )}
+      </div>
+      <div className="mt-6 flex justify-end border-t pt-4">
+        <Button onClick={submit} disabled={!resolved?.price || pending} className="gap-2">
+          {pending ? <Loader2 className="size-4 animate-spin" /> : null}
           {t('quoteUi.review.startQuote')}
         </Button>
-      </CardContent>
-    </Card>
+      </div>
+    </QuoteStep>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Admin layout
+// Admin: quote editor — steps on the left, summary + actions on the right
 // ─────────────────────────────────────────────────────────────────────────
+
+/** The quote fields the admin edits directly (the rest comes from the pack). */
+interface QuoteForm {
+  language: DevisLanguage;
+  deliveryFees: number;
+  discountAmount: number;
+  notes: string;
+  adminMessage: string;
+}
 
 function AdminLayout({
   quote,
@@ -355,440 +357,528 @@ function AdminLayout({
 }) {
   const { t } = useT();
   const update = useUpdateQuotation();
-  const generate = useGenerateQuotationPdf();
-  const send = useSendQuotation();
-  const cancel = useCancelQuotation();
-  const recall = useRevertQuotationToDraft();
-  // Local confirm flag — recall is a one-click action with consequences
-  // for the doctor (their bell pings), so we ask once before firing.
-  const [confirmRecall, setConfirmRecall] = useState(false);
-
-  // Only the fields admins still touch directly: language (controls PDF
-  // rendering), delivery fees (admin-added to the pack), discount
-  // (subtracted from pack), notes, admin message. Fees/VAT are owned
-  // by the pack snapshot + billing settings now.
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<QuoteForm>(() => ({
     language: quote.language,
     deliveryFees: quote.deliveryFees,
     discountAmount: quote.discountAmount,
     notes: quote.notes ?? '',
     adminMessage: quote.adminMessage ?? '',
-  });
-  const [notesOpen, setNotesOpen] = useState(
-    !!(quote.notes || quote.adminMessage),
-  );
+  }));
+  const patch = (changes: Partial<QuoteForm>) =>
+    setForm((current) => ({ ...current, ...changes }));
 
-  const isEditable = quote.status === QuotationStatus.DRAFT;
-  const canCancel =
-    quote.status === QuotationStatus.DRAFT ||
-    quote.status === QuotationStatus.SENT;
+  const isDraft = quote.status === QuotationStatus.DRAFT;
+  const hasPack = !!quote.packId;
+  // Only drafts can be saved; once sent, the language picker alone stays
+  // live (it re-renders the PDF, it does not edit the quote).
+  const totalDirty =
+    isDraft &&
+    (form.deliveryFees !== quote.deliveryFees ||
+      form.discountAmount !== quote.discountAmount);
+  const dirty =
+    totalDirty ||
+    (isDraft &&
+      (form.language !== quote.language ||
+        form.notes !== (quote.notes ?? '') ||
+        form.adminMessage !== (quote.adminMessage ?? '')));
+
+  const saveDraft = async () => {
+    if (!dirty) return;
+    await update.mutateAsync({
+      id: quote.id,
+      dto: {
+        language: form.language,
+        // `treatmentFees` carries the pack-price snapshot; forwarded
+        // untouched so the backend recomputes the pack total.
+        treatmentFees: quote.treatmentFees,
+        fabricationFees: 0,
+        deliveryFees: form.deliveryFees,
+        discountAmount: form.discountAmount,
+        tvaRate: quote.tvaRate,
+        currency: quote.currency,
+        notes: form.notes,
+        adminMessage: form.adminMessage,
+      },
+    });
+  };
+
+  return (
+    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_20rem] xl:items-start">
+      <div className="min-w-0 space-y-4">
+        <QuotePackPanel
+          quote={quote}
+          role={UserRole.ADMIN}
+          section="pack"
+          patientName={patientName}
+          orderCode={orderCode}
+        />
+        <AdjustmentsStep
+          quote={quote}
+          form={form}
+          onChange={patch}
+          totalDirty={totalDirty}
+        />
+        {hasPack ? (
+          <QuotePackPanel
+            quote={quote}
+            role={UserRole.ADMIN}
+            section="plan"
+            patientName={patientName}
+            orderCode={orderCode}
+          />
+        ) : (
+          <QuoteStep
+            step={3}
+            title={t('quoteEditor.planStep')}
+            description={t('quoteEditor.needsPack')}
+          />
+        )}
+        <NotesStep form={form} onChange={patch} disabled={!isDraft} />
+      </div>
+
+      <QuoteSummary
+        quote={quote}
+        orderId={orderId}
+        patientName={patientName}
+        orderCode={orderCode}
+        form={form}
+        onLanguageChange={(language) => patch({ language })}
+        dirty={dirty}
+        totalDirty={totalDirty}
+        saving={update.isPending}
+        saveDraft={saveDraft}
+      />
+    </div>
+  );
+}
+
+function AdjustmentsStep({
+  quote,
+  form,
+  onChange,
+  totalDirty,
+}: {
+  quote: Quotation;
+  form: QuoteForm;
+  onChange: (changes: Partial<QuoteForm>) => void;
+  totalDirty: boolean;
+}) {
+  const { t } = useT();
+  const hasPack = !!quote.packId;
+  const isDraft = quote.status === QuotationStatus.DRAFT;
+
+  return (
+    <QuoteStep
+      step={2}
+      title={t('quoteEditor.adjustStep')}
+      optionalLabel={t('quoteEditor.optional')}
+      description={hasPack ? t('quoteEditor.adjustStepDesc') : t('quoteEditor.needsPack')}
+      done={
+        hasPack && !totalDirty && (quote.deliveryFees > 0 || quote.discountAmount > 0)
+      }
+    >
+      {hasPack ? (
+        <>
+          <div className="grid gap-4 sm:max-w-md sm:grid-cols-2">
+            <MoneyField
+              label={t('quoteEditor.deliveryFees')}
+              currency={quote.currency}
+              value={form.deliveryFees}
+              onChange={(deliveryFees) => onChange({ deliveryFees })}
+              disabled={!isDraft}
+            />
+            <MoneyField
+              label={t('quoteEditor.discount')}
+              currency={quote.currency}
+              value={form.discountAmount}
+              onChange={(discountAmount) => onChange({ discountAmount })}
+              disabled={!isDraft}
+            />
+          </div>
+          {totalDirty ? (
+            <p className="mt-3 text-xs text-amber-700 dark:text-amber-400">
+              {quote.paymentMode
+                ? t('quoteEditor.adjustWipesPlan')
+                : t('quoteEditor.saveBeforePlan')}
+            </p>
+          ) : null}
+        </>
+      ) : null}
+    </QuoteStep>
+  );
+}
+
+function MoneyField({
+  label,
+  currency,
+  value,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  currency: string;
+  value: number;
+  onChange: (value: number) => void;
+  disabled?: boolean;
+}) {
+  const id = useId();
+  return (
+    <div className="grid gap-2">
+      <Label htmlFor={id}>{label}</Label>
+      <div className="relative">
+        <DecimalInput
+          id={id}
+          value={value}
+          onValueChange={onChange}
+          disabled={disabled}
+          className="pr-12 tabular-nums"
+        />
+        <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-muted-foreground">
+          {currency}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function NotesStep({
+  form,
+  onChange,
+  disabled,
+}: {
+  form: QuoteForm;
+  onChange: (changes: Partial<QuoteForm>) => void;
+  disabled: boolean;
+}) {
+  const { t } = useT();
+  const notesId = useId();
+  const messageId = useId();
+  const hasContent = !!(form.notes || form.adminMessage);
+  const [open, setOpen] = useState(hasContent);
+
+  return (
+    <QuoteStep
+      title={t('quoteEditor.notesTitle')}
+      optionalLabel={t('quoteEditor.optional')}
+      description={t('quoteEditor.notesDesc')}
+      action={
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-8 text-muted-foreground"
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+        >
+          {open
+            ? t('quoteEditor.notesHide')
+            : hasContent
+              ? t('quoteEditor.change')
+              : t('quoteEditor.notesAdd')}
+        </Button>
+      }
+    >
+      {open ? (
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-2">
+            <Label htmlFor={notesId}>{t('quoteUi.review.notesDoctor')}</Label>
+            <Textarea
+              id={notesId}
+              rows={3}
+              value={form.notes}
+              onChange={(e) => onChange({ notes: e.target.value })}
+              disabled={disabled}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor={messageId}>{t('quoteUi.review.adminMessage')}</Label>
+            <Textarea
+              id={messageId}
+              rows={3}
+              value={form.adminMessage}
+              onChange={(e) => onChange({ adminMessage: e.target.value })}
+              disabled={disabled}
+            />
+          </div>
+        </div>
+      ) : null}
+    </QuoteStep>
+  );
+}
+
+function QuoteSummary({
+  quote,
+  orderId,
+  patientName,
+  orderCode,
+  form,
+  onLanguageChange,
+  dirty,
+  totalDirty,
+  saving,
+  saveDraft,
+}: {
+  quote: Quotation;
+  orderId: string;
+  patientName: string;
+  orderCode: string;
+  form: QuoteForm;
+  onLanguageChange: (language: DevisLanguage) => void;
+  dirty: boolean;
+  totalDirty: boolean;
+  saving: boolean;
+  saveDraft: () => Promise<void>;
+}) {
+  const { t, lang } = useT();
+  const generate = useGenerateQuotationPdf();
+  const send = useSendQuotation();
+  const recall = useRevertQuotationToDraft();
+  const languageId = useId();
+  // Recall pings the doctor, so it takes a second click to confirm.
+  const [confirmRecall, setConfirmRecall] = useState(false);
+
+  const isDraft = quote.status === QuotationStatus.DRAFT;
+  const hasPack = !!quote.packId;
   const hasPdf = !!quote.pdfFilePath;
+  const canCancel = isDraft || quote.status === QuotationStatus.SENT;
+  const busy = saving || generate.isPending || send.isPending;
 
-  // Pack price snapshot lives on `treatmentFees` for pack quotes —
-  // we don't surface the field name to the admin (no more "Treatment
-  // fees" UI), it's just the original pack catalog price. The net the
-  // doctor will pay is `pack + delivery − discount`.
-  const packPrice = quote.treatmentFees;
-  const netAfter = Math.max(
-    0,
-    packPrice +
-      (Number(form.deliveryFees) || 0) -
-      (Number(form.discountAmount) || 0),
-  );
+  const money = (amount: number) => formatPrice(amount, quote.currency);
+  const net = Math.max(0, quote.treatmentFees + form.deliveryFees - form.discountAmount);
+  const arch = quote.archType ?? ArchType.TWO_ARCHES;
+  const packLine = hasPack
+    ? `${quote.pack ? packName(quote.pack, lang) : (quote.packName ?? '')} · ${archLabel(arch, t)}`
+    : t('quoteEditor.noPack');
 
-  const draftDto = () => ({
-    language: form.language,
-    // `treatmentFees` carries the pack-price snapshot for pack quotes
-    // — we forward it untouched so the backend can recompute totals
-    // without flipping back to fees-mode. For legacy non-pack drafts
-    // the field is still 0, same as before.
-    treatmentFees: quote.treatmentFees,
-    fabricationFees: 0,
-    deliveryFees: Number(form.deliveryFees) || 0,
-    discountAmount: Number(form.discountAmount) || 0,
-    tvaRate: quote.tvaRate, // sourced from billing settings on create
-    currency: quote.currency,
-    notes: form.notes,
-    adminMessage: form.adminMessage,
-  });
+  // Sending needs a pack and a plan; a pending total change would wipe
+  // the plan on save, so it must be saved (and the plan redone) first.
+  const sendBlocker = !hasPack
+    ? t('quoteEditor.sendNeedsPack')
+    : totalDirty && quote.paymentMode
+      ? t('quoteEditor.adjustWipesPlan')
+      : !quote.paymentMode
+        ? t('quoteEditor.sendNeedsPlan')
+        : null;
 
-  const saveCurrentDraftIfNeeded = async () => {
-    if (!isEditable) return;
-    await update.mutateAsync({ id: quote.id, dto: draftDto() });
-  };
+  const statusHint = isDraft
+    ? t('quoteUi.review.footerDraft')
+    : quote.status === QuotationStatus.SENT
+      ? t('quoteUi.review.footerSent')
+      : t('quoteUi.review.footerLocked');
 
-  const handleSaveDraft = () => {
-    update.mutate({ id: quote.id, dto: draftDto() });
-  };
-
-  const handleGeneratePdf = async () => {
+  const run = async (action: () => Promise<unknown>) => {
     try {
-      // Draft → persist the new fee shape before rendering.
-      // Sent/approved → form is otherwise locked, but the language
-      // dropdown stays live so admin can issue a translated copy on
-      // demand. Either way we hand the current selection to the
-      // backend as a `?lang=` override.
-      await saveCurrentDraftIfNeeded();
-      await generate.mutateAsync({ id: quote.id, lang: form.language });
+      if (isDraft) await saveDraft();
+      await action();
     } catch {
-      /* toast raised by hook */
+      /* the mutation hooks toast their own errors */
     }
   };
 
-  const handleSendToDoctor = async () => {
+  const downloadPdf = async () => {
     try {
-      await saveCurrentDraftIfNeeded();
-      await send.mutateAsync(quote.id);
-    } catch {
-      /* toast raised by hook */
-    }
-  };
-
-  const handleDownloadPdf = async () => {
-    if (!hasPdf) return;
-    try {
-      const fileName = `${quote.quotationNumber ?? 'quotation'}.pdf`;
-      await quotationsService.downloadPdf(quote.id, fileName);
-    } catch (err) {
-      toast.error(
-        err instanceof Error
-          ? err.message
-          : t('quoteUi.review.pdfError'),
+      await quotationsService.downloadPdf(
+        quote.id,
+        `${quote.quotationNumber ?? 'quotation'}.pdf`,
       );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('quoteUi.review.pdfError'));
     }
   };
 
   return (
-    <div className="space-y-3">
-      <QuoteHeader
-        quote={quote}
-        patientName={patientName}
-        orderCode={orderCode}
-        rightSlot={
-          hasPdf ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleDownloadPdf}
-              className="gap-2"
-            >
-              <Download className="h-4 w-4" />
-              PDF
-            </Button>
-          ) : null
-        }
-      />
-
-      {/* Step 1 — Pack. Choosing the pack is the first thing the admin
-          does; its price snapshot drives every number below. */}
-      <QuotePackPanel
-        quote={quote}
-        role={UserRole.ADMIN}
-        section="pack"
-        patientName={patientName}
-        orderCode={orderCode}
-      />
-
-      {/* Step 2 — Pricing adjustments. Only meaningful once a pack is
-          attached, so they sit directly under it. */}
-      {quote.packId ? (
-        <Card size="sm">
-          <CardContent className="space-y-3">
-            <div>
-              <h3 className="text-sm font-semibold">
-                {t('quoteUi.review.pricingTitle')}
-              </h3>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {t('quoteUi.review.pricingDesc')}
-              </p>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="grid gap-1.5">
-                <Label className="text-xs font-medium text-muted-foreground">
-                  {t('quoteUi.review.deliveryFees', {
-                    currency: quote.currency,
-                  })}
-                </Label>
-                <Input
-                  type="number"
-                  step="0.001"
-                  min={0}
-                  className="h-10"
-                  value={form.deliveryFees}
-                  onChange={(e) =>
-                    setForm((s) => ({
-                      ...s,
-                      deliveryFees: Number(e.target.value) || 0,
-                    }))
-                  }
-                  disabled={!isEditable}
-                  placeholder="0.000"
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label className="text-xs font-medium text-muted-foreground">
-                  {t('quoteUi.review.discount', { currency: quote.currency })}
-                </Label>
-                <Input
-                  type="number"
-                  step="0.001"
-                  min={0}
-                  className="h-10"
-                  value={form.discountAmount}
-                  onChange={(e) =>
-                    setForm((s) => ({
-                      ...s,
-                      discountAmount: Number(e.target.value) || 0,
-                    }))
-                  }
-                  disabled={!isEditable}
-                  placeholder="0.000"
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label className="text-xs font-medium text-muted-foreground">
-                  {t('quoteUi.review.netToBill')}
-                </Label>
-                <div className="flex h-10 items-center rounded-md border bg-primary/5 px-3 text-base font-semibold tabular-nums">
-                  {formatMoney(netAfter, quote.currency)}
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {/* Step 3 — Payment plan / tranches (auto-calculated). */}
-      {quote.packId ? (
-        <QuotePackPanel
-          quote={quote}
-          role={UserRole.ADMIN}
-          section="plan"
-          patientName={patientName}
-          orderCode={orderCode}
-        />
-      ) : null}
-
-      {/* Document settings — language + internal/PDF notes. Lower
-          priority than the pack + plan, so they sit near the actions. */}
-      <Card size="sm">
-        <CardContent className="space-y-3">
-          {/* Language + notes toggle share one row so the card never
-              leaves a big empty half. */}
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div className="grid gap-1.5 sm:w-64">
-              <Label className="text-xs font-medium text-muted-foreground">
-                {t('quoteUi.review.docLanguage')}
-              </Label>
-              {/* Always interactive — once sent the rest of the form
-                  locks, but the language pick stays live so admins can
-                  issue a translated copy of the SAME quote on demand.
-                  "Regenerate PDF" passes it to the backend as a `?lang=`
-                  override without rolling back the lifecycle. */}
-              <Select
-                value={form.language}
-                onValueChange={(v) =>
-                  setForm((s) => ({ ...s, language: v as DevisLanguage }))
-                }
-              >
-                <SelectTrigger className="h-10">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={DevisLanguage.FR}>Français</SelectItem>
-                  <SelectItem value={DevisLanguage.EN}>English</SelectItem>
-                  <SelectItem value={DevisLanguage.AR}>العربية</SelectItem>
-                </SelectContent>
-              </Select>
-              {!isEditable ? (
-                <p className="text-xs leading-tight text-muted-foreground">
-                  {t('quoteUi.review.regenHintBefore')}{' '}
-                  <b>{t('quoteUi.review.regeneratePdf')}</b>{' '}
-                  {t('quoteUi.review.regenHintAfter')}
-                </p>
-              ) : null}
-            </div>
-
-            {/* Collapsible notes toggle — keeps the surface uncluttered
-                until the admin actually needs to write something. */}
-            <button
-              type="button"
-              onClick={() => setNotesOpen((v) => !v)}
-              className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground sm:mt-6"
-            >
-              {notesOpen ? (
-                <ChevronUp className="h-4 w-4" />
-              ) : (
-                <ChevronDown className="h-4 w-4" />
-              )}
-              {t('quoteUi.review.notesToggle')}
-              {(form.notes || form.adminMessage) && !notesOpen ? (
-                <span className="text-xs text-amber-700">
-                  {t('quoteUi.review.hasContent')}
-                </span>
-              ) : null}
-            </button>
+    <aside className="w-full space-y-2 md:ml-auto md:max-w-sm xl:sticky xl:top-4 xl:max-w-none">
+      <div className="rounded-xl bg-card text-card-foreground ring-1 ring-foreground/10">
+        <div className="p-5">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs text-muted-foreground tabular-nums">
+              {quote.quotationNumber ?? t('quoteEditor.quoteLabel')}
+            </span>
+            <StatusBadge status={quote.status} />
           </div>
-          {notesOpen ? (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="grid gap-1.5">
-                <Label className="text-sm font-medium">
-                  {t('quoteUi.review.notesDoctor')}
-                </Label>
-                <Textarea
-                  rows={3}
-                  value={form.notes}
-                  onChange={(e) =>
-                    setForm((s) => ({ ...s, notes: e.target.value }))
-                  }
-                  disabled={!isEditable}
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label className="text-sm font-medium">
-                  {t('quoteUi.review.adminMessage')}
-                </Label>
-                <Textarea
-                  rows={3}
-                  value={form.adminMessage}
-                  onChange={(e) =>
-                    setForm((s) => ({ ...s, adminMessage: e.target.value }))
-                  }
-                  disabled={!isEditable}
-                />
-              </div>
-            </div>
+          <p className="mt-2 truncate text-base font-semibold">{patientName}</p>
+          <div className="mt-0.5 space-y-0.5 text-xs text-muted-foreground">
+            {orderCode ? <p>{t('quoteEditor.order', { code: orderCode })}</p> : null}
+            <p className="first-letter:uppercase">
+              {t('quoteEditor.created', { date: formatTimestampDay(quote.createdAt, lang) })}
+            </p>
+            {quote.sentAt ? (
+              <p>{t('quoteEditor.sentOn', { date: formatTimestampDay(quote.sentAt, lang) })}</p>
+            ) : null}
+          </div>
+        </div>
+
+        <dl className="space-y-2 border-t p-5 text-sm">
+          <SummaryRow label={packLine} value={hasPack ? money(quote.treatmentFees) : '—'} />
+          {form.deliveryFees > 0 ? (
+            <SummaryRow label={t('quoteEditor.deliveryFees')} value={money(form.deliveryFees)} />
           ) : null}
-        </CardContent>
-      </Card>
+          {form.discountAmount > 0 ? (
+            <SummaryRow
+              label={t('quoteEditor.discount')}
+              value={`− ${money(form.discountAmount)}`}
+            />
+          ) : null}
+          <div className="flex items-baseline justify-between gap-3 border-t pt-3">
+            <dt className="font-medium">{t('quoteUi.review.netToBill')}</dt>
+            <dd className="text-lg font-semibold tabular-nums">
+              {hasPack ? money(net) : '—'}
+            </dd>
+          </div>
+        </dl>
 
-      {/* Action bar — the four primary actions, aligned and comfortably
-          sized so they're easy to spot and tap. */}
-      <Card>
-        <CardContent className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-          <div className="text-xs text-muted-foreground">
-            {isEditable
-              ? t('quoteUi.review.footerDraft')
-              : quote.status === QuotationStatus.SENT
-                ? t('quoteUi.review.footerSent')
-                : t('quoteUi.review.footerLocked')}
-          </div>
-          <div className="grid w-full grid-cols-1 gap-2 sm:w-auto sm:grid-cols-none sm:flex sm:flex-wrap sm:items-center sm:justify-end [&>button]:w-full sm:[&>button]:w-auto">
-            {/* Recall — only shown on SENT quotes. Two-click: first
-                click flips into confirm mode; second click fires the
-                mutation. We use the same button slot so the bar
-                doesn't shift, and clear the confirm flag on success
-                via the hook's invalidation re-render. */}
-            {quote.status === QuotationStatus.SENT ? (
+        <div className="grid gap-2 border-t p-5">
+          <Label htmlFor={languageId}>{t('quoteEditor.pdfLanguage')}</Label>
+          <LanguageSelect id={languageId} value={form.language} onChange={onLanguageChange} />
+          {!isDraft ? (
+            <p className="text-xs text-muted-foreground">
+              {t('quoteUi.review.regenHintBefore')}{' '}
+              <span className="font-medium text-foreground">
+                {t('quoteUi.review.regeneratePdf')}
+              </span>{' '}
+              {t('quoteUi.review.regenHintAfter')}
+            </p>
+          ) : null}
+        </div>
+
+        <div className="grid gap-2 border-t p-5">
+          {isDraft ? (
+            <>
               <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  if (confirmRecall) {
-                    recall.mutate(quote.id, {
-                      onSuccess: () => setConfirmRecall(false),
-                    });
-                  } else {
-                    setConfirmRecall(true);
-                  }
-                }}
-                onBlur={() => setConfirmRecall(false)}
-                disabled={recall.isPending}
-                className="h-10 gap-2 border-amber-300 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
+                onClick={() => run(() => send.mutateAsync(quote.id))}
+                disabled={!!sendBlocker || busy}
+                className="w-full gap-2"
               >
-                {recall.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                {send.isPending ? (
+                  <Loader2 className="size-4 animate-spin" />
                 ) : (
-                  <RotateCcw className="h-4 w-4" />
+                  <Send className="size-4" />
                 )}
-                {confirmRecall
-                  ? t('quoteUi.review.confirmRecall')
-                  : t('quoteUi.review.recallToEdit')}
+                {t('quoteUi.review.sendToDoctor')}
               </Button>
-            ) : null}
-            {canCancel ? (
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => cancel.mutate({ id: quote.id, orderId })}
-                disabled={cancel.isPending}
-                className="h-10 gap-2 text-red-600 hover:text-red-700"
-              >
-                <Trash2 className="h-4 w-4" />
-                {t('common.cancel')}
-              </Button>
-            ) : null}
-            {isEditable ? (
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleSaveDraft}
-                disabled={update.isPending}
-                className="h-10 gap-2"
-              >
-                {update.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Check className="h-4 w-4" />
-                )}
-                {t('common.save')}
-              </Button>
-            ) : null}
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={handleGeneratePdf}
-              disabled={generate.isPending || update.isPending}
-              className="h-10 gap-2"
-            >
-              {generate.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <FileText className="h-4 w-4" />
-              )}
-              {hasPdf
-                ? t('quoteUi.review.regeneratePdf')
-                : t('quoteUi.review.generatePdf')}
-            </Button>
-            {quote.status === QuotationStatus.DRAFT ? (() => {
-              // Pack-based quotes can only ship after the admin has
-              // configured the payment plan — otherwise the doctor's
-              // Approve action would fail with a 400 from the backend
-              // (no QuoteInstallment rows). paymentMode is set as part
-              // of configurePaymentPlan, so it's the source of truth
-              // for "plan exists".
-              const needsPlanConfig =
-                !!quote.packId && !quote.paymentMode;
-              return (
+              {sendBlocker ? (
+                <p className="text-xs text-muted-foreground">{sendBlocker}</p>
+              ) : null}
+              <div className="grid grid-cols-2 gap-2">
                 <Button
-                  type="button"
-                  onClick={handleSendToDoctor}
-                  disabled={
-                    send.isPending || update.isPending || needsPlanConfig
-                  }
-                  className="h-10 gap-2 bg-emerald-600 hover:bg-emerald-700 sm:min-w-[150px]"
-                  title={
-                    needsPlanConfig
-                      ? t('quoteUi.review.planFirstTitle')
-                      : undefined
-                  }
+                  variant="outline"
+                  onClick={() => saveDraft().catch(() => undefined)}
+                  disabled={!dirty || busy}
                 >
-                  {send.isPending ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Send className="h-4 w-4" />
-                  )}
-                  {needsPlanConfig
-                    ? t('quoteUi.review.planFirst')
-                    : t('quoteUi.review.sendToDoctor')}
+                  {saving ? <Loader2 className="size-4 animate-spin" /> : null}
+                  {t('common.save')}
                 </Button>
-              );
-            })() : null}
-          </div>
-        </CardContent>
-      </Card>
+                <Button
+                  variant="outline"
+                  onClick={() =>
+                    run(() => generate.mutateAsync({ id: quote.id, lang: form.language }))
+                  }
+                  disabled={busy || !hasPack}
+                >
+                  {generate.isPending ? <Loader2 className="size-4 animate-spin" /> : null}
+                  {hasPdf ? t('quoteUi.review.regeneratePdf') : t('quoteUi.review.generatePdf')}
+                </Button>
+              </div>
+            </>
+          ) : (
+            <>
+              {quote.status === QuotationStatus.SENT ? (
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    if (!confirmRecall) {
+                      setConfirmRecall(true);
+                      return;
+                    }
+                    recall.mutate(quote.id, { onSuccess: () => setConfirmRecall(false) });
+                  }}
+                  onBlur={() => setConfirmRecall(false)}
+                  disabled={recall.isPending}
+                  className="w-full gap-2"
+                >
+                  {recall.isPending ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <RotateCcw className="size-4" />
+                  )}
+                  {confirmRecall
+                    ? t('quoteUi.review.confirmRecall')
+                    : t('quoteUi.review.recallToEdit')}
+                </Button>
+              ) : null}
+              <Button
+                variant="outline"
+                onClick={() => run(() => generate.mutateAsync({ id: quote.id, lang: form.language }))}
+                disabled={busy}
+                className="w-full gap-2"
+              >
+                {generate.isPending ? <Loader2 className="size-4 animate-spin" /> : null}
+                {t('quoteUi.review.regeneratePdf')}
+              </Button>
+            </>
+          )}
+          {hasPdf ? (
+            <Button variant="ghost" onClick={downloadPdf} className="w-full gap-2">
+              <Download className="size-4" />
+              {t('quoteEditor.downloadPdf')}
+            </Button>
+          ) : null}
+          <p
+            className={cn(
+              'pt-1 text-xs',
+              dirty ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground',
+            )}
+          >
+            {dirty ? t('quoteEditor.unsaved') : statusHint}
+          </p>
+        </div>
+      </div>
+
+      {canCancel ? <CancelQuoteButton quote={quote} orderId={orderId} /> : null}
+    </aside>
+  );
+}
+
+function SummaryRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <dt className="min-w-0 truncate text-muted-foreground">{label}</dt>
+      <dd className="shrink-0 tabular-nums">{value}</dd>
     </div>
+  );
+}
+
+function CancelQuoteButton({ quote, orderId }: { quote: Quotation; orderId: string }) {
+  const { t } = useT();
+  const cancel = useCancelQuotation();
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={cancel.isPending}
+          className="w-full text-destructive hover:bg-destructive/10 hover:text-destructive"
+        >
+          {t('quoteEditor.cancelQuote')}
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t('quoteEditor.cancelTitle')}</AlertDialogTitle>
+          <AlertDialogDescription>{t('quoteEditor.cancelDesc')}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t('quoteEditor.keepQuote')}</AlertDialogCancel>
+          <AlertDialogAction
+            variant="destructive"
+            onClick={() => cancel.mutate({ id: quote.id, orderId })}
+          >
+            {t('quoteEditor.cancelQuote')}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 

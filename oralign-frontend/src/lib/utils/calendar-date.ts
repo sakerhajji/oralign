@@ -21,11 +21,18 @@ export function todayCalendarDate(now: Date = new Date()): string {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
-/** Same display format as the orders pages: "7 sept. 2026" / "Sep 7, 2026". */
+/** The orders pages' day format: "7 sept. 2026" / "Sep 7, 2026". */
+function formatDay(date: Date, lang: Lang): string {
+  return format(date, lang === 'fr' ? 'd MMM yyyy' : 'MMM d, yyyy', {
+    locale: lang === 'fr' ? frLocale : undefined,
+  });
+}
+
 export function formatCalendarDate(value: string, lang: Lang): string {
-  return format(
-    parseCalendarDate(value),
-    lang === 'fr' ? 'd MMM yyyy' : 'MMM d, yyyy',
-    { locale: lang === 'fr' ? frLocale : undefined },
-  );
+  return formatDay(parseCalendarDate(value), lang);
+}
+
+/** A timestamp (ISO string) shown as its local day, same format. */
+export function formatTimestampDay(value: string, lang: Lang): string {
+  return formatDay(new Date(value), lang);
 }

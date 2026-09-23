@@ -2,6 +2,7 @@
 
 import type { ReactNode } from 'react';
 import { Check } from 'lucide-react';
+import { SectionCard } from '@/components/ui/section-card';
 import { cn } from '@/lib/utils';
 
 /**
@@ -36,26 +37,21 @@ export function QuoteStep({
   children?: ReactNode;
 }) {
   return (
-    <section
-      className={cn('rounded-xl bg-card text-card-foreground ring-1 ring-foreground/10', className)}
+    <SectionCard
+      title={title}
+      titleSuffix={
+        optionalLabel ? (
+          <span className="text-xs font-normal text-muted-foreground">{optionalLabel}</span>
+        ) : null
+      }
+      description={description}
+      marker={step !== undefined ? <StepMarker step={step} done={done} /> : null}
+      action={action}
+      flush={flush}
+      className={className}
     >
-      <header className={cn('flex items-start gap-3 px-5 pt-4', children ? 'pb-3' : 'pb-4')}>
-        {step !== undefined ? <StepMarker step={step} done={done} /> : null}
-        <div className="min-w-0 flex-1">
-          <h3 className="flex flex-wrap items-baseline gap-x-2 text-[15px] leading-6 font-semibold">
-            {title}
-            {optionalLabel ? (
-              <span className="text-xs font-normal text-muted-foreground">{optionalLabel}</span>
-            ) : null}
-          </h3>
-          {description ? (
-            <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>
-          ) : null}
-        </div>
-        {action ? <div className="shrink-0">{action}</div> : null}
-      </header>
-      {children ? <div className={cn(flush ? 'pb-1' : 'px-5 pb-5')}>{children}</div> : null}
-    </section>
+      {children}
+    </SectionCard>
   );
 }
 

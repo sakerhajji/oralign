@@ -36,13 +36,87 @@ export const commerceDomainDict = {
     refinementsUnlimited: { en: 'Unlimited refinements', fr: 'Corrections illimitées' } as T,
     refinements: { en: '{count} refinements', fr: '{count} corrections' } as T,
     validity: { en: 'Valid for {period}', fr: 'Validité {period}' } as T,
-    // invoice-editor.tsx
+    // invoice-form.tsx
     addPack: { en: 'Add a pack', fr: 'Ajouter un pack' } as T,
     invoiceLine: { en: '{name} pack — {arch}', fr: 'Pack {name} — {arch}' } as T,
     packAdded: { en: 'Pack line added', fr: 'Ligne du pack ajoutée' } as T,
     packAddedHint: {
       en: 'Unit price excl. VAT derived from the {price} pack price at {rate} % VAT.',
       fr: 'Prix unitaire HT déduit du prix du pack ({price} TTC) à {rate} % de TVA.',
+    } as T,
+  },
+
+  // ─── Invoicing desk: list + manual invoice form ──────────────────
+  // Complements the older `invoicesAdmin` block (labels, columns, status).
+  invoiceDesk: {
+    subtitle: {
+      en: 'Issue, track and export the invoices of the practice.',
+      fr: 'Émettez, suivez et exportez les factures du cabinet.',
+    } as T,
+    moreActions: { en: 'More actions', fr: 'Autres actions' } as T,
+    selectAll: {
+      en: 'Select every invoice on this page',
+      fr: 'Sélectionner toutes les factures de la page',
+    } as T,
+    openMenu: { en: 'Open the actions menu', fr: 'Ouvrir le menu d’actions' } as T,
+    range: { en: '{from}–{to} of {total}', fr: '{from}–{to} sur {total}' } as T,
+    previous: { en: 'Previous', fr: 'Précédent' } as T,
+    next: { en: 'Next', fr: 'Suivant' } as T,
+    dueOn: { en: 'Due {date}', fr: 'Échéance {date}' } as T,
+    overdue: { en: 'Overdue', fr: 'En retard' } as T,
+    period: { en: 'Period', fr: 'Période' } as T,
+    periodAll: { en: 'All time', fr: 'Toute la période' } as T,
+    period30: { en: 'Last 30 days', fr: '30 derniers jours' } as T,
+    periodCustom: { en: 'Custom range', fr: 'Période personnalisée' } as T,
+    markIssued: { en: 'Mark as issued', fr: 'Marquer comme émise' } as T,
+    markPaid: { en: 'Mark as paid', fr: 'Marquer comme payée' } as T,
+    markCancelled: { en: 'Cancel the invoice', fr: 'Annuler la facture' } as T,
+    cancelTitle: { en: 'Cancel this invoice?', fr: 'Annuler cette facture ?' } as T,
+    cancelBody: {
+      en: 'It keeps its number and stays in the sequence, but stops counting in the totals. You can set it back to draft or issued afterwards.',
+      fr: 'Elle garde son numéro et reste dans la séquence, mais ne compte plus dans les totaux. Vous pourrez la repasser en brouillon ou émise ensuite.',
+    } as T,
+    keepInvoice: { en: 'Keep it', fr: 'Conserver' } as T,
+    emptyCta: { en: 'Create the first invoice', fr: 'Créer la première facture' } as T,
+    emptyTrash: { en: 'The archive is empty.', fr: 'La corbeille est vide.' } as T,
+    retry: { en: 'Try again', fr: 'Réessayer' } as T,
+    // ── Form ──
+    backToList: { en: 'Invoices', fr: 'Factures' } as T,
+    clientSectionDesc: {
+      en: 'Search an existing patient, or type the client in by hand.',
+      fr: 'Recherchez un patient existant, ou saisissez le client à la main.',
+    } as T,
+    invoiceSection: { en: 'Invoice', fr: 'Facture' } as T,
+    invoiceSectionDesc: {
+      en: 'Dates, number, status and the language of the PDF.',
+      fr: 'Dates, numéro, statut et langue du PDF.',
+    } as T,
+    linesSectionDesc: {
+      en: 'Add a pack from the catalogue, or write a free line.',
+      fr: 'Ajoutez un pack du catalogue, ou écrivez une ligne libre.',
+    } as T,
+    linkedTo: { en: 'Linked to {name}', fr: 'Rattachée à {name}' } as T,
+    lineFromOrder: { en: 'Bill this order', fr: 'Facturer cette commande' } as T,
+    lineAdded: { en: 'Line added', fr: 'Ligne ajoutée' } as T,
+    orderLineHint: {
+      en: 'Order prices include VAT; the net unit price is derived at {rate} %.',
+      fr: 'Les prix des commandes sont TTC ; le prix unitaire HT est calculé à {rate} %.',
+    } as T,
+    emptyLines: {
+      en: 'No line yet — add a pack or a free line.',
+      fr: 'Aucune ligne — ajoutez un pack ou une ligne libre.',
+    } as T,
+    errClientName: { en: 'The client name is required.', fr: 'Le nom du client est obligatoire.' } as T,
+    saveNew: { en: 'Create the invoice', fr: 'Créer la facture' } as T,
+    saveExisting: { en: 'Save changes', fr: 'Enregistrer les modifications' } as T,
+    settingsHint: {
+      en: 'The server recalculates every total from the lines.',
+      fr: 'Le serveur recalcule tous les totaux à partir des lignes.',
+    } as T,
+    notFound: { en: 'This invoice no longer exists.', fr: 'Cette facture n’existe plus.' } as T,
+    archivedNotice: {
+      en: 'This invoice is archived. Restore it to edit it.',
+      fr: 'Cette facture est archivée. Restaurez-la pour la modifier.',
     } as T,
   },
 

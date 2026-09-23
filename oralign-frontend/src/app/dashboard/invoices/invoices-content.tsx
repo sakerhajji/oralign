@@ -40,6 +40,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Figure, FigureRow } from '@/components/ui/figure-row';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -428,26 +429,26 @@ export function InvoicesContent() {
       ) : null}
 
       {/* ── Totals of the whole filter, never of the page ── */}
-      <dl className="grid grid-cols-2 divide-y rounded-xl bg-card ring-1 ring-foreground/10 sm:grid-cols-4 sm:divide-x sm:divide-y-0">
-        <SummaryFigure
+      <FigureRow className="sm:grid-cols-4">
+        <Figure
           label={t('invoicesAdmin.kpiCount')}
           value={summary.isLoading ? null : String(summary.data?.count ?? 0)}
         />
-        <SummaryFigure
+        <Figure
           label={t('invoicesAdmin.kpiHt')}
           value={summary.isLoading ? null : formatPrice(summary.data?.subTotalHt ?? 0)}
         />
-        <SummaryFigure
+        <Figure
           label={t('invoicesAdmin.kpiTva')}
           value={summary.isLoading ? null : formatPrice(summary.data?.tvaAmount ?? 0)}
         />
-        <SummaryFigure
+        <Figure
           label={t('invoicesAdmin.kpiTtc')}
           value={summary.isLoading ? null : formatPrice(summary.data?.totalTtc ?? 0)}
           hint={t('invoicesAdmin.kpiBillableHint')}
           strong
         />
-      </dl>
+      </FigureRow>
 
       {/* ── Selection ── */}
       {selected.size > 0 ? (
@@ -744,36 +745,6 @@ export function InvoicesContent() {
 }
 
 // ─── Pieces ───────────────────────────────────────────────────────────
-
-function SummaryFigure({
-  label,
-  value,
-  hint,
-  strong,
-}: {
-  label: string;
-  /** null while the aggregate is loading. */
-  value: string | null;
-  hint?: string;
-  strong?: boolean;
-}) {
-  return (
-    <div className="px-4 py-3">
-      <dt className="truncate text-xs text-muted-foreground">
-        {label}
-        {hint ? <span className="ml-1 opacity-70">({hint})</span> : null}
-      </dt>
-      <dd
-        className={cn(
-          'mt-0.5 truncate tabular-nums',
-          strong ? 'text-base font-semibold sm:text-lg' : 'text-sm font-medium sm:text-base',
-        )}
-      >
-        {value === null ? <Skeleton className="h-5 w-24" /> : value}
-      </dd>
-    </div>
-  );
-}
 
 /** "Due 12 Oct" — turns into an overdue warning once the date has passed. */
 function DueHint({ invoice, now }: { invoice: Invoice; now: number }) {

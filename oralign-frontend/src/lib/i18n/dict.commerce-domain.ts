@@ -46,6 +46,24 @@ export const commerceDomainDict = {
     } as T,
   },
 
+  // ─── Packs + loyalty page (packs-content.tsx, loyalty-content.tsx) ─
+  packsDesk: {
+    title: { en: 'Packs & loyalty', fr: 'Forfaits et fidélité' } as T,
+    subtitle: {
+      en: 'The price sheet practitioners are billed from, and the quarterly loyalty program.',
+      fr: 'La grille tarifaire facturée aux praticiens, et le programme de fidélité trimestriel.',
+    } as T,
+    catalogueDesc: {
+      en: 'Prices include VAT. A pack attached to a quote keeps the price it had that day.',
+      fr: 'Prix TTC. Un forfait associé à un devis garde le prix qu’il avait ce jour-là.',
+    } as T,
+    included: { en: 'Included', fr: 'Inclus' } as T,
+    correctionOne: { en: '1 refinement', fr: '1 correction' } as T,
+    archived: { en: 'Archived', fr: 'Archivé' } as T,
+    loadError: { en: 'Could not load the packs.', fr: 'Impossible de charger les forfaits.' } as T,
+    retry: { en: 'Try again', fr: 'Réessayer' } as T,
+  },
+
   // ─── Invoicing desk: list + manual invoice form ──────────────────
   // Complements the older `invoicesAdmin` block (labels, columns, status).
   invoiceDesk: {

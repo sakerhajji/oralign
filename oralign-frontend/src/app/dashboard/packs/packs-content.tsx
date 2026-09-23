@@ -18,6 +18,8 @@ import {
 } from '@/lib/hooks';
 import { useBillingPublicDefaults } from '@/lib/hooks/use-company-billing';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { SectionCard } from '@/components/ui/section-card';
+import { cn } from '@/lib/utils';
 import { LoyaltyContent } from './loyalty-content';
 import { formatPrice } from '@/lib/utils/currency';
 import { pickLocalized } from '@/lib/api/blog.service';
@@ -31,7 +33,6 @@ import {
 import { Button } from '@/components/ui/button';
 import {
   Card,
-  CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
@@ -76,7 +77,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import {
-  MoreVertical,
+  MoreHorizontal,
   ArchiveRestore,
   ShieldX,
   Plus,
@@ -89,32 +90,11 @@ import {
 
 // ─── Visual helpers ──────────────────────────────────────────────
 
-/**
- * Returns the single active price for a pack. The admin UI no longer
- * surfaces the one_arch / two_arches distinction — every pack has
- * ONE price keyed by archType=two_arches on the backend (the
- * canonical pricing unit). Legacy packs may still have a one_arch
- * price too; we prefer two_arches when present and fall back to the
- * first active row otherwise.
- */
-function activePriceFor(pack: Pack): PackPrice | null {
-  const active = (pack.prices ?? []).filter((p) => p.isActive);
-  if (active.length === 0) return null;
-  const twoArches = active.find((p) => p.archType === ArchType.TWO_ARCHES);
-  return twoArches ?? active[0]!;
-}
-
 /** Active price for a specific arch, or null when not offered. */
 function priceForArch(pack: Pack, arch: ArchType): PackPrice | null {
   return (
     (pack.prices ?? []).find((p) => p.isActive && p.archType === arch) ?? null
   );
-}
-
-function formatMoney(p: PackPrice): string {
-  // Decimal-as-string on the wire — render with a thin space + the
-  // currency code so the columns line up cleanly in tabular nums.
-  return `${p.price} ${p.currency}`;
 }
 
 /**
@@ -169,12 +149,8 @@ function DoctorPacksCatalogue() {
 
   return (
     <div className="flex flex-col gap-5 p-3 sm:gap-6 sm:p-4 md:p-6">
-      <header className="flex flex-col gap-4 rounded-2xl border bg-card p-4 shadow-sm sm:p-6 md:flex-row md:items-center md:justify-between">
+      <header className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div className="space-y-2">
-          <div className="inline-flex items-center gap-2 rounded-full border bg-background px-3 py-1 text-xs font-medium text-muted-foreground">
-            <PackageIcon className="size-3.5 text-primary" />
-            {t('packsDoctor.eyebrow')}
-          </div>
           <div>
             <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
               {t('packsDoctor.title')}
@@ -197,25 +173,37 @@ function DoctorPacksCatalogue() {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Admin surface: the 2026 price sheet and the loyalty program.
+
 /**
- * Admin surface of /dashboard/packs: two tabs — the pack catalogue
- * (grille 2026) and the quarterly loyalty program. The dentist
- * catalogue below is untouched.
+ * Admin side of /dashboard/packs: the catalogue and the "beyond the
+ * pack" tariffs under one tab, the quarterly loyalty program under the
+ * other. The dentist catalogue above is a different screen entirely.
  */
 function AdminPacksArea() {
   const { t } = useT();
   return (
-    <div className="flex flex-col gap-4 p-3 sm:p-4 md:p-6">
-      <Tabs defaultValue="packs">
+    <div className="@container/main flex min-w-0 flex-1 flex-col gap-4 p-3 pb-8 sm:gap-5 sm:p-5 lg:p-8">
+      <header className="min-w-0">
+        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
+          {t('packsDesk.title')}
+        </h1>
+        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+          {t('packsDesk.subtitle')}
+        </p>
+      </header>
+
+      <Tabs defaultValue="packs" className="gap-4">
         <TabsList>
           <TabsTrigger value="packs">{t('packsAdmin.tabPacks')}</TabsTrigger>
           <TabsTrigger value="loyalty">{t('packsAdmin.tabLoyalty')}</TabsTrigger>
         </TabsList>
-        <TabsContent value="packs" className="mt-2 flex flex-col gap-5">
-          <AdminPacksManager embedded />
+        <TabsContent value="packs" className="flex flex-col gap-4">
+          <PackCatalogue />
           <BeyondPackCard />
         </TabsContent>
-        <TabsContent value="loyalty" className="mt-2">
+        <TabsContent value="loyalty">
           <LoyaltyContent />
         </TabsContent>
       </Tabs>
@@ -223,120 +211,33 @@ function AdminPacksArea() {
   );
 }
 
-/**
- * Read-only "Au-delà du forfait" price list (grille 2026). The values
- * live on CompanyBillingSettings — edited from the billing settings
- * page, surfaced here so the whole tariff sheet reads in one place.
- */
-function BeyondPackCard() {
-  const { t } = useT();
-  const { data: defaults, isPending, isError, refetch } = useBillingPublicDefaults();
-
-  const money = (amount: number | undefined): string =>
-    amount && amount > 0
-      ? formatPrice(amount, defaults?.defaultCurrency ?? 'TND')
-      : t('packsAdmin.beyondPackNotSet');
-
-  const rows: { label: string; value: string; hint?: string }[] = [
-    {
-      label: t('packsAdmin.beyondPackStudy'),
-      value: money(defaults?.defaultTreatmentFee),
-      hint: t('packsAdmin.beyondPackStudyHint'),
-    },
-    {
-      label: t('packsAdmin.beyondPackDicom'),
-      value: defaults?.cbctSupplementEnabled
-        ? defaults.cbctSupplementFee > 0
-          ? '+' + money(defaults.cbctSupplementFee)
-          : t('packsAdmin.beyondPackNotSet')
-        : t('packsAdmin.beyondPackDicomOff'),
-    },
-    {
-      label: t('packsAdmin.beyondPackRefinementTwo'),
-      value: money(defaults?.refinementTwoArchesFee),
-    },
-    {
-      label: t('packsAdmin.beyondPackRefinementOne'),
-      value: money(defaults?.refinementSingleArchFee),
-    },
-    {
-      label: t('packsAdmin.beyondPackReplacement'),
-      value: money(defaults?.replacementAlignerFee),
-    },
-    {
-      label: t('packsAdmin.beyondPackRetainers'),
-      value: money(defaults?.retainersFee),
-    },
-  ];
-
-  return (
-    <Card>
-      <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
-        <div>
-          <CardTitle>{t('packsAdmin.beyondPackTitle')}</CardTitle>
-          <CardDescription>{t('packsAdmin.beyondPackIntro')}</CardDescription>
-        </div>
-        <Button asChild variant="outline" size="sm">
-          <Link href="/account/billing-settings">
-            {t('packsAdmin.beyondPackEdit')}
-          </Link>
-        </Button>
-      </CardHeader>
-      <CardContent>
-        {isPending ? (
-          <div className="grid gap-2 sm:grid-cols-2">
-            {rows.map((row) => (
-              <Skeleton key={row.label} className="h-12 rounded-lg" />
-            ))}
-          </div>
-        ) : isError ? (
-          <div className="flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2">
-            <p className="text-sm text-muted-foreground">
-              {t('packsAdmin.beyondPackLoadError')}
-            </p>
-            <Button variant="outline" size="sm" onClick={() => refetch()}>
-              {t('packsAdmin.beyondPackRetry')}
-            </Button>
-          </div>
-        ) : (
-        <div className="grid gap-2 sm:grid-cols-2">
-          {rows.map((row) => (
-            <div
-              key={row.label}
-              className="flex items-start justify-between gap-3 rounded-lg border bg-muted/30 px-3 py-2"
-            >
-              <div className="min-w-0">
-                <div className="text-sm">{row.label}</div>
-                {row.hint && (
-                  <div className="text-xs text-muted-foreground">{row.hint}</div>
-                )}
-              </div>
-              <div className="shrink-0 text-sm font-medium tabular-nums">
-                {row.value}
-              </div>
-            </div>
-          ))}
-        </div>
-        )}
-      </CardContent>
-    </Card>
-  );
+/** "7 aligners / arch · 2 refinements" — a pack's limits on one line. */
+function packLimits(pack: Pack, t: ReturnType<typeof useT>['t']): string {
+  return [
+    pack.isUnlimitedSteps
+      ? t('packsAdmin.unlimitedSteps')
+      : t('packsAdmin.maxStepsTpl', { count: pack.maxStepsPerArch ?? 0 }),
+    pack.isUnlimitedCorrections
+      ? t('packsAdmin.unlimitedCorrections')
+      : pack.includedCorrections === 1
+        ? t('packsDesk.correctionOne')
+        : t('packsAdmin.correctionsTpl', { count: pack.includedCorrections ?? 0 }),
+  ].join(' · ');
 }
 
-function AdminPacksManager({ embedded = false }: { embedded?: boolean } = {}) {
+function PackCatalogue() {
   const { t, lang } = useT();
   const [includeInactive, setIncludeInactive] = useState(false);
-  const { data: packsResponse, isLoading } = usePacks({
+  const { data, isLoading, isError, refetch } = usePacks({
     includeInactive,
     limit: 100,
   });
-  const packs = packsResponse?.data;
+  const packs = data?.data ?? [];
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editingPack, setEditingPack] = useState<Pack | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Pack | null>(null);
-  const [confirmPermanentDelete, setConfirmPermanentDelete] =
-    useState<Pack | null>(null);
+  const [confirmPermanentDelete, setConfirmPermanentDelete] = useState<Pack | null>(null);
 
   const deletePack = useDeletePack();
   const permanentDeletePack = usePermanentDeletePack();
@@ -344,294 +245,186 @@ function AdminPacksManager({ embedded = false }: { embedded?: boolean } = {}) {
   const activatePack = useActivatePack();
   const deactivatePack = useDeactivatePack();
 
-  return (
-    <div
-      className={
-        embedded
-          ? 'flex flex-col gap-4 sm:gap-6'
-          : 'flex flex-col gap-4 p-3 sm:gap-6 sm:p-4 md:p-6'
-      }
-    >
-      <header className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div className="space-y-1">
-          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
-            {t('packsAdmin.title')}
-          </h1>
-          <p className="text-xs leading-relaxed text-muted-foreground sm:text-sm">
-            {t('packsAdmin.intro')}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="flex items-center gap-2 text-xs sm:text-sm">
-            <Checkbox
-              checked={includeInactive}
-              onCheckedChange={(v) => setIncludeInactive(!!v)}
-            />
-            {t('packsAdmin.showInactive')}
-          </label>
-          <Button onClick={() => setCreateOpen(true)} className="gap-2">
-            <Plus className="size-4" />
-            {t('packsAdmin.newPack')}
-          </Button>
-        </div>
-      </header>
+  const actionsFor = (pack: Pack) => ({
+    pack,
+    onEdit: () => setEditingPack(pack),
+    onActivate: () => activatePack.mutate(pack.id),
+    onDeactivate: () => deactivatePack.mutate(pack.id),
+    onDelete: () => setConfirmDelete(pack),
+    onRestore: () => restorePack.mutate(pack.id),
+    onPermanentDelete: () => setConfirmPermanentDelete(pack),
+  });
 
-      <Card>
-        <CardHeader className="gap-2">
-          <CardTitle>{t('packsAdmin.activePacks')}</CardTitle>
-          <CardDescription>
-            {packs?.length === 1
-              ? t('packsAdmin.countOne', { count: packs.length })
-              : t('packsAdmin.countMany', { count: packs?.length ?? 0 })}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="p-0">
-          {isLoading ? (
-            <div className="flex flex-col gap-2 p-4">
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-            </div>
-          ) : !packs || packs.length === 0 ? (
-            <div className="flex flex-col items-center gap-2 p-8 text-center text-muted-foreground">
-              <PackageIcon className="size-8 opacity-50" />
-              <p className="text-sm">{t('packsAdmin.emptyTitle')}</p>
+  const price = (pack: Pack, arch: ArchType) => {
+    const row = priceForArch(pack, arch);
+    return row ? formatPrice(row.price, row.currency) : null;
+  };
+
+  return (
+    <>
+      <SectionCard
+        title={t('packsAdmin.title')}
+        description={t('packsDesk.catalogueDesc')}
+        flush={packs.length > 0}
+        action={
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Checkbox
+                checked={includeInactive}
+                onCheckedChange={(value) => setIncludeInactive(!!value)}
+              />
+              {t('packsAdmin.showInactive')}
+            </label>
+            <Button size="sm" onClick={() => setCreateOpen(true)}>
+              <Plus className="mr-2 size-4" />
+              {t('packsAdmin.newPack')}
+            </Button>
+          </div>
+        }
+      >
+        {isLoading ? (
+          <div className="space-y-2 px-5 pb-4" aria-busy="true">
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} className="h-14 w-full rounded-lg" />
+            ))}
+          </div>
+        ) : isError ? (
+          <EmptyBlock
+            title={t('packsDesk.loadError')}
+            action={
+              <Button variant="outline" size="sm" onClick={() => refetch()}>
+                {t('packsDesk.retry')}
+              </Button>
+            }
+          />
+        ) : packs.length === 0 ? (
+          <EmptyBlock
+            title={t('packsAdmin.emptyTitle')}
+            action={
               <Button size="sm" onClick={() => setCreateOpen(true)}>
-                <Plus className="mr-1 size-4" />
+                <Plus className="mr-2 size-4" />
                 {t('packsAdmin.createFirst')}
               </Button>
-            </div>
-          ) : (
-            <>
-              {/* Desktop / tablet — table layout. Hidden below sm so
-                  the page never tries to fit a 5-column table on a
-                  phone (where it would force horizontal scroll). */}
-              <div className="hidden sm:block">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t('packsAdmin.colName')}</TableHead>
-                      <TableHead>{t('packsAdmin.colLimits')}</TableHead>
-                      <TableHead>{t('packsAdmin.colPrice')}</TableHead>
+            }
+          />
+        ) : (
+          <>
+            {/* Table ≥ lg. Both arcade prices get their own column so the
+                numbers line up; the status column only earns its place
+                when inactive packs are on screen. */}
+            <div className="hidden overflow-x-auto border-t lg:block [&_td:first-child]:pl-5 [&_td:last-child]:pr-5 [&_th:first-child]:pl-5 [&_th:last-child]:pr-5">
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead>{t('packsAdmin.colName')}</TableHead>
+                    <TableHead>{t('packsDesk.included')}</TableHead>
+                    <TableHead className="text-right">
+                      {t('quoteUi.attachPack.twoArches')}
+                    </TableHead>
+                    <TableHead className="text-right">
+                      {t('quoteUi.attachPack.singleArch')}
+                    </TableHead>
+                    {includeInactive ? (
                       <TableHead>{t('packsAdmin.colStatus')}</TableHead>
-                      <TableHead className="w-12" />
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {packs.map((pack) => {
-                      const twoArch = priceForArch(pack, ArchType.TWO_ARCHES);
-                      const singleArch = priceForArch(
-                        pack,
-                        ArchType.ONE_ARCH,
-                      );
-                      const primaryPrice =
-                        twoArch ?? singleArch ?? activePriceFor(pack);
-                      const desc = packDescription(pack, lang);
-                      return (
-                        <TableRow key={pack.id}>
-                          <TableCell>
-                            <div className="font-medium">
-                              {packName(pack, lang)}
-                            </div>
-                            {desc ? (
-                              <div className="line-clamp-2 max-w-md text-xs text-muted-foreground">
-                                {desc}
-                              </div>
-                            ) : null}
-                          </TableCell>
-                          <TableCell className="text-xs leading-relaxed">
-                            {pack.isUnlimitedSteps
-                              ? t('packsAdmin.unlimitedSteps')
-                              : t('packsAdmin.maxStepsTpl', {
-                                  count: pack.maxStepsPerArch ?? 0,
-                                })}
-                            <br />
-                            {pack.isUnlimitedCorrections
-                              ? t('packsAdmin.unlimitedCorrections')
-                              : t('packsAdmin.correctionsTpl', {
-                                  count: pack.includedCorrections ?? 0,
-                                })}
-                          </TableCell>
-                          <TableCell>
-                            {twoArch || singleArch ? (
-                              <div className="space-y-0.5 text-sm tabular-nums">
-                                {twoArch ? (
-                                  <div>
-                                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                                      {t('packsAdmin.priceTwoArchShort')}
-                                    </span>{' '}
-                                    <span className="font-semibold">
-                                      {formatMoney(twoArch)}
-                                    </span>
-                                  </div>
-                                ) : null}
-                                {singleArch ? (
-                                  <div>
-                                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                                      {t('packsAdmin.priceSingleArchShort')}
-                                    </span>{' '}
-                                    <span className="font-medium">
-                                      {formatMoney(singleArch)}
-                                    </span>
-                                  </div>
-                                ) : null}
-                              </div>
-                            ) : primaryPrice ? (
-                              <span className="text-sm font-semibold tabular-nums">
-                                {formatMoney(primaryPrice)}
-                              </span>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">
-                                {t('packsAdmin.noPriceSet')}
-                              </span>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {pack.isActive ? (
-                              <Badge>{t('packsAdmin.active')}</Badge>
-                            ) : (
-                              <Badge variant="outline">{t('packsAdmin.inactive')}</Badge>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <RowActions
-                              pack={pack}
-                              onEdit={() => setEditingPack(pack)}
-                              onActivate={() => activatePack.mutate(pack.id)}
-                              onDeactivate={() =>
-                                deactivatePack.mutate(pack.id)
-                              }
-                              onDelete={() => setConfirmDelete(pack)}
-                              onRestore={() => restorePack.mutate(pack.id)}
-                              onPermanentDelete={() =>
-                                setConfirmPermanentDelete(pack)
-                              }
-                            />
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
-
-              {/* Mobile — stacked cards. Each card carries the same
-                  five datapoints + actions, laid out vertically so
-                  text wraps naturally and never overflows the
-                  viewport. */}
-              <div className="flex flex-col gap-3 p-3 sm:hidden">
-                {packs.map((pack) => {
-                  const twoArch = priceForArch(pack, ArchType.TWO_ARCHES);
-                  const singleArch = priceForArch(pack, ArchType.ONE_ARCH);
-                  const primaryPrice =
-                    twoArch ?? singleArch ?? activePriceFor(pack);
-                  const desc = packDescription(pack, lang);
-                  return (
-                    <div
-                      key={pack.id}
-                      className="rounded-lg border bg-card p-3 shadow-sm"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="font-semibold">
-                              {packName(pack, lang)}
-                            </span>
-                            {pack.isActive ? (
-                              <Badge>{t('packsAdmin.active')}</Badge>
-                            ) : (
-                              <Badge variant="outline">{t('packsAdmin.inactive')}</Badge>
-                            )}
-                          </div>
-                          {desc ? (
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              {desc}
+                    ) : null}
+                    <TableHead className="w-12" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {packs.map((pack) => {
+                    const description = packDescription(pack, lang);
+                    return (
+                      <TableRow key={pack.id} className={cn(pack.deletedAt && 'opacity-60')}>
+                        <TableCell>
+                          <p className="font-medium">{packName(pack, lang)}</p>
+                          {description ? (
+                            <p className="line-clamp-1 max-w-md text-xs text-muted-foreground">
+                              {description}
                             </p>
                           ) : null}
-                        </div>
-                        <RowActions
-                          pack={pack}
-                          onEdit={() => setEditingPack(pack)}
-                          onActivate={() => activatePack.mutate(pack.id)}
-                          onDeactivate={() => deactivatePack.mutate(pack.id)}
-                          onDelete={() => setConfirmDelete(pack)}
-                          onRestore={() => restorePack.mutate(pack.id)}
-                          onPermanentDelete={() =>
-                            setConfirmPermanentDelete(pack)
-                          }
-                        />
-                      </div>
-                      <dl className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                        <div className="rounded border bg-muted/30 p-2">
-                          <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                            {t('packsAdmin.cardSteps')}
-                          </dt>
-                          <dd className="mt-0.5 font-medium">
-                            {pack.isUnlimitedSteps
-                              ? t('packsAdmin.cardUnlimited')
-                              : t('packsAdmin.cardMaxTpl', {
-                                  count: pack.maxStepsPerArch ?? 0,
-                                })}
-                          </dd>
-                        </div>
-                        <div className="rounded border bg-muted/30 p-2">
-                          <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                            {t('packsAdmin.cardCorrections')}
-                          </dt>
-                          <dd className="mt-0.5 font-medium">
-                            {pack.isUnlimitedCorrections
-                              ? t('packsAdmin.cardUnlimited')
-                              : pack.includedCorrections ?? 0}
-                          </dd>
-                        </div>
-                        <div className="col-span-2 rounded border bg-muted/30 p-2">
-                          <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                            {t('packsAdmin.cardPrice')}
-                          </dt>
-                          <dd className="mt-0.5 space-y-0.5 text-sm tabular-nums">
-                            {twoArch || singleArch ? (
-                              <>
-                                {twoArch ? (
-                                  <div>
-                                    <span className="text-muted-foreground">
-                                      {t('packsAdmin.priceTwoArchShort')}:{' '}
-                                    </span>
-                                    <span className="font-semibold">
-                                      {formatMoney(twoArch)}
-                                    </span>
-                                  </div>
-                                ) : null}
-                                {singleArch ? (
-                                  <div>
-                                    <span className="text-muted-foreground">
-                                      {t('packsAdmin.priceSingleArchShort')}:{' '}
-                                    </span>
-                                    <span className="font-medium">
-                                      {formatMoney(singleArch)}
-                                    </span>
-                                  </div>
-                                ) : null}
-                              </>
-                            ) : primaryPrice ? (
-                              <span className="font-semibold">
-                                {formatMoney(primaryPrice)}
-                              </span>
-                            ) : (
-                              t('packsAdmin.cardNoPrice')
-                            )}
-                          </dd>
-                        </div>
-                      </dl>
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {packLimits(pack, t)}
+                        </TableCell>
+                        <TableCell className="text-right whitespace-nowrap tabular-nums">
+                          {price(pack, ArchType.TWO_ARCHES) ?? (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right whitespace-nowrap text-muted-foreground tabular-nums">
+                          {price(pack, ArchType.ONE_ARCH) ?? '—'}
+                        </TableCell>
+                        {includeInactive ? (
+                          <TableCell>
+                            <PackStateBadge pack={pack} />
+                          </TableCell>
+                        ) : null}
+                        <TableCell className="text-right">
+                          <RowActions {...actionsFor(pack)} />
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
 
-      {/* Create / edit dialogs share the same form to keep validation aligned. */}
+            {/* Stacked cards < lg — same data, same actions. */}
+            <ul className="flex flex-col gap-2 px-3 pb-3 lg:hidden">
+              {packs.map((pack) => {
+                const description = packDescription(pack, lang);
+                const twoArches = price(pack, ArchType.TWO_ARCHES);
+                const singleArch = price(pack, ArchType.ONE_ARCH);
+                return (
+                  <li
+                    key={pack.id}
+                    className={cn(
+                      'rounded-lg border p-3',
+                      pack.deletedAt && 'opacity-60',
+                    )}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium">{packName(pack, lang)}</span>
+                          <PackStateBadge pack={pack} />
+                        </div>
+                        {description ? (
+                          <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+                        ) : null}
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {packLimits(pack, t)}
+                        </p>
+                      </div>
+                      <RowActions {...actionsFor(pack)} />
+                    </div>
+                    <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-1 border-t pt-2 text-sm">
+                      <div className="flex items-baseline gap-2">
+                        <dt className="text-xs text-muted-foreground">
+                          {t('quoteUi.attachPack.twoArches')}
+                        </dt>
+                        <dd className="font-medium tabular-nums">
+                          {twoArches ?? t('packsAdmin.noPriceSet')}
+                        </dd>
+                      </div>
+                      {singleArch ? (
+                        <div className="flex items-baseline gap-2">
+                          <dt className="text-xs text-muted-foreground">
+                            {t('quoteUi.attachPack.singleArch')}
+                          </dt>
+                          <dd className="tabular-nums">{singleArch}</dd>
+                        </div>
+                      ) : null}
+                    </dl>
+                  </li>
+                );
+              })}
+            </ul>
+          </>
+        )}
+      </SectionCard>
+
+      {/* Create / edit share the same form so validation stays aligned. */}
       <PackFormDialog
         key={`create:${createOpen ? 'open' : 'closed'}`}
         open={createOpen}
@@ -645,10 +438,7 @@ function AdminPacksManager({ embedded = false }: { embedded?: boolean } = {}) {
         pack={editingPack}
       />
 
-      <AlertDialog
-        open={!!confirmDelete}
-        onOpenChange={(o) => !o && setConfirmDelete(null)}
-      >
+      <AlertDialog open={!!confirmDelete} onOpenChange={(o) => !o && setConfirmDelete(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t('packsAdmin.deleteTitle')}</AlertDialogTitle>
@@ -661,6 +451,7 @@ function AdminPacksManager({ embedded = false }: { embedded?: boolean } = {}) {
           <AlertDialogFooter>
             <AlertDialogCancel>{t('packsAdmin.cancel')}</AlertDialogCancel>
             <AlertDialogAction
+              variant="destructive"
               onClick={() => {
                 if (confirmDelete) {
                   deletePack.mutate(confirmDelete.id);
@@ -691,14 +482,126 @@ function AdminPacksManager({ embedded = false }: { embedded?: boolean } = {}) {
           }
         }}
       />
+    </>
+  );
+}
+
+/** Only the states that need attention carry a badge. */
+function PackStateBadge({ pack }: { pack: Pack }) {
+  const { t } = useT();
+  if (pack.deletedAt) {
+    return (
+      <Badge variant="outline" className="text-muted-foreground">
+        {t('packsDesk.archived')}
+      </Badge>
+    );
+  }
+  if (pack.isActive) return null;
+  return (
+    <Badge variant="outline" className="bg-muted text-muted-foreground">
+      {t('packsAdmin.inactive')}
+    </Badge>
+  );
+}
+
+function EmptyBlock({ title, action }: { title: string; action?: ReactNode }) {
+  return (
+    <div className="flex flex-col items-center gap-3 border-t px-6 py-10 text-center">
+      <PackageIcon className="size-6 text-muted-foreground" aria-hidden="true" />
+      <p className="text-sm text-muted-foreground">{title}</p>
+      {action}
     </div>
   );
 }
 
+/**
+ * Read-only "beyond the pack" price list (grille 2026). The values live
+ * on CompanyBillingSettings — edited from the billing settings page,
+ * surfaced here so the whole tariff sheet reads in one place.
+ */
+function BeyondPackCard() {
+  const { t } = useT();
+  const { data: defaults, isPending, isError, refetch } = useBillingPublicDefaults();
+
+  const money = (amount: number | undefined): string =>
+    amount && amount > 0
+      ? formatPrice(amount, defaults?.defaultCurrency ?? 'TND')
+      : t('packsAdmin.beyondPackNotSet');
+
+  const rows: { label: string; value: string; hint?: string }[] = [
+    {
+      label: t('packsAdmin.beyondPackStudy'),
+      value: money(defaults?.defaultTreatmentFee),
+      hint: t('packsAdmin.beyondPackStudyHint'),
+    },
+    {
+      label: t('packsAdmin.beyondPackDicom'),
+      value: defaults?.cbctSupplementEnabled
+        ? defaults.cbctSupplementFee > 0
+          ? `+ ${money(defaults.cbctSupplementFee)}`
+          : t('packsAdmin.beyondPackNotSet')
+        : t('packsAdmin.beyondPackDicomOff'),
+    },
+    {
+      label: t('packsAdmin.beyondPackRefinementTwo'),
+      value: money(defaults?.refinementTwoArchesFee),
+    },
+    {
+      label: t('packsAdmin.beyondPackRefinementOne'),
+      value: money(defaults?.refinementSingleArchFee),
+    },
+    { label: t('packsAdmin.beyondPackReplacement'), value: money(defaults?.replacementAlignerFee) },
+    { label: t('packsAdmin.beyondPackRetainers'), value: money(defaults?.retainersFee) },
+  ];
+
+  return (
+    <SectionCard
+      title={t('packsAdmin.beyondPackTitle')}
+      description={t('packsAdmin.beyondPackIntro')}
+      action={
+        <Button asChild variant="outline" size="sm">
+          <Link href="/account/billing-settings">{t('packsAdmin.beyondPackEdit')}</Link>
+        </Button>
+      }
+    >
+      {isPending ? (
+        <div className="grid gap-x-8 sm:grid-cols-2">
+          {rows.map((row) => (
+            <Skeleton key={row.label} className="my-2 h-10 rounded-md" />
+          ))}
+        </div>
+      ) : isError ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2">
+          <p className="text-sm text-muted-foreground">{t('packsAdmin.beyondPackLoadError')}</p>
+          <Button variant="outline" size="sm" onClick={() => refetch()}>
+            {t('packsAdmin.beyondPackRetry')}
+          </Button>
+        </div>
+      ) : (
+        <dl className="grid gap-x-8 sm:grid-cols-2">
+          {rows.map((row) => (
+            <div
+              key={row.label}
+              className="flex items-baseline justify-between gap-4 border-b py-2.5 last:border-b-0 sm:[&:nth-last-child(2)]:border-b-0"
+            >
+              <div className="min-w-0">
+                <dt className="text-sm">{row.label}</dt>
+                {row.hint ? (
+                  <dd className="text-xs text-muted-foreground">{row.hint}</dd>
+                ) : null}
+              </div>
+              <dd className="shrink-0 text-sm font-medium tabular-nums">{row.value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </SectionCard>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────
-// Row-action dropdown — extracted so the mobile cards + the desktop
-// table use the same surface. Keeps menu items in lockstep on both
-// layouts without duplicating JSX.
+// Row-action menu — shared by the table and the stacked cards so the
+// two layouts can never drift apart.
 
 function RowActions({
   pack,
@@ -719,65 +622,51 @@ function RowActions({
 }) {
   const { t } = useT();
   const inTrash = !!pack.deletedAt;
-  if (inTrash) {
-    // Trash-first: an archived pack can only be restored or purged.
-    return (
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon">
-            <MoreVertical className="size-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem onClick={onRestore}>
-            <ArchiveRestore className="mr-2 size-4" />
-            {t('common.restore')}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            className="text-destructive focus:text-destructive"
-            onClick={onPermanentDelete}
-          >
-            <ShieldX className="mr-2 size-4" />
-            {t('packsAdmin.deletePermanently')}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    );
-  }
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon">
-          <MoreVertical className="size-4" />
+        <Button variant="ghost" size="icon" aria-label={t('packsAdmin.colActions')}>
+          <MoreHorizontal className="size-4" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={onEdit}>
-          <Pencil className="mr-2 size-4" />
-          {t('packsAdmin.editPack')}
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        {pack.isActive ? (
-          <DropdownMenuItem onClick={onDeactivate}>
-            <PowerOff className="mr-2 size-4" />
-            {t('packsAdmin.deactivate')}
-          </DropdownMenuItem>
+      <DropdownMenuContent align="end" className="w-56">
+        {inTrash ? (
+          // Trash-first: an archived pack can only be restored or purged.
+          <>
+            <DropdownMenuItem onClick={onRestore}>
+              <ArchiveRestore className="size-4" />
+              {t('common.restore')}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem variant="destructive" onClick={onPermanentDelete}>
+              <ShieldX className="size-4" />
+              {t('packsAdmin.deletePermanently')}
+            </DropdownMenuItem>
+          </>
         ) : (
-          <DropdownMenuItem onClick={onActivate}>
-            <Power className="mr-2 size-4" />
-            {t('packsAdmin.activate')}
-          </DropdownMenuItem>
+          <>
+            <DropdownMenuItem onClick={onEdit}>
+              <Pencil className="size-4" />
+              {t('packsAdmin.editPack')}
+            </DropdownMenuItem>
+            {pack.isActive ? (
+              <DropdownMenuItem onClick={onDeactivate}>
+                <PowerOff className="size-4" />
+                {t('packsAdmin.deactivate')}
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem onClick={onActivate}>
+                <Power className="size-4" />
+                {t('packsAdmin.activate')}
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem variant="destructive" onClick={onDelete}>
+              <Trash2 className="size-4" />
+              {t('packsAdmin.deletePack')}
+            </DropdownMenuItem>
+          </>
         )}
-        <DropdownMenuItem
-          className="text-destructive focus:text-destructive"
-          onClick={onDelete}
-        >
-          <Trash2 className="mr-2 size-4" />
-          {t('packsAdmin.deletePack')}
-        </DropdownMenuItem>
-        {/* Permanent deletion is trash-first: archive first, then purge from
-            the archived list (see the inTrash branch above). */}
       </DropdownMenuContent>
     </DropdownMenu>
   );

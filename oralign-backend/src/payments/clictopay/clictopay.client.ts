@@ -146,6 +146,7 @@ export class ClicToPayClient {
           );
         }
         const json: unknown = await response.json();
+        this.logExchange(path, body, json);
         if (!json || typeof json !== 'object' || Array.isArray(json)) {
           throw new ClicToPayError(
             'ambiguous',
@@ -174,6 +175,21 @@ export class ClicToPayClient {
       'The payment provider could not be reached. The payment status is unknown.',
       lastError instanceof Error ? lastError.name : undefined,
     );
+  }
+
+  /**
+   * Trace of one provider exchange: the request WITHOUT its credentials,
+   * then the raw response as returned. The provider's acceptance testing
+   * asks for results taken from the merchant's own logs, and a payment
+   * integration should be able to prove after the fact what it sent and
+   * what came back. `userName` / `password` never leave this class.
+   */
+  private logExchange(path: string, request: URLSearchParams, response: unknown): void {
+    const safeRequest = new URLSearchParams(request);
+    safeRequest.delete('userName');
+    safeRequest.delete('password');
+    this.logger.log(`ClicToPay ${path} request ${safeRequest.toString()}`);
+    this.logger.log(`ClicToPay ${path} response ${JSON.stringify(response)}`);
   }
 
   private endpoint(path: string): string {

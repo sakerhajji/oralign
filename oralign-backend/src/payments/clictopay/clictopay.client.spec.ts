@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { env } from '../../common/config/env';
 import { ClicToPayClient } from './clictopay.client';
@@ -55,6 +56,32 @@ describe('ClicToPayClient', () => {
     expect(request.method).toBe('POST');
     expect(String(request.body)).toContain('amount=10000');
     expect(String(request.body)).toContain('currency=788');
+  });
+
+  it('logs the provider exchange without the credentials', async () => {
+    const logged: string[] = [];
+    jest
+      .spyOn(Logger.prototype, 'log')
+      .mockImplementation((message: unknown) => logged.push(String(message)));
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({ orderId: 'provider-1', formUrl: 'https://pay.example/form' }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+
+    await client.register({
+      orderNumber: 'ORA-LOG',
+      amount: 10000,
+      returnUrl: 'https://app.example/payment/return?p=1',
+      failUrl: 'https://app.example/payment/fail?p=1',
+    });
+
+    const trace = logged.join('\n');
+    expect(trace).toContain('orderNumber=ORA-LOG');
+    expect(trace).toContain('"orderId":"provider-1"');
+    expect(trace).not.toContain('userName');
+    expect(trace).not.toContain('password');
   });
 
   it('maps provider registration errors without exposing credentials', async () => {

@@ -37,6 +37,25 @@ describe('ClicToPayClient', () => {
     );
   });
 
+  it('never asks for the mobile hosted page, which production does not serve', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({ orderId: 'provider-1', formUrl: 'https://pay.example/form' }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    await client.register({
+      orderNumber: 'ORA-NARROW-SCREEN',
+      amount: 10000,
+      returnUrl: 'https://app.example/payment/return?p=1',
+      failUrl: 'https://app.example/payment/fail?p=1',
+      pageView: 'MOBILE',
+    });
+    const request = fetchMock.mock.calls[0]![1] as RequestInit;
+    expect(String(request.body)).toContain('pageView=DESKTOP');
+    expect(String(request.body)).not.toContain('pageView=MOBILE');
+  });
+
   it('registers with form encoding and returns the hosted URL', async () => {
     fetchMock.mockResolvedValue(
       new Response(

@@ -155,6 +155,13 @@ export function useUpdateInvoiceNumber(): UseMutationResult<
   });
 }
 
+/**
+ * ClicToPay resolves the `MOBILE` page view to `mobile_payment.html`, a template
+ * their production servers do not serve — customers on a narrow screen landed on
+ * a 404. The desktop page is responsive, so every session asks for it.
+ */
+const HOSTED_PAGE_VIEW = 'DESKTOP' as const;
+
 export function usePayByCard(): UseMutationResult<
   HostedPaymentSession,
   Error,
@@ -174,10 +181,7 @@ export function usePayByCard(): UseMutationResult<
         idempotencyKey,
         purpose: PaymentPurpose.INSTALLMENT,
         language,
-        pageView:
-          typeof window !== 'undefined' && window.innerWidth < 768
-            ? 'MOBILE'
-            : 'DESKTOP',
+        pageView: HOSTED_PAGE_VIEW,
       }),
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
@@ -195,10 +199,7 @@ export function useCreateTreatmentFeeCardSession(): UseMutationResult<
         idempotencyKey,
         purpose: PaymentPurpose.TREATMENT_FEE,
         language,
-        pageView:
-          typeof window !== 'undefined' && window.innerWidth < 768
-            ? 'MOBILE'
-            : 'DESKTOP',
+        pageView: HOSTED_PAGE_VIEW,
       }),
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });

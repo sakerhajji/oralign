@@ -50,7 +50,11 @@ export class ClicToPayClient {
     body.set('returnUrl', input.returnUrl);
     body.set('failUrl', input.failUrl);
     if (input.language) body.set('language', input.language);
-    if (input.pageView) body.set('pageView', input.pageView);
+    // ClicToPay resolves MOBILE to `mobile_payment.html`, a template their
+    // production servers return a 404 for; the desktop page is responsive and is
+    // the only one they serve. Browsers still running an older bundle keep asking
+    // for MOBILE, so the choice is pinned here, at the provider boundary.
+    if (input.pageView) body.set('pageView', 'DESKTOP');
 
     // Registration is intentionally never retried: the first request may
     // have reached ClicToPay even if its response was lost. Retrying could

@@ -235,6 +235,9 @@ enum PaymentRecordStatus {
   failed
   rejected
   cancelled
+  // Hosted session that ran out of time before the customer paid. Terminal:
+  // the formUrl is dead, so a retry must register a brand-new attempt.
+  expired
 }
 
 // ─────────────────────────────────────────
@@ -1497,6 +1500,11 @@ model Payment {
   providerErrorMessage String?
   lastProviderCheckAt DateTime?
   verificationCount  Int             @default(0)
+  // A ClicToPay hosted session dies a few minutes after register.do. We keep
+  // our own conservative deadline so an abandoned attempt is never handed back
+  // to the customer with a dead paymentUrl.
+  expiresAt          DateTime?
+  expiredAt          DateTime?
 
   // Sequential receipt/invoice number (e.g. FAC-000001), allocated
   // lazily the first time a successful payment's receipt is rendered.
@@ -1556,6 +1564,8 @@ model Payment {
   @@index([status, createdAt(sort: Desc)])
   @@index([paymentMethod, status])
   @@index([orderId, createdAt(sort: Desc)])
+  // Reconciliation sweep: live attempts, oldest first.
+  @@index([provider, status, lastProviderCheckAt])
 }
 
 // ─────────────────────────────────────────

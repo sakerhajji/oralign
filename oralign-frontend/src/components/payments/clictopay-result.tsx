@@ -199,6 +199,15 @@ function getPresentation(status: PaymentRecordStatus | undefined, fr: boolean) {
           ? 'Le paiement a été vérifié et enregistré avec succès.'
           : 'The payment was verified and recorded successfully.',
       };
+    case PaymentRecordStatus.EXPIRED:
+      return {
+        icon: Clock3,
+        tone: 'danger' as const,
+        title: fr ? 'Session de paiement expirée' : 'Payment session expired',
+        description: fr
+          ? 'La page de paiement n’est plus valable et aucun montant n’a été débité. Relancez un paiement depuis la commande.'
+          : 'The payment page is no longer valid and nothing was charged. Start a new payment from the order.',
+      };
     case PaymentRecordStatus.FAILED:
     case PaymentRecordStatus.REJECTED:
     case PaymentRecordStatus.CANCELLED:

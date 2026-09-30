@@ -77,6 +77,7 @@ const STATUS_TONE: Record<PaymentRecordStatus, string> = {
   [PaymentRecordStatus.FAILED]: 'bg-red-100 text-red-800',
   [PaymentRecordStatus.REJECTED]: 'bg-red-100 text-red-800',
   [PaymentRecordStatus.CANCELLED]: 'bg-muted text-muted-foreground',
+  [PaymentRecordStatus.EXPIRED]: 'bg-muted text-muted-foreground',
 };
 
 function PaymentMethodBadge({

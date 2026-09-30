@@ -55,7 +55,12 @@ describe('ClicToPayPaymentsService', () => {
       failUrl: 'https://app.example/payment/fail',
     });
     prisma = {
-      payment: { findUnique: jest.fn(), update: jest.fn() },
+      payment: {
+        findUnique: jest.fn(),
+        findFirst: jest.fn(),
+        update: jest.fn(),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
       dentalOrder: { findUnique: jest.fn() },
       $transaction: jest.fn(),
     };
@@ -70,6 +75,164 @@ describe('ClicToPayPaymentsService', () => {
       quotations,
       events,
     );
+  });
+
+  /** `createSession` for a treatment fee, with the attempt transaction stubbed. */
+  const createTreatmentFeeSession = () =>
+    service.createSession(
+      { orderId: 'order-1', purpose: PaymentPurpose.treatment_fee },
+      admin,
+      'client-key',
+    );
+
+  /** Make the attempt transaction hand back a freshly created attempt. */
+  const stubFreshAttempt = (fresh: unknown) => {
+    prisma.$transaction.mockImplementation(async () => ({
+      payment: fresh,
+      created: true,
+    }));
+  };
+
+  const minutes = (n: number) => new Date(Date.now() + n * 60_000);
+
+  it('reuses a hosted session that is still within its deadline', async () => {
+    const live = payment({ expiresAt: minutes(5) });
+    prisma.payment.findUnique.mockResolvedValue(null); // no idempotency replay
+    prisma.payment.findFirst.mockResolvedValue(live);
+
+    const result = await createTreatmentFeeSession();
+
+    expect(result.paymentUrl).toBe('https://pay.example/form');
+    expect(client.register).not.toHaveBeenCalled();
+  });
+
+  it('never hands back a hosted session whose deadline has passed', async () => {
+    const stale = payment({ expiresAt: minutes(-5) });
+    const fresh = payment({
+      id: 'payment-2',
+      merchantOrderNumber: 'ORA-TEST-2',
+      providerOrderId: null,
+      paymentUrl: null,
+      expiresAt: null,
+    });
+    prisma.payment.findUnique.mockImplementation(async (args: any) =>
+      args.where?.idempotencyKey ? null : stale,
+    );
+    prisma.payment.findFirst.mockResolvedValue(stale);
+    // The gateway is asked before anything is retired: registered, never paid.
+    client.getStatus.mockResolvedValue({
+      orderStatus: 0,
+      orderNumber: 'ORA-TEST-1',
+      amount: 10000,
+      currency: '788',
+    });
+    prisma.payment.update.mockResolvedValue(stale);
+    stubFreshAttempt(fresh);
+    client.register.mockResolvedValue({
+      orderId: 'provider-2',
+      formUrl: 'https://pay.example/form-2',
+    });
+
+    await createTreatmentFeeSession();
+
+    // The dead attempt was retired and a brand-new registration was opened.
+    expect(prisma.payment.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: PaymentRecordStatus.expired }),
+      }),
+    );
+    expect(client.register).toHaveBeenCalledTimes(1);
+    expect(client.register.mock.calls[0][0].orderNumber).toBe('ORA-TEST-2');
+  });
+
+  it('settles a payment made in the final seconds instead of expiring it', async () => {
+    const stale = payment({
+      purpose: PaymentPurpose.treatment_fee,
+      installmentId: null,
+      expiresAt: minutes(-1),
+    });
+    prisma.payment.findUnique.mockImplementation(async (args: any) =>
+      args.where?.idempotencyKey ? null : stale,
+    );
+    prisma.payment.findFirst.mockResolvedValue(stale);
+    client.getStatus.mockResolvedValue({
+      orderStatus: 2,
+      orderNumber: 'ORA-TEST-1',
+      amount: 10000,
+      currency: '788',
+    });
+    prisma.payment.update.mockResolvedValue(stale);
+    prisma.$transaction.mockImplementation(async () => ({
+      payment: payment({ status: PaymentRecordStatus.success }),
+      order: { id: 'order-1', orderCode: 'ORD-1', doctorId: 'd1', doctor: null, patient: null },
+      notify: false,
+    }));
+
+    await createTreatmentFeeSession();
+
+    // Money arrived: no second charge may be opened against it.
+    expect(client.register).not.toHaveBeenCalled();
+    expect(prisma.payment.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('does not open a second charge while a registration outcome is unknown', async () => {
+    const ambiguous = payment({
+      status: PaymentRecordStatus.unknown,
+      providerOrderId: null,
+      paymentUrl: null,
+      expiresAt: null,
+    });
+    prisma.payment.findUnique.mockImplementation(async (args: any) =>
+      args.where?.idempotencyKey ? null : ambiguous,
+    );
+    prisma.payment.findFirst.mockResolvedValue(ambiguous);
+    client.getStatus.mockRejectedValue(
+      new ClicToPayError('ambiguous', 'PAYMENT_PROVIDER_UNREACHABLE', 'unreachable'),
+    );
+    prisma.payment.update.mockResolvedValue(ambiguous);
+
+    const result = await createTreatmentFeeSession();
+
+    expect(result.status).toBe(PaymentRecordStatus.unknown);
+    expect(client.register).not.toHaveBeenCalled();
+  });
+
+  it('records a deadline on every hosted session it registers', async () => {
+    const fresh = payment({ providerOrderId: null, paymentUrl: null, expiresAt: null });
+    prisma.payment.findUnique.mockResolvedValue(null);
+    prisma.payment.findFirst.mockResolvedValue(null);
+    stubFreshAttempt(fresh);
+    client.register.mockResolvedValue({
+      orderId: 'provider-1',
+      formUrl: 'https://pay.example/form',
+    });
+    prisma.payment.update.mockResolvedValue(payment());
+
+    await createTreatmentFeeSession();
+
+    const data = prisma.payment.update.mock.calls[0][0].data;
+    expect(data.expiresAt).toBeInstanceOf(Date);
+    expect(data.expiresAt.getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it('surfaces an expired session to the return page', async () => {
+    const stale = payment({ expiresAt: minutes(-1) });
+    const expired = payment({ status: PaymentRecordStatus.expired });
+    prisma.payment.findUnique
+      .mockResolvedValueOnce(stale) // verify() loads the attempt
+      .mockResolvedValueOnce(expired); // re-read after retiring it
+    client.getStatus.mockResolvedValue({
+      orderStatus: 0,
+      orderNumber: 'ORA-TEST-1',
+      amount: 10000,
+      currency: '788',
+    });
+    prisma.payment.update.mockResolvedValue(stale);
+
+    const result = await service.verify('payment-1', admin);
+
+    expect(result.status).toBe(PaymentRecordStatus.expired);
+    expect(payments.handleSuccess).not.toHaveBeenCalled();
   });
 
   it('does not treat a browser return as payment success without provider status 2', async () => {

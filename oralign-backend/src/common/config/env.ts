@@ -159,6 +159,15 @@ export const env = Object.freeze({
     returnUrl: optionalUrl('CLICTOPAY_RETURN_URL'),
     failUrl: optionalUrl('CLICTOPAY_FAIL_URL'),
     timeoutMs: int('CLICTOPAY_TIMEOUT_MS', 15_000),
+    /**
+     * How long we consider a hosted session usable. Deliberately shorter than
+     * ClicToPay's own limit (~20 min): retiring a session a little early only
+     * costs a fresh registration, while retiring it late hands the customer a
+     * dead formUrl.
+     */
+    sessionTtlMs: int('CLICTOPAY_SESSION_TTL_MS', 15 * 60_000),
+    /** How often the reconciliation sweep asks the gateway about live attempts. */
+    reconcileIntervalMs: int('CLICTOPAY_RECONCILE_INTERVAL_MS', 5 * 60_000),
     get configured(): boolean {
       return !!(
         this.apiUrl &&

@@ -33,6 +33,16 @@ const LIVE_STATUSES: PaymentRecordStatus[] = [
   PaymentRecordStatus.unknown,
 ];
 
+/**
+ * Background reconciliation has no HTTP principal. Card settlement never
+ * writes an actor to a foreign key (`confirmedById` stays null for cards), so
+ * this synthetic caller only ever satisfies the admin access check.
+ */
+const RECONCILIATION_CALLER: Caller = {
+  userId: 'system:clictopay-reconciliation',
+  role: UserRole.super_admin,
+};
+
 export interface HostedPaymentSession {
   paymentId: string;
   orderId: string;
@@ -102,6 +112,12 @@ export class ClicToPayPaymentsService {
       return this.toSession(replay);
     }
 
+    // A customer who comes back later must never be handed a dead hosted
+    // session. Resolved before the attempt transaction so the gateway lookup
+    // never runs while a row lock is held.
+    const resumable = await this.resolveLiveAttempt(dto, caller);
+    if (resumable) return this.toSession(resumable);
+
     const attempt =
       dto.purpose === PaymentPurpose.installment
         ? await this.createInstallmentAttempt(dto, caller, idempotencyKey)
@@ -135,6 +151,7 @@ export class ClicToPayPaymentsService {
           transactionId: registration.orderId,
           paymentUrl: registration.formUrl,
           status: PaymentRecordStatus.pending,
+          expiresAt: new Date(Date.now() + env.clicToPay.sessionTtlMs),
           providerErrorCode: null,
           providerErrorMessage: null,
         },
@@ -200,17 +217,24 @@ export class ClicToPayPaymentsService {
       });
     } catch (error) {
       const failure = this.normaliseError(error);
-      const unknown = await this.prisma.payment.update({
+      // `Order not found` on an attempt that never obtained a provider order id
+      // is definitive: no charge exists under this reference, so the attempt is
+      // retired instead of blocking the customer behind a permanent `unknown`.
+      const neverRegistered =
+        failure.providerCode === '6' && !payment.providerOrderId;
+      const settled = await this.prisma.payment.update({
         where: { id: payment.id },
         data: {
-          status: PaymentRecordStatus.unknown,
+          status: neverRegistered
+            ? PaymentRecordStatus.failed
+            : PaymentRecordStatus.unknown,
           providerErrorCode: failure.safeCode,
           providerErrorMessage: failure.message,
           lastProviderCheckAt: new Date(),
           verificationCount: { increment: 1 },
         },
       });
-      return this.toSession(unknown);
+      return this.toSession(settled);
     }
 
     const mismatch = this.validateProviderIdentity(payment, providerStatus);
@@ -258,7 +282,124 @@ export class ClicToPayPaymentsService {
       where: { id: payment.id },
       data: { status: nextStatus },
     });
+    // Registered, never paid, past its deadline: the hosted session is dead.
+    // Surfacing it as EXPIRED is what lets the return page offer a fresh
+    // attempt instead of sending the customer back to a dead URL.
+    if (nextStatus === PaymentRecordStatus.pending && this.isSessionStale(updated)) {
+      await this.expireSession(updated.id);
+      const expired = await this.prisma.payment.findUnique({
+        where: { id: updated.id },
+      });
+      if (expired) return this.toSession(expired);
+    }
     return this.toSession(updated);
+  }
+
+  /**
+   * Reconciliation entry point for the background sweep: the very verification
+   * the customer's return page performs, without an HTTP principal.
+   */
+  async reconcile(paymentId: string): Promise<HostedPaymentSession> {
+    return this.verify(paymentId, RECONCILIATION_CALLER);
+  }
+
+  /**
+   * Decide what to do with the attempt already in flight for this target.
+   *
+   * The gateway is always asked before an attempt is retired: a customer may
+   * have paid in the final seconds, and a locally-expired row would strand
+   * that money. Returns the attempt to hand back, or null when opening a
+   * fresh one is safe.
+   */
+  private async resolveLiveAttempt(
+    dto: CreateClicToPaySessionDto,
+    caller: Caller,
+  ): Promise<Payment | null> {
+    const where = this.liveAttemptWhere(dto);
+    if (!where) return null;
+    const live = await this.prisma.payment.findFirst({
+      where,
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!live) return null;
+    await this.assertPaymentAccess(live, caller);
+    if (this.isSessionUsable(live)) return live;
+
+    const verified = await this.verify(live.id, caller);
+    // Paid, or still undecided: never open a second charge against it.
+    if (
+      verified.status === PaymentRecordStatus.success ||
+      verified.status === PaymentRecordStatus.unknown
+    ) {
+      return this.prisma.payment.findUnique({ where: { id: live.id } });
+    }
+    if (verified.status === PaymentRecordStatus.pending) {
+      await this.expireSession(live.id);
+    }
+    return null;
+  }
+
+  private liveAttemptWhere(
+    dto: CreateClicToPaySessionDto,
+  ): Prisma.PaymentWhereInput | null {
+    const base = {
+      provider: PaymentProvider.clictopay,
+      status: { in: LIVE_STATUSES },
+    };
+    if (dto.purpose === PaymentPurpose.installment) {
+      return dto.installmentId ? { ...base, installmentId: dto.installmentId } : null;
+    }
+    return { ...base, orderId: dto.orderId, purpose: PaymentPurpose.treatment_fee };
+  }
+
+  /** Usable: still pending, with a hosted URL, and before its deadline. */
+  private isSessionUsable(payment: Payment): boolean {
+    return (
+      payment.status === PaymentRecordStatus.pending &&
+      !!payment.paymentUrl &&
+      !!payment.expiresAt &&
+      payment.expiresAt.getTime() > Date.now()
+    );
+  }
+
+  /**
+   * Provably past its deadline. An attempt that has none is still being
+   * registered by a concurrent request, and reusing it is what makes a
+   * double click safe.
+   */
+  private isSessionStale(payment: Payment): boolean {
+    return !!payment.expiresAt && payment.expiresAt.getTime() <= Date.now();
+  }
+
+  /** Compare-and-set: a concurrent settlement must never be downgraded. */
+  private async expireSession(paymentId: string): Promise<void> {
+    const changed = await this.prisma.payment.updateMany({
+      where: { id: paymentId, status: { in: LIVE_STATUSES } },
+      data: this.expiredPatch(),
+    });
+    if (changed.count) {
+      this.logger.log(`ClicToPay session expired for payment ${paymentId}.`);
+    }
+  }
+
+  private async expireWithin(
+    tx: Prisma.TransactionClient,
+    paymentId: string,
+  ): Promise<void> {
+    await tx.payment.updateMany({
+      where: { id: paymentId, status: { in: LIVE_STATUSES } },
+      data: this.expiredPatch(),
+    });
+  }
+
+  private expiredPatch(): Prisma.PaymentUpdateManyMutationInput {
+    return {
+      status: PaymentRecordStatus.expired,
+      expiredAt: new Date(),
+      providerErrorCode: 'PAYMENT_SESSION_EXPIRED',
+      providerErrorMessage:
+        'The hosted payment session expired before the payment was completed.',
+    };
   }
 
   private async createInstallmentAttempt(
@@ -298,7 +439,11 @@ export class ClicToPayPaymentsService {
         },
         orderBy: { createdAt: 'desc' },
       });
-      if (live) return { payment: live, created: false };
+      // Concurrency backstop: a double click finds the attempt its sibling
+      // request just opened. Only a provably stale one is skipped — an attempt
+      // still being registered has no deadline yet and must be reused.
+      if (live && !this.isSessionStale(live)) return { payment: live, created: false };
+      if (live) await this.expireWithin(tx, live.id);
 
       const attemptNumber =
         (await tx.payment.count({
@@ -353,7 +498,11 @@ export class ClicToPayPaymentsService {
         },
         orderBy: { createdAt: 'desc' },
       });
-      if (live) return { payment: live, created: false };
+      // Concurrency backstop: a double click finds the attempt its sibling
+      // request just opened. Only a provably stale one is skipped — an attempt
+      // still being registered has no deadline yet and must be reused.
+      if (live && !this.isSessionStale(live)) return { payment: live, created: false };
+      if (live) await this.expireWithin(tx, live.id);
 
       const settings = await tx.companyBillingSettings.findFirst({
         where: { isActive: true },

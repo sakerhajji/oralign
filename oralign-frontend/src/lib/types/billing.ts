@@ -65,6 +65,8 @@ export enum PaymentRecordStatus {
   FAILED = 'failed',
   REJECTED = 'rejected',
   CANCELLED = 'cancelled',
+  /** Hosted session that ran out of time. Terminal: a retry opens a new one. */
+  EXPIRED = 'expired',
 }
 
 export enum PaymentPurpose {

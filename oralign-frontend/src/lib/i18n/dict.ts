@@ -2119,6 +2119,7 @@ export const dict = {
       rejected: { en: 'Rejected', fr: 'Rejetée' } as T,
       failed: { en: 'Failed', fr: 'Échouée' } as T,
       cancelled: { en: 'Cancelled', fr: 'Annulée' } as T,
+      expired: { en: 'Session expired', fr: 'Session expirée' } as T,
     },
 
     // PaymentMethod → human label.

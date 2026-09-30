@@ -6,6 +6,7 @@ import { PAYMENT_GATEWAY } from './gateways/payment-gateway.interface';
 import { PaymentsService } from './services/payments.service';
 import { ClicToPayClient } from './clictopay/clictopay.client';
 import { ClicToPayPaymentsService } from './services/clictopay-payments.service';
+import { ClicToPayReconciliationService } from './services/clictopay-reconciliation.service';
 import { env } from '../common/config/env';
 import { QuotationModule } from '../quotations/quotation.module';
 
@@ -41,6 +42,7 @@ const controllers = [
     PaymentsService,
     ClicToPayClient,
     ClicToPayPaymentsService,
+    ClicToPayReconciliationService,
     {
       provide: PAYMENT_GATEWAY,
       useClass: MockPaymentGateway,

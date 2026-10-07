@@ -21,7 +21,7 @@ const heroCopy: Record<
   }
 > = {
   fr: {
-    eyebrow: "Aligneurs dentaires invisibles — Made to Shine.",
+    eyebrow: "Aligneurs dentaires transparents en Tunisie — Made to Shine.",
     intro:
       "Bienvenue dans l’univers ORALIGN — la marque d’aligneurs invisibles premium qui transforme chaque sourire en une expression de confiance et de lumière.",
     origin: "Conçus en Allemagne. Fabriqués en Tunisie.",
@@ -33,7 +33,7 @@ const heroCopy: Record<
     imageAlt: "Trois amies souriant ensemble au soleil",
   },
   en: {
-    eyebrow: "Clear dental aligners — Made to Shine.",
+    eyebrow: "Clear aligners in Tunisia — Made to Shine.",
     intro:
       "Welcome to the ORALIGN universe — the premium clear aligner brand that turns every smile into an expression of confidence and light.",
     origin: "Designed in Germany. Manufactured in Tunisia.",
@@ -45,7 +45,7 @@ const heroCopy: Record<
     imageAlt: "Three friends smiling together in the sunlight",
   },
   ar: {
-    eyebrow: "تقويم أسنان شفاف — Made to Shine.",
+    eyebrow: "تقويم الأسنان الشفاف في تونس — Made to Shine.",
     intro:
       "مرحباً بكم في عالم ORALIGN — العلامة المتميزة للتقويم الشفاف التي تحوّل كل ابتسامة إلى تعبير عن الثقة والإشراق.",
     origin: "تصميم ألماني. صناعة تونسية.",
@@ -85,7 +85,9 @@ export function OralignHeroSection() {
               <h1 id="oralign-title">
                 <span className="block sc-serif text-[clamp(2.65rem,6vw,4.8rem)] leading-none text-[var(--sc-sun)]">
                   ORALIGN
-                </span>
+                </span>{" "}
+                {/* The space above is for text extraction: the two spans are
+                    blocks, so without it the heading reads "ORALIGNAligneurs". */}
                 <span className="mt-2 block text-[0.72rem] font-medium tracking-[0.08em] text-[var(--sc-white)] sm:text-[0.78rem]">
                   {copy.eyebrow}
                 </span>

@@ -1,21 +1,21 @@
 import { ImageResponse } from 'next/og';
 
-export const runtime = 'edge';
+// Rendered once at build on the Node runtime (the default). It used to run
+// on the edge per request, where an invalid Satori layout threw every time —
+// production answered 502 and shared links went out without a card.
 export const alt = 'Oralign — Clear aligner care platform';
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
 
 /**
  * Root-level OG image — shown by Google, Twitter, WhatsApp, LinkedIn,
- * etc. when ANY non-showcase URL on the domain is shared. The
- * /(showcase) route group has its own opengraph-image.tsx with a
- * marketing-grade card; this one is the fallback for /login, /signup,
- * etc. and the safety net if Google ever falls back to the root.
+ * etc. when a URL WITHOUT its own OpenGraph image is shared — /login,
+ * /signup and the like. Every marketing page names /og.png explicitly.
  *
  * Brand palette mirrors the marketing site (oralign yellow #FECA16
- * on near-black). No external assets — pure ImageResponse so the
- * image renders in <100ms on the edge runtime and never depends on
- * a network fetch.
+ * on near-black). No external assets — pure ImageResponse, so the
+ * image never depends on a network fetch. Marketing pages use the
+ * static /og.png card instead (seo/meta.ts → OG_IMAGE).
  */
 export default function OpengraphImage() {
   return new ImageResponse(
@@ -76,8 +76,10 @@ export default function OpengraphImage() {
           >
             Clear aligner care platform
           </div>
-          <div style={{ fontSize: 64, lineHeight: 1.05, fontWeight: 300 }}>
-            Doctor-supervised{' '}
+          {/* Satori requires display:flex on any element with several children;
+              without it the render throws, which is what made this route 502. */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', fontSize: 64, lineHeight: 1.05, fontWeight: 300 }}>
+            Doctor-supervised&nbsp;
             <span style={{ fontStyle: 'italic', color: '#feca16' }}>
               orthodontic care,
             </span>

@@ -2,6 +2,9 @@ import { dict, type Lang } from "../i18n/dict";
 import { MARKETING_PAGES, pathFor, type MarketingPageKey } from "./routes";
 import { BRAND, SITE_NAME, SITE_URL, SOCIAL_PROFILES, absoluteUrl } from "./meta";
 import type { LegalCompany } from "@/lib/legal/legal-content";
+import type { DayOfWeek, PractitionerDetail } from "../finder";
+import { mediaUrl } from "../finder";
+import { FINDER_PATH, cityLabel, practitionerPath } from "../practitioner-url";
 
 /**
  * Server-rendered JSON-LD. The previous implementation used next/script
@@ -84,6 +87,16 @@ export function organizationLd(company?: LegalCompany | null) {
         }
       : {}),
     areaServed: { "@type": "Country", name: "Tunisia" },
+    // Topics, not claims: what the entity is ABOUT, which is how search
+    // engines and AI answers associate "ORALIGN" with clear aligners.
+    knowsAbout: [
+      "Clear aligners",
+      "Invisible orthodontics",
+      "Orthodontic aligner treatment",
+      "Aligneurs transparents",
+      "Orthodontie invisible",
+      "تقويم الأسنان الشفاف",
+    ],
     knowsLanguage: ["fr", "en", "ar"],
     // Empty until the official accounts exist — see SOCIAL_PROFILES.
     ...(SOCIAL_PROFILES.length > 0 ? { sameAs: [...SOCIAL_PROFILES] } : {}),
@@ -226,5 +239,81 @@ export function dentistServiceLd(lang: Lang) {
     areaServed: { "@type": "Country", name: "Tunisia" },
     audience: { "@type": "Audience", audienceType: "Dentists and orthodontists" },
     url: absoluteUrl(pathFor("practitioners", lang)),
+  };
+}
+
+const SCHEMA_DAY: Record<DayOfWeek, string> = {
+  monday: "https://schema.org/Monday",
+  tuesday: "https://schema.org/Tuesday",
+  wednesday: "https://schema.org/Wednesday",
+  thursday: "https://schema.org/Thursday",
+  friday: "https://schema.org/Friday",
+  saturday: "https://schema.org/Saturday",
+  sunday: "https://schema.org/Sunday",
+};
+
+/**
+ * One partner practice as a schema.org Dentist, tied to the ORALIGN entity
+ * with `memberOf` — the structured form of "a certified practitioner of the
+ * ORALIGN network". Built only from what the practice published: no rating,
+ * review or specialty is asserted, and absent facts are omitted (an empty
+ * string is a validation error, not a blank).
+ */
+export function practitionerLd(p: PractitionerDetail, lang: Lang) {
+  const url = absoluteUrl(practitionerPath(p, lang));
+  const image = mediaUrl(p.logoUrl) ?? mediaUrl(p.avatarUrl);
+  const street = p.clinicAddress?.trim();
+  const city = p.city?.trim();
+  const phone = p.clinicPhone?.trim();
+  const hours = (p.workingHours ?? [])
+    .filter((w) => !w.isClosed && w.openTime && w.closeTime)
+    .map((w) => ({
+      "@type": "OpeningHoursSpecification",
+      dayOfWeek: SCHEMA_DAY[w.dayOfWeek],
+      opens: w.openTime.slice(0, 5),
+      closes: w.closeTime.slice(0, 5),
+    }));
+
+  return {
+    "@context": "https://schema.org",
+    "@type": "Dentist",
+    "@id": `${url}#practice`,
+    name: p.clinicName?.trim() || p.practitionerName,
+    url,
+    ...(image ? { image } : {}),
+    ...(phone ? { telephone: phone } : {}),
+    address: {
+      "@type": "PostalAddress",
+      ...(street ? { streetAddress: street } : {}),
+      ...(city ? { addressLocality: city } : {}),
+      addressCountry: "TN",
+    },
+    ...(typeof p.latitude === "number" && typeof p.longitude === "number"
+      ? { geo: { "@type": "GeoCoordinates", latitude: p.latitude, longitude: p.longitude } }
+      : {}),
+    ...(hours.length ? { openingHoursSpecification: hours } : {}),
+    ...(city ? { areaServed: { "@type": "City", name: city } } : {}),
+    memberOf: { "@id": ORG_ID },
+  };
+}
+
+export function practitionerBreadcrumbLd(p: PractitionerDetail, lang: Lang) {
+  const items = [
+    { name: HOME_CRUMB[lang], path: pathFor("home", lang) },
+    { name: MARKETING_PAGES.finder[lang].breadcrumb, path: FINDER_PATH[lang] },
+    {
+      name: [p.practitionerName, cityLabel(p.city, lang)].filter(Boolean).join(" — "),
+      path: practitionerPath(p, lang),
+    },
+  ];
+  return {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: items.map((item, i) => ({
+      "@type": "ListItem",
+      position: i + 1,
+      name: item.name,
+      item: absoluteUrl(item.path),
+    })),
   };
 }

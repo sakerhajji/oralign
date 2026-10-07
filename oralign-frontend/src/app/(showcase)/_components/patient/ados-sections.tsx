@@ -4,6 +4,7 @@ import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
 import type { Lang } from "../../_lib/i18n/dict";
 import { useShowcaseLang } from "../../_lib/i18n/lang-context";
+import { pathFor } from "../../_lib/seo/routes";
 import { Reveal } from "../shared/reveal";
 
 /**
@@ -464,7 +465,7 @@ export function AdosPage() {
               <p className="mt-5 max-w-[680px] text-[0.98rem] leading-8 text-[var(--sc-text-mid)]">
                 {copy.hero.lede}
               </p>
-              <Link href="/trouver-un-praticien" className={ctaClass}>
+              <Link href={pathFor("finder", lang)} className={ctaClass}>
                 {copy.hero.cta}
                 <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
               </Link>
@@ -674,7 +675,7 @@ export function AdosPage() {
                 <p className="mt-5 text-[0.98rem] leading-8 text-[var(--sc-text-mid)]">
                   {copy.cta.body}
                 </p>
-                <Link href="/trouver-un-praticien" className={ctaClass}>
+                <Link href={pathFor("finder", lang)} className={ctaClass}>
                   {copy.cta.action}
                   <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
                 </Link>

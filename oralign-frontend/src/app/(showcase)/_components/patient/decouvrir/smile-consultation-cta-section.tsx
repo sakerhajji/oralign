@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import type { Lang } from "../../../_lib/i18n/dict";
 import { useShowcaseLang } from "../../../_lib/i18n/lang-context";
+import { pathFor } from "../../../_lib/seo/routes";
 
 const ctaCopy: Record<
   Lang,
@@ -80,7 +81,7 @@ export function SmileConsultationCtaSection() {
           </h2>
 
           <Link
-            href="/trouver-un-praticien"
+            href={pathFor("finder", lang)}
             className="mt-5 inline-flex min-h-12 w-full max-w-[260px] items-center justify-center bg-[var(--sc-sun)] px-6 py-3 text-[0.72rem] font-semibold text-[var(--sc-black)] no-underline shadow-[0_16px_34px_rgba(255,200,47,0.28)] transition hover:bg-[var(--sc-sun-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sc-white)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--sc-black)] sm:min-h-12 sm:w-auto sm:max-w-none sm:px-7"
           >
             {copy.cta}

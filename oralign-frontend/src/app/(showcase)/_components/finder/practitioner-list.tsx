@@ -1,9 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { dict } from "../../_lib/i18n/dict";
 import { useShowcaseLang } from "../../_lib/i18n/lang-context";
 import { mediaUrl, type PublicPractitioner } from "../../_lib/finder";
+import { practitionerPath } from "../../_lib/practitioner-url";
 import { formatDistanceLabel } from "./distance";
 
 interface ListProps {
@@ -99,10 +101,17 @@ function PractitionerCard({
     .join("");
 
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-pressed={active}
+    // A real link to the practice's own page: crawlers follow it and a
+    // ctrl/middle click opens it in a tab, while a plain click keeps the
+    // in-place detail panel the finder has always had.
+    <Link
+      href={practitionerPath(p, lang)}
+      onClick={(event) => {
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        onSelect();
+      }}
+      aria-current={active ? "true" : undefined}
       className={[
         "group flex w-full items-start gap-4 border p-4 text-left transition-colors",
         active
@@ -152,6 +161,6 @@ function PractitionerCard({
           {f.viewDetails[lang]}
         </span>
       </span>
-    </button>
+    </Link>
   );
 }

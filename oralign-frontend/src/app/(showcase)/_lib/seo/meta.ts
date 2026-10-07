@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import type { Lang } from "../i18n/dict";
 import { MARKETING_PAGES, PAGE_LANGS, pathFor, type MarketingPageKey } from "./routes";
+import type { PractitionerDetail } from "../finder";
+import { cityLabel, practitionerPath } from "../practitioner-url";
 
 /**
  * Single source of truth for the public origin. Everything SEO-visible
@@ -50,6 +52,19 @@ export const OG_LOCALE: Record<Lang, string> = {
   en: "en_US",
   ar: "ar_TN",
 };
+
+/**
+ * The social card every public page shares. A fixed path on purpose: the
+ * file-convention opengraph-image only reached the home page (each page's
+ * own `openGraph` replaces the inherited one, images included), and its
+ * route-group URL carried a build hash. See app/og.png/route.tsx.
+ */
+export const OG_IMAGE = {
+  url: "/og.png",
+  width: 1200,
+  height: 630,
+  alt: "ORALIGN® — aligneurs transparents en Tunisie",
+} as const;
 
 export function absoluteUrl(path: string): string {
   return `${SITE_URL}${path}`;
@@ -102,12 +117,70 @@ export function marketingMetadata(key: MarketingPageKey, lang: Lang): Metadata {
       siteName: SITE_NAME,
       locale: OG_LOCALE[lang],
       alternateLocale: PAGE_LANGS[key].filter((l) => l !== lang).map((l) => OG_LOCALE[l]),
+      images: [OG_IMAGE],
     },
     twitter: {
       card: "summary_large_image",
       title: page.title,
       description: page.description,
+      images: [OG_IMAGE.url],
     },
+    robots: { index: true, follow: true },
+  };
+}
+
+const PRACTITIONER_TITLE: Record<Lang, (name: string, city: string | null) => string> = {
+  fr: (name, city) =>
+    city ? `${name} — Aligneurs transparents à ${city} | ORALIGN®` : `${name} — Praticien partenaire | ORALIGN®`,
+  en: (name, city) =>
+    city ? `${name} — Clear Aligners in ${city} | ORALIGN®` : `${name} — Partner Practitioner | ORALIGN®`,
+  ar: (name, city) =>
+    city ? `${name} — تقويم الأسنان الشفاف في ${city} | ORALIGN®` : `${name} — طبيب شريك | ORALIGN®`,
+};
+
+const PRACTITIONER_DESCRIPTION: Record<Lang, (name: string, clinic: string | null, city: string | null) => string> = {
+  fr: (name, clinic, city) =>
+    `${name}${clinic ? `, ${clinic}` : ""} : praticien partenaire ORALIGN®${city ? ` à ${city}` : ""}. Adresse, horaires et prise de rendez-vous pour un traitement par aligneurs transparents.`,
+  en: (name, clinic, city) =>
+    `${name}${clinic ? `, ${clinic}` : ""}: ORALIGN® partner practitioner${city ? ` in ${city}` : ""}. Address, opening hours and online booking for clear aligner treatment.`,
+  ar: (name, clinic, city) =>
+    `${name}${clinic ? ` — ${clinic}` : ""}: طبيب شريك لـ ORALIGN®${city ? ` في ${city}` : ""}. العنوان وساعات العمل وحجز موعد لتقويم الأسنان الشفاف بدون حديد.`,
+};
+
+/**
+ * Metadata for one practitioner profile. The three language URLs describe
+ * the same practice, so they form one reciprocal hreflang cluster exactly
+ * like the marketing pages.
+ */
+export function practitionerMetadata(p: PractitionerDetail, lang: Lang): Metadata {
+  const city = cityLabel(p.city, lang);
+  const title = PRACTITIONER_TITLE[lang](p.practitionerName, city);
+  const description = PRACTITIONER_DESCRIPTION[lang](p.practitionerName, p.clinicName || null, city);
+  const fr = practitionerPath(p, "fr");
+  return {
+    title: { absolute: title },
+    description,
+    alternates: {
+      canonical: practitionerPath(p, lang),
+      languages: {
+        "fr-TN": fr,
+        fr,
+        en: practitionerPath(p, "en"),
+        "ar-TN": practitionerPath(p, "ar"),
+        ar: practitionerPath(p, "ar"),
+        "x-default": fr,
+      },
+    },
+    openGraph: {
+      type: "website",
+      title,
+      description,
+      url: practitionerPath(p, lang),
+      siteName: SITE_NAME,
+      locale: OG_LOCALE[lang],
+      images: [OG_IMAGE],
+    },
+    twitter: { card: "summary_large_image", title, description, images: [OG_IMAGE.url] },
     robots: { index: true, follow: true },
   };
 }

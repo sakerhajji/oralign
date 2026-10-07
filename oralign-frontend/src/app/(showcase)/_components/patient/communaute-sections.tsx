@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useEffect, useMemo, useState, type ComponentType, type FormEvent, type ReactNode } from "react";
 import {
   ArrowRight,
@@ -16,6 +17,7 @@ import {
 import { showcaseCases } from "../../_lib/case-gallery";
 import type { Lang } from "../../_lib/i18n/dict";
 import { useShowcaseLang } from "../../_lib/i18n/lang-context";
+import { pathFor } from "../../_lib/seo/routes";
 import { Reveal } from "../shared/reveal";
 import { SectionHeading } from "../shared/section-heading";
 import { useApprovedCommunitySubmissions, useCreateCommunitySubmission } from "@/lib/hooks";
@@ -646,7 +648,7 @@ export function CommunauteCta() {
         <div className="mb-5 flex items-center justify-center gap-3 text-[0.6rem] uppercase tracking-[0.4em] text-[var(--sc-text-mid)]"><span className="h-px w-7 bg-[var(--sc-text-mid)]" aria-hidden="true" />{text(pageCopy.cta.eyebrow, lang)}<span className="h-px w-7 bg-[var(--sc-text-mid)]" aria-hidden="true" /></div>
         <h2 className="sc-serif text-[clamp(2rem,4.5vw,3.8rem)] font-normal leading-[1.05]">{text(pageCopy.cta.title, lang)}<br /><em className="font-normal italic">{text(pageCopy.cta.emphasis, lang)}</em></h2>
         <p className="mx-auto mt-5 max-w-lg text-sm leading-7 text-[var(--sc-text-mid)]">{text(pageCopy.cta.body, lang)}</p>
-        <a href="/trouver-un-praticien" className="mt-8 inline-flex min-h-11 items-center gap-2 bg-[var(--sc-black)] px-5 py-3 text-[0.68rem] font-medium uppercase tracking-[0.16em] text-[var(--sc-white)] transition-transform hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--sc-black)]">{text(pageCopy.cta.action, lang)}<ArrowRight className="h-4 w-4" aria-hidden="true" /></a>
+        <Link href={pathFor("finder", lang)} className="mt-8 inline-flex min-h-11 items-center gap-2 bg-[var(--sc-black)] px-5 py-3 text-[0.68rem] font-medium uppercase tracking-[0.16em] text-[var(--sc-white)] transition-transform hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--sc-black)]">{text(pageCopy.cta.action, lang)}<ArrowRight className="h-4 w-4" aria-hidden="true" /></Link>
       </Reveal>
     </section>
   );

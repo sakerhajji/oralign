@@ -11,9 +11,9 @@
 
 | Langue | URLs | Exemple |
 |---|---|---|
-| Français (canonique, marché principal) | racine | `/decouvrir`, `/praticiens` |
-| Anglais | préfixe `/en` | `/en/discover`, `/en/for-dentists` |
-| Arabe (RTL) | préfixe `/ar` | `/ar/discover`, `/ar/for-dentists` |
+| Français (canonique, marché principal) | racine | `/`, `/praticiens` |
+| Anglais | préfixe `/en` | `/en`, `/en/for-dentists` |
+| Arabe (RTL) | préfixe `/ar` | `/ar`, `/ar/for-dentists` |
 
 Chaque page marketing existe dans les trois langues, chacune étant une **URL
 distincte** avec hreflang réciproque (`fr`/`fr-TN`/`en`/`ar`/`ar-TN` +
@@ -27,7 +27,7 @@ Exception : `/qui-sommes-nous` et `/contact` n'existent qu'en **fr + en**
 
 ### 1. Patient — découverte (commercial + informationnel)
 
-**Page : `/decouvrir` · `/en/discover` · `/ar/discover`** — priorité sitemap 1.0
+**Page : `/` · `/en` · `/ar`** — priorité sitemap 1.0 (l'ancienne URL `/decouvrir` redirige en 308)
 
 - FR : aligneur dentaire, aligneurs transparents, gouttière dentaire, orthodontie
   invisible, appareil dentaire invisible, aligneur dentaire Tunisie,
@@ -35,7 +35,7 @@ Exception : `/qui-sommes-nous` et `/contact` n'existent qu'en **fr + en**
   **meilleur aligneur dentaire Tunisie**, **prix gouttière dentaire Tunisie**
 - EN : clear aligners, dental aligners, transparent aligners, invisible braces,
   invisible orthodontics, teeth aligners, clear aligner treatment
-- AR : تقويم شفاف، تقويم الأسنان الشفاف، تقويم غير مرئي، مصففات الأسنان،
+- AR : تقويم شفاف، تقويم الأسنان الشفاف، **تقويم الأسنان بدون حديد**، تقويم غير مرئي، مصففات الأسنان،
   مصففات شفافة، تقويم الأسنان بدون أسلاك، تقويم الأسنان في تونس،
   **سعر تقويم الأسنان الشفاف**، **سعر التقويم الشفاف في تونس**،
   **أفضل تقويم أسنان شفاف**
@@ -74,6 +74,25 @@ Exception : `/qui-sommes-nous` et `/contact` n'existent qu'en **fr + en**
 - AR : طبيب أسنان، طبيب تقويم الأسنان، أخصائي تقويم الأسنان، عيادة أسنان، مركز أسنان
 - Renfort : JSON-LD `MedicalOrganization` avec adresse Tunis + `areaServed: TN`
   sur tout le site.
+- L'annuaire est rendu **côté serveur** (`getPublicPractitioners` dans
+  `_lib/practitioners.ts`) : chaque cabinet est dans le HTML et chaque carte est
+  un vrai lien vers sa fiche. Avant, le composant client ne livrait aux robots
+  qu'un annuaire vide.
+
+**Fiches praticiens : `/trouver-un-praticien/<cabinet>-<ville>-<id>`** (+ `/en/find-a-practitioner/…`,
+`/ar/find-a-practitioner/…`) — priorité 0.7, une par cabinet réellement publié.
+
+- Intentions : « aligneurs transparents {ville} », « dentiste aligneur {ville} »,
+  « orthodontiste {ville} », le nom du cabinet ; AR « تقويم شفاف {مدينة} » (la ville
+  est rendue en arabe — `cityLabel` dans `_lib/practitioner-url.ts`).
+- JSON-LD `Dentist` (adresse, géo, horaires, téléphone) relié à l'entité ORALIGN par
+  `memberOf` — la forme structurée de « réseau de praticiens certifiés ».
+- Contenu : uniquement ce que le cabinet a publié. Aucune note, avis, diplôme ou
+  spécialité n'est ajouté.
+- **Pas de page « ville » sans praticien réel** : une page Sousse ou Monastir sans
+  cabinet serait une page satellite (doorway). La fiche du cabinet sert la requête
+  locale ; une page ville ne se justifiera qu'avec plusieurs cabinets dans la ville.
+- Slug obsolète (cabinet renommé) → 308 vers le slug courant ; slug invalide → 404.
 
 ### 4. Preuve clinique (considération)
 
@@ -116,6 +135,27 @@ Exception : `/qui-sommes-nous` et `/contact` n'existent qu'en **fr + en**
 par article depuis le CMS). Sujets recommandés : « prix aligneurs Tunisie :
 ce qui fait varier le devis », « scanner intra-oral vs empreinte classique »,
 « aligneur ou bagues pour un ado ? ».
+
+### 9. Moteurs de réponse IA (GEO)
+
+- `/llms.txt` — carte texte du site générée depuis les mêmes registres que le
+  sitemap (pages + cabinets), sans chiffre ni promesse.
+- `knowsAbout` sur l'Organization : les sujets (aligneurs transparents,
+  orthodontie invisible, تقويم الأسنان الشفاف), jamais des affirmations.
+
+### Recherche d'intention — arabizi / dialecte
+
+Les formes tunisiennes (« ta9wim snin chafef », « ta9wim bla 7did », « gouttiere
+tounes ») servent à **comprendre l'intention** ; elles ne sont jamais écrites dans
+le contenu visible. Elles se traduisent en contenu par la formulation arabe
+standard équivalente (« تقويم الأسنان بدون حديد ») et par le français courant
+(« gouttière dentaire », « appareil dentaire invisible »).
+
+## Partage social
+
+Toutes les pages marketing et les fiches citent `/og.png` (`OG_IMAGE`, `seo/meta.ts`),
+rendue une fois au build. L'ancienne carte OG du groupe `(showcase)` répondait 502 en
+production (mise en page refusée par Satori) et vantait encore l'offre B2B.
 
 ## Hors index (volontairement)
 

@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import type { Lang } from "../../../_lib/i18n/dict";
 import { useShowcaseLang } from "../../../_lib/i18n/lang-context";
+import { pathFor } from "../../../_lib/seo/routes";
 
 const wearCopy: Record<
   Lang,
@@ -101,7 +102,7 @@ export function WearAlignersSection() {
             </ul>
 
             <Link
-              href="/guide"
+              href={pathFor("guide", lang)}
               className="mt-9 inline-flex min-h-13 items-center justify-center border border-[var(--sc-sun)] px-7 py-3 text-[0.7rem] font-medium text-[var(--sc-sun)] no-underline transition-colors hover:bg-[var(--sc-sun)] hover:text-[var(--sc-black)]"
             >
               {copy.cta}

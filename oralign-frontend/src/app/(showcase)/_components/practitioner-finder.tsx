@@ -1,10 +1,10 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { dict } from "../_lib/i18n/dict";
 import { useShowcaseLang } from "../_lib/i18n/lang-context";
-import { fetchPractitioners, type PublicPractitioner } from "../_lib/finder";
+import { fetchPractitioners, type ListResponse, type PublicPractitioner } from "../_lib/finder";
 import { Reveal } from "./shared/reveal";
 import { PractitionerList } from "./finder/practitioner-list";
 import { PractitionerDetailPanel } from "./finder/practitioner-detail";
@@ -41,7 +41,12 @@ function mergeFacet(prev: string[], values: (string | null)[]): string[] {
   return Array.from(set).sort((a, b) => a.localeCompare(b));
 }
 
-export function PractitionerFinder() {
+/**
+ * `initial` is the directory as the server read it. Seeding the state with it
+ * puts every practitioner in the server-rendered HTML — without it, crawlers
+ * (which don't wait for this component's fetch) indexed an empty finder.
+ */
+export function PractitionerFinder({ initial }: { initial?: ListResponse } = {}) {
   const { lang } = useShowcaseLang();
   const f = dict.finder;
 
@@ -50,14 +55,19 @@ export function PractitionerFinder() {
   const [city, setCity] = useState("");
 
   // Data
-  const [practitioners, setPractitioners] = useState<PublicPractitioner[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [practitioners, setPractitioners] = useState<PublicPractitioner[]>(initial?.data ?? []);
+  const [total, setTotal] = useState(initial?.total ?? 0);
+  const [loading, setLoading] = useState(!initial?.data.length);
+  // The server already delivered the unfiltered list; refetching it on mount
+  // would only flash the loading state over identical data.
+  const skipFirstFetch = useRef(Boolean(initial?.data.length));
   const [error, setError] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
   // Facet options accumulate so the dropdowns stay stable across filtering.
-  const [facetCities, setFacetCities] = useState<string[]>([]);
+  const [facetCities, setFacetCities] = useState<string[]>(() =>
+    mergeFacet([], (initial?.data ?? []).map((p) => p.city)),
+  );
 
   // Geolocation + map focus
   const [userPosition, setUserPosition] = useState<LatLng | null>(null);
@@ -70,6 +80,10 @@ export function PractitionerFinder() {
 
   // ── Fetch list (debounced; refetches on filter or location change) ──
   useEffect(() => {
+    if (skipFirstFetch.current) {
+      skipFirstFetch.current = false;
+      return;
+    }
     const ctrl = new AbortController();
     const timer = setTimeout(() => {
       setLoading(true);
@@ -162,6 +176,20 @@ export function PractitionerFinder() {
     setFocus(p);
     setGeoStatus("manual");
   }, []);
+
+  const deepLinked = useRef(false);
+  useEffect(() => {
+    if (deepLinked.current || practitioners.length === 0) return;
+    const wanted = new URLSearchParams(window.location.search).get("p");
+    const match = wanted ? practitioners.find((x) => x.id === wanted) : undefined;
+    if (!match) return;
+    // Deferred: opening the panel is a state change, kept out of the effect body.
+    const timer = setTimeout(() => {
+      deepLinked.current = true;
+      handleSelect(match);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [practitioners, handleSelect]);
 
   const closeDetail = useCallback(() => setSelected(null), []);
 

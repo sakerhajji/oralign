@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
 import type { Lang } from "../../_lib/i18n/dict";
 import { useShowcaseLang } from "../../_lib/i18n/lang-context";
+import { pathFor } from "../../_lib/seo/routes";
 import { ShowcaseSection } from "../showcase-section";
 import { Reveal } from "../shared/reveal";
 
@@ -96,7 +97,7 @@ export function AgirTotSection() {
               {copy.description}
             </p>
             <Link
-              href="/trouver-un-praticien"
+              href={pathFor("finder", lang)}
               className="mt-8 inline-flex min-h-12 items-center justify-center gap-3 bg-[var(--sc-sun)] px-6 py-3 text-center text-[0.68rem] font-bold uppercase tracking-[0.16em] text-[var(--sc-black)] no-underline transition-colors hover:bg-[var(--sc-sun-2)] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--sc-black)]"
             >
               {copy.cta}

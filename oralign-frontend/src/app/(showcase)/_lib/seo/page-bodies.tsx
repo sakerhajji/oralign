@@ -2,6 +2,7 @@ import type { Lang } from "../i18n/dict";
 import type { MarketingPageKey } from "./routes";
 import { JsonLd, breadcrumbLd, dentistServiceLd, faqLd, procedureLd } from "./jsonld";
 import { getLegalCompany } from "../legal-info";
+import { getPublicPractitioners } from "../practitioners";
 import {
   DailyLifeSection,
   GuidePreviewSection,
@@ -82,7 +83,8 @@ async function pageSections(page: MarketingPageKey) {
         </>
       );
     case "finder":
-      return <PractitionerFinder />;
+      // Server-read directory → every practice is in the crawlable HTML.
+      return <PractitionerFinder initial={await getPublicPractitioners()} />;
     case "guide":
       return <GuidePage />;
     case "community":

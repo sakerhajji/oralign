@@ -9,6 +9,9 @@ import {
   type MarketingPageKey,
 } from './(showcase)/_lib/seo/routes';
 import { resolveBlogMediaUrl } from '@/lib/api/blog.service';
+import { getPublicPractitioners } from './(showcase)/_lib/practitioners';
+import { practitionerPath } from './(showcase)/_lib/practitioner-url';
+import type { Lang } from './(showcase)/_lib/i18n/dict';
 
 /**
  * /sitemap.xml
@@ -18,9 +21,7 @@ import { resolveBlogMediaUrl } from '@/lib/api/blog.service';
  *    blocked in robots.ts and noindexed;
  *  - auth pages (/login, /signup, …) — crawlable but noindexed, and a
  *    sitemap must never list URLs it doesn't want indexed;
- *  - /shop — placeholder page, noindexed until it has real content;
- *  - "/" and "/en", "/ar" — they 308 to the localized homes, and a
- *    sitemap lists canonical targets, never redirects.
+ *  - /shop — placeholder page, noindexed until it has real content.
  *
  * Every marketing page ships in its three language versions, each entry
  * carrying the full hreflang set (Google reads sitemap alternates as
@@ -119,5 +120,27 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     };
   });
 
-  return [...marketingRoutes, ...legalRoutes, ...blogIndex, ...blogRoutes];
+  // One page per partner practice, in the three languages, each entry
+  // carrying the practice's full hreflang cluster. Fails soft to none.
+  const { data: practitioners } = await getPublicPractitioners();
+  const practitionerRoutes: MetadataRoute.Sitemap = practitioners.flatMap((p) => {
+    const url = (lang: Lang) => absoluteUrl(practitionerPath(p, lang));
+    const languages = {
+      fr: url('fr'),
+      'fr-TN': url('fr'),
+      en: url('en'),
+      ar: url('ar'),
+      'ar-TN': url('ar'),
+      'x-default': url('fr'),
+    };
+    return (['fr', 'en', 'ar'] as const).map((lang) => ({
+      url: url(lang),
+      lastModified: now,
+      changeFrequency: 'monthly' as const,
+      priority: lang === 'fr' ? 0.7 : 0.6,
+      alternates: { languages },
+    }));
+  });
+
+  return [...marketingRoutes, ...practitionerRoutes, ...legalRoutes, ...blogIndex, ...blogRoutes];
 }

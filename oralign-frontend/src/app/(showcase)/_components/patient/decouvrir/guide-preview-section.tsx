@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
 import type { Lang } from "../../../_lib/i18n/dict";
 import { useShowcaseLang } from "../../../_lib/i18n/lang-context";
+import { pathFor } from "../../../_lib/seo/routes";
 
 const guideCopy: Record<
   Lang,
@@ -123,7 +124,7 @@ export function GuidePreviewSection() {
 
             <div className="mt-7 flex sm:mt-8">
               <Link
-                href="/guide"
+                href={pathFor("guide", lang)}
                 className="group inline-flex min-h-13 w-full items-center justify-center gap-4 bg-[var(--sc-sun)] px-7 py-3.5 text-center text-[0.72rem] font-semibold text-[var(--sc-black)] no-underline transition-colors hover:bg-[var(--sc-sun-2)] focus-visible:outline-[var(--sc-black)] sm:w-auto"
               >
                 {copy.cta}

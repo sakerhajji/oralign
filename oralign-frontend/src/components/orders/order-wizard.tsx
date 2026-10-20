@@ -69,6 +69,22 @@ const OdontogramSelector = dynamic(
 // Stable no-op for the read-only odontogram on the review step — an inline
 // `() => undefined` would break the selector's memo boundary every render.
 const NOOP_TOOTH_CHANGE = () => undefined;
+
+/** One key per draft the wizard tries to create — see useCreateOrder. */
+function newIdempotencyKey(): string {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+/** Canonical form of the odontogram, for change detection between saves. */
+function teethSnapshot(instructions: ToothInstruction[]): string {
+  return JSON.stringify(
+    [...instructions].sort(
+      (a, b) => a.toothNumber - b.toothNumber || a.type.localeCompare(b.type),
+    ),
+  );
+}
 import {
   ClinicalOrderFiles,
 } from '@/components/orders/order-file-upload';
@@ -306,6 +322,16 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
   const updateOrder = useUpdateOrder();
   const updateTeeth = useUpdateToothInstructions();
   const submitOrder = useSubmitOrder();
+
+  // What the server holds right now, so a "Continue" that changed nothing
+  // sends nothing: no PUT, no toast. Every save used to re-send the order
+  // AND the odontogram and announce both, on every step.
+  const lastSavedRef = useRef<{ order: string; teeth: string } | null>(null);
+  // Replay key for the one POST this wizard may issue. A lost response
+  // (the phone dropped mid-request) leaves `savedOrder` empty and the next
+  // click POSTs again; with the same key the backend hands back the draft
+  // the first attempt created instead of a twin.
+  const createKeyRef = useRef<string>(newIdempotencyKey());
 
   // Dedup guard for inline new-patient creation. A single "Continue"
   // click calls ensurePatientReady() twice (validateCurrentStep then
@@ -713,10 +739,6 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
       return undefined;
     }
 
-    const nextOrder = savedOrder
-      ? await updateOrder.mutateAsync({ id: savedOrder.id, data: parsed.data })
-      : await createOrder.mutateAsync(parsed.data);
-
     // The order wizard owns the FOUR doctor-level instruction types
     // (No Attachments / Do Not Move / No IPR / Extract). It does NOT
     // own ATTACHMENT — that's the planner's surface in the treatment
@@ -740,16 +762,39 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
       (i) =>
         !(extractTeeth.has(i.toothNumber) && OTHER_DOCTOR_MARKS.has(i.type)),
     );
-    await updateTeeth.mutateAsync({
-      id: nextOrder.id,
-      instructions: sanitizedInstructions,
-      replaceTypes: [
-        ToothInstructionType.NO_ATTACHMENTS,
-        ToothInstructionType.DO_NOT_MOVE,
-        ToothInstructionType.NO_IPR,
-        ToothInstructionType.EXTRACT,
-      ],
-    });
+
+    const snapshot = {
+      order: JSON.stringify(parsed.data),
+      teeth: teethSnapshot(sanitizedInstructions),
+    };
+    const orderUnchanged =
+      Boolean(savedOrder) && lastSavedRef.current?.order === snapshot.order;
+    const teethUnchanged =
+      Boolean(savedOrder) && lastSavedRef.current?.teeth === snapshot.teeth;
+    if (savedOrder && orderUnchanged && teethUnchanged) return savedOrder;
+
+    const nextOrder = savedOrder
+      ? orderUnchanged
+        ? savedOrder
+        : await updateOrder.mutateAsync({ id: savedOrder.id, data: parsed.data })
+      : await createOrder.mutateAsync({
+          data: parsed.data,
+          idempotencyKey: createKeyRef.current,
+        });
+
+    if (!teethUnchanged) {
+      await updateTeeth.mutateAsync({
+        id: nextOrder.id,
+        instructions: sanitizedInstructions,
+        replaceTypes: [
+          ToothInstructionType.NO_ATTACHMENTS,
+          ToothInstructionType.DO_NOT_MOVE,
+          ToothInstructionType.NO_IPR,
+          ToothInstructionType.EXTRACT,
+        ],
+      });
+    }
+    lastSavedRef.current = snapshot;
     setSavedOrder(nextOrder);
     return nextOrder;
   };

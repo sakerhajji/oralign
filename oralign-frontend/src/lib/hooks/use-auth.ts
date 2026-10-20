@@ -9,9 +9,9 @@ import {
 } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { useCallback } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { isAxiosError } from 'axios';
-import { authService } from '@/lib/api';
+import { authService, extractApiErrorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/providers';
 import { useT } from '@/lib/i18n/lang-context';
 import {
@@ -29,8 +29,13 @@ import {
 
 export function getApiErrorMessage(error: unknown, fallback: string): string {
   if (isAxiosError(error)) {
-    if (!error.response) {
-      return 'Cannot reach the server. Check that the backend is running and try again.';
+    // No HTTP response at all (offline, timed out, blocked before the API
+    // answered), a throttle, or an upstream failure: the shared classifier
+    // tells those apart and words each one in the dashboard language.
+    // None of them is "the backend is not running" — in production that
+    // was almost never the cause, and the sentence sent people chasing it.
+    if (!error.response || error.response.status === 429 || error.response.status >= 500) {
+      return extractApiErrorMessage(error);
     }
 
     const apiData = error.response?.data as
@@ -79,7 +84,12 @@ export function useBackendHealth(): UseQueryResult<
   return useQuery<{ status: string; timestamp: string }, Error>({
     queryKey: ['backend-health'],
     queryFn: authService.checkHealth,
-    retry: 1,
+    // One dropped probe on a phone is not an outage. The query only
+    // reports an error after three consecutive failures a few seconds
+    // apart, and whatever it reports is advisory: the sign-in request
+    // itself is the real test (see LoginForm).
+    retry: 2,
+    retryDelay: (attempt) => 1500 * (attempt + 1),
     refetchInterval: 15000,
   });
 }
@@ -175,9 +185,8 @@ export function useSignIn() {
       // first keeps the routing logic in one place.
       router.push('/dashboard');
     },
-    onError: (error: unknown) => {
-      toast.error(getApiErrorMessage(error, t('toasts.auth.invalidCredentials')));
-    },
+    // No toast: LoginForm renders the same message as an inline alert next
+    // to the fields. One failure, one notice.
   });
 }
 

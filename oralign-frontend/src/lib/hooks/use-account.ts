@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { useAuth } from '@/lib/providers';
 import { useT } from '@/lib/i18n/lang-context';
 import { extractApiErrorMessage, usersService, dentistProfileService } from '@/lib/api';

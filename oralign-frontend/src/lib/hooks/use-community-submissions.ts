@@ -1,7 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { communitySubmissionsService } from '@/lib/api/community-submissions.service';
 import { extractApiErrorMessage, toastMutationError } from '@/lib/api/error';
 import { useT } from '@/lib/i18n/lang-context';

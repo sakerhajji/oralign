@@ -7,7 +7,7 @@ import {
   type UseMutationResult,
   type UseQueryResult,
 } from '@tanstack/react-query';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { paymentsService } from '@/lib/api/payments.service';
 import { invoicesService } from '@/lib/api/invoices.service';
 import { extractApiErrorMessage } from '@/lib/api/error';

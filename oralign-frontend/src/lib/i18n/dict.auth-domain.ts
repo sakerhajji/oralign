@@ -14,12 +14,12 @@ export const authDomainDict = {
         fr: 'Saisissez votre e-mail ci-dessous pour vous connecter à votre compte',
       } as T,
       backendDownTitle: {
-        en: 'Backend is not connected',
-        fr: 'Le serveur n’est pas connecté',
+        en: 'Connection to the server is unstable',
+        fr: 'Connexion au serveur difficile',
       } as T,
       backendDownDesc: {
-        en: 'The app cannot reach the API server right now. Please make sure the backend container is running, then try again.',
-        fr: 'L’application ne parvient pas à joindre le serveur API pour le moment. Veuillez vous assurer que le conteneur backend est en cours d’exécution, puis réessayer.',
+        en: 'The app has not been able to reach the server for the last few seconds. Check your internet connection, then try again — you can still attempt to sign in.',
+        fr: 'L’application ne parvient pas à joindre le serveur depuis quelques secondes. Vérifiez votre connexion internet, puis réessayez — vous pouvez quand même tenter de vous connecter.',
       } as T,
       failedTitle: { en: 'Login failed', fr: 'Échec de la connexion' } as T,
       failedFallback: {

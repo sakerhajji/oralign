@@ -19,7 +19,7 @@ import {
   type CommunitySubmission,
   type CreateCommunitySubmissionInput,
 } from '@/lib/types';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 
 type Props = {
   open: boolean;

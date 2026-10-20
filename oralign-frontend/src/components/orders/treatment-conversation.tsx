@@ -36,7 +36,7 @@ import {
   UserRole,
   type TreatmentMessage,
 } from '@/lib/types';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 
 // Type alias for the attachment shape used inside a chat message. Pulled
 // from the TreatmentMessage type so it stays in sync with the API.

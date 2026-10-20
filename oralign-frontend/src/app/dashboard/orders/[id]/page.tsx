@@ -20,7 +20,7 @@ import {
   Trash2,
   UserRound,
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import {
   AlertDialog,
   AlertDialogAction,

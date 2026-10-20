@@ -25,7 +25,7 @@ import {
   Video,
   X,
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { IndeterminateBar, Progress } from '@/components/ui/progress';

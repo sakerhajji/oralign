@@ -4,6 +4,7 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   HttpCode,
   HttpStatus,
   Param,
@@ -86,11 +87,16 @@ export class OrderController {
   async createOrder(
     @Body() createOrderDto: CreateOrderDto,
     @CurrentUser() user: JwtPayload,
+    // Optional. The wizard sends one key per draft it tries to create, so
+    // a POST repeated after a lost response returns the order the first
+    // attempt made instead of creating a twin. See OrderService.createOrder.
+    @Headers('idempotency-key') idempotencyKey?: string,
   ): Promise<OrderResponseDto> {
-    return this.orderService.createOrder(createOrderDto, {
-      userId: user.sub,
-      role: user.role,
-    });
+    return this.orderService.createOrder(
+      createOrderDto,
+      { userId: user.sub, role: user.role },
+      idempotencyKey,
+    );
   }
 
   @Get()

@@ -86,7 +86,7 @@ import {
   useUpdateSliderMedia,
 } from '@/lib/hooks';
 import { resolveSliderMediaUrl } from '@/lib/api/slider-media.service';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { useAuth } from '@/lib/providers/auth-provider';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';

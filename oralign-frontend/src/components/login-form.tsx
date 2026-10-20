@@ -134,7 +134,11 @@ export function LoginForm({
           )}
         </Field>
         <Field>
-          <Button type="submit" disabled={isPending || isBackendUnavailable}>
+          {/* The health probe is advisory only. Disabling the button on a
+              failed probe stranded doctors behind a flaky mobile signal
+              (and, on an origin the API refused, permanently) — while the
+              sign-in request would have told them exactly what was wrong. */}
+          <Button type="submit" disabled={isPending}>
             {isPending ? t('authPages.login.submitting') : t('authPages.login.submit')}
           </Button>
         </Field>

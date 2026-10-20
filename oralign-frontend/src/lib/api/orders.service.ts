@@ -62,8 +62,19 @@ export const ordersService = {
     return response.data;
   },
 
-  createOrder: async (data: CreateOrderDto): Promise<DentalOrder> => {
-    const response = await apiClient.post<DentalOrder>('/orders', data);
+  /**
+   * `idempotencyKey` lets a POST be repeated safely: the backend returns
+   * the order the first attempt created instead of a second draft.
+   */
+  createOrder: async (
+    data: CreateOrderDto,
+    options: { idempotencyKey?: string } = {},
+  ): Promise<DentalOrder> => {
+    const response = await apiClient.post<DentalOrder>('/orders', data, {
+      headers: options.idempotencyKey
+        ? { 'Idempotency-Key': options.idempotencyKey }
+        : undefined,
+    });
     return response.data;
   },
 

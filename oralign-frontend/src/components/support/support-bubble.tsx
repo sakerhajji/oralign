@@ -40,7 +40,7 @@ import {
   UserRole,
   type SupportConversation,
 } from '@/lib/types';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 
 // Image upload guard rails — match backend exactly so we fail fast
 // before a 400 round trip.

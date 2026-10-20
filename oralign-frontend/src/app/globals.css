@@ -437,3 +437,100 @@
   max-width: none;
   max-height: none;
 }
+
+/* ─── Toasts (sonner) ───────────────────────────────────────────────
+   Compact receipts, not banners. The Toaster (components/ui/sonner.tsx)
+   anchors them at the top; lifetimes and de-duplication live in
+   lib/toast.ts. Everything here is appearance: a single-line card that
+   reads in a glance, a close control a thumb can hit, and colours that
+   come from the design tokens so dark mode follows for free. */
+.toaster[data-sonner-toaster] {
+  --width: 340px;
+  font-family: var(--font-sans);
+}
+
+.toaster [data-sonner-toast].cn-toast {
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  padding-right: 40px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.toaster [data-sonner-toast].cn-toast [data-icon] {
+  margin: 0;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.toaster [data-sonner-toast].cn-toast [data-title] {
+  font-weight: 500;
+}
+
+.toaster [data-sonner-toast].cn-toast [data-description] {
+  margin-top: 2px;
+  color: var(--muted-foreground);
+  font-size: 12.5px;
+}
+
+/* Only the icon carries the colour — the card stays neutral, so three
+   stacked toasts read as one calm system rather than three alarms. */
+.toaster [data-sonner-toast][data-type="success"].cn-toast [data-icon] { color: oklch(0.62 0.17 150); }
+.toaster [data-sonner-toast][data-type="info"].cn-toast [data-icon] { color: oklch(0.6 0.15 250); }
+.toaster [data-sonner-toast][data-type="warning"].cn-toast [data-icon] { color: oklch(0.72 0.17 70); }
+.toaster [data-sonner-toast][data-type="error"].cn-toast [data-icon] { color: var(--destructive); }
+.toaster [data-sonner-toast][data-type="error"].cn-toast {
+  border-color: color-mix(in oklch, var(--destructive) 35%, var(--border));
+}
+
+/* Close control: always visible, inside the card at the trailing edge,
+   28 px hit area. sonner's default hides it until hover and parks it on
+   the top-left corner — invisible on a phone, and in the way on a form. */
+.toaster [data-sonner-toast].cn-toast [data-close-button] {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  left: auto;
+  transform: translateY(-50%);
+  opacity: 1;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: calc(var(--radius) * 0.6);
+  background: transparent;
+  color: var(--muted-foreground);
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.toaster [data-sonner-toast].cn-toast [data-close-button]:hover,
+.toaster [data-sonner-toast].cn-toast [data-close-button]:focus-visible {
+  background: var(--accent);
+  color: var(--foreground);
+  outline: none;
+}
+.toaster [data-sonner-toast].cn-toast [data-close-button]:focus-visible {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+@media (max-width: 600px) {
+  .toaster[data-sonner-toaster] {
+    --width: calc(100vw - 24px);
+  }
+  .toaster [data-sonner-toast].cn-toast {
+    padding: 9px 11px;
+    padding-right: 38px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toaster [data-sonner-toast] {
+    transition: none !important;
+    animation: none !important;
+  }
+}

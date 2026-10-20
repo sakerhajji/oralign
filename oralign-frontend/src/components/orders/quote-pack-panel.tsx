@@ -16,7 +16,7 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { format } from 'date-fns';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { cn } from '@/lib/utils';
 import { useT } from '@/lib/i18n/lang-context';
 import { pickLocalized } from '@/lib/api/blog.service';

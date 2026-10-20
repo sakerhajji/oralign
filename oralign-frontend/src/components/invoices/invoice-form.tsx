@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
 import { useDebounce } from 'use-debounce';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { Loader2Icon, PackageIcon, PlusIcon, SearchIcon, Trash2Icon, XIcon } from 'lucide-react';
 import { PackPicker, type PackSelection } from '@/components/billing/pack-picker';
 import { Button } from '@/components/ui/button';

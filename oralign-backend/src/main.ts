@@ -8,7 +8,7 @@ import { join } from 'path';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/exceptions/exception.filter';
 import { env } from './common/config/env';
-import { allowedOrigins } from './common/config/cors';
+import { checkOrigin } from './common/config/cors';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -116,13 +116,11 @@ async function bootstrap(): Promise<void> {
   // Allowlist is computed once in common/config/cors.ts and shared with the
   // Socket.IO gateways, so HTTP and WS enforce the SAME origins.
   app.enableCors({
-    origin: (origin, callback) => {
-      // Server-to-server / curl / health-check requests have no Origin —
-      // allow them. Browser-origins must match the allowlist exactly.
-      if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
-      callback(new Error(`CORS: origin ${origin} is not allowed`));
-    },
+    // Server-to-server / curl / health-check requests have no Origin and
+    // are allowed; browser origins must match the allowlist exactly. The
+    // check (and its 403 + one-line log per refused origin) is shared with
+    // the Socket.IO gateways.
+    origin: checkOrigin,
     credentials: true,
     exposedHeaders: ['Content-Disposition'],
     maxAge: 600,

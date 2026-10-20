@@ -6,7 +6,7 @@ import {
   useQueryClient,
   type QueryClient,
 } from '@tanstack/react-query';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { loyaltyService } from '@/lib/api/loyalty.service';
 import { toastMutationError } from '@/lib/api/error';
 import { useT } from '@/lib/i18n/lang-context';

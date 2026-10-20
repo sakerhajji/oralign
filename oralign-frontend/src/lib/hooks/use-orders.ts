@@ -7,7 +7,7 @@ import {
   UseMutationResult,
   UseQueryResult,
 } from '@tanstack/react-query';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { extractApiErrorMessage, toastMutationError, ordersService } from '@/lib/api';
 import { useT } from '@/lib/i18n/lang-context';
 import {
@@ -138,12 +138,13 @@ export function useOrder(id?: string): UseQueryResult<DentalOrder, Error> {
 export function useCreateOrder(): UseMutationResult<
   DentalOrder,
   Error,
-  CreateOrderDto
+  { data: CreateOrderDto; idempotencyKey?: string }
 > {
   const queryClient = useQueryClient();
   const { t } = useT();
   return useMutation({
-    mutationFn: ordersService.createOrder,
+    mutationFn: ({ data, idempotencyKey }) =>
+      ordersService.createOrder(data, { idempotencyKey }),
     onSuccess: (order) => {
       syncOrderCaches(queryClient, order);
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });

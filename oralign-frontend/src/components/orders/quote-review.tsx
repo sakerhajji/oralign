@@ -1,7 +1,7 @@
 'use client';
 
 import { useId, useState, type ReactNode } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { Download, Globe, Loader2, RotateCcw, Send } from 'lucide-react';
 import {
   PackChoiceFields,

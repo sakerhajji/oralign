@@ -7,7 +7,7 @@ import {
   type UseMutationResult,
   type UseQueryResult,
 } from '@tanstack/react-query';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { blogService } from '@/lib/api/blog.service';
 import { extractApiErrorMessage, toastMutationError } from '@/lib/api/error';
 import { useT } from '@/lib/i18n/lang-context';

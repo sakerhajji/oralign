@@ -46,7 +46,7 @@ import { useAuth } from '@/lib/providers/auth-provider';
 import { getAvatarUrl, cn } from '@/lib/utils';
 import { useT } from '@/lib/i18n/lang-context';
 import { optionalCountrySchema, optionalE164PhoneSchema } from '@/lib/schemas';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { format } from 'date-fns';
 import {
   User as UserIcon,

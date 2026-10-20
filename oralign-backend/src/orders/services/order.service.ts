@@ -1,4 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import type { Cache } from 'cache-manager';
 import {
   OrderFileCategory,
   OrderStatus,
@@ -66,6 +68,11 @@ type ClinicalOrderData = Partial<
   >
 >;
 
+/** How long a creation key keeps pointing at the order it created. */
+const CREATE_IDEMPOTENCY_TTL_MS = 15 * 60_000;
+/** Opaque client token: a UUID or similar, never user text. */
+const IDEMPOTENCY_KEY_SHAPE = /^[A-Za-z0-9_-]{8,128}$/;
+
 @Injectable()
 export class OrderService {
   private readonly logger = new Logger(OrderService.name);
@@ -74,11 +81,27 @@ export class OrderService {
     private readonly prisma: PrismaService,
     private readonly orderAccess: OrderAccessPolicy,
     private readonly events: EventEmitter2,
+    // Optional so the service keeps working (without replay protection)
+    // when no cache store is wired — unit tests, or a Redis outage.
+    @Optional() @Inject(CACHE_MANAGER) private readonly cache?: Cache,
   ) {}
 
+  /**
+   * Create a draft. With an `idempotencyKey`, a repeat of the same POST
+   * returns the order the first attempt created instead of a second one.
+   *
+   * The case this guards is a phone losing its connection AFTER the request
+   * reached us: the draft exists, the response never arrives, the wizard
+   * still believes nothing was saved, and the doctor's next click would
+   * create a twin. The key is scoped to the caller, so one user can never
+   * replay another's, and it lives in the shared cache for a quarter of an
+   * hour — long enough to cover a retry, short enough to never resurrect a
+   * stale draft.
+   */
   async createOrder(
     createOrderDto: CreateOrderDto,
     caller: Caller,
+    idempotencyKey?: string,
   ): Promise<OrderResponseDto> {
     this.ensureCanCreateOrModify(caller);
 
@@ -88,6 +111,12 @@ export class OrderService {
 
     if (!doctorId) {
       throw new BadRequestException('Dentist is required');
+    }
+
+    const replayKey = this.creationReplayKey(caller, idempotencyKey);
+    if (replayKey) {
+      const replayed = await this.findReplayedOrder(replayKey, doctorId);
+      if (replayed) return replayed;
     }
 
     await this.ensureDentistExists(doctorId);
@@ -128,7 +157,48 @@ export class OrderService {
     // Notifying on every saved draft was noise: a doctor often opens
     // a new order and abandons it during photo prep.
 
+    if (replayKey) await this.rememberCreation(replayKey, order.id);
+
     return mapOrderToDto(order);
+  }
+
+  private creationReplayKey(caller: Caller, key: string | undefined): string | null {
+    if (!this.cache || !key || !IDEMPOTENCY_KEY_SHAPE.test(key)) return null;
+    return `orders:create:${caller.userId}:${key}`;
+  }
+
+  /**
+   * The order a previous attempt with this key created, if it still exists
+   * for this doctor. A cache miss — including a cache that is down — just
+   * means "create normally": replay protection degrades, it never blocks.
+   */
+  private async findReplayedOrder(
+    replayKey: string,
+    doctorId: string,
+  ): Promise<OrderResponseDto | null> {
+    let orderId: string | undefined;
+    try {
+      orderId = (await this.cache!.get<string>(replayKey)) ?? undefined;
+    } catch (err) {
+      this.logger.warn(`cache.get(${replayKey}) failed: ${(err as Error).message}`);
+      return null;
+    }
+    if (!orderId) return null;
+    const existing = await this.prisma.dentalOrder.findFirst({
+      where: { id: orderId, doctorId, deletedAt: null },
+      include: orderInclude,
+    });
+    if (!existing) return null;
+    this.logger.log(`Order creation replayed for ${orderId}; returning the existing draft.`);
+    return mapOrderToDto(existing);
+  }
+
+  private async rememberCreation(replayKey: string, orderId: string): Promise<void> {
+    try {
+      await this.cache!.set(replayKey, orderId, CREATE_IDEMPOTENCY_TTL_MS);
+    } catch (err) {
+      this.logger.warn(`cache.set(${replayKey}) failed: ${(err as Error).message}`);
+    }
   }
 
   async getOrders(

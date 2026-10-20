@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient, UseQueryResult, UseMutationResult } from '@tanstack/react-query';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { dentistProfileService, extractApiErrorMessage } from '@/lib/api';
 import { useT } from '@/lib/i18n/lang-context';
 import {

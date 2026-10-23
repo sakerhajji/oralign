@@ -16,11 +16,19 @@ From a scratch directory holding the source film as `src/source.mp4`
 cp "$APP"/scripts/hero-film/*.sh .
 docker run --rm --entrypoint sh -v "$PWD:/w" -w /w linuxserver/ffmpeg:latest -c '
   sh master.sh &&                       # lossless seamless-loop master
+  sh endcard.sh extract                 # raw tail for the phone cut
+'
+python "$APP"/scripts/hero-film/endcard.py work/tail.yuv work/tail-pulled.yuv 430
+docker run --rm --entrypoint sh -v "$PWD:/w" -w /w linuxserver/ffmpeg:latest -c '
+  sh endcard.sh splice &&
+  sh master.sh src/source-tall.mkv work/master-tall.mkv &&
   sh reframe.sh &&                      # tall / portrait / square / wide references
   sh final.sh tall:35:25 portrait:35:26 square:36:26 wide:36:27
 '
 python "$APP"/scripts/hero-film/install.py . "$APP"
 ```
+
+`endcard.py` needs a host Python with numpy and Pillow.
 
 `linuxserver/ffmpeg` is used because it ships SVT-AV1, x264 **and**
 libvmaf; `final.sh` scores every encode against its lossless reference.
@@ -31,6 +39,14 @@ libvmaf; `final.sh` scores every encode against its lossless reference.
   so the loop has no cut. The blend weight reaches 100 % on the last frame
   (ffmpeg's `blend` counts `N` from 1), which makes the seam exactly as
   smooth as an ordinary frame step (SSIM 0.9908 = the film's own step there).
+- **endcard.sh + endcard.py** — phones show the film full height on a
+  ~0.5-aspect screen, i.e. only ~520–540 of its 1920 columns, and the
+  end card's ORALIGN wordmark is 550 px wide: its first and last letters
+  were cut on every phone. For the tall cut only, the frame eases back to
+  80 % while the camera pushes toward the logo (master 17.6 → 19.3 s); the
+  bands this opens are filled with a blurred extension of the same frame.
+  Done on the source, before the loop dissolve, so frames 0–429 and the
+  loop seam stay bit-identical to the main master.
 - **reframe.sh** — the full-screen hero box is ~9:16 on phones, ~4:5 on
   tablets in portrait and ~16:9 on desktop, so most of a 16:9 frame would
   be cropped by `object-fit` on anything but desktop. Each rendition is

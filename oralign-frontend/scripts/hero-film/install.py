@@ -75,7 +75,9 @@ ts = f'''/**
  *  - Loop: the last 18 frames dissolve into the first 18, so the end flows
  *    into the start; the seam is as smooth as any ordinary frame step.
  *  - Reframed per box shape; the crop follows the subject and moves only on
- *    the film's own hard cut, or while the camera itself moves.
+ *    the film's own hard cut, or while the camera itself moves. The tall
+ *    (phone) cut's end card eases back to 80 % so the ORALIGN wordmark
+ *    fits a phone's width (endcard.py).
  *  - AV1: SVT-AV1 preset 3, 10-bit, VQ tune. H.264: x264 veryslow, High
  *    profile, level 4.0 (hardware-decodable on older Androids), aq-mode 3
  *    for the dark gradients. Both faststart, no audio.

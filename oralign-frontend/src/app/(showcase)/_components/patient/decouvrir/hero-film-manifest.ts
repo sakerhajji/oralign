@@ -8,14 +8,16 @@
  *  - Loop: the last 18 frames dissolve into the first 18, so the end flows
  *    into the start; the seam is as smooth as any ordinary frame step.
  *  - Reframed per box shape; the crop follows the subject and moves only on
- *    the film's own hard cut, or while the camera itself moves.
+ *    the film's own hard cut, or while the camera itself moves. The tall
+ *    (phone) cut's end card eases back to 80 % so the ORALIGN wordmark
+ *    fits a phone's width (endcard.py).
  *  - AV1: SVT-AV1 preset 3, 10-bit, VQ tune. H.264: x264 veryslow, High
  *    profile, level 4.0 (hardware-decodable on older Androids), aq-mode 3
  *    for the dark gradients. Both faststart, no audio.
  *  - Quality gate: VMAF mean >= 95 and 1st-percentile frame >= 91 against
  *    the lossless reference of the same rendition.
  *
- *   tall     608x1080   AV1   708 KB (VMAF 96.26, p1 91.33)   H.264  1532 KB (VMAF 95.58, p1 92.40)
+ *   tall     608x1080   AV1   696 KB (VMAF 96.19, p1 91.33)   H.264  1514 KB (VMAF 95.47, p1 92.08)
  *   portrait 864x1080   AV1   815 KB (VMAF 96.59, p1 93.51)   H.264  1724 KB (VMAF 95.39, p1 91.52)
  *   square   1080x1080  AV1   857 KB (VMAF 96.27, p1 92.92)   H.264  2020 KB (VMAF 95.41, p1 91.79)
  *   wide     1920x1080  AV1  1005 KB (VMAF 96.02, p1 92.90)   H.264  2571 KB (VMAF 95.10, p1 91.86)
@@ -53,14 +55,14 @@ export const HERO_FILM: {
     width: 608,
     height: 1080,
     av1: {
-      src: "/showcase/hero/oralign-film-tall.av1.98265164.mp4",
+      src: "/showcase/hero/oralign-film-tall.av1.cb68253c.mp4",
       type: 'video/mp4; codecs="av01.0.04M.10"',
-      bitrate: 275193,
+      bitrate: 270619,
     },
     h264: {
-      src: "/showcase/hero/oralign-film-tall.h264.cbb328ad.mp4",
+      src: "/showcase/hero/oralign-film-tall.h264.0b7c09b8.mp4",
       type: 'video/mp4; codecs="avc1.640028"',
-      bitrate: 595629,
+      bitrate: 588632,
     },
   },
   portrait: {

@@ -25,8 +25,10 @@ cx() { # $1 = c1, $2 = crop width  →  x expression of t, rounded to an even pi
   echo "2*floor((max(0,min(1920-$2,$x))+1)/2)"
 }
 # Tall 9:16 (phones in portrait): too narrow for the two-box shot, so it
-# follows the action instead — the case dropping into the black box.
-ffmpeg -hide_banner -loglevel error -y -i work/master.mkv \
+# follows the action instead — the case dropping into the black box. Cut
+# from master-tall.mkv, whose end card is pulled back so the ORALIGN
+# wordmark fits a phone's width (endcard.py).
+ffmpeg -hide_banner -loglevel error -y -i work/master-tall.mkv \
   -vf "crop=w=608:h=1080:y=0:x='$(cx 0.56 608)'" -c:v ffv1 -level 3 work/ref-tall.mkv
 # Portrait 4:5 and square: wide enough to keep the yellow ORALIGN box in
 # frame next to the black one.

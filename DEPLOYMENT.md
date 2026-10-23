@@ -522,28 +522,74 @@ mailbox, or point `rua` at one you read). Move to `p=quarantine` after
 2–4 weeks of clean reports.
 
 **App-side DKIM** — the backend signs every message with nodemailer
-(`src/mail/mail-auth.ts`). Generate the key ON the VPS so the private
-key never travels, outside the repository:
+(`src/mail/mail-auth.ts`). Only for path 2, i.e. once `MAIL_FROM` is an
+`@oralign.com.tn` mailbox: never set `MAIL_DKIM_*` while `MAIL_FROM` is
+@gmail.com or @aura-aligners.com (it would sign for a domain where the
+key is not published). Deploying the code alone changes nothing: DKIM
+stays off until both variables are set.
 
-```bash
-sudo install -d -m 700 /etc/oralign
-sudo openssl genrsa -out /etc/oralign/dkim-oralign1.pem 2048
-sudo chmod 600 /etc/oralign/dkim-oralign1.pem
-# DNS: TXT record on oralign1._domainkey.oralign.com.tn with this value
-echo "v=DKIM1; k=rsa; p=$(sudo openssl rsa -in /etc/oralign/dkim-oralign1.pem -pubout -outform der 2>/dev/null | base64 -w0)"
-# Backend env (.env.production)
-echo "MAIL_DKIM_SELECTOR=oralign1" >> .env.production
-echo "MAIL_DKIM_PRIVATE_KEY=$(sudo base64 -w0 /etc/oralign/dkim-oralign1.pem)" >> .env.production
-```
+1. Generate the key ON the VPS, outside the repository (`*.pem` is not
+   gitignored), so the private key never travels. The guard stops a
+   second run from replacing a key whose public half is already in DNS:
 
-A 2048-bit key's value is ~400 characters: DNS splits a TXT longer than
-255 characters into several strings. If Topnet's panel refuses it, ask
-their support to add it, or generate a 1024-bit key (fits one string;
-Gmail accepts ≥1024). Restart the backend (§5.8). At boot it logs
-`DKIM signing on: d=oralign.com.tn, s=oralign1.` and then a DNS
-self-check: `Mail authentication DNS looks right …` or the exact list
-of what is still missing (no DMARC, DKIM key not published or not
-matching the private key).
+   ```bash
+   sudo install -d -m 700 /etc/oralign
+   sudo test -f /etc/oralign/dkim-oralign1.pem || sudo openssl genrsa -out /etc/oralign/dkim-oralign1.pem 2048
+   sudo chmod 600 /etc/oralign/dkim-oralign1.pem
+   # Public value to publish (safe to copy):
+   echo "v=DKIM1; k=rsa; p=$(sudo openssl rsa -in /etc/oralign/dkim-oralign1.pem -pubout -outform der 2>/dev/null | base64 -w0)"
+   ```
+
+2. Publish at Topnet a TXT record `oralign1._domainkey` with that value,
+   plus the DMARC record above, and WAIT until both answer — a signature
+   whose key is not yet visible FAILS, which is worse than none:
+
+   ```bash
+   nslookup -q=TXT oralign1._domainkey.oralign.com.tn 8.8.8.8
+   nslookup -q=TXT _dmarc.oralign.com.tn 8.8.8.8
+   ```
+
+   A 2048-bit value is ~410 characters; DNS stores a TXT over 255
+   characters as several strings (the backend joins them). If Topnet's
+   panel refuses or truncates it, ask their support, or — before step 3
+   only — replace the key with a 1024-bit one (`sudo rm` the .pem, rerun
+   step 1 with `1024`; ~234 characters, Gmail accepts ≥ 1024 bits).
+
+3. Add the variables, by absolute path, after a backup. Use ONLY the
+   base64 form: `deploy.sh` sources `.env.production` with bash, so a
+   PEM with spaces would abort the next deploy.
+
+   ```bash
+   cd /opt/oralign-app
+   cp .env.production .env.production.bak.$(date +%Y%m%dT%H%M%S)
+   grep -c '^MAIL_DKIM_' .env.production   # must print 0, otherwise edit with nano
+   echo "" >> .env.production              # in case the file has no final newline
+   echo "MAIL_DKIM_SELECTOR=oralign1" >> .env.production
+   echo "MAIL_DKIM_PRIVATE_KEY=$(sudo base64 -w0 /etc/oralign/dkim-oralign1.pem)" >> .env.production
+   grep -c '^MAIL_DKIM_' .env.production   # must print 2
+   ```
+
+4. Recreate the backend (§5.8 — `docker restart` does NOT re-read the
+   env file) and read its boot logs:
+
+   ```bash
+   docker compose -p oralign-app -f docker-compose.yml -f docker-compose.production.yml --env-file .env.production up -d backend
+   docker logs --since 5m oralign-backend 2>&1 | grep -A4 -E 'DKIM|Mail authentication|MAIL_FROM domain'
+   ```
+
+   Expected: `DKIM signing on: d=oralign.com.tn, s=oralign1.` then
+   `Mail authentication DNS looks right for oralign.com.tn (SPF, DMARC,
+   DKIM key matches).` Otherwise the log lists what is still missing
+   (no DMARC, DKIM key not published, or published key ≠ private key).
+   The check runs once per boot: rerun step 4 after fixing DNS.
+
+Undo DKIM (mail keeps flowing, unsigned): `sed -i '/^MAIL_DKIM_/d'
+.env.production` then step 4's `up -d backend`. Since this release the
+backend also announces the From domain in SMTP EHLO; should a relay ever
+object, set `MAIL_EHLO_NAME=[127.0.0.1]` (nodemailer's previous value).
+`MAIL_FROM_NAME`, `MAIL_REPLY_TO` and `MAIL_LOGO_URL` now reach the
+backend in production (they were silently ignored before) — note that
+`MAIL_LOGO_URL` is a base URL, the templates append the file name.
 
 **Verify** as in B (Gmail → *Show original*: SPF, DKIM and DMARC all
 `PASS`, with `d=oralign.com.tn` on the DKIM line; mail-tester ≥ 9/10),

@@ -138,7 +138,7 @@ export const env = Object.freeze({
     replyTo: str('MAIL_REPLY_TO'),
     logoUrl: str('MAIL_LOGO_URL'),
     /** Hostname announced in SMTP EHLO. Defaults to the From domain —
-     *  otherwise nodemailer announces the container's random hostname. */
+     *  otherwise nodemailer announces "[127.0.0.1]" from a container. */
     ehloName: str('MAIL_EHLO_NAME'),
     /** App-side DKIM signing (see mail/mail-auth.ts), for relays that do
      *  not sign for our From domain. Off unless selector + key are set. */

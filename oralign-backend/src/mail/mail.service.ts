@@ -50,8 +50,9 @@ export class MailService {
       port: env.mail.port,
       secure: env.mail.port === 465,
       auth: { user, pass },
-      // EHLO with a real domain, not the container's random hostname
-      // (which relays copy into the Received header filters read).
+      // EHLO with a real domain. Left unset, nodemailer falls back to
+      // "[127.0.0.1]" (a container hostname has no dot), which relays
+      // copy into the Received header filters read.
       name: env.mail.ehloName || fromDomain || undefined,
       ...(dkim ? { dkim } : {}),
     });

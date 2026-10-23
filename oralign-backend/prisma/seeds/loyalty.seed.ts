@@ -1,8 +1,8 @@
 /**
  * Seed the loyalty program defaults — grille tarifaire 2026.
  *
- *   « 8 traitements par trimestre  → 5 % de remise le trimestre suivant
- *     12 traitements ou plus       → 10 % »
+ *   « 8 commandes terminées éligibles par trimestre → 5 % le trimestre suivant
+ *     12 commandes éligibles ou plus                → 10 % »
  *
  * Also fills the beyond-the-pack tariffs on the ACTIVE billing settings
  * row, but ONLY for fields still at their 0 default — an admin-edited

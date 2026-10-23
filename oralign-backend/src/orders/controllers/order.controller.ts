@@ -60,6 +60,7 @@ import { OrderService } from '../services/order.service';
 import { OrderFilesService } from '../services/order-files.service';
 import { OrderExportService } from '../services/order-export.service';
 import { TreatmentFeeService } from '../services/treatment-fee.service';
+import { OrderAuditService } from '../services/order-audit.service';
 
 @ApiTags('orders')
 @ApiBearerAuth('access-token')
@@ -78,6 +79,7 @@ export class OrderController {
     private readonly orderExport: OrderExportService,
     private readonly treatmentFees: TreatmentFeeService,
     private readonly chunkedUploads: ChunkedUploadService,
+    private readonly orderAudit: OrderAuditService,
   ) {}
 
   @Post()
@@ -124,6 +126,23 @@ export class OrderController {
       filters,
       { userId: user.sub, role: user.role },
     );
+  }
+
+  @Get(':id/history')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Get the unified order history: direct edits, plans, quotations, payments and deliveries.',
+  })
+  @ApiParam({ name: 'id', type: String })
+  async getOrderHistory(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.orderAudit.list(id, {
+      userId: user.sub,
+      role: user.role,
+    });
   }
 
   @Get(':id')
@@ -339,8 +358,7 @@ export class OrderController {
   @Roles(UserRole.admin, UserRole.super_admin)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary:
-      'Admin confirms a pending bank-transfer treatment-fee payment.',
+    summary: 'Admin confirms a pending bank-transfer treatment-fee payment.',
   })
   @ApiParam({ name: 'id', type: String })
   async confirmTreatmentFeePayment(
@@ -448,12 +466,10 @@ export class OrderController {
     @Body() dto: BulkUpdateOrderStatusDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.orderService.bulkUpdateStatus(
-      dto.ids,
-      dto.status,
-      dto.reason,
-      { userId: user.sub, role: user.role },
-    );
+    return this.orderService.bulkUpdateStatus(dto.ids, dto.status, dto.reason, {
+      userId: user.sub,
+      role: user.role,
+    });
   }
 
   @Post('bulk-delete')
@@ -692,7 +708,12 @@ export class OrderController {
    * false positive.
    */
   @Get(':id/sheet')
-  @Roles(UserRole.dentist, UserRole.admin, UserRole.super_admin, UserRole.designer)
+  @Roles(
+    UserRole.dentist,
+    UserRole.admin,
+    UserRole.super_admin,
+    UserRole.designer,
+  )
   @SkipThrottle()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({

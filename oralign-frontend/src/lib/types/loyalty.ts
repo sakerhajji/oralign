@@ -30,14 +30,16 @@ export interface LoyaltyDoctorRow {
   doctorId: string;
   doctorName: string;
   clinicName: string | null;
-  currentCount: number;
-  currentTierPercent: number;
+  eligibleOrdersThisQuarter: number;
+  excludedDiscountedOrdersThisQuarter: number;
+  achievedTierPercent: number;
   activeDiscountPercent: number;
-  nextQuarterDiscountPercent: number;
-  nextTierMinTreatments: number | null;
+  projectedNextQuarterDiscountPercent: number;
+  nextTierMinOrders: number | null;
   nextTierPercent: number | null;
-  remainingToNextTier: number | null;
-  previousCount: number;
+  remainingOrdersToNextTier: number | null;
+  previousEligibleOrderCount: number;
+  previousExcludedDiscountedOrderCount: number;
   previousDiscountPercent: number;
 }
 
@@ -47,7 +49,8 @@ export interface LoyaltyOverview {
   previousQuarter: LoyaltyQuarterInfo;
   tiers: LoyaltyTier[];
   kpis: {
-    treatmentsThisQuarter: number;
+    eligibleOrdersThisQuarter: number;
+    excludedDiscountedOrdersThisQuarter: number;
     eligibleByTier: {
       minTreatments: number;
       discountPercent: number;

@@ -7,7 +7,7 @@ import type { Lang } from "../../../_lib/i18n/dict";
 import { useShowcaseLang } from "../../../_lib/i18n/lang-context";
 
 const VIDEO_URL = process.env.NEXT_PUBLIC_ORALIGN_WEAR_ALIGNERS_VIDEO_URL ?? "";
-const VIDEO_THUMBNAIL_SRC = "/showcase/Portez.webp";
+const VIDEO_THUMBNAIL_SRC = "/showcase/oralign-wear-aligner.webp";
 
 const wearVideoCopy: Record<
   Lang,

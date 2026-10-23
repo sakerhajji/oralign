@@ -17,21 +17,21 @@ const everydayCopy: Record<
     description:
       "Chez ORALIGN®, nous pensons qu’un traitement par aligneurs transparents doit s’intégrer naturellement à votre mode de vie, sans le compliquer.",
     imageAlt:
-      "Patiente ORALIGN souriant dans un village méditerranéen au bord de la mer",
+      "Patiente ORALIGN rangeant son aligneur transparent dans son étui à une terrasse",
   },
   en: {
     title: "Enjoy every part of your day",
     description:
       "At ORALIGN®, we believe clear aligner treatment should fit naturally into your lifestyle without making it more complicated.",
     imageAlt:
-      "ORALIGN patient smiling in a Mediterranean village by the sea",
+      "ORALIGN patient placing her clear aligner in its case at a café terrace",
   },
   ar: {
     title: "استمتع بكل لحظة من يومك",
     description:
       "في ORALIGN® نؤمن بأن العلاج بالتقويم الشفاف يجب أن ينسجم بصورة طبيعية مع أسلوب حياتك من دون أن يزيده تعقيداً.",
     imageAlt:
-      "مريضة ORALIGN تبتسم في قرية متوسطية مطلة على البحر",
+      "مريضة ORALIGN تضع تقويمها الشفاف في علبته على شرفة مقهى",
   },
 };
 
@@ -62,7 +62,7 @@ export function DailyLifeSection() {
 
       <div className="relative aspect-[16/9] w-full overflow-hidden sm:aspect-[16/10] lg:min-h-0 lg:flex-1 lg:aspect-auto">
         <Image
-          src="/showcase/image123456.png"
+          src="/showcase/oralign-daily-life.webp"
           alt={copy.imageAlt}
           fill
           sizes="100vw"

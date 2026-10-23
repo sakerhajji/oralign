@@ -73,7 +73,7 @@ export function TreatmentDurationSection() {
 
         <div className="relative aspect-square overflow-hidden sm:aspect-[4/3] lg:min-h-0 lg:aspect-auto">
           <Image
-            src="/showcase/image.jpeg"
+            src="/showcase/oralign-treatment-duration.webp"
             alt={copy.imageAlt}
             fill
             sizes="(min-width: 1024px) 45vw, 100vw"

@@ -1,23 +1,23 @@
 // Quotation / Devis
 // Split out of the former 2,000-line lib/types/index.ts; import via '@/lib/types'.
 
-import type { ArchType, PaymentMode, QuotationPaymentStatus } from './billing';
-import type { Localized } from './blog';
+import type { ArchType, PaymentMode, QuotationPaymentStatus } from "./billing";
+import type { Localized } from "./blog";
 
 // ─── Quotation / Devis ──────────────────────────────────────────────────────
 
 export enum DevisLanguage {
-  FR = 'fr',
-  EN = 'en',
-  AR = 'ar',
+  FR = "fr",
+  EN = "en",
+  AR = "ar",
 }
 
 export enum QuotationStatus {
-  DRAFT     = 'draft',
-  SENT      = 'sent',
-  APPROVED  = 'approved',
-  REJECTED  = 'rejected',
-  CANCELED  = 'canceled',
+  DRAFT = "draft",
+  SENT = "sent",
+  APPROVED = "approved",
+  REJECTED = "rejected",
+  CANCELED = "canceled",
 }
 
 /** Translated text bundles editable from the admin billing-settings UI. */
@@ -232,6 +232,10 @@ export interface Quotation {
   paymentMode?: PaymentMode | null;
   paymentStatus?: QuotationPaymentStatus | null;
   doctorApprovedAt?: string | null;
+  loyaltyDiscountPercent?: string | null;
+  loyaltyDiscountAmount?: string | null;
+  loyaltySourceYear?: number | null;
+  loyaltySourceQuarter?: number | null;
   // Read-only LOCALIZED display fields for the attached pack, joined on
   // the `getForOrder` read (NOT stored on the quote). Lets the order
   // summary render the pack name / expiration / finishing in the current

@@ -82,6 +82,7 @@ function invalidatePaymentPlan(
     queryKey: quotationKeys.byOrder(quote.orderId),
   });
   queryClient.invalidateQueries({ queryKey: orderKeys.detail(quote.orderId) });
+  queryClient.invalidateQueries({ queryKey: orderKeys.history(quote.orderId) });
   queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
 }
 

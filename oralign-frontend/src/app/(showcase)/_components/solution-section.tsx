@@ -50,7 +50,7 @@ export function SolutionSection() {
           <Reveal>
             <figure className="relative min-h-[500px] overflow-hidden border border-[#303030] bg-[#202020]">
               <Image
-                src="/showcase/invisaligne.png"
+                src="/showcase/oralign-aligner-precision.webp"
                 alt={dict.solution.imageAlt[lang]}
                 fill
                 quality={85}

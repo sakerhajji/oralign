@@ -275,3 +275,17 @@ export interface DentalOrder {
   /** Set when the order is in the trash (soft-deleted). */
   deletedAt?: string | null;
 }
+
+export interface OrderHistoryEntry {
+  id: string;
+  source: 'order' | 'treatment_plan' | 'quotation' | 'payment' | 'delivery';
+  action: string;
+  actor: {
+    id: string | null;
+    name: string;
+    role: UserRole | null;
+  } | null;
+  changes: Record<string, { from: unknown; to: unknown }> | null;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+}

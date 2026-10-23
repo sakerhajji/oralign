@@ -26,7 +26,8 @@ const freedomCopy: Record<
       "Discret au quotidien",
       "Accompagnement humain",
     ],
-    imageAlt: "Patiente ORALIGN souriant dans une voiture au bord de la mer",
+    imageAlt:
+      "Patiente ORALIGN présentant son aligneur transparent dans une voiture face à la mer",
   },
   en: {
     title: "Set your smile free today",
@@ -40,7 +41,8 @@ const freedomCopy: Record<
       "Discreet every day",
       "Human support",
     ],
-    imageAlt: "ORALIGN patient smiling in a car by the sea",
+    imageAlt:
+      "ORALIGN patient holding her clear aligner in a car overlooking the sea",
   },
   ar: {
     title: "حرّر ابتسامتك ابتداءً من اليوم",
@@ -54,7 +56,7 @@ const freedomCopy: Record<
       "شفاف في حياتك اليومية",
       "مرافقة إنسانية",
     ],
-    imageAlt: "مريضة ORALIGN تبتسم داخل سيارة قرب البحر",
+    imageAlt: "مريضة ORALIGN تعرض تقويمها الشفاف داخل سيارة مطلة على البحر",
   },
 };
 
@@ -74,7 +76,7 @@ export function SmileFreedomSection() {
       <div className="grid min-h-[calc(100svh-4rem)] sm:min-h-[calc(100svh-4.5rem)] lg:min-h-[calc(100svh-5rem)] lg:grid-cols-2">
         <div className="relative aspect-[4/3] w-full overflow-hidden sm:aspect-[16/10] lg:min-h-0 lg:aspect-auto">
           <Image
-            src="/showcase/womenBornToshine.png"
+            src="/showcase/oralign-smile-freedom.webp"
             alt={copy.imageAlt}
             fill
             sizes="(min-width: 1024px) 50vw, 100vw"

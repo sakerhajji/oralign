@@ -240,6 +240,14 @@ enum PaymentRecordStatus {
   expired
 }
 
+// Distinguishes the legacy approved-quotation calculation from the
+// production order-based loyalty rules. Existing rows are migrated as
+// approved_quotes_v1 and are recalculated non-destructively into v2.
+enum LoyaltyCalculationBasis {
+  approved_quotes_v1
+  completed_orders_v2
+}
+
 // ─────────────────────────────────────────
 // USER
 // ─────────────────────────────────────────
@@ -348,6 +356,7 @@ model User {
   invoicesAsDoctor         Invoice[]           @relation("InvoiceDoctor")
   invoicesCreated          Invoice[]           @relation("InvoiceCreatedBy")
   invoiceAuditEntries      InvoiceAuditLog[]   @relation("InvoiceAuditActor")
+  orderAuditEntries        OrderAuditLog[]     @relation("OrderAuditActor")
 
   @@index([email])
   @@index([role])
@@ -540,14 +549,40 @@ model DentalOrder {
   // Manual invoices attached to this order (Restrict: an order with an
   // invoice cannot be purged, only archived).
   invoices                      Invoice[]
+  auditLogs                     OrderAuditLog[]
 
   @@index([doctorId])
   @@index([patientId])
   @@index([assignedDesignerId])
   @@index([status])
+  @@index([status, createdAt, deletedAt])
   @@index([orderCode])
   @@index([deletedAt])
   @@index([createdAt])
+}
+
+model OrderAuditLog {
+  id        String      @id @default(uuid())
+  orderId   String
+  order     DentalOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  // Actor snapshot keeps the history readable if the user is later removed.
+  actorId   String?
+  actor     User?       @relation("OrderAuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  actorName String?
+  actorRole UserRole?
+
+  // Stable application action key. The frontend owns localized labels.
+  action    String
+  // { field: { from, to } } for direct order edits/status transitions.
+  changes   Json?
+  // Small contextual payload (reason, file names, payment amount, etc.).
+  metadata  Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([orderId, createdAt(sort: Desc)])
+  @@index([actorId])
 }
 
 model OrderToothInstruction {
@@ -1246,6 +1281,10 @@ model Quotation {
   // as the pack snapshot above).
   loyaltyDiscountPercent Decimal?         @db.Decimal(5, 2)
   loyaltyDiscountAmount  Decimal?         @db.Decimal(12, 3)
+  // Calendar quarter whose eligible completed orders earned the applied
+  // reward. Null means no loyalty reward was actually applied.
+  loyaltySourceYear       Int?
+  loyaltySourceQuarter    Int?
 
   // ── Payment plan + status ───────────────────────────────────────
   paymentMode           PaymentMode?
@@ -1346,16 +1385,17 @@ model PackPrice {
 // ─────────────────────────────────────────
 // LOYALTY PROGRAM
 // ─────────────────────────────────────────
-// Quarterly practitioner loyalty (grille 2026): N approved treatments
-// during a quarter earn a percentage discount on every pack quote of
-// the FOLLOWING quarter. Tiers are admin-editable rows (variable
+// Quarterly practitioner loyalty (grille 2026): N eligible completed
+// orders during a quarter earn a percentage discount on every pack quote
+// of the FOLLOWING quarter. Tiers are admin-editable rows (variable
 // count — same idiom as PackPrice rather than fixed settings
 // columns); closed quarters are persisted per doctor with the awarded
 // percent SNAPSHOTTED, so future tier edits never rewrite history.
 
 model LoyaltyTier {
   id              String   @id @default(uuid())
-  // Treatments required within one quarter to reach this tier.
+  // Eligible completed orders required within one quarter. The physical
+  // field name is retained for backward-compatible APIs and migrations.
   minTreatments   Int
   // Discount granted on the following quarter's pack quotes (0-100).
   discountPercent Decimal  @db.Decimal(5, 2)
@@ -1369,11 +1409,24 @@ model LoyaltyTier {
 model LoyaltyQuarterResult {
   id              String   @id @default(uuid())
   doctorId        String
-  // Calendar quarter the TREATMENTS were counted in (UTC). The awarded
+  // Calendar quarter the ORDERS were created in (UTC). The awarded
   // discount applies to the quarter that FOLLOWS this one.
   year            Int
   quarter         Int      // 1..4
+  // For completed_orders_v2 this stores the eligible completed-order
+  // count. The legacy name is retained to avoid a destructive rename.
   treatmentCount  Int
+  // Completed orders omitted because a loyalty discount was actually
+  // persisted on their quotation.
+  excludedDiscountedOrderCount Int?
+  calculationBasis             LoyaltyCalculationBasis @default(approved_quotes_v1)
+  // Snapshot of the active tier ladder used for this quarter. Recomputing
+  // after a later tier edit therefore does not rewrite the earned reward.
+  tierSnapshot                 Json?
+  // Migration snapshots of the pre-v2 treatment-based result. They remain
+  // untouched when the row is recalculated using completed orders.
+  legacyTreatmentCount         Int?
+  legacyDiscountPercent        Decimal? @db.Decimal(5, 2)
   // Snapshot of the highest tier reached when the quarter was closed.
   // Zero when no tier was reached. Kept as literal values (not a tier
   // FK) so deleting or editing tiers never mutates a closed quarter.

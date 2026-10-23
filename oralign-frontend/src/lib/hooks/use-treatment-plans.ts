@@ -11,6 +11,7 @@ import { toast } from '@/lib/toast';
 import { treatmentPlansService } from '@/lib/api/treatment-plans.service';
 import { extractApiErrorMessage } from '@/lib/api/error';
 import { useT } from '@/lib/i18n/lang-context';
+import { orderKeys } from './use-orders';
 import {
   TreatmentPlanStatus,
   type TreatmentAttachmentCategory,
@@ -75,6 +76,7 @@ function invalidatePlan(queryClient: ReturnType<typeof useQueryClient>, plan: Tr
   queryClient.invalidateQueries({ queryKey: treatmentPlanKeys.byOrder(plan.orderId) });
   queryClient.invalidateQueries({ queryKey: treatmentPlanKeys.review(plan.id) });
   queryClient.invalidateQueries({ queryKey: treatmentPlanKeys.detail(plan.id) });
+  queryClient.invalidateQueries({ queryKey: orderKeys.history(plan.orderId) });
 }
 
 export function useCreateTreatmentPlan(): UseMutationResult<

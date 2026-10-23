@@ -52,6 +52,7 @@ function invalidateQuotation(
   queryClient.invalidateQueries({ queryKey: quotationKeys.byOrder(quote.orderId) });
   queryClient.invalidateQueries({ queryKey: quotationKeys.detail(quote.id) });
   queryClient.invalidateQueries({ queryKey: orderKeys.detail(quote.orderId) });
+  queryClient.invalidateQueries({ queryKey: orderKeys.history(quote.orderId) });
   queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
 }
 
@@ -140,6 +141,7 @@ export function useCancelQuotation(): UseMutationResult<
         queryKey: quotationKeys.byOrder(orderId),
       });
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(orderId) });
+      queryClient.invalidateQueries({ queryKey: orderKeys.history(orderId) });
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
       toast.success(t('toasts.quotations.canceled'));
     },

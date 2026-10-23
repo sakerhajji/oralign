@@ -22,6 +22,7 @@ import {
 import { isAdmin, type Caller } from '../../common/access/caller';
 import { OrderResponseDto } from '../dto/order.dto';
 import { OrderService } from './order.service';
+import { OrderAuditService } from './order-audit.service';
 import {
   mapOrderToDto,
   orderInclude,
@@ -44,6 +45,7 @@ export class TreatmentFeeService {
     private readonly prisma: PrismaService,
     private readonly orders: OrderService,
     private readonly events: EventEmitter2,
+    private readonly orderAudit: OrderAuditService,
   ) {}
 
   /**
@@ -86,10 +88,7 @@ export class TreatmentFeeService {
     const amount = await this.resolveTreatmentFeeAmount(current);
 
     // Cash collection is an in-clinic flow — only an admin records it.
-    if (
-      method === PaymentMethod.cash &&
-      !isAdmin(caller)
-    ) {
+    if (method === PaymentMethod.cash && !isAdmin(caller)) {
       throw new ForbiddenException(
         'Cash payment can only be recorded by an admin.',
       );
@@ -99,14 +98,27 @@ export class TreatmentFeeService {
     // the actual `paidAt`. Direct callers should use uploadProof + confirm.
     if (method === PaymentMethod.bank_transfer) {
       await this.ensureBankTransferIsConfigured();
-      const order = await this.prisma.dentalOrder.update({
-        where: { id },
-        data: {
-          treatmentFeePaymentMethod: method,
-          treatmentFeePaymentStatus: PaymentRecordStatus.awaiting_confirmation,
-          treatmentFeeAmount: amount,
-        },
-        include: orderInclude,
+      const auditEntry = await this.orderAudit.entry(
+        caller,
+        'treatment_fee_declared',
+        null,
+        { method, amount },
+      );
+      const order = await this.prisma.$transaction(async (tx) => {
+        const updated = await tx.dentalOrder.update({
+          where: { id },
+          data: {
+            treatmentFeePaymentMethod: method,
+            treatmentFeePaymentStatus:
+              PaymentRecordStatus.awaiting_confirmation,
+            treatmentFeeAmount: amount,
+          },
+          include: orderInclude,
+        });
+        await tx.orderAuditLog.create({
+          data: { orderId: id, ...auditEntry },
+        });
+        return updated;
       });
       this.logger.log(
         `Treatment fee bank-transfer recorded (awaiting admin confirmation) for order ${id} by user ${caller.userId}`,
@@ -125,15 +137,27 @@ export class TreatmentFeeService {
 
     // CASH — instant success. Card payments use ClicToPay and reach this
     // aggregate only after server-side provider verification.
-    const order = await this.prisma.dentalOrder.update({
-      where: { id },
-      data: {
-        treatmentFeePaymentMethod: method,
-        treatmentFeePaymentStatus: PaymentRecordStatus.success,
-        treatmentFeePaidAt: new Date(),
-        treatmentFeeAmount: amount,
-      },
-      include: orderInclude,
+    const auditEntry = await this.orderAudit.entry(
+      caller,
+      'treatment_fee_paid',
+      null,
+      { method, amount },
+    );
+    const order = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.dentalOrder.update({
+        where: { id },
+        data: {
+          treatmentFeePaymentMethod: method,
+          treatmentFeePaymentStatus: PaymentRecordStatus.success,
+          treatmentFeePaidAt: new Date(),
+          treatmentFeeAmount: amount,
+        },
+        include: orderInclude,
+      });
+      await tx.orderAuditLog.create({
+        data: { orderId: id, ...auditEntry },
+      });
+      return updated;
     });
     this.logger.log(
       `Treatment fee paid (${method}) for order ${id} by user ${caller.userId} — amount ${amount}`,
@@ -169,15 +193,27 @@ export class TreatmentFeeService {
     // Server-computed amount (audit M-4) — not taken from the client.
     const amount = await this.resolveTreatmentFeeAmount(current);
     await this.ensureBankTransferIsConfigured();
-    const order = await this.prisma.dentalOrder.update({
-      where: { id },
-      data: {
-        treatmentFeePaymentMethod: PaymentMethod.bank_transfer,
-        treatmentFeePaymentStatus: PaymentRecordStatus.awaiting_confirmation,
-        treatmentFeeProofPath: relativePath,
-        treatmentFeeAmount: amount,
-      },
-      include: orderInclude,
+    const auditEntry = await this.orderAudit.entry(
+      caller,
+      'treatment_fee_proof_uploaded',
+      null,
+      { method: PaymentMethod.bank_transfer, amount },
+    );
+    const order = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.dentalOrder.update({
+        where: { id },
+        data: {
+          treatmentFeePaymentMethod: PaymentMethod.bank_transfer,
+          treatmentFeePaymentStatus: PaymentRecordStatus.awaiting_confirmation,
+          treatmentFeeProofPath: relativePath,
+          treatmentFeeAmount: amount,
+        },
+        include: orderInclude,
+      });
+      await tx.orderAuditLog.create({
+        data: { orderId: id, ...auditEntry },
+      });
+      return updated;
     });
     this.logger.log(
       `Treatment fee bank-transfer proof uploaded for order ${id} by user ${caller.userId}`,
@@ -279,10 +315,7 @@ export class TreatmentFeeService {
     const [rows, total] = await Promise.all([
       this.prisma.dentalOrder.findMany({
         where,
-        orderBy: [
-          { treatmentFeePaidAt: 'desc' },
-          { updatedAt: 'desc' },
-        ],
+        orderBy: [{ treatmentFeePaidAt: 'desc' }, { updatedAt: 'desc' }],
         skip,
         take: limit,
         select: this.treatmentFeeSelect,
@@ -325,13 +358,34 @@ export class TreatmentFeeService {
         'No bank-transfer payment is awaiting confirmation on this order.',
       );
     }
-    const order = await this.prisma.dentalOrder.update({
-      where: { id },
-      data: {
-        treatmentFeePaymentStatus: PaymentRecordStatus.success,
-        treatmentFeePaidAt: new Date(),
+    const auditEntry = await this.orderAudit.entry(
+      caller,
+      'treatment_fee_confirmed',
+      {
+        treatmentFeePaymentStatus: {
+          from: PaymentRecordStatus.awaiting_confirmation,
+          to: PaymentRecordStatus.success,
+        },
       },
-      include: orderInclude,
+      {
+        method:
+          current.treatmentFeePaymentMethod ?? PaymentMethod.bank_transfer,
+        amount: Number(current.treatmentFeeAmount ?? 0),
+      },
+    );
+    const order = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.dentalOrder.update({
+        where: { id },
+        data: {
+          treatmentFeePaymentStatus: PaymentRecordStatus.success,
+          treatmentFeePaidAt: new Date(),
+        },
+        include: orderInclude,
+      });
+      await tx.orderAuditLog.create({
+        data: { orderId: id, ...auditEntry },
+      });
+      return updated;
     });
     this.logger.log(
       `Treatment fee bank-transfer CONFIRMED for order ${id} by admin ${caller.userId}`,
@@ -409,9 +463,7 @@ export class TreatmentFeeService {
       orderId: row.id,
       orderCode: row.orderCode,
       amount:
-        row.treatmentFeeAmount !== null
-          ? Number(row.treatmentFeeAmount)
-          : null,
+        row.treatmentFeeAmount !== null ? Number(row.treatmentFeeAmount) : null,
       method: row.treatmentFeePaymentMethod,
       status: row.treatmentFeePaymentStatus,
       paidAt: row.treatmentFeePaidAt,

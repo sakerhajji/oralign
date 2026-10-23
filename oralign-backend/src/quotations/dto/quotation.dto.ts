@@ -16,7 +16,12 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { ArchType, DevisLanguage, PaymentMode, QuotationStatus } from '@prisma/client';
+import {
+  ArchType,
+  DevisLanguage,
+  PaymentMode,
+  QuotationStatus,
+} from '@prisma/client';
 
 // ─── Create ────────────────────────────────────────────────────────────────
 
@@ -206,6 +211,17 @@ export class QuotationResponseDto {
 
   @ApiProperty() createdAt!: Date;
   @ApiProperty() updatedAt!: Date;
+
+  @ApiPropertyOptional({ description: 'Applied loyalty percentage snapshot' })
+  loyaltyDiscountPercent?: string | null;
+  @ApiPropertyOptional({ description: 'Applied loyalty amount snapshot' })
+  loyaltyDiscountAmount?: string | null;
+  @ApiPropertyOptional({ description: 'Quarter year that earned the reward' })
+  loyaltySourceYear?: number | null;
+  @ApiPropertyOptional({
+    description: 'Quarter number (1-4) that earned the reward',
+  })
+  loyaltySourceQuarter?: number | null;
 }
 
 // ─── Pack attachment + payment plan configuration ────────────────

@@ -224,7 +224,9 @@ export class ChunkedUploadService {
 
       const verdict = await scanUploadFile(assembledPath, session.originalName);
       if (!verdict.safe) {
-        const suffix = verdict.detail ? `: ${verdict.detail.slice(0, 120)}` : '';
+        const suffix = verdict.detail
+          ? `: ${verdict.detail.slice(0, 120)}`
+          : '';
         throw new BadRequestException(
           `${verdict.reason ?? 'This file was rejected for security reasons.'}${suffix}`,
         );
@@ -239,6 +241,7 @@ export class ChunkedUploadService {
           sizeBytes: Number(session.totalBytes),
         },
         assembledPath,
+        caller,
       );
 
       await this.destroySession(session.id);
@@ -254,7 +257,9 @@ export class ChunkedUploadService {
           data: { status: UploadSessionStatus.active },
         })
         .catch(() => undefined);
-      await fs.promises.rm(assembledPath, { force: true }).catch(() => undefined);
+      await fs.promises
+        .rm(assembledPath, { force: true })
+        .catch(() => undefined);
       throw error;
     }
   }

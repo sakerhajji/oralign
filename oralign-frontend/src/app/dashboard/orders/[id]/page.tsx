@@ -12,6 +12,7 @@ import {
   ClipboardCheck,
   Edit,
   FileArchive,
+  History,
   ListChecks,
   Loader2,
   ScanLine,
@@ -62,6 +63,7 @@ import { ordersService } from '@/lib/api/orders.service';
 import { extractApiErrorMessage } from '@/lib/api/error';
 import { TreatmentFeePaymentDialog } from '@/components/orders/treatment-fee-payment-dialog';
 import { TreatmentFeeReceiptDialog } from '@/components/orders/treatment-fee-receipt-dialog';
+import { OrderHistory } from '@/components/orders/order-history';
 import { useAuth } from '@/lib/providers/auth-provider';
 import { useT } from '@/lib/i18n/lang-context';
 import {
@@ -121,7 +123,7 @@ const OdontogramSelector = dynamic(
   },
 );
 
-type OrderDetailTab = 'order' | 'treatment-plans' | 'quote';
+type OrderDetailTab = 'order' | 'treatment-plans' | 'quote' | 'history';
 
 const ORDER_DETAIL_TAB_TRIGGER_CLASS =
   'group flex h-12 min-w-0 w-full items-center justify-center gap-2.5 rounded-lg border border-transparent px-4 text-center text-sm font-semibold text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 data-[state=active]:border-border data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm sm:h-14';
@@ -400,12 +402,14 @@ export default function OrderDetailPage() {
     isPlanner,
     hasQuotation: hasQuotationSignal,
   });
+  const visibleTabCount =
+    2 + Number(shouldShowTreatmentPlansTab) + Number(shouldShowQuoteTab);
   const tabListColumns =
-    shouldShowTreatmentPlansTab && shouldShowQuoteTab
-      ? 'sm:grid-cols-3'
-      : shouldShowTreatmentPlansTab || shouldShowQuoteTab
-        ? 'sm:grid-cols-2'
-        : 'sm:grid-cols-1';
+    visibleTabCount === 4
+      ? 'sm:grid-cols-2 lg:grid-cols-4'
+      : visibleTabCount === 3
+        ? 'sm:grid-cols-3'
+        : 'sm:grid-cols-2';
 
   // Extractions summary — the doctor marks teeth for extraction on the
   // odontogram (tooth instructions of type 'extract'); `order.extractions`
@@ -588,7 +592,7 @@ export default function OrderDetailPage() {
       >
         <div className="w-full rounded-xl border bg-muted/50 p-1.5 shadow-sm">
           <TabsList
-            className={`grid !h-auto w-full grid-cols-1 items-stretch gap-1 bg-transparent p-0 ${tabListColumns}`}
+            className={`grid !h-auto w-full grid-cols-2 items-stretch gap-1 bg-transparent p-0 ${tabListColumns}`}
           >
             <TabsTrigger value="order" className={ORDER_DETAIL_TAB_TRIGGER_CLASS}>
               <span className={ORDER_DETAIL_TAB_ICON_CLASS}>
@@ -637,6 +641,17 @@ export default function OrderDetailPage() {
                 }) && <AttentionDot />}
               </TabsTrigger>
             )}
+            <TabsTrigger
+              value="history"
+              className={ORDER_DETAIL_TAB_TRIGGER_CLASS}
+            >
+              <span className={ORDER_DETAIL_TAB_ICON_CLASS}>
+                <History className="h-4 w-4" />
+              </span>
+              <span className="min-w-0 truncate">
+                {t('orderDetail.tabs.history')}
+              </span>
+            </TabsTrigger>
           </TabsList>
         </div>
 
@@ -828,6 +843,16 @@ export default function OrderDetailPage() {
             <QuoteReview orderId={order.id} role={user?.role as UserRole} />
           ) : null}
         </TabsContent>
+
+        <TabsContent
+          value="history"
+          forceMount
+          className="data-[state=inactive]:hidden"
+        >
+          {mountedTabs.has('history') ? (
+            <OrderHistory orderId={order.id} />
+          ) : null}
+        </TabsContent>
       </Tabs>
     </div>
   );
@@ -857,7 +882,8 @@ function parseOrderDetailTab(value: string | null): OrderDetailTab | null {
   if (
     value === 'order' ||
     value === 'treatment-plans' ||
-    value === 'quote'
+    value === 'quote' ||
+    value === 'history'
   ) {
     return value;
   }
@@ -876,6 +902,9 @@ function resolveRequestedTab(args: {
   }
   if (args.requestedTab === 'order') {
     return 'order';
+  }
+  if (args.requestedTab === 'history') {
+    return 'history';
   }
   if (
     args.requestedTab === 'treatment-plans' &&

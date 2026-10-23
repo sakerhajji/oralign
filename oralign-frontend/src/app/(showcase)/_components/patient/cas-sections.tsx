@@ -28,7 +28,8 @@ const actEarlyCopy: Record<
     description:
       "Un bilan précoce aide le praticien à repérer les besoins et à choisir le moment le plus adapté pour agir, avec un suivi pensé pour chaque étape de la croissance.",
     cta: "Trouver un praticien",
-    imageAlt: "Une adolescente et sa mère sourient ensemble dans une lumière chaleureuse",
+    imageAlt:
+      "Une adolescente présente son aligneur transparent aux côtés de sa mère",
   },
   en: {
     eyebrow: "ORALIGN PRIME",
@@ -36,7 +37,8 @@ const actEarlyCopy: Record<
     description:
       "An early assessment helps the practitioner understand what is needed and choose the right moment to act, with support designed for every stage of growth.",
     cta: "Find a practitioner",
-    imageAlt: "A teenage girl and her mother smiling together in warm natural light",
+    imageAlt:
+      "A teenage girl presenting her clear aligner beside her mother",
   },
   ar: {
     eyebrow: "ORALIGN PRIME",
@@ -44,7 +46,7 @@ const actEarlyCopy: Record<
     description:
       "يساعد الفحص المبكر الطبيب على فهم الاحتياجات واختيار الوقت الأنسب للتدخّل، مع متابعة تناسب كل مرحلة من مراحل النمو.",
     cta: "ابحث عن طبيب",
-    imageAlt: "فتاة مراهقة ووالدتها تبتسمان معاً في ضوء طبيعي دافئ",
+    imageAlt: "فتاة مراهقة تعرض تقويمها الشفاف إلى جانب والدتها",
   },
 };
 
@@ -63,7 +65,7 @@ export function AgirTotSection() {
         <Reveal>
           <div className="relative mx-auto aspect-[4/5] w-full max-w-[440px] overflow-hidden border border-[var(--sc-grey)] bg-[var(--sc-grey)] lg:mx-0">
             <Image
-              src="/showcase/agir-tot.webp"
+              src="/showcase/oralign-prime-early-treatment.webp"
               alt={copy.imageAlt}
               fill
               quality={85}

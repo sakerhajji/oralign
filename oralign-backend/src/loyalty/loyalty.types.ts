@@ -1,8 +1,8 @@
 /**
  * Calendar-quarter arithmetic for the loyalty program. UTC on purpose:
  * quarter boundaries must be identical wherever the server runs, and
- * every timestamp the program reads (Quotation.doctorApprovedAt) is
- * stored in UTC.
+ * every timestamp the program reads (DentalOrder.createdAt) is stored
+ * in UTC.
  */
 
 export interface QuarterRef {

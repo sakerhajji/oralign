@@ -5,6 +5,7 @@ import type { PrismaService } from '../../prisma/prisma.service';
 import type { OrderAccessPolicy } from '../../common/access/order-access.policy';
 import type { Caller } from '../../common/access/caller';
 import type { CreateOrderDto } from '../dto/order.dto';
+import type { OrderAuditService } from './order-audit.service';
 import { OrderService } from './order.service';
 
 jest.mock('./order-storage', () => ({
@@ -28,13 +29,23 @@ function makeService(cache?: CacheMock) {
     .fn()
     .mockResolvedValue({ id: 'o-new', doctorId: 'u-doc' });
   const findFirst = jest.fn().mockResolvedValue(null);
-  const prisma = {
+  const auditLogCreate = jest.fn();
+  // The draft and its "created" audit row are written in one transaction.
+  const tx = {
     dentalOrder: { create, findFirst },
+    orderAuditLog: { create: auditLogCreate },
+  };
+  const prisma = {
+    ...tx,
+    $transaction: (run: (client: typeof tx) => unknown) => run(tx),
   } as unknown as PrismaService;
   const service = new OrderService(
     prisma,
     {} as OrderAccessPolicy,
     { emit: jest.fn() } as unknown as EventEmitter2,
+    {
+      entry: jest.fn().mockResolvedValue({ action: 'created' }),
+    } as unknown as OrderAuditService,
     cache as unknown as Cache | undefined,
   );
   // The checks that need a database are not what is under test.
@@ -44,7 +55,7 @@ function makeService(cache?: CacheMock) {
     .spyOn(internals, 'ensurePatientBelongsToDoctor')
     .mockResolvedValue(undefined);
   jest.spyOn(internals, 'generateOrderCode').mockResolvedValue('ORD-1');
-  return { service, create, findFirst };
+  return { service, create, findFirst, auditLogCreate };
 }
 
 describe('OrderService.createOrder idempotency', () => {
@@ -71,13 +82,15 @@ describe('OrderService.createOrder idempotency', () => {
       get: jest.fn().mockResolvedValue('o-first'),
       set: jest.fn(),
     };
-    const { service, create, findFirst } = makeService(cache);
+    const { service, create, findFirst, auditLogCreate } = makeService(cache);
     findFirst.mockResolvedValue({ id: 'o-first', doctorId: 'u-doc' });
 
     const replayed = await service.createOrder(dto, doctor, 'key-abcdefgh');
 
     expect(replayed).toMatchObject({ id: 'o-first' });
     expect(create).not.toHaveBeenCalled();
+    // A replay is not a second creation: no second "created" history row.
+    expect(auditLogCreate).not.toHaveBeenCalled();
     expect(findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'o-first', doctorId: 'u-doc', deletedAt: null },

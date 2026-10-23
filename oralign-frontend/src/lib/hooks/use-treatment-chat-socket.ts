@@ -81,6 +81,7 @@ export function useTreatmentChatSocket(orderId: string | null) {
         queryKey: treatmentPlanKeys.all,
         predicate: (q) => q.queryKey[0] === 'treatment-plans',
       });
+      queryClient.invalidateQueries({ queryKey: orderKeys.history(orderId) });
     });
 
     socket.on('message:deleted', () => {
@@ -88,6 +89,7 @@ export function useTreatmentChatSocket(orderId: string | null) {
         queryKey: treatmentPlanKeys.all,
         predicate: (q) => q.queryKey[0] === 'treatment-plans',
       });
+      queryClient.invalidateQueries({ queryKey: orderKeys.history(orderId) });
     });
 
     socket.on(
@@ -113,6 +115,9 @@ export function useTreatmentChatSocket(orderId: string | null) {
         queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
         queryClient.invalidateQueries({
           queryKey: orderKeys.detail(evt.orderId),
+        });
+        queryClient.invalidateQueries({
+          queryKey: orderKeys.history(evt.orderId),
         });
       },
     );

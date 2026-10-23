@@ -26,7 +26,7 @@ const guideCopy: Record<
       "D’une transparence exceptionnelle, les aligneurs ORALIGN sont conçus pour se faire oublier. Ils sont si discrets que votre entourage ne remarquera même pas votre traitement.",
     cta: "Guide d’utilisation",
     imageAlt:
-      "Patient ORALIGN souriant à une terrasse de café avec ses aligneurs transparents",
+      "Patient ORALIGN présentant son aligneur transparent après une activité sportive",
   },
   en: {
     benefits: [
@@ -38,7 +38,7 @@ const guideCopy: Record<
       "Exceptionally clear, ORALIGN aligners are designed to fade into your daily life. They are so discreet that the people around you may never notice your treatment.",
     cta: "User guide",
     imageAlt:
-      "ORALIGN patient smiling at a café terrace with his clear aligners",
+      "ORALIGN patient holding his clear aligner after a sports activity",
   },
   ar: {
     benefits: [
@@ -50,7 +50,7 @@ const guideCopy: Record<
       "صُمّم تقويم ORALIGN الشفاف بدرجة استثنائية ليصبح جزءاً غير ملحوظ من يومك، حتى إن من حولك قد لا ينتبهون إلى علاجك.",
     cta: "دليل الاستخدام",
     imageAlt:
-      "مريض ORALIGN يبتسم في مقهى مع تقويمه الشفاف",
+      "مريض ORALIGN يعرض تقويمه الشفاف بعد نشاط رياضي",
   },
 };
 
@@ -73,7 +73,7 @@ export function GuidePreviewSection() {
               className="absolute left-0 top-0 z-10 h-2 w-28 bg-[var(--sc-sun)] sm:w-36"
             />
             <Image
-              src="/showcase/image123.jpeg"
+              src="/showcase/oralign-guide-lifestyle.webp"
               alt={copy.imageAlt}
               fill
               sizes="(min-width: 1024px) 50vw, 100vw"

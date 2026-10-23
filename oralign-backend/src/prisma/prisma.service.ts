@@ -53,6 +53,10 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     return this.prisma.orderFile;
   }
 
+  get orderAuditLog() {
+    return this.prisma.orderAuditLog;
+  }
+
   // ─── Treatment plan models ────────────────────────────────────────────────
 
   get treatmentPlan() {

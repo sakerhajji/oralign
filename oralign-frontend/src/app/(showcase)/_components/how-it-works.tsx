@@ -7,11 +7,11 @@ import { Reveal } from "./shared/reveal";
 import { SectionHeading } from "./shared/section-heading";
 
 const stepImagePaths = [
-  "/showcase/Consultationsourire.webp",
-  "/showcase/Scan3D.webp",
-  "/showcase/futurSourire.webp",
-  "/showcase/Portez.webp",
-  "/showcase/Sourire.webp",
+  "/showcase/oralign-consultation.webp",
+  "/showcase/oralign-3d-scan.webp",
+  "/showcase/oralign-future-smile.webp",
+  "/showcase/oralign-wear-aligner.webp",
+  "/showcase/oralign-discreet-smile.webp",
 ];
 
 export function HowItWorks() {

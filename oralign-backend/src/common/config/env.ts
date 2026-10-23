@@ -137,6 +137,16 @@ export const env = Object.freeze({
     fromName: str('MAIL_FROM_NAME', 'Oralign')!,
     replyTo: str('MAIL_REPLY_TO'),
     logoUrl: str('MAIL_LOGO_URL'),
+    /** Hostname announced in SMTP EHLO. Defaults to the From domain —
+     *  otherwise nodemailer announces the container's random hostname. */
+    ehloName: str('MAIL_EHLO_NAME'),
+    /** App-side DKIM signing (see mail/mail-auth.ts), for relays that do
+     *  not sign for our From domain. Off unless selector + key are set. */
+    dkim: {
+      domain: str('MAIL_DKIM_DOMAIN'),
+      selector: str('MAIL_DKIM_SELECTOR'),
+      privateKey: str('MAIL_DKIM_PRIVATE_KEY'),
+    },
     /** True when the transport can be built at all. MailService logs and
      *  no-ops when false instead of crashing feature flows. */
     get configured(): boolean {

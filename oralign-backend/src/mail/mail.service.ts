@@ -18,6 +18,7 @@ import {
   renderVerificationEmail,
 } from './templates';
 import { env } from '../common/config/env';
+import { aligned, checkDomainAuth, domainOf, resolveDkim } from './mail-auth';
 
 type Transporter = ReturnType<typeof nodemailer.createTransport>;
 
@@ -41,12 +42,27 @@ export class MailService {
       return;
     }
 
+    const fromDomain = domainOf(this.fromAddress);
+    const dkim = resolveDkim(env.mail.dkim, fromDomain, this.logger);
+
     this.transporter = nodemailer.createTransport({
       host,
       port: env.mail.port,
       secure: env.mail.port === 465,
       auth: { user, pass },
+      // EHLO with a real domain, not the container's random hostname
+      // (which relays copy into the Received header filters read).
+      name: env.mail.ehloName || fromDomain || undefined,
+      ...(dkim ? { dkim } : {}),
     });
+    if (dkim) {
+      this.logger.log(
+        `DKIM signing on: d=${dkim.domainName}, s=${dkim.keySelector}.`,
+      );
+    }
+    if (env.nodeEnv !== 'test') {
+      void checkDomainAuth(fromDomain, dkim, this.logger);
+    }
 
     // ── Deliverability guard ─────────────────────────────────────────
     // Sending "From: someone@other-domain" through an SMTP account of a
@@ -54,11 +70,11 @@ export class MailService {
     // SPF/DKIM covering this sender), which is THE classic reason mail
     // lands in spam. Gmail in particular only signs for the
     // authenticated account (or its verified aliases). Warn loudly so a
-    // misconfigured MAIL_FROM never ships silently.
-    const fromAddr = this.fromAddress;
-    const fromDomain = fromAddr.split('@')[1]?.toLowerCase();
-    const userDomain = user.split('@')[1]?.toLowerCase();
-    if (fromDomain && userDomain && fromDomain !== userDomain) {
+    // misconfigured MAIL_FROM never ships silently — unless the app
+    // signs for the From domain itself, which is exactly the fix.
+    const userDomain = domainOf(user);
+    const selfSigned = !!dkim && aligned(dkim.domainName, fromDomain);
+    if (fromDomain && userDomain && fromDomain !== userDomain && !selfSigned) {
       this.logger.warn(
         `MAIL_FROM domain "${fromDomain}" differs from the authenticated ` +
           `account domain "${userDomain}". Unless "${fromDomain}" publishes ` +
@@ -443,6 +459,7 @@ function htmlToPlainText(html: string): string {
       .replace(/&gt;/g, '>')
       .replace(/&#39;|&apos;/g, "'")
       .replace(/&quot;/g, '"')
+      .replace(/&copy;/g, '©')
       // Collapse the whitespace soup HTML leaves behind.
       .replace(/[ \t]+/g, ' ')
       .replace(/\s*\n\s*/g, '\n')

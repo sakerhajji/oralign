@@ -480,6 +480,78 @@ The domain's auth records (checked live 2026-07-19): SPF ✓
 > name in `MAIL_FROM_NAME`. The backend now sanitises the value (and
 > logs an error when it has to), but the env should still be clean.
 
+**D. `oralign.com.tn` — state and fix (DNS checked live 2026-10-23)**
+
+`oralign.com.tn` has its DNS and mailboxes at Topnet Pro (NS and MX
+`*.topnetpro.com`):
+
+| Check | State |
+|---|---|
+| SPF | ✓ `v=spf1 include:_spf.topnetpro.com ~all` (Topnet relays only) |
+| DKIM | ✗ no key published |
+| DMARC | ✗ no `_dmarc.oralign.com.tn` record |
+
+So mail From `@oralign.com.tn` can at best pass SPF, and only when it is
+relayed by Topnet; mail From gmail.com or aura-aligners.com under the
+name "ORALIGN" reads as impersonation. Gmail requires SPF **or** DKIM
+aligned with the From domain, and ramped up enforcement in November
+2025 (spam or rejection). The content itself is not the problem: the
+verification email scores 0.0 on SpamAssassin.
+
+Find what production sends with (prints no secret):
+
+```bash
+docker exec oralign-backend printenv MAIL_HOST MAIL_FROM
+```
+
+Then pick ONE sending path:
+
+1. **Transactional provider** (recommended: clean IP reputation, bounce
+   handling, logs): Brevo, Resend, Postmark… Add `oralign.com.tn` as a
+   sending domain, publish the DKIM records it gives, and MERGE its SPF
+   into the existing record (one SPF per domain):
+   `v=spf1 include:_spf.topnetpro.com include:<provider> ~all`.
+   The provider signs DKIM itself; app-side DKIM is not needed.
+2. **A Topnet mailbox** (e.g. `contact@oralign.com.tn`) through Topnet's
+   SMTP: SPF already passes; add **app-side DKIM** (below). `MAIL_USER`
+   and `MAIL_FROM` must be that mailbox.
+
+In both cases add DMARC (TXT on `_dmarc`, Topnet client area or support):
+`v=DMARC1; p=none; rua=mailto:dmarc@oralign.com.tn; fo=1` (create that
+mailbox, or point `rua` at one you read). Move to `p=quarantine` after
+2–4 weeks of clean reports.
+
+**App-side DKIM** — the backend signs every message with nodemailer
+(`src/mail/mail-auth.ts`). Generate the key ON the VPS so the private
+key never travels, outside the repository:
+
+```bash
+sudo install -d -m 700 /etc/oralign
+sudo openssl genrsa -out /etc/oralign/dkim-oralign1.pem 2048
+sudo chmod 600 /etc/oralign/dkim-oralign1.pem
+# DNS: TXT record on oralign1._domainkey.oralign.com.tn with this value
+echo "v=DKIM1; k=rsa; p=$(sudo openssl rsa -in /etc/oralign/dkim-oralign1.pem -pubout -outform der 2>/dev/null | base64 -w0)"
+# Backend env (.env.production)
+echo "MAIL_DKIM_SELECTOR=oralign1" >> .env.production
+echo "MAIL_DKIM_PRIVATE_KEY=$(sudo base64 -w0 /etc/oralign/dkim-oralign1.pem)" >> .env.production
+```
+
+A 2048-bit key's value is ~400 characters: DNS splits a TXT longer than
+255 characters into several strings. If Topnet's panel refuses it, ask
+their support to add it, or generate a 1024-bit key (fits one string;
+Gmail accepts ≥1024). Restart the backend (§5.8). At boot it logs
+`DKIM signing on: d=oralign.com.tn, s=oralign1.` and then a DNS
+self-check: `Mail authentication DNS looks right …` or the exact list
+of what is still missing (no DMARC, DKIM key not published or not
+matching the private key).
+
+**Verify** as in B (Gmail → *Show original*: SPF, DKIM and DMARC all
+`PASS`, with `d=oralign.com.tn` on the DKIM line; mail-tester ≥ 9/10),
+then register `oralign.com.tn` in
+[Google Postmaster Tools](https://postmaster.google.com) to watch the
+domain's reputation. A new domain earns it: the first recipients who
+find a message in spam should click *Not spam*.
+
 ### 5.10 Troubleshooting — finder distance & appointment emails
 
 **Finder shows no distances** (`/trouver-un-praticien`): the browser can

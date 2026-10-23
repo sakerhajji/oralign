@@ -61,6 +61,19 @@ services:
       MAIL_USER: ${MAIL_USER}
       MAIL_PASSWORD: ${MAIL_PASSWORD}
       MAIL_FROM: ${MAIL_FROM}
+      # Optional mail settings (empty = the backend's default). Every
+      # MAIL_* the backend reads must be listed here: env_file is off in
+      # production, so a variable missing from this block is silently
+      # ignored even when it is set in .env.production.
+      MAIL_FROM_NAME: ${MAIL_FROM_NAME:-}
+      MAIL_REPLY_TO: ${MAIL_REPLY_TO:-}
+      MAIL_LOGO_URL: ${MAIL_LOGO_URL:-}
+      MAIL_EHLO_NAME: ${MAIL_EHLO_NAME:-}
+      # App-side DKIM signing (DEPLOYMENT.md §5.9 D). The key is the
+      # base64 of the PEM file, so it holds no "$" for compose to expand.
+      MAIL_DKIM_DOMAIN: ${MAIL_DKIM_DOMAIN:-}
+      MAIL_DKIM_SELECTOR: ${MAIL_DKIM_SELECTOR:-}
+      MAIL_DKIM_PRIVATE_KEY: ${MAIL_DKIM_PRIVATE_KEY:-}
       # Public origin of THIS API. The appointment accept/decline links in
       # the practitioner emails are built from it — without it they fall
       # back to http://localhost:3000 and are dead outside the server.

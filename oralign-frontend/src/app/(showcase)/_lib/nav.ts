@@ -30,8 +30,10 @@ export const PATIENT_NAV_ITEMS: readonly NavItem[] = [
     href: "/",
     children: [
       { id: "oralign", labelKey: "navOralign", href: "/#oralign" },
-      { id: "oralign-prime", labelKey: "oralignPrime", href: "/#oralign-prime" },
-      { id: "parcours", labelKey: "howItWorks", href: "/#parcours" },
+      // The home has no Prime section: the only one rendered is the
+      // "ORALIGN PRIME" act-early block on the clinical cases page.
+      { id: "oralign-prime", labelKey: "oralignPrime", href: "/cas#agir-tot" },
+      { id: "how-it-works", labelKey: "howItWorks", href: "/#how-it-works" },
       // Points at the public practitioner finder, not an in-page anchor.
       { id: "find-practitioner", labelKey: "findPractitioner", href: "/trouver-un-praticien" },
     ],

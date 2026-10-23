@@ -8,6 +8,7 @@ import { OrderFilesService } from './services/order-files.service';
 import { OrderExportService } from './services/order-export.service';
 import { TreatmentFeeService } from './services/treatment-fee.service';
 import { UploadCleanupService } from './services/upload-cleanup.service';
+import { OrderAuditService } from './services/order-audit.service';
 // UploadCleanupService is the app's single retention scheduler; the
 // support-trash sweep itself lives in SupportService (which owns that
 // model and the /uploads/support layout). SupportModule imports only
@@ -24,6 +25,7 @@ import { SupportModule } from '../support/support.module';
     //   OrderExportService  - streaming lab ZIP + order-sheet PDF
     //   TreatmentFeeService - the flat treatment fee (pay / proof / confirm / admin lists)
     OrderService,
+    OrderAuditService,
     OrderFilesService,
     OrderExportService,
     TreatmentFeeService,
@@ -31,6 +33,11 @@ import { SupportModule } from '../support/support.module';
     ChunkedUploadService,
     UploadCleanupService,
   ],
-  exports: [OrderService, OrderFilesService, TreatmentFeeService],
+  exports: [
+    OrderService,
+    OrderFilesService,
+    TreatmentFeeService,
+    OrderAuditService,
+  ],
 })
 export class OrderModule {}

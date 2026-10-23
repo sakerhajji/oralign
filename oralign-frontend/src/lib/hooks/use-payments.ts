@@ -126,6 +126,7 @@ function invalidateAfterPayment(
   }
   if (orderId) {
     queryClient.invalidateQueries({ queryKey: orderKeys.detail(orderId) });
+    queryClient.invalidateQueries({ queryKey: orderKeys.history(orderId) });
   }
   queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
 }

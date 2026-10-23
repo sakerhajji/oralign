@@ -418,8 +418,12 @@ export class QuotationService {
         // No payment has cleared yet (status === draft asserted above),
         // so this is safe — the SUCCESS transition can only happen on
         // installments that already exist after `approve()`.
-        await tx.quoteStepBatch.deleteMany({ where: { quotationId: quote.id } });
-        await tx.quoteInstallment.deleteMany({ where: { quotationId: quote.id } });
+        await tx.quoteStepBatch.deleteMany({
+          where: { quotationId: quote.id },
+        });
+        await tx.quoteInstallment.deleteMany({
+          where: { quotationId: quote.id },
+        });
       }
       return tx.quotation.update({
         where: { id: quote.id },
@@ -451,7 +455,12 @@ export class QuotationService {
           !quote.loyaltyDiscountAmount.equals(
             new Prisma.Decimal(dto.discountAmount.toFixed(3)),
           )
-            ? { loyaltyDiscountPercent: null, loyaltyDiscountAmount: null }
+            ? {
+                loyaltyDiscountPercent: null,
+                loyaltyDiscountAmount: null,
+                loyaltySourceYear: null,
+                loyaltySourceQuarter: null,
+              }
             : {}),
         },
       });

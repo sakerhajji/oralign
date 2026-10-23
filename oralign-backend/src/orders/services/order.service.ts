@@ -16,7 +16,10 @@ import {
 } from '../../common/exceptions/app.exception';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OrderAccessPolicy } from '../../common/access/order-access.policy';
-import { formatDateStamp, slugifyForCode } from '../../common/utils/code-naming.util';
+import {
+  formatDateStamp,
+  slugifyForCode,
+} from '../../common/utils/code-naming.util';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { NotificationEvents } from '../../notifications/events/notification-events';
 import {
@@ -39,6 +42,7 @@ import {
   removeFileFromDisk,
 } from './order-storage';
 import { assertNoDependents } from '../../common/deletion/deletion-blocked';
+import { OrderAuditService } from './order-audit.service';
 
 type ClinicalOrderData = Partial<
   Pick<
@@ -81,6 +85,7 @@ export class OrderService {
     private readonly prisma: PrismaService,
     private readonly orderAccess: OrderAccessPolicy,
     private readonly events: EventEmitter2,
+    private readonly orderAudit: OrderAuditService,
     // Optional so the service keeps working (without replay protection)
     // when no cache store is wired — unit tests, or a Redis outage.
     @Optional() @Inject(CACHE_MANAGER) private readonly cache?: Cache,
@@ -105,9 +110,7 @@ export class OrderService {
   ): Promise<OrderResponseDto> {
     this.ensureCanCreateOrModify(caller);
 
-    const doctorId = isAdmin(caller)
-      ? createOrderDto.doctorId
-      : caller.userId;
+    const doctorId = isAdmin(caller) ? createOrderDto.doctorId : caller.userId;
 
     if (!doctorId) {
       throw new BadRequestException('Dentist is required');
@@ -128,28 +131,38 @@ export class OrderService {
     const cbct = createOrderDto.useCbctWithScans
       ? await this.resolveCbctSupplement()
       : null;
+    const orderCode =
+      createOrderDto.orderCode ??
+      (await this.generateOrderCode(createOrderDto.patientId));
 
-    const order = await this.prisma.dentalOrder.create({
-      data: {
-        ...this.buildClinicalData(createOrderDto),
-        ...(cbct
-          ? { cbctFeeAmount: cbct.amount, cbctFeeCurrency: cbct.currency }
-          : {}),
-        orderCode:
-          createOrderDto.orderCode ??
-          (await this.generateOrderCode(createOrderDto.patientId)),
-        doctorId,
-        patientId: createOrderDto.patientId,
-        toothInstructions: createOrderDto.toothInstructions?.length
-          ? {
-              create: createOrderDto.toothInstructions.map((instruction) => ({
-                toothNumber: instruction.toothNumber,
-                type: instruction.type,
-              })),
-            }
-          : undefined,
-      },
-      include: orderInclude,
+    const auditEntry = await this.orderAudit.entry(caller, 'created', null, {
+      patientId: createOrderDto.patientId,
+    });
+    const order = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.dentalOrder.create({
+        data: {
+          ...this.buildClinicalData(createOrderDto),
+          ...(cbct
+            ? { cbctFeeAmount: cbct.amount, cbctFeeCurrency: cbct.currency }
+            : {}),
+          orderCode,
+          doctorId,
+          patientId: createOrderDto.patientId,
+          toothInstructions: createOrderDto.toothInstructions?.length
+            ? {
+                create: createOrderDto.toothInstructions.map((instruction) => ({
+                  toothNumber: instruction.toothNumber,
+                  type: instruction.type,
+                })),
+              }
+            : undefined,
+        },
+        include: orderInclude,
+      });
+      await tx.orderAuditLog.create({
+        data: { orderId: created.id, ...auditEntry },
+      });
+      return created;
     });
 
     // Draft creation is intentionally silent — admins only get pinged
@@ -267,18 +280,30 @@ export class OrderService {
       doctorId ?? current.doctorId,
     );
 
-    const order = await this.prisma.dentalOrder.update({
-      where: { id },
-      data: {
-        ...this.buildClinicalData(updateOrderDto),
-        ...(await this.cbctSnapshotUpdate(current, updateOrderDto)),
-        ...(isAdmin(caller) && doctorId ? { doctorId } : {}),
-        patientId,
-        ...(updateOrderDto.orderCode
-          ? { orderCode: updateOrderDto.orderCode }
-          : {}),
-      },
-      include: orderInclude,
+    const data: Prisma.DentalOrderUncheckedUpdateInput = {
+      ...this.buildClinicalData(updateOrderDto),
+      ...(await this.cbctSnapshotUpdate(current, updateOrderDto)),
+      ...(isAdmin(caller) && doctorId ? { doctorId } : {}),
+      patientId,
+      ...(updateOrderDto.orderCode
+        ? { orderCode: updateOrderDto.orderCode }
+        : {}),
+    };
+    const changes = this.orderAudit.diff(
+      current as unknown as Record<string, unknown>,
+      data as unknown as Record<string, unknown>,
+    );
+    const auditEntry = await this.orderAudit.entry(caller, 'updated', changes);
+    const order = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.dentalOrder.update({
+        where: { id },
+        data,
+        include: orderInclude,
+      });
+      if (Object.keys(changes).length > 0) {
+        await tx.orderAuditLog.create({ data: { orderId: id, ...auditEntry } });
+      }
+      return updated;
     });
 
     return mapOrderToDto(order);
@@ -344,9 +369,16 @@ export class OrderService {
     const current = await this.findAccessibleOrder(id, caller);
     this.ensureOrderNotLockedByPayment(current, caller);
 
-    await this.prisma.dentalOrder.update({
-      where: { id },
-      data: { deletedAt: new Date() },
+    const deletedAt = new Date();
+    const auditEntry = await this.orderAudit.entry(caller, 'archived', {
+      deletedAt: { from: current.deletedAt, to: deletedAt.toISOString() },
+    });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.dentalOrder.update({
+        where: { id },
+        data: { deletedAt },
+      });
+      await tx.orderAuditLog.create({ data: { orderId: id, ...auditEntry } });
     });
 
     return { message: 'Order deleted successfully' };
@@ -359,7 +391,10 @@ export class OrderService {
    * call a no-op, so the detail page can fire it on every mount. Only
    * admins drive the badge, so non-admins are a harmless no-op.
    */
-  async markSeenByAdmin(id: string, caller: Caller): Promise<{ seen: boolean }> {
+  async markSeenByAdmin(
+    id: string,
+    caller: Caller,
+  ): Promise<{ seen: boolean }> {
     if (!isAdmin(caller)) return { seen: false };
     const res = await this.prisma.dentalOrder.updateMany({
       where: { id, deletedAt: null, adminSeenAt: null },
@@ -378,14 +413,9 @@ export class OrderService {
    * helper filters by `deletedAt: null` — we explicitly need to
    * fetch deleted rows. RBAC is enforced by the role check first.
    */
-  async restoreOrder(
-    id: string,
-    caller: Caller,
-  ): Promise<{ message: string }> {
+  async restoreOrder(id: string, caller: Caller): Promise<{ message: string }> {
     if (!isAdmin(caller)) {
-      throw new ForbiddenException(
-        'Only admins can restore deleted orders.',
-      );
+      throw new ForbiddenException('Only admins can restore deleted orders.');
     }
     const order = await this.prisma.dentalOrder.findFirst({
       where: { id },
@@ -398,9 +428,15 @@ export class OrderService {
       return { message: 'Order is already active' };
     }
 
-    await this.prisma.dentalOrder.update({
-      where: { id },
-      data: { deletedAt: null },
+    const auditEntry = await this.orderAudit.entry(caller, 'restored', {
+      deletedAt: { from: order.deletedAt?.toISOString() ?? null, to: null },
+    });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.dentalOrder.update({
+        where: { id },
+        data: { deletedAt: null },
+      });
+      await tx.orderAuditLog.create({ data: { orderId: id, ...auditEntry } });
     });
 
     return { message: 'Order restored successfully' };
@@ -481,14 +517,23 @@ export class OrderService {
       }
     }
 
-    const order = await this.prisma.dentalOrder.update({
-      where: { id },
-      data: {
-        status: OrderStatus.submitted,
-        submittedAt: new Date(),
-        termsAcceptedAt: new Date(),
-      },
-      include: orderInclude,
+    const submittedAt = new Date();
+    const auditEntry = await this.orderAudit.entry(caller, 'submitted', {
+      status: { from: current.status, to: OrderStatus.submitted },
+      submittedAt: { from: current.submittedAt, to: submittedAt.toISOString() },
+    });
+    const order = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.dentalOrder.update({
+        where: { id },
+        data: {
+          status: OrderStatus.submitted,
+          submittedAt,
+          termsAcceptedAt: submittedAt,
+        },
+        include: orderInclude,
+      });
+      await tx.orderAuditLog.create({ data: { orderId: id, ...auditEntry } });
+      return updated;
     });
 
     // E-mail fan-out (doctor + admins) is handled by the notification
@@ -554,10 +599,20 @@ export class OrderService {
       data.submittedAt = new Date();
     }
 
-    const order = await this.prisma.dentalOrder.update({
-      where: { id },
-      data,
-      include: orderInclude,
+    const auditEntry = await this.orderAudit.entry(
+      caller,
+      'status_changed',
+      { status: { from: current.status, to: status } },
+      reason ? { reason } : null,
+    );
+    const order = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.dentalOrder.update({
+        where: { id },
+        data,
+        include: orderInclude,
+      });
+      await tx.orderAuditLog.create({ data: { orderId: id, ...auditEntry } });
+      return updated;
     });
 
     // Tell the doctor the order moved — admin already saw the transition
@@ -623,6 +678,12 @@ export class OrderService {
         (reason ? ` — reason: ${reason}` : ''),
     );
 
+    const auditEntry = await this.orderAudit.entry(
+      caller,
+      'status_changed',
+      null,
+      { bulk: true, ...(reason ? { reason } : {}) },
+    );
     await this.prisma.$transaction(async (tx) => {
       // The submittedAt fix-up is per-row because we honour the same
       // semantics as the single overrideStatus path. Loop-of-updates
@@ -636,6 +697,15 @@ export class OrderService {
           data.submittedAt = new Date();
         }
         await tx.dentalOrder.update({ where: { id: order.id }, data });
+        await tx.orderAuditLog.create({
+          data: {
+            orderId: order.id,
+            ...auditEntry,
+            changes: {
+              status: { from: order.status, to: status },
+            },
+          },
+        });
       }
     });
 
@@ -654,9 +724,7 @@ export class OrderService {
     caller: Caller,
   ): Promise<{ deleted: number; skipped: number }> {
     if (!isAdmin(caller)) {
-      throw new ForbiddenException(
-        'Only admins can bulk-delete orders.',
-      );
+      throw new ForbiddenException('Only admins can bulk-delete orders.');
     }
     if (ids.length === 0) {
       return { deleted: 0, skipped: 0 };
@@ -676,12 +744,27 @@ export class OrderService {
       `Bulk soft-delete on ${candidates.length} order(s) by user ${caller.userId}`,
     );
 
-    const result = await this.prisma.dentalOrder.updateMany({
-      where: { id: { in: candidates.map((c) => c.id) } },
-      data: { deletedAt: new Date() },
+    const deletedAt = new Date();
+    const auditEntry = await this.orderAudit.entry(caller, 'archived', null, {
+      bulk: true,
+    });
+    await this.prisma.$transaction(async (tx) => {
+      for (const order of candidates) {
+        await tx.dentalOrder.update({
+          where: { id: order.id },
+          data: { deletedAt },
+        });
+        await tx.orderAuditLog.create({
+          data: {
+            orderId: order.id,
+            ...auditEntry,
+            changes: { deletedAt: { from: null, to: deletedAt.toISOString() } },
+          },
+        });
+      }
     });
 
-    return { deleted: result.count, skipped };
+    return { deleted: candidates.length, skipped };
   }
 
   /**
@@ -695,9 +778,7 @@ export class OrderService {
     caller: Caller,
   ): Promise<{ restored: number; skipped: number }> {
     if (!isAdmin(caller)) {
-      throw new ForbiddenException(
-        'Only admins can bulk-restore orders.',
-      );
+      throw new ForbiddenException('Only admins can bulk-restore orders.');
     }
     if (ids.length === 0) return { restored: 0, skipped: 0 };
 
@@ -712,12 +793,26 @@ export class OrderService {
       `Bulk restore on ${candidates.length} order(s) by user ${caller.userId}`,
     );
 
-    const result = await this.prisma.dentalOrder.updateMany({
-      where: { id: { in: candidates.map((c) => c.id) } },
-      data: { deletedAt: null },
+    const auditEntry = await this.orderAudit.entry(caller, 'restored', null, {
+      bulk: true,
+    });
+    await this.prisma.$transaction(async (tx) => {
+      for (const order of candidates) {
+        await tx.dentalOrder.update({
+          where: { id: order.id },
+          data: { deletedAt: null },
+        });
+        await tx.orderAuditLog.create({
+          data: {
+            orderId: order.id,
+            ...auditEntry,
+            changes: { deletedAt: { from: 'archived', to: null } },
+          },
+        });
+      }
     });
 
-    return { restored: result.count, skipped };
+    return { restored: candidates.length, skipped };
   }
 
   /**
@@ -914,6 +1009,15 @@ export class OrderService {
     }
     const uniqueInstructions = Array.from(deduped.values());
 
+    const auditEntry = await this.orderAudit.entry(
+      caller,
+      'tooth_instructions_updated',
+      null,
+      {
+        instructionCount: uniqueInstructions.length,
+        replaceTypes: replaceTypes ?? [],
+      },
+    );
     const order = await this.prisma.$transaction(async (tx) => {
       // Row-level lock on the parent order. Two concurrent calls for
       // the same orderId serialise here, eliminating the delete +
@@ -950,6 +1054,8 @@ export class OrderService {
         });
       }
 
+      await tx.orderAuditLog.create({ data: { orderId: id, ...auditEntry } });
+
       return tx.dentalOrder.findUniqueOrThrow({
         where: { id },
         include: orderInclude,
@@ -968,8 +1074,7 @@ export class OrderService {
     // back both the live catalogue AND the deleted-orders trash UI
     // without a second route. Non-admin callers always see the live
     // set — the flag is silently ignored for safety.
-    const showOnlyDeleted =
-      isAdmin(caller) && filters.includeDeleted === true;
+    const showOnlyDeleted = isAdmin(caller) && filters.includeDeleted === true;
     const where: Prisma.DentalOrderWhereInput = showOnlyDeleted
       ? { deletedAt: { not: null } }
       : { deletedAt: null };
@@ -1070,10 +1175,7 @@ export class OrderService {
     if (caller.role === UserRole.designer) {
       throw new ForbiddenException('Designers cannot modify orders directly');
     }
-    if (
-      caller.role !== UserRole.dentist &&
-      !isAdmin(caller)
-    ) {
+    if (caller.role !== UserRole.dentist && !isAdmin(caller)) {
       throw new ForbiddenException('You cannot manage orders');
     }
   }
@@ -1231,5 +1333,4 @@ export class OrderService {
       ? stem
       : `${stem}-${String(existingToday + 1).padStart(2, '0')}`;
   }
-
 }

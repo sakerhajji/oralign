@@ -4,7 +4,7 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
-import { Prisma, QuotationStatus } from '@prisma/client';
+import { LoyaltyCalculationBasis, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { BadRequestException } from '../../common/exceptions/app.exception';
 import {
@@ -21,6 +21,8 @@ import {
   quarterOf,
   quarterPeriod,
 } from '../loyalty.types';
+import { LoyaltyEligibilityService } from './loyalty-eligibility.service';
+import { highestReachedTier, type LoyaltyTierRule } from '../loyalty.rules';
 
 // Plain timers instead of @nestjs/schedule — matches UploadCleanupService
 // and MediaReconciliationService, no extra dependency. The sweep only has
@@ -34,23 +36,17 @@ const round3 = (n: number): number => Math.round(n * 1000) / 1000;
 const num = (v: Prisma.Decimal | number | null | undefined): number =>
   v == null ? 0 : Number(v);
 
-interface TierShape {
-  minTreatments: number;
+export interface ActiveLoyaltyReward {
   discountPercent: number;
+  sourceYear: number | null;
+  sourceQuarter: number | null;
 }
 
 /**
- * The single home of every loyalty rule (grille 2026):
- *
- *   « 8 traitements par trimestre → 5 % de remise sur tous les cas du
- *     trimestre suivant ; 12 ou plus → 10 %. Tous forfaits confondus,
- *     recalcul à chaque fin de trimestre. »
- *
- * A TREATMENT is a pack quotation the doctor APPROVED during the
- * quarter (Quotation.doctorApprovedAt) — per the tariff sheet the pack
- * is only ordered after the treatment plan is validated, and the quote
- * approval is exactly that commitment. Cancelled / deleted quotes never
- * count (status must still be `approved`).
+ * The single home of the quarterly loyalty policy. Qualification is
+ * derived from DentalOrder source rows: an order counts once when its
+ * status is `finished`, its immutable createdAt belongs to the quarter,
+ * and no positive loyalty snapshot was actually applied to its quote.
  *
  * Closing a quarter persists one LoyaltyQuarterResult per doctor with
  * the awarded percent SNAPSHOTTED, so editing tiers later never
@@ -58,7 +54,7 @@ interface TierShape {
  * additionally frozen on the quote itself (loyaltyDiscountPercent).
  *
  * The discount is applied in exactly ONE place — attachPack, via
- * activeDiscountPercentFor() — which re-derives the price from the pack
+ * activeRewardFor() — which re-derives the price from the pack
  * on every call, so re-attaching can never stack discounts.
  */
 @Injectable()
@@ -67,7 +63,10 @@ export class LoyaltyService implements OnModuleInit, OnModuleDestroy {
   private bootTimer?: NodeJS.Timeout;
   private sweepTimer?: NodeJS.Timeout;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly eligibility: LoyaltyEligibilityService,
+  ) {}
 
   onModuleInit(): void {
     this.bootTimer = setTimeout(() => void this.sweep(), BOOT_DELAY_MS);
@@ -94,7 +93,7 @@ export class LoyaltyService implements OnModuleInit, OnModuleDestroy {
 
   // ── Tiers ─────────────────────────────────────────────────────────
 
-  private async activeTiers(): Promise<TierShape[]> {
+  private async activeTiers(): Promise<LoyaltyTierRule[]> {
     const rows = await this.prisma.loyaltyTier.findMany({
       where: { isActive: true },
       orderBy: { minTreatments: 'asc' },
@@ -105,12 +104,11 @@ export class LoyaltyService implements OnModuleInit, OnModuleDestroy {
     }));
   }
 
-  private tierFor(count: number, tiers: TierShape[]): TierShape | null {
-    let reached: TierShape | null = null;
-    for (const tier of tiers) {
-      if (count >= tier.minTreatments) reached = tier;
-    }
-    return reached;
+  private tierFor(
+    count: number,
+    tiers: LoyaltyTierRule[],
+  ): LoyaltyTierRule | null {
+    return highestReachedTier(count, tiers);
   }
 
   async listTiers(): Promise<LoyaltyTierDto[]> {
@@ -131,11 +129,13 @@ export class LoyaltyService implements OnModuleInit, OnModuleDestroy {
    * keeping the rows makes the audit trail readable.
    */
   async updateTiers(dto: UpdateLoyaltyTiersDto): Promise<LoyaltyTierDto[]> {
-    const sorted = [...dto.tiers].sort((a, b) => a.minTreatments - b.minTreatments);
+    const sorted = [...dto.tiers].sort(
+      (a, b) => a.minTreatments - b.minTreatments,
+    );
     for (let i = 1; i < sorted.length; i++) {
       if (sorted[i].minTreatments === sorted[i - 1].minTreatments) {
         throw new BadRequestException(
-          'Two tiers cannot share the same treatment threshold.',
+          'Two tiers cannot share the same eligible-order threshold.',
           'LOYALTY_TIERS_DUPLICATE',
         );
       }
@@ -163,7 +163,9 @@ export class LoyaltyService implements OnModuleInit, OnModuleDestroy {
         await tx.loyaltyTier.create({
           data: {
             minTreatments: tier.minTreatments,
-            discountPercent: new Prisma.Decimal(tier.discountPercent.toFixed(2)),
+            discountPercent: new Prisma.Decimal(
+              tier.discountPercent.toFixed(2),
+            ),
           },
         });
       }
@@ -172,37 +174,44 @@ export class LoyaltyService implements OnModuleInit, OnModuleDestroy {
     return this.listTiers();
   }
 
-  // ── Counting ──────────────────────────────────────────────────────
-
-  /** Approved-quote count per doctor within a quarter (live). */
-  private async countsByDoctor(ref: QuarterRef): Promise<Map<string, number>> {
-    const { start, end } = quarterPeriod(ref);
-    const rows = await this.prisma.quotation.findMany({
-      where: {
-        status: QuotationStatus.approved,
-        doctorApprovedAt: { gte: start, lt: end },
-        // A treatment is a PACK quotation — legacy free-form quotes
-        // approved through the same transition do not count.
-        packId: { not: null },
-        deletedAt: null,
-        order: { deletedAt: null },
-      },
-      select: { order: { select: { doctorId: true } } },
-    });
-    const counts = new Map<string, number>();
-    for (const row of rows) {
-      const id = row.order.doctorId;
-      counts.set(id, (counts.get(id) ?? 0) + 1);
+  private parseTierSnapshot(
+    value: Prisma.JsonValue | null,
+  ): LoyaltyTierRule[] | null {
+    if (!Array.isArray(value)) return null;
+    const tiers: LoyaltyTierRule[] = [];
+    for (const row of value) {
+      if (!row || typeof row !== 'object' || Array.isArray(row)) return null;
+      const raw = row as Record<string, unknown>;
+      const minTreatments = Number(raw.minTreatments);
+      const discountPercent = Number(raw.discountPercent);
+      if (
+        !Number.isInteger(minTreatments) ||
+        minTreatments < 1 ||
+        !Number.isFinite(discountPercent) ||
+        discountPercent < 0 ||
+        discountPercent > 100
+      ) {
+        return null;
+      }
+      tiers.push({ minTreatments, discountPercent });
     }
-    return counts;
+    return tiers.sort((a, b) => a.minTreatments - b.minTreatments);
+  }
+
+  private tierSnapshot(tiers: LoyaltyTierRule[]): Prisma.InputJsonValue {
+    return tiers.map((tier) => ({
+      minTreatments: tier.minTreatments,
+      discountPercent: tier.discountPercent.toFixed(2),
+    }));
   }
 
   // ── Quarter closing ───────────────────────────────────────────────
 
   /**
-   * Persist the results of a FINISHED quarter. Refuses to close the
-   * current or a future quarter (its count is still moving). Existing
-   * rows are left untouched — a closed quarter is history.
+   * Recalculate a FINISHED quarter from immutable order IDs. Upserting on
+   * (doctor, year, quarter) makes repeated jobs and API retries idempotent.
+   * Tier rules are snapshotted on the first v2 calculation, so later admin
+   * edits cannot rewrite the commercial reward earned in this quarter.
    */
   async ensureQuarterClosed(ref: QuarterRef): Promise<void> {
     const { end } = quarterPeriod(ref);
@@ -213,32 +222,69 @@ export class LoyaltyService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    const counts = await this.countsByDoctor(ref);
-    if (counts.size === 0) return;
+    const [metrics, existing] = await Promise.all([
+      this.eligibility.metricsByDoctor(ref),
+      this.prisma.loyaltyQuarterResult.findMany({
+        where: { year: ref.year, quarter: ref.quarter },
+      }),
+    ]);
+    const doctorIds = new Set<string>([
+      ...metrics.keys(),
+      ...existing.map((row) => row.doctorId),
+    ]);
+    if (doctorIds.size === 0) return;
 
-    const tiers = await this.activeTiers();
-    for (const [doctorId, treatmentCount] of counts) {
-      const tier = this.tierFor(treatmentCount, tiers);
+    const existingByDoctor = new Map(
+      existing.map((row) => [row.doctorId, row]),
+    );
+    const quarterSnapshot =
+      existing
+        .map((row) => this.parseTierSnapshot(row.tierSnapshot))
+        .find((value): value is LoyaltyTierRule[] => value !== null) ??
+      (await this.activeTiers());
+    const computedAt = new Date();
+
+    for (const doctorId of doctorIds) {
+      const doctorMetrics = metrics.get(doctorId) ?? {
+        eligibleOrderCount: 0,
+        excludedDiscountedOrderCount: 0,
+      };
+      const tiers =
+        this.parseTierSnapshot(
+          existingByDoctor.get(doctorId)?.tierSnapshot ?? null,
+        ) ?? quarterSnapshot;
+      const tier = this.tierFor(doctorMetrics.eligibleOrderCount, tiers);
+      const result = {
+        treatmentCount: doctorMetrics.eligibleOrderCount,
+        excludedDiscountedOrderCount:
+          doctorMetrics.excludedDiscountedOrderCount,
+        calculationBasis: LoyaltyCalculationBasis.completed_orders_v2,
+        tierSnapshot: this.tierSnapshot(tiers),
+        tierMinTreatments: tier?.minTreatments ?? null,
+        discountPercent: new Prisma.Decimal(
+          (tier?.discountPercent ?? 0).toFixed(2),
+        ),
+        computedAt,
+      };
       await this.prisma.loyaltyQuarterResult.upsert({
         where: {
-          doctorId_year_quarter: { doctorId, year: ref.year, quarter: ref.quarter },
+          doctorId_year_quarter: {
+            doctorId,
+            year: ref.year,
+            quarter: ref.quarter,
+          },
         },
-        // Already closed → keep the historical snapshot untouched.
-        update: {},
+        update: result,
         create: {
           doctorId,
           year: ref.year,
           quarter: ref.quarter,
-          treatmentCount,
-          tierMinTreatments: tier?.minTreatments ?? null,
-          discountPercent: new Prisma.Decimal(
-            (tier?.discountPercent ?? 0).toFixed(2),
-          ),
+          ...result,
         },
       });
     }
     this.logger.log(
-      `Loyalty quarter ${quarterLabel(ref)} closed for ${counts.size} practitioner(s).`,
+      `Loyalty quarter ${quarterLabel(ref)} recalculated from completed orders for ${doctorIds.size} practitioner(s).`,
     );
   }
 
@@ -250,14 +296,19 @@ export class LoyaltyService implements OnModuleInit, OnModuleDestroy {
    * Lazily closes that quarter first, so the program works without any
    * external cron. Returns 0 when the program is disabled.
    */
-  async activeDiscountPercentFor(doctorId: string): Promise<number> {
+  async activeRewardFor(
+    doctorId: string,
+    at = new Date(),
+  ): Promise<ActiveLoyaltyReward> {
     const settings = await this.prisma.companyBillingSettings.findFirst({
       where: { isActive: true },
       select: { loyaltyEnabled: true },
     });
-    if (settings && !settings.loyaltyEnabled) return 0;
+    if (settings && !settings.loyaltyEnabled) {
+      return { discountPercent: 0, sourceYear: null, sourceQuarter: null };
+    }
 
-    const prev = previousQuarter(quarterOf(new Date()));
+    const prev = previousQuarter(quarterOf(at));
     try {
       await this.ensureQuarterClosed(prev);
     } catch {
@@ -274,7 +325,22 @@ export class LoyaltyService implements OnModuleInit, OnModuleDestroy {
         },
       },
     });
-    return num(result?.discountPercent);
+    if (
+      !result ||
+      result.calculationBasis !== LoyaltyCalculationBasis.completed_orders_v2
+    ) {
+      return { discountPercent: 0, sourceYear: null, sourceQuarter: null };
+    }
+    return {
+      discountPercent: num(result.discountPercent),
+      sourceYear: prev.year,
+      sourceQuarter: prev.quarter,
+    };
+  }
+
+  /** Backward-compatible convenience used by any older internal caller. */
+  async activeDiscountPercentFor(doctorId: string): Promise<number> {
+    return (await this.activeRewardFor(doctorId)).discountPercent;
   }
 
   // ── Admin overview ────────────────────────────────────────────────
@@ -303,7 +369,7 @@ export class LoyaltyService implements OnModuleInit, OnModuleDestroy {
       /* transient — the table simply shows what is already closed */
     }
 
-    const [settings, tierRows, currentCounts, prevResults, discountAgg] =
+    const [settings, tierRows, currentMetrics, prevResults, discountAgg] =
       await Promise.all([
         this.prisma.companyBillingSettings.findFirst({
           where: { isActive: true },
@@ -313,7 +379,7 @@ export class LoyaltyService implements OnModuleInit, OnModuleDestroy {
           where: { isActive: true },
           orderBy: { minTreatments: 'asc' },
         }),
-        this.countsByDoctor(current),
+        this.eligibility.metricsByDoctor(current),
         this.prisma.loyaltyQuarterResult.findMany({
           where: { year: prev.year, quarter: prev.quarter },
         }),
@@ -330,7 +396,7 @@ export class LoyaltyService implements OnModuleInit, OnModuleDestroy {
         }),
       ]);
 
-    const tiers: TierShape[] = tierRows.map((t) => ({
+    const tiers: LoyaltyTierRule[] = tierRows.map((t) => ({
       minTreatments: t.minTreatments,
       discountPercent: Number(t.discountPercent),
     }));
@@ -339,7 +405,7 @@ export class LoyaltyService implements OnModuleInit, OnModuleDestroy {
     // The table covers every practitioner with loyalty activity: counted
     // this quarter, counted last quarter, or carrying an active discount.
     const doctorIds = new Set<string>([
-      ...currentCounts.keys(),
+      ...currentMetrics.keys(),
       ...prevByDoctor.keys(),
     ]);
 
@@ -357,32 +423,52 @@ export class LoyaltyService implements OnModuleInit, OnModuleDestroy {
 
     const doctors: LoyaltyDoctorRowDto[] = [...doctorIds].map((doctorId) => {
       const user = userById.get(doctorId);
-      const currentCount = currentCounts.get(doctorId) ?? 0;
+      const metrics = currentMetrics.get(doctorId) ?? {
+        eligibleOrderCount: 0,
+        excludedDiscountedOrderCount: 0,
+      };
       const prevResult = prevByDoctor.get(doctorId);
-      const currentTier = this.tierFor(currentCount, tiers);
+      const previousIsOrderBased =
+        prevResult?.calculationBasis ===
+        LoyaltyCalculationBasis.completed_orders_v2;
+      const currentTier = this.tierFor(metrics.eligibleOrderCount, tiers);
       const nextTier =
-        tiers.find((t) => t.minTreatments > currentCount) ?? null;
+        tiers.find((t) => t.minTreatments > metrics.eligibleOrderCount) ?? null;
       return {
         doctorId,
         doctorName: user?.fullName ?? '—',
         clinicName: user?.dentistProfile?.clinicName ?? null,
-        currentCount,
-        currentTierPercent: currentTier?.discountPercent ?? 0,
-        activeDiscountPercent: num(prevResult?.discountPercent),
-        nextQuarterDiscountPercent: currentTier?.discountPercent ?? 0,
-        nextTierMinTreatments: nextTier?.minTreatments ?? null,
+        eligibleOrdersThisQuarter: metrics.eligibleOrderCount,
+        excludedDiscountedOrdersThisQuarter:
+          metrics.excludedDiscountedOrderCount,
+        achievedTierPercent: currentTier?.discountPercent ?? 0,
+        activeDiscountPercent:
+          (settings?.loyaltyEnabled ?? true) && previousIsOrderBased
+            ? num(prevResult?.discountPercent)
+            : 0,
+        projectedNextQuarterDiscountPercent: currentTier?.discountPercent ?? 0,
+        nextTierMinOrders: nextTier?.minTreatments ?? null,
         nextTierPercent: nextTier?.discountPercent ?? null,
-        remainingToNextTier: nextTier
-          ? nextTier.minTreatments - currentCount
+        remainingOrdersToNextTier: nextTier
+          ? nextTier.minTreatments - metrics.eligibleOrderCount
           : null,
-        previousCount: prevResult?.treatmentCount ?? 0,
-        previousDiscountPercent: num(prevResult?.discountPercent),
+        previousEligibleOrderCount: previousIsOrderBased
+          ? (prevResult?.treatmentCount ?? 0)
+          : 0,
+        previousExcludedDiscountedOrderCount: previousIsOrderBased
+          ? (prevResult?.excludedDiscountedOrderCount ?? 0)
+          : 0,
+        previousDiscountPercent: previousIsOrderBased
+          ? num(prevResult?.discountPercent)
+          : 0,
       };
     });
 
     // Highest tier first in the table, then by progress.
     doctors.sort(
-      (a, b) => b.currentCount - a.currentCount || a.doctorName.localeCompare(b.doctorName),
+      (a, b) =>
+        b.eligibleOrdersThisQuarter - a.eligibleOrdersThisQuarter ||
+        a.doctorName.localeCompare(b.doctorName),
     );
 
     const eligibleByTier = tiers.map((tier) => ({
@@ -390,13 +476,19 @@ export class LoyaltyService implements OnModuleInit, OnModuleDestroy {
       discountPercent: tier.discountPercent,
       doctors: doctors.filter(
         (d) =>
-          d.currentCount >= tier.minTreatments &&
-          this.tierFor(d.currentCount, tiers)?.minTreatments === tier.minTreatments,
+          d.eligibleOrdersThisQuarter >= tier.minTreatments &&
+          this.tierFor(d.eligibleOrdersThisQuarter, tiers)?.minTreatments ===
+            tier.minTreatments,
       ).length,
     }));
 
-    let treatmentsThisQuarter = 0;
-    for (const count of currentCounts.values()) treatmentsThisQuarter += count;
+    let eligibleOrdersThisQuarter = 0;
+    let excludedDiscountedOrdersThisQuarter = 0;
+    for (const metrics of currentMetrics.values()) {
+      eligibleOrdersThisQuarter += metrics.eligibleOrderCount;
+      excludedDiscountedOrdersThisQuarter +=
+        metrics.excludedDiscountedOrderCount;
+    }
 
     return {
       enabled: settings?.loyaltyEnabled ?? true,
@@ -408,7 +500,8 @@ export class LoyaltyService implements OnModuleInit, OnModuleDestroy {
         discountPercent: t.discountPercent.toString(),
       })),
       kpis: {
-        treatmentsThisQuarter,
+        eligibleOrdersThisQuarter,
+        excludedDiscountedOrdersThisQuarter,
         eligibleByTier,
         discountsGrantedThisQuarter: round3(
           num(discountAgg._sum.loyaltyDiscountAmount),

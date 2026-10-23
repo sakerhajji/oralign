@@ -17,6 +17,7 @@ import {
   OrderFile,
   OrderFileCategory,
   OrderFilterParams,
+  OrderHistoryEntry,
   OrderStatus,
   PaginatedResponse,
   ToothInstruction,
@@ -77,6 +78,7 @@ export const orderKeys = {
   details: () => [...orderKeys.all, 'detail'] as const,
   detail: (id: string) => [...orderKeys.details(), id] as const,
   files: (id: string) => [...orderKeys.detail(id), 'files'] as const,
+  history: (id: string) => [...orderKeys.detail(id), 'history'] as const,
   /** Rendered treatment-fee invoice PDF for an order, per language. */
   treatmentFeeInvoicePdf: (id: string, lang: string) =>
     [...orderKeys.detail(id), 'treatment-fee-invoice-pdf', lang] as const,
@@ -135,6 +137,21 @@ export function useOrder(id?: string): UseQueryResult<DentalOrder, Error> {
   });
 }
 
+export function useOrderHistory(
+  id?: string,
+  enabled = true,
+): UseQueryResult<OrderHistoryEntry[], Error> {
+  return useQuery({
+    queryKey: orderKeys.history(id ?? ''),
+    queryFn: () => ordersService.getOrderHistory(id ?? ''),
+    enabled: !!id && enabled,
+    staleTime: 15_000,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+    retry: 2,
+  });
+}
+
 export function useCreateOrder(): UseMutationResult<
   DentalOrder,
   Error,
@@ -167,6 +184,7 @@ export function useUpdateOrder(): UseMutationResult<
       syncOrderCaches(queryClient, order);
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(variables.id) });
+      queryClient.invalidateQueries({ queryKey: orderKeys.history(variables.id) });
       toast.success(t('toasts.orders.updated'));
     },
     onError: (error) => toastMutationError(error),
@@ -187,6 +205,7 @@ export function useSubmitOrder(): UseMutationResult<
       syncOrderCaches(queryClient, order);
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
+      queryClient.invalidateQueries({ queryKey: orderKeys.history(id) });
       toast.success(t('toasts.orders.submitted'));
     },
     onError: (error) => toastMutationError(error),
@@ -214,6 +233,7 @@ export function usePayTreatmentFee(): UseMutationResult<
       syncOrderCaches(queryClient, order);
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
+      queryClient.invalidateQueries({ queryKey: orderKeys.history(id) });
       if (method === 'bank_transfer') {
         toast.success(t('toasts.orders.bankTransferRecorded'));
       } else {
@@ -238,6 +258,7 @@ export function useUploadTreatmentFeeProof(): UseMutationResult<
     onSuccess: (order, { id }) => {
       syncOrderCaches(queryClient, order);
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
+      queryClient.invalidateQueries({ queryKey: orderKeys.history(id) });
       toast.success(t('toasts.orders.receiptUploaded'));
     },
     onError: (error) => toastMutationError(error),
@@ -258,6 +279,7 @@ export function useConfirmTreatmentFeePayment(): UseMutationResult<
       syncOrderCaches(queryClient, order);
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
+      queryClient.invalidateQueries({ queryKey: orderKeys.history(id) });
       // Bust both treatment-fee list caches so the confirmed row
       // hops from the pending queue into the history table.
       queryClient.invalidateQueries({ queryKey: ['treatment-fees'] });
@@ -313,6 +335,7 @@ export function useOverrideOrderStatus(): UseMutationResult<
       syncOrderCaches(queryClient, order);
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
+      queryClient.invalidateQueries({ queryKey: orderKeys.history(id) });
       // Treatment plan + quote views read order status indirectly via
       // their order include — refresh those too so the status badges
       // shown next to those tabs stay accurate.
@@ -410,6 +433,7 @@ export function useBulkUpdateOrderStatus(): UseMutationResult<
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
       for (const id of ids) {
         queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
+        queryClient.invalidateQueries({ queryKey: orderKeys.history(id) });
       }
       queryClient.invalidateQueries({ queryKey: ['treatment-plans'] });
       queryClient.invalidateQueries({ queryKey: ['quotations'] });
@@ -545,13 +569,14 @@ export function useUpdateToothInstructions(): UseMutationResult<
   return useMutation({
     mutationFn: ({ id, instructions, replaceTypes }) =>
       ordersService.updateToothInstructions(id, instructions, replaceTypes),
-    onSuccess: (order) => {
+    onSuccess: (order, { id }) => {
       // The PUT already returns the FULL updated order — write it into
       // the detail cache and the lists. Do NOT also invalidate the
       // detail key: that refired GET /orders/:id (files + variants
       // included) right after every odontogram save for data we
       // already hold.
       syncOrderCaches(queryClient, order);
+      queryClient.invalidateQueries({ queryKey: orderKeys.history(id) });
       // The treatment plan review payload also includes the tooth
       // instructions (grouped odontogram + IPR map). Without this
       // invalidation, the IPR purple bars in the plan editor stay
@@ -606,6 +631,7 @@ export function useUploadOrderFiles(): UseMutationResult<
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: orderKeys.files(variables.id) });
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(variables.id) });
+      queryClient.invalidateQueries({ queryKey: orderKeys.history(variables.id) });
       toast.success(t('toasts.orders.filesUploaded'));
     },
     onError: (error) => {
@@ -636,6 +662,7 @@ export function useDeleteOrderFile(): UseMutationResult<
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: orderKeys.files(variables.id) });
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(variables.id) });
+      queryClient.invalidateQueries({ queryKey: orderKeys.history(variables.id) });
       toast.success(t('toasts.orders.fileDeleted'));
     },
     onError: (error) => toastMutationError(error),

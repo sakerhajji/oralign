@@ -190,16 +190,23 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
     // The rest of the pipeline needs no change: installments validate
     // against the NET totalPrice, Payment.amount copies installments,
     // and auto-invoices derive from the paid amount.
-    const loyaltyPercent = await this.loyalty.activeDiscountPercentFor(
+    const loyaltyReward = await this.loyalty.activeRewardFor(
       quote.order.doctorId,
     );
-    const grossPrice = Number(price.price);
-    const loyaltyAmount =
-      loyaltyPercent > 0
-        ? Math.round(grossPrice * (loyaltyPercent / 100) * 1000) / 1000
-        : 0;
-    const netPrice = Math.round((grossPrice - loyaltyAmount) * 1000) / 1000;
-    const netDecimal = new Prisma.Decimal(netPrice.toFixed(3));
+    const grossDecimal = new Prisma.Decimal(price.price);
+    const loyaltyPercentDecimal = new Prisma.Decimal(
+      loyaltyReward.discountPercent.toFixed(2),
+    );
+    const loyaltyAmountDecimal = loyaltyPercentDecimal.gt(0)
+      ? grossDecimal.mul(loyaltyPercentDecimal).div(100).toDecimalPlaces(3)
+      : new Prisma.Decimal(0);
+    const netDecimal = grossDecimal
+      .minus(loyaltyAmountDecimal)
+      .toDecimalPlaces(3);
+    const loyaltyApplied = loyaltyAmountDecimal.gt(0);
+    const grossPrice = grossDecimal.toNumber();
+    const loyaltyAmount = loyaltyAmountDecimal.toNumber();
+    const netPrice = netDecimal.toNumber();
 
     // Reset any previously-configured plan because the totals just
     // changed. Doing this inside the same transaction guarantees the
@@ -225,14 +232,12 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
           paymentMode: null,
           paymentStatus: QuotationPaymentStatus.pending,
           currency: price.currency,
-          loyaltyDiscountPercent:
-            loyaltyAmount > 0
-              ? new Prisma.Decimal(loyaltyPercent.toFixed(2))
-              : null,
-          loyaltyDiscountAmount:
-            loyaltyAmount > 0
-              ? new Prisma.Decimal(loyaltyAmount.toFixed(3))
-              : null,
+          loyaltyDiscountPercent: loyaltyApplied ? loyaltyPercentDecimal : null,
+          loyaltyDiscountAmount: loyaltyApplied ? loyaltyAmountDecimal : null,
+          loyaltySourceYear: loyaltyApplied ? loyaltyReward.sourceYear : null,
+          loyaltySourceQuarter: loyaltyApplied
+            ? loyaltyReward.sourceQuarter
+            : null,
           // Mirror the new price onto the legacy Float columns too so the
           // PDF renderer + existing UI stay in sync. The legacy treatment/
           // fab/delivery breakdown is set to zero — for pack-based quotes
@@ -331,7 +336,9 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
     const rows = dto.installments.map((row, idx) => ({
       idx,
       amount: new Prisma.Decimal(row.amount.toFixed(3)),
-      availableFrom: row.availableFrom ? new Date(row.availableFrom) : new Date(),
+      availableFrom: row.availableFrom
+        ? new Date(row.availableFrom)
+        : new Date(),
       dueDate: row.dueDate ? new Date(row.dueDate) : null,
       fromStep: row.batch.fromStep,
       toStep: row.batch.toStep,
@@ -359,10 +366,10 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
     // strictly after the previous row's toStep.
     const sorted = [...rows].sort((a, b) => a.fromStep - b.fromStep);
     for (let i = 1; i < sorted.length; i++) {
-      if (sorted[i]!.fromStep <= sorted[i - 1]!.toStep) {
+      if (sorted[i].fromStep <= sorted[i - 1].toStep) {
         throw new BadRequestException(
-          `Step ranges overlap between installments #${sorted[i - 1]!.idx + 1} and #${
-            sorted[i]!.idx + 1
+          `Step ranges overlap between installments #${sorted[i - 1].idx + 1} and #${
+            sorted[i].idx + 1
           }.`,
         );
       }
@@ -388,7 +395,7 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
       await tx.quoteInstallment.deleteMany({ where: { quotationId } });
 
       for (let i = 0; i < rows.length; i++) {
-        const row = rows[i]!;
+        const row = rows[i];
         const installment = await tx.quoteInstallment.create({
           data: {
             quotationId,
@@ -533,10 +540,7 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
    * `unlocked` — locked batches can never deliver, delivered batches
    * are idempotently kept in that state.
    */
-  async deliverBatch(
-    batchId: string,
-    caller: Caller,
-  ) {
+  async deliverBatch(batchId: string, caller: Caller) {
     if (!isAdmin(caller)) {
       throw new ForbiddenException(
         'Only admins can mark a batch as delivered.',

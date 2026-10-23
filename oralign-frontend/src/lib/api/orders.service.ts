@@ -6,6 +6,7 @@ import {
   OrderFile,
   OrderFileCategory,
   OrderFilterParams,
+  OrderHistoryEntry,
   OrderStatus,
   PaginatedResponse,
   PaymentMethod,
@@ -59,6 +60,13 @@ export const ordersService = {
 
   getOrderById: async (id: string): Promise<DentalOrder> => {
     const response = await apiClient.get<DentalOrder>(`/orders/${id}`);
+    return response.data;
+  },
+
+  getOrderHistory: async (id: string): Promise<OrderHistoryEntry[]> => {
+    const response = await apiClient.get<OrderHistoryEntry[]>(
+      `/orders/${id}/history`,
+    );
     return response.data;
   },
 

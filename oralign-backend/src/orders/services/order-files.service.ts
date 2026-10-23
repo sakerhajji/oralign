@@ -24,6 +24,7 @@ import { buildSequentialName } from '../../media/naming';
 import { MediaVariantInfo } from '../../media/media.types';
 import type { Caller } from '../../common/access/caller';
 import { OrderService } from './order.service';
+import { OrderAuditService } from './order-audit.service';
 import { mapOrderFileToDto, type OrderWithRelations } from './order.mapper';
 import { maxUploadBytesFor, resolveUploadPath } from './order-storage';
 
@@ -44,6 +45,7 @@ export class OrderFilesService {
     private readonly prisma: PrismaService,
     private readonly orders: OrderService,
     private readonly mediaProcessing: MediaProcessingService,
+    private readonly orderAudit: OrderAuditService,
   ) {}
 
   async uploadFiles(
@@ -80,7 +82,9 @@ export class OrderFilesService {
       // above only trusts the attacker-supplied name. See file-security.ts.
       const verdict = await scanUploadContent(file);
       if (!verdict.safe) {
-        const suffix = verdict.detail ? `: ${verdict.detail.slice(0, 120)}` : '';
+        const suffix = verdict.detail
+          ? `: ${verdict.detail.slice(0, 120)}`
+          : '';
         throw new BadRequestException(
           `${verdict.reason ?? 'This file was rejected for security reasons.'}${suffix}`,
         );
@@ -94,7 +98,20 @@ export class OrderFilesService {
       savedFiles.push(saved);
     }
 
-    await this.prisma.orderFile.createMany({ data: savedFiles });
+    const auditEntry = await this.orderAudit.entry(
+      caller,
+      'files_uploaded',
+      null,
+      {
+        category,
+        count: savedFiles.length,
+        fileNames: savedFiles.map((file) => file.originalName),
+      },
+    );
+    await this.prisma.$transaction(async (tx) => {
+      await tx.orderFile.createMany({ data: savedFiles });
+      await tx.orderAuditLog.create({ data: { orderId: id, ...auditEntry } });
+    });
 
     const orderFiles = await this.prisma.orderFile.findMany({
       where: {
@@ -143,9 +160,22 @@ export class OrderFilesService {
     // (OrderService.permanentDeleteOrder → purgeStoredMedia) or when the
     // retention sweep purges files that have sat in the trash long enough
     // (UploadCleanupService).
-    await this.prisma.orderFile.update({
-      where: { id: file.id },
-      data: { deletedAt: new Date() },
+    const auditEntry = await this.orderAudit.entry(
+      caller,
+      'file_deleted',
+      null,
+      {
+        fileId: file.id,
+        fileName: file.generatedName ?? file.originalName,
+        category: file.category,
+      },
+    );
+    await this.prisma.$transaction(async (tx) => {
+      await tx.orderFile.update({
+        where: { id: file.id },
+        data: { deletedAt: new Date() },
+      });
+      await tx.orderAuditLog.create({ data: { orderId: id, ...auditEntry } });
     });
 
     return { message: 'Order file deleted successfully' };
@@ -273,6 +303,7 @@ export class OrderFilesService {
     category: OrderFileCategory,
     meta: { originalName: string; mimeType?: string; sizeBytes: number },
     sourceAbsolutePath: string,
+    caller: Caller,
   ): Promise<OrderFileResponseDto> {
     const maxExisting = await this.prisma.orderFile.aggregate({
       where: { orderId: order.id, category },
@@ -296,7 +327,23 @@ export class OrderFilesService {
       sourceAbsolutePath,
     );
 
-    const file = await this.prisma.orderFile.create({ data: saved });
+    const auditEntry = await this.orderAudit.entry(
+      caller,
+      'files_uploaded',
+      null,
+      {
+        category,
+        count: 1,
+        fileNames: [meta.originalName],
+      },
+    );
+    const file = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.orderFile.create({ data: saved });
+      await tx.orderAuditLog.create({
+        data: { orderId: order.id, ...auditEntry },
+      });
+      return created;
+    });
 
     if (file.processingStatus === MediaProcessingStatus.pending) {
       this.mediaProcessing.enqueue('order-file', file.id);

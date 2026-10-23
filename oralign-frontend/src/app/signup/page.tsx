@@ -30,7 +30,7 @@ function SignupContent() {
       </div>
       <div className="relative hidden bg-muted lg:block">
         <Image
-          src="/loginPicture.webp"
+          src="/loginPicture.d132e5d4.webp"
           alt={t('authPages.common.clinicImageAlt')}
           fill
           sizes="50vw"

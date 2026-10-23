@@ -59,8 +59,12 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
+        // A year, immutable: a file under public/ must therefore change its
+        // NAME when its content changes (loginPicture.<hash>.webp, the hero
+        // film's oralign-film-*.<hash>.mp4), or returning visitors keep the
+        // old copy for that year.
         source:
-          "/:path*\\.(webp|png|jpg|jpeg|gif|svg|ico|avif|woff|woff2)",
+          "/:path*\\.(webp|png|jpg|jpeg|gif|svg|ico|avif|woff|woff2|mp4)",
         headers: [
           {
             key: "Cache-Control",

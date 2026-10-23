@@ -116,7 +116,7 @@ export function WearAlignersSection() {
             />
             <div className="relative aspect-square overflow-hidden">
               <Image
-                src="/showcase/Portez.webp"
+                src="/showcase/oralign-wear-aligner.webp"
                 alt={copy.imageAlt}
                 fill
                 sizes="(min-width: 1024px) 42vw, 100vw"

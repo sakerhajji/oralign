@@ -48,7 +48,7 @@ export function SmileConsultationCtaSection() {
       className="relative isolate min-h-[calc(100svh-4rem)] overflow-hidden bg-[var(--sc-black)] text-[var(--sc-white)] sm:min-h-[calc(100svh-4.5rem)] lg:min-h-[calc(100svh-5rem)]"
     >
       <Image
-        src="/showcase/ready-smile-cta.webp"
+        src="/showcase/oralign-consultation-cta.webp"
         alt={copy.imageAlt}
         fill
         sizes="100vw"

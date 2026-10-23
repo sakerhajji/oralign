@@ -30,7 +30,7 @@ export function Header() {
 
   // Anchor sections to observe on the CURRENT page = the `#hash` of any
   // dropdown child whose LOCALIZED route is the active pathname (on
-  // /en/discover we watch the same #oralign, #oralign-prime, … ids).
+  // /en we watch the same #oralign, #how-it-works, … ids).
   const sectionIds = (() => {
     const ids: string[] = [];
     for (const item of navItems) {
@@ -165,7 +165,8 @@ export function Header() {
                   <div className="invisible absolute left-1/2 top-full z-50 -translate-x-1/2 translate-y-1 pt-3 opacity-0 transition-all duration-200 group-hover:visible group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:visible group-focus-within:translate-y-0 group-focus-within:opacity-100">
                     <ul className="min-w-[264px] list-none border border-[var(--sc-grey)] bg-[var(--sc-white)] p-2 shadow-[0_24px_60px_-28px_rgba(10,10,10,0.4)]">
                       {(item.children ?? []).map((child) => {
-                        const [childRoute, childHash] = child.href.split("#");
+                        // Localized, like sectionIds: on /en the raw "/" never matches.
+                        const [childRoute, childHash] = l(child.href).split("#");
                         const childActive =
                           (childRoute === "" || childRoute === pathname) &&
                           activeSection === childHash;

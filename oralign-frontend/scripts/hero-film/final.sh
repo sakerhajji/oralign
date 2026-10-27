@@ -63,10 +63,13 @@ done
 # matrix is converted explicitly or the colours would shift at the fade-in.
 # zscale, not scale: ffmpeg 9's scale=in/out_color_matrix made it WORSE
 # (R/B bias -2.6 against a hand-computed BT.709 reference; zscale: ~0).
+# POSTER_NAME names it for a second film (the phone film: see phone.sh).
+POSTER_NAME=${POSTER_NAME:-oralign-film-poster}
 ffmpeg -hide_banner -loglevel error -y -i work/master.mkv \
   -vf "select=eq(n\,0),zscale=matrixin=709:rangein=limited:matrix=470bg:range=limited,format=yuv420p" \
   -frames:v 1 -c:v libwebp -quality 85 -compression_level 6 -preset photo out/poster.webp
 phash=$(sha256sum out/poster.webp | cut -c1-8)
-mv out/poster.webp "out/oralign-film-poster.$phash.webp"
-echo "poster - oralign-film-poster.$phash.webp 1920 1080 0 - - - -" >> out/manifest.txt
+mv out/poster.webp "out/$POSTER_NAME.$phash.webp"
+pdims=$(ffprobe -v error -select_streams v -show_entries stream=width,height -of csv=p=0 work/master.mkv | tr ',' ' ')
+echo "poster - $POSTER_NAME.$phash.webp $pdims 0 - - - -" >> out/manifest.txt
 ls -l out

@@ -33,6 +33,22 @@ python "$APP"/scripts/hero-film/install.py . "$APP"
 `linuxserver/ffmpeg` is used because it ships SVT-AV1, x264 **and**
 libvmaf; `final.sh` scores every encode against its lossless reference.
 
+### Phone film
+
+Phones held upright (`PHONE_MEDIA` in `hero-film.tsx`) play a separate
+9:16 film instead of a crop of the brand film, with its own poster. From
+another scratch directory holding that film as `src/source.mp4`:
+
+```sh
+docker run --rm --entrypoint sh -v "$PWD:/w" -v "$APP/scripts/hero-film:/scripts:ro" \
+  -w /w linuxserver/ffmpeg:latest -c 'sh /scripts/phone.sh 33 25'
+python "$APP"/scripts/hero-film/install_phone.py . "$APP"
+```
+
+Same loop dissolve, encoders and gate, no reframing (the source is already
+9:16); it writes `hero-film-phone-manifest.ts`. The current film (720x1280,
+7.0 s) passes at AV1 CRF 33 / H.264 CRF 25.
+
 ## What each step does, and why
 
 - **master.sh** — the film's last 18 frames dissolve into its first 18,

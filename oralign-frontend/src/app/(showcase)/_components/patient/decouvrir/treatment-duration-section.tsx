@@ -20,7 +20,7 @@ const durationCopy: Record<
       "Les premiers changements sont souvent visibles dès les premiers mois et continuent de s’affiner tout au long du traitement.",
     ],
     imageAlt:
-      "Aligneur transparent ORALIGN tenu face à une lumière dorée",
+      "Femme souriante tenant un aligneur transparent ORALIGN dans une lumière dorée",
   },
   en: {
     title: "How long does ORALIGN® treatment take?",
@@ -29,7 +29,7 @@ const durationCopy: Record<
       "Treatment lasts 12 to 18 months on average, depending on your clinical situation and the plan defined by your ORALIGN®-certified practitioner.",
       "Early changes are often visible within the first few months and continue to refine throughout treatment.",
     ],
-    imageAlt: "Clear ORALIGN aligner held against warm golden light",
+    imageAlt: "Smiling woman holding a clear ORALIGN aligner in warm golden light",
   },
   ar: {
     title: "ما مدة العلاج بتقويم ORALIGN®؟",
@@ -38,7 +38,7 @@ const durationCopy: Record<
       "تتراوح مدة العلاج في المتوسط بين 12 و18 شهراً حسب حالتك السريرية والخطة التي يحددها طبيبك المعتمد من ORALIGN®.",
       "غالباً ما تبدأ التغييرات بالظهور خلال الأشهر الأولى وتستمر النتيجة في التحسن طوال فترة العلاج.",
     ],
-    imageAlt: "تقويم ORALIGN شفاف أمام ضوء ذهبي دافئ",
+    imageAlt: "امرأة مبتسمة تمسك تقويم ORALIGN شفافاً في ضوء ذهبي دافئ",
   },
 };
 
@@ -73,7 +73,7 @@ export function TreatmentDurationSection() {
 
         <div className="relative aspect-square overflow-hidden sm:aspect-[4/3] lg:min-h-0 lg:aspect-auto">
           <Image
-            src="/showcase/oralign-treatment-duration.webp"
+            src="/showcase/oralign-treatment-duration.70f797f7.webp"
             alt={copy.imageAlt}
             fill
             sizes="(min-width: 1024px) 45vw, 100vw"

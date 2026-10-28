@@ -1,8 +1,8 @@
 "use client";
 
-import Image from "next/image";
 import type { Lang } from "../../../_lib/i18n/dict";
 import { useShowcaseLang } from "../../../_lib/i18n/lang-context";
+import { PrecisionFilm } from "./precision-film";
 
 type PrecisionBenefitCopy = {
   title: string;
@@ -20,7 +20,7 @@ const precisionCopy: Record<
       PrecisionBenefitCopy,
       PrecisionBenefitCopy,
     ];
-    imageAlt: string;
+    filmLabel: string;
   }
 > = {
   fr: {
@@ -49,7 +49,7 @@ const precisionCopy: Record<
           "Un praticien certifié ORALIGN vous accompagne à chaque phase du traitement.",
       },
     ],
-    imageAlt: "Deux étuis ORALIGN, un noir et un jaune, au-dessus d’un socle blanc",
+    filmLabel: "Découpe laser des gouttières ORALIGN",
   },
   en: {
     title: "Your smile, aligned with precision.",
@@ -77,7 +77,7 @@ const precisionCopy: Record<
           "An ORALIGN-certified practitioner supports you throughout treatment.",
       },
     ],
-    imageAlt: "Two ORALIGN cases, one black and one yellow, above a white block",
+    filmLabel: "Laser trimming of ORALIGN aligners",
   },
   ar: {
     title: "ابتسامتك، مصفوفة بدقّة.",
@@ -105,7 +105,7 @@ const precisionCopy: Record<
           "يرافقك طبيب معتمد من ORALIGN خلال كل مرحلة من مراحل العلاج.",
       },
     ],
-    imageAlt: "علبتان من ORALIGN، سوداء وصفراء، فوق قاعدة بيضاء",
+    filmLabel: "قصّ مصفّفات ORALIGN بالليزر",
   },
 };
 
@@ -121,26 +121,18 @@ export function PrecisionSection() {
       className="relative isolate min-h-[calc(100svh-4rem)] overflow-hidden bg-[var(--sc-black)] text-[var(--sc-white)] sm:min-h-[calc(100svh-4.5rem)] lg:min-h-[calc(100svh-5rem)]"
     >
       <div className="relative hidden min-h-[calc(100svh-5rem)] lg:block">
-        {/* Square photo: shown whole in a centred square between the two
-            text columns, its sides fading into the black (cover would blow
-            the cases up past the screen). */}
-        <div className="absolute inset-y-0 left-1/2 aspect-square h-full -translate-x-1/2 [mask-image:linear-gradient(90deg,transparent,#000_24%,#000_76%,transparent)]">
-          <Image
-            src="/showcase/oralign-cases-duo.497e7855.webp"
-            alt={copy.imageAlt}
-            fill
-            quality={85}
-            sizes="(min-width: 1024px) 60vw, 100vw"
-            className="object-cover object-center"
-          />
-        </div>
+        {/* The laser-trimming film is the section's ground. The overlays
+            keep the two text columns readable and leave the centre almost
+            clear, where the laser and the aligner are; top and bottom fade
+            into the neighbouring black. */}
+        <PrecisionFilm media="(min-width: 1024px)" label={copy.filmLabel} />
         <div
           aria-hidden="true"
-          className="absolute inset-0 bg-[linear-gradient(90deg,rgba(10,10,10,0.94)_0%,rgba(10,10,10,0.54)_32%,rgba(10,10,10,0.18)_53%,rgba(10,10,10,0.62)_74%,rgba(10,10,10,0.94)_100%)]"
+          className="absolute inset-0 bg-[linear-gradient(90deg,rgba(10,10,10,0.9)_0%,rgba(10,10,10,0.58)_24%,rgba(10,10,10,0.08)_44%,rgba(10,10,10,0.08)_56%,rgba(10,10,10,0.58)_76%,rgba(10,10,10,0.9)_100%)]"
         />
         <div
           aria-hidden="true"
-          className="absolute inset-0 bg-[linear-gradient(180deg,rgba(10,10,10,0.74)_0%,transparent_30%,transparent_67%,rgba(10,10,10,0.72)_100%)]"
+          className="absolute inset-0 bg-[linear-gradient(180deg,rgba(10,10,10,0.7)_0%,transparent_26%,transparent_72%,rgba(10,10,10,0.78)_100%)]"
         />
 
         <div className="relative z-10 mx-auto min-h-[calc(100svh-5rem)] max-w-[1440px] px-12 py-12 xl:px-16">
@@ -180,18 +172,14 @@ export function PrecisionSection() {
           </p>
         </div>
 
-        <div className="relative aspect-[16/10] overflow-hidden sm:aspect-[16/10]">
-          <Image
-            src="/showcase/oralign-cases-duo.497e7855.webp"
-            alt={copy.imageAlt}
-            fill
-            quality={85}
-            sizes="100vw"
-            className="object-cover object-center"
-          />
+        {/* The frame takes the footage's own shape — 9:16 cut on phones,
+            16:9 on tablets — so nothing is stretched and the box is sized
+            before anything loads (no layout shift). */}
+        <div className="relative aspect-[9/16] overflow-hidden md:aspect-video">
+          <PrecisionFilm media="(max-width: 1023.98px)" label={copy.filmLabel} />
           <div
             aria-hidden="true"
-            className="absolute inset-0 bg-[linear-gradient(180deg,rgba(10,10,10,0.2),transparent_45%,rgba(10,10,10,0.35))]"
+            className="absolute inset-0 bg-[linear-gradient(180deg,rgba(10,10,10,0.55)_0%,transparent_18%,transparent_80%,rgba(10,10,10,0.6)_100%)]"
           />
         </div>
 

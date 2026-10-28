@@ -7,7 +7,8 @@ import { z } from 'zod';
 import { useRouter } from 'next/navigation';
 import { toast } from '@/lib/toast';
 import { useQueryClient } from '@tanstack/react-query';
-import { AlertCircle, MailIcon, RefreshCwIcon } from 'lucide-react';
+import { AlertCircle, MailIcon, MailWarning, RefreshCwIcon } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -125,6 +126,16 @@ export function VerifyEmailCard() {
         </CardHeader>
 
         <CardContent className="space-y-5">
+          {/* The code mail often lands in spam (Gmail especially): say so
+              before people give up or ask for code after code. */}
+          <Alert className="border-amber-300 bg-amber-50 text-amber-950 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
+            <MailWarning className="size-4 !text-amber-600 dark:!text-amber-400" aria-hidden="true" />
+            <AlertTitle className="leading-snug">{t('authPages.verify.spamTitle')}</AlertTitle>
+            <AlertDescription className="text-amber-900/90 dark:text-amber-100/80">
+              <p>{t('authPages.verify.spamBody')}</p>
+            </AlertDescription>
+          </Alert>
+
           <Form onSubmit={onSubmit} className="space-y-4">
             {/* Hidden unless the user needs to change their email */}
             {!user?.email && (

@@ -134,6 +134,15 @@ export const authDomainDict = {
         en: '. Enter it below to continue.',
         fr: '. Saisissez-le ci-dessous pour continuer.',
       } as T,
+      // Shown above the code field: the code mail often lands in spam.
+      spamTitle: {
+        en: 'Can’t find the email? Check your spam folder.',
+        fr: 'Vous ne trouvez pas l’e-mail ? Vérifiez vos spams.',
+      } as T,
+      spamBody: {
+        en: 'It can take a minute to arrive, and it may be in your Spam (Junk) or Promotions folder. If it is there, mark it as “Not spam” so our next emails reach your inbox.',
+        fr: 'Il peut mettre une minute à arriver et se trouver dans le dossier Spam (Courrier indésirable) ou Promotions. Si c’est le cas, marquez-le comme « Non spam » pour recevoir nos prochains e-mails dans votre boîte de réception.',
+      } as T,
       emailLabel: { en: 'Email', fr: 'E-mail' } as T,
       emailPlaceholder: { en: 'you@example.com', fr: 'vous@exemple.com' } as T,
       codeLabel: { en: 'Verification code', fr: 'Code de vérification' } as T,

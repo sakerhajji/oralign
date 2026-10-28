@@ -1,12 +1,13 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useRouter } from 'next/navigation';
 import { toast } from '@/lib/toast';
 import { useQueryClient } from '@tanstack/react-query';
+import { isAxiosError } from 'axios';
 import { AlertCircle, MailIcon, MailWarning, RefreshCwIcon } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -25,6 +26,7 @@ import { getApiErrorMessage } from '@/lib/hooks/use-auth';
 import { useAuth } from '@/lib/providers';
 import { userKeys } from '@/lib/hooks/use-users';
 import { useT } from '@/lib/i18n/lang-context';
+import { suggestEmail } from '@/lib/email-typos';
 
 const RESEND_COOLDOWN_SECONDS = 60;
 
@@ -45,6 +47,9 @@ export function VerifyEmailCard() {
   const { mutate: resendCode, isPending: isResending } = useResendVerification();
   const [cooldown, setCooldown] = useState(0);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // The code is tied to an address: show the field when there is no
+  // session, or when the person wants to (or must) correct the address.
+  const [editingEmail, setEditingEmail] = useState(false);
 
   const verifyEmailSchema = useMemo(() => makeVerifyEmailSchema(t), [t]);
 
@@ -55,6 +60,20 @@ export function VerifyEmailCard() {
       verificationCode: '',
     },
   });
+
+  // A typo'd domain (…@gamil.com) passes validation but no account or
+  // mailbox uses it: offer the corrected address.
+  const emailValue = useWatch({ control: form.control, name: 'email' });
+  const suggestion = suggestEmail(emailValue ?? '');
+  const showEmailField = !user?.email || editingEmail;
+  // Once corrected, the header names the address the code goes to.
+  const shownEmail = (editingEmail ? emailValue : user?.email) || user?.email;
+  const applySuggestion = () => {
+    if (!suggestion) return;
+    form.setValue('email', suggestion, { shouldValidate: true });
+    setEditingEmail(true);
+    setSubmitError(null);
+  };
 
   // Sync email field when user context loads
   useEffect(() => {
@@ -99,6 +118,13 @@ export function VerifyEmailCard() {
       // them anyway, but redirecting directly avoids a flash of the dashboard.
       router.replace('/onboarding/profile');
     } catch (error) {
+      // No account with this address (a typo at sign-up, or a session left
+      // from another account): say so and open the field to correct it.
+      if (isAxiosError(error) && error.response?.status === 404) {
+        setSubmitError(t('authPages.verify.notFound', { email: values.email }));
+        setEditingEmail(true);
+        return;
+      }
       // Surface the actual backend reason in the form, not just a toast.
       // Common causes: "Invalid verification code", "Verification code has
       // expired", "No verification code found".
@@ -116,13 +142,33 @@ export function VerifyEmailCard() {
           <CardTitle className="text-2xl">{t('authPages.verify.title')}</CardTitle>
           <CardDescription className="text-balance">
             {t('authPages.verify.descBefore')}{' '}
-            {user?.email ? (
-              <span className="font-medium text-foreground">{user.email}</span>
+            {shownEmail ? (
+              <span className="font-medium text-foreground">{shownEmail}</span>
             ) : (
               t('authPages.verify.descFallbackEmail')
             )}
             {t('authPages.verify.descAfter')}
           </CardDescription>
+          {suggestion ? (
+            <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-sm">
+              <span className="font-medium text-foreground">
+                {t('authPages.common.didYouMean', { email: suggestion })}
+              </span>
+              <Button type="button" variant="link" size="sm" className="h-auto p-0" onClick={applySuggestion}>
+                {t('authPages.common.useSuggestion')}
+              </Button>
+            </div>
+          ) : user?.email && !editingEmail ? (
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              className="mx-auto h-auto p-0 text-muted-foreground"
+              onClick={() => setEditingEmail(true)}
+            >
+              {t('authPages.verify.changeEmail')}
+            </Button>
+          ) : null}
         </CardHeader>
 
         <CardContent className="space-y-5">
@@ -137,8 +183,8 @@ export function VerifyEmailCard() {
           </Alert>
 
           <Form onSubmit={onSubmit} className="space-y-4">
-            {/* Hidden unless the user needs to change their email */}
-            {!user?.email && (
+            {/* Hidden unless there is no session or the address needs fixing */}
+            {showEmailField && (
               <div className="space-y-1.5">
                 <label className="text-sm font-medium" htmlFor="email">
                   {t('authPages.verify.emailLabel')}

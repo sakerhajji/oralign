@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { useForm, Controller } from 'react-hook-form';
+import { useForm, useWatch, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import Link from 'next/link';
@@ -14,6 +14,7 @@ import { PhoneInput } from '@/components/ui/phone-input';
 import { useSignUp } from '@/lib/hooks';
 import { SignUpFormData } from '@/lib/schemas';
 import { useT } from '@/lib/i18n/lang-context';
+import { suggestEmail } from '@/lib/email-typos';
 
 const E164_PHONE_REGEX = /^\+[1-9]\d{1,14}$/;
 const ISO_COUNTRY_REGEX = /^[A-Z]{2}$/;
@@ -95,6 +96,9 @@ export function SignupForm({
   };
 
   const countryValue = watch('country');
+  // "sakerdev13@gamil.com" is a valid address nobody reads: the code mail
+  // is lost and verification fails later. Offer the fix at the field.
+  const emailSuggestion = suggestEmail(useWatch({ control, name: 'email' }) ?? '');
 
   return (
     <form
@@ -144,6 +148,20 @@ export function SignupForm({
           />
           {errors.email && (
             <p className="text-sm text-destructive">{errors.email.message}</p>
+          )}
+          {emailSuggestion && (
+            <p className="flex flex-wrap items-center gap-x-2 text-sm" role="status">
+              <span>{t('authPages.common.didYouMean', { email: emailSuggestion })}</span>
+              <button
+                type="button"
+                className="font-medium underline underline-offset-4"
+                onClick={() =>
+                  setValue('email', emailSuggestion, { shouldValidate: true, shouldDirty: true })
+                }
+              >
+                {t('authPages.common.useSuggestion')}
+              </button>
+            </p>
           )}
         </Field>
 

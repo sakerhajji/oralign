@@ -49,8 +49,7 @@ const precisionCopy: Record<
           "Un praticien certifié ORALIGN vous accompagne à chaque phase du traitement.",
       },
     ],
-    imageAlt:
-      "Aligneur transparent ORALIGN éclairé par la lumière naturelle",
+    imageAlt: "Deux étuis ORALIGN, un noir et un jaune, au-dessus d’un socle blanc",
   },
   en: {
     title: "Your smile, aligned with precision.",
@@ -78,7 +77,7 @@ const precisionCopy: Record<
           "An ORALIGN-certified practitioner supports you throughout treatment.",
       },
     ],
-    imageAlt: "Clear ORALIGN aligner illuminated by natural light",
+    imageAlt: "Two ORALIGN cases, one black and one yellow, above a white block",
   },
   ar: {
     title: "ابتسامتك، مصفوفة بدقّة.",
@@ -106,7 +105,7 @@ const precisionCopy: Record<
           "يرافقك طبيب معتمد من ORALIGN خلال كل مرحلة من مراحل العلاج.",
       },
     ],
-    imageAlt: "تقويم ORALIGN شفاف مضاء بضوء طبيعي",
+    imageAlt: "علبتان من ORALIGN، سوداء وصفراء، فوق قاعدة بيضاء",
   },
 };
 
@@ -122,14 +121,19 @@ export function PrecisionSection() {
       className="relative isolate min-h-[calc(100svh-4rem)] overflow-hidden bg-[var(--sc-black)] text-[var(--sc-white)] sm:min-h-[calc(100svh-4.5rem)] lg:min-h-[calc(100svh-5rem)]"
     >
       <div className="relative hidden min-h-[calc(100svh-5rem)] lg:block">
-        <Image
-          src="/showcase/oralign-aligner-precision.webp"
-          alt={copy.imageAlt}
-          fill
-          quality={85}
-          sizes="100vw"
-          className="object-cover object-[60%_42%]"
-        />
+        {/* Square photo: shown whole in a centred square between the two
+            text columns, its sides fading into the black (cover would blow
+            the cases up past the screen). */}
+        <div className="absolute inset-y-0 left-1/2 aspect-square h-full -translate-x-1/2 [mask-image:linear-gradient(90deg,transparent,#000_24%,#000_76%,transparent)]">
+          <Image
+            src="/showcase/oralign-cases-duo.497e7855.webp"
+            alt={copy.imageAlt}
+            fill
+            quality={85}
+            sizes="(min-width: 1024px) 60vw, 100vw"
+            className="object-cover object-center"
+          />
+        </div>
         <div
           aria-hidden="true"
           className="absolute inset-0 bg-[linear-gradient(90deg,rgba(10,10,10,0.94)_0%,rgba(10,10,10,0.54)_32%,rgba(10,10,10,0.18)_53%,rgba(10,10,10,0.62)_74%,rgba(10,10,10,0.94)_100%)]"
@@ -178,7 +182,7 @@ export function PrecisionSection() {
 
         <div className="relative aspect-[16/10] overflow-hidden sm:aspect-[16/10]">
           <Image
-            src="/showcase/oralign-aligner-precision.webp"
+            src="/showcase/oralign-cases-duo.497e7855.webp"
             alt={copy.imageAlt}
             fill
             quality={85}

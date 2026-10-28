@@ -2,6 +2,7 @@
 
 import { Suspense } from 'react';
 import { LoginForm } from '@/components/login-form';
+import { AuthFilmPanel } from '@/components/auth-film-panel';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useT } from '@/lib/i18n/lang-context';
@@ -30,16 +31,7 @@ function LoginContent() {
           </div>
         </div>
       </div>
-      <div className="relative hidden bg-muted lg:block">
-        <Image
-          src="/loginPicture.d132e5d4.webp"
-          alt={t('authPages.common.clinicImageAlt')}
-          fill
-          sizes="50vw"
-          unoptimized
-          className="absolute inset-0 h-full w-full object-cover dark:brightness-[0.2] dark:grayscale"
-        />
-      </div>
+      <AuthFilmPanel />
     </div>
   );
 }

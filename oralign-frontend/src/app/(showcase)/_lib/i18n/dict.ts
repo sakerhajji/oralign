@@ -501,9 +501,9 @@ export const dict = {
       },
     ] as T[],
     imageAlt: {
-      fr: "Sourire aligné après traitement ORALIGN",
-      en: "Aligned smile after ORALIGN treatment",
-      ar: "ابتسامة مصطفة بعد علاج ORALIGN",
+      fr: "Deux étuis ORALIGN, un noir et un jaune, au-dessus d’un socle blanc",
+      en: "Two ORALIGN cases, one black and one yellow, above a white block",
+      ar: "علبتان من ORALIGN، سوداء وصفراء، فوق قاعدة بيضاء",
     } as T,
     imageCaption: {
       fr: "Un plan numérique, des aligneurs fabriqués sur mesure, un suivi régulier.",

@@ -35,10 +35,15 @@ export const authDomainDict = {
       signUpLink: { en: 'Sign up', fr: 'Créer un compte' } as T,
     },
 
-    // login/page.tsx + signup/page.tsx shared imagery
+    // login/page.tsx + signup/page.tsx: logo + the brand film panel
     common: {
       logoAlt: { en: 'Oralign Logo', fr: 'Logo Oralign' } as T,
-      clinicImageAlt: { en: 'Dental clinic', fr: 'Cabinet dentaire' } as T,
+      filmAlt: {
+        en: 'The black ORALIGN case opens above the yellow one to reveal the aligner',
+        fr: 'L’étui noir ORALIGN s’ouvre au-dessus de l’étui jaune et dévoile l’aligneur',
+      } as T,
+      playFilm: { en: 'Play the video', fr: 'Lire la vidéo' } as T,
+      pauseFilm: { en: 'Pause the video', fr: 'Mettre la vidéo en pause' } as T,
     },
 
     // signup-form.tsx

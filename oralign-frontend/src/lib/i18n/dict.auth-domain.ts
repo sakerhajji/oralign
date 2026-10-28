@@ -41,6 +41,15 @@ export const authDomainDict = {
       // Email typo hint (lib/email-typos.ts), signup + verify-email.
       didYouMean: { en: 'Did you mean {email}?', fr: 'Vouliez-vous dire {email} ?' } as T,
       useSuggestion: { en: 'Use it', fr: 'Corriger' } as T,
+      // SpamHint (components/auth/spam-hint.tsx): verify-email + forgot-password.
+      spamTitle: {
+        en: 'Can’t find the email? Check your spam folder.',
+        fr: 'Vous ne trouvez pas l’e-mail ? Vérifiez vos spams.',
+      } as T,
+      spamBody: {
+        en: 'It can take a minute to arrive, and it may be in your Spam (Junk) or Promotions folder. If it is there, mark it as “Not spam” so our next emails reach your inbox.',
+        fr: 'Il peut mettre une minute à arriver et se trouver dans le dossier Spam (Courrier indésirable) ou Promotions. Si c’est le cas, marquez-le comme « Non spam » pour recevoir nos prochains e-mails dans votre boîte de réception.',
+      } as T,
       filmAlt: {
         en: 'The black ORALIGN case opens above the yellow one to reveal the aligner',
         fr: 'L’étui noir ORALIGN s’ouvre au-dessus de l’étui jaune et dévoile l’aligneur',
@@ -136,15 +145,6 @@ export const authDomainDict = {
       descAfter: {
         en: '. Enter it below to continue.',
         fr: '. Saisissez-le ci-dessous pour continuer.',
-      } as T,
-      // Shown above the code field: the code mail often lands in spam.
-      spamTitle: {
-        en: 'Can’t find the email? Check your spam folder.',
-        fr: 'Vous ne trouvez pas l’e-mail ? Vérifiez vos spams.',
-      } as T,
-      spamBody: {
-        en: 'It can take a minute to arrive, and it may be in your Spam (Junk) or Promotions folder. If it is there, mark it as “Not spam” so our next emails reach your inbox.',
-        fr: 'Il peut mettre une minute à arriver et se trouver dans le dossier Spam (Courrier indésirable) ou Promotions. Si c’est le cas, marquez-le comme « Non spam » pour recevoir nos prochains e-mails dans votre boîte de réception.',
       } as T,
       changeEmail: { en: 'Wrong address? Change it', fr: 'Pas la bonne adresse ? Modifiez-la' } as T,
       notFound: {

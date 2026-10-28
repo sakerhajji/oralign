@@ -8,8 +8,7 @@ import { useRouter } from 'next/navigation';
 import { toast } from '@/lib/toast';
 import { useQueryClient } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
-import { AlertCircle, MailIcon, MailWarning, RefreshCwIcon } from 'lucide-react';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { AlertCircle, MailIcon, RefreshCwIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -27,6 +26,7 @@ import { useAuth } from '@/lib/providers';
 import { userKeys } from '@/lib/hooks/use-users';
 import { useT } from '@/lib/i18n/lang-context';
 import { suggestEmail } from '@/lib/email-typos';
+import { SpamHint } from '@/components/auth/spam-hint';
 
 const RESEND_COOLDOWN_SECONDS = 60;
 
@@ -172,15 +172,9 @@ export function VerifyEmailCard() {
         </CardHeader>
 
         <CardContent className="space-y-5">
-          {/* The code mail often lands in spam (Gmail especially): say so
-              before people give up or ask for code after code. */}
-          <Alert className="border-amber-300 bg-amber-50 text-amber-950 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
-            <MailWarning className="size-4 !text-amber-600 dark:!text-amber-400" aria-hidden="true" />
-            <AlertTitle className="leading-snug">{t('authPages.verify.spamTitle')}</AlertTitle>
-            <AlertDescription className="text-amber-900/90 dark:text-amber-100/80">
-              <p>{t('authPages.verify.spamBody')}</p>
-            </AlertDescription>
-          </Alert>
+          {/* The code mail often lands in spam: say so before people give
+              up or ask for code after code. */}
+          <SpamHint />
 
           <Form onSubmit={onSubmit} className="space-y-4">
             {/* Hidden unless there is no session or the address needs fixing */}

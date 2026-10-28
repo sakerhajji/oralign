@@ -12,6 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useForgotPassword } from '@/lib/hooks';
 import { ForgotPasswordFormData } from '@/lib/schemas';
 import { useT } from '@/lib/i18n/lang-context';
+import { SpamHint } from '@/components/auth/spam-hint';
 
 type Translate = (path: string, vars?: Record<string, string | number>) => string;
 
@@ -48,7 +49,9 @@ export default function ForgotPasswordPage() {
               {t('authPages.forgot.successDesc')}
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-5">
+            {/* The reset link often lands in spam: say so while they wait. */}
+            <SpamHint />
             <Link href="/login">
               <Button className="w-full">{t('authPages.forgot.backToLogin')}</Button>
             </Link>

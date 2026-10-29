@@ -52,6 +52,16 @@ def line(codec: str, label: str) -> str:
     return f"{label} {f['size_kb']:>4} KB (VMAF {f['vmaf'][0]}, p1 {f['vmaf'][1]})"
 
 
+# phone.sh records the source (ffprobe key=value lines).
+src = dict(l.split("=", 1) for l in (out / "source.txt").read_text().split() if "=" in l)
+num, den = src["r_frame_rate"].split("/")
+codec_label = {"h264": "H.264", "hevc": "HEVC", "av1": "AV1"}.get(src["codec_name"], src["codec_name"])
+source = (
+    f"{src['width']}x{src['height']} {codec_label}, "
+    f"{round(int(num) / int(den))} fps, {float(src['duration']):.1f} s"
+)
+
+
 ts = f'''/**
  * The phone film's files — produced by scripts/hero-film/phone.sh and
  * install_phone.py (see the README). Filenames carry a content hash because
@@ -59,8 +69,9 @@ ts = f'''/**
  * regenerate this file rather than overwrite a file in place.
  *
  * Shown instead of the brand film on phones held upright (PHONE_MEDIA in
- * hero-film.tsx). Source: 720x1280 H.264, 24 fps, 7.0 s, no audio; same
- * loop dissolve, encoders and VMAF gate as the brand film, no reframing.
+ * hero-film.tsx); same loop dissolve, encoders and VMAF gate as the brand
+ * film, no reframing.
+ * Source: {source}, no audio -> {rendition['width']}x{rendition['height']}.
  *
  *   {rendition['width']}x{rendition['height']}   {line('av1', 'AV1')}   {line('h264', 'H.264')}
  */

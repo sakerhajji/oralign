@@ -41,13 +41,15 @@ another scratch directory holding that film as `src/source.mp4`:
 
 ```sh
 docker run --rm --entrypoint sh -v "$PWD:/w" -v "$APP/scripts/hero-film:/scripts:ro" \
-  -w /w linuxserver/ffmpeg:latest -c 'sh /scripts/phone.sh 33 25'
+  -w /w linuxserver/ffmpeg:latest -c 'sh /scripts/phone.sh 31 23'
 python "$APP"/scripts/hero-film/install_phone.py . "$APP"
 ```
 
 Same loop dissolve, encoders and gate, no reframing (the source is already
-9:16); it writes `hero-film-phone-manifest.ts`. The current film (720x1280,
-7.0 s) passes at AV1 CRF 33 / H.264 CRF 25.
+9:16); a larger source is scaled to 720x1280 (`PHONE_SIZE`), and it writes
+`hero-film-phone-manifest.ts`, removing the previous phone film's files. The
+current film (1080x1920, 22.1 s) passes at AV1 CRF 31 / H.264 CRF 23 — at
+full 1080x1920 the H.264 file would be 3.5 MB instead of 2.0 MB.
 
 ## What each step does, and why
 

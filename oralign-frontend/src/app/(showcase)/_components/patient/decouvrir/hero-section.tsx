@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowDown, MapPin, Play } from "lucide-react";
+import { ArrowDown, MapPin, Stethoscope } from "lucide-react";
 import type { Lang } from "../../../_lib/i18n/dict";
 import { useLocalizedHref, useShowcaseLang } from "../../../_lib/i18n/lang-context";
 import { HeroFilm } from "./hero-film";
@@ -14,8 +14,8 @@ const heroCopy: Record<
     origin: string;
     practitioner: string;
     practitionerHint: string;
-    video: string;
-    videoHint: string;
+    practitionerSpace: string;
+    practitionerSpaceHint: string;
     scroll: string;
     imageAlt: string;
     playFilm: string;
@@ -29,8 +29,8 @@ const heroCopy: Record<
     origin: "Conçus en Allemagne. Fabriqués en Tunisie.",
     practitioner: "Trouver un praticien",
     practitionerHint: "près de chez moi",
-    video: "Découvrir ORALIGN",
-    videoHint: "en vidéo",
+    practitionerSpace: "Espace praticien",
+    practitionerSpaceHint: "professionnels ORALIGN",
     scroll: "Explorer ORALIGN",
     imageAlt: "Le coffret ORALIGN s’ouvre et dévoile l’étui et les aligneurs transparents",
     playFilm: "Lire la vidéo",
@@ -43,8 +43,8 @@ const heroCopy: Record<
     origin: "Designed in Germany. Manufactured in Tunisia.",
     practitioner: "Find a practitioner",
     practitionerHint: "near me",
-    video: "Discover ORALIGN",
-    videoHint: "on video",
+    practitionerSpace: "Practitioner space",
+    practitionerSpaceHint: "for ORALIGN professionals",
     scroll: "Explore ORALIGN",
     imageAlt: "The ORALIGN box opens to reveal the case and the clear aligners",
     playFilm: "Play the video",
@@ -57,14 +57,68 @@ const heroCopy: Record<
     origin: "تصميم ألماني. صناعة تونسية.",
     practitioner: "ابحث عن طبيب",
     practitionerHint: "بالقرب مني",
-    video: "اكتشف ORALIGN",
-    videoHint: "بالفيديو",
+    practitionerSpace: "فضاء الطبيب",
+    practitionerSpaceHint: "لمختصي ORALIGN",
     scroll: "اكتشف ORALIGN",
     imageAlt: "صندوق ORALIGN ينفتح ليكشف عن العلبة والمصففات الشفافة",
     playFilm: "تشغيل الفيديو",
     pauseFilm: "إيقاف الفيديو مؤقتاً",
   },
 };
+
+type HeroCopy = (typeof heroCopy)[Lang];
+
+function HeroActions({
+  copy,
+  finderHref,
+  practitionerHref,
+}: {
+  copy: HeroCopy;
+  finderHref: string;
+  practitionerHref: string;
+}) {
+  return (
+    <div className="mx-auto grid w-full max-w-[560px] gap-3 sm:grid-cols-2">
+      <Link
+        href={finderHref}
+        className="group inline-flex min-h-14 items-center justify-between gap-4 bg-[var(--sc-white)] px-5 py-3 text-[var(--sc-black)] no-underline shadow-[0_18px_40px_rgba(0,0,0,0.28)] transition-colors hover:bg-white"
+      >
+        <span className="flex min-w-0 items-center gap-3">
+          <MapPin className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span className="text-[0.72rem] font-medium leading-tight">
+            <span className="block">{copy.practitioner}</span>
+            <span className="block text-[0.66rem] text-[var(--sc-text-mid)]">
+              {copy.practitionerHint}
+            </span>
+          </span>
+        </span>
+        <span
+          aria-hidden="true"
+          className="h-px w-5 shrink-0 bg-current transition-transform group-hover:translate-x-1"
+        />
+      </Link>
+
+      <Link
+        href={practitionerHref}
+        className="group inline-flex min-h-14 items-center justify-between gap-4 bg-[var(--sc-sun)] px-5 py-3 text-[var(--sc-black)] no-underline shadow-[0_18px_40px_rgba(0,0,0,0.28)] transition-colors hover:bg-[var(--sc-sun-2)]"
+      >
+        <span className="flex min-w-0 items-center gap-3">
+          <Stethoscope className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span className="text-[0.72rem] font-medium leading-tight">
+            <span className="block">{copy.practitionerSpace}</span>
+            <span className="block text-[0.66rem] text-[rgba(25,25,25,0.62)]">
+              {copy.practitionerSpaceHint}
+            </span>
+          </span>
+        </span>
+        <span
+          aria-hidden="true"
+          className="h-px w-5 shrink-0 bg-current transition-transform group-hover:translate-x-1"
+        />
+      </Link>
+    </div>
+  );
+}
 
 export function OralignHeroSection() {
   const { lang } = useShowcaseLang();
@@ -78,69 +132,39 @@ export function OralignHeroSection() {
       aria-labelledby="oralign-title"
       className="relative isolate bg-[var(--sc-black)] text-[var(--sc-white)]"
     >
-      {/* The film opens the page full screen, with no text over it — only
-          the two calls to action. The floor stays below a landscape phone's
-          height (~310 px under the header), so the film, its buttons and its
-          pause control fit that screen too. */}
+      {/* The film opens the page full screen with no marketing copy over it.
+          Actions overlay its lower edge from tablet upward and move below
+          the film on phones, where preserving the product frame matters more. */}
       <div className="relative h-[calc(100svh-4rem)] min-h-[280px] overflow-hidden sm:h-[calc(100svh-4.5rem)] lg:h-[calc(100svh-5rem)] lg:min-h-[560px]">
         <HeroFilm labels={{ alt: copy.imageAlt, play: copy.playFilm, pause: copy.pauseFilm }} />
         {/* Darkens the lower part for the buttons, and ends in the section's
             black so the copy beneath reads as the same block, not a new band. */}
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute inset-x-0 bottom-0 h-[45%] lg:h-2/5"
+          className="pointer-events-none absolute inset-x-0 bottom-0 hidden h-[45%] sm:block lg:h-2/5"
           style={{
             backgroundImage:
               "linear-gradient(0deg, rgba(25,25,25,1) 0%, rgba(25,25,25,0.62) 38%, rgba(25,25,25,0) 100%)",
           }}
         />
-        {/* Centred, in the lower third: the film frames its subject in the
-            middle, so the buttons sit under the product, not over it (on
-            desktop, on the dark floor below the boxes). The bottom padding
-            keeps them clear of the pause control (bottom-4, 40 px) on phones. */}
-        <div className="absolute inset-x-0 bottom-0 z-10 px-5 pb-[4.5rem] sm:px-10 sm:pb-24 lg:pb-20">
-          <div className="mx-auto grid w-full max-w-[560px] gap-3 sm:grid-cols-2">
-            <Link
-              href={localizedHref("/trouver-un-praticien")}
-              className="group inline-flex min-h-14 items-center justify-between gap-4 bg-[var(--sc-white)] px-5 py-3 text-[var(--sc-black)] no-underline shadow-[0_18px_40px_rgba(0,0,0,0.28)] transition-colors hover:bg-white"
-            >
-              <span className="flex min-w-0 items-center gap-3">
-                <MapPin className="h-4 w-4 shrink-0" aria-hidden="true" />
-                <span className="text-[0.72rem] font-medium leading-tight">
-                  <span className="block">{copy.practitioner}</span>
-                  <span className="block text-[0.66rem] text-[var(--sc-text-mid)]">
-                    {copy.practitionerHint}
-                  </span>
-                </span>
-              </span>
-              <span
-                aria-hidden="true"
-                className="h-px w-5 shrink-0 bg-current transition-transform group-hover:translate-x-1"
-              />
-            </Link>
-
-            {/* The home page's video is the "how to wear your aligners"
-                section — #parcours does not exist on this page. */}
-            <Link
-              href="#wear-aligners-video"
-              className="group inline-flex min-h-14 items-center justify-between gap-4 bg-[var(--sc-sun)] px-5 py-3 text-[var(--sc-black)] no-underline shadow-[0_18px_40px_rgba(0,0,0,0.28)] transition-colors hover:bg-[var(--sc-sun-2)]"
-            >
-              <span className="flex min-w-0 items-center gap-3">
-                <Play className="h-4 w-4 shrink-0 fill-current" aria-hidden="true" />
-                <span className="text-[0.72rem] font-medium leading-tight">
-                  <span className="block">{copy.video}</span>
-                  <span className="block text-[0.66rem] text-[rgba(25,25,25,0.62)]">
-                    {copy.videoHint}
-                  </span>
-                </span>
-              </span>
-              <span
-                aria-hidden="true"
-                className="h-px w-5 shrink-0 bg-current transition-transform group-hover:translate-x-1"
-              />
-            </Link>
-          </div>
+        {/* Overlay the actions from tablet upward, where the film has enough
+            horizontal room. Phones get the same actions immediately below
+            the film so neither the product nor the pause control is covered. */}
+        <div className="absolute inset-x-0 bottom-0 z-10 hidden px-10 pb-24 sm:block lg:pb-20">
+          <HeroActions
+            copy={copy}
+            finderHref={localizedHref("/trouver-un-praticien")}
+            practitionerHref={localizedHref("/praticiens")}
+          />
         </div>
+      </div>
+
+      <div className="px-5 py-5 sm:hidden">
+        <HeroActions
+          copy={copy}
+          finderHref={localizedHref("/trouver-un-praticien")}
+          practitionerHref={localizedHref("/praticiens")}
+        />
       </div>
 
       {/* Then the copy, always visible (not on hover: phones have none, and

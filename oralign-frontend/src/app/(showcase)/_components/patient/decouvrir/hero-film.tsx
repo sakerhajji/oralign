@@ -9,7 +9,6 @@ import {
   type FilmRendition,
   type FilmShape,
 } from "./hero-film-manifest";
-import { PHONE_FILM } from "./hero-film-phone-manifest";
 
 /**
  * The brand film behind the home hero.
@@ -27,8 +26,8 @@ import { PHONE_FILM } from "./hero-film-phone-manifest";
  *    narrowest one at least as wide as the measured box, re-chosen when a
  *    resize changes it — see shapeFor for why that also makes the fade-in
  *    invisible. Nothing downloads until the box is near the viewport.
- *  - Phones held upright play a film of their own, made 9:16 (PHONE_FILM),
- *    with its own poster — see PHONE_MEDIA.
+ *  - Every viewport plays the same brand film. Responsive renditions only
+ *    change the crop and resolution, never the content or timeline.
  *  - Two codecs per rendition, AV1 (half the bytes) and H.264: whichever
  *    the device decodes in HARDWARE, AV1 first — a looping film decoded in
  *    software drains the battery of phones without an AV1 decoder. With no
@@ -85,25 +84,8 @@ function shapeFor(box: DOMRect): FilmShape {
   );
 }
 
-/**
- * Where the phone film replaces the brand film. One media query decides for
- * the server-rendered poster (a <picture> source) AND for the video, so the
- * frame the video fades in on is always the poster already on screen — the
- * box-shape rule above runs only after hydration and could not choose the
- * poster. By screen, not box: on an iPhone, Safari's toolbars leave a box
- * wider than 9:16, which shapeFor would hand the 4:5 tablet cut.
- */
-const PHONE_MEDIA = "(max-width: 639.98px) and (orientation: portrait)";
-
-/** A cut of the brand film, or the phone film. */
-type Cut = FilmShape | "phone";
-
-function cutFor(box: DOMRect): Cut {
-  return window.matchMedia(PHONE_MEDIA).matches ? "phone" : shapeFor(box);
-}
-
-function renditionFor(cut: Cut): FilmRendition {
-  return cut === "phone" ? PHONE_FILM.rendition : HERO_FILM.renditions[cut];
+function renditionFor(shape: FilmShape): FilmRendition {
+  return HERO_FILM.renditions[shape];
 }
 
 /** Data-saving or very slow connection: never spend the visitor's bytes uninvited. */
@@ -165,9 +147,7 @@ export function HeroFilm({ labels }: { labels: Labels }) {
   const [manual, setManual] = useState(false);
   const inView = useRef(true);
   const userPaused = useRef(false);
-  const shape = useRef<Cut | null>(null);
-  /** The next source is the OTHER film: start it from its first frame. */
-  const restart = useRef(false);
+  const shape = useRef<FilmShape | null>(null);
 
   /**
    * Pick the rendition + codec for the current box and load it. `optIn`:
@@ -177,20 +157,13 @@ export function HeroFilm({ labels }: { labels: Labels }) {
   const load = useCallback(async (optIn = false) => {
     const box = boxRef.current;
     if (!box) return;
-    const nextShape = cutFor(box.getBoundingClientRect());
+    const nextShape = shapeFor(box.getBoundingClientRect());
     if (nextShape === shape.current) return;
     const rendition = renditionFor(nextShape);
     const codec = (await pickCodec(rendition)) ?? (optIn ? "h264" : null);
     if (!codec) {
       setStatus("blocked");
       return;
-    }
-    // A rotation that swaps phone film and brand film: the <picture> has
-    // already switched posters, so hide the video until the other film plays
-    // and fades in on it, from its start — its timeline is unrelated.
-    if (shape.current !== null && (shape.current === "phone") !== (nextShape === "phone")) {
-      restart.current = true;
-      setShown(false);
     }
     shape.current = nextShape;
     setSrc(rendition[codec].src);
@@ -252,8 +225,7 @@ export function HeroFilm({ labels }: { labels: Labels }) {
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !src) return;
-    const resumeAt = restart.current ? 0 : video.currentTime;
-    restart.current = false;
+    const resumeAt = video.currentTime;
     video.muted = true;
     video.defaultMuted = true;
     video.setAttribute("muted", "");
@@ -354,14 +326,9 @@ export function HeroFilm({ labels }: { labels: Labels }) {
   const showControl = src !== null || manual;
   const playing = status === "playing";
 
-  // The poster is the LCP element: preload each one only where it shows
-  // (React hoists these into <head>, like next/image's `preload`).
-  preload(PHONE_FILM.poster, { as: "image", fetchPriority: "high", media: PHONE_MEDIA });
-  preload(HERO_FILM.poster, {
-    as: "image",
-    fetchPriority: "high",
-    media: `not all and ${PHONE_MEDIA}`,
-  });
+  // The desktop brand-film poster is the LCP element on every viewport
+  // (React hoists this into <head>, like next/image's `preload`).
+  preload(HERO_FILM.poster, { as: "image", fetchPriority: "high" });
 
   return (
     <div ref={boxRef} className="absolute inset-0">
@@ -370,16 +337,13 @@ export function HeroFilm({ labels }: { labels: Labels }) {
           box narrower than 16:9 and needs all its pixels on tablets, and a
           static file is cached immutable — no optimizer encode after a
           deploy, no revalidation on return visits. */}
-      <picture>
-        <source media={PHONE_MEDIA} srcSet={PHONE_FILM.poster} />
-        <img
-          src={HERO_FILM.poster}
-          alt={labels.alt}
-          fetchPriority="high"
-          className="absolute inset-0 h-full w-full object-cover"
-          style={{ objectPosition: HERO_FILM.posterPosition }}
-        />
-      </picture>
+      <img
+        src={HERO_FILM.poster}
+        alt={labels.alt}
+        fetchPriority="high"
+        className="absolute inset-0 h-full w-full object-cover"
+        style={{ objectPosition: HERO_FILM.posterPosition }}
+      />
       <video
         ref={videoRef}
         aria-hidden="true"

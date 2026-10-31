@@ -73,7 +73,10 @@ const EXECUTABLE_SIGNATURES: { bytes: number[]; label: string }[] = [
   { bytes: [0xcf, 0xfa, 0xed, 0xfe], label: 'Mach-O executable' },
   { bytes: [0xca, 0xfe, 0xba, 0xbe], label: 'Java class / Mach-O fat binary' },
   { bytes: [0x23, 0x21], label: 'script with shebang (#!)' }, // #!/bin/sh …
-  { bytes: [0xd0, 0xcf, 0x11, 0xe0], label: 'OLE compound (legacy Office/exe)' },
+  {
+    bytes: [0xd0, 0xcf, 0x11, 0xe0],
+    label: 'OLE compound (legacy Office/exe)',
+  },
 ];
 
 // ── Active-content text markers ─────────────────────────────────────────
@@ -133,39 +136,153 @@ const SCRIPT_MARKERS = [
 // policy is a denylist: any file is accepted unless it is dangerous).
 const CODE_EXTENSIONS: string[] = [
   // native executables / libraries
-  '.exe', '.dll', '.so', '.dylib', '.bin', '.msi', '.msp', '.com', '.scr',
-  '.cpl', '.sys', '.drv', '.ocx', '.efi', '.o',
+  '.exe',
+  '.dll',
+  '.so',
+  '.dylib',
+  '.bin',
+  '.msi',
+  '.msp',
+  '.com',
+  '.scr',
+  '.cpl',
+  '.sys',
+  '.drv',
+  '.ocx',
+  '.efi',
+  '.o',
   // installers / packages
-  '.apk', '.app', '.dmg', '.pkg', '.deb', '.rpm', '.appimage', '.msix',
+  '.apk',
+  '.app',
+  '.dmg',
+  '.pkg',
+  '.deb',
+  '.rpm',
+  '.appimage',
+  '.msix',
   // shell / windows scripting
-  '.sh', '.bash', '.zsh', '.ksh', '.csh', '.bat', '.cmd', '.ps1', '.psm1',
-  '.psd1', '.vbs', '.vbe', '.js', '.mjs', '.cjs', '.jse', '.wsf', '.wsh',
-  '.hta', '.ahk', '.ps2', '.msh', '.msh1', '.msh2',
+  '.sh',
+  '.bash',
+  '.zsh',
+  '.ksh',
+  '.csh',
+  '.bat',
+  '.cmd',
+  '.ps1',
+  '.psm1',
+  '.psd1',
+  '.vbs',
+  '.vbe',
+  '.js',
+  '.mjs',
+  '.cjs',
+  '.jse',
+  '.wsf',
+  '.wsh',
+  '.hta',
+  '.ahk',
+  '.ps2',
+  '.msh',
+  '.msh1',
+  '.msh2',
   // interpreted languages
-  '.py', '.pyc', '.pyo', '.pyw', '.rb', '.pl', '.pm', '.php', '.php3',
-  '.php4', '.php5', '.php7', '.phtml', '.phar', '.lua', '.tcl', '.groovy',
+  '.py',
+  '.pyc',
+  '.pyo',
+  '.pyw',
+  '.rb',
+  '.pl',
+  '.pm',
+  '.php',
+  '.php3',
+  '.php4',
+  '.php5',
+  '.php7',
+  '.phtml',
+  '.phar',
+  '.lua',
+  '.tcl',
+  '.groovy',
   // server pages / web-executable
-  '.asp', '.aspx', '.ashx', '.asmx', '.jsp', '.jspx', '.cgi', '.htaccess',
-  '.cshtml', '.vbhtml',
+  '.asp',
+  '.aspx',
+  '.ashx',
+  '.asmx',
+  '.jsp',
+  '.jspx',
+  '.cgi',
+  '.htaccess',
+  '.cshtml',
+  '.vbhtml',
   // markup with active content
-  '.html', '.htm', '.xhtml', '.shtml', '.svg', '.svgz', '.mht', '.mhtml',
-  '.url', '.xml', '.xsl', '.xslt',
+  '.html',
+  '.htm',
+  '.xhtml',
+  '.shtml',
+  '.svg',
+  '.svgz',
+  '.mht',
+  '.mhtml',
+  '.url',
+  '.xml',
+  '.xsl',
+  '.xslt',
   // jvm / android / .net
-  '.jar', '.class', '.dex', '.war', '.ear',
+  '.jar',
+  '.class',
+  '.dex',
+  '.war',
+  '.ear',
   // macro-enabled office
-  '.docm', '.xlsm', '.pptm', '.dotm', '.xltm', '.potm', '.xlam', '.ppam',
-  '.sldm', '.xll',
+  '.docm',
+  '.xlsm',
+  '.pptm',
+  '.dotm',
+  '.xltm',
+  '.potm',
+  '.xlam',
+  '.ppam',
+  '.sldm',
+  '.xll',
   // windows shortcuts / registry / scriptlets / help
-  '.lnk', '.reg', '.scf', '.inf', '.sct', '.wsc', '.job', '.msc', '.gadget',
-  '.chm', '.pif', '.application', '.appref-ms',
+  '.lnk',
+  '.reg',
+  '.scf',
+  '.inf',
+  '.sct',
+  '.wsc',
+  '.job',
+  '.msc',
+  '.gadget',
+  '.chm',
+  '.pif',
+  '.application',
+  '.appref-ms',
 ];
 
 // Nested archives — dangerous ONLY as a ZIP entry (they hide payloads and
 // invite unzip recursion). A top-level `.zip` is fine (it gets deep-scanned)
 // and other top-level archives are inert opaque blobs (never extracted).
 const NESTED_ARCHIVE_EXTENSIONS: string[] = [
-  '.zip', '.rar', '.7z', '.gz', '.bz2', '.tar', '.tgz', '.tbz', '.xz', '.z',
-  '.cab', '.iso', '.arj', '.lzh', '.ace', '.cpio', '.lz', '.lz4', '.zst',
+  '.zip',
+  '.rar',
+  '.7z',
+  '.gz',
+  '.bz2',
+  '.tar',
+  '.tgz',
+  '.tbz',
+  '.xz',
+  '.z',
+  '.cab',
+  '.iso',
+  '.arj',
+  '.lzh',
+  '.ace',
+  '.cpio',
+  '.lz',
+  '.lz4',
+  '.zst',
 ];
 
 // Top-level upload denylist: code/scripts/executables only (archives allowed).
@@ -230,7 +347,10 @@ function hasExecutableSignature(buf: Buffer): string | null {
 }
 
 function hasScriptMarker(buf: Buffer): string | null {
-  const slice = buf.subarray(0, PREFIX_SCAN_BYTES).toString('latin1').toLowerCase();
+  const slice = buf
+    .subarray(0, PREFIX_SCAN_BYTES)
+    .toString('latin1')
+    .toLowerCase();
   for (const marker of SCRIPT_MARKERS) {
     if (slice.includes(marker)) return marker;
   }
@@ -257,6 +377,32 @@ function looksLikeText(buf: Buffer): boolean {
     }
   }
   return printable / n >= 0.95;
+}
+
+/**
+ * Binary STL has a fixed envelope: an arbitrary 80-byte header, a uint32
+ * triangle count, then exactly 50 bytes per triangle (plus at most four pad
+ * bytes used by a few scanners). The header and triangle records are binary
+ * data, so decoding them as Latin-1 and searching for source-code tokens can
+ * produce random false positives such as `<%@`.
+ */
+function isBinaryStl(buf: Buffer, totalBytes: number): boolean {
+  if (buf.length < 84) return false;
+
+  const triangleCount = buf.readUInt32LE(80);
+  const expectedBytes = 84 + triangleCount * 50;
+  return totalBytes >= expectedBytes && totalBytes - expectedBytes <= 4;
+}
+
+/** Keep the upload gate aligned with the async STL processor's ASCII probe. */
+function isAsciiStl(buf: Buffer): boolean {
+  const head = buf.subarray(0, Math.min(buf.length, 4 * 1024));
+  const text = head.toString('latin1').toLowerCase();
+  return (
+    text.trimStart().startsWith('solid') &&
+    text.includes('facet') &&
+    text.includes('vertex')
+  );
 }
 
 // Magic checks for the strongly-typed formats. Returns true when the
@@ -304,8 +450,17 @@ function magicMatchesExtension(buf: Buffer, ext: string): boolean {
 }
 
 const STRICT_MAGIC_EXTENSIONS = new Set([
-  '.jpg', '.jpeg', '.png', '.gif', '.webp', '.pdf', '.zip',
-  '.mp4', '.mov', '.avi', '.heic',
+  '.jpg',
+  '.jpeg',
+  '.png',
+  '.gif',
+  '.webp',
+  '.pdf',
+  '.zip',
+  '.mp4',
+  '.mov',
+  '.avi',
+  '.heic',
 ]);
 
 /**
@@ -318,6 +473,7 @@ const STRICT_MAGIC_EXTENSIONS = new Set([
 function judgePrefix(
   buf: Buffer,
   ext: string,
+  totalBytes: number,
 ): FileSecurityVerdict | 'zip' {
   // 1) Disguised executable / script — reject no matter the extension.
   const exe = hasExecutableSignature(buf);
@@ -344,7 +500,31 @@ function judgePrefix(
     return { safe: true };
   }
 
-  // 3) Loose formats (.dcm/.stl/.ply/.obj/…): no hard magic. Accept only
+  // 3) STL has no fixed magic, but binary STL has a strict byte envelope.
+  //    Validate that envelope before any text-marker scan: its arbitrary
+  //    binary header/geometry may naturally contain bytes that resemble a
+  //    script token. ASCII STL remains text-scanned below.
+  if (ext === '.stl') {
+    if (isBinaryStl(buf, totalBytes)) return { safe: true };
+
+    if (!isAsciiStl(buf)) {
+      const marker = hasScriptMarker(buf);
+      if (marker) {
+        return {
+          safe: false,
+          code: 'script',
+          reason: `File contains script/code ("${marker}") and cannot be uploaded.`,
+        };
+      }
+      return {
+        safe: false,
+        code: 'type_mismatch',
+        reason: 'File content is not a valid binary or ASCII STL model.',
+      };
+    }
+  }
+
+  // 4) Other loose formats (.dcm/.ply/.obj/…): no hard magic. Accept only
   //    if there's no active-script marker in the header. DICOM with the
   //    standard preamble (`DICM` @128) is trusted outright; a preamble-less
   //    `.dcm` that is plain TEXT is a disguised script (a real DICOM is
@@ -384,7 +564,7 @@ export async function scanUploadContent(
     return { safe: false, code: 'empty', reason: 'The file is empty.' };
   }
 
-  const verdict = judgePrefix(buf, extOf(file.originalname));
+  const verdict = judgePrefix(buf, extOf(file.originalname), buf.length);
   if (verdict === 'zip') return scanZipBuffer(buf);
   return verdict;
 }
@@ -418,7 +598,7 @@ export async function scanUploadFile(
     await fd.close();
   }
 
-  const verdict = judgePrefix(prefix, extOf(originalName));
+  const verdict = judgePrefix(prefix, extOf(originalName), stat.size);
   if (verdict !== 'zip') return verdict;
 
   return new Promise((resolve) => {

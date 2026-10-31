@@ -112,14 +112,16 @@ export class AuthService {
       role: user.role,
     });
 
-    // NOTE: the "review & approve" EMAIL to admins is intentionally sent
-    // LATER — when the dentist finishes onboarding (saves their clinic) and
-    // is genuinely ready for review — not here at sign-up where the profile
-    // is still empty. See DentistProfileService.setupClinic →
-    // NotificationEvents.DentistOnboardingCompleted. The bell above is the
-    // lightweight in-app "a new account registered" awareness ping.
+    // The notification listener also sends the best-effort admin email here.
+    // DentistProfileService emits DentistOnboardingCompleted later to sharpen
+    // the in-app item once the clinic profile is genuinely ready for review.
 
-    const authToken = this.generateTokens(user.id, user.email, user.role, user.tokenVersion);
+    const authToken = this.generateTokens(
+      user.id,
+      user.email,
+      user.role,
+      user.tokenVersion,
+    );
 
     return {
       id: user.id,
@@ -214,7 +216,12 @@ export class AuthService {
       },
     });
 
-    const authToken = this.generateTokens(user.id, user.email, user.role, user.tokenVersion);
+    const authToken = this.generateTokens(
+      user.id,
+      user.email,
+      user.role,
+      user.tokenVersion,
+    );
 
     return {
       id: user.id,
@@ -250,7 +257,12 @@ export class AuthService {
 
     if (user.isEmailVerified) {
       // Already verified — still return tokens so the client can complete the flow
-      const authToken = this.generateTokens(user.id, user.email, user.role, user.tokenVersion);
+      const authToken = this.generateTokens(
+        user.id,
+        user.email,
+        user.role,
+        user.tokenVersion,
+      );
       return {
         message: 'Email already verified',
         user: {

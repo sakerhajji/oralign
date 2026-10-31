@@ -3,7 +3,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useUsers, useDeletedUsers, useBulkDeleteUsers, useBulkRestoreUsers, useBulkUpdateStatus, useBulkPermanentlyDeleteUsers, useUpdateApproval } from '@/lib/hooks';
-import { UserRole, VerificationStatus } from '@/lib/types';
+import { VerificationStatus } from '@/lib/types';
 import type { User } from '@/lib/types';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -52,6 +52,7 @@ import { CreateUserDialog } from "@/components/users/user-dialogs";
 import { UserDetailSheet } from "@/components/users/user-detail-sheet";
 import { ClinicViewDialog } from "@/components/users/clinic-view-dialog";
 import { SearchFilters } from "@/components/users/search-filters";
+import { AdminUsersList, type UserRowAction } from '@/components/users/admin-users-list';
 import { format } from 'date-fns';
 import { fr as frLocale } from 'date-fns/locale';
 import { useT } from '@/lib/i18n/lang-context';
@@ -97,8 +98,8 @@ export function UsersPageContent() {
   }, [page, limit, filters]);
 
   // Queries and mutations
-  const activeUsersQuery = useUsers(apiParams);
-  const deletedUsersQuery = useDeletedUsers(apiParams);
+  const activeUsersQuery = useUsers(apiParams, { enabled: viewMode === 'active' });
+  const deletedUsersQuery = useDeletedUsers(apiParams, { enabled: viewMode === 'deleted' });
   const { data, isLoading, error, refetch } = viewMode === 'deleted' ? deletedUsersQuery : activeUsersQuery;
   const bulkDelete = useBulkDeleteUsers();
   const bulkRestore = useBulkRestoreUsers();
@@ -153,6 +154,17 @@ export function UsersPageContent() {
     setSelectedUsers(newSelected);
   };
 
+  const openUser = (userId: string, tab = 'profile') => {
+    setDetailInitialTab(tab);
+    setDetailUserId(userId);
+  };
+
+  const handleUserAction = (user: User, action: UserRowAction) => {
+    setSelectedUsers(new Set([user.id]));
+    setBulkActionType(action);
+    setBulkDeleteOpen(true);
+  };
+
   // Bulk actions
   const bulkPending =
     bulkDelete.isPending ||
@@ -189,6 +201,7 @@ export function UsersPageContent() {
   const getRoleBadgeColor = (role: string) => {
     switch (role.toLowerCase()) {
       case 'admin':
+      case 'super_admin':
         return 'destructive' as const;
       case 'dentist':
         return 'default' as const;
@@ -283,12 +296,12 @@ export function UsersPageContent() {
     <div className="@container/main flex flex-1 flex-col gap-2">
       <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6 px-4 lg:px-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">{t('usersAdmin.title')}</h1>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">{t('usersAdmin.title')}</h1>
           <p className="text-muted-foreground">{t('usersAdmin.intro')}</p>
         </div>
-        <Button onClick={() => setCreateOpen(true)}>
+        <Button className="h-11 w-full sm:w-auto" onClick={() => setCreateOpen(true)}>
           <Plus className="mr-2 h-4 w-4" />
           {t('usersAdmin.addUser')}
         </Button>
@@ -297,8 +310,8 @@ export function UsersPageContent() {
       {/* Pending-approval banner — surfaces the count up top so admins
           can scan even before they look at the table. */}
       {viewMode === 'active' && pendingCount > 0 && (
-        <div className="flex items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-50 px-4 py-3 dark:bg-amber-950/30">
-          <ShieldAlert className="h-5 w-5 shrink-0 text-amber-600" />
+        <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-50 px-4 py-3 dark:bg-amber-950/30">
+          <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
           <div className="flex-1 text-sm">
             <span className="font-semibold text-amber-900 dark:text-amber-200">
               {pendingCount === 1
@@ -321,14 +334,14 @@ export function UsersPageContent() {
           setBulkActionType(null);
         }}
       >
-        <TabsList variant="line">
+        <TabsList variant="line" className="grid w-full grid-cols-2 sm:flex sm:w-auto">
           <TabsTrigger value="active">{t('usersAdmin.tabActive')}</TabsTrigger>
           <TabsTrigger value="deleted">{t('usersAdmin.tabDeleted')}</TabsTrigger>
         </TabsList>
       </Tabs>
 
       {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">
@@ -376,7 +389,7 @@ export function UsersPageContent() {
 
       {/* Filters and Search */}
       <Card>
-        <CardHeader>
+        <CardHeader className="p-4">
           <SearchFilters
             onFiltersChange={handleFiltersChange}
             placeholder={viewMode === 'deleted' ? t('usersAdmin.searchDeletedPh') : t('usersAdmin.searchPh')}
@@ -386,15 +399,15 @@ export function UsersPageContent() {
 
       {/* Bulk Actions */}
       {selectedUsers.size > 0 && (
-        <Card className="border-primary">
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-lg">
+        <Card className="border-primary/40 bg-primary/[0.02]">
+          <CardHeader className="p-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <CardTitle className="text-base">
                 {selectedUsers.size === 1
                   ? t('usersAdmin.selectedOne', { count: selectedUsers.size })
                   : t('usersAdmin.selectedMany', { count: selectedUsers.size })}
               </CardTitle>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {viewMode === 'deleted' ? (
                   <>
                     <Button
@@ -472,7 +485,7 @@ export function UsersPageContent() {
 
       {/* Users Table */}
       <Card>
-        <CardHeader>
+        <CardHeader className="p-4 pb-3">
           <CardTitle>
             {viewMode === 'deleted'
               ? t('usersAdmin.tableTitleDeleted', { total: data?.total || 0 })
@@ -484,8 +497,24 @@ export function UsersPageContent() {
               : t('usersAdmin.tableDesc')}
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <div className="rounded-md border">
+        <CardContent className="p-4 pt-0">
+          <div className="xl:hidden">
+            <AdminUsersList
+              users={displayUsers}
+              viewMode={viewMode}
+              selectedUsers={selectedUsers}
+              onToggleAll={toggleSelectAll}
+              onToggleUser={toggleSelectUser}
+              onOpenUser={openUser}
+              onViewClinic={setClinicViewUser}
+              onApprovalChange={(userId, verificationStatus) =>
+                updateApproval.mutate({ id: userId, verificationStatus })
+              }
+              onUserAction={handleUserAction}
+            />
+          </div>
+
+          <div className="hidden rounded-md border xl:block">
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
@@ -616,25 +645,30 @@ export function UsersPageContent() {
                           : '—'}
                       </td>
                       <td className="p-4">
-                        <div className="flex justify-end">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => openUser(user.id)}
+                          >
+                            <Eye className="mr-1.5 h-4 w-4" />
+                            {t('usersAdmin.viewDetails')}
+                          </Button>
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-10 w-10"
+                                aria-label={`${t('usersAdmin.actions')} - ${user.fullName}`}
+                              >
                                 <MoreVertical className="h-4 w-4" />
                               </Button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
+                            <DropdownMenuContent align="end" className="w-56">
                               <DropdownMenuLabel>{t('usersAdmin.actions')}</DropdownMenuLabel>
                               <DropdownMenuItem
-                                onClick={() => {
-                                  setDetailInitialTab('profile');
-                                  setDetailUserId(user.id);
-                                }}
-                              >
-                                <Eye className="mr-2 h-4 w-4" />
-                                {t('usersAdmin.viewDetails')}
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
+                                className="min-h-10"
                                 onClick={() => {
                                   setDetailInitialTab('profile');
                                   setDetailUserId(user.id);
@@ -808,7 +842,7 @@ export function UsersPageContent() {
 
           {/* Pagination */}
           {data && data.totalPages > 1 && (
-            <div className="flex items-center justify-between mt-4">
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 pb-2 pr-20 sm:pr-24">
               <div className="text-sm text-muted-foreground">
                 {t('usersAdmin.pagShowing', {
                   from: ((page - 1) * limit) + 1,
@@ -816,17 +850,18 @@ export function UsersPageContent() {
                   total: data.total,
                 })}
               </div>
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center gap-2">
                 <Button
                   variant="outline"
                   size="sm"
+                  className="h-10"
                   onClick={() => setPage(Math.max(1, page - 1))}
                   disabled={page === 1}
                 >
                   <ChevronLeft className="h-4 w-4" />
                   {t('usersAdmin.previous')}
                 </Button>
-                <div className="flex items-center space-x-1">
+                <div className="hidden items-center gap-1 sm:flex">
                   {[...Array(data.totalPages)].map((_, i) => (
                     <Button
                       key={i}
@@ -842,6 +877,7 @@ export function UsersPageContent() {
                 <Button
                   variant="outline"
                   size="sm"
+                  className="h-10"
                   onClick={() => setPage(Math.min(data.totalPages, page + 1))}
                   disabled={page === data.totalPages}
                 >

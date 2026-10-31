@@ -208,6 +208,9 @@ export function UserDetailSheet({
       latitude: undefined, longitude: undefined,
     },
   });
+  const resetProfileForm = profileForm.reset;
+  const resetAccountForm = accountForm.reset;
+  const resetClinicForm = clinicForm.reset;
 
   // ── Effects ────────────────────────────────────────────────────────────────
 
@@ -222,15 +225,15 @@ export function UserDetailSheet({
 
   useEffect(() => {
     if (!user) return;
-    profileForm.reset({
+    resetProfileForm({
       fullName: user.fullName,
       phone:    user.phone    ?? '',
       country:  user.country  ?? 'TN',
       password: '',
     });
-    accountForm.reset({ role: user.role, isEmailVerified: user.isEmailVerified });
+    resetAccountForm({ role: user.role, isEmailVerified: user.isEmailVerified });
     const dp = user.dentistProfile;
-    clinicForm.reset({
+    resetClinicForm({
       clinicName:    dp?.clinicName    ?? '',
       clinicAddress: dp?.clinicAddress ?? '',
       city:          dp?.city          ?? '',
@@ -244,7 +247,7 @@ export function UserDetailSheet({
     });
     setAvatarPreview(getAvatarUrl(user.avatarUrl));
     setAvatarFile(null);
-  }, [user]);
+  }, [user, resetProfileForm, resetAccountForm, resetClinicForm]);
 
   useEffect(() => {
     setSchedule(
@@ -437,17 +440,17 @@ export function UserDetailSheet({
       */}
       <SheetContent
         side="right"
-        className="flex flex-col gap-0 p-0 w-[95%] sm:max-w-[1100px]"
+        className="flex w-full flex-col gap-0 p-0 sm:max-w-[1100px]"
       >
         {/* ── Header ──────────────────────────────────────────────────────── */}
-        <div className="shrink-0 border-b px-6 py-4 pr-14">
+        <div className="shrink-0 border-b px-4 py-4 pr-12 sm:px-6 sm:pr-14">
           <SheetTitle className="sr-only">{t('usersUi.sheet.srTitle')}</SheetTitle>
           <SheetDescription className="sr-only">
             {t('usersUi.sheet.srDesc')}
           </SheetDescription>
 
           {isLoadingUser ? (
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3 sm:gap-4">
               <div className="h-12 w-12 rounded-full bg-muted animate-pulse shrink-0" />
               <div className="space-y-2">
                 <div className="h-4 w-40 bg-muted animate-pulse rounded" />
@@ -492,15 +495,15 @@ export function UserDetailSheet({
           onValueChange={setActiveTab}
           className="flex flex-col flex-1 min-h-0 gap-0"
         >
-          <TabsList className="shrink-0 mx-6 mt-3 mb-0 w-auto justify-start rounded-lg bg-muted/60 h-9">
-            <TabsTrigger value="profile" className="flex items-center gap-1.5 text-xs h-7">
+          <TabsList className="mx-4 mb-0 mt-3 h-11 w-[calc(100%-2rem)] shrink-0 justify-start overflow-x-auto rounded-md bg-muted/60 p-1 sm:mx-6 sm:w-auto">
+            <TabsTrigger value="profile" className="h-9 shrink-0 gap-1.5 px-3 text-xs">
               <UserIcon className="h-3.5 w-3.5" /> {t('usersUi.sheet.tabProfile')}
             </TabsTrigger>
-            <TabsTrigger value="account" className="flex items-center gap-1.5 text-xs h-7">
+            <TabsTrigger value="account" className="h-9 shrink-0 gap-1.5 px-3 text-xs">
               <Shield className="h-3.5 w-3.5" /> {t('usersUi.sheet.tabAccount')}
             </TabsTrigger>
             {(isDentist || hasClinic) && (
-              <TabsTrigger value="clinic" className="flex items-center gap-1.5 text-xs h-7">
+              <TabsTrigger value="clinic" className="h-9 shrink-0 gap-1.5 px-3 text-xs">
                 <Building2 className="h-3.5 w-3.5" />
                 {t('usersUi.sheet.tabClinic')}
                 {!hasClinic && isDentist && (
@@ -509,7 +512,7 @@ export function UserDetailSheet({
               </TabsTrigger>
             )}
             {hasClinic && (
-              <TabsTrigger value="schedule" className="flex items-center gap-1.5 text-xs h-7">
+              <TabsTrigger value="schedule" className="h-9 shrink-0 gap-1.5 px-3 text-xs">
                 <Clock className="h-3.5 w-3.5" /> {t('usersUi.sheet.tabSchedule')}
               </TabsTrigger>
             )}
@@ -518,11 +521,11 @@ export function UserDetailSheet({
           {/* ── Profile tab ─────────────────────────────────────────────── */}
           <TabsContent value="profile" className="flex-1 min-h-0 mt-0 flex flex-col">
             <div className="flex-1 min-h-0 overflow-y-auto">
-              <div className="px-6 py-5 space-y-6 max-w-2xl">
+              <div className="max-w-2xl space-y-6 px-4 py-5 sm:px-6">
                 {/* Avatar */}
                 <section>
                   <SectionTitle>{t('usersUi.sheet.profilePicture')}</SectionTitle>
-                  <div className="flex items-center gap-5">
+                  <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:gap-5">
                     <Avatar className="h-20 w-20 border-2 border-muted shrink-0">
                       <AvatarImage src={avatarPreview} alt={user?.fullName} />
                       <AvatarFallback className="bg-gradient-to-br from-blue-500 to-purple-600 text-white text-xl font-semibold">
@@ -661,7 +664,7 @@ export function UserDetailSheet({
           {/* ── Account tab ─────────────────────────────────────────────── */}
           <TabsContent value="account" className="flex-1 min-h-0 mt-0 flex flex-col">
             <div className="flex-1 min-h-0 overflow-y-auto">
-              <div className="px-6 py-5 space-y-6 max-w-2xl">
+              <div className="max-w-2xl space-y-6 px-4 py-5 sm:px-6">
                 <section>
                   <SectionTitle>{t('usersUi.sheet.permissions')}</SectionTitle>
                   <div className="space-y-3">
@@ -717,7 +720,7 @@ export function UserDetailSheet({
 
                 <section>
                   <SectionTitle>{t('usersUi.sheet.currentStatus')}</SectionTitle>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     {[
                       {
                         label: t('usersUi.sheet.account'),
@@ -813,7 +816,7 @@ export function UserDetailSheet({
           {(isDentist || hasClinic) && (
             <TabsContent value="clinic" className="flex-1 min-h-0 mt-0 flex flex-col">
               <div className="flex-1 min-h-0 overflow-y-auto">
-                <div className="px-6 py-5 space-y-6">
+                <div className="space-y-6 px-4 py-5 sm:px-6">
 
                   {!hasClinic && (
                     <div className="flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800 dark:border-blue-800/40 dark:bg-blue-900/20 dark:text-blue-300">
@@ -845,7 +848,7 @@ export function UserDetailSheet({
                           placeholder={t('usersUi.sheet.addressPh')}
                         />
                       </Field>
-                      <div className="grid grid-cols-2 gap-3">
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                         <Field label={t('usersUi.sheet.city')}>
                           <Input {...clinicForm.register('city')} placeholder="Tunis" />
                         </Field>
@@ -872,7 +875,7 @@ export function UserDetailSheet({
 
                   <section>
                     <SectionTitle>{t('usersUi.sheet.contact')}</SectionTitle>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                       <Field label={t('usersUi.phone')} icon={<Phone className="h-3.5 w-3.5" />}>
                         <Controller
                           name="clinicPhone"
@@ -972,7 +975,7 @@ export function UserDetailSheet({
           {hasClinic && (
             <TabsContent value="schedule" className="flex-1 min-h-0 mt-0 flex flex-col">
               <div className="flex-1 min-h-0 overflow-y-auto">
-                <div className="px-6 py-5">
+                <div className="px-4 py-5 sm:px-6">
                   <SectionTitle>{t('usersUi.sheet.workingHours')}</SectionTitle>
                   <p className="text-xs text-muted-foreground mb-5">
                     {t('usersUi.sheet.workingHoursHint')}
@@ -986,7 +989,7 @@ export function UserDetailSheet({
                   */}
 
                   {/* Header row */}
-                  <div className="grid grid-cols-[190px_1fr_1fr_52px] gap-x-3 px-4 pb-2 mb-1">
+                  <div className="mb-1 hidden grid-cols-[190px_1fr_1fr_52px] gap-x-3 px-4 pb-2 md:grid">
                     <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                       {t('usersUi.sheet.day')}
                     </span>
@@ -1011,8 +1014,8 @@ export function UserDetailSheet({
                         <div
                           key={day.dayOfWeek}
                           className={cn(
-                            'grid grid-cols-[190px_1fr_1fr_52px] gap-x-3 items-center',
-                            'rounded-xl border px-4 py-3 transition-all duration-150',
+                            'grid grid-cols-[1fr_auto] items-center gap-3 md:grid-cols-[190px_1fr_1fr_52px] md:gap-x-3',
+                            'rounded-lg border px-3 py-3 transition-colors sm:px-4',
                             isOpen
                               ? 'bg-background border-border'
                               : 'bg-muted/20 border-border/40',
@@ -1055,35 +1058,39 @@ export function UserDetailSheet({
                           {/* Col 2 + 3 — time inputs OR "Rest day" spanning both */}
                           {isOpen ? (
                             <>
-                              <input
-                                type="time"
-                                value={day.openTime}
-                                onChange={(e) =>
-                                  updateDay(day.dayOfWeek, { openTime: e.target.value })
-                                }
-                                className={cn(
-                                  'w-full min-w-0 rounded-lg border border-input bg-background',
-                                  'px-3 py-2 text-sm font-mono text-foreground',
-                                  'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1',
-                                  'hover:border-ring/50 transition-colors cursor-pointer',
-                                )}
-                              />
-                              <input
-                                type="time"
-                                value={day.closeTime}
-                                onChange={(e) =>
-                                  updateDay(day.dayOfWeek, { closeTime: e.target.value })
-                                }
-                                className={cn(
-                                  'w-full min-w-0 rounded-lg border border-input bg-background',
-                                  'px-3 py-2 text-sm font-mono text-foreground',
-                                  'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1',
-                                  'hover:border-ring/50 transition-colors cursor-pointer',
-                                )}
-                              />
+                              <div className="order-3 col-span-2 grid grid-cols-2 gap-2 md:order-none md:col-span-2">
+                                <input
+                                  type="time"
+                                  aria-label={`${t(`usersUi.days.${meta.key}.label`)} - ${t('usersUi.sheet.opens')}`}
+                                  value={day.openTime}
+                                  onChange={(e) =>
+                                    updateDay(day.dayOfWeek, { openTime: e.target.value })
+                                  }
+                                  className={cn(
+                                    'w-full min-w-0 rounded-md border border-input bg-background',
+                                    'px-2 py-2 text-sm font-mono text-foreground sm:px-3',
+                                    'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1',
+                                    'hover:border-ring/50 transition-colors cursor-pointer',
+                                  )}
+                                />
+                                <input
+                                  type="time"
+                                  aria-label={`${t(`usersUi.days.${meta.key}.label`)} - ${t('usersUi.sheet.closes')}`}
+                                  value={day.closeTime}
+                                  onChange={(e) =>
+                                    updateDay(day.dayOfWeek, { closeTime: e.target.value })
+                                  }
+                                  className={cn(
+                                    'w-full min-w-0 rounded-md border border-input bg-background',
+                                    'px-2 py-2 text-sm font-mono text-foreground sm:px-3',
+                                    'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1',
+                                    'hover:border-ring/50 transition-colors cursor-pointer',
+                                  )}
+                                />
+                              </div>
                             </>
                           ) : (
-                            <div className="col-span-2 flex items-center pl-1">
+                            <div className="order-3 col-span-2 flex items-center pl-1 md:order-none">
                               <span className="text-sm text-muted-foreground/50 font-medium italic">
                                 {t('usersUi.sheet.restDay')}
                               </span>
@@ -1091,9 +1098,10 @@ export function UserDetailSheet({
                           )}
 
                           {/* Col 4 — toggle */}
-                          <div className="flex items-center justify-center">
+                          <div className="order-2 flex items-center justify-center md:order-none">
                             <Switch
                               checked={isOpen}
+                              aria-label={`${t(`usersUi.days.${meta.key}.label`)} - ${t('usersUi.sheet.open')}`}
                               onCheckedChange={(v) =>
                                 updateDay(day.dayOfWeek, { isClosed: !v })
                               }
@@ -1169,7 +1177,7 @@ function Field({
 
 function TabFooter({ children }: { children: React.ReactNode }) {
   return (
-    <div className="shrink-0 border-t bg-muted/30 px-6 py-3 flex justify-end">
+    <div className="flex shrink-0 justify-end border-t bg-muted/30 px-4 py-3 [&>button]:w-full sm:px-6 sm:[&>button]:w-auto">
       {children}
     </div>
   );

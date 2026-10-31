@@ -22,9 +22,9 @@ export const NotificationEvents = {
   UserRegistered: 'user.registered',
   /**
    * A dentist finished onboarding (saved their clinic) and is now a
-   * COMPLETE account awaiting admin approval. This — not UserRegistered —
-   * is the moment admins get the "please review & approve" email, because
-   * the profile is only worth reviewing once it's filled in.
+   * COMPLETE account awaiting admin approval. UserRegistered sends the
+   * immediate admin email; this later event sharpens the in-app notification
+   * once the profile is ready for review.
    */
   DentistOnboardingCompleted: 'dentist.onboardingCompleted',
   OrderCreated: 'order.created',
@@ -155,7 +155,7 @@ export interface PaymentEvent {
   doctorId: string;
   doctorName?: string | null;
   patientName?: string | null;
-  amount: string;     // Decimal-as-string
+  amount: string; // Decimal-as-string
   currency: string;
   method: PaymentMethod;
   installmentNumber?: number;
@@ -174,7 +174,7 @@ export interface TreatmentFeeEvent {
   doctorId: string;
   doctorName?: string | null;
   patientName?: string | null;
-  amount: string;     // Decimal-as-string at event time
+  amount: string; // Decimal-as-string at event time
   currency: string;
   method: PaymentMethod;
 }

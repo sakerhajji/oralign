@@ -3600,6 +3600,7 @@ export const dict = {
     colLastLogin: { en: 'Last Login', fr: 'Dernière connexion' } as T,
     colCreatedAt: { en: 'Created', fr: 'Date de création' } as T,
     colActions: { en: 'Actions', fr: 'Actions' } as T,
+    selectAll: { en: 'Select all users', fr: 'Sélectionner tous les utilisateurs' } as T,
     approved: { en: 'Approved', fr: 'Approuvé' } as T,
     rejected: { en: 'Rejected', fr: 'Rejeté' } as T,
     notApproved: { en: 'Not approved', fr: 'Non approuvé' } as T,

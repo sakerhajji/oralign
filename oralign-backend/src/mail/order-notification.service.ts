@@ -255,11 +255,10 @@ export class OrderNotificationService {
   }
 
   /**
-   * A dentist finished onboarding (saved their clinic) and is awaiting
-   * admin approval → email every active admin / super-admin so they can
-   * review & approve even when they're not looking at the dashboard. Each
-   * send is wrapped so one bad address can't abort the rest; safe to call
-   * fire-and-forget.
+   * A new practitioner account is awaiting admin approval → email every
+   * active admin / super-admin so the team sees the registration even when
+   * nobody has the dashboard open. Each send is isolated so one invalid
+   * address cannot abort the rest.
    */
   async notifyDentistPendingApproval(args: {
     fullName: string;
@@ -267,9 +266,7 @@ export class OrderNotificationService {
     role: string;
   }): Promise<void> {
     try {
-      const base = (
-        env.frontendUrl
-      ).replace(/\/$/, '');
+      const base = env.frontendUrl.replace(/\/$/, '');
       const dashboardUrl = `${base}/dashboard/users`;
       const admins = await this.findAdmins();
       for (const admin of admins) {
@@ -308,10 +305,7 @@ export class OrderNotificationService {
   }
 
   private dashboardOrderUrl(orderId: string): string {
-    const base = (env.frontendUrl).replace(
-      /\/$/,
-      '',
-    );
+    const base = env.frontendUrl.replace(/\/$/, '');
     return `${base}/dashboard/orders/${orderId}`;
   }
 

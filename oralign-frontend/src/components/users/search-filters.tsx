@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useDebouncedCallback } from 'use-debounce';
 import { Input } from '@/components/ui/input';
@@ -27,6 +27,7 @@ export function SearchFilters({ onFiltersChange, placeholder }: SearchFiltersPro
   const currentSearch = searchParams.get('search') || '';
   const currentRole = searchParams.get('role') || 'all';
   const currentStatus = searchParams.get('status') || 'all';
+  const [searchDraft, setSearchDraft] = useState(currentSearch);
 
   const updateFilters = useCallback((updates: Partial<{ search: string; role: string; status: string }>) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -63,7 +64,7 @@ export function SearchFilters({ onFiltersChange, placeholder }: SearchFiltersPro
     
     // Update URL
     const newUrl = `${window.location.pathname}?${params.toString()}`;
-    router.push(newUrl, { scroll: false });
+    router.replace(newUrl, { scroll: false });
     
     // Notify parent component
     const newFilters = {
@@ -77,7 +78,13 @@ export function SearchFilters({ onFiltersChange, placeholder }: SearchFiltersPro
   // Debounced search handler
   const debouncedSearch = useDebouncedCallback((value: string) => {
     updateFilters({ search: value });
-  }, 300);
+  }, 600);
+
+  useEffect(() => {
+    setSearchDraft(currentSearch);
+  }, [currentSearch]);
+
+  useEffect(() => () => debouncedSearch.cancel(), [debouncedSearch]);
 
   // Sync initial state with parent
   useEffect(() => {
@@ -89,42 +96,55 @@ export function SearchFilters({ onFiltersChange, placeholder }: SearchFiltersPro
   }, [currentSearch, currentRole, currentStatus, onFiltersChange]);
 
   const handleSearchChange = (value: string) => {
+    setSearchDraft(value);
     debouncedSearch(value);
   };
 
   const handleRoleChange = (value: string) => {
-    updateFilters({ role: value });
+    debouncedSearch.cancel();
+    updateFilters({ search: searchDraft, role: value });
   };
 
   const handleStatusChange = (value: string) => {
-    updateFilters({ status: value });
+    debouncedSearch.cancel();
+    updateFilters({ search: searchDraft, status: value });
   };
 
   const clearAllFilters = () => {
+    debouncedSearch.cancel();
+    setSearchDraft('');
     updateFilters({ search: '', role: 'all', status: 'all' });
   };
 
   const hasActiveFilters = currentSearch || currentRole !== 'all' || currentStatus !== 'all';
 
   return (
-    <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-      <div className="flex-1 max-w-md">
+    <div className="grid w-full gap-3 lg:grid-cols-[minmax(300px,1fr)_auto] lg:items-center">
+      <form
+        className="min-w-0"
+        onSubmit={(event) => {
+          event.preventDefault();
+          debouncedSearch.cancel();
+          updateFilters({ search: searchDraft });
+        }}
+        role="search"
+      >
         <div className="relative">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder={placeholder ?? t('usersUi.filters.searchPh')}
-            defaultValue={currentSearch}
+            value={searchDraft}
             onChange={(e) => handleSearchChange(e.target.value)}
-            className="pl-10 pr-4"
+            className="h-11 pl-10 pr-4"
             aria-label={t('usersUi.filters.searchAria')}
           />
         </div>
-      </div>
+      </form>
       
-      <div className="flex items-center gap-2">
+      <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
         <Select value={currentRole} onValueChange={handleRoleChange}>
-          <SelectTrigger className="w-[140px]">
-            <Filter className="mr-2 h-4 w-4" />
+          <SelectTrigger className="h-11 w-full sm:w-[160px]" aria-label={t('usersUi.filters.rolePh')}>
+            <Filter className="mr-2 h-4 w-4 shrink-0" />
             <SelectValue placeholder={t('usersUi.filters.rolePh')} />
           </SelectTrigger>
           <SelectContent>
@@ -136,7 +156,7 @@ export function SearchFilters({ onFiltersChange, placeholder }: SearchFiltersPro
         </Select>
 
         <Select value={currentStatus} onValueChange={handleStatusChange}>
-          <SelectTrigger className="w-[140px]">
+          <SelectTrigger className="h-11 w-full sm:w-[160px]" aria-label={t('usersUi.filters.statusPh')}>
             <SelectValue placeholder={t('usersUi.filters.statusPh')} />
           </SelectTrigger>
           <SelectContent>
@@ -151,7 +171,7 @@ export function SearchFilters({ onFiltersChange, placeholder }: SearchFiltersPro
             variant="ghost"
             size="sm"
             onClick={clearAllFilters}
-            className="h-9 px-2 lg:px-3"
+            className="col-span-2 h-11 px-3 sm:col-span-1"
             aria-label={t('usersUi.filters.clearAria')}
           >
             <X className="mr-1 h-4 w-4" />

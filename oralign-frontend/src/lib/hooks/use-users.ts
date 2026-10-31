@@ -57,10 +57,14 @@ export function useCurrentUser(): UseQueryResult<User, Error> {
 /**
  * Hook to get all users with pagination and filters (Admin only)
  */
-export function useUsers(params?: UserFilterParams): UseQueryResult<PaginatedResponse<User>, Error> {
+export function useUsers(
+  params?: UserFilterParams,
+  options: { enabled?: boolean } = {},
+): UseQueryResult<PaginatedResponse<User>, Error> {
   return useQuery<PaginatedResponse<User>, Error>({
     queryKey: userKeys.list(params),
     queryFn: () => usersService.getAllUsers(params),
+    enabled: options.enabled ?? true,
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
 }
@@ -68,10 +72,14 @@ export function useUsers(params?: UserFilterParams): UseQueryResult<PaginatedRes
 /**
  * Hook to get all deleted users with pagination and filters (Admin only)
  */
-export function useDeletedUsers(params?: UserFilterParams): UseQueryResult<PaginatedResponse<User>, Error> {
+export function useDeletedUsers(
+  params?: UserFilterParams,
+  options: { enabled?: boolean } = {},
+): UseQueryResult<PaginatedResponse<User>, Error> {
   return useQuery<PaginatedResponse<User>, Error>({
     queryKey: userKeys.deletedList(params),
     queryFn: () => usersService.getDeletedUsers(params),
+    enabled: options.enabled ?? true,
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
 }

@@ -132,13 +132,25 @@ export class NotificationsListener {
         },
       });
     });
+
+    // Registration itself is actionable: admins should know about the new
+    // account even if the practitioner finishes onboarding later. Keep mail
+    // in a separate safety boundary so SMTP can never affect registration or
+    // suppress the in-app notification above.
+    await this.safe('user.registered.mail', () =>
+      this.orderNotifications.notifyDentistPendingApproval({
+        fullName: payload.fullName,
+        email: payload.email,
+        role: payload.role,
+      }),
+    );
   }
 
   /**
    * A dentist finished onboarding (saved their clinic) → the account is now
-   * complete and genuinely ready for review. THIS is where admins get the
-   * out-of-band "review & approve" EMAIL (plus a sharper bell), rather than
-   * at sign-up when the profile is still empty.
+   * complete and genuinely ready for review. Admins already received the
+   * sign-up email, so this event adds a sharper in-app notification without
+   * sending a duplicate email.
    */
   @OnEvent(NotificationEvents.DentistOnboardingCompleted, { async: true })
   async onDentistOnboardingCompleted(
@@ -158,12 +170,6 @@ export class NotificationsListener {
         },
         link: `/dashboard/users`,
         metadata: { userId: payload.userId, role: payload.role },
-      });
-      // Out-of-band email to every admin / super-admin (best-effort).
-      await this.orderNotifications.notifyDentistPendingApproval({
-        fullName: payload.fullName,
-        email: payload.email,
-        role: payload.role,
       });
     });
   }
@@ -224,9 +230,7 @@ export class NotificationsListener {
   }
 
   @OnEvent(NotificationEvents.OrderStatusChanged, { async: true })
-  async onOrderStatusChanged(
-    payload: OrderStatusChangedEvent,
-  ): Promise<void> {
+  async onOrderStatusChanged(payload: OrderStatusChangedEvent): Promise<void> {
     await this.safe('order.statusChanged', async () => {
       // Notify the doctor — the admin sees the transition because
       // they performed it, no point pinging them back.
@@ -313,9 +317,7 @@ export class NotificationsListener {
   }
 
   @OnEvent(NotificationEvents.TreatmentPlanUpdated, { async: true })
-  async onTreatmentPlanUpdated(
-    payload: TreatmentPlanEvent,
-  ): Promise<void> {
+  async onTreatmentPlanUpdated(payload: TreatmentPlanEvent): Promise<void> {
     await this.safe('treatmentPlan.updated', async () => {
       const subjectEn = payload.patientName
         ? `The treatment plan for patient ${payload.patientName}`
@@ -397,7 +399,10 @@ export class NotificationsListener {
     // its own safe() so a mail-provider outage never suppresses the in-app
     // notification above, and vice-versa.
     await this.safe('treatmentPlan.approved.mail', () =>
-      this.orderNotifications.notifyTreatmentDecision(payload.treatmentPlanId, 'approved'),
+      this.orderNotifications.notifyTreatmentDecision(
+        payload.treatmentPlanId,
+        'approved',
+      ),
     );
   }
 
@@ -444,7 +449,10 @@ export class NotificationsListener {
     // its own safe() so a mail-provider outage never suppresses the in-app
     // notification above, and vice-versa.
     await this.safe('treatmentPlan.rejected.mail', () =>
-      this.orderNotifications.notifyTreatmentDecision(payload.treatmentPlanId, 'rejected'),
+      this.orderNotifications.notifyTreatmentDecision(
+        payload.treatmentPlanId,
+        'rejected',
+      ),
     );
   }
 
@@ -511,7 +519,10 @@ export class NotificationsListener {
   @OnEvent(NotificationEvents.QuotationApproved, { async: true })
   async onQuotationApproved(payload: QuotationDecisionEvent): Promise<void> {
     await this.safe('quotation.approved.mail', () =>
-      this.orderNotifications.notifyQuoteDecision(payload.quotationId, 'approved'),
+      this.orderNotifications.notifyQuoteDecision(
+        payload.quotationId,
+        'approved',
+      ),
     );
   }
 
@@ -851,9 +862,7 @@ export class NotificationsListener {
   // ─── Treatment fee (order-level professional fee) ───────────────────
 
   @OnEvent(NotificationEvents.TreatmentFeeDeclared, { async: true })
-  async onTreatmentFeeDeclared(
-    payload: TreatmentFeeEvent,
-  ): Promise<void> {
+  async onTreatmentFeeDeclared(payload: TreatmentFeeEvent): Promise<void> {
     await this.safe('treatmentFee.declared', async () => {
       const byline = adminByline({
         doctorName: payload.doctorName,
@@ -945,9 +954,7 @@ export class NotificationsListener {
   }
 
   @OnEvent(NotificationEvents.TreatmentFeeConfirmed, { async: true })
-  async onTreatmentFeeConfirmed(
-    payload: TreatmentFeeEvent,
-  ): Promise<void> {
+  async onTreatmentFeeConfirmed(payload: TreatmentFeeEvent): Promise<void> {
     await this.safe('treatmentFee.confirmed', async () => {
       const subjectEn = payload.patientName
         ? ` for patient ${payload.patientName}`

@@ -11,11 +11,9 @@ out = work / "out"
 dest = app / "public" / "showcase" / "hero"
 dest.mkdir(parents=True, exist_ok=True)
 
-# Remove earlier generations so only the referenced files ship. The phone
-# film (oralign-film-phone*) has its own installer and is left alone.
+# Remove earlier generations so only the referenced files ship.
 for old in dest.glob("oralign-film-*"):
-    if not old.name.startswith("oralign-film-phone"):
-        old.unlink()
+    old.unlink()
 
 rows = [line.split() for line in (out / "manifest.txt").read_text().splitlines() if line.strip()]
 renditions: dict[str, dict] = {}

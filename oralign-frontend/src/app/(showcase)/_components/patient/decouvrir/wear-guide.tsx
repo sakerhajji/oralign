@@ -1,19 +1,33 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { Maximize2, Pause, Play, RotateCcw } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Maximize2,
+  Pause,
+  Play,
+  RotateCcw,
+} from "lucide-react";
 import { WEAR_GUIDE } from "./wear-guide-manifest";
 
 /**
  * The wear guide: a silent instructional film and its ten steps as text.
  *
- *  - The steps are the film's chapters AND its text alternative: the step on
- *    screen is highlighted while the film plays, and choosing one plays the
- *    film from there. The film's captions are burned in, in French; the list
- *    carries the same steps in the page's language.
- *  - Phones (below the `sm` breakpoint, where the frame turns 9:16) get the
- *    9:16 cut, everything wider the 16:9 one. The choice follows the
- *    viewport: a rotation swaps cuts and resumes at the same step.
+ *  - The steps are the film's chapters AND its text alternative: the current
+ *    step follows the film, and choosing one plays the film from there. The
+ *    film's captions are burned in, in French; the page carries the same
+ *    steps in its own language.
+ *  - Desktop and tablet: the 16:9 film beside (or above) the full step list.
+ *  - Phone (below `sm`): told like a Story, because that is how a 9:16 film
+ *    is watched on a phone — full-bleed film, one segment per step filling
+ *    across the top, tap the edges for the previous / next step and the
+ *    middle to pause. Under it, the current step in the page's language,
+ *    set like the film's own captions (amber number, short amber rule), with
+ *    previous / next buttons. The full list folds away behind "see all".
+ *  - The cut follows the viewport (9:16 below `sm`, 16:9 above); a rotation
+ *    across it swaps cuts and resumes at the same step.
  *  - Nothing downloads with the page: the poster is a lazy WebP, the video
  *    has preload="none" and no source until hydration. Once the frame is a
  *    third on screen it plays muted (the film has no sound) — unless reduced
@@ -52,7 +66,13 @@ export type GuideLabels = {
   pause: string;
   replay: string;
   fullscreen: string;
+  previous: string;
+  next: string;
   pickStep: string;
+  showSteps: string;
+  hideSteps: string;
+  /** Shown on a phone under the film before the first step. */
+  tapHint: string;
   /** Pages whose language is not the captions' (French). */
   captions?: string;
 };
@@ -79,6 +99,8 @@ function stepAt(time: number, chapters: readonly number[]): number {
   return step;
 }
 
+const pad = (n: number) => String(n).padStart(2, "0");
+
 function subscribePhone(onChange: () => void) {
   const query = window.matchMedia(PHONE_MEDIA);
   query.addEventListener("change", onChange);
@@ -93,6 +115,9 @@ function useCut(): Cut | null {
     () => null,
   );
 }
+
+const ROUND_BUTTON =
+  "flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sc-sun)]";
 
 export function WearGuide({
   steps,
@@ -112,8 +137,10 @@ export function WearGuide({
   /** Waiting for the visitor's play (stillness asked, or autoplay refused). */
   const [manual, setManual] = useState(false);
   const [active, setActive] = useState(-1);
-  const [progress, setProgress] = useState(0);
+  const [time, setTime] = useState(0);
   const [fullscreen, setFullscreen] = useState(false);
+  /** Phone: the full step list, folded by default. */
+  const [listOpen, setListOpen] = useState(false);
   const activeRef = useRef(-1);
   const inView = useRef(false);
   const userPaused = useRef(false);
@@ -224,22 +251,32 @@ export function WearGuide({
     play();
   };
 
-  const seek = (step: number) => {
+  /** Play from `seconds`, with `step` shown as current right away. */
+  const jump = (seconds: number, step: number) => {
     const video = videoRef.current;
-    if (!video || !cut) return;
+    if (!video) return;
     startByHand();
-    const time = CHAPTERS[cut][step];
-    if (video.readyState >= 1) video.currentTime = time;
-    else pendingTime.current = time;
+    if (video.readyState >= 1) video.currentTime = seconds;
+    else pendingTime.current = seconds;
     activeRef.current = step;
     setActive(step);
+    setTime(seconds);
     play();
-    // On a phone the list sits under the film: bring the film back to view.
-    if (cut === "phone") {
+  };
+
+  const seek = (step: number, { scroll = false } = {}) => {
+    if (!cut) return;
+    jump(CHAPTERS[cut][step], step);
+    // From the folded list on a phone: bring the film back into view.
+    if (scroll && cut === "phone") {
       const smooth = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       frameRef.current?.scrollIntoView({ block: "center", behavior: smooth ? "smooth" : "auto" });
     }
   };
+
+  // Before step 1 "previous" replays the title card; after step 10 "next" stays.
+  const previous = () => (active <= 0 ? jump(0, -1) : seek(active - 1));
+  const next = () => seek(Math.min(active + 1, steps.length - 1));
 
   const toggleFullscreen = () => {
     const frame = frameRef.current as (HTMLDivElement & { webkitRequestFullscreen?: () => void }) | null;
@@ -273,12 +310,26 @@ export function WearGuide({
       activeRef.current = step;
       setActive(step);
     }
-    setProgress(video.duration ? video.currentTime / video.duration : 0);
+    setTime(video.currentTime);
   };
 
   const film = WEAR_GUIDE[cut ?? "desktop"];
+  const chapters = CHAPTERS[cut ?? "desktop"];
   const playing = status === "playing";
   const showCenter = status === "ended" || (manual && status !== "playing");
+  const toggleLabel = playing ? labels.pause : status === "ended" ? labels.replay : labels.play;
+  const toggleIcon = playing ? (
+    <Pause className="h-4 w-4" aria-hidden="true" />
+  ) : (
+    <Play className="h-4 w-4 translate-x-px fill-current" aria-hidden="true" />
+  );
+  /** How much of step i has played, 0..1 — the phone's story segments. */
+  const filled = (i: number) => {
+    const start = chapters[i] - LEAD;
+    const end = i + 1 < chapters.length ? chapters[i + 1] - LEAD : film.duration;
+    return Math.min(1, Math.max(0, (time - start) / (end - start)));
+  };
+  const current = active >= 0 ? steps[active] : null;
 
   return (
     <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,25rem)] lg:items-start lg:gap-12">
@@ -287,9 +338,9 @@ export function WearGuide({
           ref={frameRef}
           className={[
             "relative overflow-hidden",
-            // The films' studio cream, so the frame reads as the film before
-            // the lazy poster arrives.
-            fullscreen ? "bg-black" : "aspect-[9/16] bg-[#f3eadf] sm:aspect-video",
+            // Phone: full-bleed, edge to edge like a Story. The films'
+            // studio cream fills the frame before the lazy poster arrives.
+            fullscreen ? "bg-black" : "-mx-5 aspect-[9/16] bg-[#f3eadf] sm:mx-0 sm:aspect-video",
           ].join(" ")}
         >
           <picture>
@@ -339,11 +390,32 @@ export function WearGuide({
               ))}
           </video>
 
+          {/* Phone: one segment per step, filling as the film plays. */}
+          <div aria-hidden="true" className="absolute inset-x-3 top-3 flex gap-1 sm:hidden">
+            {chapters.map((start, i) => (
+              <span key={start} className="relative h-[3px] flex-1 overflow-hidden rounded-full bg-[rgba(25,25,25,0.16)]">
+                <span
+                  className="absolute inset-y-0 start-0 rounded-full bg-[rgba(25,25,25,0.78)] transition-[width] duration-300 ease-linear motion-reduce:transition-none"
+                  style={{ width: `${filled(i) * 100}%` }}
+                />
+              </span>
+            ))}
+          </div>
+
+          {/* Phone: tap the start edge for the previous step, the end edge
+              for the next, the middle to pause — the Story gesture. Shortcuts
+              only: the buttons under the film and the list do the same. */}
+          <div aria-hidden="true" className="absolute inset-x-0 top-8 bottom-16 flex sm:hidden">
+            <button type="button" tabIndex={-1} onClick={previous} className="h-full w-1/3 cursor-default" />
+            <button type="button" tabIndex={-1} onClick={toggle} className="h-full w-1/3 cursor-default" />
+            <button type="button" tabIndex={-1} onClick={next} className="h-full w-1/3 cursor-default" />
+          </div>
+
           {showCenter && (
             <button
               type="button"
               onClick={toggle}
-              className="absolute left-1/2 top-1/2 inline-flex -translate-x-1/2 -translate-y-1/2 items-center gap-2.5 rounded-full bg-[rgba(25,25,25,0.74)] px-5 py-3 text-[0.9rem] font-medium text-[var(--sc-white)] backdrop-blur-sm transition-colors hover:bg-[rgba(25,25,25,0.88)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sc-sun)]"
+              className="absolute left-1/2 top-1/2 z-10 inline-flex -translate-x-1/2 -translate-y-1/2 items-center gap-2.5 rounded-full bg-[rgba(25,25,25,0.74)] px-5 py-3 text-[0.9rem] font-medium text-[var(--sc-white)] backdrop-blur-sm transition-colors hover:bg-[rgba(25,25,25,0.88)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sc-sun)]"
             >
               {status === "ended" ? (
                 <RotateCcw className="h-4 w-4" aria-hidden="true" />
@@ -355,90 +427,179 @@ export function WearGuide({
           )}
 
           {status !== "idle" && (
-            <div className="absolute inset-x-3 bottom-3 flex items-center gap-2 rounded-full bg-[rgba(25,25,25,0.66)] p-1 text-[var(--sc-white)] backdrop-blur-sm sm:inset-x-4 sm:bottom-4">
-              <button
-                type="button"
-                onClick={toggle}
-                // The label names the action and changes with it.
-                aria-label={playing ? labels.pause : status === "ended" ? labels.replay : labels.play}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--sc-sun)]"
-              >
-                {playing ? (
-                  <Pause className="h-4 w-4" aria-hidden="true" />
-                ) : (
-                  <Play className="h-4 w-4 translate-x-px fill-current" aria-hidden="true" />
-                )}
-              </button>
-              {/* Progress, with a tick where each step begins. The step list
-                  is the way to move in the film, so this stays visual. */}
-              <div aria-hidden="true" className="relative mx-1 h-[3px] flex-1 rounded-full bg-[rgba(242,245,239,0.24)]">
-                <div
-                  className="absolute inset-y-0 start-0 rounded-full bg-[var(--sc-sun)] transition-[width] duration-300 ease-linear motion-reduce:transition-none"
-                  style={{ width: `${progress * 100}%` }}
-                />
-                {CHAPTERS[cut ?? "desktop"].map((start) => (
-                  <span
-                    key={start}
-                    className="absolute top-1/2 h-2 w-px -translate-y-1/2 bg-[rgba(242,245,239,0.55)]"
-                    style={{ insetInlineStart: `${(start / film.duration) * 100}%` }}
-                  />
-                ))}
+            <>
+              {/* Phone: two round buttons; the segments are the progress. */}
+              <div className="absolute bottom-3 end-3 z-10 flex gap-2 text-[var(--sc-white)] sm:hidden">
+                <button
+                  type="button"
+                  onClick={toggle}
+                  aria-label={toggleLabel}
+                  className={`${ROUND_BUTTON} bg-[rgba(25,25,25,0.62)] backdrop-blur-sm`}
+                >
+                  {toggleIcon}
+                </button>
+                <button
+                  type="button"
+                  onClick={toggleFullscreen}
+                  aria-label={labels.fullscreen}
+                  className={`${ROUND_BUTTON} bg-[rgba(25,25,25,0.62)] backdrop-blur-sm`}
+                >
+                  <Maximize2 className="h-4 w-4" aria-hidden="true" />
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={toggleFullscreen}
-                aria-label={labels.fullscreen}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--sc-sun)]"
-              >
-                <Maximize2 className="h-4 w-4" aria-hidden="true" />
-              </button>
-            </div>
+
+              {/* Tablet and desktop: one bar, progress with a tick per step. */}
+              <div className="absolute inset-x-4 bottom-4 z-10 hidden items-center gap-2 rounded-full bg-[rgba(25,25,25,0.66)] p-1 text-[var(--sc-white)] backdrop-blur-sm sm:flex">
+                <button
+                  type="button"
+                  onClick={toggle}
+                  aria-label={toggleLabel}
+                  className={`${ROUND_BUTTON} h-9 w-9 hover:bg-white/10`}
+                >
+                  {toggleIcon}
+                </button>
+                {/* The step list is the way to move in the film, so the
+                    progress stays visual. */}
+                <div aria-hidden="true" className="relative mx-1 h-[3px] flex-1 rounded-full bg-[rgba(242,245,239,0.24)]">
+                  <div
+                    className="absolute inset-y-0 start-0 rounded-full bg-[var(--sc-sun)] transition-[width] duration-300 ease-linear motion-reduce:transition-none"
+                    style={{ width: `${film.duration ? (time / film.duration) * 100 : 0}%` }}
+                  />
+                  {chapters.map((start) => (
+                    <span
+                      key={start}
+                      className="absolute top-1/2 h-2 w-px -translate-y-1/2 bg-[rgba(242,245,239,0.55)]"
+                      style={{ insetInlineStart: `${(start / film.duration) * 100}%` }}
+                    />
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={toggleFullscreen}
+                  aria-label={labels.fullscreen}
+                  className={`${ROUND_BUTTON} h-9 w-9 hover:bg-white/10`}
+                >
+                  <Maximize2 className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </div>
+            </>
           )}
         </div>
+
+        {/* Phone: the current step, set like the film's own captions. The
+            minimum height fits a title and a short note, so only the
+            longest note (step 4) moves what lies below — never the film. */}
+        <div className="mt-6 flex min-h-[9rem] items-start gap-4 sm:hidden">
+          <div
+            key={active}
+            className="min-w-0 flex-1 animate-in fade-in slide-in-from-bottom-1 duration-300 motion-reduce:animate-none"
+          >
+            {current ? (
+              <>
+                <p className="flex items-baseline gap-2">
+                  <span className="sc-serif text-[1.75rem] leading-none tabular-nums text-[var(--sc-sun)]">
+                    {pad(active + 1)}
+                  </span>
+                  <span className="text-[0.8rem] tabular-nums text-[var(--sc-text-mid-on-dark)]">
+                    / {pad(steps.length)}
+                  </span>
+                </p>
+                <span aria-hidden="true" className="mt-3 block h-px w-8 bg-[var(--sc-sun)]" />
+                <p className="mt-3 text-[1.08rem] leading-snug text-[var(--sc-white)]">{current.title}</p>
+                {current.note && (
+                  <p className="mt-2 text-[0.86rem] leading-relaxed text-[var(--sc-text-mid-on-dark)]">
+                    {current.note}
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="pt-1 text-[0.92rem] leading-relaxed text-[var(--sc-text-mid-on-dark)]">
+                {labels.tapHint}
+              </p>
+            )}
+          </div>
+          <div className="flex shrink-0 gap-2">
+            <button
+              type="button"
+              onClick={previous}
+              disabled={active < 0}
+              aria-label={labels.previous}
+              className={`${ROUND_BUTTON} h-11 w-11 border border-[rgba(242,245,239,0.22)] text-[var(--sc-white)] disabled:opacity-35`}
+            >
+              <ChevronLeft className="h-5 w-5 rtl:rotate-180" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              onClick={next}
+              disabled={active >= steps.length - 1}
+              aria-label={labels.next}
+              className={`${ROUND_BUTTON} h-11 w-11 border border-[rgba(242,245,239,0.22)] text-[var(--sc-white)] disabled:opacity-35`}
+            >
+              <ChevronRight className="h-5 w-5 rtl:rotate-180" aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+
         {labels.captions && (
           <p className="mt-3 text-[0.8rem] text-[var(--sc-text-mid-on-dark)]">{labels.captions}</p>
         )}
       </div>
 
       <div>
-        <p className="text-[0.88rem] text-[var(--sc-text-mid-on-dark)]">{labels.pickStep}</p>
-        <ol id={listId} className="mt-4 border-t border-[rgba(242,245,239,0.12)]">
-          {steps.map((step, i) => {
-            const current = i === active;
-            return (
-              <li key={step.title} className="border-b border-[rgba(242,245,239,0.12)]">
-                <button
-                  type="button"
-                  onClick={() => seek(i)}
-                  aria-current={current ? "step" : undefined}
-                  className="group relative grid w-full grid-cols-[2.6rem_minmax(0,1fr)] gap-x-2 py-3.5 text-start focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--sc-sun)]"
-                >
-                  <span
-                    aria-hidden="true"
-                    className={`absolute inset-y-3 start-0 w-0.5 transition-colors ${current ? "bg-[var(--sc-sun)]" : "bg-transparent"}`}
-                  />
-                  <span
-                    className={`sc-serif ps-3.5 pt-px text-[0.95rem] tabular-nums transition-colors ${current ? "text-[var(--sc-sun)]" : "text-[rgba(242,245,239,0.42)]"}`}
+        {/* Phone: the full list folds away; the film and its caption lead. */}
+        <button
+          type="button"
+          onClick={() => setListOpen((open) => !open)}
+          aria-expanded={listOpen}
+          aria-controls={`${listId}-panel`}
+          className="flex w-full items-center justify-between gap-4 border-y border-[rgba(242,245,239,0.12)] py-4 text-start text-[0.95rem] text-[var(--sc-white)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--sc-sun)] sm:hidden"
+        >
+          {listOpen ? labels.hideSteps : labels.showSteps}
+          <ChevronDown
+            className={`h-4 w-4 shrink-0 transition-transform motion-reduce:transition-none ${listOpen ? "rotate-180" : ""}`}
+            aria-hidden="true"
+          />
+        </button>
+        <div id={`${listId}-panel`} className={listOpen ? "" : "hidden sm:block"}>
+          <p className="hidden text-[0.88rem] text-[var(--sc-text-mid-on-dark)] sm:block">{labels.pickStep}</p>
+          <ol id={listId} className="sm:mt-4 sm:border-t sm:border-[rgba(242,245,239,0.12)]">
+            {steps.map((step, i) => {
+              const isCurrent = i === active;
+              return (
+                <li key={step.title} className="border-b border-[rgba(242,245,239,0.12)]">
+                  <button
+                    type="button"
+                    onClick={() => seek(i, { scroll: true })}
+                    aria-current={isCurrent ? "step" : undefined}
+                    className="group relative grid w-full grid-cols-[2.6rem_minmax(0,1fr)] gap-x-2 py-3.5 text-start focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--sc-sun)]"
                   >
-                    {String(i + 1).padStart(2, "0")}
-                  </span>
-                  <span>
                     <span
-                      className={`block text-[0.98rem] leading-snug transition-colors ${current ? "text-[var(--sc-white)]" : "text-[rgba(242,245,239,0.8)] group-hover:text-[var(--sc-white)]"}`}
+                      aria-hidden="true"
+                      className={`absolute inset-y-3 start-0 w-0.5 transition-colors ${isCurrent ? "bg-[var(--sc-sun)]" : "bg-transparent"}`}
+                    />
+                    <span
+                      className={`sc-serif ps-3.5 pt-px text-[0.95rem] tabular-nums transition-colors ${isCurrent ? "text-[var(--sc-sun)]" : "text-[rgba(242,245,239,0.42)]"}`}
                     >
-                      {step.title}
+                      {pad(i + 1)}
                     </span>
-                    {step.note && (
-                      <span className="mt-1 block text-[0.84rem] leading-relaxed text-[var(--sc-text-mid-on-dark)]">
-                        {step.note}
+                    <span>
+                      <span
+                        className={`block text-[0.98rem] leading-snug transition-colors ${isCurrent ? "text-[var(--sc-white)]" : "text-[rgba(242,245,239,0.8)] group-hover:text-[var(--sc-white)]"}`}
+                      >
+                        {step.title}
                       </span>
-                    )}
-                  </span>
-                </button>
-              </li>
-            );
-          })}
-        </ol>
+                      {step.note && (
+                        <span className="mt-1 block text-[0.84rem] leading-relaxed text-[var(--sc-text-mid-on-dark)]">
+                          {step.note}
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
       </div>
     </div>
   );

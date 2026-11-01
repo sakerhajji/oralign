@@ -1,259 +1,164 @@
 "use client";
 
-import { Play, X } from "lucide-react";
-import Image from "next/image";
-import { useEffect, useMemo, useState } from "react";
 import type { Lang } from "../../../_lib/i18n/dict";
 import { useShowcaseLang } from "../../../_lib/i18n/lang-context";
+import { WearGuide, type GuideLabels, type GuideStep } from "./wear-guide";
 
-const VIDEO_URL = process.env.NEXT_PUBLIC_ORALIGN_WEAR_ALIGNERS_VIDEO_URL ?? "";
-const VIDEO_THUMBNAIL_SRC = "/showcase/oralign-wear-aligner.webp";
-
-const wearVideoCopy: Record<
+/**
+ * "How to wear your aligners": the ORALIGN guide film and its ten steps.
+ * The steps follow the film word for word (its captions are the source):
+ * steps 4 and 5 carry the film's two follow-up cards as their notes.
+ */
+const wearGuideCopy: Record<
   Lang,
-  {
-    title: string;
-    intro: string;
-    tips: [string, string, string, string];
-    videoTitle: string;
-    videoCta: string;
-    close: string;
-    unavailable: string;
-    thumbnailAlt: string;
-  }
+  { title: string; intro: string; labels: GuideLabels; steps: GuideStep[] }
 > = {
   fr: {
     title:
       "Comment porter vos aligneurs ORALIGN® pour obtenir les meilleurs résultats",
     intro:
-      "Tout au long du traitement, votre praticien ORALIGN® reste à vos côtés pour vous accompagner, répondre à vos questions et vous guider à chaque étape. Parce qu’un beau sourire se construit avec confiance et sérénité, voici quelques conseils simples pour vous aider à obtenir les meilleurs résultats possibles avec vos aligneurs.",
-    tips: [
-      "Retirez vos aligneurs avant de manger ou de boire",
-      "Brossez-vous les dents après les repas, avant de remettre vos aligneurs.",
-      "Portez vos aligneurs pendant 20 à 22 heures par jour.",
-      "Des soirées cinéma à la maison aux sorties entre amis, ce traitement par aligneurs ne perturbera pas votre vie !",
+      "Dix gestes simples, de la pose au rangement, pour que vos aligneurs agissent comme prévu. Votre praticien ORALIGN® reste là pour répondre à vos questions tout au long du traitement.",
+    labels: {
+      film: "Film : comment porter vos aligneurs ORALIGN, en 10 gestes",
+      play: "Lire le film",
+      pause: "Mettre le film en pause",
+      replay: "Revoir le film",
+      fullscreen: "Plein écran",
+      pickStep: "Choisissez une étape pour la voir dans le film.",
+    },
+    steps: [
+      { title: "Lavez-vous les mains." },
+      { title: "Rincez l’aligneur à l’eau froide." },
+      { title: "Placez-le d’abord sur les dents de devant." },
+      {
+        title: "Appuyez doucement avec les doigts jusqu’aux molaires.",
+        note: "Ne mordez pas pour le mettre en place. Une fois en place, mordez sur un chewie, devant et sur les côtés : il améliore l’ajustement, surtout les 3 premiers jours.",
+      },
+      {
+        title: "Pour le retirer, commencez par l’arrière, côté molaires.",
+        note: "S’il résiste, faites de même de l’autre côté.",
+      },
+      {
+        title: "Portez-les 22 h par jour.",
+        note: "Retirez-les uniquement pour manger et pour boire autre chose que de l’eau.",
+      },
+      { title: "Brossez-vous les dents avant de les remettre." },
+      {
+        title: "Nettoyez-les à l’eau froide avec une brosse souple.",
+        note: "Jamais d’eau chaude.",
+      },
+      { title: "Rangez-les toujours dans leur étui ORALIGN." },
+      { title: "Changez d’aligneur tous les 10 jours." },
     ],
-    videoTitle: "Conseils ORALIGN pour porter vos aligneurs",
-    videoCta: "Lire la vidéo",
-    close: "Fermer la vidéo",
-    unavailable:
-      "Ajoutez l’URL YouTube dans NEXT_PUBLIC_ORALIGN_WEAR_ALIGNERS_VIDEO_URL pour afficher cette vidéo.",
-    thumbnailAlt:
-      "Aperçu vidéo des conseils pour porter les aligneurs ORALIGN",
   },
   en: {
     title: "How to wear your ORALIGN® aligners for the best results",
     intro:
-      "Throughout treatment, your ORALIGN® practitioner stays by your side to answer questions and guide each step. Because a confident smile is built with calm daily habits, here are simple tips to help you get the best possible results from your aligners.",
-    tips: [
-      "Remove your aligners before eating or drinking.",
-      "Brush your teeth after meals before putting your aligners back in.",
-      "Wear your aligners for 20 to 22 hours per day.",
-      "From movie nights at home to evenings with friends, aligner treatment fits naturally into your life.",
+      "Ten simple steps, from putting them in to putting them away, so your aligners work as planned. Your ORALIGN® practitioner is there to answer your questions throughout treatment.",
+    labels: {
+      film: "Film: how to wear your ORALIGN aligners, in 10 steps",
+      play: "Play the film",
+      pause: "Pause the film",
+      replay: "Watch again",
+      fullscreen: "Full screen",
+      pickStep: "Choose a step to see it in the film.",
+      captions: "The captions in the film are in French.",
+    },
+    steps: [
+      { title: "Wash your hands." },
+      { title: "Rinse the aligner in cold water." },
+      { title: "Fit it over your front teeth first." },
+      {
+        title: "Press it gently into place with your fingers, back to the molars.",
+        note: "Don’t bite it into place. Once it’s in, bite on a chewie, at the front and on both sides: it improves the fit, especially in the first 3 days.",
+      },
+      {
+        title: "To remove it, start at the back, on the molars.",
+        note: "If it resists, do the same on the other side.",
+      },
+      {
+        title: "Wear them 22 hours a day.",
+        note: "Take them out only to eat, or to drink anything other than water.",
+      },
+      { title: "Brush your teeth before putting them back in." },
+      {
+        title: "Clean them in cold water with a soft brush.",
+        note: "Never hot water.",
+      },
+      { title: "Always keep them in their ORALIGN case." },
+      { title: "Move to your next aligner every 10 days." },
     ],
-    videoTitle: "ORALIGN tips for wearing your aligners",
-    videoCta: "Play video",
-    close: "Close video",
-    unavailable:
-      "Add the YouTube URL in NEXT_PUBLIC_ORALIGN_WEAR_ALIGNERS_VIDEO_URL to display this video.",
-    thumbnailAlt: "Video preview about wearing ORALIGN aligners",
   },
   ar: {
     title: "كيف ترتدي تقويم ORALIGN® للحصول على أفضل النتائج",
     intro:
-      "يبقى طبيب ORALIGN® إلى جانبك طوال فترة العلاج للإجابة عن أسئلتك وإرشادك في كل مرحلة. لأن الابتسامة الجميلة تُبنى بثقة وطمأنينة، إليك نصائح بسيطة تساعدك على الحصول على أفضل النتائج.",
-    tips: [
-      "انزع القوالب قبل الأكل أو الشرب.",
-      "نظّف أسنانك بعد الوجبات وقبل إعادة القوالب.",
-      "ارتدِ القوالب من 20 إلى 22 ساعة يومياً.",
-      "من السهرات العائلية إلى الخروج مع الأصدقاء، علاج التقويم الشفاف ينسجم مع حياتك اليومية.",
+      "عشر خطوات بسيطة، من تركيب القوالب إلى حفظها، لتعمل كما هو مخطط لها. يبقى طبيب ORALIGN® إلى جانبك للإجابة عن أسئلتك طوال فترة العلاج.",
+    labels: {
+      film: "فيلم: كيف ترتدي قوالب ORALIGN، في 10 خطوات",
+      play: "تشغيل الفيلم",
+      pause: "إيقاف الفيلم مؤقتاً",
+      replay: "إعادة المشاهدة",
+      fullscreen: "ملء الشاشة",
+      pickStep: "اختر خطوة لمشاهدتها في الفيلم.",
+      captions: "النصوص داخل الفيلم باللغة الفرنسية.",
+    },
+    steps: [
+      { title: "اغسل يديك." },
+      { title: "اشطف القالب بالماء البارد." },
+      { title: "ضعه أولاً على الأسنان الأمامية." },
+      {
+        title: "اضغط عليه بلطف بأصابعك حتى الأضراس.",
+        note: "لا تعضّ لتثبيته. بعد تثبيته، اعضض على أداة العض (chewie) من الأمام وعلى الجانبين: فهي تحسّن انطباق القالب، خاصةً في الأيام الثلاثة الأولى.",
+      },
+      {
+        title: "لنزعه، ابدأ من الخلف، من جهة الأضراس.",
+        note: "إذا قاوم، كرّر الشيء نفسه من الجهة الأخرى.",
+      },
+      {
+        title: "ارتدِ القوالب 22 ساعة يومياً.",
+        note: "انزعها فقط لتناول الطعام أو لشرب أي شيء غير الماء.",
+      },
+      { title: "نظّف أسنانك بالفرشاة قبل إعادتها." },
+      {
+        title: "نظّفها بالماء البارد وبفرشاة ناعمة.",
+        note: "لا تستخدم الماء الساخن أبداً.",
+      },
+      { title: "احفظها دائماً في علبة ORALIGN الخاصة بها." },
+      { title: "انتقل إلى القالب التالي كل 10 أيام." },
     ],
-    videoTitle: "نصائح ORALIGN لارتداء القوالب الشفافة",
-    videoCta: "تشغيل الفيديو",
-    close: "إغلاق الفيديو",
-    unavailable:
-      "أضف رابط يوتيوب في NEXT_PUBLIC_ORALIGN_WEAR_ALIGNERS_VIDEO_URL لعرض هذا الفيديو.",
-    thumbnailAlt: "معاينة فيديو حول ارتداء تقويم ORALIGN الشفاف",
   },
 };
 
-function getYouTubeEmbedUrl(videoUrl: string) {
-  const value = videoUrl.trim();
-
-  if (!value) {
-    return null;
-  }
-
-  try {
-    const url = new URL(value);
-    const host = url.hostname.replace(/^www\./, "");
-
-    if (host === "youtube-nocookie.com" && url.pathname.startsWith("/embed/")) {
-      url.searchParams.set("autoplay", "1");
-      url.searchParams.set("rel", "0");
-      return url.toString();
-    }
-
-    if (host === "youtube.com" || host === "m.youtube.com") {
-      const watchId = url.searchParams.get("v");
-      const embedMatch = url.pathname.match(/^\/embed\/([^/?#]+)/);
-      const shortsMatch = url.pathname.match(/^\/shorts\/([^/?#]+)/);
-      const videoId = watchId ?? embedMatch?.[1] ?? shortsMatch?.[1];
-
-      if (videoId) {
-        return `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&rel=0`;
-      }
-    }
-
-    if (host === "youtu.be") {
-      const videoId = url.pathname.split("/").filter(Boolean)[0];
-
-      if (videoId) {
-        return `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&rel=0`;
-      }
-    }
-  } catch {
-    return null;
-  }
-
-  return null;
-}
-
 export function WearAlignersVideoSection() {
   const { lang } = useShowcaseLang();
-  const copy = wearVideoCopy[lang];
-  const [isOpen, setIsOpen] = useState(false);
-  const embedUrl = useMemo(() => getYouTubeEmbedUrl(VIDEO_URL), []);
-
-  useEffect(() => {
-    if (!isOpen) {
-      return;
-    }
-
-    const previousOverflow = document.body.style.overflow;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setIsOpen(false);
-      }
-    };
-
-    document.body.style.overflow = "hidden";
-    window.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [isOpen]);
+  const copy = wearGuideCopy[lang];
 
   return (
     <section
       id="wear-aligners-video"
       data-section-tone="dark"
       aria-labelledby="wear-aligners-video-title"
-      className="flex min-h-[calc(100svh-4rem)] items-center bg-[var(--sc-black)] px-5 py-16 text-[var(--sc-white)] sm:min-h-[calc(100svh-4.5rem)] sm:px-8 sm:py-20 lg:min-h-[calc(100svh-5rem)] lg:px-12 lg:py-24"
+      className="bg-[var(--sc-black)] px-5 py-20 text-[var(--sc-white)] sm:px-8 sm:py-24 lg:px-12 lg:py-28"
     >
-      <div className="mx-auto w-full max-w-[1240px]">
-        <div className="mx-auto max-w-[1020px] text-center">
+      <div className="mx-auto w-full max-w-[1280px]">
+        {/* Same columns as the guide below: the title sits over the film,
+            the introduction over the steps. */}
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,25rem)] lg:items-end lg:gap-12">
           <h2
             id="wear-aligners-video-title"
-            className="sc-serif text-balance text-[clamp(2rem,4vw,3.55rem)] leading-[1.12]"
+            className="sc-serif max-w-[22ch] text-balance text-[clamp(1.9rem,3.6vw,3.2rem)] leading-[1.12]"
           >
             {copy.title}
           </h2>
-          <p className="mx-auto mt-6 max-w-[940px] text-pretty text-[0.9rem] leading-[1.75] text-[var(--sc-text-mid-on-dark)] sm:text-[0.98rem]">
+          <p className="max-w-[60ch] text-pretty text-[0.95rem] leading-[1.75] text-[var(--sc-text-mid-on-dark)] sm:text-[1rem]">
             {copy.intro}
           </p>
         </div>
 
-        <div className="mt-12 grid items-center gap-10 lg:mt-14 lg:grid-cols-[1.08fr_0.92fr] lg:gap-16">
-          <ul className="space-y-5">
-            {copy.tips.map((tip) => (
-              <li
-                key={tip}
-                className="flex items-start gap-4 text-[0.98rem] leading-[1.8] text-[rgba(242,245,239,0.92)] sm:text-[1.04rem]"
-              >
-                <span
-                  aria-hidden="true"
-                  className="mt-[0.72em] h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--sc-white)]"
-                />
-                <span>{tip}</span>
-              </li>
-            ))}
-          </ul>
-
-          <button
-            type="button"
-            onClick={() => setIsOpen(true)}
-            aria-label={copy.videoCta}
-            className="group relative mx-auto block w-full max-w-[420px] overflow-hidden border border-[rgba(255,200,47,0.72)] bg-[rgba(255,255,255,0.04)] text-left shadow-[0_26px_70px_rgba(0,0,0,0.38)] transition duration-300 hover:-translate-y-1 hover:border-[var(--sc-sun)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sc-sun)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--sc-black)]"
-          >
-            <span className="relative block aspect-square">
-              <Image
-                src={VIDEO_THUMBNAIL_SRC}
-                alt={copy.thumbnailAlt}
-                fill
-                sizes="(min-width: 1024px) 420px, 88vw"
-                className="object-cover object-center transition duration-500 group-hover:scale-[1.03]"
-              />
-              <span className="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-transparent" />
-              <span className="absolute bottom-5 left-5 inline-flex h-12 w-16 items-center justify-center rounded-xl bg-[#ff0033] text-white shadow-[0_18px_34px_rgba(255,0,51,0.32)] transition duration-300 group-hover:scale-105">
-                <Play className="ml-1 h-6 w-6 fill-current" aria-hidden="true" />
-              </span>
-            </span>
-          </button>
+        <div className="mt-10 lg:mt-14">
+          <WearGuide steps={copy.steps} labels={copy.labels} listId="wear-guide-steps" />
         </div>
       </div>
-
-      {isOpen ? (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="wear-aligners-modal-title"
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/92 px-4 py-6 backdrop-blur-sm"
-        >
-          <button
-            type="button"
-            aria-label={copy.close}
-            className="absolute inset-0 cursor-default"
-            onClick={() => setIsOpen(false)}
-          />
-          <div className="relative z-10 w-full max-w-5xl">
-            <div className="mb-4 flex items-center justify-between gap-4">
-              <h3
-                id="wear-aligners-modal-title"
-                className="sc-serif text-xl text-[var(--sc-white)] sm:text-2xl"
-              >
-                {copy.videoTitle}
-              </h3>
-              <button
-                type="button"
-                onClick={() => setIsOpen(false)}
-                aria-label={copy.close}
-                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/20 bg-white/10 text-white transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sc-sun)]"
-              >
-                <X className="h-5 w-5" aria-hidden="true" />
-              </button>
-            </div>
-
-            <div className="overflow-hidden border border-white/15 bg-black shadow-[0_28px_100px_rgba(0,0,0,0.55)]">
-              {embedUrl ? (
-                <iframe
-                  title={copy.videoTitle}
-                  src={embedUrl}
-                  className="aspect-video w-full"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                  allowFullScreen
-                />
-              ) : (
-                <div className="flex aspect-video items-center justify-center px-6 text-center text-sm leading-7 text-[var(--sc-text-mid-on-dark)] sm:text-base">
-                  {copy.unavailable}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      ) : null}
     </section>
   );
 }

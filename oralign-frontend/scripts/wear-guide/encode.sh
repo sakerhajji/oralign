@@ -6,10 +6,21 @@
 #   sh "$APP"/scripts/wear-guide/encode.sh desktop:<av1 crf>:<h264 crf> phone:<av1 crf>:<h264 crf>
 #   python "$APP"/scripts/wear-guide/install.py . "$APP"
 #
+# One film can be redone alone (e.g. only phone:...): install.py keeps the
+# other film's files and manifest entry as they are.
+#
 # Each film is scaled to its rendition (desktop 1920x1080, phone 1080x1920:
-# the burned-in captions need the pixels) as a lossless reference, then
-# encoded twice and scored against it — gate: VMAF mean >= 95 and
-# 1st-percentile frame >= 91, as for the hero film.
+# the burned-in captions need the pixels; a smaller source keeps its own
+# size, never upscaled) as a lossless reference, then encoded twice and
+# scored against it — gate: VMAF mean >= 95 and 1st-percentile frame >= 91,
+# as for the hero film.
+#  - <h264 crf> = copy: the source is already a web H.264 at its rendition
+#    size (e.g. the 720x1280 phone_web cut, 456 kb/s) — re-encoding it would
+#    only add a generation of loss, so its stream is remuxed (+faststart,
+#    BT.709 tags).
+#  - <av1 crf> = none: no AV1 file. For that phone_web cut an AV1 passing
+#    the gate weighed about what its H.264 does (CRF 26: 2.9 MB and still
+#    p1 89.9 — the source's own artifacts), so the H.264 ships alone.
 #  - No audio: the masters' AAC track is digital silence.
 #  - Keyframes: the step list seeks into the film, and a seek decodes from
 #    the previous keyframe. H.264 (what iPhones play) gets one every 2 s.
@@ -22,7 +33,11 @@
 set -e
 rm -rf out && mkdir -p out work
 
-size() { [ "$1" = phone ] && echo 1080x1920 || echo 1920x1080; }
+size() { # $1 film → its rendition: the default, or the source's own size if smaller
+  if [ "$1" = phone ]; then d=1080x1920; else d=1920x1080; fi
+  s=$(ffprobe -v error -select_streams v -show_entries stream=width,height -of csv=s=x:p=0 "src/$1.mp4")
+  if [ "${s%x*}" -lt "${d%x*}" ]; then echo "$s"; else echo "$d"; fi
+}
 
 ref() { # $1 film
   s=$(size "$1")
@@ -42,12 +57,24 @@ vmaf() { # $1 encode, $2 film → "mean p1 min"
 
 codec_string() { # $1 file, $2 codec → RFC 6381 codecs= value read from the bitstream
   level=$(ffprobe -v error -select_streams v -show_entries stream=level -of csv=p=0 "$1")
-  if [ "$2" = h264 ]; then printf 'avc1.6400%02X' "$level"; else printf 'av01.0.%02dM.10' "$level"; fi
+  if [ "$2" = h264 ]; then
+    # profile_idc + constraint flags: High 64 00, Main 4D 40, else Constrained Baseline 42 E0
+    case "$(ffprobe -v error -select_streams v -show_entries stream=profile -of csv=p=0 "$1")" in
+      High) pc=6400 ;; Main) pc=4D40 ;; *) pc=42E0 ;;
+    esac
+    printf 'avc1.%s%02X' "$pc" "$level"
+  else
+    printf 'av01.0.%02dM.10' "$level"
+  fi
 }
 
-encode() { # $1 film, $2 codec, $3 crf
+encode() { # $1 film, $2 codec, $3 crf (or "copy" for h264: see the header)
   tmp=out/tmp.mp4
-  if [ "$2" = av1 ]; then
+  if [ "$3" = copy ]; then
+    ffmpeg -hide_banner -loglevel error -y -i "src/$1.mp4" -an -c:v copy \
+      -bsf:v "h264_metadata=video_full_range_flag=0:colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1" \
+      -movflags +faststart "$tmp"
+  elif [ "$2" = av1 ]; then
     ffmpeg -hide_banner -loglevel error -y -i "work/ref-$1.mkv" -an \
       -c:v libsvtav1 -preset 4 -crf "$3" -g 96 -pix_fmt yuv420p10le \
       -svtav1-params tune=0:enable-qm=1 -movflags +faststart "$tmp" 2>/dev/null
@@ -79,7 +106,8 @@ poster() { # $1 film — zscale converts BT.709 to WebP's BT.601 (see hero-film/
 for spec in "$@"; do
   film=$(echo "$spec" | cut -d: -f1)
   ref "$film"
-  encode "$film" av1 "$(echo "$spec" | cut -d: -f2)"
+  av1=$(echo "$spec" | cut -d: -f2)
+  [ "$av1" = none ] || encode "$film" av1 "$av1"
   encode "$film" h264 "$(echo "$spec" | cut -d: -f3)"
   poster "$film"
 done

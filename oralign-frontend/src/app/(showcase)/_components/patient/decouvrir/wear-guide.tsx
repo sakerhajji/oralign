@@ -35,7 +35,8 @@ import { WEAR_GUIDE } from "./wear-guide-manifest";
  *    waits for the play button. Off-screen or in a background tab it pauses,
  *    and it stops on its end card instead of looping.
  *  - AV1 first, H.264 second: the browser plays the first source it can
- *    decode and falls back to the next one if it fails.
+ *    decode and falls back to the next one if it fails. A cut may have no
+ *    AV1 (the phone cut ships its source H.264 as is — see encode.sh).
  */
 
 type Cut = "desktop" | "phone";
@@ -43,15 +44,13 @@ type Cut = "desktop" | "phone";
 const PHONE_MEDIA = "(max-width: 639.98px)";
 
 /**
- * When each step's caption is on screen, in seconds, per cut — measured on
- * the masters (frame differences in the caption area, then checked frame by
- * frame). Re-measure if a film is re-cut: the two cuts drift apart after
- * step 5.
+ * When each step's caption is on screen, in seconds — measured on the 16:9
+ * master (frame differences in the caption area, then checked frame by
+ * frame). The 9:16 phone_web cut follows the same edit (65.04 s, checked
+ * at every step). Re-measure per cut if a film is re-cut.
  */
-const CHAPTERS: Record<Cut, readonly number[]> = {
-  desktop: [4.4, 8.4, 12.5, 17.1, 31.0, 39.5, 44.6, 48.8, 53.3, 57.9],
-  phone: [4.5, 8.5, 12.5, 17.1, 29.1, 37.5, 42.6, 46.0, 49.8, 54.5],
-};
+const TIMELINE = [4.4, 8.4, 12.5, 17.1, 31.0, 39.5, 44.6, 48.8, 53.3, 57.9];
+const CHAPTERS: Record<Cut, readonly number[]> = { desktop: TIMELINE, phone: TIMELINE };
 
 /** A step counts as current from just before its caption settles. */
 const LEAD = 0.4;
@@ -385,9 +384,9 @@ export function WearGuide({
             style={{ opacity: shown ? 1 : 0 }}
           >
             {cut &&
-              (["av1", "h264"] as const).map((codec) => (
-                <source key={`${cut}-${codec}`} src={WEAR_GUIDE[cut][codec].src} type={WEAR_GUIDE[cut][codec].type} />
-              ))}
+              [WEAR_GUIDE[cut].av1, WEAR_GUIDE[cut].h264].map(
+                (file) => file && <source key={file.src} src={file.src} type={file.type} />,
+              )}
           </video>
 
           {/* Phone: one segment per step, filling as the film plays. */}

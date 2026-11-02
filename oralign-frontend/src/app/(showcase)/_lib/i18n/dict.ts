@@ -279,6 +279,21 @@ export const dict = {
       en: "This practitioner has no map location yet.",
       ar: "لا يوجد موقع على الخريطة لهذا الطبيب بعد.",
     } as T,
+    // Location chip: at rest, and once the list is sorted around the visitor.
+    nearMe: { fr: "Près de moi", en: "Near me", ar: "بالقرب مني" } as T,
+    nearYou: { fr: "Autour de vous", en: "Around you", ar: "حولك" } as T,
+    tapOnMapHint: {
+      fr: "Touchez la carte pour définir votre position",
+      en: "Tap the map to set your position",
+      ar: "المس الخريطة لتحديد موقعك",
+    } as T,
+    // Practice sheet: quick actions, hours on a phone, back control.
+    call: { fr: "Appeler", en: "Call", ar: "اتصال" } as T,
+    directions: { fr: "Itinéraire", en: "Directions", ar: "الاتجاهات" } as T,
+    today: { fr: "Aujourd'hui", en: "Today", ar: "اليوم" } as T,
+    allHours: { fr: "Tous les horaires", en: "All opening hours", ar: "كل ساعات العمل" } as T,
+    hideHours: { fr: "Masquer les horaires", en: "Hide opening hours", ar: "إخفاء ساعات العمل" } as T,
+    backToList: { fr: "Retour à la liste", en: "Back to the list", ar: "العودة إلى القائمة" } as T,
   },
 
   // ── Scaffold copy for the empty per-page SEO pages ──

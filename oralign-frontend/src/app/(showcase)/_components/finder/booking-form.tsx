@@ -336,7 +336,8 @@ export function BookingForm({
               onChange={(e) => setMessage(e.target.value)}
               placeholder={f.messagePlaceholder[lang]}
               rows={3}
-              className="w-full resize-y border border-[rgba(25,25,25,0.18)] bg-[var(--sc-white)] px-3 py-2 text-[0.9rem] text-[var(--sc-black)] outline-none transition-colors focus:border-[var(--sc-black)]"
+              // 16 px on phones: iOS zooms into any field set smaller.
+              className="w-full resize-y border border-[rgba(25,25,25,0.18)] bg-[var(--sc-white)] px-3 py-2 text-[16px] text-[var(--sc-black)] outline-none transition-colors focus:border-[var(--sc-black)] sm:text-[0.9rem]"
             />
           </label>
 
@@ -399,7 +400,8 @@ function Field({
         aria-invalid={!!error}
         aria-describedby={errId}
         className={[
-          "w-full border bg-[var(--sc-white)] px-3 py-2.5 text-[0.9rem] text-[var(--sc-black)] outline-none transition-colors focus:border-[var(--sc-black)]",
+          // 16 px on phones: iOS zooms into any field set smaller.
+          "w-full border bg-[var(--sc-white)] px-3 py-2.5 text-[16px] text-[var(--sc-black)] outline-none transition-colors focus:border-[var(--sc-black)] sm:text-[0.9rem]",
           error ? "border-red-400" : "border-[rgba(25,25,25,0.18)]",
         ].join(" ")}
       />

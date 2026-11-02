@@ -1,13 +1,15 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { ChevronDown, ChevronRight, LocateFixed, Search } from "lucide-react";
 import { dict } from "../_lib/i18n/dict";
 import { useShowcaseLang } from "../_lib/i18n/lang-context";
 import { fetchPractitioners, type ListResponse, type PublicPractitioner } from "../_lib/finder";
 import { Reveal } from "./shared/reveal";
-import { PractitionerList } from "./finder/practitioner-list";
+import { Avatar, PractitionerList } from "./finder/practitioner-list";
 import { PractitionerDetailPanel } from "./finder/practitioner-detail";
+import { formatDistanceLabel } from "./finder/distance";
 
 type LatLng = [number, number];
 type GeoStatus =
@@ -20,6 +22,14 @@ type GeoStatus =
   // browser geolocation is denied, unavailable, or blocked by a restrictive
   // Permissions-Policy header. Distance sorting works exactly the same.
   | "manual";
+
+/**
+ * Below `lg` the finder shows ONE of list and map, chosen by a toggle: a
+ * map in the middle of a phone page swallows every scroll gesture over it,
+ * and a list under a map is what nobody scrolls to. Desktop shows both.
+ */
+type View = "list" | "map";
+const DESKTOP_MEDIA = "(min-width: 1024px)";
 
 // Leaflet touches `window`, so the map is client-only. A branded skeleton
 // holds the layout while the chunk loads.
@@ -41,6 +51,24 @@ function mergeFacet(prev: string[], values: (string | null)[]): string[] {
   return Array.from(set).sort((a, b) => a.localeCompare(b));
 }
 
+function subscribeDesktop(onChange: () => void) {
+  const query = window.matchMedia(DESKTOP_MEDIA);
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+}
+
+/** true on desktop, false below `lg`, null on the server and during hydration. */
+function useIsDesktop(): boolean | null {
+  return useSyncExternalStore(
+    subscribeDesktop,
+    () => window.matchMedia(DESKTOP_MEDIA).matches,
+    () => null,
+  );
+}
+
+const CHIP =
+  "inline-flex h-10 shrink-0 items-center gap-2 border px-3.5 text-[0.84rem] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sc-sun)]";
+
 /**
  * `initial` is the directory as the server read it. Seeding the state with it
  * puts every practitioner in the server-rendered HTML — without it, crawlers
@@ -49,10 +77,12 @@ function mergeFacet(prev: string[], values: (string | null)[]): string[] {
 export function PractitionerFinder({ initial }: { initial?: ListResponse } = {}) {
   const { lang } = useShowcaseLang();
   const f = dict.finder;
+  const isDesktop = useIsDesktop();
 
   // Filters
   const [search, setSearch] = useState("");
   const [city, setCity] = useState("");
+  const [view, setView] = useState<View>("list");
 
   // Data
   const [practitioners, setPractitioners] = useState<PublicPractitioner[]>(initial?.data ?? []);
@@ -74,8 +104,11 @@ export function PractitionerFinder({ initial }: { initial?: ListResponse } = {})
   const [geoStatus, setGeoStatus] = useState<GeoStatus>("idle");
   const [focus, setFocus] = useState<LatLng | null>(null);
 
-  // Selection (drives the detail panel + the active marker)
+  // Selection drives the active marker and the map's card; `detailOpen`
+  // the sheet. On a phone's map a pin shows its card first — the sheet
+  // would hide the map the visitor is reading — and the card opens the sheet.
   const [selected, setSelected] = useState<PublicPractitioner | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
   const selectedId = selected?.id ?? null;
 
   // ── Fetch list (debounced; refetches on filter or location change) ──
@@ -152,19 +185,30 @@ export function PractitionerFinder({ initial }: { initial?: ListResponse } = {})
   }, [requestLocation]);
 
   // ── Selection ──
-  const handleSelect = useCallback((p: PublicPractitioner) => {
+  const focusOn = useCallback((p: PublicPractitioner) => {
     setSelected(p);
     if (typeof p.latitude === "number" && typeof p.longitude === "number") {
       setFocus([p.latitude, p.longitude]);
     }
   }, []);
 
+  /** From the list, or the map's card: open the sheet. */
+  const handleSelect = useCallback(
+    (p: PublicPractitioner) => {
+      focusOn(p);
+      setDetailOpen(true);
+    },
+    [focusOn],
+  );
+
   const handleMapSelect = useCallback(
     (id: string) => {
       const p = practitioners.find((x) => x.id === id);
-      if (p) handleSelect(p);
+      if (!p) return;
+      if (isDesktop) handleSelect(p);
+      else focusOn(p);
     },
-    [practitioners, handleSelect],
+    [practitioners, isDesktop, handleSelect, focusOn],
   );
 
   // Manual position fallback — clicking the map sets "where I am". Works
@@ -191,7 +235,36 @@ export function PractitionerFinder({ initial }: { initial?: ListResponse } = {})
     return () => clearTimeout(timer);
   }, [practitioners, handleSelect]);
 
-  const closeDetail = useCallback(() => setSelected(null), []);
+  const closeDetail = useCallback(() => setDetailOpen(false), []);
+
+  const located = userPosition !== null && (geoStatus === "granted" || geoStatus === "manual");
+  // Desktop always shows the map; below `lg` only the map view mounts it
+  // (a hidden Leaflet map measures 0×0 and comes back blank).
+  const showMap = isDesktop === true || view === "map";
+  const phoneMap = isDesktop === false && view === "map";
+
+  // Phone: bring the map under the toggle bar when it is chosen, so the
+  // whole map — and the card a pin opens at its foot — is on screen.
+  const mapRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!phoneMap) return;
+    const smooth = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    mapRef.current?.scrollIntoView({ block: "start", behavior: smooth ? "smooth" : "auto" });
+  }, [phoneMap]);
+
+  // The sheet is a place of its own on a phone: opening it adds a history
+  // entry, so the Back button (or gesture) closes it instead of leaving the
+  // page. Closing it any other way removes that entry again.
+  useEffect(() => {
+    if (!detailOpen) return;
+    window.history.pushState({ ...window.history.state, finderSheet: true }, "");
+    const onPop = () => setDetailOpen(false);
+    window.addEventListener("popstate", onPop);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      if (window.history.state?.finderSheet) window.history.back();
+    };
+  }, [detailOpen]);
 
   const hasActiveFilters = Boolean(search || city);
   const clearFilters = () => {
@@ -204,109 +277,140 @@ export function PractitionerFinder({ initial }: { initial?: ListResponse } = {})
     [f.resultsCount, lang, total],
   );
 
+  const selectedDistance = selected ? formatDistanceLabel(selected.distanceKm, lang) : null;
+
   return (
     <section
       data-section-tone="light"
-      className="bg-[var(--sc-white)] px-5 py-16 text-[var(--sc-black)] sm:px-8 sm:py-20 lg:px-12 lg:py-24"
+      className="bg-[var(--sc-white)] px-5 py-12 text-[var(--sc-black)] sm:px-8 sm:py-20 lg:px-12 lg:py-24"
     >
       <div className="mx-auto max-w-[1240px]">
         {/* ── Heading ── */}
         <Reveal>
-          <div className="mb-6 flex items-center gap-3 text-[0.58rem] uppercase tracking-[0.42em] text-[var(--sc-sun-deep)]">
+          <div className="mb-5 flex items-center gap-3 text-[0.58rem] uppercase tracking-[0.42em] text-[var(--sc-sun-deep)] sm:mb-6">
             <span className="h-px w-8 bg-[var(--sc-sun-deep)]" aria-hidden="true" />
             <span>{dict.brand.name[lang]}</span>
           </div>
-          <h1 className="sc-serif text-[clamp(2.1rem,4.6vw,3.4rem)] font-normal leading-[1.05] tracking-[-0.02em]">
+          <h1 className="sc-serif text-[clamp(2rem,4.6vw,3.4rem)] font-normal leading-[1.05] tracking-[-0.02em]">
             {f.title[lang]}
           </h1>
-          <p className="mt-4 max-w-[640px] text-[0.98rem] leading-8 text-[var(--sc-text-mid)]">
+          <p className="mt-3 max-w-[640px] text-[0.95rem] leading-7 text-[var(--sc-text-mid)] sm:mt-4 sm:text-[0.98rem] sm:leading-8">
             {f.subtitle[lang]}
           </p>
         </Reveal>
 
-        {/* ── Filter bar ── */}
+        {/* ── Search + chips ── */}
         <Reveal delay>
-          <div className="mt-10 flex flex-col gap-3 border border-[rgba(25,25,25,0.1)] bg-[rgba(25,25,25,0.015)] p-4 sm:p-5 lg:flex-row lg:items-end">
-            <label className="flex-1">
-              <span className="mb-1 block text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-[var(--sc-text-mid)]">
-                {f.searchLabel[lang]}
-              </span>
+          <div className="mt-7 flex flex-col gap-3 sm:mt-10 lg:flex-row lg:items-center">
+            <label className="relative block flex-1">
+              <span className="sr-only">{f.searchLabel[lang]}</span>
+              <Search
+                aria-hidden="true"
+                className="pointer-events-none absolute start-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[rgba(25,25,25,0.45)]"
+              />
               <input
                 type="search"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder={f.searchPlaceholder[lang]}
-                className="w-full border border-[rgba(25,25,25,0.18)] bg-[var(--sc-white)] px-3 py-2.5 text-[0.9rem] text-[var(--sc-black)] outline-none focus:border-[var(--sc-black)]"
+                autoComplete="off"
+                enterKeyHint="search"
+                // 16 px on phones: iOS zooms into any field set smaller.
+                className="h-12 w-full appearance-none border border-[rgba(25,25,25,0.18)] bg-[var(--sc-white)] ps-10 pe-3 text-[16px] text-[var(--sc-black)] outline-none transition-colors placeholder:text-[rgba(25,25,25,0.4)] focus:border-[var(--sc-black)] sm:text-[0.92rem] [&::-webkit-search-cancel-button]:appearance-none [&::-webkit-search-decoration]:appearance-none"
               />
             </label>
 
-            <label className="lg:w-44">
-              <span className="mb-1 block text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-[var(--sc-text-mid)]">
-                {f.cityLabel[lang]}
-              </span>
-              <select
-                value={city}
-                onChange={(e) => setCity(e.target.value)}
-                className="w-full border border-[rgba(25,25,25,0.18)] bg-[var(--sc-white)] px-3 py-2.5 text-[0.9rem] text-[var(--sc-black)] outline-none focus:border-[var(--sc-black)]"
+            {/* The chips scroll sideways on a phone rather than wrap. */}
+            <div className="-mx-5 flex gap-2 overflow-x-auto px-5 pb-0.5 [scrollbar-width:none] sm:mx-0 sm:px-0 [&::-webkit-scrollbar]:hidden">
+              <button
+                type="button"
+                onClick={requestLocation}
+                disabled={geoStatus === "locating"}
+                aria-pressed={located}
+                className={[
+                  CHIP,
+                  located
+                    ? "border-[var(--sc-black)] bg-[var(--sc-black)] text-[var(--sc-white)]"
+                    : "border-[rgba(25,25,25,0.18)] text-[var(--sc-black)] hover:border-[var(--sc-black)] disabled:opacity-60",
+                ].join(" ")}
               >
-                <option value="">{f.cityPlaceholder[lang]}</option>
-                {facetCities.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-            </label>
+                <LocateFixed aria-hidden="true" className={`h-4 w-4 ${geoStatus === "locating" ? "animate-pulse" : ""}`} />
+                {geoStatus === "locating" ? f.locating[lang] : located ? f.nearYou[lang] : f.nearMe[lang]}
+              </button>
 
-            <button
-              type="button"
-              onClick={requestLocation}
-              disabled={geoStatus === "locating"}
-              className="sc-serif inline-flex min-h-11 items-center justify-center gap-2 border border-[var(--sc-black)] px-4 py-2.5 text-[0.62rem] font-bold uppercase tracking-[0.14em] text-[var(--sc-black)] transition-colors hover:bg-[var(--sc-black)] hover:text-[var(--sc-white)] disabled:opacity-60"
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path
-                  d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11Z"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                />
-                <circle cx="12" cy="10" r="2.4" stroke="currentColor" strokeWidth="1.8" />
-              </svg>
-              {geoStatus === "locating" ? f.locating[lang] : f.useMyLocation[lang]}
-            </button>
+              <label className={`${CHIP} relative cursor-pointer ${city ? "border-[var(--sc-black)]" : "border-[rgba(25,25,25,0.18)] hover:border-[var(--sc-black)]"}`}>
+                <span className="sr-only">{f.cityLabel[lang]}</span>
+                <select
+                  value={city}
+                  onChange={(e) => setCity(e.target.value)}
+                  className="absolute inset-0 w-full cursor-pointer appearance-none opacity-0"
+                >
+                  <option value="">{f.cityPlaceholder[lang]}</option>
+                  {facetCities.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+                <span aria-hidden="true">{city || f.cityPlaceholder[lang]}</span>
+                <ChevronDown aria-hidden="true" className="h-4 w-4 text-[rgba(25,25,25,0.5)]" />
+              </label>
+
+              {hasActiveFilters && (
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className={`${CHIP} border-transparent text-[var(--sc-text-mid)] underline decoration-[var(--sc-sun)] underline-offset-4 hover:text-[var(--sc-black)]`}
+                >
+                  {f.clearFilters[lang]}
+                </button>
+              )}
+            </div>
           </div>
         </Reveal>
 
-        {/* ── Status line ── */}
-        <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-[0.82rem] text-[var(--sc-text-mid)]">
-          {!loading && !error && <span>{resultsLabel}</span>}
-          {userPosition && (geoStatus === "granted" || geoStatus === "manual") && (
-            <span className="text-[var(--sc-sun-deep)]">· {f.sortedByDistance[lang]}</span>
-          )}
-          {geoStatus === "denied" && <span>· {f.geoDenied[lang]}</span>}
-          {geoStatus === "unavailable" && <span>· {f.geoUnavailable[lang]}</span>}
-          {/* No position yet (never asked, refused, or blocked) → tell the
-              visitor the map itself is the fallback. */}
-          {!userPosition && geoStatus !== "locating" && (
-            <span className="text-[var(--sc-sun-deep)]">
-              · {f.pickOnMapHint[lang]}
-            </span>
-          )}
-          {hasActiveFilters && (
-            <button
-              type="button"
-              onClick={clearFilters}
-              className="underline decoration-[var(--sc-sun)] underline-offset-2 hover:text-[var(--sc-black)]"
-            >
-              {f.clearFilters[lang]}
-            </button>
-          )}
+        {/* ── Status + view toggle: stays under the header below `lg`, so
+            the toggle is at hand while the map fills the screen. ── */}
+        <div className="sticky top-16 z-10 -mx-5 mt-5 flex items-center justify-between gap-4 bg-[var(--sc-white)] px-5 py-2.5 sm:top-[72px] sm:mx-0 sm:mt-6 sm:px-0 lg:static lg:py-0">
+          <p className="min-w-0 text-[0.84rem] leading-6 text-[var(--sc-text-mid)]">
+            {!loading && !error && <span>{resultsLabel}</span>}
+            {located && <span className="text-[var(--sc-sun-deep)]"> · {f.sortedByDistance[lang]}</span>}
+            {geoStatus === "denied" && <span> · {f.geoDenied[lang]}</span>}
+            {geoStatus === "unavailable" && <span> · {f.geoUnavailable[lang]}</span>}
+            {/* No position yet (never asked, refused, or blocked): the map
+                is the fallback. The phone says so on the map itself. */}
+            {!userPosition && geoStatus !== "locating" && (
+              <span className="hidden text-[var(--sc-sun-deep)] lg:inline"> · {f.pickOnMapHint[lang]}</span>
+            )}
+          </p>
+
+          <div
+            role="group"
+            aria-label={`${f.showList[lang]} / ${f.showMap[lang]}`}
+            className="flex shrink-0 border border-[rgba(25,25,25,0.18)] p-0.5 lg:hidden"
+          >
+            {(["list", "map"] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setView(v)}
+                aria-pressed={view === v}
+                className={[
+                  "min-h-9 px-3.5 text-[0.8rem] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--sc-sun)]",
+                  view === v ? "bg-[var(--sc-black)] text-[var(--sc-white)]" : "text-[var(--sc-black)]",
+                ].join(" ")}
+              >
+                {v === "list" ? f.showList[lang] : f.showMap[lang]}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* ── Map + list ── */}
-        <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,400px)_1fr]">
-          {/* List — below the map on mobile, left column on desktop */}
-          <div className="order-2 lg:order-1 lg:max-h-[660px] lg:overflow-y-auto lg:pr-1">
+        <div className="mt-4 grid gap-6 sm:mt-5 lg:grid-cols-[minmax(0,400px)_1fr]">
+          {/* The list stays in the DOM in map view (it is the crawlable
+              directory); only its display changes. */}
+          <div className={`${view === "map" ? "hidden lg:block" : ""} lg:max-h-[660px] lg:overflow-y-auto lg:pr-1`}>
             <PractitionerList
               practitioners={practitioners}
               loading={loading}
@@ -317,23 +421,72 @@ export function PractitionerFinder({ initial }: { initial?: ListResponse } = {})
             />
           </div>
 
-          {/* Map — on top on mobile, right column (sticky) on desktop */}
-          <div className="order-1 h-[380px] overflow-hidden border border-[rgba(25,25,25,0.12)] sm:h-[440px] lg:order-2 lg:sticky lg:top-24 lg:h-[660px]">
-            <PractitionerMap
-              practitioners={practitioners}
-              userPosition={userPosition}
-              selectedId={selectedId}
-              focus={focus}
-              userLabel={f.youAreHere[lang]}
-              onSelect={handleMapSelect}
-              onPickPosition={handlePickPosition}
-            />
-          </div>
+          {showMap && (
+            // `isolate`: Leaflet's own z-indexes stay inside the map, under
+            // the sticky toggle bar and the sheet.
+            <div
+              ref={mapRef}
+              className="relative isolate -mx-5 h-[min(62svh,560px)] min-h-[360px] scroll-mt-32 overflow-hidden border-y border-[rgba(25,25,25,0.12)] sm:mx-0 sm:h-[440px] sm:scroll-mt-36 sm:border lg:sticky lg:top-24 lg:h-[660px]"
+            >
+              <PractitionerMap
+                practitioners={practitioners}
+                userPosition={userPosition}
+                selectedId={selectedId}
+                focus={focus}
+                userLabel={f.youAreHere[lang]}
+                onSelect={handleMapSelect}
+                onPickPosition={handlePickPosition}
+                zoomControl={isDesktop !== false}
+                // The card under the map says who the pin is.
+                popups={isDesktop !== false}
+              />
+
+              {phoneMap && (
+                <>
+                  {!userPosition && geoStatus !== "locating" && (
+                    <p className="pointer-events-none absolute inset-x-3 top-3 z-[1100] bg-[rgba(25,25,25,0.72)] px-3 py-2 text-center text-[0.78rem] text-[var(--sc-white)] backdrop-blur-sm">
+                      {f.tapOnMapHint[lang]}
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={requestLocation}
+                    disabled={geoStatus === "locating"}
+                    aria-label={f.useMyLocation[lang]}
+                    className={`absolute end-3 z-[1100] flex h-11 w-11 items-center justify-center rounded-full border border-[rgba(25,25,25,0.12)] bg-[var(--sc-white)] text-[var(--sc-black)] shadow-[0_6px_18px_rgba(0,0,0,0.18)] transition-colors hover:bg-white disabled:opacity-60 ${selected ? "bottom-[6.5rem]" : "bottom-3"}`}
+                  >
+                    <LocateFixed aria-hidden="true" className={`h-5 w-5 ${geoStatus === "locating" ? "animate-pulse" : ""}`} />
+                  </button>
+                  {selected && (
+                    // The pin's card: who it is, and the way into the sheet.
+                    <div className="absolute inset-x-3 bottom-3 z-[1100] flex items-center gap-3 border border-[rgba(25,25,25,0.12)] bg-[var(--sc-white)] p-3 shadow-[0_10px_30px_rgba(0,0,0,0.22)] animate-in fade-in slide-in-from-bottom-2 duration-200 motion-reduce:animate-none">
+                      <Avatar practitioner={selected} className="h-11 w-11 text-[0.8rem]" />
+                      <div className="min-w-0 flex-1">
+                        <p className="sc-serif truncate text-[1rem] font-medium leading-tight">{selected.practitionerName}</p>
+                        <p className="truncate text-[0.82rem] text-[var(--sc-text-mid)]">
+                          {[selected.clinicName, selected.city].filter(Boolean).join(" · ")}
+                          {selectedDistance && <span className="text-[var(--sc-sun-deep)]"> · {selectedDistance}</span>}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleSelect(selected)}
+                        className="sc-serif inline-flex min-h-10 shrink-0 items-center gap-1 bg-[var(--sc-black)] ps-3.5 pe-2.5 text-[0.6rem] font-bold uppercase tracking-[0.14em] text-[var(--sc-white)] transition-colors hover:bg-[rgba(25,25,25,0.85)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sc-sun)]"
+                      >
+                        {f.viewDetails[lang]}
+                        <ChevronRight aria-hidden="true" className="h-3.5 w-3.5 rtl:rotate-180" />
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* ── Detail + booking panel ── */}
-      {selected && (
+      {/* ── Detail + booking sheet ── */}
+      {detailOpen && selected && (
         // key by id → a fresh mount per practitioner so the booking form
         // (and its success screen) never carries over from a previous selection.
         <PractitionerDetailPanel

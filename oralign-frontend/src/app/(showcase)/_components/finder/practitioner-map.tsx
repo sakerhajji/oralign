@@ -120,6 +120,10 @@ export interface PractitionerMapProps {
   onSelect: (id: string) => void;
   /** Optional — when provided, clicking the map sets the visitor position. */
   onPickPosition?: (lat: number, lng: number) => void;
+  /** Off on phones: pinch zooms, and the +/- buttons only crowd the map. */
+  zoomControl?: boolean;
+  /** Leaflet's popup on a pin; off where the finder shows its own card. */
+  popups?: boolean;
 }
 
 export default function PractitionerMap({
@@ -130,6 +134,8 @@ export default function PractitionerMap({
   userLabel,
   onSelect,
   onPickPosition,
+  zoomControl = true,
+  popups = true,
 }: PractitionerMapProps) {
   // Only practitioners that carry real coordinates can be mapped.
   const located = useMemo(
@@ -157,6 +163,7 @@ export default function PractitionerMap({
     <MapContainer
       center={[34.0, 9.5]}
       zoom={6}
+      zoomControl={zoomControl}
       scrollWheelZoom
       style={{ width: "100%", height: "100%" }}
     >
@@ -182,11 +189,13 @@ export default function PractitionerMap({
           icon={pinIcon(p.id === selectedId)}
           eventHandlers={{ click: () => onSelect(p.id) }}
         >
-          <Popup>
-            <span style={{ fontWeight: 600 }}>{p.practitionerName}</span>
-            <br />
-            {p.clinicName}
-          </Popup>
+          {popups && (
+            <Popup>
+              <span style={{ fontWeight: 600 }}>{p.practitionerName}</span>
+              <br />
+              {p.clinicName}
+            </Popup>
+          )}
         </Marker>
       ))}
     </MapContainer>

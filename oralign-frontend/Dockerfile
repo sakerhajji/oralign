@@ -8,9 +8,13 @@ WORKDIR /app
 ARG NEXT_PUBLIC_API_URL=http://localhost:3000/api
 ARG NEXT_PUBLIC_APP_NAME=Oralign
 ARG NEXT_PUBLIC_APP_URL=http://localhost:3001
+# The API as reached from inside the cluster (e.g. http://backend:3000/api);
+# next.config.ts proxies /uploads to it. Empty → the public URL is used.
+ARG API_INTERNAL_URL=
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_APP_NAME=$NEXT_PUBLIC_APP_NAME
 ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
+ENV API_INTERNAL_URL=$API_INTERNAL_URL
 
 COPY package*.json ./
 RUN npm ci

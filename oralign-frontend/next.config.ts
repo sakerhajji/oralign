@@ -4,6 +4,19 @@ import { fileURLToPath } from "node:url";
 
 const projectRoot = path.dirname(fileURLToPath(import.meta.url));
 
+/**
+ * Where the API lives, as seen from THIS server: the in-cluster address when
+ * the container has one (API_INTERNAL_URL), the public one otherwise. Read
+ * at build time — rewrites are baked into the standalone server.
+ */
+const API_ORIGIN = (
+  process.env.API_INTERNAL_URL ||
+  process.env.NEXT_PUBLIC_API_URL ||
+  "http://localhost:3000/api"
+)
+  .replace(/\/$/, "")
+  .replace(/\/api$/, "");
+
 const nextConfig: NextConfig = {
   // Bundle only required files for the Docker image (drops image from ~1.4GB to ~250MB)
   output: "standalone",
@@ -26,6 +39,15 @@ const nextConfig: NextConfig = {
         pathname: "/uploads/**",
       },
     ],
+  },
+  // Uploaded files (practitioner photos, clinic logos) are served by the API
+  // origin. The site proxies them under its own /uploads so pages can draw
+  // them as same-origin paths — which lets next/image resize them: the
+  // optimizer refuses a remote host that resolves to a private address
+  // (Docker's), and a practitioner's photo is a full-size upload that no
+  // phone should decode for a 44 px circle.
+  async rewrites() {
+    return [{ source: "/uploads/:path*", destination: `${API_ORIGIN}/uploads/:path*` }];
   },
   // The practitioner marketing showcase was removed; the public site is the
   // patient website served at "/". Old practitioner URLs redirect to the

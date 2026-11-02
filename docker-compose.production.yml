@@ -99,8 +99,13 @@ services:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
         NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME}
         NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+        # Optional (.env.production): the API by its service name, so the
+        # frontend's server-side reads and /uploads proxy stay in-cluster
+        # instead of going out to the public hostname. Empty → public URL.
+        API_INTERNAL_URL: ${API_INTERNAL_URL:-}
     environment:
       NODE_ENV: production
+      API_INTERNAL_URL: ${API_INTERNAL_URL:-}
     # Same reason as backend — replace, don't merge.
     ports: !override
       - "127.0.0.1:3001:3001"

@@ -93,6 +93,9 @@ services:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3000/api}
         NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-Oralign}
         NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3001}
+        # The frontend container reaches the API by its service name, not
+        # by the browser's localhost: server-side reads and the /uploads proxy.
+        API_INTERNAL_URL: ${API_INTERNAL_URL:-http://backend:3000/api}
     container_name: oralign-frontend
     depends_on:
       backend:
@@ -100,6 +103,7 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: 3001
+      API_INTERNAL_URL: ${API_INTERNAL_URL:-http://backend:3000/api}
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3000/api}
       NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-Oralign}
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3001}

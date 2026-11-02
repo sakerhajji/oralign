@@ -54,16 +54,33 @@ function userIcon(): L.DivIcon {
   });
 }
 
+const FOCUS_ZOOM = 13;
+
+const keyOf = (points: LatLng[]) => points.map((p) => `${p[0].toFixed(5)},${p[1].toFixed(5)}`).join("|");
+
+function showAll(map: L.Map, points: LatLng[]) {
+  if (points.length === 1) map.setView(points[0], FOCUS_ZOOM, { animate: false });
+  else map.fitBounds(points, { padding: [42, 42], maxZoom: FOCUS_ZOOM, animate: false });
+}
+
 /**
- * Imperative viewport controller. `focus` (a selected practitioner or the
- * visitor) always wins; otherwise the map fits all markers once per dataset.
+ * Imperative viewport controller, in order of precedence: `focus` (the
+ * selected practitioner), then `fit` (the visitor and the practices nearest
+ * them), then every marker once per dataset.
+ *
+ * Moves are cuts, not flights: a flyTo from the country view to a street
+ * passes through seven zoom levels, requesting (and then dropping) a tile
+ * set at each — twenty-odd requests and a stuttering second on a phone.
+ * Only a short move at street zoom pans.
  */
 function MapEffects({
   focus,
+  fit,
   bounds,
   boundsKey,
 }: {
   focus: LatLng | null;
+  fit: LatLng[] | null;
   bounds: LatLng[];
   boundsKey: string;
 }) {
@@ -73,23 +90,22 @@ function MapEffects({
 
   useEffect(() => {
     if (!focus) return;
-    const key = `${focus[0].toFixed(5)},${focus[1].toFixed(5)}`;
+    const key = keyOf([focus]);
     if (lastFocus.current === key) return;
     lastFocus.current = key;
-    map.flyTo(focus, Math.max(map.getZoom(), 13), { animate: true, duration: 0.8 });
+    if (map.getZoom() >= FOCUS_ZOOM) map.panTo(focus, { animate: true, duration: 0.4 });
+    else map.setView(focus, FOCUS_ZOOM, { animate: false });
   }, [focus, map]);
 
   useEffect(() => {
     if (focus) return; // don't fight an active focus
-    if (bounds.length === 0) return;
-    if (lastFit.current === boundsKey) return;
-    lastFit.current = boundsKey;
-    if (bounds.length === 1) {
-      map.setView(bounds[0], 13, { animate: false });
-    } else {
-      map.fitBounds(bounds, { padding: [42, 42], maxZoom: 13, animate: false });
-    }
-  }, [bounds, boundsKey, focus, map]);
+    const points = fit && fit.length > 0 ? fit : bounds;
+    if (points.length === 0) return;
+    const key = fit && fit.length > 0 ? `fit:${keyOf(fit)}` : `all:${boundsKey}`;
+    if (lastFit.current === key) return;
+    lastFit.current = key;
+    showAll(map, points);
+  }, [bounds, boundsKey, fit, focus, map]);
 
   return null;
 }
@@ -116,6 +132,8 @@ export interface PractitionerMapProps {
   userPosition: LatLng | null;
   selectedId: string | null;
   focus: LatLng | null;
+  /** Points to frame together while nothing is selected (visitor + nearest). */
+  fit?: LatLng[] | null;
   userLabel: string;
   onSelect: (id: string) => void;
   /** Optional — when provided, clicking the map sets the visitor position. */
@@ -131,6 +149,7 @@ export default function PractitionerMap({
   userPosition,
   selectedId,
   focus,
+  fit = null,
   userLabel,
   onSelect,
   onPickPosition,
@@ -172,7 +191,7 @@ export default function PractitionerMap({
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
 
-      <MapEffects focus={focus} bounds={bounds} boundsKey={boundsKey} />
+      <MapEffects focus={focus} fit={fit} bounds={bounds} boundsKey={boundsKey} />
 
       {onPickPosition && <MapClickPicker onPick={onPickPosition} />}
 

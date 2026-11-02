@@ -261,7 +261,9 @@ const SCHEMA_DAY: Record<DayOfWeek, string> = {
  */
 export function practitionerLd(p: PractitionerDetail, lang: Lang) {
   const url = absoluteUrl(practitionerPath(p, lang));
-  const image = mediaUrl(p.logoUrl) ?? mediaUrl(p.avatarUrl);
+  // mediaUrl gives the site's proxied path; structured data wants it absolute.
+  const media = mediaUrl(p.logoUrl) ?? mediaUrl(p.avatarUrl);
+  const image = media?.startsWith("/") ? absoluteUrl(media) : media;
   const street = p.clinicAddress?.trim();
   const city = p.city?.trim();
   const phone = p.clinicPhone?.trim();

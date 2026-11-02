@@ -160,9 +160,7 @@ export function PractitionerFinder({ initial }: { initial?: ListResponse } = {})
     setGeoStatus("locating");
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        const p: LatLng = [pos.coords.latitude, pos.coords.longitude];
-        setUserPosition(p);
-        setFocus(p);
+        setUserPosition([pos.coords.latitude, pos.coords.longitude]);
         setGeoStatus("granted");
       },
       (err) => {
@@ -215,11 +213,22 @@ export function PractitionerFinder({ initial }: { initial?: ListResponse } = {})
   // even when the browser refuses geolocation, and lets a visitor search
   // around any other point (their office, a relative's town, …).
   const handlePickPosition = useCallback((lat: number, lng: number) => {
-    const p: LatLng = [lat, lng];
-    setUserPosition(p);
-    setFocus(p);
+    setUserPosition([lat, lng]);
     setGeoStatus("manual");
   }, []);
+
+  // With a position and nothing selected, the map frames the visitor and
+  // the three nearest practices (the list arrives sorted by distance) —
+  // not the visitor alone at street zoom, where a town without a practice
+  // shows an empty map, nor the whole country.
+  const fit = useMemo<LatLng[] | null>(() => {
+    if (!userPosition || selected) return null;
+    const nearest = practitioners
+      .filter((p) => typeof p.latitude === "number" && typeof p.longitude === "number")
+      .slice(0, 3)
+      .map((p): LatLng => [p.latitude as number, p.longitude as number]);
+    return [userPosition, ...nearest];
+  }, [userPosition, selected, practitioners]);
 
   const deepLinked = useRef(false);
   useEffect(() => {
@@ -433,6 +442,7 @@ export function PractitionerFinder({ initial }: { initial?: ListResponse } = {})
                 userPosition={userPosition}
                 selectedId={selectedId}
                 focus={focus}
+                fit={fit}
                 userLabel={f.youAreHere[lang]}
                 onSelect={handleMapSelect}
                 onPickPosition={handlePickPosition}
@@ -460,7 +470,7 @@ export function PractitionerFinder({ initial }: { initial?: ListResponse } = {})
                   {selected && (
                     // The pin's card: who it is, and the way into the sheet.
                     <div className="absolute inset-x-3 bottom-3 z-[1100] flex items-center gap-3 border border-[rgba(25,25,25,0.12)] bg-[var(--sc-white)] p-3 shadow-[0_10px_30px_rgba(0,0,0,0.22)] animate-in fade-in slide-in-from-bottom-2 duration-200 motion-reduce:animate-none">
-                      <Avatar practitioner={selected} className="h-11 w-11 text-[0.8rem]" />
+                      <Avatar practitioner={selected} size={44} className="text-[0.8rem]" />
                       <div className="min-w-0 flex-1">
                         <p className="sc-serif truncate text-[1rem] font-medium leading-tight">{selected.practitionerName}</p>
                         <p className="truncate text-[0.82rem] text-[var(--sc-text-mid)]">

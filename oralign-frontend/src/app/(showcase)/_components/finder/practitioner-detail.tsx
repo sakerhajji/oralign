@@ -206,7 +206,7 @@ export function PractitionerDetailPanel({ summary, onClose }: Props) {
           </button>
           <div className="flex items-start justify-between gap-4 px-5 pb-4 pt-1 sm:px-6 sm:py-5">
             <div className="flex min-w-0 items-start gap-3.5">
-              <Avatar practitioner={view} className="h-14 w-14 text-[1rem]" />
+              <Avatar practitioner={view} size={56} className="text-[1rem]" />
               <div className="min-w-0">
                 <p className="text-[0.58rem] uppercase tracking-[0.36em] text-[var(--sc-sun-deep)]">
                   {dict.brand.name[lang]}

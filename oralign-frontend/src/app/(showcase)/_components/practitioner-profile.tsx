@@ -1,7 +1,14 @@
+import Image from "next/image";
 import Link from "next/link";
 import { ArrowUpRight, MapPin, Phone } from "lucide-react";
 import { dict, type Lang } from "../_lib/i18n/dict";
-import { mediaUrl, type DayOfWeek, type PractitionerDetail, type PublicPractitioner } from "../_lib/finder";
+import {
+  isUploadUrl,
+  mediaUrl,
+  type DayOfWeek,
+  type PractitionerDetail,
+  type PublicPractitioner,
+} from "../_lib/finder";
 import { cityLabel, FINDER_PATH, practitionerPath } from "../_lib/practitioner-url";
 import { pathFor } from "../_lib/seo/routes";
 
@@ -147,12 +154,14 @@ export function PractitionerProfile({
               </div>
               <div className="flex items-center gap-5">
                 {avatar && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
+                  // Resized by next/image: the uploads are full-size photos.
+                  <Image
                     src={avatar}
                     alt={p.practitionerName}
                     width={72}
                     height={72}
+                    sizes="72px"
+                    unoptimized={!isUploadUrl(avatar)}
                     className="h-[72px] w-[72px] shrink-0 rounded-full object-cover"
                   />
                 )}

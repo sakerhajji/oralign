@@ -1,11 +1,12 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { dict } from "../../_lib/i18n/dict";
 import { useShowcaseLang } from "../../_lib/i18n/lang-context";
-import { mediaUrl, type PublicPractitioner } from "../../_lib/finder";
+import { isUploadUrl, mediaUrl, type PublicPractitioner } from "../../_lib/finder";
 import { practitionerPath } from "../../_lib/practitioner-url";
 import { formatDistanceLabel } from "./distance";
 
@@ -86,13 +87,23 @@ export function PractitionerList({
   );
 }
 
-/** Round avatar, or the practitioner's initials on amber when there is none. */
+/**
+ * Round avatar, or the practitioner's initials on amber when there is none.
+ *
+ * `size` is the circle's CSS pixels. The photo goes through next/image so
+ * the phone downloads a copy of about that size: practitioners upload
+ * their photos as they are, and one of them is 4284×5712 — 24 megapixels
+ * to decode for a 44 px circle, which is what made the finder take half a
+ * minute to load on a phone, and crash Safari.
+ */
 export function Avatar({
   practitioner: p,
-  className,
+  size,
+  className = "",
 }: {
   practitioner: PublicPractitioner;
-  className: string;
+  size: number;
+  className?: string;
 }) {
   const [imgOk, setImgOk] = useState(true);
   const avatar = mediaUrl(p.avatarUrl);
@@ -103,14 +114,17 @@ export function Avatar({
     .join("");
   return (
     <span
+      style={{ width: size, height: size }}
       className={`flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-[var(--sc-sun)] font-bold text-[var(--sc-black)] ${className}`}
     >
       {avatar && imgOk ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
+        <Image
           src={avatar}
           alt=""
-          loading="lazy"
+          width={size}
+          height={size}
+          sizes={`${size}px`}
+          unoptimized={!isUploadUrl(avatar)}
           className="h-full w-full object-cover"
           onError={() => setImgOk(false)}
         />
@@ -137,9 +151,11 @@ function PractitionerRow({
   return (
     // A real link to the practice's own page: crawlers follow it and a
     // ctrl/middle click opens it in a tab, while a plain click keeps the
-    // in-place sheet the finder has always had.
+    // in-place sheet the finder has always had — so no prefetch: twelve
+    // pages fetched on load, for a page a tap never reaches.
     <Link
       href={practitionerPath(p, lang)}
+      prefetch={false}
       onClick={(event) => {
         if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
         event.preventDefault();
@@ -156,7 +172,7 @@ function PractitionerRow({
         aria-hidden="true"
         className={`absolute inset-y-2 start-0 w-0.5 ${active ? "bg-[var(--sc-sun)]" : "bg-transparent"}`}
       />
-      <Avatar practitioner={p} className="h-11 w-11 text-[0.8rem]" />
+      <Avatar practitioner={p} size={44} className="text-[0.8rem]" />
 
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline justify-between gap-3">

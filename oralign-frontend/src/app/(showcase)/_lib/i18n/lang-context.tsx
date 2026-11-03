@@ -81,6 +81,18 @@ export function useShowcaseLang(): Ctx {
 }
 
 /**
+ * The current page's sibling URL in another language, or null when the
+ * page has none (blog, legal). The language switchers render a real
+ * link to it — a crawlable path between the three trees, which buttons
+ * calling setLang never gave search engines — and keep the in-place
+ * toggle only for pages without a sibling.
+ */
+export function useLocalizedSibling(): (lang: Lang) => string | null {
+  const pathname = usePathname();
+  return useCallback((lang: Lang) => localizedPathFor(pathname, lang), [pathname]);
+}
+
+/**
  * Maps a French route (optionally with a #hash) to its sibling in the
  * ACTIVE language, falling back to the original href when no localized
  * version exists (blog, legal, auth). This is what keeps the /en and

@@ -29,7 +29,7 @@ export default function proxy(request: NextRequest): NextResponse {
   if (
     pathname.startsWith('/_next') ||
     pathname.startsWith('/api') ||
-    /\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js|html|txt|xml)$/.test(pathname)
+    /\.(?:svg|png|jpg|jpeg|gif|webp|avif|ico|css|js|html|txt|xml|mp4|webm|woff|woff2)$/.test(pathname)
   ) {
     return NextResponse.next();
   }
@@ -73,6 +73,8 @@ export default function proxy(request: NextRequest): NextResponse {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    // The films and fonts under public/ are served in byte ranges; none of
+    // them is auth-gated, so the proxy need not run for each range request.
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|avif|mp4|webm|woff|woff2)$).*)',
   ],
 };

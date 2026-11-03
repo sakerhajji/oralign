@@ -85,7 +85,13 @@ export const dict = {
 
   // ── Public practitioner finder ("Trouver un praticien") ──
   finder: {
-    title: { fr: "Trouver un praticien", en: "Find a Practitioner", ar: "ابحث عن طبيب" } as T,
+    // The directory's H1 names what the page is for (the title tag already
+    // does): a dentist or orthodontist, in Tunisia — not just "a practitioner".
+    title: {
+      fr: "Trouver un dentiste ou un orthodontiste partenaire ORALIGN en Tunisie",
+      en: "Find an ORALIGN partner dentist or orthodontist in Tunisia",
+      ar: "ابحث عن طبيب أسنان أو أخصائي تقويم شريك لـ ORALIGN في تونس",
+    } as T,
     subtitle: {
       fr: "Praticiens certifiés ORALIGN près de chez vous.",
       en: "ORALIGN-certified practitioners near you.",
@@ -528,6 +534,7 @@ export const dict = {
   },
   how: {
     eyebrow: { fr: "Votre parcours", en: "Your Journey", ar: "رحلتك" } as T,
+    stepLabel: { fr: "Étape", en: "Step", ar: "الخطوة" } as T,
     h2Part1: { fr: "Du premier rendez-vous au", en: "From first visit to", ar: "من أوّل زيارة إلى" } as T,
     h2Em: { fr: "sourire final.", en: "final smile.", ar: "الابتسامة النهائية." } as T,
     steps: [

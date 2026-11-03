@@ -419,9 +419,13 @@ html { scroll-behavior: smooth; }
    RTL so headings, body, and small caps regain parity with FR/EN.
    This stylesheet is imported only by the (showcase) layout, so the
    rule does not affect the dashboard. */
-html[dir="rtl"] {
+html[dir="rtl"],
+html:has([data-theme="showcase"][dir="rtl"]) {
   font-size: 17.2px;
 }
+/* The second selector matches the /ar tree's server HTML at first paint
+   (the wrapper carries dir="rtl"; <html> only gets it after hydration),
+   so Arabic pages no longer render at 16 px LTR and reflow to 17.2 px. */
 
 /* ─── FOCUS RING ─── */
 [data-theme="showcase"] *:focus-visible {

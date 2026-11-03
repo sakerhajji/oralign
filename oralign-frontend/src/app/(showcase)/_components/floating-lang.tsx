@@ -1,10 +1,31 @@
 "use client";
 
+import Link from "next/link";
 import { LANGS, type Lang } from "../_lib/i18n/dict";
-import { useShowcaseLang } from "../_lib/i18n/lang-context";
+import { useLocalizedSibling, useShowcaseLang } from "../_lib/i18n/lang-context";
 
+const LABEL: Record<Lang, string> = { fr: "Français", en: "English", ar: "العربية" };
+
+/**
+ * The desktop language rail. Each language is a LINK to the page's
+ * sibling URL when one exists (/en/…, /ar/…), so the three trees are
+ * joined by crawlable links and not only by hreflang; a page without a
+ * sibling (blog, legal) keeps the in-place toggle. Clicking still
+ * records the preference, as before.
+ */
 export function FloatingLang() {
   const { lang, setLang } = useShowcaseLang();
+  const siblingFor = useLocalizedSibling();
+  const itemClass = (isActive: boolean) =>
+    [
+      "relative block bg-transparent border-0 border-t border-[var(--sc-grey)] px-3 py-2.5 text-center uppercase no-underline transition-colors",
+      "text-[0.62rem] font-medium tracking-[0.28em]",
+      "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sc-sun)]",
+      isActive
+        ? "bg-[var(--sc-sun)] text-[var(--sc-black)]"
+        : "text-[var(--sc-text-mid)] hover:bg-[#fdf9ec] hover:text-[var(--sc-black)]",
+    ].join(" ");
+
   return (
     <div
       role="group"
@@ -19,21 +40,28 @@ export function FloatingLang() {
       </span>
       {LANGS.map((l: Lang) => {
         const isActive = l === lang;
-        return (
+        const sibling = siblingFor(l);
+        return sibling ? (
+          <Link
+            key={l}
+            href={sibling}
+            hrefLang={l}
+            lang={l}
+            onClick={() => setLang(l)}
+            aria-current={isActive ? "true" : undefined}
+            aria-label={LABEL[l]}
+            className={itemClass(isActive)}
+          >
+            {l}
+          </Link>
+        ) : (
           <button
             key={l}
             type="button"
             onClick={() => setLang(l)}
             aria-pressed={isActive}
-            aria-label={`Switch to ${l.toUpperCase()}`}
-            className={[
-              "relative bg-transparent border-0 border-t border-[var(--sc-grey)] px-3 py-2.5 uppercase transition-colors",
-              "text-[0.62rem] font-medium tracking-[0.28em]",
-              "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sc-sun)]",
-              isActive
-                ? "bg-[var(--sc-sun)] text-[var(--sc-black)]"
-                : "text-[var(--sc-text-mid)] hover:bg-[#fdf9ec] hover:text-[var(--sc-black)]",
-            ].join(" ")}
+            aria-label={LABEL[l]}
+            className={itemClass(isActive)}
           >
             {l}
           </button>

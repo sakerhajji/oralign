@@ -37,6 +37,7 @@ import {
   JwtPayload,
 } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
+import { PublicReadThrottle } from '../../common/decorators/public-read-throttle.decorator';
 import { UserRole } from '@prisma/client';
 
 @ApiTags('dentist-profile')
@@ -187,6 +188,7 @@ export class DentistProfileController {
 
   @Get('public')
   @Public()
+  @PublicReadThrottle()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
@@ -214,6 +216,7 @@ export class DentistProfileController {
 
   @Get('public/:id')
   @Public()
+  @PublicReadThrottle()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:

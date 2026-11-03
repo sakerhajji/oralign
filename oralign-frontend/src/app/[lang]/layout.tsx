@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { ShowcaseChrome } from "../(showcase)/_components/showcase-chrome";
-import { OG_LOCALE, SITE_NAME, SITE_URL } from "../(showcase)/_lib/seo/meta";
+import { OG_IMAGE, OG_LOCALE, SITE_NAME, SITE_URL } from "../(showcase)/_lib/seo/meta";
 import { isLocalizedLang, LOCALIZED_LANGS } from "../(showcase)/_lib/seo/routes";
 
 /**
@@ -39,7 +39,9 @@ export async function generateMetadata({
       type: "website",
       siteName: SITE_NAME,
       locale: OG_LOCALE[lang],
+      images: [OG_IMAGE],
     },
+    twitter: { card: "summary_large_image", images: [OG_IMAGE.url] },
     robots: { index: true, follow: true },
   };
 }

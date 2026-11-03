@@ -42,9 +42,12 @@ export const metadata: Metadata = {
   ...(GOOGLE_SITE_VERIFICATION
     ? { verification: { google: GOOGLE_SITE_VERIFICATION } }
     : {}),
+  // The brand as the public site writes it: these defaults reach the
+  // pages outside the showcase trees (auth, payment, errors) and the
+  // template suffixes their titles.
   title: {
-    default: `${APP_NAME} — Clear aligner care`,
-    template: `%s · ${APP_NAME}`,
+    default: "ORALIGN® — Aligneurs transparents en Tunisie",
+    template: "%s | ORALIGN®",
   },
   description: APP_DESCRIPTION,
   applicationName: APP_NAME,
@@ -73,11 +76,11 @@ export const metadata: Metadata = {
   },
   openGraph: {
     type: "website",
-    locale: "en_US",
-    alternateLocale: ["fr_FR", "ar_TN"],
+    locale: "fr_TN",
+    alternateLocale: ["en_US", "ar_TN"],
     url: APP_URL,
     siteName: APP_NAME,
-    title: `${APP_NAME} — Clear aligner care`,
+    title: "ORALIGN® — Aligneurs transparents en Tunisie",
     description: APP_DESCRIPTION,
     // `images` is intentionally omitted — Next.js auto-discovers
     // `src/app/opengraph-image.tsx` (a 1200×630 branded PNG) and
@@ -91,7 +94,7 @@ export const metadata: Metadata = {
     // `summary_large_image` picks up the 1200×630 OG card too, so the
     // Twitter / X share preview matches Google.
     card: "summary_large_image",
-    title: `${APP_NAME} — Clear aligner care`,
+    title: "ORALIGN® — Aligneurs transparents en Tunisie",
     description: APP_DESCRIPTION,
   },
   robots: {

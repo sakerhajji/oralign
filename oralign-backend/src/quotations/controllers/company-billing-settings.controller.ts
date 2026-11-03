@@ -25,6 +25,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Public } from '../../common/decorators/public.decorator';
+import { PublicReadThrottle } from '../../common/decorators/public-read-throttle.decorator';
 import { BadRequestException } from '../../common/exceptions/app.exception';
 import { LocalStorageService } from '../../storage/local-storage.service';
 import {
@@ -298,6 +299,7 @@ export class PublicLegalInfoController {
   constructor(private readonly service: CompanyBillingSettingsService) {}
 
   @Public()
+  @PublicReadThrottle()
   @Get('legal-info')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({

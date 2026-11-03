@@ -14,7 +14,11 @@ import {
 } from "@/components/ui/sheet";
 import { NAV_ITEMS } from "../_lib/nav";
 import { dict, LANGS, type Lang } from "../_lib/i18n/dict";
-import { useLocalizedHref, useShowcaseLang } from "../_lib/i18n/lang-context";
+import {
+  useLocalizedHref,
+  useLocalizedSibling,
+  useShowcaseLang,
+} from "../_lib/i18n/lang-context";
 
 const FINDER_HREF = "/trouver-un-praticien";
 const PRACTITIONER_SPACE_HREF = "/praticiens";
@@ -22,6 +26,7 @@ const PRACTITIONER_SPACE_HREF = "/praticiens";
 export function MobileNav() {
   const { lang, setLang } = useShowcaseLang();
   const l = useLocalizedHref();
+  const siblingFor = useLocalizedSibling();
   const [open, setOpen] = useState(false);
   const navItems = NAV_ITEMS;
   const [openId, setOpenId] = useState<string | null>(null);
@@ -77,7 +82,6 @@ export function MobileNav() {
               alt="Oralign"
               width={1240}
               height={880}
-              priority
               className="h-11 w-auto"
             />
           </Link>
@@ -162,23 +166,40 @@ export function MobileNav() {
             })}
           </ul>
 
+          {/* Links to the page's sibling URL when it has one, so the three
+              language trees are joined by crawlable links; a button only
+              where there is no sibling (blog, legal). */}
           <div className="mt-7 grid grid-cols-3 border border-[var(--sc-grey)]">
-            {LANGS.map((l: Lang) => {
-              const active = l === lang;
-              return (
-                <button
-                  key={l}
-                  type="button"
-                  onClick={() => setLang(l)}
-                  aria-pressed={active}
-                  className={[
-                    "h-12 border-r border-[var(--sc-grey)] text-[0.74rem] uppercase tracking-[0.22em] transition-colors last:border-r-0",
-                    active
-                      ? "bg-[var(--sc-black)] text-[var(--sc-sun)]"
-                      : "bg-transparent text-[var(--sc-text-mid)] hover:text-[var(--sc-black)]",
-                  ].join(" ")}
+            {LANGS.map((code: Lang) => {
+              const active = code === lang;
+              const sibling = siblingFor(code);
+              const cls = [
+                "flex h-12 items-center justify-center border-r border-[var(--sc-grey)] text-[0.74rem] uppercase tracking-[0.22em] no-underline transition-colors last:border-r-0",
+                active
+                  ? "bg-[var(--sc-black)] text-[var(--sc-sun)]"
+                  : "bg-transparent text-[var(--sc-text-mid)] hover:text-[var(--sc-black)]",
+              ].join(" ");
+              return sibling ? (
+                <Link
+                  key={code}
+                  href={sibling}
+                  hrefLang={code}
+                  lang={code}
+                  onClick={() => setLang(code)}
+                  aria-current={active ? "true" : undefined}
+                  className={cls}
                 >
-                  {l}
+                  {code}
+                </Link>
+              ) : (
+                <button
+                  key={code}
+                  type="button"
+                  onClick={() => setLang(code)}
+                  aria-pressed={active}
+                  className={cls}
+                >
+                  {code}
                 </button>
               );
             })}

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { dict, DEFAULT_LANG } from "../_lib/i18n/dict";
+import { OG_IMAGE } from "../_lib/seo/meta";
 import { Reveal } from "../_components/shared/reveal";
 import { getPublishedPosts } from "./_lib/fetch";
 import { BlogIndex } from "./_components/blog-index";
@@ -19,6 +20,12 @@ export const metadata: Metadata = {
     description:
       "Des conseils pour les patients et des ressources cliniques pour les praticiens, par ORALIGN®.",
     url: "/blog",
+    images: [OG_IMAGE],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Blog ORALIGN® — Conseils, guides & actualités",
+    images: [OG_IMAGE.url],
   },
 };
 

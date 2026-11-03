@@ -13,6 +13,7 @@ import { FilesInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
+import { PublicReadThrottle } from '../../common/decorators/public-read-throttle.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { CreateCommunitySubmissionDto } from '../dto/community-submission.dto';
 import { CommunitySubmissionService } from '../services/community-submission.service';
@@ -47,6 +48,7 @@ export class CommunitySubmissionController {
   constructor(private readonly service: CommunitySubmissionService) {}
 
   @Public()
+  @PublicReadThrottle()
   @Get('approved')
   @ApiOperation({ summary: 'Public approved community stories.' })
   async approved() {

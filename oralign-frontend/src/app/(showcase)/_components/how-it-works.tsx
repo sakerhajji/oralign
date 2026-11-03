@@ -103,6 +103,7 @@ export function HowItWorks() {
                   title={step[lang]}
                   description={dict.how.stepDescs[i][lang]}
                   imageSrc={stepImagePaths[i]}
+                  stepLabel={dict.how.stepLabel[lang]}
                   index={i}
                   isLast={i === dict.how.steps.length - 1}
                 />
@@ -119,12 +120,15 @@ function StepCard({
   title,
   description,
   imageSrc,
+  stepLabel,
   index,
   isLast,
 }: {
   title: string;
   description: string;
   imageSrc: string;
+  /** "Étape" / "Step" / "الخطوة", in the page's language. */
+  stepLabel: string;
   index: number;
   isLast: boolean;
 }) {
@@ -165,7 +169,7 @@ function StepCard({
               (max-width: 1024px) 50vw,
               20vw
             "
-            quality={84}
+            quality={85}
             className="
               object-cover transition-transform duration-700
               group-hover:scale-105
@@ -225,7 +229,7 @@ function StepCard({
               "
               style={{ color: "var(--sc-text-mid)" }}
             >
-              Step {number}
+              {stepLabel} {number}
             </span>
           </div>
 

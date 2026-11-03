@@ -108,7 +108,6 @@ export function Header() {
             alt="Oralign"
             width={1240}
             height={880}
-            priority
             sizes="(min-width: 1024px) 56px, (min-width: 640px) 48px, 40px"
             className="h-12 w-auto sm:h-12 lg:h-14"
           />

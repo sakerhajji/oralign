@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { ShowcaseChrome } from "./_components/showcase-chrome";
-import { OG_LOCALE, SITE_NAME, SITE_URL } from "./_lib/seo/meta";
+import { OG_IMAGE, OG_LOCALE, SITE_NAME, SITE_URL } from "./_lib/seo/meta";
 
 /**
  * Layout metadata = safety-net defaults for the French showcase tree.
@@ -28,20 +28,25 @@ export const metadata: Metadata = {
     "aligneur dentaire Tunisie",
     "ORALIGN",
   ],
+  // No `url` here: a segment-level openGraph replaces the inherited one,
+  // so a layout url would make every legal page share as the homepage.
+  // The card image is listed for the same reason — pages that do not
+  // call marketingMetadata (blog, legal) would otherwise ship none.
   openGraph: {
     type: "website",
     title: "ORALIGN® — Aligneurs dentaires invisibles en Tunisie",
     description:
       "Un sourire aligné aujourd'hui, une confiance durable demain. Aligneurs transparents, conçus en Allemagne, fabriqués en Tunisie et validés par votre praticien.",
-    url: SITE_URL,
     siteName: SITE_NAME,
     locale: OG_LOCALE.fr,
+    images: [OG_IMAGE],
   },
   twitter: {
     card: "summary_large_image",
     title: "ORALIGN® — Aligneurs dentaires invisibles en Tunisie",
     description:
       "Aligneurs transparents supervisés par un praticien certifié, pour adultes, enfants et adolescents.",
+    images: [OG_IMAGE.url],
   },
   robots: { index: true, follow: true },
 };

@@ -81,6 +81,14 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
+        // The social card is RENDERED (app/og.png/route.tsx) under a fixed
+        // name, so it must not fall under the immutable rule below: a
+        // redesign would otherwise never reach browsers and CDNs that
+        // cached it. A day is plenty for a card.
+        source: "/og.png",
+        headers: [{ key: "Cache-Control", value: "public, max-age=86400" }],
+      },
+      {
         // A year, immutable: a file under public/ must therefore change its
         // NAME when its content changes (loginPicture.<hash>.webp, the hero
         // film's oralign-film-*.<hash>.mp4), or returning visitors keep the

@@ -126,17 +126,24 @@ export interface LegalDoc {
 
 interface DocMeta {
   slug: string;
-  nav: Record<Base, string>;
+  /**
+   * Footer / nav label. The documents themselves exist in French and
+   * English only (`Base`), but the label is shown on the Arabic tree
+   * too, so it has its own Arabic string rather than falling back to
+   * French in the middle of an Arabic footer.
+   */
+  nav: Record<Base, string> & { ar: string };
   title: Record<Base, string>;
   description: Record<Base, string>;
 }
 
-const BRAND = 'ORALIGN';
+// The registered mark, as every other page title ends ("| ORALIGN®").
+const BRAND = 'ORALIGN®';
 
 const DOC_META: Record<LegalDocKey, DocMeta> = {
   about: {
     slug: 'qui-sommes-nous',
-    nav: { fr: 'Qui sommes-nous', en: 'About us' },
+    nav: { fr: 'Qui sommes-nous', en: 'About us', ar: 'من نحن' },
     title: { fr: 'Qui sommes-nous', en: 'About us' },
     description: {
       fr: 'Découvrez ORALIGN, boutique en ligne d’aligneurs dentaires transparents basée en Tunisie : notre mission, notre catalogue et notre service client.',
@@ -145,7 +152,7 @@ const DOC_META: Record<LegalDocKey, DocMeta> = {
   },
   refunds: {
     slug: 'reclamations-remboursements',
-    nav: { fr: 'Réclamations et remboursements', en: 'Complaints and refunds' },
+    nav: { fr: 'Réclamations et remboursements', en: 'Complaints and refunds', ar: 'الشكاوى والاسترداد' },
     title: {
       fr: 'Réclamations et remboursements clients',
       en: 'Customer complaints and refunds',
@@ -157,7 +164,7 @@ const DOC_META: Record<LegalDocKey, DocMeta> = {
   },
   legal: {
     slug: 'mentions-legales',
-    nav: { fr: 'Mentions légales', en: 'Legal notice' },
+    nav: { fr: 'Mentions légales', en: 'Legal notice', ar: 'الإشعار القانوني' },
     title: { fr: 'Mentions légales', en: 'Legal notice' },
     description: {
       fr: 'Informations légales d’ORALIGN : raison sociale, forme juridique, matricule fiscal, registre de commerce, propriété intellectuelle, données personnelles et paiement sécurisé.',
@@ -166,7 +173,7 @@ const DOC_META: Record<LegalDocKey, DocMeta> = {
   },
   privacy: {
     slug: 'politique-confidentialite',
-    nav: { fr: 'Politique de confidentialité', en: 'Privacy policy' },
+    nav: { fr: 'Politique de confidentialité', en: 'Privacy policy', ar: 'سياسة الخصوصية' },
     title: { fr: 'Politique de confidentialité', en: 'Privacy policy' },
     description: {
       fr: 'Comment ORALIGN collecte, utilise, conserve et protège les données personnelles : finalités, partage, sécurité, paiement et droits des utilisateurs.',
@@ -175,7 +182,7 @@ const DOC_META: Record<LegalDocKey, DocMeta> = {
   },
   termsOfUse: {
     slug: 'conditions-utilisation',
-    nav: { fr: 'Conditions générales d’utilisation', en: 'Terms of use' },
+    nav: { fr: 'Conditions générales d’utilisation', en: 'Terms of use', ar: 'شروط الاستخدام' },
     title: { fr: 'Conditions générales d’utilisation', en: 'Terms of use' },
     description: {
       fr: 'Conditions générales d’utilisation de la plateforme ORALIGN : accès professionnel, sécurité du compte, responsabilité clinique du praticien, données patients, propriété intellectuelle, disponibilité et droit applicable.',
@@ -184,7 +191,7 @@ const DOC_META: Record<LegalDocKey, DocMeta> = {
   },
   terms: {
     slug: 'conditions-vente',
-    nav: { fr: 'Conditions de commande', en: 'Order terms' },
+    nav: { fr: 'Conditions de commande', en: 'Order terms', ar: 'شروط الطلب' },
     title: {
       fr: 'Conditions de commande, de traitement, de fabrication et de livraison',
       en: 'Order, treatment, manufacturing and delivery terms',
@@ -196,7 +203,7 @@ const DOC_META: Record<LegalDocKey, DocMeta> = {
   },
   contact: {
     slug: 'contact',
-    nav: { fr: 'Contact', en: 'Contact' },
+    nav: { fr: 'Contact', en: 'Contact', ar: 'اتصل بنا' },
     title: { fr: 'Nous contacter', en: 'Contact us' },
     description: {
       fr: 'Contactez le service client ORALIGN : email, téléphone et adresse. Assistance disponible avant et après votre commande.',
@@ -217,7 +224,7 @@ export function legalDocMeta(key: LegalDocKey, lang: LegalLang) {
   return {
     slug: m.slug,
     href: `/${m.slug}`,
-    navLabel: m.nav[b],
+    navLabel: lang === 'ar' ? m.nav.ar : m.nav[b],
     title: `${m.title[b]} | ${BRAND}`,
     description: m.description[b],
   };
@@ -236,7 +243,7 @@ export function legalFooterLinks(lang: LegalLang): { label: string; href: string
  * not a legal doc so it's built inline; the others come from `legalDocMeta`.
  */
 export function companyFooterLinks(lang: LegalLang): { label: string; href: string }[] {
-  const home = base(lang) === 'en' ? 'Home' : 'Accueil';
+  const home = lang === 'ar' ? 'الرئيسية' : base(lang) === 'en' ? 'Home' : 'Accueil';
   return [
     { label: home, href: '/' },
     (() => {

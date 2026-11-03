@@ -3,6 +3,9 @@
 import React from 'react';
 import ReactPhoneInput from 'react-phone-input-2';
 import type { CountryData } from 'react-phone-input-2';
+// Loaded with this component only (it carries a 45 KB flag sprite): the
+// overrides in app/globals.css win on specificity, not on order.
+import 'react-phone-input-2/lib/style.css';
 import { useT } from '@/lib/i18n/lang-context';
 import { cn } from '@/lib/utils';
 

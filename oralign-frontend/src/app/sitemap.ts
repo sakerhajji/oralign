@@ -73,15 +73,18 @@ const LEGAL_PAGES = [
   '/reclamations-remboursements',
 ];
 
+/**
+ * No lastmod on the pages whose change date we do not know (marketing,
+ * legal, practitioner profiles): the previous "now" on every render told
+ * Google everything changed at every fetch, and Google ignores lastmod it
+ * finds to be unreliable — on every entry, including the blog's real one.
+ */
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const now = new Date();
-
   const marketingRoutes: MetadataRoute.Sitemap = MARKETING_PAGE_KEYS.flatMap((key) => {
     const rank = PAGE_RANK[key];
     const alternates = marketingAlternates(key);
     return PAGE_LANGS[key].map((lang) => ({
       url: absoluteUrl(MARKETING_PAGES[key][lang].path),
-      lastModified: now,
       changeFrequency: rank.changeFrequency,
       priority: lang === 'fr' ? rank.priority : Math.max(rank.priority - 0.1, 0.1),
       alternates,
@@ -90,7 +93,6 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   const legalRoutes: MetadataRoute.Sitemap = LEGAL_PAGES.map((path) => ({
     url: `${SITE_URL}${path}`,
-    lastModified: now,
     changeFrequency: 'yearly',
     priority: 0.3,
   }));
@@ -98,7 +100,6 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const blogIndex: MetadataRoute.Sitemap = [
     {
       url: `${SITE_URL}/blog`,
-      lastModified: now,
       changeFrequency: 'daily',
       priority: 0.7,
     },
@@ -113,7 +114,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     const coverAbs = cover ? resolveBlogMediaUrl(cover) : null;
     return {
       url: `${SITE_URL}/blog/${post.slug}`,
-      lastModified: post.publishedAt ? new Date(post.publishedAt) : now,
+      ...(post.publishedAt ? { lastModified: new Date(post.publishedAt) } : {}),
       changeFrequency: 'weekly' as const,
       priority: 0.6,
       ...(coverAbs ? { images: [coverAbs] } : {}),
@@ -135,7 +136,6 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     };
     return (['fr', 'en', 'ar'] as const).map((lang) => ({
       url: url(lang),
-      lastModified: now,
       changeFrequency: 'monthly' as const,
       priority: lang === 'fr' ? 0.7 : 0.6,
       alternates: { languages },

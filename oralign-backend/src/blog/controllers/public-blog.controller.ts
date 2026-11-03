@@ -11,6 +11,7 @@ import { ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { BlogAudience } from '@prisma/client';
 import { Public } from '../../common/decorators/public.decorator';
+import { PublicReadThrottle } from '../../common/decorators/public-read-throttle.decorator';
 import { BlogFilterDto } from '../dto/blog.dto';
 import { BlogService } from '../services/blog.service';
 
@@ -35,6 +36,7 @@ export class PublicBlogController {
   // `/blog/published` and `/blog/categories` are never matched as slugs.
 
   @Public()
+  @PublicReadThrottle()
   @Get('published')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -45,6 +47,7 @@ export class PublicBlogController {
   }
 
   @Public()
+  @PublicReadThrottle()
   @Get('categories')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Distinct categories among published posts.' })
@@ -54,6 +57,7 @@ export class PublicBlogController {
   }
 
   @Public()
+  @PublicReadThrottle()
   @Get(':slug')
   @HttpCode(HttpStatus.OK)
   @ApiParam({ name: 'slug', type: String })

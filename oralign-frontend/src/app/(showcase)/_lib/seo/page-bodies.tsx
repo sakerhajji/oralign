@@ -1,6 +1,13 @@
 import type { Lang } from "../i18n/dict";
 import type { MarketingPageKey } from "./routes";
-import { JsonLd, breadcrumbLd, dentistServiceLd, faqLd, procedureLd } from "./jsonld";
+import {
+  JsonLd,
+  breadcrumbLd,
+  dentistServiceLd,
+  faqLd,
+  practitionerListLd,
+  procedureLd,
+} from "./jsonld";
 import { getLegalCompany } from "../legal-info";
 import { getPublicPractitioners } from "../practitioners";
 import {
@@ -54,12 +61,12 @@ export async function MarketingPageBody({
           markup describes is actually visible (Google requirement). */}
       {page === "guide" && <JsonLd data={faqLd(lang)} />}
       {page === "practitioners" && <JsonLd data={dentistServiceLd(lang)} />}
-      {await pageSections(page)}
+      {await pageSections(page, lang)}
     </>
   );
 }
 
-async function pageSections(page: MarketingPageKey) {
+async function pageSections(page: MarketingPageKey, lang: Lang) {
   switch (page) {
     case "home":
       return (
@@ -82,9 +89,17 @@ async function pageSections(page: MarketingPageKey) {
           <AgirTotSection />
         </>
       );
-    case "finder":
-      // Server-read directory → every practice is in the crawlable HTML.
-      return <PractitionerFinder initial={await getPublicPractitioners()} />;
+    case "finder": {
+      // Server-read directory → every practice is in the crawlable HTML,
+      // and described as a list of entities (ItemList of the profiles).
+      const initial = await getPublicPractitioners();
+      return (
+        <>
+          <JsonLd data={practitionerListLd(initial.data, lang)} />
+          <PractitionerFinder initial={initial} />
+        </>
+      );
+    }
     case "guide":
       return <GuidePage />;
     case "community":

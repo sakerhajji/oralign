@@ -1,8 +1,10 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "react-phone-input-2/lib/style.css";
-@import "leaflet/dist/leaflet.css";
+/* The phone-input (45 KB, a base64 flag sprite) and Leaflet stylesheets
+   are imported by the components that use them (ui/phone-input.tsx, the
+   two map components), not here: this file is render-blocking on every
+   marketing page, where neither a phone field nor a map ever appears. */
 
 @custom-variant dark (&:is(.dark *));
 
@@ -133,7 +135,9 @@
 
 /* ─── react-phone-input-2 overrides ─────────────────────────────────────────
    Intentionally outside @layer so these rules beat the library's unlayered CSS.
-   Declaration order wins at equal specificity, and we declare after the import.
+   The library stylesheet is loaded with the phone-input component, i.e. after
+   this file: every rule here therefore wins on specificity (.react-tel-input
+   .phone-input …, plus !important where the library uses it), never on order.
    ─────────────────────────────────────────────────────────────────────────── */
 
 /* Container */

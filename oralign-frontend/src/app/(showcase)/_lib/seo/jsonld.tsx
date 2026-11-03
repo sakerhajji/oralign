@@ -2,9 +2,10 @@ import { dict, type Lang } from "../i18n/dict";
 import { MARKETING_PAGES, pathFor, type MarketingPageKey } from "./routes";
 import { BRAND, SITE_NAME, SITE_URL, SOCIAL_PROFILES, absoluteUrl } from "./meta";
 import type { LegalCompany } from "@/lib/legal/legal-content";
-import type { DayOfWeek, PractitionerDetail } from "../finder";
+import type { DayOfWeek, PractitionerDetail, PublicPractitioner } from "../finder";
 import { mediaUrl } from "../finder";
 import { FINDER_PATH, cityLabel, practitionerPath } from "../practitioner-url";
+import { guideCopy } from "../../guide/_components/guide-copy";
 
 /**
  * Server-rendered JSON-LD. The previous implementation used next/script
@@ -171,14 +172,40 @@ export function procedureLd(lang: Lang) {
  * pages without visible FAQ content. Practitioner-tab items are omitted:
  * Radix only mounts the active tab, so they're absent from the HTML.
  */
+/**
+ * The directory page as a list of the practices it shows: an ItemList of
+ * the profile URLs, so the page is read as a list of entities and each
+ * profile gets one more crawlable path.
+ */
+export function practitionerListLd(
+  practitioners: readonly PublicPractitioner[],
+  lang: Lang,
+) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "ItemList",
+    name: MARKETING_PAGES.finder[lang].title,
+    numberOfItems: practitioners.length,
+    itemListElement: practitioners.map((p, i) => ({
+      "@type": "ListItem",
+      position: i + 1,
+      name: p.clinicName || p.practitionerName,
+      url: absoluteUrl(practitionerPath(p, lang)),
+    })),
+  };
+}
+
 export function faqLd(lang: Lang) {
+  // The questions the guide page actually shows (guide-copy.ts), not the
+  // dict.faq list of an unmounted section: FAQ markup must describe the
+  // visible FAQ, or Google treats it as ineligible.
   return {
     "@context": "https://schema.org",
     "@type": "FAQPage",
-    mainEntity: dict.faq.items.map((item) => ({
+    mainEntity: guideCopy[lang].faq.items.map((item) => ({
       "@type": "Question",
-      name: item.q[lang],
-      acceptedAnswer: { "@type": "Answer", text: item.a[lang] },
+      name: item.question,
+      acceptedAnswer: { "@type": "Answer", text: item.answer },
     })),
   };
 }

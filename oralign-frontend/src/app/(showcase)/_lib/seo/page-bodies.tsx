@@ -10,6 +10,7 @@ import {
 } from "./jsonld";
 import { getLegalCompany } from "../legal-info";
 import { getPublicPractitioners } from "../practitioners";
+import { groupByCity } from "../practitioner-url";
 import {
   DailyLifeSection,
   GuidePreviewSection,
@@ -29,6 +30,7 @@ import {
   TemoignagesSection,
 } from "../../_components/patient/communaute-sections";
 import { PractitionerFinder } from "../../_components/practitioner-finder";
+import { CityStrip } from "../../_components/city-links";
 import { PrixPage } from "../../_components/patient/prix-sections";
 import { ComparatifPage } from "../../_components/patient/comparatif-sections";
 import { AdosPage } from "../../_components/patient/ados-sections";
@@ -92,11 +94,14 @@ async function pageSections(page: MarketingPageKey, lang: Lang) {
     case "finder": {
       // Server-read directory → every practice is in the crawlable HTML,
       // and described as a list of entities (ItemList of the profiles).
+      // The city strip under it is the crawl path to the city landing
+      // pages (the finder's city filter is client state, not a URL).
       const initial = await getPublicPractitioners();
       return (
         <>
           <JsonLd data={practitionerListLd(initial.data, lang)} />
           <PractitionerFinder initial={initial} />
+          <CityStrip groups={groupByCity(initial.data)} lang={lang} />
         </>
       );
     }

@@ -10,7 +10,7 @@ import {
 } from './(showcase)/_lib/seo/routes';
 import { resolveBlogMediaUrl } from '@/lib/api/blog.service';
 import { getPublicPractitioners } from './(showcase)/_lib/practitioners';
-import { practitionerPath } from './(showcase)/_lib/practitioner-url';
+import { cityPath, groupByCity, isIndexableCity, practitionerPath } from './(showcase)/_lib/practitioner-url';
 import type { Lang } from './(showcase)/_lib/i18n/dict';
 
 /**
@@ -142,5 +142,36 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     }));
   });
 
-  return [...marketingRoutes, ...practitionerRoutes, ...legalRoutes, ...blogIndex, ...blogRoutes];
+  // One landing page per city with enough listed practices, in the three
+  // languages — the indexable form of the finder's city filter. A city
+  // with a single practice is noindexed (thin), so it is not listed here:
+  // a sitemap must never carry a URL it does not want indexed.
+  const cityRoutes: MetadataRoute.Sitemap = groupByCity(practitioners)
+    .filter(isIndexableCity)
+    .flatMap((group) => {
+      const url = (lang: Lang) => absoluteUrl(cityPath(group.label, lang));
+      const languages = {
+        fr: url('fr'),
+        'fr-TN': url('fr'),
+        en: url('en'),
+        ar: url('ar'),
+        'ar-TN': url('ar'),
+        'x-default': url('fr'),
+      };
+      return (['fr', 'en', 'ar'] as const).map((lang) => ({
+        url: url(lang),
+        changeFrequency: 'monthly' as const,
+        priority: lang === 'fr' ? 0.7 : 0.6,
+        alternates: { languages },
+      }));
+    });
+
+  return [
+    ...marketingRoutes,
+    ...cityRoutes,
+    ...practitionerRoutes,
+    ...legalRoutes,
+    ...blogIndex,
+    ...blogRoutes,
+  ];
 }

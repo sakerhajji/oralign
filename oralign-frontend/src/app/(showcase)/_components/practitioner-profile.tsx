@@ -9,7 +9,7 @@ import {
   type PractitionerDetail,
   type PublicPractitioner,
 } from "../_lib/finder";
-import { cityLabel, FINDER_PATH, practitionerPath } from "../_lib/practitioner-url";
+import { cityLabel, cityPath, citySlug, FINDER_PATH, frInCity, practitionerPath } from "../_lib/practitioner-url";
 import { pathFor } from "../_lib/seo/routes";
 
 /**
@@ -50,7 +50,7 @@ const copy: Record<Lang, Copy> = {
     eyebrow: "Praticien partenaire ORALIGN®",
     intro: (name, city) =>
       `${name} fait partie du réseau de praticiens partenaires ORALIGN®${
-        city ? ` à ${city}` : " en Tunisie"
+        city ? ` ${frInCity(city)}` : " en Tunisie"
       }. Une consultation au cabinet permet de savoir si un traitement par aligneurs transparents convient à votre sourire, et d'établir un devis adapté à votre cas.`,
     bookCta: "Prendre rendez-vous en ligne",
     call: "Appeler le cabinet",
@@ -62,7 +62,7 @@ const copy: Record<Lang, Copy> = {
       { key: "guide", label: "Porter et entretenir ses aligneurs" },
       { key: "teens", label: "Aligneurs pour adolescents" },
     ],
-    sameCity: (city) => `Autres praticiens partenaires à ${city}`,
+    sameCity: (city) => `Autres praticiens partenaires ${frInCity(city)}`,
     allPractitioners: "Tous les praticiens partenaires en Tunisie",
   },
   en: {
@@ -122,6 +122,8 @@ export function PractitionerProfile({
   const c = copy[lang];
   const f = dict.finder;
   const city = cityLabel(p.city, lang);
+  // The city landing page exists whenever this practice counts in a city.
+  const cityHref = p.city && citySlug(p.city) ? cityPath(p.city, lang) : null;
   const avatar = mediaUrl(p.avatarUrl) ?? mediaUrl(p.logoUrl);
   const address = [p.clinicAddress, city].filter(Boolean).join(", ");
   const hours = DAY_ORDER.map((day) => ({
@@ -143,7 +145,14 @@ export function PractitionerProfile({
               {f.title[lang]}
             </Link>
             {city && <span aria-hidden="true"> · </span>}
-            {city && <span>{city}</span>}
+            {city &&
+              (cityHref ? (
+                <Link href={cityHref} className="underline decoration-[var(--sc-sun)] underline-offset-4">
+                  {city}
+                </Link>
+              ) : (
+                <span>{city}</span>
+              ))}
           </nav>
 
           <div className="grid gap-12 lg:grid-cols-[1.4fr_1fr]">
@@ -286,7 +295,15 @@ export function PractitionerProfile({
           <div>
             {city && sameCity.length > 0 && (
               <>
-                <h2 className="sc-serif text-[1.5rem] font-normal leading-tight">{c.sameCity(city)}</h2>
+                <h2 className="sc-serif text-[1.5rem] font-normal leading-tight">
+                  {cityHref ? (
+                    <Link href={cityHref} className="hover:underline hover:decoration-[var(--sc-sun)] hover:underline-offset-4">
+                      {c.sameCity(city)}
+                    </Link>
+                  ) : (
+                    c.sameCity(city)
+                  )}
+                </h2>
                 <ul className="mt-6 space-y-3">
                   {sameCity.map((other) => (
                     <li key={other.id}>

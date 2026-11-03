@@ -1,10 +1,10 @@
-import { dict, type Lang } from "../i18n/dict";
+import type { Lang } from "../i18n/dict";
 import { MARKETING_PAGES, pathFor, type MarketingPageKey } from "./routes";
 import { BRAND, SITE_NAME, SITE_URL, SOCIAL_PROFILES, absoluteUrl } from "./meta";
 import type { LegalCompany } from "@/lib/legal/legal-content";
 import type { DayOfWeek, PractitionerDetail, PublicPractitioner } from "../finder";
 import { mediaUrl } from "../finder";
-import { FINDER_PATH, cityLabel, practitionerPath } from "../practitioner-url";
+import { FINDER_PATH, cityLabel, cityPath, practitionerPath, type CityGroup } from "../practitioner-url";
 import { guideCopy } from "../../guide/_components/guide-copy";
 
 /**
@@ -180,11 +180,17 @@ export function procedureLd(lang: Lang) {
 export function practitionerListLd(
   practitioners: readonly PublicPractitioner[],
   lang: Lang,
+  // A city page names its own list (the directory page is the default).
+  list: { name: string; url: string } = {
+    name: MARKETING_PAGES.finder[lang].title,
+    url: absoluteUrl(FINDER_PATH[lang]),
+  },
 ) {
   return {
     "@context": "https://schema.org",
     "@type": "ItemList",
-    name: MARKETING_PAGES.finder[lang].title,
+    name: list.name,
+    url: list.url,
     numberOfItems: practitioners.length,
     itemListElement: practitioners.map((p, i) => ({
       "@type": "ListItem",
@@ -334,6 +340,25 @@ export function practitionerBreadcrumbLd(p: PractitionerDetail, lang: Lang) {
       name: [p.practitionerName, cityLabel(p.city, lang)].filter(Boolean).join(" — "),
       path: practitionerPath(p, lang),
     },
+  ];
+  return {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: items.map((item, i) => ({
+      "@type": "ListItem",
+      position: i + 1,
+      name: item.name,
+      item: absoluteUrl(item.path),
+    })),
+  };
+}
+
+/** Home › Directory › City, for a city landing page. */
+export function cityBreadcrumbLd(group: CityGroup, lang: Lang) {
+  const items = [
+    { name: HOME_CRUMB[lang], path: pathFor("home", lang) },
+    { name: MARKETING_PAGES.finder[lang].breadcrumb, path: FINDER_PATH[lang] },
+    { name: cityLabel(group.label, lang) ?? group.label, path: cityPath(group.label, lang) },
   ];
   return {
     "@context": "https://schema.org",

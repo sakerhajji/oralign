@@ -1,7 +1,8 @@
 import { BRAND, SITE_URL, absoluteUrl } from "../(showcase)/_lib/seo/meta";
 import { MARKETING_PAGES, MARKETING_PAGE_KEYS, PAGE_LANGS } from "../(showcase)/_lib/seo/routes";
 import { getPublicPractitioners } from "../(showcase)/_lib/practitioners";
-import { practitionerPath } from "../(showcase)/_lib/practitioner-url";
+import { cityPath, frInCity, groupByCity, isIndexableCity, practitionerPath } from "../(showcase)/_lib/practitioner-url";
+import { partnerPractitionerCount } from "../(showcase)/_lib/i18n/dict";
 import { getPublishedPosts } from "../(showcase)/blog/_lib/fetch";
 import { FOOTER_LEGAL_KEYS, legalDocMeta } from "@/lib/legal/legal-content";
 
@@ -26,6 +27,9 @@ export async function GET() {
     getPublicPractitioners(),
     getPublishedPosts({ page: 1, limit: 50 }),
   ]);
+  // Same rule as the sitemap: a one-practice city page is noindexed (thin),
+  // so answer engines are pointed at the profile instead.
+  const cities = groupByCity(practitioners).filter(isIndexableCity);
   const pages = MARKETING_PAGE_KEYS.map((key) => MARKETING_PAGES[key].fr);
   const legal = [...FOOTER_LEGAL_KEYS, "about" as const, "contact" as const].map((key) =>
     legalDocMeta(key, "fr"),
@@ -59,6 +63,16 @@ export async function GET() {
             }`,
         )
       : [`- [Annuaire des praticiens](${absoluteUrl(MARKETING_PAGES.finder.fr.path)})`]),
+    ...(cities.length
+      ? [
+          "",
+          "### Par ville",
+          ...cities.map(
+            (g) =>
+              `- [Praticiens partenaires ${frInCity(g.label)}](${absoluteUrl(cityPath(g.label, "fr"))}): ${partnerPractitionerCount(g.practitioners.length, "fr")}`,
+          ),
+        ]
+      : []),
     "",
     // The long-form answers (blog) and the pages that establish the company
     // (legal), which answer engines chain to when they qualify a source.

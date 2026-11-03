@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound, permanentRedirect } from "next/navigation";
 import type { Lang } from "./i18n/dict";
 import { getPublicPractitioner, getPublicPractitioners } from "./practitioners";
-import { FINDER_PATH, idFromSlug, practitionerPath } from "./practitioner-url";
+import { cityKey, FINDER_PATH, idFromSlug, practitionerPath } from "./practitioner-url";
 import { practitionerMetadata } from "./seo/meta";
 import { JsonLd, practitionerBreadcrumbLd, practitionerLd } from "./seo/jsonld";
 import { PractitionerProfile } from "../_components/practitioner-profile";
@@ -13,8 +13,6 @@ import { PractitionerProfile } from "../_components/practitioner-profile";
  *   /en/find-a-practitioner/<slug>        (en)
  *   /ar/find-a-practitioner/<slug>        (ar)
  */
-
-const sameCityKey = (city: string | null | undefined) => city?.trim().toLowerCase() ?? "";
 
 async function load(slug: string) {
   const id = idFromSlug(slug);
@@ -36,9 +34,10 @@ export async function PractitionerPage({ slug, lang }: { slug: string; lang: Lan
   if (`${FINDER_PATH[lang]}/${slug}` !== canonical) permanentRedirect(canonical);
 
   const { data } = await getPublicPractitioners();
-  const city = sameCityKey(practitioner.city);
+  // Same grouping rule as the city landing pages ("Sfax, Tunisie" is Sfax).
+  const city = cityKey(practitioner.city);
   const sameCity = city
-    ? data.filter((other) => other.id !== practitioner.id && sameCityKey(other.city) === city).slice(0, 6)
+    ? data.filter((other) => other.id !== practitioner.id && cityKey(other.city) === city).slice(0, 6)
     : [];
 
   return (

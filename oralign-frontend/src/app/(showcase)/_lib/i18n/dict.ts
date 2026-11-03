@@ -300,6 +300,10 @@ export const dict = {
     allHours: { fr: "Tous les horaires", en: "All opening hours", ar: "كل ساعات العمل" } as T,
     hideHours: { fr: "Masquer les horaires", en: "Hide opening hours", ar: "إخفاء ساعات العمل" } as T,
     backToList: { fr: "Retour à la liste", en: "Back to the list", ar: "العودة إلى القائمة" } as T,
+    // City landing pages (/trouver-un-praticien/ville/<city>): the strip of
+    // city links under the directory, and the city page's own links.
+    byCity: { fr: "Par ville", en: "By city", ar: "حسب المدينة" } as T,
+    otherCities: { fr: "Autres villes", en: "Other cities", ar: "مدن أخرى" } as T,
   },
 
   // ── Scaffold copy for the empty per-page SEO pages ──
@@ -1048,4 +1052,29 @@ export const dict = {
 
 export function pickLang<V extends Record<Lang, string>>(value: V, lang: Lang): string {
   return value[lang];
+}
+
+const AR_PLURAL = new Intl.PluralRules("ar");
+
+/**
+ * "N praticiens partenaires": how many partner practitioners a city page
+ * lists, in the three languages. Arabic has six plural categories, and the
+ * noun and adjective both change with the count (dual, 3–10, 11+, and the
+ * 100/101 edge cases), so the form is picked by Intl rather than by hand.
+ */
+export function partnerPractitionerCount(n: number, lang: Lang): string {
+  if (lang === "fr") return n === 1 ? "1 praticien partenaire" : `${n} praticiens partenaires`;
+  if (lang === "en") return n === 1 ? "1 partner practitioner" : `${n} partner practitioners`;
+  switch (AR_PLURAL.select(n)) {
+    case "one":
+      return "طبيب شريك واحد";
+    case "two":
+      return "طبيبان شريكان";
+    case "few":
+      return `${n} أطباء شركاء`;
+    case "many":
+      return `${n} طبيباً شريكاً`;
+    default:
+      return `${n} طبيب شريك`;
+  }
 }

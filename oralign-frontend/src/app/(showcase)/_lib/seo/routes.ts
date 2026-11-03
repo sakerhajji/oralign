@@ -592,10 +592,27 @@ const PATH_TO_KEY: Record<string, MarketingPageKey> = Object.fromEntries(
  * localized sibling in that language (blog, legal, private surfaces —
  * and about/contact for Arabic). "/" counts as home so the switch works
  * before the 308 to /decouvrir has been followed.
+ *
+ * Also knows the city landing pages, "<finder>/ville/<slug>": the slug is
+ * the same Latin key in the three trees, so the sibling is the same slug
+ * under the finder path of the other language — and the language switch
+ * navigates there instead of toggling the chrome over a French body.
  */
 export function localizedPathFor(pathname: string, lang: Lang): string | null {
   const clean = pathname !== "/" && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
   const key = clean === "/" ? "home" : PATH_TO_KEY[clean];
-  if (!key || !hasLang(key, lang)) return null;
-  return MARKETING_PAGES[key][lang].path;
+  if (key) return hasLang(key, lang) ? MARKETING_PAGES[key][lang].path : null;
+  const city = cityPageSlug(clean);
+  return city ? `${MARKETING_PAGES.finder[lang].path}/ville/${city}` : null;
+}
+
+/** The slug of a city landing page path in any language, else null. */
+function cityPageSlug(pathname: string): string | null {
+  for (const lang of PAGE_LANGS.finder) {
+    const prefix = `${MARKETING_PAGES.finder[lang].path}/ville/`;
+    if (!pathname.startsWith(prefix)) continue;
+    const slug = pathname.slice(prefix.length);
+    return slug && !slug.includes("/") ? slug : null;
+  }
+  return null;
 }

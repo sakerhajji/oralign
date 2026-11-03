@@ -2,7 +2,14 @@ import type { Metadata } from "next";
 import type { Lang } from "../i18n/dict";
 import { MARKETING_PAGES, PAGE_LANGS, pathFor, type MarketingPageKey } from "./routes";
 import type { PractitionerDetail } from "../finder";
-import { cityLabel, practitionerPath } from "../practitioner-url";
+import {
+  cityLabel,
+  cityPath,
+  frInCity,
+  isIndexableCity,
+  practitionerPath,
+  type CityGroup,
+} from "../practitioner-url";
 
 /**
  * Single source of truth for the public origin. Everything SEO-visible
@@ -131,7 +138,7 @@ export function marketingMetadata(key: MarketingPageKey, lang: Lang): Metadata {
 
 const PRACTITIONER_TITLE: Record<Lang, (name: string, city: string | null) => string> = {
   fr: (name, city) =>
-    city ? `${name} — Aligneurs transparents à ${city} | ORALIGN®` : `${name} — Praticien partenaire | ORALIGN®`,
+    city ? `${name} — Aligneurs transparents ${frInCity(city)} | ORALIGN®` : `${name} — Praticien partenaire | ORALIGN®`,
   en: (name, city) =>
     city ? `${name} — Clear Aligners in ${city} | ORALIGN®` : `${name} — Partner Practitioner | ORALIGN®`,
   ar: (name, city) =>
@@ -140,7 +147,7 @@ const PRACTITIONER_TITLE: Record<Lang, (name: string, city: string | null) => st
 
 const PRACTITIONER_DESCRIPTION: Record<Lang, (name: string, clinic: string | null, city: string | null) => string> = {
   fr: (name, clinic, city) =>
-    `${name}${clinic ? `, ${clinic}` : ""} : praticien partenaire ORALIGN®${city ? ` à ${city}` : ""}. Adresse, horaires et prise de rendez-vous pour un traitement par aligneurs transparents.`,
+    `${name}${clinic ? `, ${clinic}` : ""} : praticien partenaire ORALIGN®${city ? ` ${frInCity(city)}` : ""}. Adresse, horaires et prise de rendez-vous pour un traitement par aligneurs transparents.`,
   en: (name, clinic, city) =>
     `${name}${clinic ? `, ${clinic}` : ""}: ORALIGN® partner practitioner${city ? ` in ${city}` : ""}. Address, opening hours and online booking for clear aligner treatment.`,
   ar: (name, clinic, city) =>
@@ -182,5 +189,74 @@ export function practitionerMetadata(p: PractitionerDetail, lang: Lang): Metadat
     },
     twitter: { card: "summary_large_image", title, description, images: [OG_IMAGE.url] },
     robots: { index: true, follow: true },
+  };
+}
+
+const CITY_TITLE: Record<Lang, (city: string) => string> = {
+  fr: (city) => `Dentistes et orthodontistes partenaires ${frInCity(city)} - aligneurs transparents | ORALIGN®`,
+  en: (city) => `Partner dentists and orthodontists in ${city} - clear aligners | ORALIGN®`,
+  ar: (city) => `أطباء أسنان وأخصائيو تقويم شركاء ORALIGN في ${city} - تقويم شفاف | ORALIGN®`,
+};
+
+const CITY_DESCRIPTION: Record<Lang, (city: string) => string> = {
+  fr: (city) =>
+    `Les cabinets dentaires partenaires ORALIGN® ${frInCity(city)} : adresse, téléphone et prise de rendez-vous pour une consultation sur les aligneurs transparents. Le praticien décide du traitement après examen.`,
+  en: (city) =>
+    `ORALIGN® partner dental practices in ${city}: address, phone and online booking for a clear aligner consultation. The practitioner decides on treatment after an examination.`,
+  ar: (city) =>
+    `عيادات الأسنان الشريكة لـ ORALIGN® في ${city}: العنوان والهاتف وحجز موعد لاستشارة حول التقويم الشفاف. الطبيب هو من يقرّر العلاج بعد الفحص.`,
+};
+
+const CITY_KEYWORDS: Record<Lang, (city: string) => string[]> = {
+  fr: (city) => [
+    `dentiste ${city}`,
+    `orthodontiste ${city}`,
+    `aligneurs transparents ${city}`,
+    `orthodontie invisible ${city}`,
+    `cabinet dentaire ${city}`,
+  ],
+  en: (city) => [`dentist ${city}`, `orthodontist ${city}`, `clear aligners ${city}`, `dental clinic ${city}`],
+  ar: (city) => [`طبيب أسنان ${city}`, `طبيب تقويم أسنان ${city}`, `تقويم شفاف ${city}`, `عيادة أسنان ${city}`],
+};
+
+/**
+ * Metadata for one city landing page. The three language URLs list the
+ * same practices, so they form one reciprocal hreflang cluster like the
+ * profiles; the Arabic title names the city in Arabic (CITY_AR) so the
+ * page matches the query an Arabic searcher actually types.
+ */
+export function cityMetadata(group: CityGroup, lang: Lang): Metadata {
+  const city = cityLabel(group.label, lang) ?? group.label;
+  const title = CITY_TITLE[lang](city);
+  const description = CITY_DESCRIPTION[lang](city);
+  const fr = cityPath(group.label, "fr");
+  return {
+    title: { absolute: title },
+    description,
+    keywords: CITY_KEYWORDS[lang](city),
+    alternates: {
+      canonical: cityPath(group.label, lang),
+      languages: {
+        "fr-TN": fr,
+        fr,
+        en: cityPath(group.label, "en"),
+        "ar-TN": cityPath(group.label, "ar"),
+        ar: cityPath(group.label, "ar"),
+        "x-default": fr,
+      },
+    },
+    openGraph: {
+      type: "website",
+      title,
+      description,
+      url: cityPath(group.label, lang),
+      siteName: SITE_NAME,
+      locale: OG_LOCALE[lang],
+      images: [OG_IMAGE],
+    },
+    twitter: { card: "summary_large_image", title, description, images: [OG_IMAGE.url] },
+    // A one-practice city is a thin page: served, linked, followed, but not
+    // indexed (and absent from the sitemap and llms.txt). See city-page.tsx.
+    robots: { index: isIndexableCity(group), follow: true },
   };
 }

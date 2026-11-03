@@ -3,6 +3,8 @@
 import Image from "next/image";
 import type { Lang } from "../../../_lib/i18n/dict";
 import { useShowcaseLang } from "../../../_lib/i18n/lang-context";
+import { Reveal, revealDelay } from "../../shared/reveal";
+import { RevealWords } from "../../shared/split-words";
 
 const everydayCopy: Record<
   Lang,
@@ -47,29 +49,36 @@ export function DailyLifeSection() {
       className="flex flex-col bg-[var(--sc-white)] text-[var(--sc-black)] lg:min-h-[calc(100svh-5rem)]"
     >
       <div className="px-5 py-12 text-center sm:px-8 sm:py-16 lg:px-12 lg:py-14">
-        <div className="mx-auto max-w-[920px]">
-          <h2
+        <Reveal variant="group" className="mx-auto max-w-[920px]">
+          <RevealWords
             id="daily-life-title"
             className="sc-serif text-balance text-[clamp(1.9rem,4vw,3.5rem)] leading-[1.12]"
+            text={copy.title}
+          />
+          <p
+            className="sc-fade mx-auto mt-4 max-w-[760px] text-pretty text-[0.98rem] leading-[1.7] text-[var(--sc-text-mid)] sm:text-[1.05rem]"
+            style={revealDelay(320)}
           >
-            {copy.title}
-          </h2>
-          <p className="mx-auto mt-4 max-w-[760px] text-pretty text-[0.98rem] leading-[1.7] text-[var(--sc-text-mid)] sm:text-[1.05rem]">
             {copy.description}
           </p>
-        </div>
+        </Reveal>
       </div>
 
-      <div className="relative aspect-[16/9] w-full overflow-hidden sm:aspect-[16/10] lg:min-h-0 lg:flex-1 lg:aspect-auto">
-        <Image
-          src="/showcase/oralign-daily-life.webp"
-          alt={copy.imageAlt}
-          fill
-          sizes="100vw"
-          quality={85}
-          className="object-cover object-center"
-        />
-      </div>
+      <Reveal
+        variant="group"
+        className="relative aspect-[16/9] w-full overflow-clip sm:aspect-[16/10] lg:min-h-0 lg:flex-1 lg:aspect-auto"
+      >
+        <div className="sc-media sc-drift absolute inset-0">
+          <Image
+            src="/showcase/oralign-daily-life.webp"
+            alt={copy.imageAlt}
+            fill
+            sizes="100vw"
+            quality={85}
+            className="object-cover object-center"
+          />
+        </div>
+      </Reveal>
     </section>
   );
 }

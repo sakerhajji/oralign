@@ -25,6 +25,14 @@
   --sc-text-dark: #191919;
   --sc-text-mid: rgba(25, 25, 25, 0.58);
   --sc-text-mid-on-dark: rgba(242, 245, 239, 0.62);
+
+  /* Motion — one easing and a few durations, so every move on the site
+     has the same hand: a quick start that settles slowly. */
+  --sc-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --sc-dur: 900ms; /* a block rising into place */
+  --sc-dur-media: 1400ms; /* a photo settling after its curtain lifts */
+  --sc-stagger: 90ms; /* between the siblings of a cascade */
+  --sc-rise: 28px; /* how far a block rises */
 }
 
 [data-theme="showcase"] {
@@ -93,14 +101,130 @@ html { scroll-behavior: smooth; }
   letter-spacing: 0.18em;
 }
 
-/* ─── MOTION RESILIENCE ─────────────────────────────────────────────
-   Showcase content stays visible by default. A tiny IntersectionObserver adds
-   data-reveal states after hydration; CSS handles the motion. This avoids
-   main-thread-heavy animation libraries on the landing page while preventing
-   the old "blank until hard refresh" route-transition failure mode. */
-@media not (prefers-reduced-motion: reduce) {
-  [data-theme="showcase"] .sc-rv,
-  [data-theme="showcase"] .sc-rv-2,
+/* ─── MOTION ────────────────────────────────────────────────────────
+   Everything is visible in the server HTML. After hydration, <Reveal>
+   (shared/reveal.tsx) marks a block data-reveal="pending" while it is
+   still below the fold and "visible" once it scrolls in; the rules here
+   do the moving — on opacity and transform only, so nothing is laid out
+   again — and only for visitors who have not asked for reduced motion.
+   No animation library on the marketing bundle: the GSAP setup this
+   replaced was the biggest cost in Total Blocking Time.
+
+   Each move is a keyframe animation with only a `from` frame: it ends on
+   whatever the element's own styles say (a Tailwind opacity, a hover
+   transition, …) and leaves them untouched afterwards. Tailwind 4 writes
+   its translate/scale utilities to the `translate`/`scale` properties,
+   which compose with the `transform` animated here.
+
+   Hooks, used inside a <Reveal>:
+     .sc-rv        the Reveal block itself rises (variant "rise")
+     .sc-rise      a descendant rises on its own
+     .sc-fade      a descendant fades in
+     .sc-stagger   its direct children rise one after another
+     .sc-word      one word of a heading (shared/split-words.tsx)
+     .sc-media     a positioned photo box: a curtain in the section's
+                   colour lifts while the picture settles from a zoom
+     .sc-line      a rule draws itself from its start edge
+   `--sc-delay` on a hook (or on a parent) starts it later, for
+   choreography; `--i` on a child of .sc-stagger sets its rank.
+   A child of .sc-stagger must not carry an animation of its own
+   (marquee, animate-pulse): this one would replace it.
+
+   A block already on screen when the page hydrates is marked "shown":
+   no rule matches it, so what the visitor is reading never blinks.
+   Screen only: a page printed before it was scrolled must print whole. */
+@media screen and (prefers-reduced-motion: no-preference) {
+  [data-theme="showcase"] .sc-word {
+    display: inline-block;
+  }
+  [data-theme="showcase"] .sc-line {
+    transform-origin: 0 50%;
+  }
+  [dir="rtl"] .sc-line {
+    transform-origin: 100% 50%;
+  }
+  [data-theme="showcase"] .sc-line-center {
+    transform-origin: 50% 50%;
+  }
+  /* clip, not hidden: hidden would make the box a scroll container and
+     capture the drift's view() timeline (see DRIFT below). */
+  [data-theme="showcase"] .sc-media {
+    overflow: clip;
+  }
+  /* The curtain shrinks towards the bottom edge, so the top of the photo
+     — the strip on screen as the box scrolls in — is uncovered first. */
+  [data-theme="showcase"] .sc-media::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    pointer-events: none;
+    background: var(--sc-curtain, var(--sc-white));
+    transform: scaleY(0);
+    transform-origin: 50% 100%;
+  }
+
+  /* Hidden while waiting below the fold. */
+  [data-theme="showcase"] .sc-rv[data-reveal="pending"],
+  [data-theme="showcase"] [data-reveal="pending"] :is(.sc-rise, .sc-fade, .sc-word),
+  [data-theme="showcase"] [data-reveal="pending"] .sc-stagger > * {
+    opacity: 0;
+  }
+  [data-theme="showcase"] [data-reveal="pending"] .sc-line {
+    transform: scaleX(0);
+  }
+  [data-theme="showcase"] [data-reveal="pending"] .sc-media::after {
+    transform: scaleY(1);
+  }
+
+  /* The move, once in view. `backwards` holds the first frame through
+     the delay; no `forwards`, so the element is its own self after. */
+  [data-theme="showcase"] .sc-rv[data-reveal="visible"],
+  [data-theme="showcase"] [data-reveal="visible"] .sc-rise {
+    animation: sc-rise var(--sc-dur) var(--sc-ease) backwards;
+    animation-delay: var(--sc-delay, 0ms);
+  }
+  [data-theme="showcase"] [data-reveal="visible"] .sc-fade {
+    animation: sc-fade var(--sc-dur) var(--sc-ease) backwards;
+    animation-delay: var(--sc-delay, 0ms);
+  }
+  [data-theme="showcase"] [data-reveal="visible"] .sc-stagger > * {
+    animation: sc-rise-soft var(--sc-dur) var(--sc-ease) backwards;
+    animation-delay: calc(var(--sc-delay, 0ms) + var(--i, 0) * var(--sc-stagger));
+  }
+  [data-theme="showcase"] [data-reveal="visible"] .sc-word {
+    animation: sc-word var(--sc-dur) var(--sc-ease) backwards;
+    animation-delay: calc(var(--sc-delay, 0ms) + var(--i, 0) * 40ms);
+  }
+  [data-theme="showcase"] [data-reveal="visible"] .sc-line {
+    animation: sc-draw 1000ms var(--sc-ease) backwards;
+    animation-delay: calc(var(--sc-delay, 0ms) + 150ms);
+  }
+  [data-theme="showcase"] [data-reveal="visible"] .sc-media::after {
+    animation: sc-curtain 1100ms var(--sc-ease) backwards;
+    animation-delay: var(--sc-delay, 0ms);
+  }
+  [data-theme="showcase"] [data-reveal="visible"] .sc-media > img,
+  [data-theme="showcase"] [data-reveal="visible"] .sc-media > video,
+  [data-theme="showcase"] [data-reveal="visible"] .sc-media > picture > img {
+    animation: sc-settle var(--sc-dur-media) var(--sc-ease) backwards;
+    animation-delay: var(--sc-delay, 0ms);
+  }
+
+  /* Rank of a child in a cascade; `--i` set inline overrides it. */
+  [data-theme="showcase"] .sc-stagger > :nth-child(1) { --i: 0; }
+  [data-theme="showcase"] .sc-stagger > :nth-child(2) { --i: 1; }
+  [data-theme="showcase"] .sc-stagger > :nth-child(3) { --i: 2; }
+  [data-theme="showcase"] .sc-stagger > :nth-child(4) { --i: 3; }
+  [data-theme="showcase"] .sc-stagger > :nth-child(5) { --i: 4; }
+  [data-theme="showcase"] .sc-stagger > :nth-child(6) { --i: 5; }
+  [data-theme="showcase"] .sc-stagger > :nth-child(7) { --i: 6; }
+  [data-theme="showcase"] .sc-stagger > :nth-child(8) { --i: 7; }
+  [data-theme="showcase"] .sc-stagger > :nth-child(9) { --i: 8; }
+  [data-theme="showcase"] .sc-stagger > :nth-child(10) { --i: 9; }
+  [data-theme="showcase"] .sc-stagger > :nth-child(11) { --i: 10; }
+  [data-theme="showcase"] .sc-stagger > :nth-child(n + 12) { --i: 11; }
+
   [data-theme="showcase"] .sc-hero-eyebrow,
   [data-theme="showcase"] .sc-hero-h1,
   [data-theme="showcase"] .sc-hero-sub,
@@ -108,25 +232,6 @@ html { scroll-behavior: smooth; }
   [data-theme="showcase"] .sc-hero-scroll,
   [data-theme="showcase"] .sc-hero-core {
     will-change: opacity, transform;
-  }
-
-  [data-theme="showcase"] .sc-rv[data-reveal="pending"],
-  [data-theme="showcase"] .sc-rv-2[data-reveal="pending"] {
-    opacity: 0;
-    transform: translate3d(0, 24px, 0);
-  }
-
-  [data-theme="showcase"] .sc-rv[data-reveal="visible"],
-  [data-theme="showcase"] .sc-rv-2[data-reveal="visible"] {
-    opacity: 1;
-    transform: translate3d(0, 0, 0);
-    transition:
-      opacity 760ms cubic-bezier(0.16, 1, 0.3, 1),
-      transform 760ms cubic-bezier(0.16, 1, 0.3, 1);
-  }
-
-  [data-theme="showcase"] .sc-rv-2[data-reveal="visible"] {
-    transition-delay: 120ms;
   }
 
   [data-theme="showcase"] .sc-hero-orbit {
@@ -174,6 +279,85 @@ html { scroll-behavior: smooth; }
 @keyframes sc-hero-core-pulse {
   from { opacity: 1; transform: translate3d(-50%, -50%, 0) scale(1); }
   to { opacity: 0.72; transform: translate3d(-50%, -50%, 0) scale(1.28); }
+}
+
+/* The reveal moves. Only a `from` frame each: the end is the element's
+   own computed style. */
+@keyframes sc-rise {
+  from { opacity: 0; transform: translateY(var(--sc-rise)); }
+}
+@keyframes sc-rise-soft {
+  from { opacity: 0; transform: translateY(18px); }
+}
+@keyframes sc-word {
+  from { opacity: 0; transform: translateY(0.6em); }
+}
+@keyframes sc-fade {
+  from { opacity: 0; }
+}
+@keyframes sc-draw {
+  from { transform: scaleX(0); }
+}
+@keyframes sc-curtain {
+  from { transform: scaleY(1); }
+}
+@keyframes sc-settle {
+  from { transform: scale(1.06); }
+}
+
+/* Dark sections lift a black curtain off their photos. */
+[data-theme="showcase"] [data-section-tone="dark"] {
+  --sc-curtain: var(--sc-black);
+}
+
+/* ─── DRIFT ─────────────────────────────────────────────────────────
+   A full-bleed photo lags the page a little as it scrolls, driven by the
+   scroll position itself: no JavaScript, and off the main thread. The
+   picture is drawn a touch larger so its edges never show. Browsers
+   without scroll-driven animations (Firefox, 2026) show it still,
+   exactly as before. A photo that also reveals (.sc-media) runs both
+   animations, each on its own timeline.
+   view() follows the nearest ancestor that is a scroll container, and
+   overflow: hidden makes one: every box between the photo and the page
+   must clip with overflow: clip (Tailwind overflow-clip) instead. */
+@supports (animation-timeline: view()) {
+  @media screen and (prefers-reduced-motion: no-preference) {
+    [data-theme="showcase"] .sc-drift > img,
+    [data-theme="showcase"] .sc-drift > picture > img {
+      scale: 1.1;
+      animation: sc-drift linear both;
+      animation-timeline: view();
+    }
+    [data-theme="showcase"] [data-reveal="visible"] .sc-media.sc-drift > img,
+    [data-theme="showcase"] [data-reveal="visible"] .sc-media.sc-drift > picture > img {
+      animation:
+        sc-settle var(--sc-dur-media) var(--sc-ease) backwards,
+        sc-drift linear both;
+      animation-delay: var(--sc-delay, 0ms), 0ms;
+      animation-timeline: auto, view();
+    }
+  }
+}
+@keyframes sc-drift {
+  from { translate: 0 -3.5%; }
+  to { translate: 0 3.5%; }
+}
+
+/* ─── LIFT ─── a call to action rises a touch under the pointer. This
+   shorthand replaces Tailwind's transition utilities on the element, so
+   it lists their properties at their own 150 ms, unchanged. */
+[data-theme="showcase"] .sc-lift {
+  transition:
+    transform 500ms var(--sc-ease),
+    background-color 150ms cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 150ms cubic-bezier(0.4, 0, 0.2, 1),
+    color 150ms cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  [data-theme="showcase"] .sc-lift:hover {
+    transform: translateY(-2px);
+  }
 }
 
 /* ─── MARQUEE ─── */

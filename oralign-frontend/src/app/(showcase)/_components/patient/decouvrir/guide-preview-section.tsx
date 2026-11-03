@@ -6,6 +6,7 @@ import { ArrowUpRight } from "lucide-react";
 import type { Lang } from "../../../_lib/i18n/dict";
 import { useShowcaseLang } from "../../../_lib/i18n/lang-context";
 import { pathFor } from "../../../_lib/seo/routes";
+import { Reveal, revealDelay } from "../../shared/reveal";
 
 const guideCopy: Record<
   Lang,
@@ -63,11 +64,11 @@ export function GuidePreviewSection() {
       id="guide-preview"
       data-section-tone="light"
       aria-label={copy.cta}
-      className="overflow-hidden bg-[var(--sc-white)] text-[var(--sc-black)] lg:min-h-[calc(100svh-5rem)]"
+      className="overflow-clip bg-[var(--sc-white)] text-[var(--sc-black)] lg:min-h-[calc(100svh-5rem)]"
     >
       <div className="grid w-full lg:min-h-[calc(100svh-5rem)] lg:grid-cols-2">
-        <div className="w-full p-[15px] lg:min-h-0">
-          <div className="relative aspect-[4/3] w-full overflow-hidden sm:aspect-[16/10] lg:h-full lg:min-h-0 lg:aspect-auto">
+        <Reveal variant="group" className="w-full p-[15px] lg:min-h-0">
+          <div className="sc-media sc-drift relative aspect-[4/3] w-full overflow-clip sm:aspect-[16/10] lg:h-full lg:min-h-0 lg:aspect-auto">
             <span
               aria-hidden="true"
               className="absolute left-0 top-0 z-10 h-2 w-28 bg-[var(--sc-sun)] sm:w-36"
@@ -93,14 +94,14 @@ export function GuidePreviewSection() {
               className="absolute bottom-0 right-0 z-10 h-2 w-40 bg-[var(--sc-sun)] sm:w-52"
             />
           </div>
-        </div>
+        </Reveal>
 
         <div className="flex items-center px-5 py-10 sm:px-10 sm:py-12 lg:px-[clamp(3rem,5.5vw,6.5rem)] lg:py-16">
-          <div className="mx-auto w-full max-w-[620px]">
-            <ul className="border-y border-[rgba(25,25,25,0.16)]">
+          <Reveal variant="group" className="mx-auto w-full max-w-[620px]">
+            <ul className="sc-stagger border-y border-[rgba(25,25,25,0.16)]">
               {copy.benefits.map((benefit, index) => (
                 <li
-                  key={benefit}
+                  key={index}
                   className="grid grid-cols-[1.75rem_1fr] gap-3 border-b border-[rgba(25,25,25,0.12)] py-4 last:border-b-0 sm:grid-cols-[2.5rem_1fr] sm:gap-4 sm:py-5 lg:py-6"
                 >
                   <span
@@ -116,16 +117,19 @@ export function GuidePreviewSection() {
               ))}
             </ul>
 
-            <div className="mt-8 border-s-2 border-[var(--sc-sun)] ps-4 sm:mt-10 sm:ps-6 lg:mt-12 lg:ps-7">
+            <div
+              className="sc-fade mt-8 border-s-2 border-[var(--sc-sun)] ps-4 sm:mt-10 sm:ps-6 lg:mt-12 lg:ps-7"
+              style={revealDelay(360)}
+            >
               <p className="max-w-[510px] text-pretty text-[0.96rem] font-medium leading-[1.6] text-[var(--sc-black)] sm:text-[1.04rem] lg:text-[1.06rem]">
                 {copy.statement}
               </p>
             </div>
 
-            <div className="mt-7 flex sm:mt-8">
+            <div className="sc-fade mt-7 flex sm:mt-8" style={revealDelay(480)}>
               <Link
                 href={pathFor("guide", lang)}
-                className="group inline-flex min-h-13 w-full items-center justify-center gap-4 bg-[var(--sc-sun)] px-7 py-3.5 text-center text-[0.72rem] font-semibold text-[var(--sc-black)] no-underline transition-colors hover:bg-[var(--sc-sun-2)] focus-visible:outline-[var(--sc-black)] sm:w-auto"
+                className="sc-lift group inline-flex min-h-13 w-full items-center justify-center gap-4 bg-[var(--sc-sun)] px-7 py-3.5 text-center text-[0.72rem] font-semibold text-[var(--sc-black)] no-underline transition-colors hover:bg-[var(--sc-sun-2)] focus-visible:outline-[var(--sc-black)] sm:w-auto"
               >
                 {copy.cta}
                 <ArrowUpRight
@@ -134,7 +138,7 @@ export function GuidePreviewSection() {
                 />
               </Link>
             </div>
-          </div>
+          </Reveal>
         </div>
       </div>
     </section>

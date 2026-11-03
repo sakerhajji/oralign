@@ -4,6 +4,8 @@ import Link from "next/link";
 import { ArrowDown, MapPin, Stethoscope } from "lucide-react";
 import type { Lang } from "../../../_lib/i18n/dict";
 import { useLocalizedHref, useShowcaseLang } from "../../../_lib/i18n/lang-context";
+import { Reveal, revealDelay } from "../../shared/reveal";
+import { Words } from "../../shared/split-words";
 import { HeroFilm } from "./hero-film";
 
 const heroCopy: Record<
@@ -81,7 +83,7 @@ function HeroActions({
     <div className="mx-auto grid w-full max-w-[560px] gap-3 sm:grid-cols-2">
       <Link
         href={finderHref}
-        className="group inline-flex min-h-14 items-center justify-between gap-4 bg-[var(--sc-white)] px-5 py-3 text-[var(--sc-black)] no-underline shadow-[0_18px_40px_rgba(0,0,0,0.28)] transition-colors hover:bg-white"
+        className="sc-lift group inline-flex min-h-14 items-center justify-between gap-4 bg-[var(--sc-white)] px-5 py-3 text-[var(--sc-black)] no-underline shadow-[0_18px_40px_rgba(0,0,0,0.28)] transition-colors hover:bg-white"
       >
         <span className="flex min-w-0 items-center gap-3">
           <MapPin className="h-4 w-4 shrink-0" aria-hidden="true" />
@@ -100,7 +102,7 @@ function HeroActions({
 
       <Link
         href={practitionerHref}
-        className="group inline-flex min-h-14 items-center justify-between gap-4 bg-[var(--sc-sun)] px-5 py-3 text-[var(--sc-black)] no-underline shadow-[0_18px_40px_rgba(0,0,0,0.28)] transition-colors hover:bg-[var(--sc-sun-2)]"
+        className="sc-lift group inline-flex min-h-14 items-center justify-between gap-4 bg-[var(--sc-sun)] px-5 py-3 text-[var(--sc-black)] no-underline shadow-[0_18px_40px_rgba(0,0,0,0.28)] transition-colors hover:bg-[var(--sc-sun-2)]"
       >
         <span className="flex min-w-0 items-center gap-3">
           <Stethoscope className="h-4 w-4 shrink-0" aria-hidden="true" />
@@ -170,22 +172,35 @@ export function OralignHeroSection() {
       {/* Then the copy, always visible (not on hover: phones have none, and
           the H1 must be readable and indexable as is). */}
       <div className="px-5 pb-14 pt-8 sm:px-10 sm:pb-20 sm:pt-12 lg:px-[clamp(3rem,6vw,6.5rem)] lg:pb-24 lg:pt-14 xl:px-[clamp(4rem,7vw,8rem)]">
-        <div className="mx-auto grid w-full max-w-[1240px] gap-8 sm:gap-10 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:items-start lg:gap-16">
+        {/* The copy enters in order as it scrolls in under the film: the
+            wordmark, then the tagline word by word, then the introduction. */}
+        <Reveal
+          variant="group"
+          className="mx-auto grid w-full max-w-[1240px] gap-8 sm:gap-10 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:items-start lg:gap-16"
+        >
           {/* The tagline is PART of the H1 (same visual spot as the old
               eyebrow <p>): a brand-only H1 tells search engines nothing
-              about what the page offers. */}
-          <h1 id="oralign-title">
-            <span className="block sc-serif text-[clamp(2.65rem,6vw,4.8rem)] leading-none text-[var(--sc-sun)]">
+              about what the page offers. Its words are spans for the
+              motion only; the H1 keeps its full text, and its accessible
+              name is the whole sentence (see split-words.tsx). */}
+          <h1 id="oralign-title" aria-label={`ORALIGN ${copy.eyebrow}`}>
+            <span
+              aria-hidden="true"
+              className="sc-rise block sc-serif text-[clamp(2.65rem,6vw,4.8rem)] leading-none text-[var(--sc-sun)]"
+            >
               ORALIGN
             </span>{" "}
             {/* The space above is for text extraction: the two spans are
                 blocks, so without it the heading reads "ORALIGNAligneurs". */}
-            <span className="mt-3 block text-[0.72rem] font-medium tracking-[0.08em] text-[var(--sc-white)] sm:text-[0.78rem]">
-              {copy.eyebrow}
+            <span
+              className="mt-3 block text-[0.72rem] font-medium tracking-[0.08em] text-[var(--sc-white)] sm:text-[0.78rem]"
+              style={revealDelay(260)}
+            >
+              <Words text={copy.eyebrow} />
             </span>
           </h1>
 
-          <div>
+          <div className="sc-stagger" style={revealDelay(420)}>
             <p className="max-w-[560px] text-pretty text-[clamp(1rem,1.45vw,1.2rem)] leading-[1.7] text-[rgba(242,245,239,0.92)]">
               {copy.intro}
             </p>
@@ -201,7 +216,7 @@ export function OralignHeroSection() {
               {copy.scroll}
             </Link>
           </div>
-        </div>
+        </Reveal>
       </div>
     </section>
   );

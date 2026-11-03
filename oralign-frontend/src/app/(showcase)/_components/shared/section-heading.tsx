@@ -29,9 +29,9 @@ export function SectionHeading({
         className={`flex items-center gap-3 ${align === "center" ? "justify-center" : ""} ${eyebrowColor}`}
         style={{ fontSize: "0.55rem", letterSpacing: "0.42em", textTransform: "uppercase" }}
       >
-        <span className={`sc-eyebrow-line w-[18px] h-px ${lineBg}`} aria-hidden="true" />
+        <span className={`sc-eyebrow-line sc-line w-[18px] h-px ${lineBg}`} aria-hidden="true" />
         <span>{eyebrow}</span>
-        {align === "center" && <span className={`sc-eyebrow-line w-[18px] h-px ${lineBg}`} aria-hidden="true" />}
+        {align === "center" && <span className={`sc-eyebrow-line sc-line w-[18px] h-px ${lineBg}`} aria-hidden="true" />}
       </div>
       <Heading
         id={id}

@@ -75,12 +75,15 @@ export function HowItWorks() {
           </div>
         </Reveal>
 
-        <Reveal delay>
+        {/* The timeline draws itself from its centre while the five steps
+            rise one after another. */}
+        <Reveal variant="group">
           <div className="relative mt-16 sm:mt-20 lg:mt-24">
             {/* Desktop timeline line */}
             <div
               aria-hidden="true"
               className="
+                sc-line sc-line-center
                 absolute left-0 right-0 top-[178px] hidden h-px
                 bg-gradient-to-r from-transparent via-[rgba(17,17,17,0.18)] to-transparent
                 lg:block
@@ -89,7 +92,7 @@ export function HowItWorks() {
 
             <ol
               className="
-                relative grid list-none grid-cols-1 gap-6
+                sc-stagger relative grid list-none grid-cols-1 gap-6
                 sm:grid-cols-2 sm:gap-8
                 lg:grid-cols-5 lg:gap-5
               "

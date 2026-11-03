@@ -2,6 +2,8 @@
 
 import type { Lang } from "../../../_lib/i18n/dict";
 import { useShowcaseLang } from "../../../_lib/i18n/lang-context";
+import { Reveal, revealDelay } from "../../shared/reveal";
+import { RevealWords } from "../../shared/split-words";
 import { PrecisionFilm } from "./precision-film";
 
 type PrecisionBenefitCopy = {
@@ -135,42 +137,56 @@ export function PrecisionSection() {
           className="absolute inset-0 bg-[linear-gradient(180deg,rgba(10,10,10,0.7)_0%,transparent_26%,transparent_72%,rgba(10,10,10,0.78)_100%)]"
         />
 
-        <div className="relative z-10 mx-auto min-h-[calc(100svh-5rem)] max-w-[1440px] px-12 py-12 xl:px-16">
+        {/* Over the film, the text comes in as the section scrolls up: the
+            title word by word, then the introduction, then each column of
+            benefits in turn. */}
+        <Reveal
+          variant="group"
+          className="relative z-10 mx-auto min-h-[calc(100svh-5rem)] max-w-[1440px] px-12 py-12 xl:px-16"
+        >
           <div className="grid grid-cols-[1fr_1.25fr_1fr] gap-10">
-            <h2 className="sc-serif max-w-[430px] text-[clamp(2.2rem,3.5vw,4rem)] leading-[1.08]">
-              {copy.title}
-            </h2>
+            <RevealWords
+              className="sc-serif max-w-[430px] text-[clamp(2.2rem,3.5vw,4rem)] leading-[1.08]"
+              text={copy.title}
+            />
             <div />
-            <p className="max-w-[430px] pt-2 text-[0.9rem] leading-[1.8] text-[rgba(242,245,239,0.7)]">
+            <p
+              className="sc-fade max-w-[430px] pt-2 text-[0.9rem] leading-[1.8] text-[rgba(242,245,239,0.7)]"
+              style={revealDelay(300)}
+            >
               {copy.intro}
             </p>
           </div>
 
           <div className="mt-20 grid grid-cols-[1fr_1.25fr_1fr] gap-10">
-            <div className="space-y-16">
+            <div className="sc-stagger space-y-16" style={revealDelay(400)}>
               {copy.benefits.slice(0, 2).map((benefit) => (
                 <PrecisionBenefit key={benefit.title} {...benefit} />
               ))}
             </div>
             <div aria-hidden="true" />
-            <div className="space-y-16">
+            <div className="sc-stagger space-y-16" style={revealDelay(540)}>
               {copy.benefits.slice(2).map((benefit) => (
                 <PrecisionBenefit key={benefit.title} {...benefit} />
               ))}
             </div>
           </div>
-        </div>
+        </Reveal>
       </div>
 
       <div className="lg:hidden">
-        <div className="px-5 py-14 sm:px-10 sm:py-16">
-          <h2 className="sc-serif max-w-[620px] text-balance text-[clamp(2rem,8vw,3.6rem)] leading-[1.08]">
-            {copy.title}
-          </h2>
-          <p className="mt-5 max-w-[620px] text-[0.96rem] leading-[1.75] text-[var(--sc-text-mid-on-dark)]">
+        <Reveal variant="group" className="px-5 py-14 sm:px-10 sm:py-16">
+          <RevealWords
+            className="sc-serif max-w-[620px] text-balance text-[clamp(2rem,8vw,3.6rem)] leading-[1.08]"
+            text={copy.title}
+          />
+          <p
+            className="sc-fade mt-5 max-w-[620px] text-[0.96rem] leading-[1.75] text-[var(--sc-text-mid-on-dark)]"
+            style={revealDelay(300)}
+          >
             {copy.intro}
           </p>
-        </div>
+        </Reveal>
 
         {/* The frame takes the footage's own shape — 9:16 cut on phones,
             16:9 on tablets — so nothing is stretched and the box is sized
@@ -183,16 +199,20 @@ export function PrecisionSection() {
           />
         </div>
 
-        <div className="grid gap-px bg-[rgba(242,245,239,0.16)] sm:grid-cols-2">
-          {copy.benefits.map((benefit) => (
-            <div
-              key={benefit.title}
-              className="bg-[var(--sc-black)] px-5 py-7 sm:px-8"
-            >
-              <PrecisionBenefit {...benefit} />
-            </div>
-          ))}
-        </div>
+        {/* The cells stay opaque (their hairlines are the grid's pale
+            background showing through the gaps); only their content rises,
+            one cell after another. */}
+        <Reveal variant="group">
+          <div className="grid gap-px bg-[rgba(242,245,239,0.16)] sm:grid-cols-2">
+            {copy.benefits.map((benefit, index) => (
+              <div key={index} className="bg-[var(--sc-black)] px-5 py-7 sm:px-8">
+                <div className="sc-rise" style={revealDelay(index * 90)}>
+                  <PrecisionBenefit {...benefit} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </Reveal>
       </div>
     </section>
   );

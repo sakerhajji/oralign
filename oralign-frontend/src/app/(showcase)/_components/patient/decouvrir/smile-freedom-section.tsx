@@ -4,6 +4,8 @@ import Image from "next/image";
 import { Camera, EyeOff, Feather, UserRoundCheck } from "lucide-react";
 import type { Lang } from "../../../_lib/i18n/dict";
 import { useShowcaseLang } from "../../../_lib/i18n/lang-context";
+import { Reveal, revealDelay } from "../../shared/reveal";
+import { RevealWords } from "../../shared/split-words";
 
 const freedomCopy: Record<
   Lang,
@@ -71,41 +73,53 @@ export function SmileFreedomSection() {
       id="smile-freedom"
       data-section-tone="light"
       aria-labelledby="smile-freedom-title"
-      className="min-h-[calc(100svh-4rem)] overflow-hidden bg-[var(--sc-white)] text-[var(--sc-black)] sm:min-h-[calc(100svh-4.5rem)] lg:min-h-[calc(100svh-5rem)]"
+      className="min-h-[calc(100svh-4rem)] overflow-clip bg-[var(--sc-white)] text-[var(--sc-black)] sm:min-h-[calc(100svh-4.5rem)] lg:min-h-[calc(100svh-5rem)]"
     >
       <div className="grid min-h-[calc(100svh-4rem)] sm:min-h-[calc(100svh-4.5rem)] lg:min-h-[calc(100svh-5rem)] lg:grid-cols-2">
-        <div className="relative aspect-[4/3] w-full overflow-hidden sm:aspect-[16/10] lg:min-h-0 lg:aspect-auto">
-          <Image
-            src="/showcase/oralign-smile-freedom.webp"
-            alt={copy.imageAlt}
-            fill
-            sizes="(min-width: 1024px) 50vw, 100vw"
-            quality={85}
-            className="object-cover object-center"
-          />
-        </div>
+        {/* The photo and the text reveal each on their own: on a phone
+            they are a screen apart. overflow-clip, not hidden, so the
+            photo's drift keeps the page as its scroller. */}
+        <Reveal
+          variant="group"
+          className="relative aspect-[4/3] w-full overflow-clip sm:aspect-[16/10] lg:min-h-0 lg:aspect-auto"
+        >
+          <div className="sc-media sc-drift absolute inset-0">
+            <Image
+              src="/showcase/oralign-smile-freedom.webp"
+              alt={copy.imageAlt}
+              fill
+              sizes="(min-width: 1024px) 50vw, 100vw"
+              quality={85}
+              className="object-cover object-center"
+            />
+          </div>
+        </Reveal>
 
+        {/* The Reveal is the centred text itself, not its full-height
+            cell: the cascade starts when the words reach the eye. */}
         <div className="flex items-center px-5 py-16 sm:px-10 sm:py-20 lg:px-[clamp(3rem,5.5vw,6.5rem)] lg:py-20">
-          <div className="mx-auto w-full max-w-[680px] lg:mx-0">
-            <h2
+          <Reveal variant="group" className="mx-auto w-full max-w-[680px] lg:mx-0">
+            <RevealWords
               id="smile-freedom-title"
               className="sc-serif max-w-[620px] text-balance text-[clamp(2rem,4vw,3.6rem)] leading-[1.14] text-[var(--sc-black)]"
-            >
-              {copy.title}
-            </h2>
+              text={copy.title}
+            />
 
-            <div className="mt-7 max-w-[650px] space-y-5 text-[0.98rem] leading-[1.75] text-[var(--sc-text-mid)] sm:text-[1.03rem]">
-              {copy.paragraphs.map((paragraph) => (
-                <p key={paragraph}>{paragraph}</p>
+            <div
+              className="sc-stagger mt-7 max-w-[650px] space-y-5 text-[0.98rem] leading-[1.75] text-[var(--sc-text-mid)] sm:text-[1.03rem]"
+              style={revealDelay(320)}
+            >
+              {copy.paragraphs.map((paragraph, index) => (
+                <p key={index}>{paragraph}</p>
               ))}
             </div>
 
-            <div className="mt-10 grid gap-3 sm:grid-cols-2 lg:mt-12">
+            <div className="sc-stagger mt-10 grid gap-3 sm:grid-cols-2 lg:mt-12" style={revealDelay(420)}>
               {copy.benefits.map((benefit, index) => {
                 const Icon = benefitIcons[index];
                 return (
                   <div
-                    key={benefit}
+                    key={index}
                     className="flex min-h-[72px] items-center gap-4 border border-[rgba(25,25,25,0.2)] bg-transparent px-4 py-3 transition-colors hover:border-[var(--sc-sun-deep)] hover:bg-[var(--sc-sun-3)]"
                   >
                     <Icon
@@ -120,7 +134,7 @@ export function SmileFreedomSection() {
                 );
               })}
             </div>
-          </div>
+          </Reveal>
         </div>
       </div>
     </section>

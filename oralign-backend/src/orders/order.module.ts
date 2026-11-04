@@ -9,6 +9,8 @@ import { OrderExportService } from './services/order-export.service';
 import { TreatmentFeeService } from './services/treatment-fee.service';
 import { UploadCleanupService } from './services/upload-cleanup.service';
 import { OrderAuditService } from './services/order-audit.service';
+import { WelcomeGiftService } from './services/welcome-gift.service';
+import { WelcomeGiftController } from './controllers/welcome-gift.controller';
 // UploadCleanupService is the app's single retention scheduler; the
 // support-trash sweep itself lives in SupportService (which owns that
 // model and the /uploads/support layout). SupportModule imports only
@@ -17,15 +19,17 @@ import { SupportModule } from '../support/support.module';
 
 @Module({
   imports: [PrismaModule, SupportModule],
-  controllers: [OrderController],
+  controllers: [OrderController, WelcomeGiftController],
   providers: [
     // Order domain, one concern per service (see each file's header):
     //   OrderService        - lifecycle: create / submit / status / bulk / odontogram + access guards
     //   OrderFilesService   - blob storage: upload / list / delete / download / chunked registration
     //   OrderExportService  - streaming lab ZIP + order-sheet PDF
     //   TreatmentFeeService - the flat treatment fee (pay / proof / confirm / admin lists)
+    //   WelcomeGiftService  - once-per-doctor gift: banner status + waiver applied on submit
     OrderService,
     OrderAuditService,
+    WelcomeGiftService,
     OrderFilesService,
     OrderExportService,
     TreatmentFeeService,

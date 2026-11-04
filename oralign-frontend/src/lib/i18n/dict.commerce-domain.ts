@@ -1203,4 +1203,165 @@ export const commerceDomainDict = {
       deleteBtn: { en: 'Delete User', fr: 'Supprimer l’utilisateur' } as T,
     },
   },
+
+  // ─── Welcome gift, once per practitioner (src/components/welcome-gift/*)
+  // FR is the owner's source copy, EN its translation. No rich text in
+  // the dictionary: bold / struck / hero parts are separate keys
+  // composed in JSX (…Before / …Strong / …After). Amounts are never
+  // written here — they come from billing settings or the order.
+  // The base keys are the copy for a practitioner's FIRST case; `later`
+  // holds the variant for a gift on a later case (a current
+  // practitioner's next case). Copy that fits both is neutral.
+  welcomeGift: {
+    // welcome-gift-dialog.tsx — thank-you card after the gifted submit
+    dialog: {
+      eyebrow: { en: 'Welcome to Oralign!', fr: 'Bienvenue chez Oralign !' } as T,
+      title: { en: 'Congratulations, Doctor!', fr: 'Félicitations, Docteur !' } as T,
+      // Body when the gift covers CBCT + treatment
+      cbct: {
+        bodyBefore: {
+          en: 'To celebrate our new partnership, we are delighted to cover the',
+          fr: 'Pour célébrer notre nouvelle collaboration, nous avons le plaisir de vous offrir les frais de',
+        } as T,
+        bodyStrong: { en: 'CBCT and treatment fees', fr: 'CBCT et de traitement' } as T,
+        bodyAfter: { en: 'for your first case.', fr: 'de votre premier cas.' } as T,
+      },
+      // Body when only the treatment fee is covered
+      treatment: {
+        bodyBefore: {
+          en: 'To celebrate our new partnership, we are delighted to cover the',
+          fr: 'Pour célébrer notre nouvelle collaboration, nous avons le plaisir de vous offrir les',
+        } as T,
+        bodyStrong: { en: 'treatment fee', fr: 'frais de traitement' } as T,
+        bodyAfter: { en: 'for your first case.', fr: 'de votre premier cas.' } as T,
+      },
+      section: { en: 'Your welcome privilege', fr: 'Votre privilège de bienvenue' } as T,
+      rowCbct: { en: 'CBCT', fr: 'CBCT' } as T,
+      rowTreatment: { en: 'Treatment', fr: 'Traitement' } as T,
+      free: { en: 'Free', fr: 'Offert' } as T,
+      originalPrice: { en: 'Original price', fr: 'Prix initial' } as T,
+      // "Vous bénéficiez de {total} offerts." — {total} is the hero element
+      totalBefore: { en: "That's", fr: 'Vous bénéficiez de' } as T,
+      totalAfter: { en: 'on us.', fr: 'offerts.' } as T,
+      closing: {
+        en: 'Thank you for your trust, and welcome to Oralign excellence.',
+        fr: "Merci de votre confiance, et bienvenue dans l'excellence Oralign.",
+      } as T,
+      button: { en: 'Thank you, Oralign!', fr: 'Merci, Oralign !' } as T,
+      // Gift on a later case (gift.firstCase false). Title, section,
+      // rows, total and button stay the base keys above.
+      later: {
+        eyebrow: { en: 'Thank you for your loyalty!', fr: 'Merci de votre fidélité !' } as T,
+        section: { en: 'Your Oralign privilege', fr: 'Votre privilège Oralign' } as T,
+        cbct: {
+          bodyBefore: {
+            en: 'To thank you for your trust, we are delighted to cover the',
+            fr: 'Pour vous remercier de votre confiance, nous avons le plaisir de vous offrir les frais de',
+          } as T,
+          bodyStrong: { en: 'CBCT and treatment fees', fr: 'CBCT et de traitement' } as T,
+          bodyAfter: { en: 'for this case.', fr: 'de ce cas.' } as T,
+        },
+        treatment: {
+          bodyBefore: {
+            en: 'To thank you for your trust, we are delighted to cover the',
+            fr: 'Pour vous remercier de votre confiance, nous avons le plaisir de vous offrir les',
+          } as T,
+          bodyStrong: { en: 'treatment fee', fr: 'frais de traitement' } as T,
+          bodyAfter: { en: 'for this case.', fr: 'de ce cas.' } as T,
+        },
+        closing: {
+          en: 'Thank you for your trust and loyalty.',
+          fr: 'Merci de votre confiance et de votre fidélité.',
+        } as T,
+      },
+    },
+    // welcome-gift-banner.tsx — dashboard + orders list, while the gift is unused
+    banner: {
+      title: {
+        en: 'Your first Oralign gift is waiting for you!',
+        fr: 'Votre premier cadeau Oralign vous attend !',
+      } as T,
+      bodyCbct: {
+        en: 'For your first case, the CBCT and treatment fees are entirely on us.',
+        fr: 'Pour votre premier cas, profitez des frais de CBCT et de traitement entièrement offerts.',
+      } as T,
+      bodyTreatment: {
+        en: 'For your first case, the treatment fee is entirely on us.',
+        fr: 'Pour votre premier cas, profitez des frais de traitement entièrement offerts.',
+      } as T,
+      value: {
+        en: 'An exclusive benefit worth {total}!',
+        fr: "Un avantage exclusif d'une valeur de {total} !",
+      } as T,
+      footnote: {
+        en: 'The CBCT is included when you request it on this first case.',
+        fr: "Le CBCT est offert s'il est demandé sur ce premier cas.",
+      } as T,
+      cta: { en: 'Create my first case', fr: 'Créer mon premier cas' } as T,
+      // Practitioner who already submitted cases (status.firstCase false).
+      // The value line stays the base key above.
+      later: {
+        title: {
+          en: 'An Oralign gift is waiting for you!',
+          fr: 'Un cadeau Oralign vous attend !',
+        } as T,
+        bodyCbct: {
+          en: 'For your next case, the CBCT and treatment fees are entirely on us.',
+          fr: 'Pour votre prochain cas, profitez des frais de CBCT et de traitement entièrement offerts.',
+        } as T,
+        bodyTreatment: {
+          en: 'For your next case, the treatment fee is entirely on us.',
+          fr: 'Pour votre prochain cas, profitez des frais de traitement entièrement offerts.',
+        } as T,
+        footnote: {
+          en: 'The CBCT is included when you request it on this case.',
+          fr: "Le CBCT est offert s'il est demandé sur ce cas.",
+        } as T,
+        cta: { en: 'Create a case', fr: 'Créer un cas' } as T,
+      },
+    },
+    // welcome-gift-note.tsx — wizard review step
+    note: {
+      title: { en: 'Welcome gift', fr: 'Cadeau de bienvenue' } as T,
+      text: {
+        en: 'These fees are on us for this case: no payment will be requested.',
+        fr: 'Ces frais vous sont offerts sur ce cas : aucun paiement ne vous sera demandé.',
+      } as T,
+    },
+    // welcome-gift-detail-card.tsx — order detail, replaces the fee gate
+    detail: {
+      title: { en: 'Welcome gift: fees covered', fr: 'Cadeau de bienvenue : frais offerts' } as T,
+      textCbct: {
+        en: 'The treatment and CBCT fees for this case are covered by Oralign. No payment is required.',
+        fr: "Les frais de traitement et de CBCT de ce cas sont offerts par Oralign. Aucun paiement n'est requis.",
+      } as T,
+      textTreatment: {
+        en: 'The treatment fee for this case is covered by Oralign. No payment is required.',
+        fr: "Les frais de traitement de ce cas sont offerts par Oralign. Aucun paiement n'est requis.",
+      } as T,
+      total: { en: 'Total covered', fr: 'Total offert' } as T,
+      // Gift on a later case (gift.firstCase false)
+      later: {
+        title: { en: 'Oralign gift: fees covered', fr: 'Cadeau Oralign : frais offerts' } as T,
+      },
+    },
+    // company-billing-settings-form.tsx — admin switch
+    settings: {
+      label: {
+        en: 'Oralign gift (once per practitioner)',
+        fr: 'Cadeau Oralign (une fois par praticien)',
+      } as T,
+      description: {
+        en: 'Waives the treatment fee and the CBCT supplement once per practitioner, on the next case they submit (the first case for a new practitioner).',
+        fr: "Offre les honoraires de traitement et le supplément CBCT une seule fois par praticien, sur le prochain cas qu'il soumet (le premier cas pour un nouveau praticien).",
+      } as T,
+    },
+    // Keyed by the backend errorCode
+    errors: {
+      nothingDue: {
+        en: "Nothing to pay: this case's fees are covered by the welcome gift.",
+        fr: 'Rien à régler : les frais de ce cas sont offerts (cadeau de bienvenue).',
+      } as T,
+    },
+  },
 };

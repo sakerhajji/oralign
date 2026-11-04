@@ -150,13 +150,20 @@ export class TreatmentPlanService {
     // Direct prisma query (vs. injecting the settings service) keeps
     // this module free of a cross-module dependency just for a single
     // numeric read on the singleton row.
+    //
+    // The welcome gift (`welcomeGiftAppliedAt`) waived the fee:
+    // nothing is owed, so the gate is satisfied without any payment.
     const orderRecord = await this.prisma.dentalOrder.findUnique({
       where: { id: orderId },
-      select: { treatmentFeePaidAt: true },
+      select: { treatmentFeePaidAt: true, welcomeGiftAppliedAt: true },
     });
-    if (!orderRecord?.treatmentFeePaidAt) {
+    if (
+      !orderRecord?.treatmentFeePaidAt &&
+      !orderRecord?.welcomeGiftAppliedAt
+    ) {
       const settings = await this.prisma.companyBillingSettings.findFirst({
         where: { isActive: true },
+        orderBy: { updatedAt: 'desc' },
         select: { defaultTreatmentFee: true },
       });
       const fee = Number(settings?.defaultTreatmentFee ?? 0);

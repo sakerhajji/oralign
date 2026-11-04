@@ -80,6 +80,7 @@ import {
 } from '@/components/ui/table';
 import { OrderStatusBadge } from '@/components/orders/order-status-badge';
 import { TreatmentFeeBadge } from '@/components/orders/treatment-fee-badge';
+import { WelcomeGiftBanner } from '@/components/welcome-gift/welcome-gift-banner';
 import { useAuth } from '@/lib/providers/auth-provider';
 import {
   buildOrderNavigationHref,
@@ -499,6 +500,10 @@ export default function OrdersPage() {
           )}
         </div>
       </section>
+
+      {/* Welcome gift (dentists only — the banner gates
+          itself). The header above already carries "New order". */}
+      {isDentist && <WelcomeGiftBanner showCta={false} />}
 
       {/* ─── Toolbar (search + lifecycle tabs + sort + actions) ──── */}
       <Card>

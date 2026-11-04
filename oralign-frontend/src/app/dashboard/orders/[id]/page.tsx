@@ -64,6 +64,7 @@ import { extractApiErrorMessage } from '@/lib/api/error';
 import { TreatmentFeePaymentDialog } from '@/components/orders/treatment-fee-payment-dialog';
 import { TreatmentFeeReceiptDialog } from '@/components/orders/treatment-fee-receipt-dialog';
 import { OrderHistory } from '@/components/orders/order-history';
+import { WelcomeGiftDetailCard } from '@/components/welcome-gift/welcome-gift-detail-card';
 import { useAuth } from '@/lib/providers/auth-provider';
 import { useT } from '@/lib/i18n/lang-context';
 import {
@@ -1318,6 +1319,15 @@ function TreatmentFeeGateBanner({
 
   const fee = defaults?.defaultTreatmentFee ?? 0;
   const currency = defaults?.defaultCurrency ?? 'TND';
+
+  // Welcome gift: the fees were waived at submit — nothing to
+  // pay, for the doctor and the admin alike. Takes precedence over every
+  // state below (above all the amber "awaiting payment" one) and does
+  // not depend on the live fee: the amounts are the order's snapshot.
+  if (order.welcomeGift) {
+    return <WelcomeGiftDetailCard gift={order.welcomeGift} />;
+  }
+
   const isSubmitted = order.status !== OrderStatus.DRAFT;
   if (!isSubmitted || fee <= 0) return null;
 

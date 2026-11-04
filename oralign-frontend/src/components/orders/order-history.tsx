@@ -7,6 +7,7 @@ import {
   FileCheck2,
   FileClock,
   FilePenLine,
+  Gift,
   History,
   MessageSquareText,
   PackageCheck,
@@ -64,6 +65,7 @@ const ACTION_ICONS: Record<string, typeof History> = {
   payment_cancelled: Archive,
   batch_unlocked: PackageCheck,
   batch_delivered: PackageCheck,
+  welcome_gift_applied: Gift,
 };
 
 const POSITIVE_ACTIONS = new Set([
@@ -73,6 +75,7 @@ const POSITIVE_ACTIONS = new Set([
   'quotation_approved',
   'payment_succeeded',
   'batch_delivered',
+  'welcome_gift_applied',
 ]);
 
 const WARNING_ACTIONS = new Set([
@@ -329,6 +332,9 @@ function metadataDetails(
       'amount',
       [metadata.amount, metadata.currency].filter(Boolean).join(' '),
     );
+  } else if (typeof metadata.total === 'number') {
+    // welcome_gift_applied carries { treatmentFee, cbctFee, total, currency }.
+    add('amount', [metadata.total, metadata.currency].filter(Boolean).join(' '));
   }
   add('paymentMethod', metadata.method);
   add('installment', metadata.installmentNumber);

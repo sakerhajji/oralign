@@ -488,6 +488,15 @@ export class ClicToPayPaymentsService {
           'TREATMENT_FEE_ALREADY_PAID',
         );
       }
+      // Welcome gift: the whole charge was waived at submit.
+      // Read under the row lock above, so a submit that applies the gift
+      // and this attempt can never both win.
+      if (order.welcomeGiftAppliedAt) {
+        throw new BadRequestException(
+          "Nothing to pay: this case's fees are covered by the welcome gift.",
+          'WELCOME_GIFT_NOTHING_DUE',
+        );
+      }
 
       const live = await tx.payment.findFirst({
         where: {

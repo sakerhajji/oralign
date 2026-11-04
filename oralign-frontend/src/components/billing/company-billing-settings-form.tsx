@@ -47,6 +47,7 @@ interface FormState extends UpsertCompanyBillingSettingsDto {
   replacementAlignerFee: number;
   retainersFee: number;
   loyaltyEnabled: boolean;
+  welcomeGiftEnabled: boolean;
   defaultCurrency: string;
   devisPrefix: string;
   devisNextNumber: number;
@@ -83,6 +84,8 @@ const emptyState: FormState = {
   replacementAlignerFee: 0,
   retainersFee: 0,
   loyaltyEnabled: true,
+  // Welcome gift (once per practitioner) — on by default, like the backend column.
+  welcomeGiftEnabled: true,
   defaultCurrency: 'TND',
   devisPrefix: 'DEV',
   devisNextNumber: 1,
@@ -120,6 +123,7 @@ function formFromBillingSettings(
     replacementAlignerFee: settings.replacementAlignerFee ?? 0,
     retainersFee: settings.retainersFee ?? 0,
     loyaltyEnabled: settings.loyaltyEnabled ?? true,
+    welcomeGiftEnabled: settings.welcomeGiftEnabled ?? true,
     defaultCurrency: settings.defaultCurrency ?? 'TND',
     devisPrefix: settings.devisPrefix ?? 'DEV',
     devisNextNumber: settings.devisNextNumber ?? 1,
@@ -248,6 +252,7 @@ export function CompanyBillingSettingsForm() {
       replacementAlignerFee: Math.max(0, form.replacementAlignerFee),
       retainersFee: Math.max(0, form.retainersFee),
       loyaltyEnabled: form.loyaltyEnabled,
+      welcomeGiftEnabled: form.welcomeGiftEnabled,
       defaultCurrency: form.defaultCurrency.trim() || 'TND',
       devisPrefix: form.devisPrefix.trim() || 'DEV',
       devisNextNumber: form.devisNextNumber,
@@ -621,6 +626,29 @@ export function CompanyBillingSettingsForm() {
               id="loyalty-enabled"
               checked={form.loyaltyEnabled}
               onCheckedChange={(checked) => updateField('loyaltyEnabled', checked)}
+            />
+          </div>
+
+          {/* ── Welcome gift switch (once per practitioner) ──────────
+              On = the treatment fee and the CBCT supplement are waived
+              once per practitioner, on the next case they submit (the
+              first case for a new practitioner). Off never removes a
+              gift already applied to an order. */}
+          <div className="flex items-center justify-between gap-3 rounded-lg border p-4">
+            <div className="space-y-0.5">
+              <Label htmlFor="welcome-gift-enabled" className="font-medium">
+                {t('welcomeGift.settings.label')}
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                {t('welcomeGift.settings.description')}
+              </p>
+            </div>
+            <Switch
+              id="welcome-gift-enabled"
+              checked={form.welcomeGiftEnabled}
+              onCheckedChange={(checked) =>
+                updateField('welcomeGiftEnabled', checked)
+              }
             />
           </div>
 

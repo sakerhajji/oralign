@@ -43,6 +43,7 @@ import {
 } from './order-storage';
 import { assertNoDependents } from '../../common/deletion/deletion-blocked';
 import { OrderAuditService } from './order-audit.service';
+import { WelcomeGiftService } from './welcome-gift.service';
 
 type ClinicalOrderData = Partial<
   Pick<
@@ -86,6 +87,7 @@ export class OrderService {
     private readonly orderAccess: OrderAccessPolicy,
     private readonly events: EventEmitter2,
     private readonly orderAudit: OrderAuditService,
+    private readonly welcomeGift: WelcomeGiftService,
     // Optional so the service keeps working (without replay protection)
     // when no cache store is wired — unit tests, or a Redis outage.
     @Optional() @Inject(CACHE_MANAGER) private readonly cache?: Cache,
@@ -272,6 +274,20 @@ export class OrderService {
       : current.doctorId;
     const patientId = updateOrderDto.patientId ?? current.patientId;
 
+    // The welcome gift belongs to the doctor it was given to and is never
+    // removed: moving its order would hand the gift to another doctor (or
+    // trip DentalOrder_welcome_gift_doctor_key).
+    if (
+      doctorId &&
+      doctorId !== current.doctorId &&
+      current.welcomeGiftAppliedAt
+    ) {
+      throw new BadRequestException(
+        'This case carries the welcome gift and cannot be moved to another practitioner.',
+        'WELCOME_GIFT_ORDER_REASSIGN',
+      );
+    }
+
     if (doctorId) {
       await this.ensureDentistExists(doctorId);
     }
@@ -446,10 +462,11 @@ export class OrderService {
    * Permanent (hard) delete of ONE order. Rules, in order:
    *   1. admin only;
    *   2. trash-first — the order must already be soft-deleted;
-   *   3. no protected history: a quotation, any payment or any treatment
-   *      plan blocks the purge with 409 (the DB has onDelete: Restrict on
-   *      those relations as the last line of defence). Such an order can
-   *      only ever be archived.
+   *   3. no protected history: a quotation, any payment, any treatment
+   *      plan or aligner delivery blocks the purge with 409 (the DB has
+   *      onDelete: Restrict on those relations as the last line of
+   *      defence), and so does a welcome gift (the row is the record of
+   *      the waived fees). Such an order can only ever be archived.
    * Only orders that never entered the clinical/financial pipeline are
    * purgeable; their own children (tooth instructions, files incl. the
    * ones already in the file trash, upload sessions) go with them, and
@@ -533,7 +550,22 @@ export class OrderService {
         include: orderInclude,
       });
       await tx.orderAuditLog.create({ data: { orderId: id, ...auditEntry } });
-      return updated;
+      // Welcome gift (once per doctor, on the next case they submit):
+      // decided in THIS transaction so it commits (or rolls back) with the
+      // submission, whoever presses submit. The gift columns are written
+      // after `updated` was read, so re-read for the response.
+      const gifted = await this.welcomeGift.applyOnSubmit(
+        tx,
+        id,
+        current.doctorId,
+        caller,
+      );
+      return gifted
+        ? tx.dentalOrder.findUniqueOrThrow({
+            where: { id },
+            include: orderInclude,
+          })
+        : updated;
     });
 
     // E-mail fan-out (doctor + admins) is handled by the notification
@@ -824,8 +856,9 @@ export class OrderService {
    */
   /**
    * Bulk permanent delete — same rules as the single path, applied per
-   * id. Blocked orders (live, or with quotation / payments / plans) are
-   * counted in `blocked` and left untouched; unknown ids are `skipped`.
+   * id. Blocked orders (live, or with quotation / payments / plans /
+   * deliveries / a welcome gift) are counted in `blocked` and left
+   * untouched; unknown ids are `skipped`.
    */
   async bulkPermanentDeleteOrders(
     ids: string[],
@@ -856,6 +889,7 @@ export class OrderService {
         orderCode: true,
         deletedAt: true,
         treatmentFeeProofPath: true,
+        welcomeGiftAppliedAt: true,
         files: { select: { relativePath: true, variants: true } },
         _count: {
           select: {
@@ -886,6 +920,9 @@ export class OrderService {
         { label: 'payments', count: order._count.payments },
         { label: 'treatment plans', count: order._count.treatmentPlans },
         { label: 'aligner deliveries', count: order._count.alignerDeliveries },
+        // The gift order is the record of the waived fees (amounts, audit):
+        // archived at most, never purged.
+        { label: 'welcome gift', count: order.welcomeGiftAppliedAt ? 1 : 0 },
       ];
       if (deps.some((d) => d.count > 0)) {
         if (opts.throwOnBlocked) {

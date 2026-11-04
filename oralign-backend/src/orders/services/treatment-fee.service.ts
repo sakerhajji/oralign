@@ -84,6 +84,7 @@ export class TreatmentFeeService {
     if (current.treatmentFeePaidAt) {
       return mapOrderToDto(current);
     }
+    this.ensureNotWelcomeGift(current);
     // Server-computed — the client no longer supplies the amount.
     const amount = await this.resolveTreatmentFeeAmount(current);
 
@@ -190,6 +191,7 @@ export class TreatmentFeeService {
         'Treatment fee is already paid — receipt upload not allowed.',
       );
     }
+    this.ensureNotWelcomeGift(current);
     // Server-computed amount (audit M-4) — not taken from the client.
     const amount = await this.resolveTreatmentFeeAmount(current);
     await this.ensureBankTransferIsConfigured();
@@ -403,6 +405,22 @@ export class TreatmentFeeService {
   }
 
   // ── Internals ──────────────────────────────────────────────────────
+
+  /**
+   * The welcome gift waived this order's whole treatment-fee
+   * charge: there is nothing to pay, declare or prove. Refused before any
+   * amount is computed so no payment state can ever land on a gift order.
+   */
+  private ensureNotWelcomeGift(order: {
+    welcomeGiftAppliedAt: Date | null;
+  }): void {
+    if (order.welcomeGiftAppliedAt) {
+      throw new BadRequestException(
+        "Nothing to pay: this case's fees are covered by the welcome gift.",
+        'WELCOME_GIFT_NOTHING_DUE',
+      );
+    }
+  }
 
   /**
    * SECURITY (audit M-4): the treatment fee is computed SERVER-SIDE, never

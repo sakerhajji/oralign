@@ -4,6 +4,7 @@ import {
   AlertCircle,
   CheckCircle2,
   Clock,
+  Gift,
   XCircle,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -32,6 +33,8 @@ import {
  *                  scan of the orders list.
  *   • Rejected   — admin rejected a previous attempt → doctor needs to
  *                  re-declare. Red pill (rare but possible state).
+ *   • Gift       — the welcome gift waived the fee: nothing
+ *                  is owed. Calm brand-sun pill, distinct from unpaid.
  *   • Unpaid     — no payment recorded yet → the doctor still owes the
  *                  fee. Amber pill.
  *
@@ -40,7 +43,7 @@ import {
  * don't care about the fee yet.
  */
 
-type FeeState = 'paid' | 'pending' | 'rejected' | 'unpaid';
+type FeeState = 'paid' | 'pending' | 'rejected' | 'gift' | 'unpaid';
 
 // Visual metadata only — the label string is resolved from the i18n
 // dictionary at render time so each badge speaks the user's language.
@@ -65,6 +68,13 @@ const META: Record<
     Icon: XCircle,
     dictKey: 'orders.feeBadge.rejected',
   },
+  gift: {
+    // The brand's black box: ink fill, porcelain label (amber is never
+    // a text colour or a tint on light grounds).
+    tone: 'bg-[#191919] text-[#f2f5ef] border-[#191919]',
+    Icon: Gift,
+    dictKey: 'orders.feeBadge.gift',
+  },
   unpaid: {
     tone: 'bg-primary/10 text-primary border-primary/20',
     Icon: AlertCircle,
@@ -86,7 +96,10 @@ const META: Record<
 export function resolveTreatmentFeeState(
   order: Pick<
     DentalOrder,
-    'status' | 'treatmentFeePaidAt' | 'treatmentFeePaymentStatus'
+    | 'status'
+    | 'treatmentFeePaidAt'
+    | 'treatmentFeePaymentStatus'
+    | 'welcomeGift'
   >,
 ): FeeState | null {
   // Rows where the fee is moot — return null so the badge column
@@ -103,6 +116,11 @@ export function resolveTreatmentFeeState(
   // fee is settled regardless of how it got there (card, cash, or
   // admin-confirmed bank transfer).
   if (order.treatmentFeePaidAt) return 'paid';
+
+  // Welcome gift: the fee was waived at submit, nothing is owed. A gift
+  // order never carries fee activity (the backend refuses it), so this
+  // sits before the payment-status states and, above all, before unpaid.
+  if (order.welcomeGift) return 'gift';
 
   switch (order.treatmentFeePaymentStatus) {
     case PaymentRecordStatus.AWAITING_CONFIRMATION:
@@ -124,7 +142,10 @@ export function TreatmentFeeBadge({
 }: {
   order: Pick<
     DentalOrder,
-    'status' | 'treatmentFeePaidAt' | 'treatmentFeePaymentStatus'
+    | 'status'
+    | 'treatmentFeePaidAt'
+    | 'treatmentFeePaymentStatus'
+    | 'welcomeGift'
   >;
   className?: string;
 }) {

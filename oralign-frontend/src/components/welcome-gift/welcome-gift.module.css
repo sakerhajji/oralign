@@ -1,0 +1,101 @@
+/*
+ * Welcome-gift surfaces, in the ORALIGN brand charter: the gift is the
+ * black box (ink ground, porcelain text), lit like the brand film; amber
+ * is a fill or a thin stroke only — never text, glow or gradient.
+ *
+ * Tokens mirror the public site's (showcase.css); the dashboard does not
+ * load those, so they are scoped here under .root.
+ */
+
+.root {
+  --wg-ink: #191919;
+  --wg-stage: #242321;
+  --wg-porcelain: #f2f5ef;
+  --wg-amber: #feca16;
+  /* Secondary text on ink: porcelain at 74 % (≈ 8.7:1). */
+  --wg-mute: rgb(242 245 239 / 0.74);
+  /* Rules between ledger lines. */
+  --wg-rule: rgb(242 245 239 / 0.12);
+  --wg-ease: cubic-bezier(0.16, 1, 0.3, 1);
+
+  font-family: var(--wg-font-text, ui-sans-serif, system-ui, sans-serif);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Display face: Jost regular, the brand's headline voice. */
+.display {
+  font-family: var(--wg-font-display, var(--wg-font-text, ui-sans-serif, system-ui, sans-serif));
+  font-weight: 400;
+  letter-spacing: -0.012em;
+  text-wrap: balance;
+}
+
+/* Figures in the display face line up (350 / 50 / 300). */
+.figure {
+  font-family: var(--wg-font-display, var(--wg-font-text, ui-sans-serif, system-ui, sans-serif));
+  font-weight: 400;
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: -0.02em;
+}
+
+/* Original price: struck with a hairline in its own colour. */
+.struck {
+  text-decoration-line: line-through;
+  text-decoration-thickness: 1px;
+  text-decoration-color: currentColor;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The one press target: flat amber pill, ink label; hover turns porcelain. */
+.action {
+  background: var(--wg-amber);
+  color: var(--wg-ink);
+  transition:
+    background-color 180ms var(--wg-ease),
+    transform 120ms var(--wg-ease);
+}
+.action:hover {
+  background: var(--wg-porcelain);
+}
+.action:active {
+  transform: scale(0.98);
+}
+.action:focus-visible {
+  outline: 2px solid var(--wg-amber);
+  outline-offset: 3px;
+}
+
+/*
+ * Motion — the charter allows one authored movement per moment. Here it
+ * is the lid: the outer ring draws once around the ORALIGN sun, and the
+ * film still settles into place as the card opens. Without a motion
+ * preference nothing moves and everything is in its final state.
+ */
+.ring {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ringDraw {
+    animation: wg-ring-draw 1700ms var(--wg-ease) 380ms both;
+  }
+
+  .photoSettle {
+    animation: wg-photo-settle 1400ms var(--wg-ease) both;
+  }
+}
+
+@keyframes wg-ring-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+}
+
+@keyframes wg-photo-settle {
+  from {
+    opacity: 0;
+    transform: scale(1.045);
+  }
+}

@@ -76,6 +76,10 @@ export interface CompanyBillingSettings {
   retainersFee: number;
   // Master switch of the quarterly loyalty program.
   loyaltyEnabled: boolean;
+  // Welcome gift switch (treatment fee + CBCT waived once per
+  // practitioner, on their next submitted case). Optional until every backend
+  // serving this UI returns it; the form treats a missing value as on.
+  welcomeGiftEnabled?: boolean;
   defaultCurrency: string;
   devisPrefix: string;
   devisNextNumber: number;
@@ -117,6 +121,8 @@ export interface UpsertCompanyBillingSettingsDto {
   retainersFee?: number;
   /** Master switch of the quarterly loyalty program. */
   loyaltyEnabled?: boolean;
+  /** Welcome gift switch (once per practitioner). */
+  welcomeGiftEnabled?: boolean;
   defaultCurrency?: string;
   devisPrefix?: string;
   devisNextNumber?: number;

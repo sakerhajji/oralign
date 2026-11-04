@@ -6,6 +6,7 @@ import type { OrderAccessPolicy } from '../../common/access/order-access.policy'
 import type { Caller } from '../../common/access/caller';
 import type { CreateOrderDto } from '../dto/order.dto';
 import type { OrderAuditService } from './order-audit.service';
+import type { WelcomeGiftService } from './welcome-gift.service';
 import { OrderService } from './order.service';
 
 jest.mock('./order-storage', () => ({
@@ -46,6 +47,7 @@ function makeService(cache?: CacheMock) {
     {
       entry: jest.fn().mockResolvedValue({ action: 'created' }),
     } as unknown as OrderAuditService,
+    {} as WelcomeGiftService,
     cache as unknown as Cache | undefined,
   );
   // The checks that need a database are not what is under test.

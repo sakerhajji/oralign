@@ -140,6 +140,8 @@ export const dict = {
       pending: { en: 'Fee pending', fr: 'Honoraires en attente' } as T,
       rejected: { en: 'Fee rejected', fr: 'Honoraires rejetés' } as T,
       unpaid: { en: 'Fee unpaid', fr: 'Honoraires non payés' } as T,
+      // Welcome gift — the fee was waived, nothing is owed.
+      gift: { en: 'Fee covered', fr: 'Honoraires offerts' } as T,
     },
   },
 
@@ -1042,6 +1044,10 @@ export const dict = {
         batch_delivered: {
           en: "Aligner batch delivered",
           fr: "Lot d’aligneurs livré",
+        } as T,
+        welcome_gift_applied: {
+          en: "Welcome gift applied",
+          fr: "Cadeau de bienvenue appliqué",
         } as T,
       },
       fields: {
@@ -4256,6 +4262,11 @@ export const dict = {
       draftSaved: { en: 'Order draft saved', fr: 'Brouillon de commande enregistré' } as T,
       updated: { en: 'Order updated', fr: 'Commande mise à jour' } as T,
       submitted: { en: 'Order submitted', fr: 'Commande envoyée' } as T,
+      // Admin submitted a doctor's case — the welcome gift applied.
+      welcomeGiftApplied: {
+        en: "Gift applied: this case's fees are covered.",
+        fr: 'Cadeau appliqué : les frais de ce cas sont offerts.',
+      } as T,
       bankTransferRecorded: {
         en: 'Bank-transfer payment recorded. Upload your receipt next.',
         fr: 'Paiement par virement bancaire enregistré. Téléversez maintenant votre reçu.',

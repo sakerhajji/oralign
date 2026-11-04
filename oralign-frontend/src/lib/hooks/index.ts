@@ -23,3 +23,4 @@ export * from './use-authed-image';
 export * from './use-community-submissions';
 export * from './use-loyalty';
 export * from './use-aligner-deliveries';
+export * from './use-welcome-gift';

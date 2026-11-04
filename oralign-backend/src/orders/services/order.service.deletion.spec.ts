@@ -4,6 +4,7 @@ import type { PrismaService } from '../../prisma/prisma.service';
 import type { OrderAccessPolicy } from '../../common/access/order-access.policy';
 import type { Caller } from '../../common/access/caller';
 import type { OrderAuditService } from './order-audit.service';
+import type { WelcomeGiftService } from './welcome-gift.service';
 import { OrderService } from './order.service';
 import { DeletionBlockedException } from '../../common/deletion/deletion-blocked';
 import {
@@ -31,6 +32,7 @@ type Candidate = {
   orderCode: string;
   deletedAt: Date | null;
   treatmentFeeProofPath: string | null;
+  welcomeGiftAppliedAt?: Date | null;
   files: { relativePath: string; variants: unknown }[];
   _count: { treatmentPlans: number; payments: number };
   quotation: { id: string } | null;
@@ -59,6 +61,7 @@ function makeService(candidates: Candidate[]) {
     {} as OrderAccessPolicy,
     { emit: jest.fn() } as unknown as EventEmitter2,
     {} as OrderAuditService,
+    {} as WelcomeGiftService,
   );
   return { service, prisma, tx, findMany };
 }
@@ -133,6 +136,31 @@ describe('OrderService permanent delete — deletion policy', () => {
       expect(storage.purgeStoredMedia).not.toHaveBeenCalled();
     },
   );
+
+  it('keeps a welcome-gift order: archived only, never purged (single + bulk)', async () => {
+    const gift = { welcomeGiftAppliedAt: new Date('2026-07-01') };
+    const { service, tx } = makeService([archived(gift)]);
+    let caught: unknown;
+    try {
+      await service.permanentDeleteOrder('o1', admin);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(DeletionBlockedException);
+    expect((caught as Error).message).toContain('1 welcome gift');
+
+    const bulk = makeService([
+      archived({ id: 'g1', orderCode: 'G', ...gift }),
+      archived({ id: 'ok1', orderCode: 'A' }),
+    ]);
+    await expect(
+      bulk.service.bulkPermanentDeleteOrders(['g1', 'ok1'], admin),
+    ).resolves.toEqual({ deleted: 1, blocked: 1, skipped: 0 });
+    expect(bulk.tx.dentalOrder.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: ['ok1'] } },
+    });
+    expect(tx.dentalOrder.deleteMany).not.toHaveBeenCalled();
+  });
 
   it('purges an archived, history-free order: children first, then blobs + variants + proof', async () => {
     const { service, tx } = makeService([

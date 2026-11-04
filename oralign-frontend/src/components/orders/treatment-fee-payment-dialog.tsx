@@ -114,7 +114,13 @@ export function TreatmentFeePaymentDialog({
   // authoritative total for that order.
   const baseFee = defaults?.defaultTreatmentFee ?? 0;
   const cbctFee = order.cbctFeeAmount ?? 0;
-  const amount = order.treatmentFeeAmount ?? baseFee + cbctFee;
+  // Defensive: fees waived by the welcome gift leave nothing
+  // due — the dialog falls into its existing "no amount" state (the
+  // backend refuses any payment on such an order anyway).
+  const waivedByGift = !!order.welcomeGift;
+  const amount = waivedByGift
+    ? 0
+    : (order.treatmentFeeAmount ?? baseFee + cbctFee);
   const currency =
     order.cbctFeeCurrency ?? defaults?.defaultCurrency ?? 'TND';
   const bankDetails = defaults?.bankDetails ?? null;
@@ -126,7 +132,7 @@ export function TreatmentFeePaymentDialog({
       .filter((v): v is string => !!v && v.trim().length > 0)
       .join(', ') || null;
   const isResolvingAmount =
-    defaultsLoading && order.treatmentFeeAmount == null;
+    !waivedByGift && defaultsLoading && order.treatmentFeeAmount == null;
   const hasAmountDue = amount > 0;
   const hasBankTransfer = hasUsableBankTransferDetails(bankDetails);
 
@@ -260,7 +266,7 @@ export function TreatmentFeePaymentDialog({
             </p>
             {/* Price breakdown — only when the order carries a CBCT
                 supplement, so plain orders keep the single clean figure. */}
-            {cbctFee > 0 && order.treatmentFeeAmount == null && (
+            {!waivedByGift && cbctFee > 0 && order.treatmentFeeAmount == null && (
               <dl className="mt-3 space-y-1 rounded-lg border bg-card p-3 text-sm">
                 <div className="flex items-center justify-between gap-3">
                   <dt className="text-muted-foreground">

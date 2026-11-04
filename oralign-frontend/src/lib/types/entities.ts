@@ -268,6 +268,19 @@ export interface DentalOrder {
   // after submission so config changes never reprice existing orders.
   cbctFeeAmount?: number;
   cbctFeeCurrency?: string;
+  // Welcome gift (once per practitioner) — stamped server-side on the
+  // case a doctor submitted while the gift was unused: the treatment fee
+  // (+ CBCT snapshot) is waived, amounts snapshotted at submit. Null when
+  // no gift applies. `firstCase` = that case was the doctor's very first
+  // submitted case (drives the "premier cas" vs "ce cas" copy).
+  welcomeGift?: {
+    appliedAt: string;
+    treatmentFee: number;
+    cbctFee: number;
+    total: number;
+    currency: string;
+    firstCase: boolean;
+  } | null;
   // ── Notification badges (computed by the backend list endpoint) ───────────
   // `latestPlanStatus` is undefined when no treatment plan has been started.
   latestPlanStatus?: TreatmentPlanStatus;

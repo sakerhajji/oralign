@@ -635,6 +635,31 @@ export class OrderFileResponseDto {
   mediaMetadata?: Record<string, unknown>;
 }
 
+/**
+ * Welcome gift as frozen on the order at submit time (Decimal → Number at
+ * the DTO boundary, like the other money fields).
+ */
+export class OrderWelcomeGiftDto {
+  @ApiProperty()
+  appliedAt!: Date;
+  @ApiProperty({ example: 300, description: 'Waived treatment fee.' })
+  treatmentFee!: number;
+  @ApiProperty({
+    example: 50,
+    description: 'Waived CBCT supplement (0 when the order has no CBCT).',
+  })
+  cbctFee!: number;
+  @ApiProperty({ example: 350, description: 'treatmentFee + cbctFee.' })
+  total!: number;
+  @ApiProperty({ example: 'TND' })
+  currency!: string;
+  @ApiProperty({
+    description:
+      "True when the gifted case was the doctor's very first submitted case (drives the copy).",
+  })
+  firstCase!: boolean;
+}
+
 export class OrderResponseDto {
   @ApiProperty()
   id!: string;
@@ -733,6 +758,14 @@ export class OrderResponseDto {
   treatmentFeePaymentStatus?: string;
   @ApiProperty({ required: false, description: 'Relative path to bank-transfer receipt for the treatment fee.' })
   treatmentFeeProofPath?: string;
+  @ApiProperty({
+    type: OrderWelcomeGiftDto,
+    required: false,
+    nullable: true,
+    description:
+      'Welcome gift (once per doctor): the treatment fee and CBCT supplement waived on this order. Null when not applied.',
+  })
+  welcomeGift?: OrderWelcomeGiftDto | null;
 
   // ── Notification badges shown in the orders list ───────────────────────────
   // Computed server-side so the table doesn't have to issue per-row calls to

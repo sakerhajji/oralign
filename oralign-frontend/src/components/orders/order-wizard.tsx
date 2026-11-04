@@ -89,6 +89,15 @@ import {
   ClinicalOrderFiles,
 } from '@/components/orders/order-file-upload';
 import { TreatmentFeePaymentDialog } from '@/components/orders/treatment-fee-payment-dialog';
+import { WelcomeGiftDialog } from '@/components/welcome-gift/welcome-gift-dialog';
+import {
+  WelcomeGiftFeeLine,
+  WelcomeGiftNote,
+} from '@/components/welcome-gift/welcome-gift-note';
+import {
+  giftLinesFromStatus,
+  type WelcomeGiftLines,
+} from '@/components/welcome-gift/format';
 import { ClinicalConditionsField } from '@/components/patients/clinical-conditions-field';
 import { PatientProfilePhotoField } from '@/components/patients/patient-profile-photo-field';
 import { useAuth } from '@/lib/providers/auth-provider';
@@ -106,6 +115,8 @@ import {
   useUpdateToothInstructions,
 } from '@/lib/hooks';
 import { useBillingPublicDefaults } from '@/lib/hooks/use-company-billing';
+import { useWelcomeGiftStatus } from '@/lib/hooks/use-welcome-gift';
+import { toast } from '@/lib/toast';
 import { formatPrice } from '@/lib/utils/currency';
 import {
   ArchTreatment,
@@ -264,6 +275,15 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
   // pushes the user to /dashboard/orders/[id] on success/skip.
   const [payDialogOpen, setPayDialogOpen] = useState(false);
   const [submittedOrderId, setSubmittedOrderId] = useState<string | null>(null);
+  // Welcome gift: when the submit response carries it, the
+  // dentist gets the thank-you card instead of the payment dialog.
+  const [giftCelebration, setGiftCelebration] = useState<{
+    orderId: string;
+    gift: NonNullable<DentalOrder['welcomeGift']>;
+  } | null>(null);
+  const [giftDialogOpen, setGiftDialogOpen] = useState(false);
+  // Banner-rule status (dentist only; disabled for admins).
+  const { data: welcomeGiftStatus } = useWelcomeGiftStatus();
   // Doctor's acceptance of the General Terms & Conditions — required to
   // submit (checkbox on the final review step; the backend also enforces).
   const [termsAccepted, setTermsAccepted] = useState(false);
@@ -488,6 +508,37 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
   const paidLocked = !!savedOrder?.treatmentFeePaidAt && !isAdmin;
   const canModify = !paidLocked;
   const isDraftForSubmit = !savedOrder || savedOrder.status === OrderStatus.DRAFT;
+  // What the welcome gift waives on this draft, for the review step. An
+  // order that already carries the gift (rolled back to draft by an
+  // admin) keeps its snapshot; otherwise a dentist still eligible sees
+  // the live preview. Null = no gift: the regular price summary shows.
+  // A draft with fee activity (paid, or a declared payment method) is
+  // never gifted by the backend, so it gets no preview either.
+  // The submit response's snapshot wins first: once submitted, the status
+  // refetch says "not eligible" while savedOrder is still the pre-submit
+  // draft, and the review step must not flip to a total behind the card.
+  const welcomeGiftLines: WelcomeGiftLines | null = giftCelebration
+    ? {
+        treatmentFee: giftCelebration.gift.treatmentFee,
+        cbctFee: giftCelebration.gift.cbctFee,
+        currency: giftCelebration.gift.currency,
+      }
+    : savedOrder?.welcomeGift
+      ? {
+          treatmentFee: savedOrder.welcomeGift.treatmentFee,
+          cbctFee: savedOrder.welcomeGift.cbctFee,
+          currency: savedOrder.welcomeGift.currency,
+        }
+      : isDentist &&
+          isDraftForSubmit &&
+          welcomeGiftStatus?.eligible &&
+          !savedOrder?.treatmentFeePaidAt &&
+          !savedOrder?.treatmentFeePaymentMethod
+        ? giftLinesFromStatus(welcomeGiftStatus, {
+            cbctRequested: !!form.useCbctWithScans,
+            cbctFeeAmount: savedOrder?.cbctFeeAmount,
+          })
+        : null;
   // The General T&C box must be checked before submit is allowed. Only
   // shown/required on the final review step for a draft order.
   const canSubmit = isDraftForSubmit && termsAccepted && reviewConfirmed;
@@ -885,8 +936,19 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
                       this the doctor is bounced to a silent page. */}
                   <FieldError message={fieldErrors.cbctFiles} />
                   {/* Paid-supplement notice — shown the moment the
-                      toggle is on so the price is never a surprise. */}
-                  {form.useCbctWithScans && cbctSupplement && (
+                      toggle is on so the price is never a surprise.
+                      Under the welcome gift the supplement is waived:
+                      show it struck instead, never as an added charge. */}
+                  {form.useCbctWithScans &&
+                    welcomeGiftLines &&
+                    welcomeGiftLines.cbctFee > 0 && (
+                      <WelcomeGiftFeeLine
+                        label={t('welcomeGift.dialog.rowCbct')}
+                        amount={welcomeGiftLines.cbctFee}
+                        currency={welcomeGiftLines.currency}
+                      />
+                    )}
+                  {form.useCbctWithScans && cbctSupplement && !welcomeGiftLines && (
                     <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800">
                       {t('orderForm.files.cbctSupplementNote', {
                         price: formatPrice(
@@ -956,6 +1018,7 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
               form={form}
               toothInstructions={toothInstructions}
               cbctSupplement={cbctSupplement}
+              welcomeGift={welcomeGiftLines}
             />
           </div>
         )}
@@ -1076,6 +1139,23 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
                   id: order.id,
                   termsAccepted,
                 });
+                // The welcome gift waived the fees — never
+                // open the payment dialog. The dentist gets the
+                // thank-you card (closing it opens the order); an admin
+                // submitting on the doctor's behalf gets a toast.
+                if (submitted.welcomeGift) {
+                  if (isDentist) {
+                    setGiftCelebration({
+                      orderId: order.id,
+                      gift: submitted.welcomeGift,
+                    });
+                    setGiftDialogOpen(true);
+                    return;
+                  }
+                  toast.success(t('toasts.orders.welcomeGiftApplied'));
+                  router.push(`/dashboard/orders/${order.id}`);
+                  return;
+                }
                 // If the order is already paid (admin pre-paid an
                 // older order, or no fee is configured) skip the
                 // dialog and go straight to the detail page.
@@ -1150,6 +1230,21 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
             // No-op — the dialog will close itself which triggers
             // the router push above.
           }}
+        />
+      )}
+
+      {/* Welcome gift — the thank-you card after the
+          dentist's gifted submission. Closing it opens the order. */}
+      {giftCelebration && (
+        <WelcomeGiftDialog
+          open={giftDialogOpen}
+          onOpenChange={(next) => {
+            setGiftDialogOpen(next);
+            if (!next) {
+              router.push(`/dashboard/orders/${giftCelebration.orderId}`);
+            }
+          }}
+          gift={giftCelebration.gift}
         />
       )}
     </div>
@@ -2755,6 +2850,7 @@ function ReviewStep({
   form,
   toothInstructions,
   cbctSupplement,
+  welcomeGift,
 }: {
   savedOrder?: DentalOrder;
   selectedPatient?: Patient;
@@ -2767,6 +2863,8 @@ function ReviewStep({
   toothInstructions: ToothInstruction[];
   /** Configured CBCT paid supplement — null when disabled or free. */
   cbctSupplement: { fee: number; currency: string; baseFee: number } | null;
+  /** Fees the welcome gift waives — null when no gift applies. */
+  welcomeGift: WelcomeGiftLines | null;
 }) {
   const { t } = useT();
   // Resolve patient demographics from whichever source is populated.
@@ -2987,7 +3085,12 @@ function ReviewStep({
             The supplement shown prefers the order's own snapshot (an
             already-saved draft carries the authoritative amount); the
             configured default covers the not-yet-saved case. */}
-        {form.useCbctWithScans &&
+        {/* Case under the welcome gift: the waived lines,
+            struck, replace the price summary — never a total to pay
+            next to "no payment will be requested". */}
+        {welcomeGift && <WelcomeGiftNote gift={welcomeGift} className="mt-4" />}
+        {!welcomeGift &&
+          form.useCbctWithScans &&
           (savedOrder?.cbctFeeAmount || cbctSupplement) && (
             <dl className="mt-4 max-w-sm space-y-1 rounded-lg border bg-muted/20 p-3 text-sm">
               <div className="flex items-center justify-between gap-3">

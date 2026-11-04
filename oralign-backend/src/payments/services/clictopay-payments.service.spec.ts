@@ -373,4 +373,37 @@ describe('ClicToPayPaymentsService', () => {
       ),
     ).rejects.toMatchObject({ errorCode: 'PAYMENT_IDEMPOTENCY_CONFLICT' });
   });
+
+  it('refuses a card session for an order whose fee the welcome gift waived', async () => {
+    prisma.payment.findUnique.mockResolvedValue(null); // no idempotency replay
+    prisma.payment.findFirst.mockResolvedValue(null); // nothing to resume
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([]),
+      dentalOrder: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'order-1',
+          doctorId: 'doctor-1',
+          deletedAt: null,
+          treatmentFeePaidAt: null,
+          welcomeGiftAppliedAt: new Date('2026-11-04'),
+          cbctFeeAmount: new Prisma.Decimal('50.000'),
+        }),
+      },
+      payment: { findFirst: jest.fn(), count: jest.fn(), create: jest.fn() },
+      companyBillingSettings: { findFirst: jest.fn() },
+    };
+    prisma.$transaction.mockImplementation(
+      (run: (client: typeof tx) => unknown) => run(tx),
+    );
+
+    await expect(createTreatmentFeeSession()).rejects.toMatchObject({
+      statusCode: 400,
+      errorCode: 'WELCOME_GIFT_NOTHING_DUE',
+    });
+    // Refused under the row lock, before any amount or attempt exists.
+    expect(tx.$queryRaw).toHaveBeenCalled();
+    expect(tx.companyBillingSettings.findFirst).not.toHaveBeenCalled();
+    expect(tx.payment.create).not.toHaveBeenCalled();
+    expect(client.register).not.toHaveBeenCalled();
+  });
 });

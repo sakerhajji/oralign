@@ -18,6 +18,7 @@ import { DashboardSlider } from './dashboard-slider';
 import { DoctorLatestOrders } from './doctor-latest-orders';
 import { OutstandingBalanceDialog } from './outstanding-balance-dialog';
 import { PaidOrdersDialog } from './paid-orders-dialog';
+import { WelcomeGiftBanner } from '@/components/welcome-gift/welcome-gift-banner';
 import { useDashboardSocket, useDoctorDashboardKpis } from '@/lib/hooks';
 import { useT } from '@/lib/i18n/lang-context';
 
@@ -96,6 +97,10 @@ export function DoctorDashboard() {
           {t('dashboard.refresh')}
         </Button>
       </div>
+
+      {/* Welcome gift — renders only while the doctor has
+          not used the gift yet and the gift is on. */}
+      <WelcomeGiftBanner />
 
       {/* Visible error banner — without this every KPI sits in a
           skeleton state forever and the doctor has no clue why. */}

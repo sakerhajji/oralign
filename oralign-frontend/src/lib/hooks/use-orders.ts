@@ -9,7 +9,9 @@ import {
 } from '@tanstack/react-query';
 import { toast } from '@/lib/toast';
 import { extractApiErrorMessage, toastMutationError, ordersService } from '@/lib/api';
+import { isWelcomeGiftNothingDue } from '@/lib/api/welcome-gift.service';
 import { useT } from '@/lib/i18n/lang-context';
+import { welcomeGiftKeys } from './use-welcome-gift';
 import {
   CreateOrderDto,
   DentalOrder,
@@ -69,6 +71,26 @@ function syncOrderCaches(
 ) {
   queryClient.setQueryData(orderKeys.detail(order.id), order);
   patchOrderInLists(queryClient, order);
+}
+
+/**
+ * Failure handler of the treatment-fee writes. A refusal with
+ * WELCOME_GIFT_NOTHING_DUE means the order's fees were waived by the
+ * welcome gift: say so in the UI language (the generic copy
+ * would read like a bug) and refetch the order so its gift state shows.
+ */
+function onTreatmentFeeError(
+  queryClient: ReturnType<typeof useQueryClient>,
+  t: (path: string) => string,
+  error: unknown,
+  orderId: string,
+) {
+  if (isWelcomeGiftNothingDue(error)) {
+    queryClient.invalidateQueries({ queryKey: orderKeys.detail(orderId) });
+    toast.error(t('welcomeGift.errors.nothingDue'));
+    return;
+  }
+  toastMutationError(error);
 }
 
 export const orderKeys = {
@@ -206,6 +228,10 @@ export function useSubmitOrder(): UseMutationResult<
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
       queryClient.invalidateQueries({ queryKey: orderKeys.history(id) });
+      // A submit can consume the welcome gift (and always ends the
+      // "first case" copy): the banner (dashboard + orders list) must
+      // follow on the next render.
+      queryClient.invalidateQueries({ queryKey: welcomeGiftKeys.status() });
       toast.success(t('toasts.orders.submitted'));
     },
     onError: (error) => toastMutationError(error),
@@ -240,7 +266,7 @@ export function usePayTreatmentFee(): UseMutationResult<
         toast.success(t('toasts.orders.treatmentFeePaid'));
       }
     },
-    onError: (error) => toastMutationError(error),
+    onError: (error, { id }) => onTreatmentFeeError(queryClient, t, error, id),
   });
 }
 
@@ -261,7 +287,7 @@ export function useUploadTreatmentFeeProof(): UseMutationResult<
       queryClient.invalidateQueries({ queryKey: orderKeys.history(id) });
       toast.success(t('toasts.orders.receiptUploaded'));
     },
-    onError: (error) => toastMutationError(error),
+    onError: (error, { id }) => onTreatmentFeeError(queryClient, t, error, id),
   });
 }
 

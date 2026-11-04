@@ -52,6 +52,7 @@ const SHEET_L10N = {
     yes: 'Oui',
     no: 'Non',
     cbctSupplement: 'Oui — supplément',
+    cbctGift: 'Oui — offert (cadeau de bienvenue)',
     sectionOdontogram: 'Odontogramme',
     sectionClinical: 'Données cliniques',
     sectionOptions: 'Options de traitement',
@@ -113,6 +114,7 @@ const SHEET_L10N = {
     yes: 'Yes',
     no: 'No',
     cbctSupplement: 'Yes — supplement',
+    cbctGift: 'Yes — waived (welcome gift)',
     sectionOdontogram: 'Dental chart',
     sectionClinical: 'Clinical data',
     sectionOptions: 'Treatment options',
@@ -680,9 +682,13 @@ export class OrderPdfService implements OnModuleInit, OnModuleDestroy {
       true,
     );
 
+    // The welcome gift waived the supplement: say so instead
+    // of printing a price nobody pays.
     const cbctLine = dto.useCbctWithScans
       ? dto.cbctFeeAmount && dto.cbctFeeAmount > 0
-        ? `${L.cbctSupplement} ${this.fmtAmount(dto.cbctFeeAmount)} ${esc(dto.cbctFeeCurrency ?? 'TND')}`
+        ? dto.welcomeGift
+          ? L.cbctGift
+          : `${L.cbctSupplement} ${this.fmtAmount(dto.cbctFeeAmount)} ${esc(dto.cbctFeeCurrency ?? 'TND')}`
         : L.yes
       : L.no;
     const manufacturingRows = this.infoGrid([

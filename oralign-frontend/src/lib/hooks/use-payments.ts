@@ -11,6 +11,7 @@ import { toast } from '@/lib/toast';
 import { paymentsService } from '@/lib/api/payments.service';
 import { invoicesService } from '@/lib/api/invoices.service';
 import { extractApiErrorMessage } from '@/lib/api/error';
+import { isWelcomeGiftNothingDue } from '@/lib/api/welcome-gift.service';
 import { useT } from '@/lib/i18n/lang-context';
 import { paymentPlanKeys } from './use-quotation-payment-plan';
 import { quotationKeys } from './use-quotations';
@@ -193,6 +194,8 @@ export function useCreateTreatmentFeeCardSession(): UseMutationResult<
   Error,
   { orderId: string; idempotencyKey: string; language?: 'fr' | 'en' | 'ar' }
 > {
+  const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ orderId, idempotencyKey, language }) =>
       paymentsService.createClicToPaySession({
@@ -202,7 +205,15 @@ export function useCreateTreatmentFeeCardSession(): UseMutationResult<
         language,
         pageView: HOSTED_PAGE_VIEW,
       }),
-    onError: (err) => toast.error(extractApiErrorMessage(err)),
+    onError: (err, { orderId }) => {
+      // Fees waived by the welcome gift — nothing to pay.
+      if (isWelcomeGiftNothingDue(err)) {
+        queryClient.invalidateQueries({ queryKey: orderKeys.detail(orderId) });
+        toast.error(t('welcomeGift.errors.nothingDue'));
+        return;
+      }
+      toast.error(extractApiErrorMessage(err));
+    },
   });
 }
 

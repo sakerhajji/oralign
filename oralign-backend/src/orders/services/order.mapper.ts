@@ -1,5 +1,9 @@
 import { OrderFile, Prisma, TreatmentPlanStatus } from '@prisma/client';
-import { OrderFileResponseDto, OrderResponseDto } from '../dto/order.dto';
+import {
+  OrderFileResponseDto,
+  OrderResponseDto,
+  OrderWelcomeGiftDto,
+} from '../dto/order.dto';
 import { MediaVariantInfo } from '../../media/media.types';
 
 /**
@@ -147,11 +151,37 @@ export function mapOrderToDto(order: OrderWithRelations): OrderResponseDto {
     treatmentFeePaymentMethod: order.treatmentFeePaymentMethod ?? undefined,
     treatmentFeePaymentStatus: order.treatmentFeePaymentStatus ?? undefined,
     treatmentFeeProofPath: order.treatmentFeeProofPath ?? undefined,
+    welcomeGift: mapWelcomeGift(order),
     // Notification fields used by the orders list to render badges
     // ("Awaiting your review", "Approved", "Replanning requested", …).
     latestPlanStatus: order.treatmentPlans?.[0]?.status ?? undefined,
     treatmentPlansCount: order._count?.treatmentPlans ?? 0,
     deletedAt: order.deletedAt ?? null,
+  };
+}
+
+/**
+ * The welcome gift frozen on the order at submit (null when not applied).
+ * Decimal → Number at the DTO boundary like the other money fields; the
+ * total is summed as Decimal so it never drifts (0.1 + 0.2).
+ */
+export function mapWelcomeGift(order: {
+  welcomeGiftAppliedAt: Date | null;
+  welcomeGiftTreatmentFee: Prisma.Decimal | null;
+  welcomeGiftCbctFee: Prisma.Decimal | null;
+  welcomeGiftCurrency: string | null;
+  welcomeGiftFirstCase: boolean;
+}): OrderWelcomeGiftDto | null {
+  if (!order.welcomeGiftAppliedAt) return null;
+  const treatmentFee = new Prisma.Decimal(order.welcomeGiftTreatmentFee ?? 0);
+  const cbctFee = new Prisma.Decimal(order.welcomeGiftCbctFee ?? 0);
+  return {
+    appliedAt: order.welcomeGiftAppliedAt,
+    treatmentFee: treatmentFee.toNumber(),
+    cbctFee: cbctFee.toNumber(),
+    total: treatmentFee.add(cbctFee).toNumber(),
+    currency: order.welcomeGiftCurrency || 'TND',
+    firstCase: order.welcomeGiftFirstCase,
   };
 }
 

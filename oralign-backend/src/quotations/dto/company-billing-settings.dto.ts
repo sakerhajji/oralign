@@ -257,6 +257,23 @@ export class UpsertCompanyBillingSettingsDto {
   loyaltyEnabled?: boolean;
 
   @ApiPropertyOptional({
+    default: true,
+    description:
+      'Master switch of the welcome gift (treatment fee + CBCT supplement waived once per practitioner, on the next case they submit).',
+  })
+  @IsOptional()
+  // Same raw-value read as loyaltyEnabled: implicit conversion would turn
+  // the string "false" into true.
+  @Transform(({ obj }) => {
+    const v = (obj as Record<string, unknown>).welcomeGiftEnabled;
+    if (v === 'true') return true;
+    if (v === 'false') return false;
+    return v;
+  })
+  @IsBoolean()
+  welcomeGiftEnabled?: boolean;
+
+  @ApiPropertyOptional({
     default: 'TND',
     description: 'ISO 4217 currency code',
   })
@@ -345,6 +362,7 @@ export class CompanyBillingSettingsResponseDto {
   @ApiProperty() replacementAlignerFee!: number;
   @ApiProperty() retainersFee!: number;
   @ApiProperty() loyaltyEnabled!: boolean;
+  @ApiProperty() welcomeGiftEnabled!: boolean;
   @ApiProperty() defaultCurrency!: string;
   @ApiProperty() devisPrefix!: string;
   @ApiProperty() devisNextNumber!: number;

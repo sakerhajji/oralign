@@ -38,8 +38,15 @@ re-checks it and drops the verification when the record disappears.
 Added 2026-11-04. Some panels want the full host, `kxzpr4zxv2bt.oralign.com.tn`;
 the trailing dot on the value is optional in most panels.
 
-The older *URL-prefix* property `https://oralign.com.tn/` is verified by the
-HTML file `oralign-frontend/public/google0a527ce784cca1f2.html` and, when
+The *URL-prefix* property `https://oralign.com.tn/` is verified by the HTML
+files in `oralign-frontend/public/`, one per Search Console owner who
+verified with the file method:
+
+- `google0a527ce784cca1f2.html`
+- `google1a987e44775ecd2c.html` (added 2026-11-04)
+
+Never delete one of these files: it silently removes that owner's
+verification the next time Google re-checks. It is also verified, when
 `NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION` is set, by the meta tag in
 `oralign-frontend/src/app/layout.tsx`. Keep both: the domain property is the
 one to use for reports, the URL-prefix one still holds the history.

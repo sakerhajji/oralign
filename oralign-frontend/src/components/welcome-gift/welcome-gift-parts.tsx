@@ -3,6 +3,7 @@
 import { cn } from '@/lib/utils';
 import { useT } from '@/lib/i18n/lang-context';
 import { formatGiftAmount } from './format';
+import { StruckAmount } from './struck-price';
 import styles from './welcome-gift.module.css';
 
 /**
@@ -65,9 +66,9 @@ export function LidMark({
 }
 
 /**
- * Original price, struck through. Stays an <s> for semantics and gets an
- * sr-only "Original price" prefix (screen readers don't announce the
- * strike).
+ * Original price on the brand card, struck through ("300 TND": the
+ * card's own amount format). Copy-safe and screen-reader friendly — see
+ * StruckAmount.
  */
 export function StruckPrice({
   amount,
@@ -78,12 +79,8 @@ export function StruckPrice({
   currency: string;
   className?: string;
 }) {
-  const { t } = useT();
   return (
-    <s className={cn(styles.struck, 'whitespace-nowrap', className)}>
-      <span className="sr-only">{t('welcomeGift.dialog.originalPrice')} </span>
-      {formatGiftAmount(amount, currency)}
-    </s>
+    <StruckAmount value={formatGiftAmount(amount, currency)} className={className} />
   );
 }
 

@@ -52,3 +52,26 @@ export const welcomeGiftService = {
     return res.data;
   },
 };
+
+/**
+ * `PATCH /welcome-gift/doctors/:doctorId` (admin, super_admin) — sets or
+ * clears a practitioner's gift mark. Idempotent: marking an already-used
+ * gift keeps its original date. 404 when the user is not a dentist.
+ */
+export interface DoctorWelcomeGiftMark {
+  doctorId: string;
+  welcomeGiftUsedAt: string | null;
+}
+
+export const welcomeGiftAdminService = {
+  setDoctorMark: async (
+    doctorId: string,
+    used: boolean,
+  ): Promise<DoctorWelcomeGiftMark> => {
+    const res = await apiClient.patch<DoctorWelcomeGiftMark>(
+      `/welcome-gift/doctors/${doctorId}`,
+      { used },
+    );
+    return res.data;
+  },
+};

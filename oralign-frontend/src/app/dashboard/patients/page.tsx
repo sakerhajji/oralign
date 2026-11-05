@@ -75,7 +75,10 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { PatientDetailSheet } from '@/components/patients/patient-detail-sheet';
+import {
+  PatientDetailSheet,
+  type PatientSubmitPayload,
+} from '@/components/patients/patient-detail-sheet';
 import { useAuth } from '@/lib/providers/auth-provider';
 import {
   useBulkDeletePatients,
@@ -101,6 +104,11 @@ import { cn, getAvatarUrl } from '@/lib/utils';
 const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
 type PageSize = (typeof PAGE_SIZE_OPTIONS)[number];
 const EMPTY_PATIENT_SELECTION = new Set<string>();
+// Stable stand-in while the dentist directory is not loaded (or not
+// queried: dentists don't pick one) — a fresh `[]` per render would hand
+// the patient sheet a new prop on every page re-render (a save starting,
+// a list refetch).
+const NO_DENTISTS: { id: string; fullName: string }[] = [];
 
 // Sort options carry a `labelKey` instead of a hard-coded English
 // label so the dropdown re-renders the menu in the current language.
@@ -285,12 +293,7 @@ export default function PatientsPage() {
   }, []);
 
   const handleSubmit = useCallback(
-    (
-      payload: ReturnType<
-        typeof import('@/components/patients/patient-detail-sheet').normalizePatientForm
-      >,
-      profilePhoto: File | null,
-    ) => {
+    (payload: PatientSubmitPayload, profilePhoto: File | null) => {
       const finishSave = (patientId: string) => {
         if (!profilePhoto) {
           setSheetOpen(false);
@@ -303,14 +306,15 @@ export default function PatientsPage() {
         );
       };
 
-      if (editingPatient) {
+      if (payload.mode === 'edit') {
+        if (!editingPatient) return;
         updatePatient.mutate(
-          { id: editingPatient.id, data: payload },
+          { id: editingPatient.id, data: payload.data },
           { onSuccess: (updatedPatient) => finishSave(updatedPatient.id) },
         );
         return;
       }
-      createPatient.mutate(payload, {
+      createPatient.mutate(payload.data, {
         onSuccess: (createdPatient) => finishSave(createdPatient.id),
       });
     },
@@ -752,7 +756,7 @@ export default function PatientsPage() {
         patient={editingPatient}
         isAdmin={isAdmin}
         currentUserId={user?.id}
-        dentists={dentistsQuery.data?.data ?? []}
+        dentists={dentistsQuery.data?.data ?? NO_DENTISTS}
         isSaving={
           createPatient.isPending ||
           updatePatient.isPending ||

@@ -8,6 +8,7 @@ import {
   MessageResponse,
   BulkActionDto,
   BulkUpdateStatusDto,
+  UserStats,
 } from '@/lib/types';
 
 export const usersService = {
@@ -32,6 +33,14 @@ export const usersService = {
    */
   getDeletedUsers: async (params?: UserFilterParams): Promise<PaginatedResponse<User>> => {
     const response = await apiClient.get<PaginatedResponse<User>>('/users/deleted/list', { params });
+    return response.data;
+  },
+
+  /**
+   * Admin overview counts (whole user base, not the current page).
+   */
+  getUserStats: async (): Promise<UserStats> => {
+    const response = await apiClient.get<UserStats>('/users/stats');
     return response.data;
   },
 

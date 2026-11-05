@@ -209,26 +209,46 @@ export class CompanyBillingSettingsService {
       });
     }
 
-    // Update path — preserve fields the form didn't touch.
+    // The company name is required (PDF headers): it can be changed, never
+    // blanked.
+    if (dto.companyName !== undefined && !dto.companyName.trim()) {
+      throw new BadRequestException('Company name cannot be empty.');
+    }
+
+    // Update path — preserve fields the form didn't touch. Optional text
+    // fields can also be CLEARED: the DTO turns "" into null, so
+    // undefined = unchanged, null = clear (`clearable`). Numbers and
+    // switches keep `??` (absent = unchanged).
+    const clearable = <T>(next: T | null | undefined, stored: T | null) =>
+      next === undefined ? stored : next;
     return this.prisma.companyBillingSettings.update({
       where: { id: current.id },
       data: {
         companyName: dto.companyName ?? current.companyName,
-        companyAddress: dto.companyAddress ?? current.companyAddress,
-        companyCity: dto.companyCity ?? current.companyCity,
-        companyCountry: dto.companyCountry ?? current.companyCountry,
-        companyPhone: dto.companyPhone ?? current.companyPhone,
-        companyEmail: dto.companyEmail ?? current.companyEmail,
-        taxRegistrationNumber:
-          dto.taxRegistrationNumber ?? current.taxRegistrationNumber,
-        tradeName: dto.tradeName ?? current.tradeName,
-        legalForm: dto.legalForm ?? current.legalForm,
-        registreDeCommerce:
-          dto.registreDeCommerce ?? current.registreDeCommerce,
-        hostingProvider: dto.hostingProvider ?? current.hostingProvider,
-        hostingProviderUrl:
-          dto.hostingProviderUrl ?? current.hostingProviderUrl,
-        websiteDomain: dto.websiteDomain ?? current.websiteDomain,
+        companyAddress: clearable(dto.companyAddress, current.companyAddress),
+        companyCity: clearable(dto.companyCity, current.companyCity),
+        companyCountry: clearable(dto.companyCountry, current.companyCountry),
+        companyPhone: clearable(dto.companyPhone, current.companyPhone),
+        companyEmail: clearable(dto.companyEmail, current.companyEmail),
+        taxRegistrationNumber: clearable(
+          dto.taxRegistrationNumber,
+          current.taxRegistrationNumber,
+        ),
+        tradeName: clearable(dto.tradeName, current.tradeName),
+        legalForm: clearable(dto.legalForm, current.legalForm),
+        registreDeCommerce: clearable(
+          dto.registreDeCommerce,
+          current.registreDeCommerce,
+        ),
+        hostingProvider: clearable(
+          dto.hostingProvider,
+          current.hostingProvider,
+        ),
+        hostingProviderUrl: clearable(
+          dto.hostingProviderUrl,
+          current.hostingProviderUrl,
+        ),
+        websiteDomain: clearable(dto.websiteDomain, current.websiteDomain),
         defaultTvaRate: dto.defaultTvaRate ?? current.defaultTvaRate,
         defaultTreatmentFee:
           dto.defaultTreatmentFee ?? current.defaultTreatmentFee,

@@ -18,6 +18,8 @@ export interface WelcomeGiftLines {
   treatmentFee: number;
   cbctFee: number;
   currency: string;
+  /** The practitioner's first case: "welcome" copy, else "Oralign gift". */
+  firstCase: boolean;
 }
 
 /**
@@ -42,6 +44,7 @@ export function giftLinesFromStatus(
     treatmentFee: status.treatmentFee,
     cbctFee,
     currency: status.currency,
+    firstCase: status.firstCase,
   };
 }
 

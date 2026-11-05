@@ -48,6 +48,8 @@ import { useT } from '@/lib/i18n/lang-context';
 import { optionalCountrySchema, optionalE164PhoneSchema } from '@/lib/schemas';
 import { toast } from '@/lib/toast';
 import { format } from 'date-fns';
+import { fr as frLocale } from 'date-fns/locale';
+import { WelcomeGiftMarkSection } from './welcome-gift-mark-section';
 import {
   User as UserIcon,
   Shield,
@@ -146,7 +148,7 @@ export function UserDetailSheet({
   onOpenChange,
   initialTab = 'profile',
 }: UserDetailSheetProps) {
-  const { t } = useT();
+  const { t, lang } = useT();
   const queryClient = useQueryClient();
   // Surface the auth context so we can refresh the sidebar / header
   // avatar instantly when an admin opens their own row and uploads a
@@ -154,6 +156,7 @@ export function UserDetailSheet({
   // next /users/me refetch.
   const { user: currentUser, login } = useAuth();
   const { data: user, isLoading: isLoadingUser } = useUser(userId);
+  const callerIsSuperAdmin = currentUser?.role === UserRole.SUPER_ADMIN;
 
   const [activeTab, setActiveTab] = useState(initialTab);
   const [avatarPreview, setAvatarPreview] = useState('');
@@ -223,15 +226,20 @@ export function UserDetailSheet({
     setScheduleError(null);
   }, [activeTab]);
 
+  // The detail query refetches whenever the user changes server-side (a
+  // save, the gift switch, an approval from the list). Only the fields the
+  // admin has not touched follow the server copy, so unsaved edits in
+  // another tab survive; each save handler re-seeds its own form.
   useEffect(() => {
     if (!user) return;
+    const keep = { keepDirtyValues: true };
     resetProfileForm({
       fullName: user.fullName,
       phone:    user.phone    ?? '',
       country:  user.country  ?? 'TN',
       password: '',
-    });
-    resetAccountForm({ role: user.role, isEmailVerified: user.isEmailVerified });
+    }, keep);
+    resetAccountForm({ role: user.role, isEmailVerified: user.isEmailVerified }, keep);
     const dp = user.dentistProfile;
     resetClinicForm({
       clinicName:    dp?.clinicName    ?? '',
@@ -244,10 +252,14 @@ export function UserDetailSheet({
       taxId:         dp?.taxId         ?? '',
       latitude:      dp?.latitude      ?? undefined,
       longitude:     dp?.longitude     ?? undefined,
-    });
-    setAvatarPreview(getAvatarUrl(user.avatarUrl));
-    setAvatarFile(null);
+    }, keep);
   }, [user, resetProfileForm, resetAccountForm, resetClinicForm]);
+
+  // A picked-but-unsaved photo is kept across refetches too.
+  useEffect(() => {
+    if (!user || avatarFile) return;
+    setAvatarPreview(getAvatarUrl(user.avatarUrl));
+  }, [user, avatarFile]);
 
   useEffect(() => {
     setSchedule(
@@ -314,6 +326,7 @@ export function UserDetailSheet({
       }
       if (data.password?.trim()) payload.password = data.password;
       await updateUser({ id: userId, data: payload as UpdateUserDto });
+      resetProfileForm({ ...data, password: '' });
       toast.success(t('usersUi.sheet.profileSaved'));
     } catch (err) {
       const msg = extractApiErrorMessage(err);
@@ -328,6 +341,7 @@ export function UserDetailSheet({
     setAccountError(null);
     try {
       await updateUser({ id: userId, data });
+      resetAccountForm(data);
       toast.success(t('usersUi.sheet.accountSaved'));
     } catch (err) {
       const msg = extractApiErrorMessage(err);
@@ -359,6 +373,7 @@ export function UserDetailSheet({
         queryClient.invalidateQueries({ queryKey: userKeys.detail(userId) });
         toast.success(t('usersUi.sheet.clinicCreated'));
       }
+      resetClinicForm(data);
     } catch (err) {
       const msg = extractApiErrorMessage(err);
       setClinicError(msg);
@@ -401,6 +416,12 @@ export function UserDetailSheet({
     setSchedule((prev) => prev.map((d) => (d.dayOfWeek === key ? { ...d, ...patch } : d)));
 
   // ── Derived ────────────────────────────────────────────────────────────────
+
+  // Timeline timestamps in the dashboard language ("3 nov. 2026 · 14:05").
+  const stamp = (value: string) =>
+    format(new Date(value), lang === 'fr' ? 'd MMM yyyy · HH:mm' : 'MMM d, yyyy · HH:mm', {
+      locale: lang === 'fr' ? frLocale : undefined,
+    });
 
   const initials = (user?.fullName ?? '?')
     .split(' ')
@@ -673,7 +694,14 @@ export function UserDetailSheet({
                         name="role"
                         control={accountForm.control}
                         render={({ field }) => (
-                          <Select value={field.value} onValueChange={field.onChange}>
+                          // Same hierarchy as the backend (403 otherwise):
+                          // only a super admin grants the super admin role
+                          // or changes the role of a super admin.
+                          <Select
+                            value={field.value}
+                            onValueChange={field.onChange}
+                            disabled={!callerIsSuperAdmin && user?.role === UserRole.SUPER_ADMIN}
+                          >
                             <SelectTrigger>
                               <SelectValue />
                             </SelectTrigger>
@@ -687,9 +715,11 @@ export function UserDetailSheet({
                               <SelectItem value={UserRole.DESIGNER}>
                                 {t('usersUi.roles.designer')}
                               </SelectItem>
-                              <SelectItem value={UserRole.SUPER_ADMIN}>
-                                {t('usersUi.roles.super_admin')}
-                              </SelectItem>
+                              {(callerIsSuperAdmin || user?.role === UserRole.SUPER_ADMIN) && (
+                                <SelectItem value={UserRole.SUPER_ADMIN}>
+                                  {t('usersUi.roles.super_admin')}
+                                </SelectItem>
+                              )}
                             </SelectContent>
                           </Select>
                         )}
@@ -751,6 +781,13 @@ export function UserDetailSheet({
                   </div>
                 </section>
 
+                {user && isDentist && (
+                  <>
+                    <Separator />
+                    <WelcomeGiftMarkSection user={user} />
+                  </>
+                )}
+
                 <Separator />
 
                 <section>
@@ -759,20 +796,16 @@ export function UserDetailSheet({
                     {[
                       {
                         label: t('usersUi.memberSince'),
-                        value: user?.createdAt
-                          ? format(new Date(user.createdAt), 'MMM d, yyyy · HH:mm')
-                          : '—',
+                        value: user?.createdAt ? stamp(user.createdAt) : '—',
                       },
                       {
                         label: t('usersUi.sheet.lastUpdated'),
-                        value: user?.updatedAt
-                          ? format(new Date(user.updatedAt), 'MMM d, yyyy · HH:mm')
-                          : '—',
+                        value: user?.updatedAt ? stamp(user.updatedAt) : '—',
                       },
                       {
                         label: t('usersUi.lastLogin'),
                         value: user?.lastLoginAt
-                          ? format(new Date(user.lastLoginAt), 'MMM d, yyyy · HH:mm')
+                          ? stamp(user.lastLoginAt)
                           : t('usersUi.never'),
                       },
                       { label: t('usersUi.userId'), value: user?.id ?? '—', mono: true },

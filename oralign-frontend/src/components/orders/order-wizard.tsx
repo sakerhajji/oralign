@@ -89,7 +89,6 @@ import {
   ClinicalOrderFiles,
 } from '@/components/orders/order-file-upload';
 import { TreatmentFeePaymentDialog } from '@/components/orders/treatment-fee-payment-dialog';
-import { WelcomeGiftDialog } from '@/components/welcome-gift/welcome-gift-dialog';
 import {
   WelcomeGiftFeeLine,
   WelcomeGiftNote,
@@ -99,7 +98,18 @@ import {
   type WelcomeGiftLines,
 } from '@/components/welcome-gift/format';
 import { ClinicalConditionsField } from '@/components/patients/clinical-conditions-field';
+import { PatientPhoneInput } from '@/components/patients/patient-phone-input';
 import { PatientProfilePhotoField } from '@/components/patients/patient-profile-photo-field';
+
+// The thank-you card after a gifted submit loads the brand's fonts and
+// film still: fetch it only when a gift is actually celebrated.
+const WelcomeGiftDialog = dynamic(
+  () =>
+    import('@/components/welcome-gift/welcome-gift-dialog').then((m) => ({
+      default: m.WelcomeGiftDialog,
+    })),
+  { ssr: false },
+);
 import { useAuth } from '@/lib/providers/auth-provider';
 import { useT } from '@/lib/i18n/lang-context';
 import { patientsService } from '@/lib/api';
@@ -138,7 +148,7 @@ import {
   unpackChiefComplaint,
   formatChiefComplaint,
 } from '@/lib/chief-complaint';
-import { createOrderSchema } from '@/lib/schemas';
+import { createOrderSchema, isE164Phone } from '@/lib/schemas';
 import { cn } from '@/lib/utils';
 
 const BRAND_ACTIVE_BORDER = 'border-primary';
@@ -522,12 +532,14 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
         treatmentFee: giftCelebration.gift.treatmentFee,
         cbctFee: giftCelebration.gift.cbctFee,
         currency: giftCelebration.gift.currency,
+        firstCase: giftCelebration.gift.firstCase,
       }
     : savedOrder?.welcomeGift
       ? {
           treatmentFee: savedOrder.welcomeGift.treatmentFee,
           cbctFee: savedOrder.welcomeGift.cbctFee,
           currency: savedOrder.welcomeGift.currency,
+          firstCase: savedOrder.welcomeGift.firstCase,
         }
       : isDentist &&
           isDraftForSubmit &&
@@ -539,6 +551,13 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
             cbctFeeAmount: savedOrder?.cbctFeeAmount,
           })
         : null;
+  // A dentist reviewing a case the gift covers will most likely see the
+  // thank-you card on submit: warm its chunk so it opens without a wait.
+  const giftCardLikely =
+    isDentist && !!welcomeGiftLines && step === steps.length - 1;
+  useEffect(() => {
+    if (giftCardLikely) void import('@/components/welcome-gift/welcome-gift-dialog');
+  }, [giftCardLikely]);
   // The General T&C box must be checked before submit is allowed. Only
   // shown/required on the final review step for a draft order.
   const canSubmit = isDraftForSubmit && termsAccepted && reviewConfirmed;
@@ -603,7 +622,11 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
           'Pick at least one clinical condition (or tick "Other" and add a description).';
       }
       // email + phone + address + notes are OPTIONAL (same as the
-      // dedicated patient form).
+      // dedicated patient form). A phone, when given, follows the same
+      // E.164 rule as the patients sheet and the backend.
+      if (newPatient.phone && !isE164Phone(newPatient.phone)) {
+        errors['newPatient.phone'] = t('patientDesk.validation.phone');
+      }
     }
 
     if (Object.keys(errors).length > 0) {
@@ -943,7 +966,6 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
                     welcomeGiftLines &&
                     welcomeGiftLines.cbctFee > 0 && (
                       <WelcomeGiftFeeLine
-                        label={t('welcomeGift.dialog.rowCbct')}
                         amount={welcomeGiftLines.cbctFee}
                         currency={welcomeGiftLines.currency}
                       />
@@ -1913,14 +1935,23 @@ function PatientStep({
               disabled={!canModify}
               onChange={(value) => updateNewPatient('email', value)}
             />
-            <TextInput
-              label={t('orderForm.patient.phone')}
-              value={newPatient.phone}
-              placeholder={t('orderForm.patient.phoneInputPh')}
-              error={errors['newPatient.phone']}
-              disabled={!canModify}
-              onChange={(value) => updateNewPatient('phone', value)}
-            />
+            {/* Same flag picker as the patients sheet: Tunisia by
+                default, E.164 out ('' while only the dial code is
+                there). */}
+            <div className="grid gap-2">
+              <Label htmlFor="new-patient-wizard-phone">
+                {t('orderForm.patient.phone')}
+              </Label>
+              <PatientPhoneInput
+                id="new-patient-wizard-phone"
+                size="lg"
+                value={newPatient.phone}
+                disabled={!canModify}
+                isInvalid={!!errors['newPatient.phone']}
+                onChange={(next) => updateNewPatient('phone', next.phone)}
+              />
+              <FieldError message={errors['newPatient.phone']} />
+            </div>
             <TextInput
               label={t('orderForm.patient.dob')}
               value={newPatient.dateOfBirth}
@@ -3065,19 +3096,23 @@ function ReviewStep({
       <ReviewSection icon={ClipboardCheck} title={t('orderForm.review.orderMetadata')}>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <ReviewInfo
-            label="CBCT requested"
-            value={form.useCbctWithScans ? 'Yes' : 'No'}
+            label={t('orderDetail.metadata.cbctRequested')}
+            value={
+              form.useCbctWithScans
+                ? t('orderDetail.metadata.yes')
+                : t('orderDetail.metadata.no')
+            }
           />
           {/* Manufacturing + Materials removed from the order review per
               the clinic's flow — those are decided downstream, not by the
               doctor at order time. */}
           <ReviewInfo
-            label="Order code"
-            value={savedOrder?.orderCode ?? 'Draft not saved'}
+            label={t('orderDetail.metadata.orderCode')}
+            value={savedOrder?.orderCode ?? t('patientDesk.wizardMeta.draftNotSaved')}
           />
           <ReviewInfo
-            label="Status"
-            value={savedOrder?.status ?? OrderStatus.DRAFT}
+            label={t('patientDesk.wizardMeta.status')}
+            value={reviewStatusLabel(savedOrder?.status ?? OrderStatus.DRAFT, t)}
           />
         </div>
 
@@ -3205,6 +3240,19 @@ function reviewGenderLabel(gender?: Gender | string | null): string | undefined 
     default:
       return undefined;
   }
+}
+
+/**
+ * The order status as the badges word it (`orders.statusLabel.*`), the
+ * raw enum only as a last resort for a value the dictionary lacks.
+ */
+function reviewStatusLabel(
+  status: OrderStatus,
+  t: (path: string) => string,
+): string {
+  const key = `orders.statusLabel.${status}`;
+  const label = t(key);
+  return label !== key ? label : String(status);
 }
 
 function reviewFormatBirthDate(dob?: string | null): string | undefined {

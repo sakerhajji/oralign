@@ -1,18 +1,21 @@
 'use client';
 
+import { Gift } from 'lucide-react';
+import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
+import { formatPrice } from '@/lib/utils/currency';
 import { useT } from '@/lib/i18n/lang-context';
 import type { DentalOrder } from '@/lib/types';
-import { formatGiftAmount } from './format';
-import { giftFonts } from './fonts';
-import { GiftLedger, LidMark, ledgerLines } from './welcome-gift-parts';
-import styles from './welcome-gift.module.css';
+import { StruckAmount } from './struck-price';
 
 /**
- * Order-detail state for a case whose fees the welcome gift waived — for
- * the doctor and the admin alike, with no pay action. Amounts are the
- * order's own snapshot (taken at submit), never the live settings. The
- * title says "welcome" only on the doctor's first case (`gift.firstCase`).
+ * Order-detail state for a case whose fees the Oralign gift waived — for
+ * the doctor and the admin alike, with no pay action. A light tinted
+ * card like the sibling fee states (paid, awaiting confirmation,
+ * awaiting payment): what was waived on the left, the struck amounts
+ * and the total covered on the right. Amounts are the order's own
+ * snapshot (taken at submit), never the live settings. The title says
+ * "welcome" only on the doctor's first case (`gift.firstCase`).
  */
 export function WelcomeGiftDetailCard({
   gift,
@@ -23,26 +26,30 @@ export function WelcomeGiftDetailCard({
 }) {
   const { t } = useT();
   const withCbct = gift.cbctFee > 0;
+  const rows = [
+    { key: 'treatment', label: t('orderForm.review.priceBase'), amount: gift.treatmentFee },
+    ...(withCbct
+      ? [{ key: 'cbct', label: t('orderForm.review.priceCbct'), amount: gift.cbctFee }]
+      : []),
+  ];
 
   return (
-    <section
-      className={cn(
-        styles.root,
-        giftFonts,
-        'rounded-xl bg-(--wg-ink) p-5 text-(--wg-porcelain) sm:p-6',
-        className,
-      )}
-    >
-      <div className="grid gap-6 md:grid-cols-[minmax(0,1fr)_minmax(0,22rem)] md:items-start">
-        <div className="flex min-w-0 items-start gap-4">
-          <LidMark className="size-12" />
+    <Card className={cn('border-emerald-200 bg-emerald-50', className)}>
+      <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+        <div className="flex min-w-0 items-start gap-3">
+          <span
+            aria-hidden
+            className="grid size-8 shrink-0 place-items-center rounded-full bg-emerald-100 text-emerald-700"
+          >
+            <Gift className="size-4" />
+          </span>
           <div className="min-w-0">
-            <p className={cn(styles.display, 'text-[20px] leading-snug')}>
+            <p className="text-sm font-semibold text-emerald-900">
               {gift.firstCase
                 ? t('welcomeGift.detail.title')
                 : t('welcomeGift.detail.later.title')}
             </p>
-            <p className="mt-1.5 max-w-[52ch] text-[14px] leading-[1.55] text-pretty text-(--wg-mute)">
+            <p className="text-xs text-emerald-800/80">
               {withCbct
                 ? t('welcomeGift.detail.textCbct')
                 : t('welcomeGift.detail.textTreatment')}
@@ -50,21 +57,26 @@ export function WelcomeGiftDetailCard({
           </div>
         </div>
 
-        <div className="min-w-0">
-          <GiftLedger
-            lines={ledgerLines(t, gift)}
-            currency={gift.currency}
-            size="sm"
-            className="border-y border-(--wg-rule)"
-          />
-          <div className="mt-3 flex items-baseline justify-between gap-4">
-            <span className="text-[14px] text-(--wg-mute)">{t('welcomeGift.detail.total')}</span>
-            <span className={cn(styles.figure, 'text-[24px] leading-none text-(--wg-porcelain)')}>
-              {formatGiftAmount(gift.total, gift.currency)}
-            </span>
+        <dl className="grid shrink-0 gap-1 border-t border-emerald-200 pt-3 text-xs sm:min-w-60 sm:border-t-0 sm:border-l sm:pt-0 sm:pl-6">
+          {rows.map((row) => (
+            <div key={row.key} className="flex items-center justify-between gap-4">
+              <dt className="text-emerald-800/80">{row.label}</dt>
+              <dd>
+                <StruckAmount
+                  value={formatPrice(row.amount, gift.currency)}
+                  className="text-emerald-800/70"
+                />
+              </dd>
+            </div>
+          ))}
+          <div className="flex items-center justify-between gap-4">
+            <dt className="font-semibold text-emerald-900">{t('welcomeGift.detail.total')}</dt>
+            <dd className="text-sm font-semibold text-emerald-900 tabular-nums">
+              {formatPrice(gift.total, gift.currency)}
+            </dd>
           </div>
-        </div>
-      </div>
-    </section>
+        </dl>
+      </CardContent>
+    </Card>
   );
 }

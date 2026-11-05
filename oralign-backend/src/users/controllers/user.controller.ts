@@ -23,7 +23,6 @@ import {
   ApiResponse,
   ApiBearerAuth,
   ApiParam,
-  ApiQuery,
   ApiConsumes,
   ApiBody,
 } from '@nestjs/swagger';
@@ -32,7 +31,8 @@ import {
   CreateUserDto,
   UpdateUserDto,
   UserResponseDto,
-  UserFilterDto,
+  UserListQueryDto,
+  UsersStatsDto,
   BulkActionDto,
   BulkUpdateStatusDto,
   UpdateRoleDto,
@@ -74,8 +74,12 @@ export class UserController {
   })
   async createUser(
     @Body() createUserDto: CreateUserDto,
+    @CurrentUser() user: JwtPayload,
   ): Promise<UserResponseDto> {
-    return this.userService.createUser(createUserDto);
+    return this.userService.createUser(createUserDto, {
+      userId: user.sub,
+      role: user.role,
+    });
   }
 
   @Post(':id/restore')
@@ -143,57 +147,27 @@ export class UserController {
   @ApiOperation({
     summary: 'Get all users with pagination and filters (admin only)',
   })
-  @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
-  @ApiQuery({ name: 'limit', required: false, type: Number, example: 10 })
-  @ApiQuery({
-    name: 'search',
-    required: false,
-    type: String,
-    description: 'Search by name or email',
-  })
-  @ApiQuery({
-    name: 'role',
-    required: false,
-    enum: UserRole,
-    description: 'Filter by role',
-  })
-  @ApiQuery({
-    name: 'isActive',
-    required: false,
-    type: Boolean,
-    description: 'Filter by active status',
-  })
-  @ApiQuery({
-    name: 'isEmailVerified',
-    required: false,
-    type: Boolean,
-    description: 'Filter by email verified status',
-  })
   @ApiResponse({
     status: 200,
     description: 'Users fetched successfully',
   })
-  async getAllUsers(
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-    @Query('search') search?: string,
-    @Query('role') role?: UserRole,
-    @Query('isActive') isActive?: string,
-    @Query('isEmailVerified') isEmailVerified?: string,
-  ) {
-    const filters: UserFilterDto = {};
-    if (search) filters.search = search;
-    if (role) filters.role = role;
-    if (isActive !== undefined && isActive !== '')
-      filters.isActive = isActive === 'true';
-    if (isEmailVerified !== undefined && isEmailVerified !== '')
-      filters.isEmailVerified = isEmailVerified === 'true';
+  @ApiResponse({ status: 400, description: 'Invalid page, limit or filter' })
+  async getAllUsers(@Query() query: UserListQueryDto) {
+    return this.userService.getAllUsers(query);
+  }
 
-    return this.userService.getAllUsers(
-      page ? parseInt(page, 10) : 1,
-      limit ? parseInt(limit, 10) : 10,
-      filters,
-    );
+  // Static path: declared BEFORE the `:id` routes so "stats" is never
+  // read as a user id.
+  @Get('stats')
+  @Roles(UserRole.admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Account counts for the admin users page: total, active, blocked, pending approval, dentists, admins, welcome gift available / used (non-deleted accounts)',
+  })
+  @ApiResponse({ status: 200, type: UsersStatsDto })
+  async getUsersStats(): Promise<UsersStatsDto> {
+    return this.userService.getStats();
   }
 
   @Get('me')
@@ -216,40 +190,15 @@ export class UserController {
   @ApiOperation({
     summary: 'Get all deleted users with pagination and filters (admin only)',
   })
-  @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
-  @ApiQuery({ name: 'limit', required: false, type: Number, example: 10 })
-  @ApiQuery({
-    name: 'search',
-    required: false,
-    type: String,
-    description: 'Search by name or email',
-  })
-  @ApiQuery({
-    name: 'role',
-    required: false,
-    enum: UserRole,
-    description: 'Filter by role',
-  })
   @ApiResponse({
     status: 200,
     description: 'Deleted users fetched successfully',
   })
-  async getDeletedUsers(
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-    @Query('search') search?: string,
-    @Query('role') role?: UserRole,
-  ) {
-    const filters: UserFilterDto = {};
-    if (search) filters.search = search;
-    if (role) filters.role = role;
-
-    return this.userService.getDeletedUsers(
-      page ? parseInt(page, 10) : 1,
-      limit ? parseInt(limit, 10) : 10,
-      filters,
-    );
+  @ApiResponse({ status: 400, description: 'Invalid page, limit or filter' })
+  async getDeletedUsers(@Query() query: UserListQueryDto) {
+    return this.userService.getDeletedUsers(query);
   }
+
   @Get(':id')
   @Roles(UserRole.admin)
   @HttpCode(HttpStatus.OK)
@@ -336,8 +285,12 @@ export class UserController {
   async updateUserRole(
     @Param('id') id: string,
     @Body() updateRoleDto: UpdateRoleDto,
+    @CurrentUser() user: JwtPayload,
   ): Promise<UserResponseDto> {
-    return this.userService.updateUserRole(id, updateRoleDto.role);
+    return this.userService.updateUserRole(id, updateRoleDto.role, {
+      userId: user.sub,
+      role: user.role,
+    });
   }
 
   @Patch(':id/approval')

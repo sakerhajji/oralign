@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Building2,
   Check,
@@ -12,12 +12,14 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { CountryCityPicker } from '@/components/ui/country-city-picker';
+import { CountryCityPicker, DEFAULT_COUNTRY } from '@/components/ui/country-city-picker';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+import { CompanyBillingSettingsSkeleton } from '@/components/billing/company-billing-settings-skeleton';
+import { WelcomeGiftSettingsCard } from '@/components/billing/welcome-gift-settings-card';
 import { companyBillingService } from '@/lib/api/company-billing.service';
 import {
   useCompanyBilling,
@@ -31,171 +33,218 @@ import {
   type BankDetails,
   type CompanyBillingSettings,
   type TranslatedTexts,
-  type UpsertCompanyBillingSettingsDto,
 } from '@/lib/types';
 import { useT } from '@/lib/i18n/lang-context';
+import { cn } from '@/lib/utils';
 
-interface FormState extends UpsertCompanyBillingSettingsDto {
-  companyName: string;
-  defaultTvaRate: number;
-  defaultTreatmentFee: number;
-  stampDuty: number;
-  cbctSupplementEnabled: boolean;
-  cbctSupplementFee: number;
-  refinementTwoArchesFee: number;
-  refinementSingleArchFee: number;
-  replacementAlignerFee: number;
-  retainersFee: number;
-  loyaltyEnabled: boolean;
-  welcomeGiftEnabled: boolean;
-  defaultCurrency: string;
-  devisPrefix: string;
-  devisNextNumber: number;
-  legalTextTranslations: TranslatedTexts;
-  footerTextTranslations: TranslatedTexts;
-  bankDetails: BankDetails;
+// ─── Draft model ─────────────────────────────────────────────────────────
+
+/** Free-text inputs. Saved trimmed; '' clears the stored value. */
+type TextKey =
+  | 'companyName'
+  | 'companyAddress'
+  | 'companyCity'
+  | 'companyCountry'
+  | 'companyPhone'
+  | 'companyEmail'
+  | 'taxRegistrationNumber'
+  | 'tradeName'
+  | 'legalForm'
+  | 'registreDeCommerce'
+  | 'hostingProvider'
+  | 'hostingProviderUrl'
+  | 'websiteDomain'
+  | 'defaultCurrency'
+  | 'devisPrefix';
+
+/** Non-negative amounts (3 decimals: TND millimes). */
+type AmountKey =
+  | 'defaultTreatmentFee'
+  | 'stampDuty'
+  | 'cbctSupplementFee'
+  | 'refinementTwoArchesFee'
+  | 'refinementSingleArchFee'
+  | 'replacementAlignerFee'
+  | 'retainersFee';
+
+/**
+ * Number inputs keep the string being typed — emptying one no longer
+ * snaps it back to "0" / "1" — and are parsed and validated on save.
+ */
+type NumberKey = AmountKey | 'defaultTvaRate' | 'devisNextNumber';
+
+type ToggleKey = 'cbctSupplementEnabled' | 'loyaltyEnabled';
+
+type FormFields = Record<TextKey | NumberKey, string> & Record<ToggleKey, boolean>;
+
+interface Draft {
+  fields: FormFields;
+  legal: Required<TranslatedTexts>;
+  footer: Required<TranslatedTexts>;
+  bank: Required<BankDetails>;
 }
 
-const emptyState: FormState = {
-  companyName: '',
-  companyAddress: '',
-  companyCity: '',
-  companyCountry: '',
-  companyPhone: '',
-  companyEmail: '',
-  taxRegistrationNumber: '',
-  tradeName: '',
-  legalForm: '',
-  registreDeCommerce: '',
-  hostingProvider: '',
-  hostingProviderUrl: '',
-  websiteDomain: '',
-  defaultTvaRate: 19,
-  defaultTreatmentFee: 0,
-  // "Droit de timbre" — Tunisian fiscal stamp added to every invoice
-  // total. Backend column defaults to 1.000 TND.
-  stampDuty: 1,
-  // CBCT paid supplement — off by default; enabling it prices CBCT
-  // requests on NEW orders only (existing orders keep their snapshot).
-  cbctSupplementEnabled: false,
-  cbctSupplementFee: 0,
-  refinementTwoArchesFee: 0,
-  refinementSingleArchFee: 0,
-  replacementAlignerFee: 0,
-  retainersFee: 0,
-  loyaltyEnabled: true,
-  // Welcome gift (once per practitioner) — on by default, like the backend column.
-  welcomeGiftEnabled: true,
-  defaultCurrency: 'TND',
-  devisPrefix: 'DEV',
-  devisNextNumber: 1,
-  legalTextTranslations: { fr: '', en: '', ar: '' },
-  footerTextTranslations: { fr: '', en: '', ar: '' },
-  bankDetails: { bankName: '', accountName: '', rib: '', iban: '', swift: '' },
-};
+/**
+ * What the admin changed, laid over the saved row. Never "seeded": data
+ * arriving or changing (refetch, logo upload, the gift switch) updates the
+ * untouched fields and leaves the typed ones alone.
+ */
+interface Edits {
+  fields: Partial<FormFields>;
+  legal: Partial<TranslatedTexts>;
+  footer: Partial<TranslatedTexts>;
+  bank: Partial<BankDetails>;
+}
 
-function formFromBillingSettings(
-  settings?: CompanyBillingSettings | null,
-): FormState {
-  if (!settings) return emptyState;
+const NO_EDITS: Edits = { fields: {}, legal: {}, footer: {}, bank: {} };
 
+const toTexts = (texts?: TranslatedTexts | null): Required<TranslatedTexts> => ({
+  fr: texts?.fr ?? '',
+  en: texts?.en ?? '',
+  ar: texts?.ar ?? '',
+});
+
+function draftFromSettings(settings: CompanyBillingSettings | null): Draft {
+  const s = settings;
   return {
-    companyName: settings.companyName ?? '',
-    companyAddress: settings.companyAddress ?? '',
-    companyCity: settings.companyCity ?? '',
-    companyCountry: settings.companyCountry ?? '',
-    companyPhone: settings.companyPhone ?? '',
-    companyEmail: settings.companyEmail ?? '',
-    taxRegistrationNumber: settings.taxRegistrationNumber ?? '',
-    tradeName: settings.tradeName ?? '',
-    legalForm: settings.legalForm ?? '',
-    registreDeCommerce: settings.registreDeCommerce ?? '',
-    hostingProvider: settings.hostingProvider ?? '',
-    hostingProviderUrl: settings.hostingProviderUrl ?? '',
-    websiteDomain: settings.websiteDomain ?? '',
-    defaultTvaRate: settings.defaultTvaRate ?? 19,
-    defaultTreatmentFee: settings.defaultTreatmentFee ?? 0,
-    stampDuty: settings.stampDuty ?? 1,
-    cbctSupplementEnabled: settings.cbctSupplementEnabled ?? false,
-    cbctSupplementFee: settings.cbctSupplementFee ?? 0,
-    refinementTwoArchesFee: settings.refinementTwoArchesFee ?? 0,
-    refinementSingleArchFee: settings.refinementSingleArchFee ?? 0,
-    replacementAlignerFee: settings.replacementAlignerFee ?? 0,
-    retainersFee: settings.retainersFee ?? 0,
-    loyaltyEnabled: settings.loyaltyEnabled ?? true,
-    welcomeGiftEnabled: settings.welcomeGiftEnabled ?? true,
-    defaultCurrency: settings.defaultCurrency ?? 'TND',
-    devisPrefix: settings.devisPrefix ?? 'DEV',
-    devisNextNumber: settings.devisNextNumber ?? 1,
-    legalTextTranslations: settings.legalTextTranslations ?? {
-      fr: '',
-      en: '',
-      ar: '',
+    fields: {
+      companyName: s?.companyName ?? '',
+      companyAddress: s?.companyAddress ?? '',
+      companyCity: s?.companyCity ?? '',
+      // Preselected Tunisia is part of the draft, so what the picker shows
+      // is exactly what Save stores (it used to show Tunisia and send '').
+      // The country is mandatory (the picker has no clear button): a Save
+      // can never store null that this default would then hide.
+      companyCountry: s?.companyCountry || DEFAULT_COUNTRY.name,
+      companyPhone: s?.companyPhone ?? '',
+      companyEmail: s?.companyEmail ?? '',
+      taxRegistrationNumber: s?.taxRegistrationNumber ?? '',
+      tradeName: s?.tradeName ?? '',
+      legalForm: s?.legalForm ?? '',
+      registreDeCommerce: s?.registreDeCommerce ?? '',
+      hostingProvider: s?.hostingProvider ?? '',
+      hostingProviderUrl: s?.hostingProviderUrl ?? '',
+      websiteDomain: s?.websiteDomain ?? '',
+      defaultTvaRate: String(s?.defaultTvaRate ?? 19),
+      defaultTreatmentFee: String(s?.defaultTreatmentFee ?? 0),
+      // "Droit de timbre" — Tunisian fiscal stamp added to every invoice
+      // total. Backend column defaults to 1.000 TND.
+      stampDuty: String(s?.stampDuty ?? 1),
+      // CBCT paid supplement — off by default; enabling it prices CBCT
+      // requests on NEW orders only (existing orders keep their snapshot).
+      cbctSupplementEnabled: s?.cbctSupplementEnabled ?? false,
+      cbctSupplementFee: String(s?.cbctSupplementFee ?? 0),
+      refinementTwoArchesFee: String(s?.refinementTwoArchesFee ?? 0),
+      refinementSingleArchFee: String(s?.refinementSingleArchFee ?? 0),
+      replacementAlignerFee: String(s?.replacementAlignerFee ?? 0),
+      retainersFee: String(s?.retainersFee ?? 0),
+      loyaltyEnabled: s?.loyaltyEnabled ?? true,
+      defaultCurrency: s?.defaultCurrency ?? 'TND',
+      devisPrefix: s?.devisPrefix ?? 'DEV',
+      devisNextNumber: String(s?.devisNextNumber ?? 1),
     },
-    footerTextTranslations: settings.footerTextTranslations ?? {
-      fr: '',
-      en: '',
-      ar: '',
-    },
-    bankDetails: settings.bankDetails ?? {
-      bankName: '',
-      accountName: '',
-      rib: '',
-      iban: '',
-      swift: '',
+    legal: toTexts(s?.legalTextTranslations),
+    footer: toTexts(s?.footerTextTranslations),
+    bank: {
+      bankName: s?.bankDetails?.bankName ?? '',
+      accountName: s?.bankDetails?.accountName ?? '',
+      rib: s?.bankDetails?.rib ?? '',
+      iban: s?.bankDetails?.iban ?? '',
+      swift: s?.bankDetails?.swift ?? '',
     },
   };
 }
 
+// ─── Number parsing (mirrors the backend DTO limits) ─────────────────────
+
+const AMOUNT_RE = /^\d+(?:\.\d{1,3})?$/;
+const MAX_AMOUNT = 999_999_999.999;
+
+function parseAmount(raw: string): number | null {
+  const text = raw.trim().replace(',', '.');
+  if (!AMOUNT_RE.test(text)) return null;
+  const value = Number(text);
+  return value <= MAX_AMOUNT ? value : null;
+}
+
+function parseRate(raw: string): number | null {
+  const value = parseAmount(raw);
+  return value !== null && value <= 100 ? value : null;
+}
+
+function parseNextNumber(raw: string): number | null {
+  const text = raw.trim();
+  if (!/^\d+$/.test(text)) return null;
+  const value = Number(text);
+  return Number.isSafeInteger(value) && value >= 1 ? value : null;
+}
+
+const AMOUNT_KEYS: readonly AmountKey[] = [
+  'defaultTreatmentFee',
+  'stampDuty',
+  'cbctSupplementFee',
+  'refinementTwoArchesFee',
+  'refinementSingleArchFee',
+  'replacementAlignerFee',
+  'retainersFee',
+];
+
+type NumberError = 'amount' | 'rate' | 'nextNumber';
+
+const NUMBER_ERROR_KEYS: Record<NumberError, string> = {
+  amount: 'settingsDesk.billing.invalidAmount',
+  rate: 'settingsDesk.billing.invalidRate',
+  nextNumber: 'settingsDesk.billing.invalidNextNumber',
+};
+
+function parseNumbers(fields: FormFields) {
+  const values: Partial<Record<NumberKey, number>> = {};
+  const errors: Partial<Record<NumberKey, NumberError>> = {};
+  for (const key of AMOUNT_KEYS) {
+    const value = parseAmount(fields[key]);
+    if (value !== null) values[key] = value;
+    // A disabled CBCT fee is not saved when invalid (see handleSave), so
+    // it never blocks the save either.
+    else if (key !== 'cbctSupplementFee' || fields.cbctSupplementEnabled) errors[key] = 'amount';
+  }
+  const rate = parseRate(fields.defaultTvaRate);
+  if (rate !== null) values.defaultTvaRate = rate;
+  else errors.defaultTvaRate = 'rate';
+  const next = parseNextNumber(fields.devisNextNumber);
+  if (next !== null) values.devisNextNumber = next;
+  else errors.devisNextNumber = 'nextNumber';
+  return { values, errors, valid: Object.keys(errors).length === 0 };
+}
+
+// ─── Page ────────────────────────────────────────────────────────────────
+
 /**
- * Single-form admin page for the company-billing-settings singleton.
+ * Admin page for the company-billing-settings singleton.
  *
- * Three logical sections:
+ * Sections:
+ *   • Oralign gift (its own instant switch — WelcomeGiftSettingsCard)
  *   • Company info (name + address + contact + tax id + logo)
- *   • Quote defaults (TVA, currency, devis prefix + next number)
- *   • Translations (FR/EN/AR for legal + footer text) and bank details
+ *   • Legal identity, quote defaults, translations, bank details — saved
+ *     together by the Save bar
  *
- * The page renders an empty state when no settings exist yet — admin
- * fills in companyName and saves to create the singleton row.
+ * When no settings row exists yet the admin fills in companyName and saves
+ * to create it.
  */
 export function CompanyBillingSettingsForm() {
   const { t } = useT();
-  const { isAdmin } = useAuth();
-  const { data: settings, isLoading } = useCompanyBilling(isAdmin);
-  const upsert = useUpsertCompanyBilling();
-  const upload = useUploadCompanyLogo();
-  const removeLogo = useDeleteCompanyLogo();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { user, isAdmin } = useAuth();
+  const settingsQuery = useCompanyBilling(isAdmin);
 
-  const settingsKey = settings
-    ? `${settings.id}:${settings.updatedAt ?? ''}`
-    : 'empty';
-  const baseForm = useMemo(
-    () => formFromBillingSettings(settings),
-    [settings],
-  );
-  const [draft, setDraft] = useState<{ key: string; form: FormState }>(() => ({
-    key: settingsKey,
-    form: baseForm,
-  }));
-  const form = draft.key === settingsKey ? draft.form : baseForm;
-  const setForm = useCallback(
-    (next: FormState | ((previous: FormState) => FormState)) => {
-      setDraft((current) => {
-        const previous = current.key === settingsKey ? current.form : baseForm;
-        return {
-          key: settingsKey,
-          form: typeof next === 'function' ? next(previous) : next,
-        };
-      });
-    },
-    [baseForm, settingsKey],
+  const header = (
+    <header>
+      <h1 className="text-xl font-semibold sm:text-2xl">{t('accountBillingSettings.title')}</h1>
+      <p className="mt-1 text-sm text-muted-foreground">{t('accountBillingSettings.subtitle')}</p>
+    </header>
   );
 
-  const logoUrl = useMemo(
-    () => companyBillingService.resolveLogoUrl(settings?.companyLogoPath),
-    [settings?.companyLogoPath],
-  );
+  // The session is read after the first client render (AuthProvider), so an
+  // admin briefly has no user: wait for it instead of flashing "admins only".
+  if (!user) return <CompanyBillingSettingsSkeleton header={header} />;
 
   if (!isAdmin) {
     return (
@@ -209,67 +258,148 @@ export function CompanyBillingSettingsForm() {
     );
   }
 
-  const updateField = <K extends keyof FormState>(key: K, value: FormState[K]) =>
-    setForm((s) => ({ ...s, [key]: value }));
+  if (settingsQuery.data === undefined) {
+    if (!settingsQuery.isError) return <CompanyBillingSettingsSkeleton header={header} />;
+    return (
+      <div className="@container/main flex flex-1 flex-col gap-4 p-4 lg:p-6">
+        {header}
+        <Card>
+          <CardContent className="flex min-h-48 flex-col items-center justify-center gap-3 text-center">
+            <p className="text-sm font-medium">{t('settingsDesk.billing.loadFailedTitle')}</p>
+            <p className="text-sm text-muted-foreground">{t('settingsDesk.billing.loadFailedBody')}</p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void settingsQuery.refetch()}
+              disabled={settingsQuery.isFetching}
+              className="gap-2"
+            >
+              {settingsQuery.isFetching && <Loader2 className="h-4 w-4 animate-spin" />}
+              {t('settingsDesk.billing.retry')}
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
-  const updateLegal = (lang: keyof TranslatedTexts, value: string) =>
-    setForm((s) => ({
-      ...s,
-      legalTextTranslations: { ...s.legalTextTranslations, [lang]: value },
-    }));
+  // Mounted once the row (or "none yet") is known: the draft starts from
+  // real data, never from defaults that would then be swapped out.
+  return <BillingSettingsEditor settings={settingsQuery.data} header={header} />;
+}
 
-  const updateFooter = (lang: keyof TranslatedTexts, value: string) =>
-    setForm((s) => ({
-      ...s,
-      footerTextTranslations: { ...s.footerTextTranslations, [lang]: value },
-    }));
+function BillingSettingsEditor({
+  settings,
+  header,
+}: {
+  settings: CompanyBillingSettings | null;
+  header: ReactNode;
+}) {
+  const { t } = useT();
+  const upsert = useUpsertCompanyBilling();
+  const upload = useUploadCompanyLogo();
+  const removeLogo = useDeleteCompanyLogo();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const idPrefix = useId();
 
-  const updateBank = (field: keyof BankDetails, value: string) =>
-    setForm((s) => ({ ...s, bankDetails: { ...s.bankDetails, [field]: value } }));
+  const base = useMemo(() => draftFromSettings(settings), [settings]);
+  const [edits, setEdits] = useState<Edits>(NO_EDITS);
+  const form = useMemo<FormFields>(
+    () => ({ ...base.fields, ...edits.fields }),
+    [base.fields, edits.fields],
+  );
+  const legal = { ...base.legal, ...edits.legal };
+  const footer = { ...base.footer, ...edits.footer };
+  const bank = { ...base.bank, ...edits.bank };
+  const numbers = useMemo(() => parseNumbers(form), [form]);
+
+  // Stable setters: the memoised <Field>s re-render only when their own
+  // value changes, not on every keystroke elsewhere in the form.
+  const setText = useCallback((name: TextKey | NumberKey, value: string) => {
+    setEdits((current) => ({ ...current, fields: { ...current.fields, [name]: value } }));
+  }, []);
+  const setToggle = useCallback((name: ToggleKey, value: boolean) => {
+    setEdits((current) => ({ ...current, fields: { ...current.fields, [name]: value } }));
+  }, []);
+  const setBank = useCallback((name: keyof BankDetails, value: string) => {
+    setEdits((current) => ({ ...current, bank: { ...current.bank, [name]: value } }));
+  }, []);
+  const setLegal = (code: keyof TranslatedTexts, value: string) =>
+    setEdits((current) => ({ ...current, legal: { ...current.legal, [code]: value } }));
+  const setFooter = (code: keyof TranslatedTexts, value: string) =>
+    setEdits((current) => ({ ...current, footer: { ...current.footer, [code]: value } }));
+
+  const logoUrl = useMemo(
+    () => companyBillingService.resolveLogoUrl(settings?.companyLogoPath),
+    [settings?.companyLogoPath],
+  );
+
+  const numberError = (key: NumberKey): string | undefined => {
+    const error = numbers.errors[key];
+    return error ? t(NUMBER_ERROR_KEYS[error]) : undefined;
+  };
+
+  const currency = form.defaultCurrency.trim() || 'TND';
+  const hasEdits = edits !== NO_EDITS;
+  const canSave = !upsert.isPending && form.companyName.trim() !== '' && numbers.valid;
 
   const handleSave = () => {
-    upsert.mutate({
-      companyName: form.companyName.trim(),
-      companyAddress: form.companyAddress?.trim() || undefined,
-      companyCity: form.companyCity?.trim() || undefined,
-      companyCountry: form.companyCountry?.trim() || undefined,
-      companyPhone: form.companyPhone?.trim() || undefined,
-      companyEmail: form.companyEmail?.trim() || undefined,
-      taxRegistrationNumber: form.taxRegistrationNumber?.trim() || undefined,
-      tradeName: form.tradeName?.trim() || undefined,
-      legalForm: form.legalForm?.trim() || undefined,
-      registreDeCommerce: form.registreDeCommerce?.trim() || undefined,
-      hostingProvider: form.hostingProvider?.trim() || undefined,
-      hostingProviderUrl: form.hostingProviderUrl?.trim() || undefined,
-      websiteDomain: form.websiteDomain?.trim() || undefined,
-      defaultTvaRate: form.defaultTvaRate,
-      defaultTreatmentFee: form.defaultTreatmentFee,
-      stampDuty: form.stampDuty,
-      cbctSupplementEnabled: form.cbctSupplementEnabled,
-      cbctSupplementFee: Math.max(0, form.cbctSupplementFee),
-      refinementTwoArchesFee: Math.max(0, form.refinementTwoArchesFee),
-      refinementSingleArchFee: Math.max(0, form.refinementSingleArchFee),
-      replacementAlignerFee: Math.max(0, form.replacementAlignerFee),
-      retainersFee: Math.max(0, form.retainersFee),
-      loyaltyEnabled: form.loyaltyEnabled,
-      welcomeGiftEnabled: form.welcomeGiftEnabled,
-      defaultCurrency: form.defaultCurrency.trim() || 'TND',
-      devisPrefix: form.devisPrefix.trim() || 'DEV',
-      devisNextNumber: form.devisNextNumber,
-      legalTextTranslations: form.legalTextTranslations,
-      footerTextTranslations: form.footerTextTranslations,
-      bankDetails: form.bankDetails,
-    });
+    if (!canSave) return;
+    const n = numbers.values;
+    // Every optional text goes out trimmed, '' included: the backend
+    // stores '' as "cleared" (undefined would keep the old value).
+    const text = (key: TextKey) => form[key].trim();
+    const submitted = edits;
+    upsert.mutate(
+      {
+        companyName: text('companyName'),
+        companyAddress: text('companyAddress'),
+        companyCity: text('companyCity'),
+        companyCountry: text('companyCountry'),
+        companyPhone: text('companyPhone'),
+        companyEmail: text('companyEmail'),
+        taxRegistrationNumber: text('taxRegistrationNumber'),
+        tradeName: text('tradeName'),
+        legalForm: text('legalForm'),
+        registreDeCommerce: text('registreDeCommerce'),
+        hostingProvider: text('hostingProvider'),
+        hostingProviderUrl: text('hostingProviderUrl'),
+        websiteDomain: text('websiteDomain'),
+        defaultTvaRate: n.defaultTvaRate,
+        defaultTreatmentFee: n.defaultTreatmentFee,
+        stampDuty: n.stampDuty,
+        cbctSupplementEnabled: form.cbctSupplementEnabled,
+        // Undefined (= unchanged) only when the supplement is off and its
+        // draft is not a number.
+        cbctSupplementFee: n.cbctSupplementFee,
+        refinementTwoArchesFee: n.refinementTwoArchesFee,
+        refinementSingleArchFee: n.refinementSingleArchFee,
+        replacementAlignerFee: n.replacementAlignerFee,
+        retainersFee: n.retainersFee,
+        loyaltyEnabled: form.loyaltyEnabled,
+        // welcomeGiftEnabled is NOT sent: the gift card saves it on its own,
+        // and a stale draft value must never overwrite that switch.
+        defaultCurrency: currency,
+        devisPrefix: text('devisPrefix') || 'DEV',
+        devisNextNumber: n.devisNextNumber,
+        legalTextTranslations: legal,
+        footerTextTranslations: footer,
+        bankDetails: bank,
+      },
+      {
+        // The cache now holds the saved row: drop the overlay so the form
+        // shows it — unless the admin kept typing while it was saving.
+        onSuccess: () => setEdits((current) => (current === submitted ? NO_EDITS : current)),
+      },
+    );
   };
 
   return (
     <div className="@container/main flex flex-1 flex-col gap-4 p-4 lg:p-6">
-      <header>
-        <h1 className="text-xl font-semibold sm:text-2xl">{t('accountBillingSettings.title')}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {t('accountBillingSettings.subtitle')}
-        </p>
-      </header>
+      {header}
+
+      <WelcomeGiftSettingsCard settings={settings} />
 
       {/* ─── Logo + company info ────────────────────────────────────────── */}
       <Card>
@@ -288,6 +418,10 @@ export function CompanyBillingSettingsForm() {
                 <img
                   src={logoUrl}
                   alt={t('accountBillingSettings.companyLogoAlt')}
+                  width={128}
+                  height={80}
+                  loading="lazy"
+                  decoding="async"
                   className="h-full w-full object-contain p-1"
                 />
               ) : (
@@ -330,6 +464,8 @@ export function CompanyBillingSettingsForm() {
                 type="file"
                 accept="image/png,image/jpeg,image/webp"
                 className="sr-only"
+                tabIndex={-1}
+                aria-hidden
                 onChange={(e) => {
                   const file = e.target.files?.[0];
                   e.currentTarget.value = '';
@@ -341,53 +477,63 @@ export function CompanyBillingSettingsForm() {
 
           <div className="grid gap-4 sm:grid-cols-2">
             <Field
+              name="companyName"
               label={t('accountBillingSettings.companyName')}
               required
               value={form.companyName}
-              onChange={(v) => updateField('companyName', v)}
+              onValueChange={setText}
               placeholder="Oralign SARL"
+              autoComplete="organization"
             />
             <Field
+              name="taxRegistrationNumber"
               label={t('accountBillingSettings.taxRegistrationNumber')}
-              value={form.taxRegistrationNumber ?? ''}
-              onChange={(v) => updateField('taxRegistrationNumber', v)}
+              value={form.taxRegistrationNumber}
+              onValueChange={setText}
               placeholder="MF 0000000A"
             />
             <Field
+              name="companyPhone"
               label={t('accountBillingSettings.phone')}
-              value={form.companyPhone ?? ''}
-              onChange={(v) => updateField('companyPhone', v)}
+              type="tel"
+              value={form.companyPhone}
+              onValueChange={setText}
               placeholder="+216 71 000 000"
             />
             <Field
+              name="companyEmail"
               label={t('accountBillingSettings.email')}
-              value={form.companyEmail ?? ''}
-              onChange={(v) => updateField('companyEmail', v)}
+              type="email"
+              value={form.companyEmail}
+              onValueChange={setText}
               placeholder="contact@oralign.com"
             />
             <Field
+              name="companyAddress"
               label={t('accountBillingSettings.address')}
-              value={form.companyAddress ?? ''}
-              onChange={(v) => updateField('companyAddress', v)}
+              value={form.companyAddress}
+              onValueChange={setText}
               placeholder={t('accountBillingSettings.addressPlaceholder')}
               wide
             />
-            {/* Country + City — searchable pickers with the full world list
-                (CountryCityPicker reads from `country-state-city`). Selecting
-                a country narrows the city dropdown to that country's cities.
-                Persisted as plain strings to match the company-billing-
-                settings JSONB-friendly storage. */}
+            {/* Country + City — searchable pickers over the world list. The
+                dataset (country-state-city, 8 MB of cities) loads only when
+                a list is opened; the stored names render without it.
+                Persisted as plain strings. */}
             <div className="sm:col-span-2">
               <CountryCityPicker
-                value={{
-                  country: form.companyCountry ?? '',
-                  city: form.companyCity ?? '',
-                }}
-                onChange={(next) => {
-                  updateField('companyCountry', next.country);
-                  updateField('companyCity', next.city);
-                }}
-                defaultCountryCode="TN"
+                value={{ country: form.companyCountry, city: form.companyCity }}
+                countryClearable={false}
+                onChange={(next) =>
+                  setEdits((current) => ({
+                    ...current,
+                    fields: {
+                      ...current.fields,
+                      companyCountry: next.country,
+                      companyCity: next.city,
+                    },
+                  }))
+                }
               />
             </div>
           </div>
@@ -412,39 +558,46 @@ export function CompanyBillingSettingsForm() {
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
           <Field
+            name="tradeName"
             label={t('accountBillingSettings.tradeName')}
-            value={form.tradeName ?? ''}
-            onChange={(v) => updateField('tradeName', v)}
+            value={form.tradeName}
+            onValueChange={setText}
             placeholder="Oralign"
           />
           <Field
+            name="legalForm"
             label={t('accountBillingSettings.legalForm')}
-            value={form.legalForm ?? ''}
-            onChange={(v) => updateField('legalForm', v)}
+            value={form.legalForm}
+            onValueChange={setText}
             placeholder="SUARL / SARL / …"
           />
           <Field
+            name="registreDeCommerce"
             label={t('accountBillingSettings.registreDeCommerce')}
-            value={form.registreDeCommerce ?? ''}
-            onChange={(v) => updateField('registreDeCommerce', v)}
+            value={form.registreDeCommerce}
+            onValueChange={setText}
             placeholder="B0000000000"
           />
           <Field
+            name="websiteDomain"
             label={t('accountBillingSettings.websiteDomain')}
-            value={form.websiteDomain ?? ''}
-            onChange={(v) => updateField('websiteDomain', v)}
+            value={form.websiteDomain}
+            onValueChange={setText}
             placeholder="oralign.com.tn"
           />
           <Field
+            name="hostingProvider"
             label={t('accountBillingSettings.hostingProvider')}
-            value={form.hostingProvider ?? ''}
-            onChange={(v) => updateField('hostingProvider', v)}
+            value={form.hostingProvider}
+            onValueChange={setText}
             placeholder="OVH, Vercel, …"
           />
           <Field
+            name="hostingProviderUrl"
             label={t('accountBillingSettings.hostingProviderUrl')}
-            value={form.hostingProviderUrl ?? ''}
-            onChange={(v) => updateField('hostingProviderUrl', v)}
+            type="url"
+            value={form.hostingProviderUrl}
+            onValueChange={setText}
             placeholder="https://www.ovh.com"
           />
         </CardContent>
@@ -466,11 +619,13 @@ export function CompanyBillingSettingsForm() {
             // the only thing that flips here. Keeps the form
             // vocabulary aligned with what doctors actually see on
             // their tax filings.
+            name="defaultTvaRate"
             label={t('accountBillingSettings.defaultTvaLabel')}
-            value={String(form.defaultTvaRate)}
-            type="number"
-            onChange={(v) => updateField('defaultTvaRate', Number(v) || 0)}
+            value={form.defaultTvaRate}
+            inputMode="decimal"
+            onValueChange={setText}
             placeholder="19"
+            error={numberError('defaultTvaRate')}
           />
           {/* Professional / clinical fee. This used to be re-typed on
               every quote (or accidentally left at 0 = revenue leak).
@@ -478,30 +633,27 @@ export function CompanyBillingSettingsForm() {
               quote itself remains editable, so promotions and free
               first-consults still work without touching this. */}
           <Field
-            label={t('accountBillingSettings.defaultTreatmentFeeLabel', {
-              currency: form.defaultCurrency || 'TND',
-            })}
-            value={String(form.defaultTreatmentFee)}
-            type="number"
-            onChange={(v) => updateField('defaultTreatmentFee', Number(v) || 0)}
+            name="defaultTreatmentFee"
+            label={t('accountBillingSettings.defaultTreatmentFeeLabel', { currency })}
+            value={form.defaultTreatmentFee}
+            inputMode="decimal"
+            onValueChange={setText}
             placeholder="0"
+            error={numberError('defaultTreatmentFee')}
           />
           {/* "Droit de timbre" — Tunisian fiscal stamp added to every
               invoice total (typically 1.000 TND). Decimal(12,3) on the
-              backend, so the input steps in milli-units. Set to 0 to
-              disable it on invoices. Mirrors the defaultTreatmentFee
-              numeric field above. */}
+              backend, so up to 3 decimals. Set to 0 to disable it on
+              invoices. */}
           <Field
-            label={t('accountBillingSettings.stampDutyLabel', {
-              currency: form.defaultCurrency || 'TND',
-            })}
-            value={String(form.stampDuty)}
-            type="number"
-            step="0.001"
-            min="0"
-            onChange={(v) => updateField('stampDuty', Number(v) || 0)}
+            name="stampDuty"
+            label={t('accountBillingSettings.stampDutyLabel', { currency })}
+            value={form.stampDuty}
+            inputMode="decimal"
+            onValueChange={setText}
             placeholder={t('accountBillingSettings.stampDutyPlaceholder')}
             helper={t('accountBillingSettings.stampDutyHelp')}
+            error={numberError('stampDuty')}
           />
           {/* ── CBCT paid supplement ─────────────────────────────────
               When enabled with a fee > 0, requesting CBCT on a NEW
@@ -511,7 +663,7 @@ export function CompanyBillingSettingsForm() {
           <div className="space-y-3 rounded-lg border p-4">
             <div className="flex items-center justify-between gap-3">
               <div className="space-y-0.5">
-                <Label htmlFor="cbct-supplement-enabled" className="font-medium">
+                <Label htmlFor={`${idPrefix}-cbct`} className="font-medium">
                   {t('accountBillingSettings.cbctEnabledLabel')}
                 </Label>
                 <p className="text-xs text-muted-foreground">
@@ -519,93 +671,70 @@ export function CompanyBillingSettingsForm() {
                 </p>
               </div>
               <Switch
-                id="cbct-supplement-enabled"
+                id={`${idPrefix}-cbct`}
                 checked={form.cbctSupplementEnabled}
-                onCheckedChange={(checked) =>
-                  updateField('cbctSupplementEnabled', checked)
-                }
+                onCheckedChange={(checked) => setToggle('cbctSupplementEnabled', checked)}
               />
             </div>
             <Field
-              label={t('accountBillingSettings.cbctFeeLabel', {
-                currency: form.defaultCurrency || 'TND',
-              })}
-              value={String(form.cbctSupplementFee)}
-              type="number"
-              step="0.001"
-              min="0"
+              name="cbctSupplementFee"
+              label={t('accountBillingSettings.cbctFeeLabel', { currency })}
+              value={form.cbctSupplementFee}
+              inputMode="decimal"
               disabled={!form.cbctSupplementEnabled}
-              onChange={(v) =>
-                updateField('cbctSupplementFee', Math.max(0, Number(v) || 0))
-              }
+              onValueChange={setText}
               placeholder="0"
               helper={t('accountBillingSettings.cbctFeeHelp')}
+              error={numberError('cbctSupplementFee')}
             />
           </div>
           {/* ── Beyond-the-pack tariffs (grille 2026) ────────────────
               Informational price list shown on the packs page and in
-              doctor-facing surfaces. 0 = not configured → hidden. */}
-          <div className="space-y-3 rounded-lg border p-4">
+              doctor-facing surfaces. 0 = not configured → hidden. Full
+              width: four amounts no longer squeezed into half a row. */}
+          <div className="space-y-3 rounded-lg border p-4 sm:col-span-2">
             <div className="space-y-0.5">
-              <p className="font-medium">
-                {t('accountBillingSettings.beyondPackTitle')}
-              </p>
+              <p className="font-medium">{t('accountBillingSettings.beyondPackTitle')}</p>
               <p className="text-xs text-muted-foreground">
                 {t('accountBillingSettings.beyondPackHelp')}
               </p>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <Field
-                label={t('accountBillingSettings.refinementTwoLabel', {
-                  currency: form.defaultCurrency || 'TND',
-                })}
-                value={String(form.refinementTwoArchesFee)}
-                type="number"
-                step="0.001"
-                min="0"
-                onChange={(v) =>
-                  updateField('refinementTwoArchesFee', Math.max(0, Number(v) || 0))
-                }
+                name="refinementTwoArchesFee"
+                label={t('accountBillingSettings.refinementTwoLabel', { currency })}
+                value={form.refinementTwoArchesFee}
+                inputMode="decimal"
+                onValueChange={setText}
                 placeholder="0"
+                error={numberError('refinementTwoArchesFee')}
               />
               <Field
-                label={t('accountBillingSettings.refinementOneLabel', {
-                  currency: form.defaultCurrency || 'TND',
-                })}
-                value={String(form.refinementSingleArchFee)}
-                type="number"
-                step="0.001"
-                min="0"
-                onChange={(v) =>
-                  updateField('refinementSingleArchFee', Math.max(0, Number(v) || 0))
-                }
+                name="refinementSingleArchFee"
+                label={t('accountBillingSettings.refinementOneLabel', { currency })}
+                value={form.refinementSingleArchFee}
+                inputMode="decimal"
+                onValueChange={setText}
                 placeholder="0"
+                error={numberError('refinementSingleArchFee')}
               />
               <Field
-                label={t('accountBillingSettings.replacementLabel', {
-                  currency: form.defaultCurrency || 'TND',
-                })}
-                value={String(form.replacementAlignerFee)}
-                type="number"
-                step="0.001"
-                min="0"
-                onChange={(v) =>
-                  updateField('replacementAlignerFee', Math.max(0, Number(v) || 0))
-                }
+                name="replacementAlignerFee"
+                label={t('accountBillingSettings.replacementLabel', { currency })}
+                value={form.replacementAlignerFee}
+                inputMode="decimal"
+                onValueChange={setText}
                 placeholder="0"
+                error={numberError('replacementAlignerFee')}
               />
               <Field
-                label={t('accountBillingSettings.retainersLabel', {
-                  currency: form.defaultCurrency || 'TND',
-                })}
-                value={String(form.retainersFee)}
-                type="number"
-                step="0.001"
-                min="0"
-                onChange={(v) =>
-                  updateField('retainersFee', Math.max(0, Number(v) || 0))
-                }
+                name="retainersFee"
+                label={t('accountBillingSettings.retainersLabel', { currency })}
+                value={form.retainersFee}
+                inputMode="decimal"
+                onValueChange={setText}
                 placeholder="0"
+                error={numberError('retainersFee')}
               />
             </div>
           </div>
@@ -615,7 +744,7 @@ export function CompanyBillingSettingsForm() {
               quarters and issued quotes keep their snapshots. */}
           <div className="flex items-center justify-between gap-3 rounded-lg border p-4">
             <div className="space-y-0.5">
-              <Label htmlFor="loyalty-enabled" className="font-medium">
+              <Label htmlFor={`${idPrefix}-loyalty`} className="font-medium">
                 {t('accountBillingSettings.loyaltyEnabledLabel')}
               </Label>
               <p className="text-xs text-muted-foreground">
@@ -623,53 +752,36 @@ export function CompanyBillingSettingsForm() {
               </p>
             </div>
             <Switch
-              id="loyalty-enabled"
+              id={`${idPrefix}-loyalty`}
               checked={form.loyaltyEnabled}
-              onCheckedChange={(checked) => updateField('loyaltyEnabled', checked)}
-            />
-          </div>
-
-          {/* ── Welcome gift switch (once per practitioner) ──────────
-              On = the treatment fee and the CBCT supplement are waived
-              once per practitioner, on the next case they submit (the
-              first case for a new practitioner). Off never removes a
-              gift already applied to an order. */}
-          <div className="flex items-center justify-between gap-3 rounded-lg border p-4">
-            <div className="space-y-0.5">
-              <Label htmlFor="welcome-gift-enabled" className="font-medium">
-                {t('welcomeGift.settings.label')}
-              </Label>
-              <p className="text-xs text-muted-foreground">
-                {t('welcomeGift.settings.description')}
-              </p>
-            </div>
-            <Switch
-              id="welcome-gift-enabled"
-              checked={form.welcomeGiftEnabled}
-              onCheckedChange={(checked) =>
-                updateField('welcomeGiftEnabled', checked)
-              }
+              onCheckedChange={(checked) => setToggle('loyaltyEnabled', checked)}
             />
           </div>
 
           <Field
+            name="defaultCurrency"
             label={t('accountBillingSettings.defaultCurrencyLabel')}
             value={form.defaultCurrency}
-            onChange={(v) => updateField('defaultCurrency', v.toUpperCase())}
+            onValueChange={setText}
+            uppercase
             placeholder="TND"
           />
           <Field
+            name="devisPrefix"
             label={t('accountBillingSettings.devisPrefixLabel')}
             value={form.devisPrefix}
-            onChange={(v) => updateField('devisPrefix', v.toUpperCase())}
+            onValueChange={setText}
+            uppercase
             placeholder="DEV"
           />
           <Field
+            name="devisNextNumber"
             label={t('accountBillingSettings.nextQuoteNumberLabel')}
-            value={String(form.devisNextNumber)}
-            type="number"
-            onChange={(v) => updateField('devisNextNumber', Number(v) || 1)}
+            value={form.devisNextNumber}
+            inputMode="numeric"
+            onValueChange={setText}
             placeholder="1"
+            error={numberError('devisNextNumber')}
           />
         </CardContent>
       </Card>
@@ -716,25 +828,29 @@ export function CompanyBillingSettingsForm() {
                     ? 'accountBillingSettings.footerPlaceholderEn'
                     : 'accountBillingSettings.footerPlaceholderAr',
               );
+              const legalId = `${idPrefix}-legal-${code}`;
+              const footerId = `${idPrefix}-footer-${code}`;
               return (
                 <TabsContent key={code} value={code} className="space-y-3 pt-3">
                   <div className="grid gap-2">
-                    <Label>{t('accountBillingSettings.legalText', { label })}</Label>
+                    <Label htmlFor={legalId}>{t('accountBillingSettings.legalText', { label })}</Label>
                     <Textarea
+                      id={legalId}
                       rows={3}
                       dir={dir ?? 'ltr'}
-                      value={form.legalTextTranslations?.[code] ?? ''}
-                      onChange={(e) => updateLegal(code, e.target.value)}
+                      value={legal[code]}
+                      onChange={(e) => setLegal(code, e.target.value)}
                       placeholder={legalPlaceholder}
                     />
                   </div>
                   <div className="grid gap-2">
-                    <Label>{t('accountBillingSettings.footerText', { label })}</Label>
+                    <Label htmlFor={footerId}>{t('accountBillingSettings.footerText', { label })}</Label>
                     <Textarea
+                      id={footerId}
                       rows={2}
                       dir={dir ?? 'ltr'}
-                      value={form.footerTextTranslations?.[code] ?? ''}
-                      onChange={(e) => updateFooter(code, e.target.value)}
+                      value={footer[code]}
+                      onChange={(e) => setFooter(code, e.target.value)}
                       placeholder={footerPlaceholder}
                     />
                   </div>
@@ -755,44 +871,56 @@ export function CompanyBillingSettingsForm() {
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
           <Field
+            name="bankName"
             label={t('accountBillingSettings.bankName')}
-            value={form.bankDetails.bankName ?? ''}
-            onChange={(v) => updateBank('bankName', v)}
+            value={bank.bankName}
+            onValueChange={setBank}
             placeholder="BIAT"
           />
           <Field
+            name="accountName"
             label={t('accountBillingSettings.accountName')}
-            value={form.bankDetails.accountName ?? ''}
-            onChange={(v) => updateBank('accountName', v)}
+            value={bank.accountName}
+            onValueChange={setBank}
             placeholder="Oralign SARL"
           />
           <Field
+            name="rib"
             label={t('accountBillingSettings.rib')}
-            value={form.bankDetails.rib ?? ''}
-            onChange={(v) => updateBank('rib', v)}
+            value={bank.rib}
+            onValueChange={setBank}
             placeholder="123 4567890 1234567890"
           />
           <Field
+            name="iban"
             label={t('accountBillingSettings.iban')}
-            value={form.bankDetails.iban ?? ''}
-            onChange={(v) => updateBank('iban', v)}
+            value={bank.iban}
+            onValueChange={setBank}
             placeholder="TN59 0000 0000 0000 0000 0000"
           />
           <Field
+            name="swift"
             label={t('accountBillingSettings.swift')}
-            value={form.bankDetails.swift ?? ''}
-            onChange={(v) => updateBank('swift', v)}
+            value={bank.swift}
+            onValueChange={setBank}
             placeholder="BIATTNTT"
           />
         </CardContent>
       </Card>
 
       {/* ─── Save ────────────────────────────────────────────────────────── */}
-      <div className="flex justify-end gap-2">
+      <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
+        <p className="text-sm text-muted-foreground" aria-live="polite">
+          {!numbers.valid
+            ? t('settingsDesk.billing.fixErrors')
+            : hasEdits
+              ? t('settingsDesk.billing.unsavedChanges')
+              : null}
+        </p>
         <Button
           type="button"
           onClick={handleSave}
-          disabled={upsert.isPending || !form.companyName.trim() || isLoading}
+          disabled={!canSave}
           className="gap-2"
           size="lg"
         >
@@ -808,47 +936,82 @@ export function CompanyBillingSettingsForm() {
   );
 }
 
-function Field({
-  label,
-  value,
-  onChange,
-  placeholder,
-  type = 'text',
-  required,
-  wide,
-  step,
-  min,
-  helper,
-  disabled,
-}: {
+// ─── Field ───────────────────────────────────────────────────────────────
+
+interface FieldProps<N extends string> {
+  name: N;
   label: string;
   value: string;
-  onChange: (value: string) => void;
+  onValueChange: (name: N, value: string) => void;
   placeholder?: string;
-  type?: string;
+  type?: 'text' | 'email' | 'tel' | 'url';
+  inputMode?: 'decimal' | 'numeric';
+  autoComplete?: string;
   required?: boolean;
   wide?: boolean;
-  step?: string;
-  min?: string;
   helper?: string;
+  error?: string;
   disabled?: boolean;
-}) {
+  /** Upper-case what is typed (currency, quote prefix). */
+  uppercase?: boolean;
+}
+
+function FieldImpl<N extends string>({
+  name,
+  label,
+  value,
+  onValueChange,
+  placeholder,
+  type = 'text',
+  inputMode,
+  autoComplete = 'off',
+  required,
+  wide,
+  helper,
+  error,
+  disabled,
+  uppercase,
+}: FieldProps<N>) {
+  const id = useId();
+  const messageId = `${id}-message`;
+  const message = error ?? helper;
   return (
     <div className={wide ? 'sm:col-span-2' : undefined}>
-      <Label className="mb-1.5 inline-flex items-center gap-1">
+      <Label htmlFor={id} className="mb-1.5 inline-flex items-center gap-1">
         {label}
-        {required && <span className="text-red-500">*</span>}
+        {required && (
+          <span aria-hidden className="text-red-500">
+            *
+          </span>
+        )}
       </Label>
       <Input
+        id={id}
+        name={name}
         type={type}
+        inputMode={inputMode}
+        autoComplete={autoComplete}
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) =>
+          onValueChange(name, uppercase ? e.target.value.toUpperCase() : e.target.value)
+        }
         placeholder={placeholder}
-        step={step}
-        min={min}
+        required={required}
         disabled={disabled}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={message ? messageId : undefined}
       />
-      {helper && <p className="mt-1 text-xs text-muted-foreground">{helper}</p>}
+      {message && (
+        <p
+          id={messageId}
+          className={cn('mt-1 text-xs', error ? 'text-destructive' : 'text-muted-foreground')}
+        >
+          {message}
+        </p>
+      )}
     </div>
   );
 }
+
+/** Memoised: with the stable setters above, typing re-renders one field. */
+const Field = memo(FieldImpl) as typeof FieldImpl;

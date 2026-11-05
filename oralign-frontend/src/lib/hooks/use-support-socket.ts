@@ -17,6 +17,48 @@ let sharedSocket: Socket | null = null;
 let refCount = 0;
 
 /**
+ * How long the socket outlives its last user. Going from /dashboard to
+ * /account ("Paramètres") swaps the whole layout: the old sidebar releases
+ * the socket a moment before the new one acquires it, and an immediate
+ * disconnect meant a fresh handshake (token refresh + websocket) on every
+ * swap. Within the grace period the new user re-acquires the live socket.
+ */
+const RELEASE_GRACE_MS = 10_000;
+let releaseTimer: ReturnType<typeof setTimeout> | null = null;
+/** The account (JWT `sub`) the shared socket was opened for. */
+let socketSubject: string | null = null;
+
+function cancelPendingRelease(): void {
+  if (releaseTimer !== null) {
+    clearTimeout(releaseTimer);
+    releaseTimer = null;
+  }
+}
+
+/** The user a JWT belongs to (`sub`), read without verifying it. */
+function tokenSubject(token: string): string | null {
+  try {
+    const part = token.split('.')[1];
+    if (!part) return null;
+    const b64 = part.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+    const payload = JSON.parse(atob(padded)) as { sub?: unknown };
+    return typeof payload.sub === 'string' ? payload.sub : null;
+  } catch {
+    return null;
+  }
+}
+
+function destroySocket(): void {
+  if (!sharedSocket) return;
+  sharedSocket.removeAllListeners();
+  sharedSocket.disconnect();
+  sharedSocket = null;
+  socketSubject = null;
+  roomRefs.clear();
+}
+
+/**
  * Conversation rooms the tab currently wants to be in, ref-counted so
  * two components viewing the SAME conversation don't leave the room
  * when only one of them unmounts. The single `connect` handler
@@ -48,8 +90,17 @@ function acquireSocket(): Socket | null {
   if (typeof window === 'undefined') return null;
   const token = getAccessToken();
   if (!token) return null;
+  const subject = tokenSubject(token);
+
+  // An idle socket kept alive by the grace period but opened for ANOTHER
+  // account (sign-out then sign-in within seconds) is never handed over.
+  if (releaseTimer !== null && sharedSocket && subject !== socketSubject) {
+    cancelPendingRelease();
+    destroySocket();
+  }
 
   refCount += 1;
+  cancelPendingRelease();
 
   if (sharedSocket) return sharedSocket;
 
@@ -94,23 +145,27 @@ function acquireSocket(): Socket | null {
     socket.on('connect_error', (err) => {
       // Surfaced only in dev so a broken handshake (bad token, CORS,
       // blocked transport) is visible instead of failing silently.
-      // eslint-disable-next-line no-console
       console.warn('[support-socket] connect_error:', err.message);
     });
   }
 
   sharedSocket = socket;
+  socketSubject = subject;
   return sharedSocket;
 }
 
 function releaseSocket(): void {
   refCount = Math.max(0, refCount - 1);
-  if (refCount === 0 && sharedSocket) {
-    sharedSocket.removeAllListeners();
-    sharedSocket.disconnect();
-    sharedSocket = null;
-    roomRefs.clear();
-  }
+  if (refCount > 0 || !sharedSocket) return;
+  cancelPendingRelease();
+  releaseTimer = setTimeout(() => {
+    releaseTimer = null;
+    // Re-acquired during the grace period: keep it.
+    if (refCount > 0) return;
+    // Only the `connect` room-replay handler is left at this point: every
+    // hook detached its own listeners in its cleanup.
+    destroySocket();
+  }, RELEASE_GRACE_MS);
 }
 
 function retainRoom(id: string): void {
@@ -151,7 +206,11 @@ export function useSupportSocket(opts: {
   const queryClient = useQueryClient();
   const enabled = opts.enabled ?? true;
   const handlersRef = useRef(opts);
-  handlersRef.current = opts;
+  // Latest callbacks for the socket listeners, refreshed after each render
+  // (writing a ref during render is not allowed).
+  useEffect(() => {
+    handlersRef.current = opts;
+  });
 
   useEffect(() => {
     if (!enabled) return;
@@ -233,6 +292,5 @@ export function useSupportSocket(opts: {
       if (room) releaseRoom(room);
       releaseSocket();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, opts.conversationId, queryClient]);
 }

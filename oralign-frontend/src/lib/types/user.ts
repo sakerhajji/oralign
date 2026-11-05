@@ -17,6 +17,21 @@ export interface CreateUserDto {
   avatarUrl?: string;
 }
 
+/**
+ * `GET /users/stats` — counts over every non-deleted user (the gift
+ * counts over dentists only). Independent of the list's page/filters.
+ */
+export interface UserStats {
+  total: number;
+  active: number;
+  blocked: number;
+  pending: number;
+  dentists: number;
+  admins: number;
+  giftAvailable: number;
+  giftUsed: number;
+}
+
 export interface UpdateUserDto {
   fullName?: string;
   phone?: string;

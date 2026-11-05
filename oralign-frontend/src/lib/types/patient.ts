@@ -23,16 +23,17 @@ export interface CreatePatientDto {
   doctorId?: string;
 }
 
+// PATCH semantics: an omitted field keeps the stored value, null clears it.
 export interface UpdatePatientDto {
   fullName?: string;
-  email?: string;
-  phone?: string;
+  email?: string | null;
+  phone?: string | null;
   gender?: Gender;
   dateOfBirth?: string;
-  address?: string;
-  notes?: string;
+  address?: string | null;
+  notes?: string | null;
   clinicalConditions?: string[];
-  clinicalConditionsOther?: string;
+  clinicalConditionsOther?: string | null;
   doctorId?: string;
 }
 

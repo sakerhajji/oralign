@@ -1,10 +1,10 @@
 'use client';
 
-import { useQuery, useMutation, useQueryClient, UseQueryResult, UseMutationResult } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useMutation, useQueryClient, UseQueryResult, UseMutationResult } from '@tanstack/react-query';
 import { toast } from '@/lib/toast';
 import { usersService, extractApiErrorMessage, toastMutationError } from '@/lib/api';
 import { useT } from '@/lib/i18n/lang-context';
-import { User, UserRole, CreateUserDto, UpdateUserDto, PaginatedResponse, UserFilterParams, MessageResponse, BulkActionDto, BulkUpdateStatusDto } from '@/lib/types';
+import { User, UserRole, CreateUserDto, UpdateUserDto, PaginatedResponse, UserFilterParams, MessageResponse, BulkActionDto, BulkUpdateStatusDto, UserStats } from '@/lib/types';
 
 // Query keys
 export const userKeys = {
@@ -13,6 +13,7 @@ export const userKeys = {
   list: (params?: UserFilterParams) => [...userKeys.lists(), params] as const,
   deletedLists: () => [...userKeys.all, 'deleted'] as const,
   deletedList: (params?: UserFilterParams) => [...userKeys.deletedLists(), params] as const,
+  stats: () => [...userKeys.all, 'stats'] as const,
   details: () => [...userKeys.all, 'detail'] as const,
   detail: (id: string) => [...userKeys.details(), id] as const,
   currentUser: () => [...userKeys.all, 'current'] as const,
@@ -55,7 +56,12 @@ export function useCurrentUser(): UseQueryResult<User, Error> {
 }
 
 /**
- * Hook to get all users with pagination and filters (Admin only)
+ * Hook to get all users with pagination and filters (Admin only).
+ *
+ * Every search / filter / page is a new query key: `keepPreviousData`
+ * keeps the previous rows on screen while the next key loads
+ * (`isPlaceholderData` is true meanwhile), so the page never falls back
+ * to its skeleton — `isLoading` is only true on the very first load.
  */
 export function useUsers(
   params?: UserFilterParams,
@@ -65,6 +71,7 @@ export function useUsers(
     queryKey: userKeys.list(params),
     queryFn: () => usersService.getAllUsers(params),
     enabled: options.enabled ?? true,
+    placeholderData: keepPreviousData,
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
 }
@@ -80,7 +87,24 @@ export function useDeletedUsers(
     queryKey: userKeys.deletedList(params),
     queryFn: () => usersService.getDeletedUsers(params),
     enabled: options.enabled ?? true,
+    placeholderData: keepPreviousData,
     staleTime: 1000 * 60 * 5, // 5 minutes
+  });
+}
+
+/**
+ * Admin overview counts (`GET /users/stats`) — the whole user base,
+ * never the current page. Invalidated by every mutation that can move a
+ * user between buckets (create, role, approval, block, delete, gift).
+ */
+export function useUserStats(
+  options: { enabled?: boolean } = {},
+): UseQueryResult<UserStats, Error> {
+  return useQuery<UserStats, Error>({
+    queryKey: userKeys.stats(),
+    queryFn: () => usersService.getUserStats(),
+    enabled: options.enabled ?? true,
+    staleTime: 1000 * 60,
   });
 }
 
@@ -106,6 +130,7 @@ export function useCreateUser(): UseMutationResult<User, Error, CreateUserDto> {
     mutationFn: usersService.createUser,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: userKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: userKeys.stats() });
       toast.success(t('toasts.users.created'));
     },
     onError: (error: Error) => {
@@ -125,6 +150,7 @@ export function useUpdateUser(): UseMutationResult<User, Error, { id: string; da
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: userKeys.detail(variables.id) });
       queryClient.invalidateQueries({ queryKey: userKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: userKeys.stats() });
       queryClient.invalidateQueries({ queryKey: userKeys.currentUser() });
     },
   });
@@ -143,6 +169,7 @@ export function useDeleteUser(): UseMutationResult<MessageResponse, Error, strin
       // Invalidate users list to refetch
       queryClient.invalidateQueries({ queryKey: userKeys.lists() });
       queryClient.invalidateQueries({ queryKey: userKeys.deletedLists() });
+      queryClient.invalidateQueries({ queryKey: userKeys.stats() });
       toast.success(t('toasts.users.deleted'));
     },
     onError: (error: Error) => {
@@ -163,6 +190,7 @@ export function useRestoreUser(): UseMutationResult<User, Error, string> {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: userKeys.lists() });
       queryClient.invalidateQueries({ queryKey: userKeys.deletedLists() });
+      queryClient.invalidateQueries({ queryKey: userKeys.stats() });
       toast.success(t('toasts.users.restored'));
     },
     onError: (error: Error) => {
@@ -185,15 +213,17 @@ type BulkDeleteResult = MessageResponse & {
 
 export function useBulkDeleteUsers(): UseMutationResult<BulkDeleteResult, Error, BulkActionDto> {
   const queryClient = useQueryClient();
+  const { t } = useT();
 
   return useMutation<BulkDeleteResult, Error, BulkActionDto>({
     mutationFn: usersService.bulkDeleteUsers,
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: userKeys.lists() });
       queryClient.invalidateQueries({ queryKey: userKeys.deletedLists() });
+      queryClient.invalidateQueries({ queryKey: userKeys.stats() });
       toast.success(data.message);
       if (data.skippedSelf) {
-        toast.warning('Your own account was kept — you cannot delete it.', {
+        toast.warning(t('usersDesk.toastSelfKept'), {
           duration: 7000,
         });
       }
@@ -215,6 +245,7 @@ export function useBulkRestoreUsers(): UseMutationResult<MessageResponse & { cou
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: userKeys.lists() });
       queryClient.invalidateQueries({ queryKey: userKeys.deletedLists() });
+      queryClient.invalidateQueries({ queryKey: userKeys.stats() });
       toast.success(data.message);
     },
     onError: (error: Error) => {
@@ -234,6 +265,7 @@ export function useBulkUpdateStatus(): UseMutationResult<MessageResponse & { cou
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: userKeys.lists() });
       queryClient.invalidateQueries({ queryKey: userKeys.deletedLists() });
+      queryClient.invalidateQueries({ queryKey: userKeys.stats() });
       toast.success(data.message);
     },
     onError: (error: Error) => {
@@ -254,6 +286,7 @@ export function usePermanentlyDeleteUser(): UseMutationResult<MessageResponse, E
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: userKeys.lists() });
       queryClient.invalidateQueries({ queryKey: userKeys.deletedLists() });
+      queryClient.invalidateQueries({ queryKey: userKeys.stats() });
       toast.success(t('toasts.users.permanentlyDeleted'));
     },
     onError: (error: Error) => {
@@ -282,6 +315,7 @@ export function useUpdateApproval(): UseMutationResult<
       usersService.updateApproval(id, verificationStatus),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: userKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: userKeys.stats() });
       queryClient.invalidateQueries({
         queryKey: userKeys.detail(variables.id),
       });
@@ -310,6 +344,7 @@ export function useBulkPermanentlyDeleteUsers(): UseMutationResult<MessageRespon
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: userKeys.lists() });
       queryClient.invalidateQueries({ queryKey: userKeys.deletedLists() });
+      queryClient.invalidateQueries({ queryKey: userKeys.stats() });
       // Partial success ("2 deleted, 1 kept because history depends on
       // it") is a warning, not a plain success.
       if (data.blocked && data.blocked > 0) toast.warning(data.message, { duration: 9000 });

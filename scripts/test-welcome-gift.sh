@@ -17,6 +17,12 @@
 #   • the gift never changes hands: an admin cannot move a gift order to
 #     another doctor (WELCOME_GIFT_ORDER_REASSIGN), and an archived gift
 #     order cannot be purged (DELETION_BLOCKED) — it stays consumed
+#   • the doctor mark alone decides, and an admin controls it (Users
+#     page): GET /users shows welcomeGiftUsedAt + welcomeGiftOrder and
+#     filters on welcomeGift / phone / clinic name; PATCH
+#     /welcome-gift/doctors/:id used=false → eligible again → the next case
+#     gets a SECOND gift; used=true → no gift (idempotent); a dentist
+#     calling it → 403; bad list queries → 400; GET /users/stats adds up
 #
 # Follows the TEST_-data pattern of scripts/test-cbct-chunked.sh:
 # throwaway rows tagged TEST_WG, cleaned up on exit; the billing
@@ -410,3 +416,140 @@ R=$(cat "$TMP_DIR/submit.json")
 accepted "$CODE" && [ -z "$(echo "$R" | json welcomeGift)" ] && [ -z "$(gift_col "$OE_ID")" ] \
   && ok "doctor E's case submitted WITHOUT gift" || bad "doctor E submit: $CODE $(echo "$R" | head -c 300)"
 [ "$(mark_of "$DOC_E_ID")" = "$E_MARK" ] && ok "doctor E's mark untouched" || bad "doctor E mark changed: $(mark_of "$DOC_E_ID")"
+
+# ─────────────────────────────────────────────────────────────────
+step "15. Admin control of the doctor mark (Users page)"
+
+mark() { # $1 = auth header, $2 = doctor id, $3 = JSON body — echoes the HTTP status, body in mark.json
+  curl -sS -o "$TMP_DIR/mark.json" -w '%{http_code}' -X PATCH "$API/welcome-gift/doctors/$2" \
+    -H "$1" -H "Content-Type: application/json" -d "$3"
+}
+users_list() { # $1 = auth header, then key=value query pairs (URL-encoded) — echoes the JSON
+  local h="$1" kv; shift
+  local args=()
+  for kv in "$@"; do args+=(--data-urlencode "$kv"); done
+  curl -sS -G "$API/users" -H "$h" "${args[@]}"
+}
+code_of() { # $1 = auth header, $2 = path?query — echoes the HTTP status only
+  curl -sS -o /dev/null -w '%{http_code}' "$API$2" -H "$1"
+}
+is_count() { # $1 = value — true when it is a non-negative integer
+  [ -n "$1" ] && [ -z "$(printf '%s' "$1" | tr -d '0-9')" ]
+}
+
+O1_CODE=$(DB -c "SELECT \"orderCode\" FROM \"DentalOrder\" WHERE id='$O1_ID';" | tr -d ' \r')
+A_MARK=$(mark_of "$DOC_A_ID")
+
+# 15a. The list shows the mark and the gift order of a gifted doctor.
+L=$(users_list "$AH" "search=test_wg_doca_${STAMP}" "welcomeGift=used")
+[ "$(echo "$L" | json total)" = "1" ] && [ "$(echo "$L" | json data.0.id)" = "$DOC_A_ID" ] \
+  && ok "GET /users?welcomeGift=used finds doctor A" || bad "list used: $(echo "$L" | head -c 300)"
+[ -n "$(echo "$L" | json data.0.welcomeGiftUsedAt)" ] && [ "$(echo "$L" | json data.0.welcomeGiftOrder.id)" = "$O1_ID" ] \
+  && [ "$(echo "$L" | json data.0.welcomeGiftOrder.orderCode)" = "$O1_CODE" ] \
+  && [ "$(echo "$L" | json data.0.welcomeGiftOrder.archived)" = "false" ] \
+  && ok "list row: welcomeGiftUsedAt set, welcomeGiftOrder = { $O1_ID, $O1_CODE, archived: false }" || bad "list gift fields: $(echo "$L" | head -c 400)"
+L=$(users_list "$AH" "search=test_wg_doca_${STAMP}" "welcomeGift=available")
+[ "$(echo "$L" | json total)" = "0" ] && ok "welcomeGift=available excludes the marked doctor" || bad "list available: $(echo "$L" | head -c 200)"
+U=$(curl -sS "$API/users/$DOC_A_ID" -H "$AH")
+[ "$(echo "$U" | json welcomeGiftOrder.id)" = "$O1_ID" ] && [ -n "$(echo "$U" | json welcomeGiftUsedAt)" ] \
+  && ok "GET /users/:id carries the same gift fields" || bad "user detail: $(echo "$U" | head -c 300)"
+L=$(users_list "$AH" "search=test_wg_admin_${STAMP}")
+[ "$(echo "$L" | json data.0.id)" = "$ADMIN_ID" ] && [ -z "$(echo "$L" | json data.0.welcomeGiftOrder)" ] && [ -z "$(echo "$L" | json data.0.welcomeGiftUsedAt)" ] \
+  && ok "a non-dentist row has no gift (null / null)" || bad "admin row: $(echo "$L" | head -c 300)"
+L=$(users_list "$AH" "search=test_wg_admin_${STAMP}" "welcomeGift=available")
+[ "$(echo "$L" | json total)" = "0" ] && ok "the gift filter never matches a non-dentist" || bad "admin with gift filter: $(echo "$L" | head -c 200)"
+
+# 15b. Search covers the phone (separators ignored) and the clinic name.
+A_PHONE="+2165${STAMP:0:7}"
+DB -c "UPDATE \"User\" SET phone='$A_PHONE' WHERE id='$DOC_A_ID';" >/dev/null
+L=$(users_list "$AH" "search=5 ${STAMP:0:3} ${STAMP:3:4}")
+echo "$L" | grep -q "$DOC_A_ID" && ok "search '5 ${STAMP:0:3} ${STAMP:3:4}' finds the phone $A_PHONE" || bad "phone search: $(echo "$L" | head -c 200)"
+PROFILE_ID=$(db_insert "INSERT INTO \"DentistProfile\" (id, \"userId\", \"clinicName\", \"createdAt\", \"updatedAt\") VALUES (gen_random_uuid(), '$DOC_A_ID', 'TEST_WG_CLINIC_${STAMP}', NOW(), NOW()) RETURNING id;")
+remember "DentistProfile" "$PROFILE_ID"
+L=$(users_list "$AH" "search=test_wg_clinic_${STAMP}")
+[ "$(echo "$L" | json total)" = "1" ] && [ "$(echo "$L" | json data.0.id)" = "$DOC_A_ID" ] \
+  && ok "search matches the clinic name (case-insensitive)" || bad "clinic search: $(echo "$L" | head -c 200)"
+L=$(users_list "$AH" "search=_${STAMP}@oralign.test" "verificationStatus=approved" "role=dentist" "isActive=true")
+[ "$(echo "$L" | json total)" = "5" ] && ok "role + isActive + verificationStatus filters (the 5 TEST_WG dentists)" || bad "combined filters: total=$(echo "$L" | json total)"
+
+# 15c. Query hardening: a bad page / limit / enum is a 400, not a 500.
+for q in "limit=0" "limit=abc" "page=0" "page=-2" "role=root" "verificationStatus=waiting" "welcomeGift=maybe" "isActive=yes"; do
+  CODE=$(code_of "$AH" "/users?$q")
+  [ "$CODE" = "400" ] && ok "GET /users?$q → 400" || bad "GET /users?$q → $CODE"
+done
+CODE=$(code_of "$AH" "/users/deleted/list?isActive=false&search=test_wg_")
+[ "$CODE" = "200" ] && ok "deleted list accepts isActive" || bad "deleted list isActive: $CODE"
+
+# 15d. Who may change the mark.
+CODE=$(mark "$AAH" "$DOC_A_ID" '{"used":false}')
+[ "$CODE" = "403" ] && [ "$(mark_of "$DOC_A_ID")" = "$A_MARK" ] \
+  && ok "a dentist resetting their own gift → 403, mark untouched" || bad "dentist PATCH: $CODE $(head -c 200 "$TMP_DIR/mark.json")"
+CODE=$(mark "$AH" "$ADMIN_ID" '{"used":false}')
+[ "$CODE" = "404" ] && ok "PATCH on a non-dentist → 404" || bad "PATCH admin user: $CODE"
+CODE=$(mark "$AH" "00000000-0000-4000-8000-000000000000" '{"used":true}')
+[ "$CODE" = "404" ] && ok "PATCH on an unknown user → 404" || bad "PATCH unknown: $CODE"
+CODE=$(mark "$AH" "$DOC_A_ID" '{"used":"false"}')
+[ "$CODE" = "400" ] && [ "$(mark_of "$DOC_A_ID")" = "$A_MARK" ] && ok "a non-boolean flag → 400" || bad "PATCH string flag: $CODE"
+
+# 15e. Reset → eligible again → the next case gets a SECOND gift.
+CODE=$(mark "$AH" "$DOC_A_ID" '{"used":false}')
+accepted "$CODE" && [ "$(json doctorId < "$TMP_DIR/mark.json")" = "$DOC_A_ID" ] && [ -z "$(json welcomeGiftUsedAt < "$TMP_DIR/mark.json")" ] \
+  && ok "admin PATCH used=false → { doctorId, welcomeGiftUsedAt: null }" || bad "reset: $CODE $(head -c 200 "$TMP_DIR/mark.json")"
+[ -z "$(mark_of "$DOC_A_ID")" ] && ok "doctor A's mark cleared in DB" || bad "mark still: $(mark_of "$DOC_A_ID")"
+CODE=$(mark "$AH" "$DOC_A_ID" '{"used":false}')
+accepted "$CODE" && [ -z "$(mark_of "$DOC_A_ID")" ] && ok "used=false again is idempotent" || bad "second reset: $CODE"
+ST=$(status_of "$AAH")
+[ "$(echo "$ST" | json eligible)" = "true" ] && [ "$(echo "$ST" | json firstCase)" = "false" ] && [ "$(echo "$ST" | json giftOrderId)" = "$O1_ID" ] \
+  && ok "doctor A eligible again (firstCase=false), giftOrderId still the first gift" || bad "status after reset: $ST"
+L=$(users_list "$AH" "search=test_wg_doca_${STAMP}" "welcomeGift=available")
+[ "$(echo "$L" | json total)" = "1" ] && [ "$(echo "$L" | json data.0.welcomeGiftOrder.id)" = "$O1_ID" ] \
+  && ok "list: doctor A now 'available', the earlier gift order still shown" || bad "list after reset: $(echo "$L" | head -c 300)"
+O3=$(new_order "$AAH" "{\"patientId\":\"$PAT_A_ID\"}")
+O3_ID=$(echo "$O3" | json id)
+CODE=$(submit "$AAH" "$O3_ID")
+R=$(cat "$TMP_DIR/submit.json")
+accepted "$CODE" && [ "$(echo "$R" | json welcomeGift.total)" = "300" ] && [ "$(echo "$R" | json welcomeGift.firstCase)" = "false" ] \
+  && ok "the next case gets a SECOND gift: 300 TND, firstCase=false" || bad "second gift: $CODE $(echo "$R" | head -c 300)"
+[ -n "$(gift_col "$O1_ID")" ] && [ -n "$(gift_col "$O3_ID")" ] \
+  && ok "both gift orders kept (no unique index any more)" || bad "gift columns: O1='$(gift_col "$O1_ID")' O3='$(gift_col "$O3_ID")'"
+[ "$(mark_is_gift "$DOC_A_ID" "$O3_ID")" = "t" ] && ok "doctor A re-marked with the second gift's instant" || bad "mark after second gift: '$(mark_of "$DOC_A_ID")'"
+ST=$(status_of "$AAH")
+[ "$(echo "$ST" | json eligible)" = "false" ] && [ "$(echo "$ST" | json giftOrderId)" = "$O3_ID" ] \
+  && ok "status: not eligible, giftOrderId = the latest gift" || bad "status after second gift: $ST"
+U=$(curl -sS "$API/users/$DOC_A_ID" -H "$AH")
+[ "$(echo "$U" | json welcomeGiftOrder.id)" = "$O3_ID" ] && ok "GET /users/:id shows the latest gift order" || bad "detail after second gift: $(echo "$U" | json welcomeGiftOrder.id)"
+
+# 15f. used=true → not eligible; idempotent (keeps the original date).
+CODE=$(mark "$AH" "$DOC_A_ID" '{"used":false}')
+accepted "$CODE" || bad "reset before used=true: $CODE"
+CODE=$(mark "$AH" "$DOC_A_ID" '{"used":true}')
+SET_AT=$(json welcomeGiftUsedAt < "$TMP_DIR/mark.json")
+accepted "$CODE" && [ -n "$SET_AT" ] && [ -n "$(mark_of "$DOC_A_ID")" ] \
+  && ok "admin PATCH used=true → marked ($SET_AT)" || bad "used=true: $CODE $(head -c 200 "$TMP_DIR/mark.json")"
+CODE=$(mark "$AH" "$DOC_A_ID" '{"used":true}')
+accepted "$CODE" && [ "$(json welcomeGiftUsedAt < "$TMP_DIR/mark.json")" = "$SET_AT" ] \
+  && ok "used=true again keeps the original timestamp" || bad "idempotent used=true: $(head -c 200 "$TMP_DIR/mark.json")"
+ST=$(status_of "$AAH")
+[ "$(echo "$ST" | json eligible)" = "false" ] && ok "doctor A not eligible after used=true" || bad "status after used=true: $ST"
+O4=$(new_order "$AAH" "{\"patientId\":\"$PAT_A_ID\"}")
+O4_ID=$(echo "$O4" | json id)
+CODE=$(submit "$AAH" "$O4_ID")
+R=$(cat "$TMP_DIR/submit.json")
+accepted "$CODE" && [ -z "$(echo "$R" | json welcomeGift)" ] && [ -z "$(gift_col "$O4_ID")" ] \
+  && ok "the next case is submitted WITHOUT gift" || bad "case after used=true: $CODE $(echo "$R" | json welcomeGift)"
+
+# 15g. Stats.
+S=$(curl -sS "$API/users/stats" -H "$AH")
+STATS_OK=1
+for k in total active blocked pending dentists admins giftAvailable giftUsed; do
+  is_count "$(echo "$S" | json "$k")" || STATS_OK=0
+done
+[ "$STATS_OK" = "1" ] && ok "GET /users/stats returns 8 counts: $S" || bad "stats: $(echo "$S" | head -c 300)"
+if [ "$STATS_OK" = "1" ]; then
+  S_TOTAL=$(echo "$S" | json total); S_ACTIVE=$(echo "$S" | json active); S_BLOCKED=$(echo "$S" | json blocked)
+  S_DENT=$(echo "$S" | json dentists); S_AVAIL=$(echo "$S" | json giftAvailable); S_USED=$(echo "$S" | json giftUsed)
+  [ "$S_TOTAL" -ge 6 ] && [ $((S_TOTAL - S_ACTIVE)) = "$S_BLOCKED" ] && [ $((S_AVAIL + S_USED)) = "$S_DENT" ] && [ "$S_USED" -ge 5 ] \
+    && ok "stats add up (blocked = total - active, dentists = available + used)" || bad "stats sums: $S"
+fi
+CODE=$(code_of "$AAH" "/users/stats")
+[ "$CODE" = "403" ] && ok "a dentist cannot read the stats (403)" || bad "dentist stats: $CODE"

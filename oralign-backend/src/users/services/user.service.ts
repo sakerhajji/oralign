@@ -3,24 +3,25 @@ import {
   NotFoundException,
   ConflictException,
 } from '../../common/exceptions/app.exception';
-import { UserRepository } from '../repositories/user.repository';
+import {
+  UserRepository,
+  type UserWithProfile,
+} from '../repositories/user.repository';
 import {
   CreateUserDto,
   UpdateUserDto,
   UserResponseDto,
-  UserFilterDto,
+  UserListQueryDto,
+  UsersStatsDto,
 } from '../dto/user.dto';
-import { Prisma, UserRole, VerificationStatus } from '@prisma/client';
+import { UserRole, VerificationStatus } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PaginatedResponse } from '../../common/dto/response.dto';
 import { MailService } from '../../mail/mail.service';
 import { Logger } from '@nestjs/common';
 import { env } from '../../common/config/env';
 import { assertNoDependents } from '../../common/deletion/deletion-blocked';
-
-type UserWithProfile = Prisma.UserGetPayload<{
-  include: { dentistProfile: true };
-}>;
+import { type Caller } from '../../common/access/caller';
 
 @Injectable()
 export class UserService {
@@ -31,7 +32,24 @@ export class UserService {
     private readonly mailService: MailService,
   ) {}
 
-  async createUser(createUserDto: CreateUserDto): Promise<UserResponseDto> {
+  /**
+   * Admin creates an account with the requested role (dentist when
+   * omitted). Only a super admin may create another super admin: the role
+   * field must not become a way around the hierarchy.
+   */
+  async createUser(
+    createUserDto: CreateUserDto,
+    caller: Caller,
+  ): Promise<UserResponseDto> {
+    if (
+      createUserDto.role === UserRole.super_admin &&
+      caller.role !== UserRole.super_admin
+    ) {
+      throw new ForbiddenException(
+        'Only a super admin can create a super admin account.',
+      );
+    }
+
     const existingUser = await this.userRepository.findByEmail(
       createUserDto.email,
     );
@@ -55,6 +73,7 @@ export class UserService {
       phone,
       country: createUserDto.country,
       avatarUrl: createUserDto.avatarUrl,
+      role: createUserDto.role,
     });
 
     return this.mapToDto(user);
@@ -70,27 +89,26 @@ export class UserService {
     return this.mapToDto(user);
   }
 
+  /**
+   * `GET /users`: one page of non-deleted accounts, newest first. `page`
+   * and `limit` arrive validated (UserListQueryDto: page ≥ 1, limit within
+   * bounds), so `skip` is never NaN or negative.
+   */
   async getAllUsers(
-    page = 1,
-    limit = 10,
-    filters?: UserFilterDto,
+    query: UserListQueryDto,
   ): Promise<PaginatedResponse<UserResponseDto>> {
-    const skip = (page - 1) * limit;
+    const { page, limit } = query;
     const { users, total } = await this.userRepository.findAll(
-      skip,
+      (page - 1) * limit,
       limit,
-      filters,
+      query,
     );
+    return this.toPage(users, total, page, limit);
+  }
 
-    const totalPages = Math.ceil(total / limit);
-
-    return new PaginatedResponse(
-      users.map((user) => this.mapToDto(user)),
-      total,
-      page,
-      limit,
-      totalPages,
-    );
+  /** `GET /users/stats`: counts over non-deleted accounts (admin KPIs). */
+  async getStats(): Promise<UsersStatsDto> {
+    return this.userRepository.countStats();
   }
 
   async updateUser(
@@ -117,8 +135,8 @@ export class UserService {
     // Prepare update data object
     const updateData: {
       fullName?: string;
-      phone?: string;
-      country?: string;
+      phone?: string | null;
+      country?: string | null;
       avatarUrl?: string;
       preferredLanguage?: string;
       passwordHash?: string;
@@ -131,18 +149,16 @@ export class UserService {
     if (updateUserDto.fullName !== undefined)
       updateData.fullName = updateUserDto.fullName;
     if (updateUserDto.phone !== undefined) {
-      // Normalise blank → null, and reject a number already held by a
-      // DIFFERENT user (phone is unique when present).
-      const phone = updateUserDto.phone.trim();
+      // The DTO already turned a blank value into null ("clear"); a set
+      // number must not be held by a DIFFERENT user (unique when present).
+      const phone = updateUserDto.phone?.trim() || null;
       if (phone) {
         const owner = await this.userRepository.findByPhone(phone);
         if (owner && owner.id !== id) {
           throw new ConflictException('Phone number already exists');
         }
-        updateData.phone = phone;
-      } else {
-        updateData.phone = undefined;
       }
+      updateData.phone = phone;
     }
     if (updateUserDto.country !== undefined)
       updateData.country = updateUserDto.country;
@@ -234,11 +250,28 @@ export class UserService {
     return { message: `${count} users ${action} successfully`, count };
   }
 
-  async updateUserRole(id: string, role: UserRole): Promise<UserResponseDto> {
+  /**
+   * Same hierarchy as createUser: only a super admin may grant the super
+   * admin role or change the role of an existing super admin.
+   */
+  async updateUserRole(
+    id: string,
+    role: UserRole,
+    caller: Caller,
+  ): Promise<UserResponseDto> {
     const user = await this.userRepository.findById(id);
 
     if (!user || user.deletedAt) {
       throw new NotFoundException('User not found');
+    }
+
+    if (
+      caller.role !== UserRole.super_admin &&
+      (role === UserRole.super_admin || user.role === UserRole.super_admin)
+    ) {
+      throw new ForbiddenException(
+        'Only a super admin can grant or change a super admin role.',
+      );
     }
 
     const updatedUser = await this.userRepository.update(id, { role });
@@ -300,27 +333,17 @@ export class UserService {
     return this.mapToDto(updatedUser);
   }
 
+  /** `GET /users/deleted/list`: same query and filters as the live list. */
   async getDeletedUsers(
-    page = 1,
-    limit = 10,
-    filters?: UserFilterDto,
+    query: UserListQueryDto,
   ): Promise<PaginatedResponse<UserResponseDto>> {
-    const skip = (page - 1) * limit;
+    const { page, limit } = query;
     const { users, total } = await this.userRepository.findAllDeleted(
-      skip,
+      (page - 1) * limit,
       limit,
-      filters,
+      query,
     );
-
-    const totalPages = Math.ceil(total / limit);
-
-    return new PaginatedResponse(
-      users.map((user) => this.mapToDto(user)),
-      total,
-      page,
-      limit,
-      totalPages,
-    );
+    return this.toPage(users, total, page, limit);
   }
 
   async restoreUser(id: string): Promise<UserResponseDto> {
@@ -418,7 +441,24 @@ export class UserService {
     ]);
   }
 
+  private toPage(
+    users: UserWithProfile[],
+    total: number,
+    page: number,
+    limit: number,
+  ): PaginatedResponse<UserResponseDto> {
+    return new PaginatedResponse(
+      users.map((user) => this.mapToDto(user)),
+      total,
+      page,
+      limit,
+      Math.ceil(total / limit),
+    );
+  }
+
   private mapToDto(user: UserWithProfile): UserResponseDto {
+    const giftOrder =
+      user.role === UserRole.dentist ? user.doctorOrders[0] : undefined;
     return {
       id: user.id,
       email: user.email,
@@ -437,6 +477,18 @@ export class UserService {
       updatedAt: user.updatedAt,
       verificationStatus: user.verificationStatus ?? undefined,
       dentistProfile: user.dentistProfile ?? null,
+      // Welcome gift: the doctor mark and the most recent gift order (the
+      // repository loads at most one, id + code). Only practitioners
+      // receive the gift. An archived gift order stays (the gift was used
+      // on it) but is flagged: the order page 404s on it, so no link.
+      welcomeGiftUsedAt: user.welcomeGiftUsedAt ?? null,
+      welcomeGiftOrder: giftOrder
+        ? {
+            id: giftOrder.id,
+            orderCode: giftOrder.orderCode,
+            archived: giftOrder.deletedAt !== null,
+          }
+        : null,
     };
   }
 }

@@ -1,13 +1,17 @@
 import {
+  Body,
   Controller,
   Get,
   HttpCode,
   HttpStatus,
+  Param,
+  Patch,
   UseGuards,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOperation,
+  ApiParam,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
@@ -19,12 +23,19 @@ import {
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
-import { WelcomeGiftStatusDto } from '../dto/welcome-gift.dto';
+import {
+  WelcomeGiftMarkDto,
+  WelcomeGiftMarkResponseDto,
+  WelcomeGiftStatusDto,
+} from '../dto/welcome-gift.dto';
 import { WelcomeGiftService } from '../services/welcome-gift.service';
 
 /**
- * The doctor's own welcome gift (banner state). Always scoped to the
- * caller: there is no doctorId parameter to probe someone else's.
+ * The welcome gift. `GET /welcome-gift` is the doctor's own banner state,
+ * always scoped to the caller (no doctorId parameter to probe someone
+ * else's). `PATCH /welcome-gift/doctors/:doctorId` is the admin control of
+ * a doctor's mark; its method-level @Roles overrides the dentist-only
+ * class default (RolesGuard reads handler first, then class).
  */
 @ApiTags('welcome-gift')
 @ApiBearerAuth('access-token')
@@ -45,5 +56,29 @@ export class WelcomeGiftController {
     @CurrentUser() user: JwtPayload,
   ): Promise<WelcomeGiftStatusDto> {
     return this.welcomeGift.getStatus(user.sub);
+  }
+
+  @Patch('doctors/:doctorId')
+  @Roles(UserRole.admin, UserRole.super_admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Admin: mark a practitioner\'s welcome gift as used, or make it available again (it then lands on their next submitted case). Idempotent: an existing "used" mark keeps its original date.',
+  })
+  @ApiParam({ name: 'doctorId', type: String, description: 'Dentist user ID' })
+  @ApiResponse({ status: 200, type: WelcomeGiftMarkResponseDto })
+  @ApiResponse({
+    status: 404,
+    description: 'No non-deleted dentist with this ID.',
+  })
+  async setDoctorMark(
+    @Param('doctorId') doctorId: string,
+    @Body() dto: WelcomeGiftMarkDto,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<WelcomeGiftMarkResponseDto> {
+    return this.welcomeGift.setDoctorMark(doctorId, dto.used, {
+      userId: user.sub,
+      role: user.role,
+    });
   }
 }

@@ -1,0 +1,15 @@
+-- Welcome gift: the doctor mark alone decides, and an admin may change it.
+-- "User"."welcomeGiftUsedAt" NULL = the doctor gets the gift on the next
+-- case they submit; an admin can now reset it (PATCH
+-- /welcome-gift/doctors/:doctorId), so one doctor may legitimately end up
+-- with several gift orders over time. The partial unique index "one gift
+-- order per doctor" would turn that second gift into a unique violation,
+-- so it goes. One gift per mark is still guaranteed: WelcomeGiftService
+-- serializes every gift decision of a doctor with a transaction-scoped
+-- advisory lock (database-wide, so across app instances too) and claims
+-- the mark with a compare-and-set (UPDATE ... WHERE "welcomeGiftUsedAt"
+-- IS NULL) before writing the order. Lookups by doctor keep using the
+-- plain "DentalOrder_doctorId_idx".
+-- Idempotent: safe under `prisma migrate deploy` whether or not the index
+-- exists. No data changes.
+DROP INDEX IF EXISTS "DentalOrder_welcome_gift_doctor_key";

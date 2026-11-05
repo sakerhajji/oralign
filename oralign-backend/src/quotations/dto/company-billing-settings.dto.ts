@@ -15,6 +15,15 @@ import {
 } from 'class-validator';
 
 /**
+ * Optional text fields of the settings form: "" (or blanks) means "clear
+ * this field" and becomes null, which skips the validators (@IsOptional)
+ * so a cleared e-mail never trips @IsEmail. Absent (undefined) still means
+ * "unchanged" — the service keeps the stored value.
+ */
+const blankToNull = ({ value }: { value: unknown }) =>
+  typeof value === 'string' && value.trim() === '' ? null : value;
+
+/**
  * Translation map for legal / footer text.
  *
  * Each key is a language code accepted by `DevisLanguage` (fr|en|ar).
@@ -74,73 +83,110 @@ export class UpsertCompanyBillingSettingsDto {
   @IsString()
   @MaxLength(160)
   companyName?: string;
-  @ApiPropertyOptional()
+  // Optional text fields below: "" / null = clear, absent = unchanged.
+  @ApiPropertyOptional({ type: String, nullable: true })
+  @Transform(blankToNull)
   @IsOptional()
   @IsString()
   @MaxLength(255)
-  companyAddress?: string;
-  @ApiPropertyOptional()
+  companyAddress?: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  @Transform(blankToNull)
   @IsOptional()
   @IsString()
   @MaxLength(120)
-  companyCity?: string;
-  @ApiPropertyOptional()
+  companyCity?: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  @Transform(blankToNull)
   @IsOptional()
   @IsString()
   @MaxLength(120)
-  companyCountry?: string;
-  @ApiPropertyOptional()
+  companyCountry?: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  @Transform(blankToNull)
   @IsOptional()
   @IsString()
   @MaxLength(64)
-  companyPhone?: string;
-  @ApiPropertyOptional()
+  companyPhone?: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  @Transform(blankToNull)
   @IsOptional()
   @IsEmail()
   @MaxLength(255)
-  companyEmail?: string;
-  @ApiPropertyOptional()
+  companyEmail?: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  @Transform(blankToNull)
   @IsOptional()
   @IsString()
   @MaxLength(120)
-  taxRegistrationNumber?: string;
+  taxRegistrationNumber?: string | null;
 
   // ── Legal identity (mentions légales) ─────────────────────────────────
-  @ApiPropertyOptional({ description: 'Nom commercial / trade name' })
+  @ApiPropertyOptional({
+    description: 'Nom commercial / trade name',
+    type: String,
+    nullable: true,
+  })
+  @Transform(blankToNull)
   @IsOptional()
   @IsString()
   @MaxLength(160)
-  tradeName?: string;
+  tradeName?: string | null;
 
-  @ApiPropertyOptional({ description: 'Forme juridique (SUARL, SARL, …)' })
+  @ApiPropertyOptional({
+    description: 'Forme juridique (SUARL, SARL, …)',
+    type: String,
+    nullable: true,
+  })
+  @Transform(blankToNull)
   @IsOptional()
   @IsString()
   @MaxLength(120)
-  legalForm?: string;
+  legalForm?: string | null;
 
-  @ApiPropertyOptional({ description: 'Registre de commerce (RC)' })
+  @ApiPropertyOptional({
+    description: 'Registre de commerce (RC)',
+    type: String,
+    nullable: true,
+  })
+  @Transform(blankToNull)
   @IsOptional()
   @IsString()
   @MaxLength(120)
-  registreDeCommerce?: string;
+  registreDeCommerce?: string | null;
 
-  @ApiPropertyOptional({ description: 'Hosting provider name (hébergeur)' })
+  @ApiPropertyOptional({
+    description: 'Hosting provider name (hébergeur)',
+    type: String,
+    nullable: true,
+  })
+  @Transform(blankToNull)
   @IsOptional()
   @IsString()
   @MaxLength(160)
-  hostingProvider?: string;
+  hostingProvider?: string | null;
 
-  @ApiPropertyOptional({ description: 'Hosting provider website URL' })
+  @ApiPropertyOptional({
+    description: 'Hosting provider website URL',
+    type: String,
+    nullable: true,
+  })
+  @Transform(blankToNull)
   @IsOptional()
   @IsString()
   @MaxLength(255)
-  hostingProviderUrl?: string;
+  hostingProviderUrl?: string | null;
 
-  @ApiPropertyOptional({ description: 'Public website domain, e.g. oralign.com.tn' })
+  @ApiPropertyOptional({
+    description: 'Public website domain, e.g. oralign.com.tn',
+    type: String,
+    nullable: true,
+  })
+  @Transform(blankToNull)
   @IsOptional()
   @IsString()
   @MaxLength(160)
-  websiteDomain?: string;
+  websiteDomain?: string | null;
 
   @ApiPropertyOptional({ minimum: 0, maximum: 100, default: 19 })
   @IsOptional()

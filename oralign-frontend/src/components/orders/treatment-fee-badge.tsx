@@ -33,8 +33,9 @@ import {
  *                  scan of the orders list.
  *   • Rejected   — admin rejected a previous attempt → doctor needs to
  *                  re-declare. Red pill (rare but possible state).
- *   • Gift       — the welcome gift waived the fee: nothing
- *                  is owed. Calm brand-sun pill, distinct from unpaid.
+ *   • Gift       — the Oralign gift waived the fee: nothing is owed.
+ *                  Light emerald pill with a gift icon, distinct from
+ *                  paid and unpaid.
  *   • Unpaid     — no payment recorded yet → the doctor still owes the
  *                  fee. Amber pill.
  *
@@ -69,9 +70,10 @@ const META: Record<
     dictKey: 'orders.feeBadge.rejected',
   },
   gift: {
-    // The brand's black box: ink fill, porcelain label (amber is never
-    // a text colour or a tint on light grounds).
-    tone: 'bg-[#191919] text-[#f2f5ef] border-[#191919]',
+    // Emerald like every positive state, but the lighter tint and the
+    // gift icon keep it apart from "paid" (nothing was paid: it was
+    // offered).
+    tone: 'bg-emerald-50 text-emerald-700 border-emerald-200',
     Icon: Gift,
     dictKey: 'orders.feeBadge.gift',
   },

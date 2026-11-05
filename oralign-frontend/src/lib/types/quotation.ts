@@ -93,6 +93,12 @@ export interface CompanyBillingSettings {
   updatedAt: string;
 }
 
+/**
+ * PUT /admin/company-billing-settings. Partial: an omitted (undefined) field
+ * keeps its stored value. For the optional text fields (address … website
+ * domain) an empty string "" CLEARS the stored value (stored as null).
+ * Numbers and booleans are only ever "set" or "unchanged".
+ */
 export interface UpsertCompanyBillingSettingsDto {
   companyName?: string;
   companyAddress?: string;
@@ -121,7 +127,10 @@ export interface UpsertCompanyBillingSettingsDto {
   retainersFee?: number;
   /** Master switch of the quarterly loyalty program. */
   loyaltyEnabled?: boolean;
-  /** Welcome gift switch (once per practitioner). */
+  /**
+   * Welcome gift switch (once per practitioner). Saved on its own by the
+   * gift card's instant switch; the form's Save leaves it out.
+   */
   welcomeGiftEnabled?: boolean;
   defaultCurrency?: string;
   devisPrefix?: string;

@@ -4,7 +4,6 @@ import {
   Gender,
   PatientStage,
   ToothInstructionType,
-  UserRole,
   DayOfWeek,
 } from '@/lib/types';
 
@@ -123,25 +122,6 @@ export const resetPasswordSchema = z.object({
 // ==========================================
 // USER SCHEMAS
 // ==========================================
-
-export const createUserSchema = z.object({
-  email: z.string().email('Invalid email address').toLowerCase().trim(),
-  fullName: z.string().min(2, 'Full name must be at least 2 characters'),
-  password: z.string().min(8, 'Password must be at least 8 characters'),
-  phone: optionalE164PhoneSchema,
-  country: optionalCountrySchema,
-  role: z.nativeEnum(UserRole).optional(),
-  avatarUrl: z.string().url('Invalid URL').optional().or(z.literal('')),
-});
-
-export const updateUserSchema = z.object({
-  fullName: z.string().min(2, 'Full name must be at least 2 characters').optional(),
-  phone: optionalE164PhoneSchema,
-  country: optionalCountrySchema,
-  password: z.string().min(8, 'Password must be at least 8 characters').optional().or(z.literal('')),
-  role: z.nativeEnum(UserRole).optional(),
-  isEmailVerified: z.boolean().optional(),
-});
 
 export const accountProfileSchema = z.object({
   fullName: z.string().min(2, 'Full name must be at least 2 characters'),
@@ -357,8 +337,19 @@ export const updateWorkingHoursSchema = z.object({
 // PATIENT SCHEMAS
 // ==========================================
 
+/**
+ * The E.164 rule every patient phone follows (the backend DTO enforces
+ * the same regex). For forms outside react-hook-form, e.g. the order
+ * wizard's inline new patient.
+ */
+export function isE164Phone(value: string): boolean {
+  return E164_PHONE_REGEX.test(value);
+}
+
+// The patient schema's messages are i18n keys (`patientDesk.validation.*`):
+// the forms translate them with `t()` where they render.
 export const createPatientSchema = z.object({
-  fullName: z.string().min(2, 'Patient name must be at least 2 characters'),
+  fullName: z.string().trim().min(2, 'patientDesk.validation.fullName'),
   // Email is explicitly OPTIONAL. The `preprocess` step coerces empty
   // strings + whitespace-only entries to `undefined` BEFORE Zod's
   // `.email()` runs — without this, a user who typed a few characters
@@ -371,9 +362,14 @@ export const createPatientSchema = z.object({
   // both fields behave identically for the user.
   email: z.preprocess(
     normalizeOptionalString,
-    z.string().email('Invalid email address').optional(),
+    z.string().email('patientDesk.validation.email').optional(),
   ),
-  phone: optionalE164PhoneSchema,
+  // E.164 from the flag picker (PhoneInput); '' (no number, or the dial
+  // code alone) means "no phone".
+  phone: z.preprocess(
+    normalizeOptionalString,
+    z.string().regex(E164_PHONE_REGEX, 'patientDesk.validation.phone').optional(),
+  ),
   gender: z.nativeEnum(Gender).optional(),
   // Same coercion treatment as `email` so an empty date string never
   // surfaces as a validation failure — the field is genuinely
@@ -392,7 +388,7 @@ export const createPatientSchema = z.object({
   clinicalConditions: z.array(z.string()).max(30).optional(),
   clinicalConditionsOther: z
     .string()
-    .max(500, 'Detail must be 500 characters or fewer')
+    .max(500, 'patientDesk.validation.otherDetail')
     .optional()
     .or(z.literal('')),
   doctorId: z.string().optional(),
@@ -467,8 +463,6 @@ export type SignInFormData = z.infer<typeof signInSchema>;
 export type VerifyEmailFormData = z.infer<typeof verifyEmailSchema>;
 export type ForgotPasswordFormData = z.infer<typeof forgotPasswordSchema>;
 export type ResetPasswordFormData = z.infer<typeof resetPasswordSchema>;
-export type CreateUserFormData = z.infer<typeof createUserSchema>;
-export type UpdateUserFormData = z.infer<typeof updateUserSchema>;
 export type AccountProfileFormData = z.infer<typeof accountProfileSchema>;
 export type ClinicSettingsFormData = z.infer<typeof clinicSettingsSchema>;
 export type SecuritySettingsFormData = z.infer<typeof securitySettingsSchema>;

@@ -33,6 +33,23 @@ const normalizeEmail = (value: unknown): unknown => {
   return normalized.toLowerCase();
 };
 
+/**
+ * Update payloads (PATCH semantics): an omitted field keeps the stored
+ * value, while "" or null clears it. `@IsOptional()` skips the other
+ * validators for null, so a cleared field never trips the format checks.
+ */
+const normalizeClearableString = (value: unknown): unknown => {
+  if (value === null) return null;
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  return trimmed === '' ? null : trimmed;
+};
+
+const normalizeClearableEmail = (value: unknown): unknown => {
+  const normalized = normalizeClearableString(value);
+  return typeof normalized === 'string' ? normalized.toLowerCase() : normalized;
+};
+
 export class CreatePatientDto {
   @ApiProperty({ example: 'Sarah Morgan', description: 'Patient full name' })
   @IsString()
@@ -135,20 +152,30 @@ export class UpdatePatientDto {
   @MinLength(2)
   fullName?: string;
 
-  @ApiProperty({ example: 'sarah.morgan@example.com', required: false })
-  @Transform(({ value }: { value: unknown }) => normalizeEmail(value))
+  @ApiProperty({
+    example: 'sarah.morgan@example.com',
+    required: false,
+    nullable: true,
+    description: '"" or null clears it; omit to keep it.',
+  })
+  @Transform(({ value }: { value: unknown }) => normalizeClearableEmail(value))
   @IsOptional()
   @IsEmail()
-  email?: string;
+  email?: string | null;
 
-  @ApiProperty({ example: '+21612345678', required: false })
-  @Transform(({ value }: { value: unknown }) => normalizeOptionalString(value))
+  @ApiProperty({
+    example: '+21612345678',
+    required: false,
+    nullable: true,
+    description: 'E.164. "" or null clears it; omit to keep it.',
+  })
+  @Transform(({ value }: { value: unknown }) => normalizeClearableString(value))
   @IsOptional()
   @IsString()
   @Matches(E164_PHONE_REGEX, {
     message: 'Phone must be in E.164 format (e.g. +21612345678)',
   })
-  phone?: string;
+  phone?: string | null;
 
   @ApiProperty({ enum: Gender, required: false })
   @IsOptional()
@@ -161,17 +188,21 @@ export class UpdatePatientDto {
   @IsDate()
   dateOfBirth?: Date;
 
-  @ApiProperty({ example: '12 Dental Avenue', required: false })
-  @Transform(({ value }: { value: unknown }) => normalizeOptionalString(value))
+  @ApiProperty({ example: '12 Dental Avenue', required: false, nullable: true })
+  @Transform(({ value }: { value: unknown }) => normalizeClearableString(value))
   @IsOptional()
   @IsString()
-  address?: string;
+  address?: string | null;
 
-  @ApiProperty({ example: 'Prefers morning appointments.', required: false })
-  @Transform(({ value }: { value: unknown }) => normalizeOptionalString(value))
+  @ApiProperty({
+    example: 'Prefers morning appointments.',
+    required: false,
+    nullable: true,
+  })
+  @Transform(({ value }: { value: unknown }) => normalizeClearableString(value))
   @IsOptional()
   @IsString()
-  notes?: string;
+  notes?: string | null;
 
   // ── Clinical conditions (multi-select + Other text) — see CreatePatientDto.
   @ApiProperty({
@@ -185,12 +216,12 @@ export class UpdatePatientDto {
   @IsString({ each: true })
   clinicalConditions?: string[];
 
-  @ApiProperty({ required: false })
-  @Transform(({ value }: { value: unknown }) => normalizeOptionalString(value))
+  @ApiProperty({ required: false, nullable: true })
+  @Transform(({ value }: { value: unknown }) => normalizeClearableString(value))
   @IsOptional()
   @IsString()
   @MaxLength(500)
-  clinicalConditionsOther?: string;
+  clinicalConditionsOther?: string | null;
 
   @ApiProperty({
     example: '8a45c87d-c66a-4f30-8504-c90f7d14e68e',

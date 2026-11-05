@@ -1,7 +1,7 @@
 // List / filter query params
 // Split out of the former 2,000-line lib/types/index.ts; import via '@/lib/types'.
 
-import { Gender, OrderStatus, UserRole } from './enums';
+import { Gender, OrderStatus, UserRole, VerificationStatus } from './enums';
 
 // ==========================================
 // QUERY PARAMS
@@ -13,10 +13,14 @@ export interface PaginationParams {
 }
 
 export interface UserFilterParams extends PaginationParams {
+  /** Matches full name, email, phone (spaces ignored) and clinic name. */
   search?: string;
   role?: UserRole;
   isActive?: boolean;
   isEmailVerified?: boolean;
+  verificationStatus?: VerificationStatus;
+  /** Oralign gift mark — narrows the list to dentists. */
+  welcomeGift?: 'used' | 'available';
 }
 
 /**

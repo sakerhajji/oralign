@@ -5,7 +5,11 @@ import {
   IsOptional,
   IsEnum,
   IsIn,
+  IsInt,
   MinLength,
+  MaxLength,
+  Min,
+  Max,
   IsArray,
   IsBoolean,
   Matches,
@@ -27,6 +31,55 @@ const normalizeCountryCode = (value: unknown) => {
   if (typeof normalized !== 'string') return normalized;
   return normalized.toUpperCase();
 };
+
+/**
+ * Update semantics for an optional, clearable text field: absent →
+ * undefined ("unchanged"), blank → null ("clear"), else trimmed. Null
+ * skips the validators (@IsOptional), so a clear never trips @Matches.
+ */
+const normalizeClearableString = (value: unknown) => {
+  if (value === null) return null;
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  return trimmed === '' ? null : trimmed;
+};
+
+const normalizeClearableCountryCode = (value: unknown) => {
+  const normalized = normalizeClearableString(value);
+  if (typeof normalized !== 'string') return normalized;
+  return normalized.toUpperCase();
+};
+
+/**
+ * Query-string boolean, read from the RAW value: enableImplicitConversion
+ * runs Boolean() first, which turns the string "false" into true. Absent or
+ * blank → undefined (no filter); anything but true/false → 400.
+ */
+const toOptionalBoolean = ({ obj, key }: { obj: unknown; key: string }) => {
+  const raw = (obj as Record<string, unknown>)[key];
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  if (raw === true || raw === 'true') return true;
+  if (raw === false || raw === 'false') return false;
+  return raw;
+};
+
+/** Query-string enum / text: a blank value means "no filter". */
+const blankToUndefined = ({ obj, key }: { obj: unknown; key: string }) => {
+  const raw = (obj as Record<string, unknown>)[key];
+  if (typeof raw !== 'string') return raw;
+  const trimmed = raw.trim();
+  return trimmed === '' ? undefined : trimmed;
+};
+
+/** Values of the `welcomeGift` list filter (dentists only). */
+export const WELCOME_GIFT_FILTERS = ['used', 'available'] as const;
+export type WelcomeGiftFilter = (typeof WELCOME_GIFT_FILTERS)[number];
+
+/**
+ * Upper bound of `limit` on the users lists. The admin dentist pickers
+ * (orders / patients filters) still request 200 rows in one page.
+ */
+export const USERS_LIST_MAX_LIMIT = 200;
 
 const normalizeEmail = (value: unknown): unknown => {
   if (typeof value !== 'string') return value;
@@ -117,29 +170,35 @@ export class UpdateUserDto {
 
   @ApiProperty({
     example: '+1122334455',
-    description: 'User phone number in E.164 format',
+    description:
+      'User phone number in E.164 format. "" or null clears it; omit to keep it.',
     required: false,
+    type: String,
+    nullable: true,
   })
-  @Transform(({ value }) => normalizeOptionalString(value))
+  @Transform(({ value }) => normalizeClearableString(value))
   @IsOptional()
   @IsString()
   @Matches(E164_PHONE_REGEX, {
     message: 'Phone must be in E.164 format (e.g. +21612345678)',
   })
-  phone?: string;
+  phone?: string | null;
 
   @ApiProperty({
     example: 'TN',
-    description: 'User country ISO code',
+    description:
+      'User country ISO code. "" or null clears it; omit to keep it.',
     required: false,
+    type: String,
+    nullable: true,
   })
-  @Transform(({ value }) => normalizeCountryCode(value))
+  @Transform(({ value }) => normalizeClearableCountryCode(value))
   @IsOptional()
   @IsString()
   @Matches(ISO_COUNTRY_REGEX, {
     message: 'Country must be ISO 3166-1 alpha-2 (e.g. TN)',
   })
-  country?: string;
+  country?: string | null;
 
   @ApiProperty({
     example: 'https://example.com/new-avatar.png',
@@ -233,12 +292,40 @@ export class UserResponseDto {
     latitude?: number | null;
     longitude?: number | null;
   } | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description:
+      'Welcome gift doctor mark: when the gift was used, null while it is available (always null for non-dentists in practice).',
+  })
+  welcomeGiftUsedAt!: Date | null;
+
+  @ApiProperty({
+    type: Object,
+    nullable: true,
+    description:
+      "The doctor's most recent order carrying the welcome gift ({ id, orderCode, archived }); null when none, and always null for non-dentists. `archived` is true when that order was archived (soft-deleted): the gift still counts as used on it, but the order page is no longer reachable, so do not link to it.",
+  })
+  welcomeGiftOrder!: {
+    id: string;
+    orderCode: string;
+    archived: boolean;
+  } | null;
 }
 
+/** Filters shared by the active (`GET /users`) and deleted users lists. */
 export class UserFilterDto {
-  @ApiProperty({ required: false, description: 'Search by name or email' })
+  @ApiProperty({
+    required: false,
+    description:
+      'Matches full name, email, clinic name (case-insensitive) and phone (spaces, dashes, dots and parentheses ignored).',
+  })
+  @Transform(blankToUndefined)
   @IsOptional()
   @IsString()
+  @MaxLength(120)
   search?: string;
 
   @ApiProperty({
@@ -246,24 +333,108 @@ export class UserFilterDto {
     required: false,
     description: 'Filter by role',
   })
+  @Transform(blankToUndefined)
   @IsOptional()
   @IsEnum(UserRole)
   role?: UserRole;
 
-  @ApiProperty({ required: false, description: 'Filter by active status' })
+  @ApiProperty({
+    required: false,
+    type: Boolean,
+    description: 'Filter by active status (true = active, false = blocked)',
+  })
+  @Transform(toOptionalBoolean)
   @IsOptional()
-  @Type(() => Boolean)
   @IsBoolean()
   isActive?: boolean;
 
   @ApiProperty({
     required: false,
+    type: Boolean,
     description: 'Filter by email verified status',
   })
+  @Transform(toOptionalBoolean)
   @IsOptional()
-  @Type(() => Boolean)
   @IsBoolean()
   isEmailVerified?: boolean;
+
+  @ApiProperty({
+    enum: VerificationStatus,
+    required: false,
+    description: 'Filter by account approval status',
+  })
+  @Transform(blankToUndefined)
+  @IsOptional()
+  @IsEnum(VerificationStatus)
+  verificationStatus?: VerificationStatus;
+
+  @ApiProperty({
+    enum: [...WELCOME_GIFT_FILTERS],
+    required: false,
+    description:
+      'Welcome gift mark (dentists only): used = marked, available = not marked. Non-dentists never match.',
+  })
+  @Transform(blankToUndefined)
+  @IsOptional()
+  @IsIn(WELCOME_GIFT_FILTERS)
+  welcomeGift?: WelcomeGiftFilter;
+}
+
+/**
+ * Query of `GET /users` and `GET /users/deleted/list`: pagination + the
+ * shared filters. Bound with `@Query()` so the global ValidationPipe
+ * rejects a bad page / limit / enum with a 400 instead of sending NaN or
+ * a negative skip to Prisma.
+ */
+export class UserListQueryDto extends UserFilterDto {
+  @ApiProperty({ required: false, default: 1, minimum: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page: number = 1;
+
+  @ApiProperty({
+    required: false,
+    default: 10,
+    minimum: 1,
+    maximum: USERS_LIST_MAX_LIMIT,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(USERS_LIST_MAX_LIMIT)
+  limit: number = 10;
+}
+
+/**
+ * `GET /users/stats` — counts over non-deleted accounts. `blocked` is
+ * `total - active`; the gift counts cover dentists only
+ * (`giftAvailable + giftUsed = dentists`).
+ */
+export class UsersStatsDto {
+  @ApiProperty({ description: 'Non-deleted accounts' })
+  total!: number;
+  @ApiProperty({ description: 'Active accounts' })
+  active!: number;
+  @ApiProperty({ description: 'Blocked (inactive) accounts' })
+  blocked!: number;
+  @ApiProperty({
+    description:
+      'Accounts awaiting approval (verificationStatus = pending), every role — the same set as the verificationStatus=pending filter.',
+  })
+  pending!: number;
+  @ApiProperty({ description: 'Dentist accounts' })
+  dentists!: number;
+  @ApiProperty({ description: 'Admin and super admin accounts' })
+  admins!: number;
+  @ApiProperty({
+    description: 'Dentists whose welcome gift is still available',
+  })
+  giftAvailable!: number;
+  @ApiProperty({ description: 'Dentists whose welcome gift is used' })
+  giftUsed!: number;
 }
 
 export class BulkActionDto {

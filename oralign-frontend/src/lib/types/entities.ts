@@ -26,6 +26,18 @@ export interface User {
   createdAt: string;
   updatedAt: string;
   dentistProfile?: DentistProfile | null;
+  /**
+   * Oralign gift mark (admin users list / detail only): when the
+   * practitioner's once-only gift was used, null while it is still
+   * available. Absent on payloads that do not carry it (e.g. /users/me).
+   */
+  welcomeGiftUsedAt?: string | null;
+  /**
+   * The doctor's most recent case that received the gift (null for
+   * non-dentists). `archived`: the case was archived, so it still counts
+   * as the used gift but its page no longer opens (never link to it).
+   */
+  welcomeGiftOrder?: { id: string; orderCode: string; archived: boolean } | null;
 }
 
 export interface DentistProfile {

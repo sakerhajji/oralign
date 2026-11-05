@@ -3,15 +3,44 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { UserRole, Prisma, VerificationStatus } from '@prisma/client';
 import { UserFilterDto } from '../dto/user.dto';
 
-type UserWithProfile = Prisma.UserGetPayload<{
-  include: { dentistProfile: true };
+/**
+ * Relations every mapped user read carries: the clinic profile, and the
+ * doctor's most recent order carrying the welcome gift (id + code only —
+ * one indexed lookup per page, empty for non-dentists). Archived gift
+ * orders are kept on purpose (the gift really was used on that case);
+ * `deletedAt` lets mapToDto flag them, since GET /orders/:id 404s on them.
+ */
+const USER_INCLUDE = {
+  dentistProfile: true,
+  doctorOrders: {
+    where: { welcomeGiftAppliedAt: { not: null } },
+    orderBy: { welcomeGiftAppliedAt: 'desc' },
+    take: 1,
+    select: { id: true, orderCode: true, deletedAt: true },
+  },
+} satisfies Prisma.UserInclude;
+
+export type UserWithProfile = Prisma.UserGetPayload<{
+  include: typeof USER_INCLUDE;
 }>;
+
+/** Counts behind `GET /users/stats` (see UsersStatsDto). */
+export type UserStats = {
+  total: number;
+  active: number;
+  blocked: number;
+  pending: number;
+  dentists: number;
+  admins: number;
+  giftAvailable: number;
+  giftUsed: number;
+};
 
 @Injectable()
 export class UserRepository {
   constructor(private prisma: PrismaService) {}
 
-  private readonly withProfile = { dentistProfile: true } as const;
+  private readonly withProfile = USER_INCLUDE;
 
   async create(data: {
     email: string;
@@ -20,6 +49,7 @@ export class UserRepository {
     phone?: string;
     country?: string;
     avatarUrl?: string;
+    role?: UserRole;
   }): Promise<UserWithProfile> {
     return this.prisma.user.create({ data, include: this.withProfile });
   }
@@ -59,26 +89,7 @@ export class UserRepository {
     users: UserWithProfile[];
     total: number;
   }> {
-    const where: Prisma.UserWhereInput = { deletedAt: null };
-
-    // Apply filters
-    if (filters) {
-      if (filters.search) {
-        where.OR = [
-          { fullName: { contains: filters.search, mode: 'insensitive' } },
-          { email: { contains: filters.search, mode: 'insensitive' } },
-        ];
-      }
-      if (filters.role) {
-        where.role = filters.role;
-      }
-      if (filters.isActive !== undefined) {
-        where.isActive = filters.isActive;
-      }
-      if (filters.isEmailVerified !== undefined) {
-        where.isEmailVerified = filters.isEmailVerified;
-      }
-    }
+    const where = UserRepository.buildWhere({ deletedAt: null }, filters);
 
     const [users, total] = await Promise.all([
       this.prisma.user.findMany({
@@ -98,8 +109,8 @@ export class UserRepository {
     id: string,
     data: {
       fullName?: string;
-      phone?: string;
-      country?: string;
+      phone?: string | null;
+      country?: string | null;
       avatarUrl?: string;
       passwordHash?: string;
       role?: UserRole;
@@ -175,26 +186,10 @@ export class UserRepository {
     users: UserWithProfile[];
     total: number;
   }> {
-    const where: Prisma.UserWhereInput = { deletedAt: { not: null } };
-
-    // Apply filters
-    if (filters) {
-      if (filters.search) {
-        where.OR = [
-          { fullName: { contains: filters.search, mode: 'insensitive' } },
-          { email: { contains: filters.search, mode: 'insensitive' } },
-        ];
-      }
-      if (filters.role) {
-        where.role = filters.role;
-      }
-      if (filters.isActive !== undefined) {
-        where.isActive = filters.isActive;
-      }
-      if (filters.isEmailVerified !== undefined) {
-        where.isEmailVerified = filters.isEmailVerified;
-      }
-    }
+    const where = UserRepository.buildWhere(
+      { deletedAt: { not: null } },
+      filters,
+    );
 
     const [users, total] = await Promise.all([
       this.prisma.user.findMany({
@@ -208,6 +203,104 @@ export class UserRepository {
     ]);
 
     return { users, total };
+  }
+
+  /**
+   * Counts over non-deleted accounts, run in parallel. `blocked` and
+   * `dentists` are derived (total - active, available + used) so the
+   * numbers always add up on screen.
+   */
+  async countStats(): Promise<UserStats> {
+    const live: Prisma.UserWhereInput = { deletedAt: null };
+    const dentist: Prisma.UserWhereInput = {
+      ...live,
+      role: UserRole.dentist,
+    };
+    const [total, active, pending, admins, giftAvailable, giftUsed] =
+      await Promise.all([
+        this.prisma.user.count({ where: live }),
+        this.prisma.user.count({ where: { ...live, isActive: true } }),
+        this.prisma.user.count({
+          where: { ...live, verificationStatus: VerificationStatus.pending },
+        }),
+        this.prisma.user.count({
+          where: {
+            ...live,
+            role: { in: [UserRole.admin, UserRole.super_admin] },
+          },
+        }),
+        this.prisma.user.count({
+          where: { ...dentist, welcomeGiftUsedAt: null },
+        }),
+        this.prisma.user.count({
+          where: { ...dentist, welcomeGiftUsedAt: { not: null } },
+        }),
+      ]);
+    return {
+      total,
+      active,
+      blocked: total - active,
+      pending,
+      dentists: giftAvailable + giftUsed,
+      admins,
+      giftAvailable,
+      giftUsed,
+    };
+  }
+
+  /**
+   * The list `where`: the scope (live or deleted) AND every filter given.
+   * Built as an AND list so the `welcomeGift` filter (dentists only) can
+   * never overwrite a `role` filter — a non-dentist role simply matches
+   * nothing.
+   */
+  static buildWhere(
+    scope: Prisma.UserWhereInput,
+    filters?: UserFilterDto,
+  ): Prisma.UserWhereInput {
+    const and: Prisma.UserWhereInput[] = [scope];
+    const search = filters?.search?.trim();
+    if (search) and.push({ OR: UserRepository.searchConditions(search) });
+    if (filters?.role) and.push({ role: filters.role });
+    if (filters?.isActive !== undefined) {
+      and.push({ isActive: filters.isActive });
+    }
+    if (filters?.isEmailVerified !== undefined) {
+      and.push({ isEmailVerified: filters.isEmailVerified });
+    }
+    if (filters?.verificationStatus) {
+      and.push({ verificationStatus: filters.verificationStatus });
+    }
+    if (filters?.welcomeGift) {
+      and.push({
+        role: UserRole.dentist,
+        welcomeGiftUsedAt:
+          filters.welcomeGift === 'used' ? { not: null } : null,
+      });
+    }
+    return and.length === 1 ? scope : { AND: and };
+  }
+
+  /**
+   * Free-text search: name, email and clinic name (case-insensitive
+   * substring), plus the phone. Phones are stored E.164 without
+   * separators ("+21612345678"), so the term is matched with its spaces,
+   * dashes, dots and parentheses stripped ("12 345 678" finds it); only
+   * when it holds a digit, a name never needs the phone column.
+   */
+  static searchConditions(term: string): Prisma.UserWhereInput[] {
+    const conditions: Prisma.UserWhereInput[] = [
+      { fullName: { contains: term, mode: 'insensitive' } },
+      { email: { contains: term, mode: 'insensitive' } },
+      {
+        dentistProfile: {
+          is: { clinicName: { contains: term, mode: 'insensitive' } },
+        },
+      },
+    ];
+    const phone = term.replace(/[\s().-]/g, '');
+    if (/\d/.test(phone)) conditions.push({ phone: { contains: phone } });
+    return conditions;
   }
 
   async restore(id: string): Promise<UserWithProfile> {

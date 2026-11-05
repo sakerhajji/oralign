@@ -41,6 +41,9 @@ import { commerceDomainDict } from './dict.commerce-domain';
 import { authDomainDict } from './dict.auth-domain';
 import { treatmentDomainDict } from './dict.treatment-domain';
 import { blogDomainDict } from './dict.blog-domain';
+import { usersDeskDomainDict } from './dict.users-desk-domain';
+import { settingsDeskDomainDict } from './dict.settings-desk-domain';
+import { patientDeskDomainDict } from './dict.patient-desk-domain';
 
 export const dict = {
   ...chromeDomainDict,
@@ -48,6 +51,9 @@ export const dict = {
   ...authDomainDict,
   ...treatmentDomainDict,
   ...blogDomainDict,
+  ...usersDeskDomainDict,
+  ...settingsDeskDomainDict,
+  ...patientDeskDomainDict,
 
   // ─── Generic / cross-cutting ────────────────────────────────────
   common: {
@@ -3551,10 +3557,7 @@ export const dict = {
   usersAdmin: {
     loadingFallback: { en: 'Loading...', fr: 'Chargement…' } as T,
     title: { en: 'Users', fr: 'Utilisateurs' } as T,
-    intro: { en: 'Manage system users and their roles', fr: 'Gérez les utilisateurs du système et leurs rôles' } as T,
     addUser: { en: 'Add User', fr: 'Ajouter un utilisateur' } as T,
-    error: { en: 'Error', fr: 'Erreur' } as T,
-    errorBody: { en: 'Failed to load users', fr: 'Échec du chargement des utilisateurs' } as T,
     retry: { en: 'Retry', fr: 'Réessayer' } as T,
     pendingBannerOne: {
       en: '{count} user awaiting approval',
@@ -3564,21 +3567,6 @@ export const dict = {
       en: '{count} users awaiting approval',
       fr: '{count} utilisateurs en attente d’approbation',
     } as T,
-    pendingBannerSuffix: {
-      en: " — they're listed at the top of the table.",
-      fr: ' — ils figurent en haut du tableau.',
-    } as T,
-    tabActive: { en: 'Active Users', fr: 'Utilisateurs actifs' } as T,
-    tabDeleted: { en: 'Deleted Users', fr: 'Utilisateurs supprimés' } as T,
-    statDeletedTotal: { en: 'Deleted Users', fr: 'Utilisateurs supprimés' } as T,
-    statTotal: { en: 'Total Users', fr: 'Total des utilisateurs' } as T,
-    statActiveDeleted: { en: 'Active (deleted)', fr: 'Actifs (supprimés)' } as T,
-    statActive: { en: 'Active Users', fr: 'Utilisateurs actifs' } as T,
-    statBlockedDeleted: { en: 'Blocked (deleted)', fr: 'Bloqués (supprimés)' } as T,
-    statBlocked: { en: 'Blocked Users', fr: 'Utilisateurs bloqués' } as T,
-    statSelected: { en: 'Selected', fr: 'Sélectionnés' } as T,
-    searchDeletedPh: { en: 'Search deleted users...', fr: 'Rechercher des utilisateurs supprimés…' } as T,
-    searchPh: { en: 'Search by name or email...', fr: 'Rechercher par nom ou e-mail…' } as T,
     selectedOne: { en: '{count} user selected', fr: '{count} utilisateur sélectionné' } as T,
     selectedMany: { en: '{count} users selected', fr: '{count} utilisateurs sélectionnés' } as T,
     restore: { en: 'Restore', fr: 'Restaurer' } as T,
@@ -3586,38 +3574,18 @@ export const dict = {
     activate: { en: 'Activate', fr: 'Activer' } as T,
     block: { en: 'Block', fr: 'Bloquer' } as T,
     delete: { en: 'Delete', fr: 'Supprimer' } as T,
-    clear: { en: 'Clear', fr: 'Effacer' } as T,
-    tableTitleDeleted: { en: 'Deleted Users ({total})', fr: 'Utilisateurs supprimés ({total})' } as T,
-    tableTitle: { en: 'Users ({total})', fr: 'Utilisateurs ({total})' } as T,
-    tableDescDeleted: {
-      en: 'A list of deleted users. You can restore or permanently delete them.',
-      fr: 'Liste des utilisateurs supprimés. Vous pouvez les restaurer ou les supprimer définitivement.',
-    } as T,
-    tableDesc: {
-      en: 'A list of all users in the system with their details and status.',
-      fr: 'Liste de tous les utilisateurs du système avec leurs détails et statut.',
-    } as T,
     colUser: { en: 'User', fr: 'Utilisateur' } as T,
     colApproval: { en: 'Approval', fr: 'Approbation' } as T,
-    colPhone: { en: 'Phone', fr: 'Téléphone' } as T,
     colRole: { en: 'Role', fr: 'Rôle' } as T,
-    colStatus: { en: 'Status', fr: 'Statut' } as T,
-    colEmailVerified: { en: 'Email Verified', fr: 'E-mail vérifié' } as T,
     colLastLogin: { en: 'Last Login', fr: 'Dernière connexion' } as T,
-    colCreatedAt: { en: 'Created', fr: 'Date de création' } as T,
     colActions: { en: 'Actions', fr: 'Actions' } as T,
-    selectAll: { en: 'Select all users', fr: 'Sélectionner tous les utilisateurs' } as T,
     approved: { en: 'Approved', fr: 'Approuvé' } as T,
     rejected: { en: 'Rejected', fr: 'Rejeté' } as T,
     notApproved: { en: 'Not approved', fr: 'Non approuvé' } as T,
-    notProvided: { en: 'Not provided', fr: 'Non renseigné' } as T,
     statusActive: { en: 'Active', fr: 'Actif' } as T,
     statusBlocked: { en: 'Blocked', fr: 'Bloqué' } as T,
-    verified: { en: 'Verified', fr: 'Vérifié' } as T,
-    verifyPending: { en: 'Pending', fr: 'En attente' } as T,
     never: { en: 'Never', fr: 'Jamais' } as T,
     actions: { en: 'Actions', fr: 'Actions' } as T,
-    viewDetails: { en: 'View Details', fr: 'Voir les détails' } as T,
     editUser: { en: 'Edit User', fr: 'Modifier l’utilisateur' } as T,
     addClinic: { en: 'Add Clinic', fr: 'Ajouter une clinique' } as T,
     viewClinic: { en: 'View Clinic', fr: 'Voir la clinique' } as T,
@@ -3631,7 +3599,6 @@ export const dict = {
     deleteUser: { en: 'Delete User', fr: 'Supprimer l’utilisateur' } as T,
     emptyDeleted: { en: 'No deleted users found', fr: 'Aucun utilisateur supprimé trouvé' } as T,
     emptyActive: { en: 'No users found', fr: 'Aucun utilisateur trouvé' } as T,
-    emptyHint: { en: 'Try adjusting your search or filter criteria', fr: 'Essayez d’ajuster votre recherche ou vos filtres' } as T,
     pagShowing: {
       en: 'Showing {from} to {to} of {total} results',
       fr: 'Affichage de {from} à {to} sur {total} résultats',

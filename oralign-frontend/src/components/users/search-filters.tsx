@@ -1,184 +1,220 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useState } from 'react';
 import { useDebouncedCallback } from 'use-debounce';
-import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Search, Filter, X } from 'lucide-react';
+import { Loader2, Search, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { useT } from '@/lib/i18n/lang-context';
+import { UserRole, VerificationStatus } from '@/lib/types';
+import { cn } from '@/lib/utils';
+import type {
+  ApprovalFilter,
+  GiftFilter,
+  RoleFilter,
+  StatusFilter,
+  UsersFilters,
+} from './users-filters';
+
+const SEARCH_DEBOUNCE_MS = 300;
 
 interface SearchFiltersProps {
-  onFiltersChange: (filters: {
-    search: string;
-    role: string;
-    status: string;
-  }) => void;
-  placeholder?: string;
+  filters: UsersFilters;
+  onChange: (patch: Partial<UsersFilters>) => void;
+  placeholder: string;
+  /** A newer result set is loading behind the rows on screen. */
+  busy?: boolean;
 }
 
-export function SearchFilters({ onFiltersChange, placeholder }: SearchFiltersProps) {
+/**
+ * Search box + the four list filters.
+ *
+ * The input owns its text: only the trimmed, debounced value goes up to
+ * the page, and nothing comes back down while the admin types (so no
+ * keystroke is ever lost and "Dr " keeps its space). When the page
+ * clears the search on its own it remounts this component with a new
+ * `key` instead of pushing a value in.
+ */
+export function SearchFilters({
+  filters,
+  onChange,
+  placeholder,
+  busy = false,
+}: SearchFiltersProps) {
   const { t } = useT();
-  const router = useRouter();
-  const searchParams = useSearchParams();
+  const [draft, setDraft] = useState(filters.search);
 
-  // Get current values from URL
-  const currentSearch = searchParams.get('search') || '';
-  const currentRole = searchParams.get('role') || 'all';
-  const currentStatus = searchParams.get('status') || 'all';
-  const [searchDraft, setSearchDraft] = useState(currentSearch);
+  const commitSearch = useDebouncedCallback((value: string) => {
+    onChange({ search: value.trim() });
+  }, SEARCH_DEBOUNCE_MS);
 
-  const updateFilters = useCallback((updates: Partial<{ search: string; role: string; status: string }>) => {
-    const params = new URLSearchParams(searchParams.toString());
-    
-    // Update search param
-    if (updates.search !== undefined) {
-      if (updates.search.trim()) {
-        params.set('search', updates.search.trim());
-      } else {
-        params.delete('search');
-      }
-    }
-    
-    // Update role param
-    if (updates.role !== undefined) {
-      if (updates.role && updates.role !== 'all') {
-        params.set('role', updates.role);
-      } else {
-        params.delete('role');
-      }
-    }
-    
-    // Update status param
-    if (updates.status !== undefined) {
-      if (updates.status && updates.status !== 'all') {
-        params.set('status', updates.status);
-      } else {
-        params.delete('status');
-      }
-    }
-    
-    // Reset page when filters change
-    params.delete('page');
-    
-    // Update URL
-    const newUrl = `${window.location.pathname}?${params.toString()}`;
-    router.replace(newUrl, { scroll: false });
-    
-    // Notify parent component
-    const newFilters = {
-      search: params.get('search') || '',
-      role: params.get('role') || 'all',
-      status: params.get('status') || 'all',
-    };
-    onFiltersChange(newFilters);
-  }, [router, searchParams, onFiltersChange]);
+  const searchPending = draft.trim() !== filters.search;
+  const working = busy || searchPending;
 
-  // Debounced search handler
-  const debouncedSearch = useDebouncedCallback((value: string) => {
-    updateFilters({ search: value });
-  }, 600);
-
-  useEffect(() => {
-    setSearchDraft(currentSearch);
-  }, [currentSearch]);
-
-  useEffect(() => () => debouncedSearch.cancel(), [debouncedSearch]);
-
-  // Sync initial state with parent
-  useEffect(() => {
-    onFiltersChange({
-      search: currentSearch,
-      role: currentRole,
-      status: currentStatus,
-    });
-  }, [currentSearch, currentRole, currentStatus, onFiltersChange]);
-
-  const handleSearchChange = (value: string) => {
-    setSearchDraft(value);
-    debouncedSearch(value);
+  const clearSearch = () => {
+    commitSearch.cancel();
+    setDraft('');
+    onChange({ search: '' });
   };
-
-  const handleRoleChange = (value: string) => {
-    debouncedSearch.cancel();
-    updateFilters({ search: searchDraft, role: value });
-  };
-
-  const handleStatusChange = (value: string) => {
-    debouncedSearch.cancel();
-    updateFilters({ search: searchDraft, status: value });
-  };
-
-  const clearAllFilters = () => {
-    debouncedSearch.cancel();
-    setSearchDraft('');
-    updateFilters({ search: '', role: 'all', status: 'all' });
-  };
-
-  const hasActiveFilters = currentSearch || currentRole !== 'all' || currentStatus !== 'all';
 
   return (
-    <div className="grid w-full gap-3 lg:grid-cols-[minmax(300px,1fr)_auto] lg:items-center">
+    <div className="flex flex-col gap-2 xl:flex-row xl:items-center">
       <form
-        className="min-w-0"
+        role="search"
+        className="relative min-w-0 xl:flex-1"
         onSubmit={(event) => {
           event.preventDefault();
-          debouncedSearch.cancel();
-          updateFilters({ search: searchDraft });
+          commitSearch.flush();
         }}
-        role="search"
       >
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder={placeholder ?? t('usersUi.filters.searchPh')}
-            value={searchDraft}
-            onChange={(e) => handleSearchChange(e.target.value)}
-            className="h-11 pl-10 pr-4"
-            aria-label={t('usersUi.filters.searchAria')}
-          />
+        <Search
+          className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+          aria-hidden="true"
+        />
+        <Input
+          value={draft}
+          onChange={(event) => {
+            setDraft(event.target.value);
+            commitSearch(event.target.value);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape' && draft) {
+              event.preventDefault();
+              clearSearch();
+            }
+          }}
+          placeholder={placeholder}
+          aria-label={t('usersDesk.filters.searchAria')}
+          autoComplete="off"
+          spellCheck={false}
+          enterKeyHint="search"
+          className="h-9 pr-10 pl-9"
+        />
+        <div className="absolute top-1/2 right-1 flex size-7 -translate-y-1/2 items-center justify-center">
+          {working ? (
+            <Loader2
+              className="size-4 animate-spin text-muted-foreground"
+              aria-hidden="true"
+            />
+          ) : draft ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              onClick={clearSearch}
+              aria-label={t('usersDesk.filters.clearSearch')}
+            >
+              <X className="size-4" aria-hidden="true" />
+            </Button>
+          ) : null}
         </div>
+        <span className="sr-only" role="status" aria-live="polite">
+          {working ? t('usersDesk.filters.updating') : ''}
+        </span>
       </form>
-      
-      <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
-        <Select value={currentRole} onValueChange={handleRoleChange}>
-          <SelectTrigger className="h-11 w-full sm:w-[160px]" aria-label={t('usersUi.filters.rolePh')}>
-            <Filter className="mr-2 h-4 w-4 shrink-0" />
-            <SelectValue placeholder={t('usersUi.filters.rolePh')} />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">{t('usersUi.filters.allRoles')}</SelectItem>
-            <SelectItem value="admin">{t('usersUi.roles.admin')}</SelectItem>
-            <SelectItem value="dentist">{t('usersUi.roles.dentist')}</SelectItem>
-            <SelectItem value="designer">{t('usersUi.roles.designer')}</SelectItem>
-          </SelectContent>
-        </Select>
 
-        <Select value={currentStatus} onValueChange={handleStatusChange}>
-          <SelectTrigger className="h-11 w-full sm:w-[160px]" aria-label={t('usersUi.filters.statusPh')}>
-            <SelectValue placeholder={t('usersUi.filters.statusPh')} />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">{t('usersUi.filters.allStatus')}</SelectItem>
-            <SelectItem value="active">{t('usersUi.filters.active')}</SelectItem>
-            <SelectItem value="blocked">{t('usersUi.filters.blocked')}</SelectItem>
-          </SelectContent>
-        </Select>
-
-        {hasActiveFilters && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={clearAllFilters}
-            className="col-span-2 h-11 px-3 sm:col-span-1"
-            aria-label={t('usersUi.filters.clearAria')}
-          >
-            <X className="mr-1 h-4 w-4" />
-            {t('usersUi.filters.clear')}
-          </Button>
-        )}
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:flex xl:shrink-0">
+        <FilterSelect<RoleFilter>
+          label={t('usersDesk.filters.role')}
+          value={filters.role}
+          onValueChange={(role) => onChange({ role })}
+          options={[
+            { value: 'all', label: t('usersDesk.filters.roleAll') },
+            { value: UserRole.DENTIST, label: t('usersUi.roles.dentist') },
+            { value: UserRole.ADMIN, label: t('usersUi.roles.admin') },
+            { value: UserRole.DESIGNER, label: t('usersUi.roles.designer') },
+            { value: UserRole.SUPER_ADMIN, label: t('usersUi.roles.super_admin') },
+          ]}
+        />
+        <FilterSelect<StatusFilter>
+          label={t('usersDesk.filters.status')}
+          value={filters.status}
+          onValueChange={(status) => onChange({ status })}
+          options={[
+            { value: 'all', label: t('usersDesk.filters.statusAll') },
+            { value: 'active', label: t('usersDesk.filters.statusActive') },
+            { value: 'blocked', label: t('usersDesk.filters.statusBlocked') },
+          ]}
+        />
+        <FilterSelect<ApprovalFilter>
+          label={t('usersDesk.filters.approval')}
+          value={filters.approval}
+          onValueChange={(approval) => onChange({ approval })}
+          options={[
+            { value: 'all', label: t('usersDesk.filters.approvalAll') },
+            {
+              value: VerificationStatus.PENDING,
+              label: t('usersDesk.filters.approvalPending'),
+            },
+            {
+              value: VerificationStatus.APPROVED,
+              label: t('usersDesk.filters.approvalApproved'),
+            },
+            {
+              value: VerificationStatus.REJECTED,
+              label: t('usersDesk.filters.approvalRejected'),
+            },
+          ]}
+        />
+        <FilterSelect<GiftFilter>
+          label={t('usersDesk.filters.gift')}
+          value={filters.gift}
+          onValueChange={(gift) => onChange({ gift })}
+          options={[
+            { value: 'all', label: t('usersDesk.filters.giftAll') },
+            { value: 'available', label: t('usersDesk.filters.giftAvailable') },
+            { value: 'used', label: t('usersDesk.filters.giftUsed') },
+          ]}
+        />
       </div>
     </div>
+  );
+}
+
+function FilterSelect<V extends string>({
+  label,
+  value,
+  onValueChange,
+  options,
+}: {
+  label: string;
+  value: V;
+  onValueChange: (value: V) => void;
+  options: { value: V; label: string }[];
+}) {
+  // Unfiltered, the trigger names the dimension ("Rôle"); filtered, it
+  // shows the chosen value, highlighted.
+  const active = value !== 'all';
+  const shown = active
+    ? options.find((option) => option.value === value)?.label
+    : label;
+  return (
+    <Select value={value} onValueChange={(next) => onValueChange(next as V)}>
+      <SelectTrigger
+        aria-label={label}
+        className={cn(
+          'w-full min-w-0 data-[size=default]:h-9 xl:w-44',
+          active
+            ? 'border-foreground/25 bg-muted/50 font-medium'
+            : 'text-muted-foreground',
+        )}
+      >
+        <SelectValue>{shown}</SelectValue>
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((option) => (
+          <SelectItem key={option.value} value={option.value}>
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }

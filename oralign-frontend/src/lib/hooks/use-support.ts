@@ -39,6 +39,7 @@ export const supportKeys = {
 // 20 s polling for the doctor's unread badge. WS messages will
 // invalidate sooner — this is the fallback.
 const UNREAD_POLL_MS = 20_000;
+const UNREAD_STALE_MS = 15_000;
 
 export function useSupportConversations(
   filters: SupportConversationFilters = {},
@@ -79,7 +80,11 @@ export function useSupportUnreadCount(
     enabled,
     refetchInterval: UNREAD_POLL_MS,
     refetchOnWindowFocus: true,
-    staleTime: 0,
+    // Fresh for 15 s: the sidebar remounts on every dashboard ↔ account
+    // layout swap ("Paramètres") and refetched the count each time. The
+    // socket's invalidations (message:new, conversation:*) and the poll
+    // still refresh it regardless of this window.
+    staleTime: UNREAD_STALE_MS,
   });
 }
 

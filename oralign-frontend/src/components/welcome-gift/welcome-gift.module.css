@@ -39,14 +39,6 @@
   letter-spacing: -0.02em;
 }
 
-/* Original price: struck with a hairline in its own colour. */
-.struck {
-  text-decoration-line: line-through;
-  text-decoration-thickness: 1px;
-  text-decoration-color: currentColor;
-  font-variant-numeric: tabular-nums;
-}
-
 /* The one press target: flat amber pill, ink label; hover turns porcelain. */
 .action {
   background: var(--wg-amber);

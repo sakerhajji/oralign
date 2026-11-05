@@ -115,6 +115,58 @@ export function useUpsertCompanyBilling(): UseMutationResult<
   });
 }
 
+/**
+ * Instant on/off of the Oralign gift (`welcomeGiftEnabled`), independent of
+ * the billing form's Save button. Sends ONLY that field — the backend keeps
+ * every omitted field of the existing row — flips the cached row at once
+ * (the switch never waits for the network) and puts it back if the server
+ * refuses. Needs the settings row to exist: creating it requires a company
+ * name, which the form's Save provides.
+ */
+export function useSetWelcomeGiftEnabled(): UseMutationResult<
+  CompanyBillingSettings,
+  Error,
+  boolean,
+  { previous: CompanyBillingSettings | null | undefined }
+> {
+  const queryClient = useQueryClient();
+  const { t } = useT();
+  return useMutation({
+    mutationFn: (enabled) =>
+      companyBillingService.upsert({ welcomeGiftEnabled: enabled }),
+    onMutate: async (enabled) => {
+      // A refetch landing mid-toggle would paint the old value back.
+      await queryClient.cancelQueries({ queryKey: companyBillingKeys.active() });
+      const previous = queryClient.getQueryData<CompanyBillingSettings | null>(
+        companyBillingKeys.active(),
+      );
+      if (previous) {
+        queryClient.setQueryData<CompanyBillingSettings>(
+          companyBillingKeys.active(),
+          { ...previous, welcomeGiftEnabled: enabled },
+        );
+      }
+      return { previous };
+    },
+    onError: (err, _enabled, context) => {
+      if (context?.previous !== undefined) {
+        queryClient.setQueryData(companyBillingKeys.active(), context.previous);
+      }
+      toast.error(extractApiErrorMessage(err));
+    },
+    onSuccess: (saved) => {
+      queryClient.setQueryData(companyBillingKeys.active(), saved);
+      toast.success(
+        t(
+          saved.welcomeGiftEnabled === false
+            ? 'settingsDesk.gift.savedOff'
+            : 'settingsDesk.gift.savedOn',
+        ),
+      );
+    },
+  });
+}
+
 export function useUploadCompanyLogo(): UseMutationResult<
   CompanyBillingSettings,
   Error,

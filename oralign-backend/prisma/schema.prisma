@@ -294,10 +294,12 @@ model User {
   // a data change, not a migration. Default matches the app default.
   preferredLanguage   String             @default("en")
 
-  // Welcome gift doctor mark: set (same instant as the order's
-  // welcomeGiftAppliedAt) when the gift lands on one of this doctor's
-  // cases. NULL = the doctor still gets it on the next case they submit.
-  // Never cleared automatically: one gift per doctor, ever.
+  // Welcome gift doctor mark — the ONLY thing that decides eligibility.
+  // Set (same instant as the order's welcomeGiftAppliedAt) when the gift
+  // lands on one of this doctor's cases. NULL = the doctor gets it on the
+  // next case they submit. Nothing clears it automatically; an admin may
+  // set or clear it by hand (PATCH /welcome-gift/doctors/:doctorId), so a
+  // doctor reset to "available" receives a new gift on a later case.
   welcomeGiftUsedAt   DateTime?
 
   // Timestamps
@@ -523,17 +525,18 @@ model DentalOrder {
   cbctFeeAmount                 Decimal?                  @db.Decimal(12, 3)
   cbctFeeCurrency               String?
 
-  // ── Welcome gift (once per doctor) ───────────────────────────────
+  // ── Welcome gift (once per doctor mark) ─────────────────────────
   // Stamped by WelcomeGiftService on the next case a doctor submits
-  // while they have no gift yet (User.welcomeGiftUsedAt NULL): the
+  // while their mark is clear (User.welcomeGiftUsedAt NULL): the
   // treatment fee and the CBCT supplement snapshot of that order are
   // waived. The amounts are frozen here at submit time;
   // treatmentFeePaidAt/Amount stay NULL (nothing was paid, so nothing
-  // reaches revenue or receipts). Never cleared automatically.
-  // One gift per doctor is also enforced by the SQL-only partial unique
-  // index "DentalOrder_welcome_gift_doctor_key" (doctorId WHERE
-  // welcomeGiftAppliedAt IS NOT NULL) — see migration
-  // 20261104000000_welcome_gift; Prisma cannot declare partial indexes.
+  // reaches revenue or receipts). Never cleared on the order. A doctor
+  // whose mark an admin reset gets a new gift on a later case, so one
+  // doctor may hold several gift orders: the old partial unique index
+  // "one gift order per doctor" was dropped (migration
+  // 20261105000000_welcome_gift_mark_admin). The advisory lock + the
+  // compare-and-set on the mark keep it to one gift per mark.
   welcomeGiftAppliedAt          DateTime?
   welcomeGiftTreatmentFee       Decimal?                  @db.Decimal(12, 3) // waived treatment fee, snapshotted at submit
   welcomeGiftCbctFee            Decimal?                  @db.Decimal(12, 3) // waived CBCT supplement (0 when no CBCT)

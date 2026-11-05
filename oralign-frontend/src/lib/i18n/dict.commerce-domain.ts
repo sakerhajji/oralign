@@ -946,10 +946,7 @@ export const commerceDomainDict = {
       rejected: { en: 'Rejected', fr: 'Rejeté' } as T,
     },
     statusActive: { en: 'Active', fr: 'Actif' } as T,
-    statusInactive: { en: 'Inactive', fr: 'Inactif' } as T,
     statusBlocked: { en: 'Blocked', fr: 'Bloqué' } as T,
-    verified: { en: 'Verified', fr: 'Vérifié' } as T,
-    unverified: { en: 'Unverified', fr: 'Non vérifié' } as T,
     never: { en: 'Never', fr: 'Jamais' } as T,
     fullNameRequired: { en: 'Full Name *', fr: 'Nom complet *' } as T,
     phone: { en: 'Phone', fr: 'Téléphone' } as T,
@@ -966,23 +963,6 @@ export const commerceDomainDict = {
       en: 'Leave blank to keep current password',
       fr: 'Laissez vide pour conserver le mot de passe actuel',
     } as T,
-
-    // search-filters.tsx
-    filters: {
-      searchPh: { en: 'Search users...', fr: 'Rechercher des utilisateurs…' } as T,
-      searchAria: {
-        en: 'Search users by name or email',
-        fr: 'Rechercher des utilisateurs par nom ou e-mail',
-      } as T,
-      rolePh: { en: 'Role', fr: 'Rôle' } as T,
-      allRoles: { en: 'All Roles', fr: 'Tous les rôles' } as T,
-      statusPh: { en: 'Status', fr: 'Statut' } as T,
-      allStatus: { en: 'All Status', fr: 'Tous les statuts' } as T,
-      active: { en: 'Active', fr: 'Actifs' } as T,
-      blocked: { en: 'Blocked', fr: 'Bloqués' } as T,
-      clearAria: { en: 'Clear all filters', fr: 'Effacer tous les filtres' } as T,
-      clear: { en: 'Clear', fr: 'Effacer' } as T,
-    },
 
     // clinic-view-dialog.tsx
     clinicView: {
@@ -1006,37 +986,6 @@ export const commerceDomainDict = {
       readOnly: { en: 'Read-only view', fr: 'Vue en lecture seule' } as T,
       call: { en: 'Call', fr: 'Appeler' } as T,
       sendEmail: { en: 'Send email', fr: 'Envoyer un e-mail' } as T,
-    },
-
-    // edit-user-dialog.tsx
-    editDialog: {
-      title: { en: 'Edit User Profile', fr: 'Modifier le profil utilisateur' } as T,
-      desc: {
-        en: 'Update user information, permissions, and settings',
-        fr: 'Mettre à jour les informations, permissions et paramètres de l’utilisateur',
-      } as T,
-      profilePicture: { en: 'Profile Picture', fr: 'Photo de profil' } as T,
-      pictureHint: {
-        en: 'Upload a new profile picture (max 5MB)',
-        fr: 'Téléversez une nouvelle photo de profil (5 Mo max)',
-      } as T,
-      uploadImage: { en: 'Upload Image', fr: 'Téléverser une image' } as T,
-      identity: { en: 'Identity Information', fr: 'Informations d’identité' } as T,
-      fullNamePh: { en: 'Enter full name', fr: 'Saisissez le nom complet' } as T,
-      phoneNumber: { en: 'Phone Number', fr: 'Numéro de téléphone' } as T,
-      security: { en: 'Security Settings', fr: 'Paramètres de sécurité' } as T,
-      passwordHint: {
-        en: 'Only enter a password if you want to change it',
-        fr: 'Ne saisissez un mot de passe que si vous souhaitez le modifier',
-      } as T,
-      permissions: { en: 'Permissions & Access', fr: 'Permissions et accès' } as T,
-      userRole: { en: 'User Role', fr: 'Rôle de l’utilisateur' } as T,
-      markVerified: {
-        en: 'Mark the user’s email as verified',
-        fr: 'Marquer l’e-mail de l’utilisateur comme vérifié',
-      } as T,
-      updating: { en: 'Updating...', fr: 'Mise à jour…' } as T,
-      updateProfile: { en: 'Update Profile', fr: 'Mettre à jour le profil' } as T,
     },
 
     // user-detail-sheet.tsx
@@ -1161,47 +1110,6 @@ export const commerceDomainDict = {
       createBtn: { en: 'Create User', fr: 'Créer l’utilisateur' } as T,
     },
 
-    // user-dialogs.tsx — view
-    viewDialog: {
-      title: { en: 'User Profile Details', fr: 'Détails du profil utilisateur' } as T,
-      desc: {
-        en: 'Complete user information and account details',
-        fr: 'Informations complètes de l’utilisateur et détails du compte',
-      } as T,
-      contactInfo: { en: 'Contact Information', fr: 'Coordonnées' } as T,
-      emailAddress: { en: 'Email Address', fr: 'Adresse e-mail' } as T,
-      fullName: { en: 'Full Name', fr: 'Nom complet' } as T,
-      statusPermissions: {
-        en: 'Account Status & Permissions',
-        fr: 'Statut du compte et permissions',
-      } as T,
-      accountStatus: { en: 'Account Status', fr: 'Statut du compte' } as T,
-      verificationStatus: { en: 'Verification Status', fr: 'Statut de vérification' } as T,
-      activityTimeline: {
-        en: 'Account Activity & Timeline',
-        fr: 'Activité du compte et historique',
-      } as T,
-      memberSince: { en: 'Member Since', fr: 'Membre depuis' } as T,
-      profileUpdated: { en: 'Profile Updated', fr: 'Profil mis à jour' } as T,
-      lastLogin: { en: 'Last Login', fr: 'Dernière connexion' } as T,
-    },
-
-    // user-dialogs.tsx — delete
-    deleteDialog: {
-      title: { en: 'Delete User', fr: 'Supprimer l’utilisateur' } as T,
-      desc: {
-        en: 'Are you sure you want to delete this user? This action cannot be undone.',
-        fr: 'Êtes-vous sûr de vouloir supprimer cet utilisateur ? Cette action est irréversible.',
-      } as T,
-      userLabel: { en: 'User:', fr: 'Utilisateur :' } as T,
-      emailLabel: { en: 'Email:', fr: 'E-mail :' } as T,
-      permanent: {
-        en: 'All associated data will be permanently deleted.',
-        fr: 'Toutes les données associées seront définitivement supprimées.',
-      } as T,
-      deleting: { en: 'Deleting...', fr: 'Suppression…' } as T,
-      deleteBtn: { en: 'Delete User', fr: 'Supprimer l’utilisateur' } as T,
-    },
   },
 
   // ─── Welcome gift, once per practitioner (src/components/welcome-gift/*)
@@ -1327,6 +1235,20 @@ export const commerceDomainDict = {
         en: 'These fees are on us for this case: no payment will be requested.',
         fr: 'Ces frais vous sont offerts sur ce cas : aucun paiement ne vous sera demandé.',
       } as T,
+      // Total row under the waived lines (always 0 under the gift)
+      due: { en: 'Amount due', fr: 'Montant à régler' } as T,
+      // Gift on a later case (firstCase false)
+      later: {
+        title: { en: 'Oralign gift', fr: 'Cadeau Oralign' } as T,
+      },
+    },
+    // welcome-gift-note.tsx — files step, under the CBCT toggle.
+    // {price} is the struck supplement.
+    feeLine: {
+      text: {
+        en: 'CBCT supplement {price}, included free with your Oralign gift.',
+        fr: 'Supplément CBCT {price} — offert avec votre cadeau Oralign.',
+      } as T,
     },
     // welcome-gift-detail-card.tsx — order detail, replaces the fee gate
     detail: {
@@ -1344,17 +1266,6 @@ export const commerceDomainDict = {
       later: {
         title: { en: 'Oralign gift: fees covered', fr: 'Cadeau Oralign : frais offerts' } as T,
       },
-    },
-    // company-billing-settings-form.tsx — admin switch
-    settings: {
-      label: {
-        en: 'Oralign gift (once per practitioner)',
-        fr: 'Cadeau Oralign (une fois par praticien)',
-      } as T,
-      description: {
-        en: 'Waives the treatment fee and the CBCT supplement once per practitioner, on the next case they submit (the first case for a new practitioner).',
-        fr: "Offre les honoraires de traitement et le supplément CBCT une seule fois par praticien, sur le prochain cas qu'il soumet (le premier cas pour un nouveau praticien).",
-      } as T,
     },
     // Keyed by the backend errorCode
     errors: {

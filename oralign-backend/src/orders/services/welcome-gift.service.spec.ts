@@ -57,11 +57,16 @@ function makeTx(
     settings?: Record<string, unknown> | null;
     /** The doctor's mark row; default = an unmarked doctor. */
     doctor?: DoctorRow | null;
-    /** An order of this doctor already carrying the gift (rule 2). */
+    /**
+     * An order of this doctor already carrying a gift. It must NOT matter:
+     * the mark alone decides (a doctor reset by an admin may hold one).
+     */
     giftOrder?: { id: string } | null;
     /** An OTHER case of this doctor ever submitted (firstCase). */
     earlier?: { id: string } | null;
     liveCard?: { id: string } | null;
+    /** Rows the mark compare-and-set flips (0 = someone claimed it first). */
+    claimed?: number;
   } = {},
 ) {
   return {
@@ -70,8 +75,8 @@ function makeTx(
       findUnique: jest
         .fn()
         .mockResolvedValue(opts.order === undefined ? draft() : opts.order),
-      // Two lookups, told apart by their filter: the gift order, then an
-      // earlier submitted case.
+      // Told apart by their filter: a gift-order lookup (must not happen
+      // any more) or an earlier submitted case.
       findFirst: jest.fn((args: { where: Prisma.DentalOrderWhereInput }) =>
         Promise.resolve(
           args.where.welcomeGiftAppliedAt
@@ -87,7 +92,7 @@ function makeTx(
         .mockResolvedValue(
           opts.doctor === undefined ? { welcomeGiftUsedAt: null } : opts.doctor,
         ),
-      update: jest.fn().mockResolvedValue({}),
+      updateMany: jest.fn().mockResolvedValue({ count: opts.claimed ?? 1 }),
     },
     companyBillingSettings: {
       findFirst: jest
@@ -152,7 +157,7 @@ const lookups = (tx: Tx) => {
 
 const expectNothingWritten = (tx: Tx) => {
   expect(tx.dentalOrder.update).not.toHaveBeenCalled();
-  expect(tx.user.update).not.toHaveBeenCalled();
+  expect(tx.user.updateMany).not.toHaveBeenCalled();
   expect(tx.orderAuditLog.create).not.toHaveBeenCalled();
 };
 
@@ -208,24 +213,39 @@ describe('WelcomeGiftService.applyOnSubmit', () => {
     });
   });
 
-  it('marks the doctor in the same transaction, at the same instant as the gift', async () => {
+  it('claims the doctor mark with a compare-and-set, BEFORE the order, at the same instant as the gift', async () => {
     const { service } = makeService();
     const tx = makeTx();
 
     await apply(service, tx);
 
-    expect(tx.user.update).toHaveBeenCalledTimes(1);
-    const mark = (tx.user.update.mock.calls as unknown[][])[0][0] as {
-      where: { id: string };
+    expect(tx.user.updateMany).toHaveBeenCalledTimes(1);
+    const mark = (tx.user.updateMany.mock.calls as unknown[][])[0][0] as {
+      where: Record<string, unknown>;
       data: { welcomeGiftUsedAt: Date };
     };
-    expect(mark.where).toEqual({ id: 'u-doc' });
+    // Only flips a CLEAR mark: a concurrent claim makes it match 0 rows.
+    expect(mark.where).toEqual({ id: 'u-doc', welcomeGiftUsedAt: null });
     expect(mark.data.welcomeGiftUsedAt).toBeInstanceOf(Date);
     expect(mark.data.welcomeGiftUsedAt).toBe(
       written(tx).data.welcomeGiftAppliedAt,
     );
     // Only the mark: nothing else on the user row changes.
     expect(Object.keys(mark.data)).toEqual(['welcomeGiftUsedAt']);
+    expect(tx.user.updateMany.mock.invocationCallOrder[0]).toBeLessThan(
+      tx.dentalOrder.update.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('compare-and-set lost (the mark was claimed meanwhile): writes nothing on the order', async () => {
+    const { service, entry } = makeService();
+    const tx = makeTx({ claimed: 0 });
+
+    await expect(apply(service, tx)).resolves.toBe(false);
+    expect(tx.user.updateMany).toHaveBeenCalledTimes(1);
+    expect(tx.dentalOrder.update).not.toHaveBeenCalled();
+    expect(tx.orderAuditLog.create).not.toHaveBeenCalled();
+    expect(entry).not.toHaveBeenCalled();
   });
 
   it('takes the per-doctor advisory lock BEFORE reading anything', async () => {
@@ -281,8 +301,10 @@ describe('WelcomeGiftService.applyOnSubmit', () => {
       where: { id: 'u-doc' },
       select: { welcomeGiftUsedAt: true },
     });
-    expect(tx.user.update).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: 'u-doc' } }),
+    expect(tx.user.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'u-doc', welcomeGiftUsedAt: null },
+      }),
     );
     expect(entry.mock.calls[0][0]).toBe(admin);
   });
@@ -368,7 +390,7 @@ describe('WelcomeGiftService.applyOnSubmit', () => {
       currency: 'TND',
       firstCase: false,
     });
-    expect(tx.user.update).toHaveBeenCalledTimes(1);
+    expect(tx.user.updateMany).toHaveBeenCalledTimes(1);
   });
 
   it('counts soft-deleted and canceled cases as earlier ones for firstCase', async () => {
@@ -401,17 +423,21 @@ describe('WelcomeGiftService.applyOnSubmit', () => {
     expectNothingWritten(tx);
   });
 
-  it('never gives it twice: an order of the doctor already carries it (even without the mark)', async () => {
-    const { service } = makeService();
-    const tx = makeTx({ giftOrder: { id: 'o-gift' } });
-
-    await expect(apply(service, tx)).resolves.toBe(false);
-    // Any status, archived included: no deletedAt filter.
-    expect(lookups(tx).gift).toEqual({
-      doctorId: 'u-doc',
-      welcomeGiftAppliedAt: { not: null },
+  it('the mark alone decides: a doctor reset to available gets a second gift on a later case', async () => {
+    const { service, entry } = makeService();
+    // An earlier case of theirs already carries a gift; an admin cleared
+    // the mark since.
+    const tx = makeTx({
+      giftOrder: { id: 'o-gift' },
+      earlier: { id: 'o-gift' },
     });
-    expectNothingWritten(tx);
+
+    await expect(apply(service, tx)).resolves.toBe(true);
+    // No gift-order lookup any more: only the mark is read.
+    expect(lookups(tx).gift).toBeUndefined();
+    expect(written(tx).data.welcomeGiftFirstCase).toBe(false);
+    expect(entry.mock.calls[0][3]).toMatchObject({ total: 350 });
+    expect(tx.user.updateMany).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -627,17 +653,26 @@ describe('WelcomeGiftService.getStatus', () => {
     });
   });
 
-  it('is not eligible while an order carries the gift, even without the mark', async () => {
-    const { prisma } = statusPrisma({
+  it('is eligible again once an admin cleared the mark, even with an earlier gift order', async () => {
+    const { prisma, findFirst } = statusPrisma({
       giftOrder: { id: 'o-gift' },
       submitted: { id: 'o-gift' },
     });
     const { service } = makeService(prisma);
 
     await expect(service.getStatus('u-doc')).resolves.toMatchObject({
-      eligible: false,
+      eligible: true,
       firstCase: false,
       giftOrderId: 'o-gift',
+    });
+    // giftOrderId = the doctor's MOST RECENT gift order (deterministic now
+    // that a doctor may hold several).
+    const giftQuery = findFirst.mock.calls
+      .map((c) => c[0] as { where: Prisma.DentalOrderWhereInput })
+      .find((a) => a.where.welcomeGiftAppliedAt);
+    expect(giftQuery).toMatchObject({
+      where: { doctorId: 'u-doc', welcomeGiftAppliedAt: { not: null } },
+      orderBy: { welcomeGiftAppliedAt: 'desc' },
     });
   });
 
@@ -695,5 +730,201 @@ describe('WelcomeGiftService.getStatus', () => {
       total: 0,
       giftOrderId: null,
     });
+  });
+});
+
+describe('WelcomeGiftService.setDoctorMark', () => {
+  type MarkRow = {
+    role: UserRole;
+    deletedAt: Date | null;
+    welcomeGiftUsedAt: Date | null;
+  };
+  const dentistRow = (over: Partial<MarkRow> = {}): MarkRow => ({
+    role: UserRole.dentist,
+    deletedAt: null,
+    welcomeGiftUsedAt: null,
+    ...over,
+  });
+
+  /** prisma double: `$transaction(fn)` runs fn on a tiny tx client. */
+  function markPrisma(row: MarkRow | null) {
+    const tx = {
+      $executeRaw: jest.fn().mockResolvedValue(1),
+      user: {
+        findUnique: jest.fn().mockResolvedValue(row),
+        update: jest.fn().mockResolvedValue({}),
+      },
+    };
+    const prisma = {
+      $transaction: jest.fn((fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
+    };
+    return { prisma, tx };
+  }
+
+  it('clears a used mark: the doctor is available again', async () => {
+    const { prisma, tx } = markPrisma(
+      dentistRow({ welcomeGiftUsedAt: new Date('2026-10-01') }),
+    );
+    const { service } = makeService(prisma);
+
+    await expect(service.setDoctorMark('u-doc', false, admin)).resolves.toEqual(
+      { doctorId: 'u-doc', welcomeGiftUsedAt: null },
+    );
+    expect(tx.user.update).toHaveBeenCalledWith({
+      where: { id: 'u-doc' },
+      data: { welcomeGiftUsedAt: null },
+    });
+  });
+
+  it('marks an available doctor as used (now)', async () => {
+    const { prisma, tx } = markPrisma(dentistRow());
+    const { service } = makeService(prisma);
+
+    const res = await service.setDoctorMark('u-doc', true, admin);
+
+    expect(res.doctorId).toBe('u-doc');
+    expect(res.welcomeGiftUsedAt).toBeInstanceOf(Date);
+    const written = (tx.user.update.mock.calls as unknown[][])[0][0] as {
+      data: { welcomeGiftUsedAt: Date };
+    };
+    expect(written.data.welcomeGiftUsedAt).toBe(res.welcomeGiftUsedAt);
+  });
+
+  it('takes the same per-doctor advisory lock as the submit path, before reading', async () => {
+    const { prisma, tx } = markPrisma(dentistRow());
+    const { service } = makeService(prisma);
+
+    await service.setDoctorMark('u-doc', true, admin);
+
+    const [strings, ...values] = (
+      tx.$executeRaw.mock.calls as unknown[][]
+    )[0] as [TemplateStringsArray, ...unknown[]];
+    expect(strings.join('?')).toContain('pg_advisory_xact_lock(hashtext(');
+    expect(values).toEqual(['welcome-gift:u-doc']);
+    expect(tx.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      tx.user.findUnique.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('is idempotent: "used" on a used doctor keeps the ORIGINAL date and writes nothing', async () => {
+    const original = new Date('2026-09-15T10:00:00Z');
+    const { prisma, tx } = markPrisma(
+      dentistRow({ welcomeGiftUsedAt: original }),
+    );
+    const { service } = makeService(prisma);
+
+    await expect(service.setDoctorMark('u-doc', true, admin)).resolves.toEqual({
+      doctorId: 'u-doc',
+      welcomeGiftUsedAt: original,
+    });
+    expect(tx.user.update).not.toHaveBeenCalled();
+  });
+
+  it('is idempotent: "available" on an available doctor writes nothing', async () => {
+    const { prisma, tx } = markPrisma(dentistRow());
+    const { service } = makeService(prisma);
+
+    await expect(service.setDoctorMark('u-doc', false, admin)).resolves.toEqual(
+      { doctorId: 'u-doc', welcomeGiftUsedAt: null },
+    );
+    expect(tx.user.update).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['an unknown user', null],
+    ['a soft-deleted dentist', dentistRow({ deletedAt: new Date() })],
+    ['an admin', dentistRow({ role: UserRole.admin })],
+    ['a designer', dentistRow({ role: UserRole.designer })],
+  ])('404 for %s, nothing written', async (_label, row) => {
+    const { prisma, tx } = markPrisma(row);
+    const { service } = makeService(prisma);
+
+    await expect(
+      service.setDoctorMark('u-x', false, admin),
+    ).rejects.toMatchObject({ statusCode: 404 });
+    expect(tx.user.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('WelcomeGiftService — the mark alone decides (stateful flow)', () => {
+  /**
+   * One in-memory doctor shared by the submit tx and the admin control:
+   * first gift, then no gift while marked, then an admin reset, then a
+   * second gift on a later case, then an admin "used" → no gift.
+   */
+  function world() {
+    const state = { mark: null as Date | null, gifts: [] as string[] };
+    let orderId = '';
+    const tx = {
+      $executeRaw: jest.fn().mockResolvedValue(1),
+      dentalOrder: {
+        findUnique: jest.fn(() => Promise.resolve(draft())),
+        findFirst: jest.fn(() =>
+          Promise.resolve(state.gifts.length ? { id: state.gifts[0] } : null),
+        ),
+        update: jest.fn((args: { where: { id: string } }) => {
+          state.gifts.push(args.where.id);
+          return Promise.resolve({});
+        }),
+      },
+      user: {
+        findUnique: jest.fn(() =>
+          Promise.resolve({
+            role: UserRole.dentist,
+            deletedAt: null,
+            welcomeGiftUsedAt: state.mark,
+          }),
+        ),
+        update: jest.fn(
+          (args: { data: { welcomeGiftUsedAt: Date | null } }) => {
+            state.mark = args.data.welcomeGiftUsedAt;
+            return Promise.resolve({});
+          },
+        ),
+        // Compare-and-set, like Postgres: only flips a NULL mark.
+        updateMany: jest.fn((args: { data: { welcomeGiftUsedAt: Date } }) => {
+          if (state.mark !== null) return Promise.resolve({ count: 0 });
+          state.mark = args.data.welcomeGiftUsedAt;
+          return Promise.resolve({ count: 1 });
+        }),
+      },
+      companyBillingSettings: {
+        findFirst: jest.fn().mockResolvedValue(settingsRow()),
+      },
+      payment: { findFirst: jest.fn().mockResolvedValue(null) },
+      orderAuditLog: { create: jest.fn().mockResolvedValue({}) },
+    };
+    const prisma = {
+      $transaction: jest.fn((fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
+    };
+    const { service } = makeService(prisma);
+    const submit = (id: string) => {
+      orderId = id;
+      return service.applyOnSubmit(
+        tx as unknown as Prisma.TransactionClient,
+        orderId,
+        'u-doc',
+        doctor,
+      );
+    };
+    return { state, service, submit };
+  }
+
+  it('gift → marked → admin reset → second gift → admin "used" → no gift', async () => {
+    const { state, service, submit } = world();
+
+    await expect(submit('o-1')).resolves.toBe(true);
+    expect(state.mark).toBeInstanceOf(Date);
+    await expect(submit('o-2')).resolves.toBe(false);
+
+    await service.setDoctorMark('u-doc', false, admin);
+    expect(state.mark).toBeNull();
+    await expect(submit('o-3')).resolves.toBe(true);
+    expect(state.gifts).toEqual(['o-1', 'o-3']);
+
+    await service.setDoctorMark('u-doc', false, admin);
+    await service.setDoctorMark('u-doc', true, admin);
+    await expect(submit('o-4')).resolves.toBe(false);
+    expect(state.gifts).toEqual(['o-1', 'o-3']);
   });
 });

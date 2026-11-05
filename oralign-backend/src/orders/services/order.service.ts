@@ -274,9 +274,9 @@ export class OrderService {
       : current.doctorId;
     const patientId = updateOrderDto.patientId ?? current.patientId;
 
-    // The welcome gift belongs to the doctor it was given to and is never
-    // removed: moving its order would hand the gift to another doctor (or
-    // trip DentalOrder_welcome_gift_doctor_key).
+    // The welcome gift stays with the doctor who received it (their mark
+    // was claimed for it) and is never removed: moving its order would
+    // hand a gift to a doctor whose own mark says nothing about it.
     if (
       doctorId &&
       doctorId !== current.doctorId &&
@@ -920,8 +920,10 @@ export class OrderService {
         { label: 'payments', count: order._count.payments },
         { label: 'treatment plans', count: order._count.treatmentPlans },
         { label: 'aligner deliveries', count: order._count.alignerDeliveries },
-        // The gift order is the record of the waived fees (amounts, audit):
-        // archived at most, never purged.
+        // The gift order is the record of the waived fees (amounts, audit)
+        // and of the gift the doctor received: archived at most, never
+        // purged, so it stays with that doctor (purely a history rule —
+        // eligibility is the doctor mark alone).
         { label: 'welcome gift', count: order.welcomeGiftAppliedAt ? 1 : 0 },
       ];
       if (deps.some((d) => d.count > 0)) {

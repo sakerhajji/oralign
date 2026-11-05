@@ -5,10 +5,15 @@ import {
   PaymentPurpose,
   PaymentRecordStatus,
   Prisma,
+  UserRole,
 } from '@prisma/client';
 import { type Caller } from '../../common/access/caller';
+import { NotFoundException } from '../../common/exceptions/app.exception';
 import { PrismaService } from '../../prisma/prisma.service';
-import { WelcomeGiftStatusDto } from '../dto/welcome-gift.dto';
+import {
+  WelcomeGiftMarkResponseDto,
+  WelcomeGiftStatusDto,
+} from '../dto/welcome-gift.dto';
 import { OrderAuditService } from './order-audit.service';
 
 /** OrderAuditLog action written when the gift lands on an order. */
@@ -49,11 +54,15 @@ type WaiverSettings = {
  * Welcome gift, once per practitioner: the order's treatment-fee charge
  * (live `defaultTreatmentFee` + the order's own CBCT supplement snapshot)
  * is waived on the NEXT case a doctor submits while the gift is on — a new
- * practitioner's first case, a current practitioner's next one. The doctor
- * mark `User.welcomeGiftUsedAt` is written with the gift and never cleared
- * automatically. Cases submitted before are never repriced, and nothing
- * else is either — quotes, packs, installments and loyalty never read these
- * columns.
+ * practitioner's first case, a current practitioner's next one.
+ *
+ * The doctor mark `User.welcomeGiftUsedAt` alone decides: NULL = the gift
+ * lands on the next submitted case, set = never. It is written with the
+ * gift, nothing clears it automatically, and an admin may set or clear it
+ * by hand (`setDoctorMark`): a doctor reset to "available" gets a new gift
+ * on a later case, so one doctor can hold several gift orders over time.
+ * Cases submitted before are never repriced, and nothing else is either —
+ * quotes, packs, installments and loyalty never read these columns.
  *
  * The gift is frozen on the order (`welcomeGift*` columns) and is never paid,
  * so `treatmentFeePaidAt/Amount` stay NULL: the order stays out of revenue,
@@ -71,10 +80,12 @@ export class WelcomeGiftService {
 
   /**
    * Banner state for one doctor, from the LIVE settings. `eligible` is the
-   * banner rule: switch on, the doctor not marked, no order of theirs
-   * carrying the gift, and something worth offering (total > 0). Drafts and
-   * past cases do not matter for it; they only decide `firstCase` (no case
-   * submitted yet = the gift will land on their very first case).
+   * banner rule: switch on, the doctor not marked, and something worth
+   * offering (total > 0). The mark alone decides: an earlier gift order
+   * does not count once an admin cleared the mark. Drafts and past cases
+   * do not matter either; they only decide `firstCase` (no case submitted
+   * yet = the gift will land on their very first case). `giftOrderId` is
+   * the doctor's most recent gift order, for information only.
    */
   async getStatus(doctorId: string): Promise<WelcomeGiftStatusDto> {
     const [settings, doctor, giftOrder, submitted] = await Promise.all([
@@ -95,6 +106,7 @@ export class WelcomeGiftService {
       }),
       this.prisma.dentalOrder.findFirst({
         where: { doctorId, welcomeGiftAppliedAt: { not: null } },
+        orderBy: { welcomeGiftAppliedAt: 'desc' },
         select: { id: true },
       }),
       this.prisma.dentalOrder.findFirst({
@@ -116,7 +128,7 @@ export class WelcomeGiftService {
 
     return {
       enabled,
-      eligible: enabled && unmarked && !giftOrder && total.gt(0),
+      eligible: enabled && unmarked && total.gt(0),
       firstCase: !submitted,
       currency: settings?.defaultCurrency || 'TND',
       treatmentFee: treatmentFee.toNumber(),
@@ -128,31 +140,34 @@ export class WelcomeGiftService {
   }
 
   /**
-   * Apply the gift to `orderId` if its doctor never received it. Runs INSIDE
+   * Apply the gift to `orderId` if its doctor's mark is clear. Runs INSIDE
    * OrderService.submitOrder's transaction, after the status update, so the
    * gift and the doctor mark commit (or roll back) together with the
    * submission.
    *
    * Returns true only when THIS call wrote the gift. An order that already
    * carries it (an admin rolled it back to draft and it is re-submitted)
-   * keeps it untouched and returns false: never re-priced, never removed.
+   * keeps it untouched and returns false: never re-priced, never removed —
+   * even when an admin cleared the doctor's mark meanwhile (the doctor then
+   * stays available and the gift lands on their next NEW case).
    *
-   * Concurrency: every gift decision of one doctor is serialized by a
-   * transaction-scoped advisory lock, and every rule is re-read AFTER the
-   * lock with `tx`. Under READ COMMITTED each statement sees the commits of
-   * the transactions that held the lock before us, so two drafts submitted
-   * at the same instant cannot both receive the gift. The partial unique
-   * index DentalOrder_welcome_gift_doctor_key backs this up across instances.
-   * We deliberately do NOT catch its unique violation here: a failed
-   * statement aborts the whole Postgres transaction (only a SAVEPOINT could
-   * recover it), and with the lock + the mark / `welcomeGiftAppliedAt`
-   * pre-checks below the index cannot fire through this path. The only
-   * other write of `doctorId` is an admin's OrderService.updateOrder, which
-   * refuses to move a gift order (400 WELCOME_GIFT_ORDER_REASSIGN) so the
-   * gift never changes hands; and purgeOrders treats the gift as protected
-   * history, so a gift order can be archived but never purged. Should a
-   * stray manual write ever trip the index, the global filter maps P2002 to
-   * a 409, not a 500.
+   * Concurrency: every gift decision of one doctor (this method and the
+   * admin's `setDoctorMark`) is serialized by a transaction-scoped advisory
+   * lock, which is database-wide and so holds across app instances, and
+   * every rule is re-read AFTER the lock with `tx`. Under READ COMMITTED
+   * each statement sees the commits of the transactions that held the lock
+   * before us, so two drafts submitted at the same instant cannot both
+   * receive the gift. `writeGift` then CLAIMS the mark with a
+   * compare-and-set (`UPDATE … WHERE welcomeGiftUsedAt IS NULL`) and only
+   * writes the order when it won, so even a writer that bypassed the lock
+   * could not turn one mark into two gifts. Nothing here can raise a
+   * constraint error mid-transaction (there is no unique index on gift
+   * orders any more: a doctor reset by an admin may hold several).
+   *
+   * A gift stays with the doctor who received it: an admin's
+   * OrderService.updateOrder refuses to move a gift order to another doctor
+   * (400 WELCOME_GIFT_ORDER_REASSIGN), and purgeOrders treats the gift as
+   * protected history, so a gift order can be archived but never purged.
    */
   async applyOnSubmit(
     tx: Prisma.TransactionClient,
@@ -183,20 +198,16 @@ export class WelcomeGiftService {
     const settings = await this.activeSettings(tx);
     if (!settings?.welcomeGiftEnabled) return false;
 
-    // Rule 2 — the doctor never received the gift: no mark on the doctor
-    // and, belt and braces with the partial unique index, no order of
-    // theirs carries it. Earlier cases do NOT matter: a current
-    // practitioner gets it on their next case.
+    // Rule 2 — the doctor mark is clear. The mark alone decides: earlier
+    // cases do NOT matter (a current practitioner gets it on their next
+    // case), and neither does an earlier gift order once an admin reset
+    // the mark. Read here for an early exit; `writeGift` claims it with a
+    // compare-and-set.
     const doctor = await tx.user.findUnique({
       where: { id: doctorId },
       select: { welcomeGiftUsedAt: true },
     });
     if (!doctor || doctor.welcomeGiftUsedAt) return false;
-    const giftOrder = await tx.dentalOrder.findFirst({
-      where: { doctorId, welcomeGiftAppliedAt: { not: null } },
-      select: { id: true },
-    });
-    if (giftOrder) return false;
 
     // Rule 3 — no treatment-fee activity on this order. We never refund
     // automatically, so a doctor who already started paying keeps the
@@ -222,14 +233,59 @@ export class WelcomeGiftService {
       select: { id: true },
     });
 
-    await this.writeGift(
+    return this.writeGift(
       tx,
       { id: orderId, doctorId },
       waiver,
       earlier === null,
       caller,
     );
-    return true;
+  }
+
+  /**
+   * Admin control of the doctor mark. `used = true` marks the doctor (the
+   * gift will not be offered again; an existing mark keeps its original
+   * timestamp), `used = false` clears it (the doctor gets the gift on the
+   * next case they submit — a new gift order, earlier ones stay as they
+   * are). Idempotent. Runs under the same per-doctor advisory lock as
+   * `applyOnSubmit`, so it cannot interleave with a submission deciding
+   * the gift for that doctor.
+   *
+   * 404 when the user does not exist, is soft-deleted or is not a dentist:
+   * the mark only means something for a practitioner.
+   */
+  async setDoctorMark(
+    doctorId: string,
+    used: boolean,
+    caller: Caller,
+  ): Promise<WelcomeGiftMarkResponseDto> {
+    const result = await this.prisma.$transaction(async (tx) => {
+      await this.lockDoctor(tx, doctorId);
+      const doctor = await tx.user.findUnique({
+        where: { id: doctorId },
+        select: { role: true, deletedAt: true, welcomeGiftUsedAt: true },
+      });
+      if (!doctor || doctor.deletedAt || doctor.role !== UserRole.dentist) {
+        throw new NotFoundException('Practitioner not found');
+      }
+      const current = doctor.welcomeGiftUsedAt;
+      // Idempotent: already in the requested state → keep it as is (a
+      // "used" mark keeps the instant the gift was actually consumed).
+      if (used === (current !== null)) {
+        return { welcomeGiftUsedAt: current, changed: false };
+      }
+      const next = used ? new Date() : null;
+      await tx.user.update({
+        where: { id: doctorId },
+        data: { welcomeGiftUsedAt: next },
+      });
+      return { welcomeGiftUsedAt: next, changed: true };
+    });
+
+    this.logger.log(
+      `Welcome gift mark ${used ? 'set (used)' : 'cleared (available)'} for doctor ${doctorId} by ${caller.role} ${caller.userId}${result.changed ? '' : ' (unchanged)'}`,
+    );
+    return { doctorId, welcomeGiftUsedAt: result.welcomeGiftUsedAt };
   }
 
   /**
@@ -293,9 +349,11 @@ export class WelcomeGiftService {
   }
 
   /**
-   * The ONE write path of the gift: the frozen columns on the order, the
-   * doctor mark (same instant) and one `welcome_gift_applied` audit row.
-   * The payment columns are never touched — nothing was paid.
+   * The ONE write path of the gift: the doctor mark (claimed first), the
+   * frozen columns on the order (same instant) and one
+   * `welcome_gift_applied` audit row. The payment columns are never
+   * touched — nothing was paid. Returns false, writing nothing, when the
+   * mark was no longer clear.
    */
   private async writeGift(
     tx: Prisma.TransactionClient,
@@ -303,8 +361,17 @@ export class WelcomeGiftService {
     waiver: Waiver,
     firstCase: boolean,
     caller: Caller,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const appliedAt = new Date();
+    // Compare-and-set on the doctor mark: only the writer that flips it
+    // from NULL wins. From now on this doctor is not eligible again,
+    // whatever later happens to this order, unless an admin clears it.
+    const claimed = await tx.user.updateMany({
+      where: { id: order.doctorId, welcomeGiftUsedAt: null },
+      data: { welcomeGiftUsedAt: appliedAt },
+    });
+    if (claimed.count !== 1) return false;
+
     await tx.dentalOrder.update({
       where: { id: order.id },
       data: {
@@ -314,12 +381,6 @@ export class WelcomeGiftService {
         welcomeGiftCurrency: waiver.currency,
         welcomeGiftFirstCase: firstCase,
       },
-    });
-    // The doctor mark: from now on this doctor is never eligible again,
-    // whatever later happens to this order.
-    await tx.user.update({
-      where: { id: order.doctorId },
-      data: { welcomeGiftUsedAt: appliedAt },
     });
     const auditEntry = await this.orderAudit.entry(
       caller,
@@ -340,5 +401,6 @@ export class WelcomeGiftService {
     this.logger.log(
       `Welcome gift applied to order ${order.id} (doctor ${order.doctorId}, ${firstCase ? 'first case' : 'later case'}): ${waiver.total.toString()} ${waiver.currency} waived`,
     );
+    return true;
   }
 }

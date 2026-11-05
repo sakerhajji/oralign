@@ -65,6 +65,8 @@ import { TreatmentFeePaymentDialog } from '@/components/orders/treatment-fee-pay
 import { TreatmentFeeReceiptDialog } from '@/components/orders/treatment-fee-receipt-dialog';
 import { OrderHistory } from '@/components/orders/order-history';
 import { WelcomeGiftDetailCard } from '@/components/welcome-gift/welcome-gift-detail-card';
+import { FreeBadge } from '@/components/welcome-gift/welcome-gift-note';
+import { StruckAmount } from '@/components/welcome-gift/struck-price';
 import { useAuth } from '@/lib/providers/auth-provider';
 import { useT } from '@/lib/i18n/lang-context';
 import {
@@ -792,15 +794,31 @@ export default function OrderDetailPage() {
           />
           {/* CBCT paid supplement — the price snapshotted on THIS order
               when CBCT was requested (config changes never reprice it). */}
-          {(order.cbctFeeAmount ?? 0) > 0 && (
-            <Info
-              label={t('orderDetail.metadata.cbctSupplement')}
-              value={formatPrice(
-                order.cbctFeeAmount ?? 0,
-                order.cbctFeeCurrency ?? 'TND',
-              )}
-            />
-          )}
+          {(order.cbctFeeAmount ?? 0) > 0 &&
+            ((order.welcomeGift?.cbctFee ?? 0) > 0 ? (
+              // Waived by the Oralign gift: the snapshot price struck,
+              // as in the gift card above — never a price to pay.
+              <Info label={t('orderDetail.metadata.cbctSupplement')}>
+                <span className="inline-flex flex-wrap items-center gap-2">
+                  <StruckAmount
+                    value={formatPrice(
+                      order.cbctFeeAmount ?? 0,
+                      order.cbctFeeCurrency ?? 'TND',
+                    )}
+                    className="text-muted-foreground"
+                  />
+                  <FreeBadge />
+                </span>
+              </Info>
+            ) : (
+              <Info
+                label={t('orderDetail.metadata.cbctSupplement')}
+                value={formatPrice(
+                  order.cbctFeeAmount ?? 0,
+                  order.cbctFeeCurrency ?? 'TND',
+                )}
+              />
+            ))}
           {/* CBCT delivery status, derived from the ZIP bundle files. */}
           {order.useCbctWithScans && (
             <Info
@@ -1056,10 +1074,13 @@ function Info({
   label,
   value,
   wide,
+  children,
 }: {
   label: string;
   value?: string | null;
   wide?: boolean;
+  /** Inline rich value (e.g. a struck price + badge); wins over `value`. */
+  children?: ReactNode;
 }) {
   return (
     <div className={wide ? 'sm:col-span-2 lg:col-span-3' : undefined}>
@@ -1067,7 +1088,7 @@ function Info({
         {label}
       </p>
       <p className="mt-1 whitespace-pre-wrap text-sm font-medium text-foreground">
-        {value && value.trim().length > 0 ? value : '—'}
+        {children ?? (value && value.trim().length > 0 ? value : '—')}
       </p>
     </div>
   );

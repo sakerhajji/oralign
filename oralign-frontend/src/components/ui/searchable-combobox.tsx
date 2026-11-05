@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  memo,
   useCallback,
   useEffect,
   useId,
@@ -10,7 +11,7 @@ import {
   useState,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, ChevronsUpDown, Search, X } from 'lucide-react';
+import { Check, ChevronsUpDown, Loader2, Search, X } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { useT } from '@/lib/i18n/lang-context';
 import { cn } from '@/lib/utils';
@@ -30,7 +31,16 @@ export interface SearchableComboboxProps {
   id?: string;
   value?: string | null;
   onChange: (next: string | null) => void;
-  items: ComboboxItem[];
+  items: readonly ComboboxItem[];
+  /**
+   * What the trigger shows for `value` while `items` does not contain it —
+   * a lazily loaded list (country/city picker) has no items until it opens.
+   */
+  selectedItem?: ComboboxItem | null;
+  /** Called with `true` when the panel opens and `false` when it closes. */
+  onOpenChange?: (open: boolean) => void;
+  /** The list is being fetched: a loading row replaces the items. */
+  loading?: boolean;
   placeholder?: string;
   emptyLabel?: string;
   disabled?: boolean;
@@ -41,6 +51,9 @@ export interface SearchableComboboxProps {
   /** Allow clearing the value with an X button. */
   clearable?: boolean;
 }
+
+/** The panel renders at most this many rows; search narrows the rest. */
+const MAX_ROWS = 200;
 
 /**
  * Headless combobox with built-in search filtering.
@@ -58,6 +71,9 @@ export function SearchableCombobox({
   value,
   onChange,
   items,
+  selectedItem,
+  onOpenChange,
+  loading = false,
   placeholder,
   emptyLabel,
   disabled,
@@ -72,6 +88,7 @@ export function SearchableCombobox({
   const effectivePlaceholder = placeholder ?? t('uiBits.select');
   const effectiveEmptyLabel = emptyLabel ?? t('uiBits.noMatches');
   const triggerId = useId();
+  const listboxId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -80,19 +97,35 @@ export function SearchableCombobox({
   const [activeIndex, setActiveIndex] = useState(0);
   const [pos, setPos] = useState({ left: 0, top: 0, width: 0 });
 
+  // Every open/close goes through here so the parent hears about it (the
+  // country/city picker loads its dataset on the first open).
+  const onOpenChangeRef = useRef(onOpenChange);
+  useEffect(() => {
+    onOpenChangeRef.current = onOpenChange;
+  });
+  const changeOpen = useCallback((next: boolean) => {
+    setOpen(next);
+    setQuery('');
+    setActiveIndex(0);
+    onOpenChangeRef.current?.(next);
+  }, []);
+
   const selected = useMemo(
-    () => items.find((it) => it.value === value) ?? null,
-    [items, value],
+    () =>
+      items.find((it) => it.value === value) ??
+      (value != null && selectedItem?.value === value ? selectedItem : null),
+    [items, value, selectedItem],
   );
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return items.slice(0, 200); // cap initial list so first paint is fast
-    return items.filter((it) => {
-      const hay =
-        (it.keywords ?? `${it.label} ${it.hint ?? ''}`).toLowerCase();
-      return hay.includes(q);
-    }).slice(0, 200);
+    if (!q) return items.slice(0, MAX_ROWS); // cap initial list so first paint is fast
+    return items
+      .filter((it) => {
+        const hay = (it.keywords ?? `${it.label} ${it.hint ?? ''}`).toLowerCase();
+        return hay.includes(q);
+      })
+      .slice(0, MAX_ROWS);
   }, [items, query]);
 
   // Anchor the panel to the trigger on open + on resize/scroll.
@@ -126,7 +159,7 @@ export function SearchableCombobox({
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setOpen(false);
+        changeOpen(false);
         triggerRef.current?.focus();
       }
     };
@@ -137,7 +170,7 @@ export function SearchableCombobox({
       ) {
         return;
       }
-      setOpen(false);
+      changeOpen(false);
     };
     document.addEventListener('keydown', onKey);
     document.addEventListener('mousedown', onClick);
@@ -145,7 +178,7 @@ export function SearchableCombobox({
       document.removeEventListener('keydown', onKey);
       document.removeEventListener('mousedown', onClick);
     };
-  }, [open]);
+  }, [open, changeOpen]);
 
   // Focus the search input shortly after opening so the keyboard can drive it.
   useEffect(() => {
@@ -155,12 +188,14 @@ export function SearchableCombobox({
     }
   }, [open]);
 
-  const pick = (item: ComboboxItem) => {
-    onChange(item.value);
-    setOpen(false);
-    setQuery('');
-    triggerRef.current?.focus();
-  };
+  const pick = useCallback(
+    (item: ComboboxItem) => {
+      onChange(item.value);
+      changeOpen(false);
+      triggerRef.current?.focus();
+    },
+    [onChange, changeOpen],
+  );
 
   const handleKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'ArrowDown') {
@@ -174,9 +209,12 @@ export function SearchableCombobox({
       const choice = filtered[activeIndex];
       if (choice) pick(choice);
     } else if (e.key === 'Tab') {
-      setOpen(false);
+      changeOpen(false);
     }
   };
+
+  const showRows = !loading && filtered.length > 0;
+  const activeOptionId = showRows ? `${listboxId}-${activeIndex}` : undefined;
 
   return (
     <>
@@ -187,7 +225,8 @@ export function SearchableCombobox({
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
+        aria-controls={open ? listboxId : undefined}
+        onClick={() => changeOpen(!open)}
         className={cn(
           'flex h-10 w-full items-center justify-between gap-2 rounded-md border bg-background px-3 text-sm transition-colors',
           'hover:border-primary/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
@@ -243,7 +282,6 @@ export function SearchableCombobox({
         createPortal(
           <div
             ref={panelRef}
-            role="listbox"
             style={{
               left: pos.left,
               top: pos.top,
@@ -264,56 +302,50 @@ export function SearchableCombobox({
                   }}
                   onKeyDown={handleKey}
                   placeholder={t('uiBits.search')}
+                  aria-controls={listboxId}
+                  aria-activedescendant={activeOptionId}
                   className="h-8 bg-background pl-7 text-sm"
                 />
               </div>
-              {hint && (
+              {hint && !loading && (
                 <p className="mt-2 text-[11px] text-muted-foreground">
                   {hint}
                 </p>
               )}
             </div>
 
-            <div className="max-h-64 overflow-auto py-1">
-              {filtered.length === 0 ? (
+            <div
+              id={listboxId}
+              role="listbox"
+              aria-busy={loading || undefined}
+              // `relative`: the rows' offsetTop is measured from this list.
+              className="relative max-h-64 overflow-auto py-1"
+            >
+              {loading ? (
+                <p
+                  role="status"
+                  className="flex items-center justify-center gap-2 px-3 py-6 text-sm text-muted-foreground"
+                >
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                  {t('settingsDesk.picker.loading')}
+                </p>
+              ) : !showRows ? (
                 <p className="px-3 py-6 text-center text-sm text-muted-foreground">
                   {effectiveEmptyLabel}
                 </p>
               ) : (
-                filtered.map((it, idx) => {
-                  const active = idx === activeIndex;
-                  const isSelected = it.value === value;
-                  return (
-                    <button
-                      key={it.value}
-                      type="button"
-                      onMouseEnter={() => setActiveIndex(idx)}
-                      onClick={() => pick(it)}
-                      className={cn(
-                        'flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors',
-                        active && 'bg-muted',
-                        isSelected && 'font-medium',
-                      )}
-                    >
-                      {it.prefix && (
-                        <span className="text-base leading-none" aria-hidden>
-                          {it.prefix}
-                        </span>
-                      )}
-                      <span className="min-w-0 flex-1 truncate">
-                        {it.label}
-                      </span>
-                      {it.hint && (
-                        <span className="shrink-0 text-xs text-muted-foreground">
-                          {it.hint}
-                        </span>
-                      )}
-                      {isSelected && (
-                        <Check className="h-4 w-4 shrink-0 text-primary" />
-                      )}
-                    </button>
-                  );
-                })
+                filtered.map((it, idx) => (
+                  <ComboboxRow
+                    key={it.value}
+                    id={`${listboxId}-${idx}`}
+                    index={idx}
+                    item={it}
+                    active={idx === activeIndex}
+                    selected={it.value === value}
+                    onHover={setActiveIndex}
+                    onPick={pick}
+                  />
+                ))
               )}
             </div>
           </div>,
@@ -322,3 +354,70 @@ export function SearchableCombobox({
     </>
   );
 }
+
+/**
+ * One option. Memoised with stable callbacks so moving the pointer across
+ * the list re-renders the two rows whose `active` flag flips, not all 200.
+ */
+const ComboboxRow = memo(function ComboboxRow({
+  id,
+  index,
+  item,
+  active,
+  selected,
+  onHover,
+  onPick,
+}: {
+  id: string;
+  index: number;
+  item: ComboboxItem;
+  active: boolean;
+  selected: boolean;
+  onHover: (index: number) => void;
+  onPick: (item: ComboboxItem) => void;
+}) {
+  const ref = useRef<HTMLButtonElement>(null);
+  // Keep the keyboard-highlighted row visible inside the scrolling list (a
+  // no-op for a row the pointer is already over). Scrolls the list only —
+  // scrollIntoView would also scroll the page under the fixed panel.
+  useEffect(() => {
+    const row = ref.current;
+    const list = row?.parentElement;
+    if (!active || !row || !list) return;
+    const top = row.offsetTop;
+    const bottom = top + row.offsetHeight;
+    if (top < list.scrollTop) list.scrollTop = top;
+    else if (bottom > list.scrollTop + list.clientHeight) {
+      list.scrollTop = bottom - list.clientHeight;
+    }
+  }, [active]);
+
+  return (
+    <button
+      ref={ref}
+      id={id}
+      type="button"
+      role="option"
+      aria-selected={selected}
+      tabIndex={-1}
+      onMouseEnter={() => onHover(index)}
+      onClick={() => onPick(item)}
+      className={cn(
+        'flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors',
+        active && 'bg-muted',
+        selected && 'font-medium',
+      )}
+    >
+      {item.prefix && (
+        <span className="text-base leading-none" aria-hidden>
+          {item.prefix}
+        </span>
+      )}
+      <span className="min-w-0 flex-1 truncate">{item.label}</span>
+      {item.hint && (
+        <span className="shrink-0 text-xs text-muted-foreground">{item.hint}</span>
+      )}
+      {selected && <Check className="h-4 w-4 shrink-0 text-primary" />}
+    </button>
+  );
+});

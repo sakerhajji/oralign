@@ -9,7 +9,7 @@
  * and i18n context.
  */
 import type { Metadata } from 'next';
-import { Playfair_Display, DM_Sans } from 'next/font/google';
+import localFont from 'next/font/local';
 import { LangProvider } from '../(showcase)/_lib/i18n/lang-context';
 import { Header } from '../(showcase)/_components/header';
 import { Footer } from '../(showcase)/_components/footer';
@@ -18,17 +18,38 @@ import { FloatingLang } from '../(showcase)/_components/floating-lang';
 // hoists global CSS imports so they apply to this subtree.
 import '../(showcase)/showcase.css';
 
-const serif = Playfair_Display({
-  subsets: ['latin'],
-  weight: ['400', '500', '600'],
-  style: ['normal', 'italic'],
+// Self-hosted from src/fonts (see its README), never next/font/google: that
+// loader downloads from Google during `next build`, and a Google answer
+// Turbopack could not parse broke the production build. One variable file
+// per face and style; the declared weights are the ones used before. Paths
+// stay literal: next/font only accepts static options.
+// Turbopack names a local font's family after the const it is assigned to
+// (no hash), so each const is named after its typeface: the generated
+// families are "jost", "dmSans", "playfairDisplay", never a generic word
+// two loaders could share for different faces. A custom font-family in
+// `declarations` is not an option: Turbopack keeps the const name in the
+// CSS variable, which then points at no @font-face.
+const playfairDisplay = localFont({
+  src: [
+    { path: '../../fonts/playfair-display-latin.woff2', weight: '400', style: 'normal' },
+    { path: '../../fonts/playfair-display-latin.woff2', weight: '500', style: 'normal' },
+    { path: '../../fonts/playfair-display-latin.woff2', weight: '600', style: 'normal' },
+    { path: '../../fonts/playfair-display-italic-latin.woff2', weight: '400', style: 'italic' },
+    { path: '../../fonts/playfair-display-italic-latin.woff2', weight: '500', style: 'italic' },
+    { path: '../../fonts/playfair-display-italic-latin.woff2', weight: '600', style: 'italic' },
+  ],
   variable: '--font-sc-serif',
   display: 'swap',
+  adjustFontFallback: 'Times New Roman',
 });
 
-const sans = DM_Sans({
-  subsets: ['latin'],
-  weight: ['200', '300', '400', '500'],
+const dmSans = localFont({
+  src: [
+    { path: '../../fonts/dm-sans-latin.woff2', weight: '200', style: 'normal' },
+    { path: '../../fonts/dm-sans-latin.woff2', weight: '300', style: 'normal' },
+    { path: '../../fonts/dm-sans-latin.woff2', weight: '400', style: 'normal' },
+    { path: '../../fonts/dm-sans-latin.woff2', weight: '500', style: 'normal' },
+  ],
   variable: '--font-sc-sans',
   display: 'swap',
 });
@@ -49,7 +70,7 @@ export default function CreatedForYouLayout({
     <div
       data-theme="showcase"
       data-patient-viewer="true"
-      className={`${serif.variable} ${sans.variable} min-h-screen flex flex-col`}
+      className={`${playfairDisplay.variable} ${dmSans.variable} min-h-screen flex flex-col`}
     >
       {/* Patient-viewer overrides. The showcase layout normally hides the
           system cursor (>=1024px) and lets a custom dot+ring follow the

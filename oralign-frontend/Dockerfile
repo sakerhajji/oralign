@@ -28,6 +28,8 @@ ARG CACHE_BUST=1
 RUN echo "CACHE_BUST=$CACHE_BUST" > /tmp/cache-bust.txt
 
 COPY . .
+# No telemetry call from the build either (the runtime stage already sets it).
+ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
 # ─── Stage 2: Runtime ────────────────────────────────────────────────────────

@@ -54,8 +54,11 @@ export const ERROR_THEME = {
   onDarkMuted: 'rgba(242, 245, 239, 0.62)',
   onDarkFaint: 'rgba(242, 245, 239, 0.34)',
   hairline: 'rgba(242, 245, 239, 0.14)',
-  display: '"Century Gothic", Jost, system-ui, sans-serif',
-  body: '"DM Sans", system-ui, -apple-system, sans-serif',
+  // jost / dmSans: the family names Turbopack gives the self-hosted faces
+  // (src/fonts/README.md, "Naming"); they resolve wherever the showcase or
+  // dashboard font CSS is loaded. "DM Sans" / Jost stay for a local install.
+  display: '"Century Gothic", Jost, jost, system-ui, sans-serif',
+  body: '"DM Sans", dmSans, system-ui, -apple-system, sans-serif',
 } as const;
 
 export type ErrorKind =

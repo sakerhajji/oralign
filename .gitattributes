@@ -8,3 +8,6 @@ Dockerfile  text eol=lf
 
 # Keep everything else as-is.
 *           text=auto
+
+# Self-hosted web fonts (oralign-frontend/src/fonts): never touch the bytes.
+*.woff2     binary

@@ -23,7 +23,13 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { IndeterminateBar, Progress } from '@/components/ui/progress';
-import { readBodyWithProgress } from '@/lib/utils/read-body-with-progress';
+import {
+  prefetchToothArt,
+  toothArtKey,
+  useToothArtReady,
+  useToothArtUrls,
+  useToothSpriteProgress,
+} from './tooth-art';
 import { TOOTH_VIEWBOXES } from './tooth-viewboxes';
 import { useT } from '@/lib/i18n/lang-context';
 
@@ -34,6 +40,7 @@ const LOWER_RIGHT = [48, 47, 46, 45, 44, 43, 42, 41] as const;
 const LOWER_LEFT = [31, 32, 33, 34, 35, 36, 37, 38] as const;
 
 const MIRRORED = new Set<number>([...UPPER_LEFT, ...LOWER_RIGHT]);
+const ALL_TEETH = [...UPPER_RIGHT, ...UPPER_LEFT, ...LOWER_RIGHT, ...LOWER_LEFT];
 
 /**
  * Sprite symbol each tooth renders. The sprite ships only the 16 right-side
@@ -41,140 +48,12 @@ const MIRRORED = new Set<number>([...UPPER_LEFT, ...LOWER_RIGHT]);
  * byte-identical, and the left-side teeth are ALREADY flipped with CSS
  * `scaleX(-1)` (the MIRRORED set above) — so tooth 21 rendering symbol
  * #tooth-11 produces the exact same pixels while the sprite file, its
- * parse time and the hidden symbol DOM are all halved.
+ * parse time and the tooth images built from it are all halved.
  */
 function canonicalSpriteTooth(toothNumber: number): number {
   if (toothNumber >= 21 && toothNumber <= 28) return toothNumber - 10; // 21→11 … 28→18
   if (toothNumber >= 41 && toothNumber <= 48) return toothNumber - 10; // 41→31 … 48→38
   return toothNumber;
-}
-
-// Sprite URL — Next.js serves /public files at the root.
-const SPRITE_URL = '/teeth-sprite.svg';
-const SPRITE_HOST_ID = 'oralign-tooth-sprite-host';
-
-let toothSpritePromise: Promise<boolean> | null = null;
-
-function normalizeSpriteMarkup(markup: string) {
-  if (typeof window === 'undefined') return markup;
-
-  const wrapper = document.createElement('div');
-  wrapper.innerHTML = markup;
-  const svg = wrapper.querySelector('svg');
-
-  if (svg) {
-    // External <use href="/teeth-sprite.svg#tooth-11"> is fragile behind
-    // some production proxy/CDN setups. Once fetched, keep the sprite in the
-    // live DOM as an invisible 0x0 SVG and reference local symbols instead.
-    svg.removeAttribute('style');
-    svg.setAttribute('aria-hidden', 'true');
-    svg.setAttribute('focusable', 'false');
-    svg.setAttribute('width', '0');
-    svg.setAttribute('height', '0');
-    svg.style.position = 'absolute';
-    svg.style.width = '0';
-    svg.style.height = '0';
-    svg.style.overflow = 'hidden';
-  }
-
-  return wrapper.innerHTML;
-}
-
-/**
- * Download-progress channel for the sprite. The fetch is a module-level
- * singleton (one download shared by every odontogram on the page), so the
- * progress is too: every mounted chart subscribes and renders the same
- * bar. `null` = byte total unknown (indeterminate); 100 = parsed + in DOM.
- */
-type SpriteProgressListener = (percent: number | null) => void;
-const spriteProgressListeners = new Set<SpriteProgressListener>();
-let spriteProgress: number | null = 0;
-
-function publishSpriteProgress(percent: number | null) {
-  spriteProgress = percent;
-  spriteProgressListeners.forEach((listener) => listener(percent));
-}
-
-// The sprite is served with a fixed size (~2.1 MB); used as the total when
-// the response is content-encoded and Content-Length can't be trusted.
-const SPRITE_EXPECTED_BYTES = 2_106_392;
-
-function ensureToothSprite() {
-  if (typeof window === 'undefined') return Promise.resolve(false);
-  if (document.getElementById(SPRITE_HOST_ID)) return Promise.resolve(true);
-  if (toothSpritePromise) return toothSpritePromise;
-
-  toothSpritePromise = fetch(SPRITE_URL, { cache: 'force-cache' })
-    .then(async (response) => {
-      if (!response.ok) {
-        throw new Error(`Unable to load tooth sprite (${response.status})`);
-      }
-      // Stream so the skeleton can show real download progress — on a
-      // slow clinic connection the 2 MB sprite is the visible wait.
-      const buffer = await readBodyWithProgress(
-        response,
-        SPRITE_EXPECTED_BYTES,
-        (percent) =>
-          // Hold at 99 until the markup is parsed + in the DOM; the
-          // final 100 is published below so "100 %" means "ready".
-          publishSpriteProgress(percent === 100 ? 99 : percent),
-      );
-      const markup = new TextDecoder().decode(buffer);
-      const host = document.createElement('div');
-      host.id = SPRITE_HOST_ID;
-      host.setAttribute('aria-hidden', 'true');
-      host.style.position = 'absolute';
-      host.style.width = '0';
-      host.style.height = '0';
-      host.style.overflow = 'hidden';
-      host.innerHTML = normalizeSpriteMarkup(markup);
-      document.body.prepend(host);
-      publishSpriteProgress(100);
-      return true;
-    })
-    .catch(() => {
-      toothSpritePromise = null;
-      publishSpriteProgress(null);
-      return false;
-    });
-
-  return toothSpritePromise;
-}
-
-function useToothSpriteReady() {
-  const [ready, setReady] = useState(
-    () =>
-      typeof document !== 'undefined' &&
-      !!document.getElementById(SPRITE_HOST_ID),
-  );
-
-  useEffect(() => {
-    let cancelled = false;
-
-    ensureToothSprite().then((isReady) => {
-      if (!cancelled) setReady(isReady);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  return ready;
-}
-
-/** Live download progress of the shared tooth sprite (see above). */
-function useToothSpriteProgress(): number | null {
-  const [percent, setPercent] = useState<number | null>(() => spriteProgress);
-  useEffect(() => {
-    // Sync in case progress advanced between render and subscribe.
-    setPercent(spriteProgress);
-    spriteProgressListeners.add(setPercent);
-    return () => {
-      spriteProgressListeners.delete(setPercent);
-    };
-  }, []);
-  return percent;
 }
 
 // ── Color → instruction mapping ─────────────────────────────────────────────
@@ -237,6 +116,44 @@ const DEFAULT_OUTLINE = '#f3eeea';
 const COLOR_BY_TYPE = new Map<ToothInstructionType, ColorEntry>(
   COLORS.map((c) => [c.type, c]),
 );
+
+/**
+ * Ordered, de-duped colours painted on one tooth. `preferEditableFill`
+ * decides which layer leads (and so owns the dominant fill): the treatment
+ * attachment editor wants its editable ATTACHMENT to win; order surfaces
+ * want the doctor marks to lead.
+ */
+function resolveToothMarks(
+  types: ToothInstructionType[] | undefined,
+  readonlyTypes: ToothInstructionType[] | undefined,
+  preferEditableFill: boolean | undefined,
+): ColorEntry[] {
+  const editableColors = (types ?? [])
+    .map((tp) => COLOR_BY_TYPE.get(tp))
+    .filter((c): c is ColorEntry => !!c);
+  const readonlyColors = (readonlyTypes ?? [])
+    .map((tp) => COLOR_BY_TYPE.get(tp))
+    .filter((c): c is ColorEntry => !!c);
+  const orderedColors = preferEditableFill
+    ? [...editableColors, ...readonlyColors]
+    : [...readonlyColors, ...editableColors];
+  // De-dupe by type, preserving order.
+  const seenTypes = new Set<ToothInstructionType>();
+  return orderedColors.filter((c) => {
+    if (seenTypes.has(c.type)) return false;
+    seenTypes.add(c.type);
+    return true;
+  });
+}
+
+/** Tooth images one glyph draws: the neutral tooth, or one per colour band. */
+function glyphArtKeys(toothNumber: number, marks: ColorEntry[]): string[] {
+  const symbol = canonicalSpriteTooth(toothNumber);
+  if (marks.length === 0) {
+    return [toothArtKey(symbol, DEFAULT_TOOTH, DEFAULT_OUTLINE)];
+  }
+  return marks.map((c) => toothArtKey(symbol, c.hex, c.outline));
+}
 
 /**
  * The four order-level doctor instruction types among which EXTRACT is
@@ -470,7 +387,6 @@ export const OdontogramSelector = memo(function OdontogramSelector({
   subtitle?: string;
 }) {
   const { t } = useT();
-  const toothSpriteReady = useToothSpriteReady();
   const toothSpriteProgress = useToothSpriteProgress();
   const [showLegend, setShowLegend] = useState(true);
   const [popup, setPopup] = useState<{
@@ -557,6 +473,32 @@ export const OdontogramSelector = memo(function OdontogramSelector({
     );
     return buildMarkMap(readonlyValue, notEditable);
   }, [readonlyValue, visibleTypes]);
+
+  // Every tooth image the chart draws right now. The skeleton stays until
+  // all of them have decoded, so the arch appears in one frame. After that
+  // first reveal it never comes back: a tooth whose colours change keeps
+  // its previous image until the new one is ready (useToothArtUrls).
+  const preferEditableFill = mode === 'attachments';
+  const artKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const n of ALL_TEETH) {
+      const marks = resolveToothMarks(
+        assignments.get(n),
+        readonlyAssignments.get(n),
+        preferEditableFill,
+      );
+      for (const key of glyphArtKeys(n, marks)) keys.add(key);
+    }
+    return [...keys].sort();
+  }, [assignments, readonlyAssignments, preferEditableFill]);
+  const artReady = useToothArtReady(artKeys);
+  const [artRevealed, setArtRevealed] = useState(artReady);
+  if (artReady && !artRevealed) setArtRevealed(true);
+  const toothSpriteReady = artReady || artRevealed;
+  // A chart mounted after the sprite was parsed only waits for a few images
+  // to decode: no download to report, and a progress strip shown for a
+  // frame would push the arch down. The glyph-slot pulse covers it.
+  const [spriteParsedAtMount] = useState(toothSpriteProgress === 100);
 
   // Keep onChange / value / disabled reachable from stable callbacks so
   // ToothButton's memoization actually holds across renders.
@@ -783,14 +725,15 @@ export const OdontogramSelector = memo(function OdontogramSelector({
       <div className="rounded-2xl border bg-card shadow-sm">
         {/* Skeleton while the tooth artwork downloads: same layout box
             (fixed glyph heights), a soft pulse behind each glyph slot and
-            an accessible status line. Disappears the moment the sprite is
-            in the DOM — no layout shift either way. */}
-        {!toothSpriteReady && (
+            an accessible status line. Disappears the moment every tooth
+            image has decoded — no layout shift either way. */}
+        {!toothSpriteReady && !spriteParsedAtMount && (
           // Visible progress strip above the skeleton: the ~2 MB tooth
           // sprite is the one asset users actually wait for on a slow
           // clinic connection, so show how far along it is rather than
           // an unexplained pulse. Determinate while bytes stream in,
-          // indeterminate only if the total can't be known.
+          // indeterminate only if the total can't be known. Held at 99
+          // while the images decode, so "100 %" means "drawn".
           <div
             role="status"
             aria-live="polite"
@@ -803,12 +746,15 @@ export const OdontogramSelector = memo(function OdontogramSelector({
               {toothSpriteProgress === null ? (
                 <IndeterminateBar className="h-1.5" />
               ) : (
-                <Progress value={toothSpriteProgress} className="h-1.5" />
+                <Progress
+                  value={Math.min(99, toothSpriteProgress)}
+                  className="h-1.5"
+                />
               )}
             </div>
             {toothSpriteProgress !== null && (
               <span className="w-9 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
-                {Math.round(toothSpriteProgress)}%
+                {Math.round(Math.min(99, toothSpriteProgress))}%
               </span>
             )}
           </div>
@@ -838,7 +784,7 @@ export const OdontogramSelector = memo(function OdontogramSelector({
               activeTooth={popup?.tooth ?? null}
               activeIpr={iprPopup?.tooth ?? null}
               spriteReady={toothSpriteReady}
-              preferEditableFill={mode === 'attachments'}
+              preferEditableFill={preferEditableFill}
               disabled={disabled}
               iprValues={iprVisible ? iprValues : undefined}
               iprNotes={iprVisible ? iprNotes : undefined}
@@ -857,7 +803,7 @@ export const OdontogramSelector = memo(function OdontogramSelector({
               activeTooth={popup?.tooth ?? null}
               activeIpr={iprPopup?.tooth ?? null}
               spriteReady={toothSpriteReady}
-              preferEditableFill={mode === 'attachments'}
+              preferEditableFill={preferEditableFill}
               disabled={disabled}
               iprValues={iprVisible ? iprValues : undefined}
               iprNotes={iprVisible ? iprNotes : undefined}
@@ -1384,69 +1330,102 @@ function segmentGradient(hexes: string[], direction: string): string {
  * for ANY tooth (11…48) and any of the tooth-level marks (No Attachments /
  * Do Not Move / No IPR / Extract / Attachment). The stacked layers all use
  * the same `viewBox` + `preserveAspectRatio`, so the bands stay aligned.
+ *
+ * Each layer draws the tooth as an image, pre-coloured (tooth-art.ts):
+ * the page paints it as a single item, where the live sprite instance it
+ * replaces was thousands of paint chunks.
  */
 function SegmentedToothGlyph({
   viewBox,
-  spriteHref,
-  colors,
+  artKeys,
+  ready,
 }: {
   viewBox: string;
-  spriteHref: string;
-  /** Ordered, de-duped instruction colours for this tooth (0–4). */
-  colors: ColorEntry[];
+  /** One tooth image per colour band, top to bottom (see glyphArtKeys). */
+  artKeys: readonly string[];
+  /** False while the artwork downloads: an empty slot for the skeleton. */
+  ready: boolean;
 }) {
-  // Single (or empty) → one glyph, exactly as before.
-  if (colors.length <= 1) {
-    const color = colors[0];
+  if (!ready) return <GlyphFrame className="odo-glyph" viewBox={viewBox} />;
+  return <ToothGlyphImages viewBox={viewBox} artKeys={artKeys} />;
+}
+
+function ToothGlyphImages({
+  viewBox,
+  artKeys,
+}: {
+  viewBox: string;
+  artKeys: readonly string[];
+}) {
+  const urls = useToothArtUrls(artKeys);
+  if (!urls) return <GlyphFrame className="odo-glyph" viewBox={viewBox} />;
+
+  // Single (or empty) → one glyph.
+  if (urls.length === 1) {
     return (
-      <svg
-        className="odo-glyph"
-        viewBox={viewBox}
-        width="100%"
-        preserveAspectRatio="xMidYMid meet"
-        aria-hidden
-        focusable="false"
-        style={
-          {
-            '--tooth-color': color?.hex ?? DEFAULT_TOOTH,
-            '--tooth-outline': color?.outline ?? DEFAULT_OUTLINE,
-          } as CSSProperties
-        }
-      >
-        <use href={spriteHref} xlinkHref={spriteHref} />
-      </svg>
+      <GlyphFrame className="odo-glyph" viewBox={viewBox} url={urls[0]} />
     );
   }
 
-  const n = colors.length;
+  const n = urls.length;
   return (
     <span className="odo-glyph odo-glyph-stack" aria-hidden>
-      {colors.map((c, i) => {
+      {urls.map((url, i) => {
         // Band i (0 = top): reveal only its horizontal slice via inset clip.
         const top = ((i / n) * 100).toFixed(3);
         const bottom = (((n - 1 - i) / n) * 100).toFixed(3);
         return (
-          <svg
-            key={c.type}
+          <GlyphFrame
+            key={i}
             className="odo-seg-glyph"
             viewBox={viewBox}
-            width="100%"
-            preserveAspectRatio="xMidYMid meet"
-            aria-hidden
-            focusable="false"
-            style={
-              {
-                '--tooth-color': c.hex,
-                '--tooth-outline': c.outline,
-                clipPath: `inset(${top}% 0 ${bottom}% 0)`,
-              } as CSSProperties
-            }
-          >
-            <use href={spriteHref} xlinkHref={spriteHref} />
-          </svg>
+            url={url}
+            style={{ clipPath: `inset(${top}% 0 ${bottom}% 0)` }}
+          />
         );
       })}
     </span>
+  );
+}
+
+/**
+ * The glyph's box: the same `<svg>` the sprite instance lived in, so the
+ * tooth keeps its exact geometry. The image fills the viewBox; its
+ * `preserveAspectRatio="none"` (and the document's) keeps that mapping
+ * exact — see tooth-art.ts.
+ */
+function GlyphFrame({
+  className,
+  viewBox,
+  url,
+  style,
+}: {
+  className: string;
+  viewBox: string;
+  url?: string;
+  style?: CSSProperties;
+}) {
+  const [, , width, height] = viewBox.split(' ');
+  return (
+    <svg
+      className={className}
+      viewBox={viewBox}
+      width="100%"
+      preserveAspectRatio="xMidYMid meet"
+      aria-hidden
+      focusable="false"
+      style={style}
+    >
+      {url && (
+        <image
+          href={url}
+          xlinkHref={url}
+          width={width}
+          height={height}
+          preserveAspectRatio="none"
+        />
+      )}
+    </svg>
   );
 }
 
@@ -1501,26 +1480,7 @@ const ToothButton = memo(
     disabled,
     onClick,
   }: ToothButtonProps) {
-    // Resolve the ordered list of colours to represent. `preferEditableFill`
-    // decides which layer leads (and thus owns the dominant fill): the
-    // treatment attachment editor wants its editable ATTACHMENT to win;
-    // order surfaces want the doctor marks to lead.
-    const editableColors = (types ?? [])
-      .map((tp) => COLOR_BY_TYPE.get(tp))
-      .filter((c): c is ColorEntry => !!c);
-    const readonlyColors = (readonlyTypes ?? [])
-      .map((tp) => COLOR_BY_TYPE.get(tp))
-      .filter((c): c is ColorEntry => !!c);
-    const orderedColors = preferEditableFill
-      ? [...editableColors, ...readonlyColors]
-      : [...readonlyColors, ...editableColors];
-    // De-dupe by type, preserving order.
-    const seenTypes = new Set<ToothInstructionType>();
-    const marks = orderedColors.filter((c) => {
-      if (seenTypes.has(c.type)) return false;
-      seenTypes.add(c.type);
-      return true;
-    });
+    const marks = resolveToothMarks(types, readonlyTypes, preferEditableFill);
     // Colours painted ON the tooth: ONE colour fills the whole tooth; TWO
     // to FOUR split it into equal coloured bands (SegmentedToothGlyph).
     // No dots. `color` (first mark) still drives the single-mark number
@@ -1533,12 +1493,11 @@ const ToothButton = memo(
           'to right',
         )
       : color?.hex;
+    const artKeys = glyphArtKeys(toothNumber, marks);
     // Normalise the host viewBox to "0 0 w h" — some source teeth (17, 27,
     // 37, 47) have content drawn far from the SVG origin (min-x ≈ 22.5).
-    // Keeping the raw viewBox would push the <use> at (0, 0) outside the
-    // visible viewport and the tooth would silently fail to render.
-    // The <symbol> keeps its original viewBox so its content still scales
-    // correctly into the <use>'s 0..w / 0..h box.
+    // The tooth image fills this box; the symbol's own viewBox lives inside
+    // the image document, so its content still lands in the 0..w / 0..h box.
     const viewBox = useMemo(() => {
       const raw = TOOTH_VIEWBOXES[toothNumber];
       if (!raw) return '0 0 11 22';
@@ -1547,18 +1506,11 @@ const ToothButton = memo(
     }, [toothNumber]);
 
     const style = useMemo<CSSProperties>(
-      () =>
-        ({
-          '--tooth-color': color?.hex ?? DEFAULT_TOOTH,
-          '--tooth-outline': color?.outline ?? DEFAULT_OUTLINE,
-          transformOrigin: row === 'upper' ? 'bottom center' : 'top center',
-        }) as CSSProperties,
-      [color?.hex, color?.outline, row],
+      () => ({
+        transformOrigin: row === 'upper' ? 'bottom center' : 'top center',
+      }),
+      [row],
     );
-    const spriteTooth = canonicalSpriteTooth(toothNumber);
-    const spriteHref = spriteReady
-      ? `#tooth-${spriteTooth}`
-      : `${SPRITE_URL}#tooth-${spriteTooth}`;
 
     const handleClick = useCallback(
       (e: ReactMouseEvent<HTMLButtonElement>) => onClick(toothNumber, e),
@@ -1610,8 +1562,8 @@ const ToothButton = memo(
             coloured bands (no dots). */}
         <SegmentedToothGlyph
           viewBox={viewBox}
-          spriteHref={spriteHref}
-          colors={marks}
+          artKeys={artKeys}
+          ready={spriteReady}
         />
 
         {row === 'lower' && labelChip}
@@ -1620,9 +1572,9 @@ const ToothButton = memo(
   },
   // Compare the mark arrays by CONTENT. Every change to the instruction
   // list rebuilds the assignments Map and mints fresh per-tooth arrays —
-  // with the default reference compare, marking ONE tooth repainted every
-  // marked tooth (each glyph is a heavy filter-laden sprite instance).
-  // Content equality confines the repaint to the tooth that changed.
+  // with the default reference compare, marking ONE tooth re-rendered every
+  // marked tooth. Content equality confines the work to the tooth that
+  // changed.
   (prev, next) =>
     prev.toothNumber === next.toothNumber &&
     prev.row === next.row &&
@@ -1820,6 +1772,13 @@ function ColorPopover({
       document.removeEventListener('mousedown', onDocClick);
     };
   }, [onClose]);
+
+  // Decode this tooth's image in every colour on offer while the user
+  // reads the swatches, so a pick repaints the tooth in the same frame.
+  useEffect(() => {
+    const symbol = canonicalSpriteTooth(tooth);
+    prefetchToothArt(colors.map((c) => toothArtKey(symbol, c.hex, c.outline)));
+  }, [tooth, colors]);
 
   // Position once mounted.
   useLayoutEffect(() => {
@@ -2110,8 +2069,8 @@ function IprPopover({
 
 // ── Scoped styles ──────────────────────────────────────────────────────────
 // Co-located because the perf rules below (`contain`, `will-change`, GPU
-// `translate3d`) form the perf contract of this component — easy to lose if
-// they migrate to a global stylesheet.
+// `translate3d`, a transform-only hover transition) form the perf contract
+// of this component — easy to lose if they migrate to a global stylesheet.
 
 const ODONTOGRAM_CSS = /* css */ `
 .odo-tooth {
@@ -2138,16 +2097,20 @@ const ODONTOGRAM_CSS = /* css */ `
      full-screen image dialog both janked. Promotion is now transient:
      applied on :hover only (below), so idle teeth cost the compositor
      nothing and the hover lift still runs on its own layer. */
+  /* The hover lift animates transform only: that runs on the compositor,
+     with no main-thread frame. Never transition the filter: a drop-shadow
+     moves pixels, so Chrome animates it on the main thread, repainting
+     and re-layerizing the page on every frame of the hover. */
   transition:
     transform 180ms cubic-bezier(0.4, 0, 0.2, 1),
-    filter 180ms cubic-bezier(0.4, 0, 0.2, 1),
     background 180ms cubic-bezier(0.4, 0, 0.2, 1),
     border-color 180ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 .odo-tooth:hover {
   /* Promote just-in-time for the lift animation, then drop back to no
      layer once the hover ends — keeps the interaction smooth without the
-     idle layer cost. */
+     idle layer cost. The shadow is set at once (see the transition note
+     above): one repaint when the hover starts, one when it ends. */
   will-change: transform;
   transform: translate3d(0, -3px, 0) scale(1.06);
   filter: drop-shadow(0 6px 10px rgba(15, 23, 42, 0.18));

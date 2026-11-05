@@ -36,6 +36,7 @@ import type { User } from "@/lib/types";
 import { UserRole, VerificationStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { formatTimestampDay } from "@/lib/utils/calendar-date";
+import { formatPhone } from "@/lib/utils/phone";
 
 export type UserRowAction =
   "delete" | "restore" | "permanent" | "block" | "activate";
@@ -69,15 +70,6 @@ const AMBER_BADGE =
 
 function day(value: string | undefined, lang: Lang): string | null {
   return value ? formatTimestampDay(value, lang) : null;
-}
-
-/** "+21698123456" → "+216 98 123 456" (TN / FR); other numbers as stored. */
-function formatPhone(phone: string): string {
-  const tn = /^\+216(\d{2})(\d{3})(\d{3})$/.exec(phone);
-  if (tn) return `+216 ${tn[1]} ${tn[2]} ${tn[3]}`;
-  const fr = /^\+33(\d)(\d{2})(\d{2})(\d{2})(\d{2})$/.exec(phone);
-  if (fr) return `+33 ${fr.slice(1).join(" ")}`;
-  return phone;
 }
 
 // ─── Badges ──────────────────────────────────────────────────────────────────

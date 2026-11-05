@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { Gender } from '@prisma/client';
+import { Gender, OrderStatus } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -18,6 +18,7 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
+import { PaginatedResponse } from '../../common/dto/response.dto';
 
 const E164_PHONE_REGEX = /^\+[1-9]\d{1,14}$/;
 
@@ -276,6 +277,57 @@ export class PatientResponseDto {
   deletedAt?: Date | null;
 }
 
+/** The newest order of a patients-list row: enough to show and open it. */
+export class PatientLatestOrderDto {
+  @ApiProperty()
+  id!: string;
+  @ApiProperty({ example: 'Sarah_Morgan_20261105' })
+  orderCode!: string;
+  @ApiProperty({ enum: OrderStatus })
+  status!: OrderStatus;
+  @ApiProperty()
+  createdAt!: Date;
+}
+
+/**
+ * A row of `GET /patients`: the patient plus their orders as the caller
+ * sees them (own orders for a dentist, every order for an admin; archived
+ * orders never count). Only the list carries these two fields: the
+ * single-patient read and the mutations keep returning PatientResponseDto.
+ */
+export class PatientListItemDto extends PatientResponseDto {
+  @ApiProperty({
+    example: 2,
+    description:
+      "Orders of this patient in the caller's scope, any status (drafts included), archived ones excluded. A display count: archiving the patient is refused while any live order exists, whoever owns it.",
+  })
+  ordersCount!: number;
+  @ApiProperty({
+    type: PatientLatestOrderDto,
+    nullable: true,
+    description:
+      'The newest of those orders (createdAt, then id); null when there is none.',
+  })
+  latestOrder!: PatientLatestOrderDto | null;
+}
+
+/**
+ * Swagger shape of `GET /patients` (a PaginatedResponse of list rows).
+ * `implements` keeps it in step with the class the service really returns.
+ */
+export class PatientListResponseDto implements PaginatedResponse<PatientListItemDto> {
+  @ApiProperty({ type: [PatientListItemDto] })
+  data!: PatientListItemDto[];
+  @ApiProperty({ example: 42 })
+  total!: number;
+  @ApiProperty({ example: 1 })
+  page!: number;
+  @ApiProperty({ example: 10 })
+  limit!: number;
+  @ApiProperty({ example: 5 })
+  totalPages!: number;
+}
+
 // Sort fields the patients-list endpoint honours. Narrow enum so a
 // typo in the client falls through to the default rather than producing
 // nonsense ordering.
@@ -288,6 +340,14 @@ export enum PatientSortField {
 export enum PatientSortOrder {
   asc = 'asc',
   desc = 'desc',
+}
+
+// Order-based filter of the patients list. A string enum on purpose, never
+// a boolean query param: with enableImplicitConversion the global pipe
+// turns the string "false" into true before any @Transform sees it.
+export enum PatientOrderState {
+  ACTIVE = 'active',
+  NONE = 'none',
 }
 
 export class PatientFilterDto {
@@ -308,8 +368,10 @@ export class PatientFilterDto {
 
   @ApiProperty({
     required: false,
-    description: 'Search by name, email, or phone',
+    description:
+      'Search by name, email, phone (spaces, dots, dashes and parentheses ignored) or order code. Trimmed; blank means no search.',
   })
+  @Transform(({ value }: { value: unknown }) => normalizeOptionalString(value))
   @IsOptional()
   @IsString()
   search?: string;
@@ -323,6 +385,16 @@ export class PatientFilterDto {
   @IsOptional()
   @IsEnum(Gender)
   gender?: Gender;
+
+  @ApiProperty({
+    enum: PatientOrderState,
+    required: false,
+    description:
+      "active: at least one order in progress (not draft, finished, canceled or rejected). none: no order at all. Orders are read in the caller's scope, archived ones excluded.",
+  })
+  @IsOptional()
+  @IsEnum(PatientOrderState)
+  orderState?: PatientOrderState;
 
   @ApiProperty({
     enum: PatientSortField,

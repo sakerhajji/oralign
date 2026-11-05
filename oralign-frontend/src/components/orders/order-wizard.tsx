@@ -119,6 +119,7 @@ import {
   useCreatePatient,
   useDentistOptions,
   useOrderFiles,
+  usePatient,
   useUploadPatientProfilePhoto,
   useSubmitOrder,
   useUpdateOrder,
@@ -260,7 +261,15 @@ interface NewPatientDraft {
   clinicalConditionsOther: string;
 }
 
-export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
+export function OrderWizard({
+  initialOrder,
+  initialPatientId,
+}: {
+  initialOrder?: DentalOrder;
+  // Patient to start a NEW order for (the new-order page's ?patientId=).
+  // Ignored when editing: the order already names its patient.
+  initialPatientId?: string;
+}) {
   const router = useRouter();
   const { isAdmin, isDentist, user } = useAuth();
   // Configured CBCT paid supplement (doctor-safe public-defaults read).
@@ -372,6 +381,44 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
 
   const dentistsQuery = useDentistOptions({ limit: 100, enabled: isAdmin });
 
+  // ── Patient named by the link (initialPatientId) ───────────────────
+  // Fetched on its own: the picker below loads only the first 100
+  // patients and this one may not be among them. Once the link has been
+  // acted on, the lookup stays on that patient even if the URL drops the
+  // param (the sidebar's plain "New order" keeps this wizard mounted), so
+  // a seeded choice never stops resolving.
+  const [linkHandledId, setLinkHandledId] = useState<string | null>(null);
+  const { data: linkedPatient } = usePatient(
+    initialOrder ? '' : (linkHandledId ?? initialPatientId ?? ''),
+  );
+  // Seeds the patient step ONCE, on the first render where both the
+  // patient and the caller's role are known (`isAdmin` is still false
+  // while the session loads). An admin also gets the patient's dentist:
+  // their patient list stays disabled until one is chosen. If the
+  // planner already chose by hand (another patient, "new patient", or a
+  // different dentist), the link is spent without touching the form.
+  // Adjusted while rendering, not in an effect: the first painted frame
+  // already shows the patient.
+  if (!linkHandledId && linkedPatient && (isAdmin || isDentist)) {
+    setLinkHandledId(linkedPatient.id);
+    const untouched =
+      patientMode === 'existing' &&
+      !form.patientId &&
+      (!isAdmin || !form.doctorId || form.doctorId === linkedPatient.doctorId);
+    if (untouched) {
+      setForm((current) => ({
+        ...current,
+        patientId: linkedPatient.id,
+        ...(isAdmin ? { doctorId: linkedPatient.doctorId } : {}),
+      }));
+      setFieldErrors((current) => ({
+        ...current,
+        patientId: undefined,
+        doctorId: undefined,
+      }));
+    }
+  }
+
   const patientParams: PatientFilterParams = {
     page: 1,
     limit: 100,
@@ -391,7 +438,17 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
     refetchOnMount: 'always',
   });
 
-  const selectedPatient = patientsQuery.data?.data.find(
+  // The linked patient joins the picker's list when the first 100 leave
+  // it out, so it shows as chosen (and stays pickable) — but only next to
+  // its own dentist's patients: an admin may switch to another dentist.
+  const listedPatients = patientsQuery.data?.data ?? [];
+  const pickablePatients: Patient[] =
+    linkedPatient &&
+    (!isAdmin || form.doctorId === linkedPatient.doctorId) &&
+    !listedPatients.some((patient) => patient.id === linkedPatient.id)
+      ? [linkedPatient, ...listedPatients]
+      : listedPatients;
+  const selectedPatient = pickablePatients.find(
     (patient) => patient.id === form.patientId,
   );
   const selectedDentist = dentistsQuery.data?.data.find(
@@ -453,7 +510,6 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
     updateField('chiefComplaint', packChiefComplaint(ordered, other));
     // updateField is intentionally omitted — it's stable enough and the
     // seededPatientRef guard makes re-runs no-ops.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.patientId, patientMode, selectedPatient, initialOrder]);
 
   // Mirror the NEW-patient conditions (entered in step 1) into the chief
@@ -470,7 +526,6 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
     setChiefConditions(conds);
     setChiefOther(other);
     updateField('chiefComplaint', packChiefComplaint(conds, other));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     patientMode,
     newPatient.clinicalConditions,
@@ -914,7 +969,7 @@ export function OrderWizard({ initialOrder }: { initialOrder?: DentalOrder }) {
             selectedPatientName={selectedPatient?.fullName ?? savedOrder?.patient?.fullName}
             dentists={dentistsQuery.data?.data ?? []}
             dentistsLoading={dentistsQuery.isLoading}
-            patients={patientsQuery.data?.data ?? []}
+            patients={pickablePatients}
             patientsLoading={patientsQuery.isLoading}
             errors={fieldErrors}
             updateField={updateField}

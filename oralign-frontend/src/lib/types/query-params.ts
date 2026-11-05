@@ -33,11 +33,19 @@ export type PatientSortField = 'createdAt' | 'updatedAt' | 'fullName';
 export type OrderSortField = 'createdAt' | 'updatedAt' | 'orderCode' | 'status';
 export type SortOrder = 'asc' | 'desc';
 
+/**
+ * Patients-list case filter: `active` = an order in progress (submitted
+ * through shipped), `none` = no order at all. Drafts, finished and
+ * cancelled orders are not "in progress".
+ */
+export type PatientOrderState = 'active' | 'none';
+
 export interface PatientFilterParams extends PaginationParams {
+  /** Name, email, phone (any spacing) or an order code. */
   search?: string;
   doctorId?: string;
-  /** Optional gender filter — admin-only on the patients page. */
   gender?: Gender;
+  orderState?: PatientOrderState;
   sortBy?: PatientSortField;
   sortOrder?: SortOrder;
   /** ISO 8601 dates (YYYY-MM-DD or full datetime). Inclusive bounds. */

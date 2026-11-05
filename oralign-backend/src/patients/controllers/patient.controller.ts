@@ -42,6 +42,7 @@ import {
   BulkDeletePatientsDto,
   CreatePatientDto,
   PatientFilterDto,
+  PatientListResponseDto,
   PatientResponseDto,
   UpdatePatientDto,
 } from '../dto/patient.dto';
@@ -85,7 +86,8 @@ export class PatientController {
     name: 'search',
     required: false,
     type: String,
-    description: 'Search by patient name, email, or phone',
+    description:
+      'Search by name, email, phone (spaces, dots, dashes and parentheses ignored) or order code',
   })
   @ApiQuery({
     name: 'doctorId',
@@ -93,7 +95,11 @@ export class PatientController {
     type: String,
     description: 'Admin-only filter by dentist ID',
   })
-  @ApiResponse({ status: 200, description: 'Patients fetched successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'Patients fetched successfully',
+    type: PatientListResponseDto,
+  })
   async getPatients(
     @CurrentUser() user: JwtPayload,
     // Bind the FULL DTO so every documented filter (gender, sort,
@@ -239,7 +245,9 @@ export class PatientController {
 
   @Post(':id/restore')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Restore a soft-deleted patient (owner dentist or admin)' })
+  @ApiOperation({
+    summary: 'Restore a soft-deleted patient (owner dentist or admin)',
+  })
   @ApiParam({ name: 'id', type: String, description: 'Patient ID' })
   @ApiResponse({ status: 200, description: 'Patient restored' })
   async restorePatient(

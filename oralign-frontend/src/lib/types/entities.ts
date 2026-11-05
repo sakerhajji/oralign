@@ -145,6 +145,24 @@ export interface Patient {
   updatedAt: string;
 }
 
+/** The newest order of a patient, as the patients list carries it. */
+export interface PatientLatestOrder {
+  id: string;
+  orderCode: string;
+  status: OrderStatus;
+  createdAt: string;
+}
+
+/**
+ * A row of GET /patients. The order figures are scoped like the orders
+ * the caller can open (a dentist counts only their own) and leave out
+ * orders in the trash.
+ */
+export interface PatientListItem extends Patient {
+  ordersCount: number;
+  latestOrder: PatientLatestOrder | null;
+}
+
 export interface ToothInstruction {
   toothNumber: number;
   type: ToothInstructionType;

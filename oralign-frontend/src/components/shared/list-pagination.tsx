@@ -3,13 +3,39 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useT } from '@/lib/i18n/lang-context';
-import { pageWindow } from './users-filters';
 
 /**
- * Range + windowed page numbers (1 … 4 5 6 … 20). Phones get
- * previous / "page / total" / next only.
+ * Page numbers to show around `page`, with `'gap'` for an ellipsis:
+ * 1 … 4 5 6 … 20. At most 7 slots, so the row never overflows.
  */
-export function UsersPagination({
+export function pageWindow(page: number, totalPages: number): (number | 'gap')[] {
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, i) => i + 1);
+  }
+  const pages = new Set<number>([1, totalPages, page - 1, page, page + 1]);
+  if (page <= 4) [2, 3, 4, 5].forEach((p) => pages.add(p));
+  if (page >= totalPages - 3) {
+    [totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1].forEach((p) =>
+      pages.add(p),
+    );
+  }
+  const sorted = [...pages]
+    .filter((p) => p >= 1 && p <= totalPages)
+    .sort((a, b) => a - b);
+  const out: (number | 'gap')[] = [];
+  sorted.forEach((p, i) => {
+    const prev = sorted[i - 1];
+    if (prev !== undefined && p - prev > 1) out.push('gap');
+    out.push(p);
+  });
+  return out;
+}
+
+/**
+ * Range + windowed page numbers (1 … 4 5 6 … 20) under a list. Phones get
+ * previous / "page / total" / next only. Renders nothing for an empty list.
+ */
+export function ListPagination({
   page,
   totalPages,
   total,
@@ -30,11 +56,11 @@ export function UsersPagination({
 
   return (
     <nav
-      aria-label={t('usersDesk.pagination.aria')}
+      aria-label={t('listUi.pagination.aria')}
       className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2"
     >
       <p className="text-sm text-muted-foreground tabular-nums">
-        {t('usersAdmin.pagShowing', { from, to, total })}
+        {t('listUi.pagination.showing', { from, to, total })}
       </p>
       {totalPages > 1 && (
         <div className="flex items-center gap-1">
@@ -43,10 +69,10 @@ export function UsersPagination({
             size="sm"
             onClick={() => onPageChange(page - 1)}
             disabled={page <= 1}
-            aria-label={t('usersAdmin.previous')}
+            aria-label={t('listUi.pagination.previous')}
           >
             <ChevronLeft aria-hidden="true" />
-            <span className="hidden sm:inline">{t('usersAdmin.previous')}</span>
+            <span className="hidden sm:inline">{t('listUi.pagination.previous')}</span>
           </Button>
           <ul className="hidden items-center gap-1 sm:flex">
             {pageWindow(page, totalPages).map((item, index) =>
@@ -65,7 +91,7 @@ export function UsersPagination({
                     size="sm"
                     className="min-w-7 px-2 tabular-nums"
                     aria-current={item === page ? 'page' : undefined}
-                    aria-label={t('usersDesk.pagination.goTo', { page: item })}
+                    aria-label={t('listUi.pagination.goTo', { page: item })}
                     onClick={() => onPageChange(item)}
                   >
                     {item}
@@ -75,16 +101,16 @@ export function UsersPagination({
             )}
           </ul>
           <span className="px-2 text-sm text-muted-foreground tabular-nums sm:hidden">
-            {t('usersDesk.pagination.pageOf', { page, total: totalPages })}
+            {t('listUi.pagination.pageOf', { page, total: totalPages })}
           </span>
           <Button
             variant="outline"
             size="sm"
             onClick={() => onPageChange(page + 1)}
             disabled={page >= totalPages}
-            aria-label={t('usersAdmin.next')}
+            aria-label={t('listUi.pagination.next')}
           >
-            <span className="hidden sm:inline">{t('usersAdmin.next')}</span>
+            <span className="hidden sm:inline">{t('listUi.pagination.next')}</span>
             <ChevronRight aria-hidden="true" />
           </Button>
         </div>

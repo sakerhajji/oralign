@@ -1,27 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { Controller, useForm, useWatch, type FieldErrors } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import {
-  AlertTriangle,
-  Loader2,
-  Mail,
-  Stethoscope,
-  Trash2,
-  UserRound,
-} from 'lucide-react';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
+import { Loader2, Mail, Stethoscope } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -46,6 +29,8 @@ import {
   TabsTrigger,
 } from '@/components/ui/tabs';
 import { ClinicalConditionsField } from '@/components/patients/clinical-conditions-field';
+import { PatientAvatar } from '@/components/patients/patient-avatar';
+import { genderLabelKey } from '@/components/patients/patient-format';
 import { PatientPhoneInput } from '@/components/patients/patient-phone-input';
 import { PatientProfilePhotoField } from '@/components/patients/patient-profile-photo-field';
 import { createPatientSchema, type CreatePatientFormData } from '@/lib/schemas';
@@ -83,7 +68,7 @@ export function normalizePatientForm(
 ): UpdatePatientDto;
 export function normalizePatientForm(
   data: CreatePatientFormData,
-  mode: PatientDetailMode,
+  mode: PatientFormMode,
 ): CreatePatientDto | UpdatePatientDto {
   const conditions = (data.clinicalConditions ?? []).filter(Boolean);
   const text = (value: string | undefined) => value?.trim() || undefined;
@@ -123,9 +108,9 @@ export type PatientSubmitPayload =
   | { mode: 'create'; data: CreatePatientDto }
   | { mode: 'edit'; data: UpdatePatientDto };
 
-export type PatientDetailMode = 'create' | 'edit';
+export type PatientFormMode = 'create' | 'edit';
 
-export interface PatientDetailSheetProps {
+export interface PatientFormSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** `null` (or undefined) → create mode; a Patient → edit mode. */
@@ -136,36 +121,25 @@ export interface PatientDetailSheetProps {
   currentUserId?: string;
   /** Dentist directory for the assignment dropdown (admin). */
   dentists: { id: string; fullName: string }[];
-  /** True while the create or update mutation is in flight. */
+  /** True while the create or update mutation (or the photo upload) runs. */
   isSaving: boolean;
-  /** True while the delete mutation is in flight. */
-  isDeleting?: boolean;
   /** Save handler — payload is already normalised via `normalizePatientForm`. */
   onSubmit: (payload: PatientSubmitPayload, profilePhoto: File | null) => void;
-  /** Delete handler. Only invoked in edit mode + only when admin/owner. */
-  onDelete?: () => void;
 }
 
 /**
- * Right-side slide-out sheet that handles BOTH create and edit. Mirrors
- * the UX of `UserDetailSheet` on the Users page: a header strap with
- * an icon avatar + identity badges, four content tabs (Identity,
- * Contact, Clinical, Notes), and a sticky footer with Save / Delete /
- * Cancel.
- *
- * Why a sheet and not a separate `/dashboard/patients/[id]` route:
- * patient records on Oralign are simple — there's no detail page
- * worth the page transition, and the inline editor lets a planner
- * stay in their filter / sort context while opening a record. Matches
- * the Users page exactly so the two surfaces feel consistent.
+ * The patient form, for BOTH create and edit: a header strap (photo or
+ * initials + identity badges), four tabs (Identity, Contact, Clinical,
+ * Notes) and a sticky Cancel / Save footer. Viewing a patient is the
+ * PatientPanel's job; this sheet only edits. Full width on phones.
  *
  * The form lives inside react-hook-form (`createPatientSchema`, whose
  * messages are i18n keys). The phone is the flag picker (E.164 out,
  * Tunisia by default). An invalid submit opens the tab holding the
  * first error and focuses that field.
  */
-export function PatientDetailSheet(props: PatientDetailSheetProps) {
-  const { open, onOpenChange, patient, isSaving, isDeleting } = props;
+export function PatientFormSheet(props: PatientFormSheetProps) {
+  const { open, onOpenChange, patient, isSaving } = props;
 
   return (
     <Sheet
@@ -173,13 +147,13 @@ export function PatientDetailSheet(props: PatientDetailSheetProps) {
       onOpenChange={(next) => {
         // Don't let the sheet close while a save is in flight — the
         // planner would lose the optimistic feedback otherwise.
-        if (!next && (isSaving || isDeleting)) return;
+        if (!next && isSaving) return;
         onOpenChange(next);
       }}
     >
       <SheetContent
         side="right"
-        className="flex w-full flex-col gap-0 p-0 sm:max-w-2xl"
+        className="flex flex-col gap-0 p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-2xl"
       >
         {/* The content unmounts when the sheet closes, so the body mounts
             once per opening (and per patient): the form seeds from
@@ -226,11 +200,9 @@ function PatientSheetBody({
   currentUserId,
   dentists,
   isSaving,
-  isDeleting,
   onSubmit,
-  onDelete,
-}: PatientDetailSheetProps) {
-  const mode: PatientDetailMode = patient ? 'edit' : 'create';
+}: PatientFormSheetProps) {
+  const mode: PatientFormMode = patient ? 'edit' : 'create';
   const { t } = useT();
   const [profilePhoto, setProfilePhoto] = useState<File | null>(null);
   const [tab, setTab] = useState<SheetTab>('identity');
@@ -276,7 +248,7 @@ function PatientSheetBody({
   const clinicalConditions = useWatch({ control, name: 'clinicalConditions' }) ?? NO_CONDITIONS;
   const clinicalConditionsOther = useWatch({ control, name: 'clinicalConditionsOther' }) ?? '';
 
-  const initials = useMemo(() => buildInitials(fullName), [fullName]);
+  const genderKey = genderLabelKey(patient?.gender);
   // Schema messages are i18n keys.
   const errorText = (message?: string) => (message ? t(message) : undefined);
 
@@ -304,9 +276,10 @@ function PatientSheetBody({
             : t('patients.sheet.descCreate')}
         </SheetDescription>
         <div className="flex min-w-0 items-start gap-3 pr-8">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary/10 text-base font-semibold text-primary">
-            {initials || <UserRound className="h-5 w-5" />}
-          </div>
+          <PatientAvatar
+            patient={{ fullName, profilePhotoUrl: patient?.profilePhotoUrl }}
+            className="size-12"
+          />
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-lg font-semibold">
               {fullName.trim() ||
@@ -315,13 +288,9 @@ function PatientSheetBody({
                   : t('patients.sheet.titleCreate'))}
             </h2>
             <div className="mt-1 flex flex-wrap items-center gap-1.5">
-              {patient?.gender && (
-                <Badge variant="secondary" className="text-[10px]">
-                  {genderLabel(patient.gender, t)}
-                </Badge>
-              )}
+              {genderKey && <Badge variant="secondary">{t(genderKey)}</Badge>}
               {patient?.doctor?.fullName && (
-                <Badge variant="outline" className="gap-1 text-[10px]">
+                <Badge variant="outline" className="gap-1">
                   <Stethoscope className="h-3 w-3" />
                   {patient.doctor.fullName}
                 </Badge>
@@ -329,7 +298,7 @@ function PatientSheetBody({
               {mode === 'create' && (
                 <Badge
                   variant="outline"
-                  className="border-amber-400 bg-amber-50 text-[10px] text-amber-800"
+                  className="border-amber-300 bg-amber-50 text-amber-800"
                 >
                   {t('patients.sheet.draftBadge')}
                 </Badge>
@@ -423,9 +392,9 @@ function PatientSheetBody({
                       <SelectValue placeholder={t('patients.sheet.fieldGenderPh')} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value={Gender.FEMALE}>{t('patients.genderFemale')}</SelectItem>
-                      <SelectItem value={Gender.MALE}>{t('patients.genderMale')}</SelectItem>
-                      <SelectItem value={Gender.OTHER}>{t('patients.genderOther')}</SelectItem>
+                      <SelectItem value={Gender.FEMALE}>{t('patientDesk.gender.female')}</SelectItem>
+                      <SelectItem value={Gender.MALE}>{t('patientDesk.gender.male')}</SelectItem>
+                      <SelectItem value={Gender.OTHER}>{t('patientDesk.gender.other')}</SelectItem>
                     </SelectContent>
                   </Select>
                 </FieldGroup>
@@ -551,42 +520,26 @@ function PatientSheetBody({
           </div>
 
           {/* ─── Sticky footer ───────────────────────────────── */}
-          <footer className="flex shrink-0 flex-col gap-3 border-t bg-card px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-            <div className="w-full sm:w-auto">
-              {mode === 'edit' && onDelete && (
-                <DeletePatientButton
-                  patientName={patient?.fullName ?? t('patients.sheet.deleteThis')}
-                  onConfirm={onDelete}
-                  disabled={isSaving || !!isDeleting}
-                  loading={!!isDeleting}
-                />
-              )}
-            </div>
-            <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:items-center">
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full sm:w-auto"
-                onClick={() => onOpenChange(false)}
-                disabled={isSaving || !!isDeleting}
-              >
-                {t('patients.sheet.cancel')}
-              </Button>
-              <Button
-                type="submit"
-                disabled={
-                  isSaving ||
-                  !!isDeleting ||
-                  (mode === 'edit' && !isDirty && !profilePhoto)
-                }
-                className="w-full gap-2 sm:w-auto"
-              >
-                {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
-                {mode === 'edit'
-                  ? t('patients.sheet.saveChanges')
-                  : t('patients.sheet.createPatient')}
-              </Button>
-            </div>
+          <footer className="flex shrink-0 flex-col-reverse gap-2 border-t bg-card px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:flex-row sm:justify-end sm:px-6">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 w-full sm:h-8 sm:w-auto"
+              onClick={() => onOpenChange(false)}
+              disabled={isSaving}
+            >
+              {t('patients.sheet.cancel')}
+            </Button>
+            <Button
+              type="submit"
+              disabled={isSaving || (mode === 'edit' && !isDirty && !profilePhoto)}
+              className="h-11 w-full sm:h-8 sm:w-auto"
+            >
+              {isSaving && <Loader2 className="animate-spin" aria-hidden="true" />}
+              {mode === 'edit'
+                ? t('patients.sheet.saveChanges')
+                : t('patients.sheet.createPatient')}
+            </Button>
           </footer>
         </Tabs>
       </form>
@@ -627,95 +580,4 @@ function FieldGroup({
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
   );
-}
-
-function DeletePatientButton({
-  patientName,
-  onConfirm,
-  disabled,
-  loading,
-}: {
-  patientName: string;
-  onConfirm: () => void;
-  disabled?: boolean;
-  loading?: boolean;
-}) {
-  const { t } = useT();
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className={cn(
-          'w-full gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive sm:w-auto',
-        )}
-        disabled={disabled}
-        onClick={() => setOpen(true)}
-      >
-        {loading ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : (
-          <Trash2 className="h-4 w-4" />
-        )}
-        {t('patients.sheet.deleteBtn')}
-      </Button>
-      <AlertDialog open={open} onOpenChange={setOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              <span className="grid h-9 w-9 place-items-center rounded-full bg-destructive/10 text-destructive">
-                <AlertTriangle className="h-4 w-4" />
-              </span>
-              {t('patients.sheet.deleteTitle')}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {t('patients.sheet.deleteBodyNamed', { name: patientName })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('patients.sheet.cancel')}</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={() => {
-                onConfirm();
-                setOpen(false);
-              }}
-            >
-              {t('patients.sheet.deleteBtn')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
-  );
-}
-
-// ── helpers ─────────────────────────────────────────────────────────
-
-function buildInitials(name: string): string {
-  const parts = name
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
-  if (parts.length === 0) return '';
-  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
-  return `${parts[0]![0] ?? ''}${parts[parts.length - 1]![0] ?? ''}`.toUpperCase();
-}
-
-// Takes the translator function so the badge in the header strap and
-// the page-level table share one localised source of truth.
-type TFn = (path: string, vars?: Record<string, string | number>) => string;
-function genderLabel(gender: string | null | undefined, t: TFn): string | undefined {
-  switch (gender) {
-    case Gender.MALE:
-      return t('patients.genderMale');
-    case Gender.FEMALE:
-      return t('patients.genderFemale');
-    case Gender.OTHER:
-      return t('patients.genderOther');
-    default:
-      return undefined;
-  }
 }

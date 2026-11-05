@@ -44,6 +44,7 @@ import { blogDomainDict } from './dict.blog-domain';
 import { usersDeskDomainDict } from './dict.users-desk-domain';
 import { settingsDeskDomainDict } from './dict.settings-desk-domain';
 import { patientDeskDomainDict } from './dict.patient-desk-domain';
+import { listUiDomainDict } from './dict.list-ui-domain';
 
 export const dict = {
   ...chromeDomainDict,
@@ -54,6 +55,7 @@ export const dict = {
   ...usersDeskDomainDict,
   ...settingsDeskDomainDict,
   ...patientDeskDomainDict,
+  ...listUiDomainDict,
 
   // ─── Generic / cross-cutting ────────────────────────────────────
   common: {
@@ -1601,154 +1603,27 @@ export const dict = {
   // "Nom complet", "Date de naissance", etc. — so a French-speaking
   // clinic recognises every field without an English crutch.
   patients: {
-    trash: { en: 'Trash', fr: 'Corbeille' } as T,
-    activePatients: { en: 'Active patients', fr: 'Patients actifs' } as T,
     // Header strap
-    eyebrow: { en: 'Clinical patient registry', fr: 'Registre clinique des patients' } as T,
-    title: { en: 'Patients', fr: 'Patients' } as T,
-    subtitleAdmin: {
-      en: 'Browse patients across every dentist on the platform, filter by demographics, and manage records.',
-      fr: 'Parcourez les patients de tous les praticiens, filtrez par données démographiques et gérez les dossiers.',
-    } as T,
-    subtitleDentist: {
-      en: 'Browse your patient list, capture demographics, and prepare them for new aligner cases.',
-      fr: 'Consultez votre liste de patients, enregistrez leurs données démographiques et préparez-les pour de nouveaux cas d’aligneurs.',
-    } as T,
-    addPatient: { en: 'Add Patient', fr: 'Ajouter un patient' } as T,
-    noRole: {
-      en: 'Your role does not manage patients directly.',
-      fr: 'Votre rôle ne gère pas directement les patients.',
-    } as T,
 
     // Toolbar
-    searchPh: {
-      en: 'Search by name, email, or phone…',
-      fr: 'Rechercher par nom, e-mail ou téléphone…',
-    } as T,
-    filters: { en: 'Filters', fr: 'Filtres' } as T,
-    sort: { en: 'Sort', fr: 'Trier' } as T,
-    sortBy: { en: 'Sort by', fr: 'Trier par' } as T,
-    refresh: { en: 'Refresh', fr: 'Actualiser' } as T,
 
     // Sort options
-    sortNewest: { en: 'Newest first', fr: 'Du plus récent' } as T,
-    sortOldest: { en: 'Oldest first', fr: 'Du plus ancien' } as T,
-    sortNameAsc: { en: 'Name (A–Z)', fr: 'Nom (A–Z)' } as T,
-    sortNameDesc: { en: 'Name (Z–A)', fr: 'Nom (Z–A)' } as T,
-    sortUpdated: { en: 'Recently updated', fr: 'Récemment mis à jour' } as T,
 
     // Filter panel
-    dentistLabel: { en: 'Dentist', fr: 'Praticien' } as T,
-    allDentists: { en: 'All dentists', fr: 'Tous les praticiens' } as T,
-    genderLabel: { en: 'Gender', fr: 'Sexe' } as T,
-    genderAll: { en: 'All', fr: 'Tous' } as T,
-    genderFemale: { en: 'Female', fr: 'Femme' } as T,
-    genderMale: { en: 'Male', fr: 'Homme' } as T,
-    genderOther: { en: 'Other', fr: 'Autre' } as T,
-    createdFrom: { en: 'Created from', fr: 'Créé du' } as T,
-    createdTo: { en: 'Created to', fr: 'Créé au' } as T,
-    clearFilters: { en: 'Clear filters', fr: 'Effacer les filtres' } as T,
 
     // Filter chips
-    activeLabel: { en: 'Active:', fr: 'Actifs :' } as T,
-    chipSearch: { en: 'Search: "{value}"', fr: 'Recherche : « {value} »' } as T,
-    chipDentist: { en: 'Dentist: {value}', fr: 'Praticien : {value}' } as T,
-    chipGender: { en: 'Gender: {value}', fr: 'Sexe : {value}' } as T,
-    chipFrom: { en: 'From {value}', fr: 'À partir du {value}' } as T,
-    chipTo: { en: 'To {value}', fr: 'Jusqu’au {value}' } as T,
-    chipUnknown: { en: 'Unknown', fr: 'Inconnu' } as T,
 
     // Bulk action bar
-    bulkSelected: {
-      en: '{count} patient{s} selected',
-      fr: '{count} patient(s) sélectionné(s)',
-    } as T,
-    bulkDeselect: { en: 'Deselect all', fr: 'Tout désélectionner' } as T,
-    bulkDelete: {
-      en: 'Delete {count} patient{s}',
-      fr: 'Supprimer {count} patient(s)',
-    } as T,
-    bulkConfirmTitle: {
-      en: 'Delete {count} patient{s}?',
-      fr: 'Supprimer {count} patient(s) ?',
-    } as T,
-    bulkConfirmBody: {
-      en: 'This will soft-delete {count} patient record{s}. The records will disappear from active lists but existing orders are preserved.',
-      fr: 'Cela supprimera {count} dossier(s) patient (suppression douce). Les fiches disparaîtront des listes actives, mais les commandes existantes sont conservées.',
-    } as T,
-    cancel: { en: 'Cancel', fr: 'Annuler' } as T,
 
     // Table headers
-    colName: { en: 'Name', fr: 'Nom' } as T,
-    colEmail: { en: 'Email', fr: 'E-mail' } as T,
-    colPhone: { en: 'Phone', fr: 'Téléphone' } as T,
-    colGender: { en: 'Gender', fr: 'Sexe' } as T,
-    colDentist: { en: 'Dentist', fr: 'Praticien' } as T,
-    colCreated: { en: 'Created', fr: 'Créé le' } as T,
-    colActions: { en: 'Actions', fr: 'Actions' } as T,
 
     // Row bits
-    dobPrefix: { en: 'DOB', fr: 'Né(e) le' } as T,
-    selectAllAria: {
-      en: 'Select all patients on this page',
-      fr: 'Sélectionner tous les patients de cette page',
-    } as T,
-    selectAria: { en: 'Select {name}', fr: 'Sélectionner {name}' } as T,
-    actionsAria: { en: 'Actions for {name}', fr: 'Actions pour {name}' } as T,
-    openEdit: { en: 'Open / edit', fr: 'Ouvrir / modifier' } as T,
-    deletePatient: { en: 'Delete patient', fr: 'Supprimer le patient' } as T,
-    deletePatientConfirmTitle: {
-      en: 'Delete patient?',
-      fr: 'Supprimer le patient ?',
-    } as T,
-    deletePatientConfirmBody: {
-      en: 'This soft-deletes {name}. The record stays in the database but disappears from active patient lists. Existing orders remain visible.',
-      fr: 'Cela supprime {name} en mode douce. La fiche reste en base mais disparaît des listes actives. Les commandes existantes restent visibles.',
-    } as T,
-    deletePermanently: { en: 'Delete permanently', fr: 'Supprimer définitivement' } as T,
-    deletePermanentlyTitle: {
-      en: 'Permanently delete patient?',
-      fr: 'Supprimer définitivement le patient ?',
-    } as T,
-    deletePermanentlyBody: {
-      en: 'This permanently removes {name} from the database. This cannot be undone. The patient must have no orders — delete their orders permanently first.',
-      fr: 'Cela supprime définitivement {name} de la base de données. Action irréversible. Le patient ne doit avoir aucune commande — supprimez d’abord ses commandes définitivement.',
-    } as T,
 
     // Mobile card fallback strings
-    noEmail: { en: 'No email', fr: 'Aucun e-mail' } as T,
-    noPhone: { en: 'No phone', fr: 'Aucun téléphone' } as T,
-    noBirthDate: { en: 'No birth date', fr: 'Aucune date de naissance' } as T,
-    noDentist: { en: 'No dentist', fr: 'Aucun praticien' } as T,
 
     // States
-    loadingFailedTitle: {
-      en: 'Failed to load patients',
-      fr: 'Échec du chargement des patients',
-    } as T,
-    retry: { en: 'Retry', fr: 'Réessayer' } as T,
-    emptyTitle: { en: 'No patients found', fr: 'Aucun patient trouvé' } as T,
-    emptyBodyFiltered: {
-      en: 'No patients match the current filters. Try widening the search or clearing filters.',
-      fr: 'Aucun patient ne correspond aux filtres actuels. Essayez d’élargir la recherche ou d’effacer les filtres.',
-    } as T,
-    emptyBodyNone: {
-      en: 'Add your first patient to start creating orders.',
-      fr: 'Ajoutez votre premier patient pour commencer à créer des commandes.',
-    } as T,
 
     // Pagination
-    pagSummary: {
-      en: '{from}–{to} of {total} patients',
-      fr: '{from}–{to} sur {total} patients',
-    } as T,
-    pagRowsPerPage: { en: 'Rows per page', fr: 'Lignes par page' } as T,
-    pagPrevious: { en: 'Previous', fr: 'Précédent' } as T,
-    pagNext: { en: 'Next', fr: 'Suivant' } as T,
-    pagPageOf: {
-      en: 'Page {page} of {total}',
-      fr: 'Page {page} sur {total}',
-    } as T,
 
     // ── Detail sheet (add + edit) ────────────────────────────────
     sheet: {
@@ -1795,7 +1670,6 @@ export const dict = {
       fieldEmail: { en: 'Email', fr: 'E-mail' } as T,
       fieldEmailPh: { en: 'patient@example.com', fr: 'patient@example.com' } as T,
       fieldPhone: { en: 'Phone', fr: 'Téléphone' } as T,
-      fieldPhonePh: { en: '+21612345678', fr: '+21612345678' } as T,
       fieldAddress: { en: 'Address', fr: 'Adresse' } as T,
       fieldAddressPh: {
         en: 'Street, city, postal code',
@@ -1816,13 +1690,6 @@ export const dict = {
       createPatient: { en: 'Create patient', fr: 'Créer le patient' } as T,
 
       // Inline delete
-      deleteBtn: { en: 'Delete patient', fr: 'Supprimer le patient' } as T,
-      deleteTitle: { en: 'Delete patient?', fr: 'Supprimer le patient ?' } as T,
-      deleteBodyNamed: {
-        en: 'This soft-deletes {name}. The record stays in the database but disappears from active patient lists. Existing orders for this patient remain visible.',
-        fr: 'Cela supprime {name} en mode douce. La fiche reste en base mais disparaît des listes actives. Les commandes existantes pour ce patient restent visibles.',
-      } as T,
-      deleteThis: { en: 'this patient', fr: 'ce patient' } as T,
     },
   },
 
@@ -3599,12 +3466,6 @@ export const dict = {
     deleteUser: { en: 'Delete User', fr: 'Supprimer l’utilisateur' } as T,
     emptyDeleted: { en: 'No deleted users found', fr: 'Aucun utilisateur supprimé trouvé' } as T,
     emptyActive: { en: 'No users found', fr: 'Aucun utilisateur trouvé' } as T,
-    pagShowing: {
-      en: 'Showing {from} to {to} of {total} results',
-      fr: 'Affichage de {from} à {to} sur {total} résultats',
-    } as T,
-    previous: { en: 'Previous', fr: 'Précédent' } as T,
-    next: { en: 'Next', fr: 'Suivant' } as T,
     bulkDeleteTitle: { en: 'Delete Users', fr: 'Supprimer les utilisateurs' } as T,
     bulkRestoreTitle: { en: 'Restore Users', fr: 'Restaurer les utilisateurs' } as T,
     bulkPermanentTitle: { en: 'Permanently Delete Users', fr: 'Supprimer définitivement les utilisateurs' } as T,
@@ -4306,10 +4167,22 @@ export const dict = {
     patients: {
       created: { en: 'Patient created successfully', fr: 'Patient créé' } as T,
       updated: { en: 'Patient updated successfully', fr: 'Patient mis à jour' } as T,
-      deleted: { en: 'Patient deleted successfully', fr: 'Patient supprimé' } as T,
+      deleted: { en: 'Patient moved to the trash', fr: 'Patient mis à la corbeille' } as T,
       permanentlyDeleted: { en: 'Patient permanently deleted', fr: 'Patient supprimé définitivement' } as T,
       restored: { en: 'Patient restored', fr: 'Patient restauré' } as T,
-      bulkDeleted: { en: '{count} patient(s) deleted', fr: '{count} patient(s) supprimé(s)' } as T,
+      bulkDeletedOne: { en: '1 patient moved to the trash', fr: '1 patient mis à la corbeille' } as T,
+      bulkDeletedMany: {
+        en: '{count} patients moved to the trash',
+        fr: '{count} patients mis à la corbeille',
+      } as T,
+      bulkBlockedOne: {
+        en: '1 patient kept: they still have orders',
+        fr: '1 patient conservé : il a encore des commandes',
+      } as T,
+      bulkBlockedMany: {
+        en: '{count} patients kept: they still have orders',
+        fr: '{count} patients conservés : ils ont encore des commandes',
+      } as T,
     },
     payments: {
       invoiceNumberUpdated: { en: 'Invoice number updated.', fr: 'Numéro de facture mis à jour.' } as T,

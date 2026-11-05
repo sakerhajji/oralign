@@ -5,14 +5,22 @@ import {
   PaginatedResponse,
   Patient,
   PatientFilterParams,
+  PatientListItem,
   UpdatePatientDto,
 } from '@/lib/types';
+
+/** Bulk archive: `blocked` patients were kept because they still have orders. */
+export interface BulkDeletePatientsResult {
+  message: string;
+  deleted: number;
+  blocked: number;
+}
 
 export const patientsService = {
   getPatients: async (
     params?: PatientFilterParams,
-  ): Promise<PaginatedResponse<Patient>> => {
-    const response = await apiClient.get<PaginatedResponse<Patient>>(
+  ): Promise<PaginatedResponse<PatientListItem>> => {
+    const response = await apiClient.get<PaginatedResponse<PatientListItem>>(
       '/patients',
       { params },
     );
@@ -66,10 +74,8 @@ export const patientsService = {
     return response.data;
   },
 
-  bulkDeletePatients: async (
-    ids: string[],
-  ): Promise<{ message: string; deleted: number }> => {
-    const response = await apiClient.delete<{ message: string; deleted: number }>(
+  bulkDeletePatients: async (ids: string[]): Promise<BulkDeletePatientsResult> => {
+    const response = await apiClient.delete<BulkDeletePatientsResult>(
       '/patients/bulk',
       { data: { ids } },
     );

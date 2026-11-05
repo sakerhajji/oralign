@@ -60,8 +60,6 @@ export const usersDeskDomainDict = {
         fr: 'Rechercher parmi les comptes supprimés…',
       } as T,
       searchAria: { en: 'Search users', fr: 'Rechercher des utilisateurs' } as T,
-      clearSearch: { en: 'Clear search', fr: 'Effacer la recherche' } as T,
-      updating: { en: 'Updating results…', fr: 'Mise à jour des résultats…' } as T,
       role: { en: 'Role', fr: 'Rôle' } as T,
       roleAll: { en: 'All roles', fr: 'Tous les rôles' } as T,
       status: { en: 'Status', fr: 'Statut' } as T,
@@ -104,12 +102,6 @@ export const usersDeskDomainDict = {
         en: 'The users could not be loaded.',
         fr: 'Impossible de charger les utilisateurs.',
       } as T,
-    },
-
-    pagination: {
-      aria: { en: 'Pagination', fr: 'Pagination' } as T,
-      goTo: { en: 'Go to page {page}', fr: 'Aller à la page {page}' } as T,
-      pageOf: { en: '{page} / {total}', fr: '{page} / {total}' } as T,
     },
 
     // Oralign gift: list badge + the "Cadeau Oralign" block of the user sheet

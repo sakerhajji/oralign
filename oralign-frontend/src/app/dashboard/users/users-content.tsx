@@ -47,7 +47,7 @@ import {
 } from '@/components/users/admin-users-list';
 import { ClinicViewDialog } from '@/components/users/clinic-view-dialog';
 import { SearchFilters } from '@/components/users/search-filters';
-import { UsersPagination } from '@/components/users/users-pagination';
+import { ListPagination } from '@/components/shared/list-pagination';
 import { UsersStats, useCountLabel } from '@/components/users/users-stats';
 import {
   EMPTY_USERS_FILTERS,
@@ -464,7 +464,7 @@ export function UsersPageContent() {
         )}
 
         {!list.isLoading && rows.length > 0 && (
-          <UsersPagination
+          <ListPagination
             page={page}
             totalPages={totalPages}
             total={total}

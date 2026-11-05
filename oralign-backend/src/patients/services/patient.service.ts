@@ -11,11 +11,15 @@ import { PrismaService } from '../../prisma/prisma.service';
 import {
   CreatePatientDto,
   PatientFilterDto,
+  PatientListItemDto,
+  PatientOrderState,
   PatientResponseDto,
   UpdatePatientDto,
 } from '../dto/patient.dto';
 import { isAdmin, type Caller } from '../../common/access/caller';
+import { OrderAccessPolicy } from '../../common/access/order-access.policy';
 import { assertNoDependents } from '../../common/deletion/deletion-blocked';
+import { INACTIVE_ORDER_STATUSES } from '../../orders/order-status-groups';
 
 type PatientWithDoctor = Prisma.PatientGetPayload<{
   include: {
@@ -29,9 +33,48 @@ type PatientWithDoctor = Prisma.PatientGetPayload<{
   };
 }>;
 
+// Module level (not only a class field) so the list include below can
+// extend it.
+const INCLUDE_DOCTOR = {
+  doctor: {
+    select: {
+      id: true,
+      fullName: true,
+      email: true,
+    },
+  },
+} as const;
+
+/**
+ * A row of the patients list: the dentist, plus how many orders the caller
+ * can see for the patient and the newest of them (createdAt then id, so two
+ * orders created in the same instant always resolve the same way). Read by
+ * the page query itself, like USER_INCLUDE in the users repository: no
+ * extra query per patient.
+ */
+function listInclude(orderScope: Prisma.DentalOrderWhereInput) {
+  return {
+    ...INCLUDE_DOCTOR,
+    _count: { select: { orders: { where: orderScope } } },
+    orders: {
+      where: orderScope,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: 1,
+      select: { id: true, orderCode: true, status: true, createdAt: true },
+    },
+  } satisfies Prisma.PatientInclude;
+}
+
+type PatientListRow = Prisma.PatientGetPayload<{
+  include: ReturnType<typeof listInclude>;
+}>;
+
 @Injectable()
 export class PatientService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly orderAccess: OrderAccessPolicy,
+  ) {}
 
   async createPatient(
     createPatientDto: CreatePatientDto,
@@ -139,22 +182,29 @@ export class PatientService {
     limit = 10,
     filters: PatientFilterDto,
     caller: Caller,
-  ): Promise<PaginatedResponse<PatientResponseDto>> {
+  ): Promise<PaginatedResponse<PatientListItemDto>> {
     this.ensureCanManagePatients(caller);
 
     const take = Math.min(Math.max(limit, 1), 100);
     const currentPage = Math.max(page, 1);
     const skip = (currentPage - 1) * take;
-    const where = this.buildWhere(filters, caller);
+    // One set of orders behind every order-derived part of the list (the
+    // count, the latest order, the orderState filter, the order-code
+    // search), so the columns and the filters can never disagree.
+    const orderScope = this.liveOrderScope(caller);
+    const where = this.buildWhere(filters, caller, orderScope);
 
     // Sort whitelist already enforced by the DTO enum — Prisma will
     // throw on any unexpected key, but the runtime validation is the
-    // real safety net.
+    // real safety net. The id tie-breaker keeps pages stable when rows
+    // share the sort value (same name, same creation instant): without
+    // it a row could show on two pages, or on none.
     const sortField = filters.sortBy ?? 'createdAt';
     const sortOrder = filters.sortOrder ?? 'desc';
-    const orderBy: Prisma.PatientOrderByWithRelationInput = {
-      [sortField]: sortOrder,
-    };
+    const orderBy: Prisma.PatientOrderByWithRelationInput[] = [
+      { [sortField]: sortOrder },
+      { id: sortOrder },
+    ];
 
     const [patients, total] = await Promise.all([
       this.prisma.patient.findMany({
@@ -162,13 +212,13 @@ export class PatientService {
         skip,
         take,
         orderBy,
-        include: this.includeDoctor,
+        include: listInclude(orderScope),
       }),
       this.prisma.patient.count({ where }),
     ]);
 
     return new PaginatedResponse(
-      patients.map((patient) => this.mapToDto(patient)),
+      patients.map((patient) => this.mapToListItem(patient)),
       total,
       currentPage,
       take,
@@ -214,9 +264,7 @@ export class PatientService {
     this.ensureCanManagePatients(caller);
     await this.findAccessiblePatient(id, caller);
 
-    const doctorId = isAdmin(caller)
-      ? updatePatientDto.doctorId
-      : undefined;
+    const doctorId = isAdmin(caller) ? updatePatientDto.doctorId : undefined;
 
     if (doctorId) {
       await this.ensureDentistExists(doctorId);
@@ -371,8 +419,7 @@ export class PatientService {
 
     const deleted = results.filter((r) => r.status === 'fulfilled').length;
     const blocked = results.filter(
-      (r) =>
-        r.status === 'rejected' && r.reason instanceof ConflictException,
+      (r) => r.status === 'rejected' && r.reason instanceof ConflictException,
     ).length;
     return {
       message:
@@ -384,19 +431,21 @@ export class PatientService {
     };
   }
 
-  private readonly includeDoctor = {
-    doctor: {
-      select: {
-        id: true,
-        fullName: true,
-        email: true,
-      },
-    },
-  } as const;
+  private readonly includeDoctor = INCLUDE_DOCTOR;
+
+  /**
+   * The orders the list reads for each patient: those the caller may see
+   * (OrderAccessPolicy, the one order rule: own orders for a dentist,
+   * every order for an admin), archived ones excluded.
+   */
+  private liveOrderScope(caller: Caller): Prisma.DentalOrderWhereInput {
+    return { ...this.orderAccess.scope(caller), deletedAt: null };
+  }
 
   private buildWhere(
     filters: PatientFilterDto,
     caller: Caller,
+    orderScope: Prisma.DentalOrderWhereInput,
   ): Prisma.PatientWhereInput {
     // Trash-bin view: admin opted in via includeDeleted=true → ONLY
     // soft-deleted rows. Everyone else always sees the live set.
@@ -413,16 +462,31 @@ export class PatientService {
       where.doctorId = caller.userId;
     }
 
-    if (filters.search) {
-      where.OR = [
-        { fullName: { contains: filters.search, mode: 'insensitive' } },
-        { email: { contains: filters.search, mode: 'insensitive' } },
-        { phone: { contains: filters.search, mode: 'insensitive' } },
-      ];
+    // Conditions carrying their own OR or their own `orders` filter go in
+    // an AND list, so the search and the order filter can never overwrite
+    // each other, nor anything else set on `where`.
+    const and: Prisma.PatientWhereInput[] = [];
+
+    const search = filters.search?.trim();
+    if (search) {
+      and.push({ OR: this.searchConditions(search, orderScope) });
     }
 
     if (filters.gender) {
       where.gender = filters.gender;
+    }
+
+    if (filters.orderState === PatientOrderState.ACTIVE) {
+      and.push({
+        orders: {
+          some: {
+            ...orderScope,
+            status: { notIn: [...INACTIVE_ORDER_STATUSES] },
+          },
+        },
+      });
+    } else if (filters.orderState === PatientOrderState.NONE) {
+      and.push({ orders: { none: orderScope } });
     }
 
     // Inclusive [from, to] range on createdAt. Strings come straight
@@ -448,7 +512,42 @@ export class PatientService {
       where.createdAt = createdRange;
     }
 
+    if (and.length > 0) {
+      where.AND = and;
+    }
+
     return where;
+  }
+
+  /**
+   * Free-text search: name and e-mail (case-insensitive substring), the
+   * phone, and the codes of the patient's orders. Phones are stored E.164
+   * without separators ("+21650339214"), so the term is matched with its
+   * spaces, dots, dashes and parentheses stripped ("50 339 214" finds it),
+   * and only when it holds a digit: a name never needs the phone column
+   * (the rule of UserRepository.searchConditions). Order codes are matched
+   * within the caller's order scope: a patient is never found through an
+   * order the caller cannot open.
+   */
+  private searchConditions(
+    term: string,
+    orderScope: Prisma.DentalOrderWhereInput,
+  ): Prisma.PatientWhereInput[] {
+    const conditions: Prisma.PatientWhereInput[] = [
+      { fullName: { contains: term, mode: 'insensitive' } },
+      { email: { contains: term, mode: 'insensitive' } },
+      {
+        orders: {
+          some: {
+            ...orderScope,
+            orderCode: { contains: term, mode: 'insensitive' },
+          },
+        },
+      },
+    ];
+    const phone = term.replace(/[\s().-]/g, '');
+    if (/\d/.test(phone)) conditions.push({ phone: { contains: phone } });
+    return conditions;
   }
 
   private async findAccessiblePatient(
@@ -459,9 +558,7 @@ export class PatientService {
       where: {
         id,
         deletedAt: null,
-        ...(isAdmin(caller)
-          ? {}
-          : { doctorId: caller.userId }),
+        ...(isAdmin(caller) ? {} : { doctorId: caller.userId }),
       },
       include: this.includeDoctor,
     });
@@ -478,10 +575,7 @@ export class PatientService {
       throw new ForbiddenException('Designers cannot manage patients directly');
     }
 
-    if (
-      caller.role !== UserRole.dentist &&
-      !isAdmin(caller)
-    ) {
+    if (caller.role !== UserRole.dentist && !isAdmin(caller)) {
       throw new ForbiddenException('You cannot manage patients');
     }
   }
@@ -536,6 +630,22 @@ export class PatientService {
       createdAt: patient.createdAt,
       updatedAt: patient.updatedAt,
       deletedAt: patient.deletedAt,
+    };
+  }
+
+  private mapToListItem(patient: PatientListRow): PatientListItemDto {
+    const latest = patient.orders.at(0);
+    return {
+      ...this.mapToDto(patient),
+      ordersCount: patient._count.orders,
+      latestOrder: latest
+        ? {
+            id: latest.id,
+            orderCode: latest.orderCode,
+            status: latest.status,
+            createdAt: latest.createdAt,
+          }
+        : null,
     };
   }
 }

@@ -25,9 +25,7 @@ export default function DashboardLayout({
       // Start collapsed — AppSidebar layers a hover-to-expand wrapper
       // on top so the sidebar opens smoothly when the user mouses
       // over the rail and snaps back to icons-only when they leave.
-      // The shadcn primitive still writes a `sidebar:state` cookie on
-      // every toggle but doesn't read it on mount, so a fresh page
-      // load always starts here regardless of last session state.
+      // The state is not persisted: every page load starts collapsed.
       defaultOpen={false}
       style={
         {

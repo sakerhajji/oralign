@@ -26,8 +26,6 @@ import {
 } from "@/components/ui/tooltip"
 import { PanelLeftIcon } from "lucide-react"
 
-const SIDEBAR_COOKIE_NAME = "sidebar_state"
-const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
 const SIDEBAR_WIDTH = "16rem"
 // Phones: even tighter drawer (10 rem ≈ 160 px). Single-word labels like
 // "Orders", "Patients", "Settings" still read comfortably alongside their
@@ -36,6 +34,8 @@ const SIDEBAR_WIDTH = "16rem"
 const SIDEBAR_WIDTH_MOBILE = "10rem"
 const SIDEBAR_WIDTH_ICON = "3rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
+// Length of the icon rail's clip-path reveal (--sidebar-reveal-duration).
+const SIDEBAR_REVEAL_MS = 200
 
 type SidebarContextProps = {
   state: "expanded" | "collapsed"
@@ -47,7 +47,15 @@ type SidebarContextProps = {
   toggleSidebar: () => void
 }
 
+type SidebarActions = Pick<
+  SidebarContextProps,
+  "isMobile" | "setOpen" | "setOpenMobile" | "toggleSidebar"
+>
+
 const SidebarContext = React.createContext<SidebarContextProps | null>(null)
+// The part of the context that stays the same when the sidebar opens or
+// closes, so components that only act on it skip a re-render per toggle.
+const SidebarActionsContext = React.createContext<SidebarActions | null>(null)
 
 function useSidebar() {
   const context = React.useContext(SidebarContext)
@@ -56,6 +64,16 @@ function useSidebar() {
   }
 
   return context
+}
+
+/** `useSidebar` without the open state: does not re-render on toggles. */
+function useSidebarActions() {
+  const actions = React.useContext(SidebarActionsContext)
+  if (!actions) {
+    throw new Error("useSidebarActions must be used within a SidebarProvider.")
+  }
+
+  return actions
 }
 
 function SidebarProvider({
@@ -78,26 +96,23 @@ function SidebarProvider({
   // We use openProp and setOpenProp for control from outside the component.
   const [_open, _setOpen] = React.useState(defaultOpen)
   const open = openProp ?? _open
-  // Ref-mirror so `setOpen` never depends on `open`: with `open` in the
-  // deps, every toggle churned setOpen/toggleSidebar identities, which
-  // re-registered the window keydown listener and defeated React.memo on
-  // every SidebarMenuButton (they re-rendered on each hover-expand flip).
+  // `setOpen` must keep one identity: with `open` in its deps, every toggle
+  // churned setOpen/toggleSidebar, re-registered the window keydown
+  // listener and re-rendered every memoised consumer on each hover flip.
+  // Uncontrolled, React's own setter already takes a value or an updater
+  // and skips unchanged values. Controlled, an updater needs the current
+  // value, mirrored into a ref after each commit (never during render).
   const openRef = React.useRef(open)
-  openRef.current = open
+  React.useLayoutEffect(() => {
+    openRef.current = open
+  }, [open])
   const setOpen = React.useCallback(
     (value: boolean | ((value: boolean) => boolean)) => {
-      const openState =
-        typeof value === "function" ? value(openRef.current) : value
-      if (openState === openRef.current) return
-
       if (setOpenProp) {
-        setOpenProp(openState)
+        setOpenProp(typeof value === "function" ? value(openRef.current) : value)
       } else {
-        _setOpen(openState)
+        _setOpen(value)
       }
-
-      // This sets the cookie to keep the sidebar state.
-      document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
     },
     [setOpenProp]
   )
@@ -151,28 +166,85 @@ function SidebarProvider({
     }),
     [state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar]
   )
+  const actions = React.useMemo<SidebarActions>(
+    () => ({ isMobile, setOpen, setOpenMobile, toggleSidebar }),
+    [isMobile, setOpen, setOpenMobile, toggleSidebar]
+  )
 
   return (
-    <SidebarContext.Provider value={contextValue}>
-      <div
-        data-slot="sidebar-wrapper"
-        style={
-          {
-            "--sidebar-width": SIDEBAR_WIDTH,
-            "--sidebar-width-icon": SIDEBAR_WIDTH_ICON,
-            ...style,
-          } as React.CSSProperties
-        }
-        className={cn(
-          "group/sidebar-wrapper flex min-h-svh w-full has-data-[variant=inset]:bg-sidebar",
-          className
-        )}
-        {...props}
-      >
-        {children}
-      </div>
-    </SidebarContext.Provider>
+    <SidebarActionsContext.Provider value={actions}>
+      <SidebarContext.Provider value={contextValue}>
+        <div
+          data-slot="sidebar-wrapper"
+          style={
+            {
+              "--sidebar-width": SIDEBAR_WIDTH,
+              "--sidebar-width-icon": SIDEBAR_WIDTH_ICON,
+              ...style,
+            } as React.CSSProperties
+          }
+          className={cn(
+            "group/sidebar-wrapper flex min-h-svh w-full has-data-[variant=inset]:bg-sidebar",
+            className
+          )}
+          {...props}
+        >
+          {children}
+        </div>
+      </SidebarContext.Provider>
+    </SidebarActionsContext.Provider>
   )
+}
+
+/**
+ * Whether the icon rail's compact layout (`data-collapsible="icon"`) is on,
+ * sequenced around the clip-path reveal.
+ *
+ * `data-state` flips at once and drives the reveal. The rail layout
+ * re-centres the rows and swaps the logo, so it may only change while the
+ * clip hides the panel:
+ *   - opening: it is dropped during the same render, so the clip uncovers
+ *     the finished panel;
+ *   - closing: it is applied when the closing transition has finished, so
+ *     the panel stays intact while it is covered. Its `finished` promise is
+ *     the real end, however late a slow machine starts the transition (a
+ *     timer was not); it rejects when a reopen cancels it.
+ * One style and layout pass per toggle, never one per animation frame.
+ */
+function useRailLayout(
+  collapsed: boolean,
+  sidebarRef: React.RefObject<HTMLElement | null>
+): boolean {
+  const [rail, setRail] = React.useState(collapsed)
+  if (!collapsed && rail) setRail(false)
+
+  React.useEffect(() => {
+    if (!collapsed || rail) return
+    // getAnimations() flushes style first, so the transition exists here.
+    // None under reduced motion: the layout then applies at once.
+    const closing = sidebarRef.current
+      ?.getAnimations({ subtree: true })
+      .find(
+        (animation): animation is CSSTransition =>
+          animation instanceof CSSTransition &&
+          animation.transitionProperty === "clip-path"
+      )
+    const finished: Promise<unknown> = closing
+      ? closing.finished
+      : Promise.resolve()
+    let active = true
+    finished.then(
+      () => {
+        if (active) setRail(true)
+      },
+      () => {} // cancelled by a reopen: the panel stays
+    )
+    return () => {
+      active = false
+    }
+  }, [collapsed, rail, sidebarRef])
+
+  return rail
 }
 
 function Sidebar({
@@ -190,6 +262,12 @@ function Sidebar({
 }) {
   const { isMobile, state, openMobile, setOpenMobile } = useSidebar()
   const { t } = useT()
+  // Icon mode on the flush variant opens with a clip-path reveal (see the
+  // container below). Floating/inset keep the shadcn width animation.
+  const clipReveal =
+    collapsible === "icon" && variant !== "floating" && variant !== "inset"
+  const sidebarRef = React.useRef<HTMLDivElement>(null)
+  const railLayout = useRailLayout(clipReveal && state === "collapsed", sidebarRef)
 
   if (collapsible === "none") {
     return (
@@ -245,13 +323,30 @@ function Sidebar({
 
   return (
     <div
+      ref={sidebarRef}
       className="group peer hidden text-sidebar-foreground md:block"
       data-state={state}
-      data-collapsible={state === "collapsed" ? collapsible : ""}
+      data-collapsible={
+        clipReveal
+          ? railLayout
+            ? "icon"
+            : ""
+          : state === "collapsed"
+            ? collapsible
+            : ""
+      }
       data-mode={collapsible}
+      data-reveal={clipReveal ? "clip" : undefined}
       data-variant={variant}
       data-side={side}
       data-slot="sidebar"
+      style={
+        clipReveal
+          ? ({
+              "--sidebar-reveal-duration": `${SIDEBAR_REVEAL_MS}ms`,
+            } as React.CSSProperties)
+          : undefined
+      }
     >
       {/* Keep the page canvas at the compact rail width for icon-mode
           sidebars. The full sidebar expands as a fixed overlay instead
@@ -274,48 +369,39 @@ function Sidebar({
         data-slot="sidebar-container"
         data-side={side}
         className={cn(
-          "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-linear data-[side=left]:left-0 data-[side=left]:group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)] data-[side=right]:right-0 data-[side=right]:group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)] md:flex",
-          // The overlay is its own compositor layer, so the reveal below
-          // never invalidates route content.
-          "[contain:layout_style] [transform:translateZ(0)] [backface-visibility:hidden] group-data-[state=expanded]:shadow-[12px_0_32px_-24px_rgba(15,23,42,0.45)]",
-          // Adjust the padding for floating and inset variants.
-          variant === "floating" || variant === "inset"
-            ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"
+          "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) md:flex",
+          // The overlay is its own compositor layer, so neither the reveal
+          // nor a repaint of the panel invalidates route content.
+          "[contain:layout_style] [transform:translateZ(0)] [backface-visibility:hidden]",
+          clipReveal
+            ? cn(
+                // Clip-path reveal instead of a width animation: the panel
+                // keeps its full width and the collapsed state clips it down
+                // to the rail. clip-path animates on the compositor against
+                // a constant-size layer, so no frame runs style, layout or
+                // paint, and the page underneath (the odontogram above all)
+                // is never touched. Hit-testing follows the clip.
+                // Nothing inside may animate either (see the
+                // `group-data-[reveal=clip]` rules): on a heavy page every
+                // main-thread animation frame re-layerizes the whole page.
+                "[will-change:clip-path] transition-[clip-path] duration-(--sidebar-reveal-duration) ease-out motion-reduce:transition-none",
+                // Static shadow: the rail clip hides it and the reveal
+                // uncovers it with the panel, so it needs no transition.
+                "shadow-[12px_0_32px_-24px_rgba(15,23,42,0.45)]",
+                // The open clip keeps 48px of slack outside the panel for
+                // the shadow. The clip follows `data-state` at once; the
+                // rail layout follows the clip (see useRailLayout).
+                side === "left"
+                  ? "left-0 group-data-[state=expanded]:[clip-path:inset(0_-48px_0_0)] group-data-[state=collapsed]:[clip-path:inset(0_calc(100%_-_var(--sidebar-width-icon))_0_0)]"
+                  : "right-0 group-data-[state=expanded]:[clip-path:inset(0_0_0_-48px)] group-data-[state=collapsed]:[clip-path:inset(0_0_0_calc(100%_-_var(--sidebar-width-icon)))]"
+              )
             : cn(
-                "group-data-[side=left]:border-r group-data-[side=right]:border-l",
-                // Icon mode expands/collapses via a CLIP-PATH reveal, not a
-                // width animation. Animating `width` (a layout property) ran
-                // style→layout→paint for the whole rail on every frame AND
-                // resized this compositor layer per frame — with a heavy
-                // raster workload on the page (the odontogram's sprite
-                // glyphs) those frames blew the 16 ms budget and the
-                // animation janked. The container now keeps its full
-                // expanded width at all times and the collapsed state clips
-                // it down to the rail; clip-path animates on the compositor
-                // against a constant-size layer, so no layout, no paint and
-                // no re-raster happen per frame. Hit-testing follows the
-                // clip, so the collapsed hover/click target stays the rail
-                // strip exactly as before. The expanded clip leaves slack on
-                // the outer edge so the drop shadow isn't clipped off.
-                // NOTE: chaining two group-data-[...] variants silently drops
-                // one condition in this Tailwind version, so "collapsed in
-                // icon mode" is expressed via data-collapsible=icon (which the
-                // root only sets while collapsed) and "expanded in icon mode"
-                // via one arbitrary group selector carrying both attributes.
-                "group-data-[mode=icon]:[will-change:clip-path] group-data-[mode=icon]:transition-[clip-path,box-shadow] group-data-[mode=icon]:duration-200 group-data-[mode=icon]:ease-linear",
-                "group-[[data-mode=icon][data-state=expanded]]:data-[side=left]:[clip-path:inset(0_-48px_0_0)]",
-                "group-[[data-mode=icon][data-state=expanded]]:data-[side=right]:[clip-path:inset(0_0_0_-48px)]",
-                "group-data-[collapsible=icon]:data-[side=left]:[clip-path:inset(0_calc(100%_-_var(--sidebar-width-icon))_0_0)]",
-                "group-data-[collapsible=icon]:data-[side=right]:[clip-path:inset(0_0_0_calc(100%_-_var(--sidebar-width-icon)))]",
-                // The real border sits on the (clipped-away) full-width edge,
-                // so the collapsed rail draws its edge line with a pseudo
-                // pinned at the icon width; it fades as the panel expands.
-                "group-data-[mode=icon]:after:pointer-events-none group-data-[mode=icon]:after:absolute group-data-[mode=icon]:after:inset-y-0 group-data-[mode=icon]:after:w-px group-data-[mode=icon]:after:bg-sidebar-border group-data-[mode=icon]:after:opacity-0 group-data-[mode=icon]:after:transition-opacity group-data-[mode=icon]:after:duration-200",
-                "group-data-[mode=icon]:data-[side=left]:after:left-[calc(var(--sidebar-width-icon)-1px)]",
-                "group-data-[mode=icon]:data-[side=right]:after:right-[calc(var(--sidebar-width-icon)-1px)]",
-                // `!` needed: this competes with the base after:opacity-0
-                // above at equal specificity and loses on stylesheet order.
-                "group-data-[collapsible=icon]:after:opacity-100!"
+                "transition-[left,right,width] duration-200 ease-linear data-[side=left]:left-0 data-[side=left]:group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)] data-[side=right]:right-0 data-[side=right]:group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
+                "group-data-[state=expanded]:shadow-[12px_0_32px_-24px_rgba(15,23,42,0.45)]",
+                // Adjust the padding for floating and inset variants.
+                variant === "floating" || variant === "inset"
+                  ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"
+                  : "group-data-[side=left]:border-r group-data-[side=right]:border-l"
               ),
           className
         )}
@@ -326,18 +412,19 @@ function Sidebar({
           data-slot="sidebar-inner"
           className={cn(
             "flex size-full flex-col bg-sidebar group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:shadow-sm group-data-[variant=floating]:ring-1 group-data-[variant=floating]:ring-sidebar-border",
-            // Icon mode: the container above stays at full width (the
-            // clip-path reveal needs a constant-size layer), but the rail's
-            // content is CENTERED (logo, icon buttons), so the inner box
-            // must still be exactly rail-wide when collapsed or the icons
-            // centre themselves out beyond the 56px clip window. Width
-            // switches INSTANTLY (0s) - one layout per toggle, never one
-            // per frame. On collapse the switch is delayed until the
-            // clip has finished closing (200ms) so labels sweep out under
-            // the clip instead of vanishing on frame 0; on expand it flips
-            // immediately so the opening clip reveals the full layout.
-            variant !== "floating" && variant !== "inset" &&
-              "group-data-[mode=icon]:transition-[width] group-data-[mode=icon]:duration-0 group-data-[mode=icon]:delay-0 group-data-[collapsible=icon]:w-(--sidebar-width-icon) group-data-[collapsible=icon]:delay-200"
+            clipReveal &&
+              cn(
+                // The rail's content is centred (logo, icon tiles), so in
+                // the rail layout this box must be exactly rail-wide, or the
+                // icons centre themselves outside the clip window.
+                "group-data-[collapsible=icon]:w-(--sidebar-width-icon)",
+                // The edge line, drawn by this box so it follows the layout:
+                // on the rail's edge in the rail, on the panel's edge when
+                // open. An inset shadow takes no layout space.
+                side === "left"
+                  ? "shadow-[inset_-1px_0_0_var(--color-sidebar-border)]"
+                  : "shadow-[inset_1px_0_0_var(--color-sidebar-border)]"
+              )
           )}
         >
           {children}
@@ -352,7 +439,7 @@ function SidebarTrigger({
   onClick,
   ...props
 }: React.ComponentProps<typeof Button>) {
-  const { toggleSidebar } = useSidebar()
+  const { toggleSidebar } = useSidebarActions()
   const { t } = useT()
 
   return (
@@ -375,7 +462,7 @@ function SidebarTrigger({
 }
 
 function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
-  const { toggleSidebar } = useSidebar()
+  const { toggleSidebar } = useSidebarActions()
   const { t } = useT()
 
   return (
@@ -506,6 +593,9 @@ function SidebarGroupLabel({
       data-sidebar="group-label"
       className={cn(
         "flex h-8 shrink-0 items-center rounded-md px-2 text-xs font-medium text-sidebar-foreground/70 ring-sidebar-ring outline-hidden transition-[margin,opacity] duration-200 ease-linear group-data-[collapsible=icon]:-mt-8 group-data-[collapsible=icon]:opacity-0 focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
+        // Under the clip reveal the rail layout only switches while the
+        // clip hides the panel, so it must not animate (see Sidebar).
+        "group-data-[reveal=clip]:transition-none",
         className
       )}
       {...props}
@@ -569,8 +659,11 @@ function SidebarMenuItem({ className, ...props }: React.ComponentProps<"li">) {
   )
 }
 
+// `group-data-[reveal=clip]:transition-none`: under the clip reveal the
+// rail layout only switches while the clip hides the panel; the size
+// transition would run the swap on the main thread, frame by frame.
 const sidebarMenuButtonVariants = cva(
-  "peer/menu-button group/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-sm ring-sidebar-ring outline-hidden transition-[width,height,padding] group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-open:hover:bg-sidebar-accent data-open:hover:text-sidebar-accent-foreground data-active:bg-sidebar-accent data-active:font-medium data-active:text-sidebar-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0 [&>span:last-child]:truncate",
+  "peer/menu-button group/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-sm ring-sidebar-ring outline-hidden transition-[width,height,padding] group-data-[reveal=clip]:transition-none group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-open:hover:bg-sidebar-accent data-open:hover:text-sidebar-accent-foreground data-active:bg-sidebar-accent data-active:font-medium data-active:text-sidebar-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0 [&>span:last-child]:truncate",
   {
     variants: {
       variant: {
@@ -803,4 +896,5 @@ export {
   SidebarSeparator,
   SidebarTrigger,
   useSidebar,
+  useSidebarActions,
 }

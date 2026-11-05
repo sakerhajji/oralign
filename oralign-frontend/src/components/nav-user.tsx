@@ -19,7 +19,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  useSidebar,
+  useSidebarActions,
 } from "@/components/ui/sidebar"
 import { EllipsisVerticalIcon, CircleUserRoundIcon, CreditCardIcon, BellIcon, LogOutIcon } from "lucide-react"
 import { useLogout } from "@/lib/hooks/use-auth"
@@ -46,7 +46,7 @@ export function NavUser({
   }
   onOpenChange?: (open: boolean) => void
 }) {
-  const { isMobile } = useSidebar()
+  const { isMobile } = useSidebarActions()
   const handleLogout = useLogout()
   const { t } = useT()
   const initials = getInitials(user.name)

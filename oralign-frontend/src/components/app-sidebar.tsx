@@ -26,7 +26,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  useSidebar,
+  useSidebarActions,
 } from "@/components/ui/sidebar"
 import {
   ClipboardListIcon,
@@ -285,18 +285,16 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     [user, isAdmin],
   )
 
-  // Hover-to-expand on desktop: pull `setOpen` + `isMobile` off the
-  // sidebar context, then wire `onMouseEnter` / `onMouseLeave` to
-  // toggle the persisted `open` flag. The shadcn primitive already
-  // animates `data-state` transitions, so flipping the flag gives a
-  // smooth slide for free. Mobile uses a Sheet drawer (no hover) —
-  // we skip the handlers there to avoid weird touch behaviour.
+  // Hover-to-expand on desktop: wire `onMouseEnter` / `onMouseLeave` to
+  // the sidebar's `open` flag; the primitive animates the reveal. Mobile
+  // uses a Sheet drawer (no hover), so the handlers skip it.
+  // `useSidebarActions`, not `useSidebar`: this component only acts on the
+  // flag, so it must not re-render the whole sidebar on every hover.
   //
-  // A small leave-delay (150 ms) absorbs accidental mouse-outs (e.g.
-  // crossing a hairline border) so the sidebar doesn't flicker when
-  // the cursor brushes its edge. Cleared on enter so the collapse is
-  // immediate the moment the user actually leaves the rail.
-  const { setOpen, isMobile } = useSidebar()
+  // A short leave delay (220 ms, `scheduleClose`) absorbs accidental
+  // mouse-outs (e.g. crossing a hairline border) so the sidebar doesn't
+  // flicker when the cursor brushes its edge. Cleared on enter.
+  const { setOpen, isMobile } = useSidebarActions()
   const leaveTimerRef = React.useRef<number | null>(null)
   const pointerInsideSidebarRef = React.useRef(false)
   const overlayHoldRef = React.useRef(false)
@@ -467,7 +465,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               // height delta here shifts every nav row during hover-expand
               // (see the header comment above) — the old h-8 added 8px of
               // drift. w-10 fills the 40px flush-rail slot on the icon axis.
-              className="h-10 w-full justify-start gap-2 bg-foreground text-background shadow-sm hover:bg-foreground/90 group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:h-10 group-data-[collapsible=icon]:w-10 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
+              // `transition-colors` replaces the button's `transition-all`:
+              // the pill↔tile swap happens behind the sidebar's clip and
+              // must not animate (see components/ui/sidebar.tsx).
+              className="h-10 w-full justify-start gap-2 bg-foreground text-background shadow-sm transition-colors hover:bg-foreground/90 group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:h-10 group-data-[collapsible=icon]:w-10 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
             >
               <Link
                 href="/dashboard/orders/new"

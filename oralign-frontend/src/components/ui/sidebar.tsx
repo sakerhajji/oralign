@@ -208,7 +208,12 @@ function SidebarProvider({
  *   - closing: it is applied when the closing transition has finished, so
  *     the panel stays intact while it is covered. Its `finished` promise is
  *     the real end, however late a slow machine starts the transition (a
- *     timer was not); it rejects when a reopen cancels it.
+ *     timer was not).
+ * A cancelled transition settles the same way: when a reopen cancelled it,
+ * the render-time reset above drops the layout again before any commit;
+ * any other cause (the phone breakpoint unmounting this root, reduced
+ * motion switched on) must still land on the rail layout, or the rail
+ * would show the panel's layout until the next hover.
  * One style and layout pass per toggle, never one per animation frame.
  */
 function useRailLayout(
@@ -233,12 +238,10 @@ function useRailLayout(
       ? closing.finished
       : Promise.resolve()
     let active = true
-    finished.then(
-      () => {
-        if (active) setRail(true)
-      },
-      () => {} // cancelled by a reopen: the panel stays
-    )
+    const applyRail = () => {
+      if (active) setRail(true)
+    }
+    finished.then(applyRail, applyRail)
     return () => {
       active = false
     }
@@ -416,14 +419,17 @@ function Sidebar({
               cn(
                 // The rail's content is centred (logo, icon tiles), so in
                 // the rail layout this box must be exactly rail-wide, or the
-                // icons centre themselves outside the clip window.
+                // icons centre themselves outside the clip window. The
+                // physical margin pins it to the clipped side whatever the
+                // text direction.
                 "group-data-[collapsible=icon]:w-(--sidebar-width-icon)",
                 // The edge line, drawn by this box so it follows the layout:
                 // on the rail's edge in the rail, on the panel's edge when
-                // open. An inset shadow takes no layout space.
+                // open. An inset shadow takes no layout space; forced colors
+                // drop shadows, so high-contrast mode gets a real border.
                 side === "left"
-                  ? "shadow-[inset_-1px_0_0_var(--color-sidebar-border)]"
-                  : "shadow-[inset_1px_0_0_var(--color-sidebar-border)]"
+                  ? "group-data-[collapsible=icon]:mr-auto shadow-[inset_-1px_0_0_var(--color-sidebar-border)] forced-colors:border-r"
+                  : "group-data-[collapsible=icon]:ml-auto shadow-[inset_1px_0_0_var(--color-sidebar-border)] forced-colors:border-l"
               )
           )}
         >

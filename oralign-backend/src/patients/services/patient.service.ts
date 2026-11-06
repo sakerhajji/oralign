@@ -20,6 +20,7 @@ import { isAdmin, type Caller } from '../../common/access/caller';
 import { OrderAccessPolicy } from '../../common/access/order-access.policy';
 import { assertNoDependents } from '../../common/deletion/deletion-blocked';
 import { INACTIVE_ORDER_STATUSES } from '../../orders/order-status-groups';
+import { businessDayRange } from '../../common/time/business-day';
 
 type PatientWithDoctor = Prisma.PatientGetPayload<{
   include: {
@@ -489,26 +490,16 @@ export class PatientService {
       and.push({ orders: { none: orderScope } });
     }
 
-    // Inclusive [from, to] range on createdAt. Strings come straight
-    // from the client (ISO 8601) — `new Date(str)` honours the timezone
-    // suffix if present, otherwise treats the string as local. We pass
-    // through invalid dates as `undefined` so a malformed query param
-    // doesn't crash the request — at worst it widens the result set.
-    const createdRange: Prisma.DateTimeFilter = {};
-    if (filters.createdFrom) {
-      const d = new Date(filters.createdFrom);
-      if (!Number.isNaN(d.getTime())) createdRange.gte = d;
-    }
-    if (filters.createdTo) {
-      const d = new Date(filters.createdTo);
-      if (!Number.isNaN(d.getTime())) {
-        // End-of-day so "to Sep 30" includes anything created that
-        // calendar date in UTC.
-        d.setUTCHours(23, 59, 59, 999);
-        createdRange.lte = d;
-      }
-    }
-    if (createdRange.gte || createdRange.lte) {
+    // Inclusive [from, to] range of Africa/Tunis business days on
+    // createdAt, the days the clinics live in: a patient added at 00:30 in
+    // Tunis belongs to that day, not to the UTC day before. The DTO
+    // already refused a day that does not exist; a range that ends before
+    // it starts is a 400 (INVALID_DATE_RANGE), as on the payments desk.
+    const createdRange = businessDayRange(
+      filters.createdFrom,
+      filters.createdTo,
+    );
+    if (createdRange.gte || createdRange.lt) {
       where.createdAt = createdRange;
     }
 

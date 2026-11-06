@@ -326,6 +326,7 @@ function PatientsDesk({ isAdmin, userId }: { isAdmin: boolean; userId: string })
         onFiltersChange={changeFilters}
         isAdmin={isAdmin}
         dentists={dentists.data?.data ?? NO_DENTISTS}
+        dentistsLoading={isAdmin && dentists.isPending}
         busy={refreshing}
         searchKey={searchKey}
         canClear={filtered}

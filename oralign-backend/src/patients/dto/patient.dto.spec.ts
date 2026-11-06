@@ -78,4 +78,32 @@ describe('PatientFilterDto (GET /patients query)', () => {
     const blank = await parseQuery({ search: '   ' });
     expect(blank.search).toBeUndefined();
   });
+
+  it('takes the date added as calendar days', async () => {
+    await expect(
+      parseQuery({ createdFrom: '2026-11-01', createdTo: ' 2026-11-06 ' }),
+    ).resolves.toMatchObject({
+      createdFrom: '2026-11-01',
+      createdTo: '2026-11-06',
+    });
+    const blank = await parseQuery({ createdFrom: '', createdTo: '  ' });
+    expect(blank.createdFrom).toBeUndefined();
+    expect(blank.createdTo).toBeUndefined();
+  });
+
+  it.each([
+    '2026-02-30',
+    '2026-13-01',
+    '06/11/2026',
+    '2026-11-06T10:00:00Z',
+    'yesterday',
+    '0026-11-06',
+  ])(
+    'refuses a date added that is not a calendar day (%j)',
+    async (createdFrom) => {
+      await expect(parseQuery({ createdFrom })).rejects.toMatchObject({
+        status: 400,
+      });
+    },
+  );
 });

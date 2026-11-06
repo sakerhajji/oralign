@@ -33,7 +33,8 @@ import { useT } from '@/lib/i18n/lang-context';
 import { buildOrderNavigationHref } from '@/lib/orders/order-navigation';
 import { CLINICAL_CONDITION_OTHER, type Patient, type PatientListItem } from '@/lib/types';
 import { cn } from '@/lib/utils';
-import { formatTimestampDay } from '@/lib/utils/calendar-date';
+// Days as Tunis business days, as the "date added" filter counts them.
+import { formatBusinessDay } from '@/lib/utils/business-day';
 import { formatPhone, phoneHref } from '@/lib/utils/phone';
 import { PatientAvatar } from './patient-avatar';
 import { formatDateOfBirth, genderLabelKey, patientAge, patientFacts } from './patient-format';
@@ -166,7 +167,7 @@ function PanelBody({
         {inTrash && patient.deletedAt && (
           <Badge variant="outline" className="mt-1.5 text-muted-foreground">
             {t('patientDesk.panel.inTrashSince', {
-              date: formatTimestampDay(patient.deletedAt, lang),
+              date: formatBusinessDay(patient.deletedAt, lang),
             })}
           </Badge>
         )}
@@ -241,10 +242,10 @@ function PanelBody({
                 <Fact label={t('patientDesk.panel.dentist')}>{patient.doctor?.fullName}</Fact>
               )}
               <Fact label={t('patientDesk.panel.added')}>
-                {formatTimestampDay(patient.createdAt, lang)}
+                {formatBusinessDay(patient.createdAt, lang)}
               </Fact>
               <Fact label={t('patientDesk.panel.updated')}>
-                {formatTimestampDay(patient.updatedAt, lang)}
+                {formatBusinessDay(patient.updatedAt, lang)}
               </Fact>
             </Facts>
           </PanelSection>
@@ -397,7 +398,7 @@ function PatientOrders({
                   <span className="block truncate text-sm font-medium">{order.orderCode}</span>
                   <span className="block truncate text-xs text-muted-foreground tabular-nums">
                     {t('patientDesk.panel.orderCreated', {
-                      date: formatTimestampDay(order.createdAt, lang),
+                      date: formatBusinessDay(order.createdAt, lang),
                     })}
                   </span>
                 </span>

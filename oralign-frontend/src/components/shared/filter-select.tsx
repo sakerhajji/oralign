@@ -27,6 +27,7 @@ export function FilterSelect<V extends string>({
   onValueChange,
   options,
   inactiveValue = 'all' as V,
+  valueLabel,
   className,
 }: {
   label: string;
@@ -35,11 +36,16 @@ export function FilterSelect<V extends string>({
   options: FilterOption<V>[];
   /** The value that means "not filtering" (default `'all'`). */
   inactiveValue?: V;
+  /**
+   * What the trigger shows for the active value when its option's name is
+   * not enough (a custom period shows its days, "1 – 6 nov. 2026").
+   */
+  valueLabel?: string;
   className?: string;
 }) {
   const active = value !== inactiveValue;
   const shown = active
-    ? options.find((option) => option.value === value)?.label
+    ? (valueLabel ?? options.find((option) => option.value === value)?.label)
     : label;
   return (
     <Select value={value} onValueChange={(next) => onValueChange(next as V)}>

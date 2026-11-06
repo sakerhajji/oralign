@@ -62,6 +62,10 @@ export const patientDeskDomainDict = {
       period7d: { en: 'Added: 7 days', fr: 'Ajout : 7 jours' } as T,
       period30d: { en: 'Added: 30 days', fr: 'Ajout : 30 jours' } as T,
       period12m: { en: 'Added: 12 months', fr: 'Ajout : 12 mois' } as T,
+      // Opens the "Du / Au" fields under the toolbar.
+      periodCustom: { en: 'Custom dates…', fr: 'Dates personnalisées…' } as T,
+      // The chip once a custom period is applied: its days.
+      periodRange: { en: 'Added: {range}', fr: 'Ajout : {range}' } as T,
       gender: { en: 'Sex', fr: 'Sexe' } as T,
       genderAll: { en: 'All', fr: 'Tous' } as T,
       dentist: { en: 'Dentist', fr: 'Praticien' } as T,

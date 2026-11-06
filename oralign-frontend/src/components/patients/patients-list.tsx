@@ -23,7 +23,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useT } from '@/lib/i18n/lang-context';
 import type { PatientListItem } from '@/lib/types';
 import { cn } from '@/lib/utils';
-import { formatTimestampDay } from '@/lib/utils/calendar-date';
+// Days as Tunis business days, as the "date added" filter counts them.
+import { formatBusinessDay } from '@/lib/utils/business-day';
 import { formatPhone } from '@/lib/utils/phone';
 import { PatientAvatar } from './patient-avatar';
 import { patientFacts } from './patient-format';
@@ -234,7 +235,7 @@ function PatientTableRow({
           COLS.date,
         )}
       >
-        {shownDate ? formatTimestampDay(shownDate, lang) : <Dash />}
+        {shownDate ? formatBusinessDay(shownDate, lang) : <Dash />}
       </td>
       <td className={cn('py-2.5 text-right align-middle', COLS.actions)}>
         <PatientRowMenu
@@ -284,7 +285,7 @@ function PatientsRows({ patients, inTrash, activeId, onOpen }: PatientsListProps
             </span>
             {inTrash ? (
               <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-                {patient.deletedAt ? formatTimestampDay(patient.deletedAt, lang) : ''}
+                {patient.deletedAt ? formatBusinessDay(patient.deletedAt, lang) : ''}
               </span>
             ) : patient.phone ? (
               <span className="hidden shrink-0 text-sm text-muted-foreground tabular-nums sm:block">

@@ -1,21 +1,37 @@
 'use client';
 
+import { useState } from 'react';
 import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { DayRangeForm } from '@/components/shared/day-range-form';
+import { DentistFilter, type DentistOption } from '@/components/shared/dentist-filter';
 import { FilterSelect, type FilterOption } from '@/components/shared/filter-select';
 import { ListSearch } from '@/components/shared/list-search';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import type { Lang } from '@/lib/i18n/dict';
 import { useT } from '@/lib/i18n/lang-context';
 import { Gender } from '@/lib/types';
-import type {
-  GenderFilter,
-  PatientsFilters,
-  PatientsSort,
-  PatientsView,
-  PeriodFilter,
+import { businessToday, formatCalendarDay } from '@/lib/utils/business-day';
+import {
+  periodDays,
+  type GenderFilter,
+  type PatientsFilters,
+  type PatientsSort,
+  type PatientsView,
+  type PeriodFilter,
 } from './patients-filters';
 
 export type ViewTotals = Partial<Record<PatientsView, number>>;
+
+/** A custom period's days, short: "1er – 6 nov. 2026" / "Nov 1 – Nov 6, 2026". */
+function rangeLabel(from: string, to: string, lang: Lang): string {
+  if (!from || !to || from === to) return formatCalendarDay(from || to, lang, 'full');
+  const sameYear = from.slice(0, 4) === to.slice(0, 4);
+  const sameMonth = sameYear && from.slice(5, 7) === to.slice(5, 7);
+  const start =
+    lang === 'fr' && sameMonth ? 'day' : sameYear ? 'dayMonth' : 'full';
+  return `${formatCalendarDay(from, lang, start)} – ${formatCalendarDay(to, lang, 'full')}`;
+}
 
 /**
  * The patient book's view tabs (with live totals) over one row of
@@ -24,6 +40,11 @@ export type ViewTotals = Partial<Record<PatientsView, number>>;
  * The tabs are the case state — the one dimension a dentist sorts their
  * patients by — so it is one click away instead of buried in a select.
  * Each total follows the search and filters below it.
+ *
+ * "Date d'ajout" offers quick periods and "Dates personnalisées…", which
+ * opens Du / Au fields under the row, applied only with "Appliquer"; once
+ * applied the chip shows its days. The admins' dentist filter is typed to
+ * find (a long list of practitioners is searched, not scrolled).
  */
 export function PatientsToolbar({
   view,
@@ -33,6 +54,7 @@ export function PatientsToolbar({
   onFiltersChange,
   isAdmin,
   dentists,
+  dentistsLoading = false,
   busy,
   searchKey,
   canClear,
@@ -44,7 +66,9 @@ export function PatientsToolbar({
   filters: PatientsFilters;
   onFiltersChange: (patch: Partial<PatientsFilters>) => void;
   isAdmin: boolean;
-  dentists: { id: string; fullName: string }[];
+  dentists: readonly DentistOption[];
+  /** The dentist list is still loading: the dentist filter says so. */
+  dentistsLoading?: boolean;
   busy: boolean;
   /** Bumped by the page to clear the search box (it owns its draft). */
   searchKey: number;
@@ -52,7 +76,20 @@ export function PatientsToolbar({
   canClear: boolean;
   onClear: () => void;
 }) {
-  const { t } = useT();
+  const { t, lang } = useT();
+  const today = businessToday();
+
+  // "Dates personnalisées…" picked but not applied yet: the fields are open
+  // while the list still shows the previous period. A period set from
+  // elsewhere, or "Effacer les filtres", closes them.
+  const [editing, setEditing] = useState(false);
+  const [seen, setSeen] = useState({ period: filters.period, searchKey });
+  if (seen.period !== filters.period || seen.searchKey !== searchKey) {
+    setSeen({ period: filters.period, searchKey });
+    setEditing(false);
+  }
+  const customApplied = filters.period === 'custom';
+  const showRange = editing || customApplied;
 
   const views: { value: PatientsView; label: string }[] = [
     { value: 'all', label: t('patientDesk.views.all') },
@@ -66,6 +103,7 @@ export function PatientsToolbar({
     { value: '7d', label: t('patientDesk.filters.period7d') },
     { value: '30d', label: t('patientDesk.filters.period30d') },
     { value: '12m', label: t('patientDesk.filters.period12m') },
+    { value: 'custom', label: t('patientDesk.filters.periodCustom') },
   ];
   const genderOptions: FilterOption<GenderFilter>[] = [
     { value: 'all', label: t('patientDesk.filters.genderAll') },
@@ -80,6 +118,13 @@ export function PatientsToolbar({
     { value: 'name-desc', label: t('patientDesk.sort.nameDesc') },
     { value: 'updated', label: t('patientDesk.sort.updated') },
   ];
+
+  // Custom dates start from the period on screen (a preset's days, or
+  // today alone), so the list does not jump to every date in between.
+  const shownDays = periodDays(filters);
+  const rangeStart = customApplied
+    ? { from: filters.from, to: filters.to }
+    : { from: shownDays.from || today, to: shownDays.to || today };
 
   return (
     <div className="flex flex-col gap-3">
@@ -118,10 +163,24 @@ export function PatientsToolbar({
         <div className="no-scrollbar -mx-4 -my-1 flex gap-2 overflow-x-auto px-4 py-1 sm:mx-0 sm:my-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:py-0 xl:ml-auto xl:flex-nowrap">
           <FilterSelect<PeriodFilter>
             label={t('patientDesk.filters.period')}
-            value={filters.period}
-            onValueChange={(period) => onFiltersChange({ period })}
+            value={editing ? 'custom' : filters.period}
+            onValueChange={(period) => {
+              if (period === 'custom') {
+                setEditing(true);
+                return;
+              }
+              setEditing(false);
+              onFiltersChange({ period, from: '', to: '' });
+            }}
             options={periodOptions}
-            className="w-auto shrink-0 sm:w-44"
+            valueLabel={
+              customApplied && !editing
+                ? t('patientDesk.filters.periodRange', {
+                    range: rangeLabel(filters.from, filters.to, lang),
+                  })
+                : undefined
+            }
+            className="w-auto shrink-0 sm:w-auto sm:min-w-44 xl:w-auto xl:min-w-44"
           />
           <FilterSelect<GenderFilter>
             label={t('patientDesk.filters.gender')}
@@ -131,14 +190,12 @@ export function PatientsToolbar({
             className="w-auto shrink-0 sm:w-36 xl:w-36"
           />
           {isAdmin && (
-            <FilterSelect<string>
+            <DentistFilter
               label={t('patientDesk.filters.dentist')}
               value={filters.dentist}
-              onValueChange={(dentist) => onFiltersChange({ dentist })}
-              options={[
-                { value: 'all', label: t('patientDesk.filters.dentistAll') },
-                ...dentists.map((dentist) => ({ value: dentist.id, label: dentist.fullName })),
-              ]}
+              onChange={(dentist) => onFiltersChange({ dentist })}
+              dentists={dentists}
+              loading={dentistsLoading}
               className="w-auto max-w-56 shrink-0 sm:w-52 sm:max-w-none xl:w-52"
             />
           )}
@@ -162,6 +219,25 @@ export function PatientsToolbar({
           )}
         </div>
       </div>
+
+      {showRange && (
+        <DayRangeForm
+          // A range applied or reset from elsewhere starts the fields again.
+          key={`${filters.period}:${filters.from}:${filters.to}`}
+          initial={rangeStart}
+          applied={customApplied}
+          max={today}
+          onApply={(from, to) => {
+            setEditing(false);
+            onFiltersChange({ period: 'custom', from, to });
+          }}
+          onReset={() => {
+            setEditing(false);
+            onFiltersChange({ period: 'all', from: '', to: '' });
+          }}
+          className="xl:ml-auto xl:w-fit"
+        />
+      )}
     </div>
   );
 }

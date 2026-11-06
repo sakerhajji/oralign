@@ -327,6 +327,51 @@ describe('PatientService.getPatients (patients list)', () => {
       },
     );
 
+    describe('date added (Tunis business days)', () => {
+      it('from and to are whole Tunis days, both included', async () => {
+        await expect(
+          listWhere({ createdFrom: '2026-11-01', createdTo: '2026-11-06' }),
+        ).resolves.toEqual({
+          deletedAt: null,
+          doctorId: doctor.userId,
+          // 1 Nov 00:00 Tunis → 7 Nov 00:00 Tunis (exclusive): a patient
+          // added at 00:30 on the 7th, in Tunis, is outside.
+          createdAt: {
+            gte: new Date('2026-10-31T23:00:00.000Z'),
+            lt: new Date('2026-11-06T23:00:00.000Z'),
+          },
+        });
+      });
+
+      it('one bound leaves the other side open', async () => {
+        await expect(listWhere({ createdTo: '2026-11-06' })).resolves.toEqual({
+          deletedAt: null,
+          doctorId: doctor.userId,
+          createdAt: { lt: new Date('2026-11-06T23:00:00.000Z') },
+        });
+      });
+
+      it('a single day: from = to', async () => {
+        await expect(
+          listWhere({ createdFrom: '2026-11-06', createdTo: '2026-11-06' }),
+        ).resolves.toMatchObject({
+          createdAt: {
+            gte: new Date('2026-11-05T23:00:00.000Z'),
+            lt: new Date('2026-11-06T23:00:00.000Z'),
+          },
+        });
+      });
+
+      it('a range that ends before it starts is a 400 INVALID_DATE_RANGE', async () => {
+        await expect(
+          listWhere({ createdFrom: '2026-11-06', createdTo: '2026-11-01' }),
+        ).rejects.toMatchObject({
+          statusCode: 400,
+          errorCode: 'INVALID_DATE_RANGE',
+        });
+      });
+    });
+
     it('keeps the search OR, the order filter and the other filters side by side', async () => {
       await expect(
         listWhere({
@@ -339,7 +384,8 @@ describe('PatientService.getPatients (patients list)', () => {
         deletedAt: null,
         doctorId: doctor.userId,
         gender: Gender.female,
-        createdAt: { gte: new Date('2026-01-01') },
+        // Midnight in Tunis (UTC+1 in January), not UTC midnight.
+        createdAt: { gte: new Date('2025-12-31T23:00:00.000Z') },
         AND: [
           {
             OR: [

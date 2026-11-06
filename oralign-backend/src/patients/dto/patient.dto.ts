@@ -19,6 +19,8 @@ import {
   MinLength,
 } from 'class-validator';
 import { PaginatedResponse } from '../../common/dto/response.dto';
+import { toOptionalTrimmed } from '../../common/dto/query-transforms';
+import { IsCalendarDate } from '../../common/decorators/is-calendar-date.decorator';
 
 const E164_PHONE_REGEX = /^\+[1-9]\d{1,14}$/;
 
@@ -414,14 +416,26 @@ export class PatientFilterDto {
   @IsEnum(PatientSortOrder)
   sortOrder?: PatientSortOrder;
 
-  @ApiProperty({ required: false, example: '2024-05-22' })
+  @ApiProperty({
+    required: false,
+    example: '2024-05-22',
+    description:
+      'Added on or after this day: YYYY-MM-DD, an Africa/Tunis business day (00:30 in Tunis is already that day). Blank means no bound; a day that does not exist is a 400.',
+  })
+  @Transform(({ value }: { value: unknown }) => toOptionalTrimmed(value))
   @IsOptional()
-  @IsString()
+  @IsCalendarDate()
   createdFrom?: string;
 
-  @ApiProperty({ required: false, example: '2024-06-22' })
+  @ApiProperty({
+    required: false,
+    example: '2024-06-22',
+    description:
+      'Added on or before this day (inclusive): YYYY-MM-DD, an Africa/Tunis business day. A range ending before it starts is a 400 (INVALID_DATE_RANGE).',
+  })
+  @Transform(({ value }: { value: unknown }) => toOptionalTrimmed(value))
   @IsOptional()
-  @IsString()
+  @IsCalendarDate()
   createdTo?: string;
 
   // Trash-bin view (mirrors OrderFilterDto.includeDeleted): admins opt in

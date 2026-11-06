@@ -428,50 +428,56 @@ function BillingSettingsEditor({
                 <ImageIcon className="h-6 w-6 text-muted-foreground/60" />
               )}
             </div>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={upload.isPending}
-                className="gap-2"
-              >
-                {upload.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Upload className="h-4 w-4" />
-                )}
-                {logoUrl
-                  ? t('accountBillingSettings.replaceLogo')
-                  : t('accountBillingSettings.uploadLogo')}
-              </Button>
-              {logoUrl && (
+            <div className="flex min-w-0 flex-col gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
                   size="sm"
-                  variant="outline"
-                  onClick={() => removeLogo.mutate()}
-                  disabled={removeLogo.isPending}
-                  className="gap-2 text-red-600"
+                  variant="secondary"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={upload.isPending}
+                  className="gap-2"
                 >
-                  <Trash2 className="h-4 w-4" />
-                  {t('accountBillingSettings.removeLogo')}
+                  {upload.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Upload className="h-4 w-4" />
+                  )}
+                  {logoUrl
+                    ? t('accountBillingSettings.replaceLogo')
+                    : t('accountBillingSettings.uploadLogo')}
                 </Button>
-              )}
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                className="sr-only"
-                tabIndex={-1}
-                aria-hidden
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  e.currentTarget.value = '';
-                  if (file) upload.mutate(file);
-                }}
-              />
+                {logoUrl && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => removeLogo.mutate()}
+                    disabled={removeLogo.isPending}
+                    className="gap-2 text-red-600"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    {t('accountBillingSettings.removeLogo')}
+                  </Button>
+                )}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="sr-only"
+                  tabIndex={-1}
+                  aria-hidden
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.currentTarget.value = '';
+                    if (file) upload.mutate(file);
+                  }}
+                />
+              </div>
+              <p className="max-w-md text-xs text-muted-foreground">
+                {t('accountBillingSettings.logoHint')}
+                {!logoUrl && <> {t('accountBillingSettings.logoDefaultHint')}</>}
+              </p>
             </div>
           </div>
 

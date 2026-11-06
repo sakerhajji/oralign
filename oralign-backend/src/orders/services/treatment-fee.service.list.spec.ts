@@ -1,5 +1,6 @@
 import {
   PaymentMethod,
+  PaymentPurpose,
   PaymentRecordStatus,
   Prisma,
   UserRole,
@@ -131,7 +132,7 @@ describe('TreatmentFeeService.listTreatmentFees (treatment-fee history)', () => 
       expect(findMany).not.toHaveBeenCalled();
     });
 
-    it('the search matches order code, both names and the TF- receipt number, in an AND list', async () => {
+    it('the search matches order code, both names, the TF- receipt number and the card references, in an AND list', async () => {
       const { where } = await listArgs(
         { search: 'TF-0000', statuses: [PaymentRecordStatus.success] },
         doctor,
@@ -147,6 +148,17 @@ describe('TreatmentFeeService.listTreatmentFees (treatment-fee history)', () => 
               { doctor: { fullName: text('TF-0000') } },
               { patient: { fullName: text('TF-0000') } },
               { treatmentFeeInvoiceNumber: text('TF-0000') },
+              {
+                payments: {
+                  some: {
+                    purpose: PaymentPurpose.treatment_fee,
+                    OR: [
+                      { transactionId: text('TF-0000') },
+                      { merchantOrderNumber: text('TF-0000') },
+                    ],
+                  },
+                },
+              },
             ],
           },
         ],

@@ -16,6 +16,9 @@ export const paymentKeys = {
     [...paymentKeys.all, 'mine', filters] as const,
   summary: (params: Record<string, unknown>) =>
     [...paymentKeys.all, 'summary', params] as const,
+  /** The dentists with a payment of that kind (the desk's practitioner filter). */
+  practitioners: (purpose: string) =>
+    [...paymentKeys.all, 'practitioners', purpose] as const,
   detail: (id: string) => [...paymentKeys.all, 'detail', id] as const,
   /** Rendered receipt PDF; `invoiceNumber` in the key re-fetches after an admin renumbers it. */
   invoicePdf: (id: string, lang: string, invoiceNumber?: string | null) =>

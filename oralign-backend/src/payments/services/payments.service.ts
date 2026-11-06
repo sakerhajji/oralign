@@ -41,40 +41,30 @@ import { env } from '../../common/config/env';
 import { QuotationService } from '../../quotations/services/quotation.service';
 import { isAdmin, type Caller } from '../../common/access/caller';
 import { lookupActorName } from '../../common/access/actor-snapshot';
-import { businessDayRange } from '../../common/time/business-day';
-import { parseSearchAmount } from '../../common/utils/amount-search.util';
 import {
   assertInvoiceNumberFree,
   invoiceNumberTaken,
 } from '../../common/billing/invoice-number';
+import {
+  compareIds,
+  paymentEventDate,
+  paymentListWhere,
+  type PaymentListFilters,
+} from './payment-list-query';
 
 /**
  * Shape consumed by the shared payment-list executor. Mirrors the
  * PaymentFilterDto fields the controller surfaces, with explicit
  * legacy single-value fallbacks (`status`, `paymentMethod`) for
- * backward-compat with old client builds.
+ * backward-compat with old client builds. The filters themselves are
+ * built by `paymentListWhere`, which the payments report shares.
  */
-interface PaymentListOptions {
+interface PaymentListOptions extends PaymentListFilters {
   // pagination
   page?: number;
   limit?: number;
-  // status filter — legacy single + canonical multi
-  status?: PaymentRecordStatus;
-  statuses?: PaymentRecordStatus[];
-  // method filter — legacy single + canonical multi
-  paymentMethod?: PaymentMethod;
-  methods?: PaymentMethod[];
-  purpose?: PaymentPurpose;
-  // search + structural filters
-  search?: string;
+  // the dentist to list (admins only: a dentist is always scoped to themselves)
   doctorId?: string;
-  patientId?: string;
-  // business days ('YYYY-MM-DD', Africa/Tunis) of the date the payment happened
-  from?: string;
-  to?: string;
-  // deprecated: UTC days of createdAt
-  createdFrom?: string;
-  createdTo?: string;
   // sorting; eventAt = the date the payment happened (paidAt ?? createdAt)
   sortBy?: 'createdAt' | 'amount' | 'paidAt' | 'status' | 'eventAt';
   sortOrder?: 'asc' | 'desc';
@@ -957,7 +947,7 @@ export class PaymentsService {
     const ids = [...paid, ...unpaid]
       .map((row) => ({
         id: row.id,
-        at: (row.paidAt ?? row.createdAt).getTime(),
+        at: paymentEventDate(row).getTime(),
       }))
       .sort((a, b) => sign * (a.at - b.at || compareIds(a.id, b.id)))
       .slice(skip, window)
@@ -973,63 +963,18 @@ export class PaymentsService {
     return ids.flatMap((id) => byId.get(id) ?? []);
   }
 
-  /** Compose the Prisma where clause from the DTO + scope rules. */
+  /**
+   * Compose the Prisma where clause from the DTO + scope rules: a dentist
+   * only ever reads their own orders' payments; payments of archived
+   * orders stay in the ledger but leave the working lists (see
+   * paymentListWhere).
+   */
   private buildPaymentWhere(
     opts: PaymentListOptions & { caller: Caller; forceScope: 'all' | 'doctor' },
   ): Prisma.PaymentWhereInput {
-    const where: Prisma.PaymentWhereInput = {
-      order: this.paymentOrderScope(opts),
-    };
-
-    // Multi-value statuses — explicit list wins, legacy `status`
-    // single-value falls back when no list is provided.
-    if (opts.statuses && opts.statuses.length > 0) {
-      where.status = { in: opts.statuses };
-    } else if (opts.status) {
-      where.status = opts.status;
-    }
-
-    // Multi-value methods — same precedence as statuses.
-    if (opts.methods && opts.methods.length > 0) {
-      where.paymentMethod = { in: opts.methods };
-    } else if (opts.paymentMethod) {
-      where.paymentMethod = opts.paymentMethod;
-    }
-
-    if (opts.purpose) where.purpose = opts.purpose;
-
-    const createdAt = legacyCreatedRange(opts.createdFrom, opts.createdTo);
-    if (createdAt) where.createdAt = createdAt;
-
-    // Conditions carrying their own OR go in an AND list, so the period
-    // and the search can never overwrite each other.
-    const and: Prisma.PaymentWhereInput[] = [];
-    const period = eventDateFilter(opts.from, opts.to);
-    if (period) and.push(period);
-    const search = opts.search?.trim();
-    if (search) and.push({ OR: paymentSearchConditions(search) });
-    if (and.length > 0) where.AND = and;
-
-    return where;
-  }
-
-  /**
-   * The orders a payment list reads: a dentist only their own. Payments of
-   * archived orders stay in the ledger but leave the working lists
-   * (pending queue / history) — the admin trash view of orders is where
-   * archived work is reviewed.
-   */
-  private paymentOrderScope(
-    opts: PaymentListOptions & { caller: Caller; forceScope: 'all' | 'doctor' },
-  ): Prisma.DentalOrderWhereInput {
-    const order: Prisma.DentalOrderWhereInput = { deletedAt: null };
-    if (opts.forceScope === 'doctor') {
-      order.doctorId = opts.caller.userId;
-    } else if (opts.doctorId) {
-      order.doctorId = opts.doctorId;
-    }
-    if (opts.patientId) order.patientId = opts.patientId;
-    return order;
+    const doctorId =
+      opts.forceScope === 'doctor' ? opts.caller.userId : opts.doctorId;
+    return paymentListWhere(opts, doctorId);
   }
 
   /**
@@ -1256,79 +1201,6 @@ export class PaymentsService {
       );
     }
   }
-}
-
-/**
- * Deprecated createdFrom/createdTo, kept exactly as they always worked:
- * whole UTC days of createdAt, [from 00:00, to 23:59:59.999] UTC. New
- * clients send from/to (business days of the date the payment happened).
- */
-function legacyCreatedRange(
-  from?: string,
-  to?: string,
-): Prisma.DateTimeFilter | undefined {
-  const range: Prisma.DateTimeFilter = {};
-  const start = from ? new Date(from.trim()) : null;
-  if (start && !Number.isNaN(start.getTime())) range.gte = start;
-  const end = to ? new Date(to.trim()) : null;
-  if (end && !Number.isNaN(end.getTime())) {
-    end.setUTCHours(23, 59, 59, 999);
-    range.lte = end;
-  }
-  return range.gte || range.lte ? range : undefined;
-}
-
-/**
- * Business days of the date a payment happened: when it was received if
- * it was, otherwise when it was made (an attempt, a transfer still
- * awaiting confirmation). A transfer declared on Monday and confirmed on
- * Wednesday is Wednesday's money.
- */
-function eventDateFilter(
-  from?: string,
-  to?: string,
-): Prisma.PaymentWhereInput | null {
-  const range = businessDayRange(from, to);
-  if (!range.gte && !range.lt) return null;
-  return { OR: [{ paidAt: range }, { paidAt: null, createdAt: range }] };
-}
-
-/**
- * The id order the database gives a run sorted on the same date. Payment
- * ids are lowercase uuids, the hyphens at the same places, which the C
- * and the language collations all order like this.
- */
-function compareIds(a: string, b: string): number {
-  if (a === b) return 0;
-  return a < b ? -1 : 1;
-}
-
-/**
- * Free-text search: the references a payment is known by (transactionId
- * holds the gateway id, the bank reference or the cash receipt; then the
- * receipt number FAC-… and the ClicToPay order reference ORA-…), the
- * order code, the doctor and patient names, and the exact amount when the
- * term reads as one. The caller's order scope stays on the outer where.
- */
-function paymentSearchConditions(term: string): Prisma.PaymentWhereInput[] {
-  const text = { contains: term, mode: 'insensitive' } as const;
-  const conditions: Prisma.PaymentWhereInput[] = [
-    { transactionId: text },
-    { invoiceNumber: text },
-    { merchantOrderNumber: text },
-    {
-      order: {
-        OR: [
-          { orderCode: text },
-          { doctor: { fullName: text } },
-          { patient: { fullName: text } },
-        ],
-      },
-    },
-  ];
-  const amount = parseSearchAmount(term);
-  if (amount) conditions.push({ amount });
-  return conditions;
 }
 
 /**

@@ -259,6 +259,34 @@ export class PaymentFilterDto {
   to?: string;
 
   @ApiPropertyOptional({
+    minimum: 1,
+    maximum: 99,
+    example: 2,
+    description:
+      'Installment payments whose installment is at least this rank on its quote (1 = the first installment). With `installmentMax`, a range; both included.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(99)
+  installmentMin?: number;
+
+  @ApiPropertyOptional({
+    minimum: 1,
+    maximum: 99,
+    example: 2,
+    description:
+      'Installment payments whose installment is at most this rank on its quote. Below `installmentMin`: 400 INVALID_INSTALLMENT_RANGE.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(99)
+  installmentMax?: number;
+
+  @ApiPropertyOptional({
     deprecated: true,
     description:
       'Deprecated, use `from`. ISO date — payments created ON or AFTER this date (UTC day).',
@@ -330,6 +358,35 @@ export class PaymentSummaryQueryDto {
   @IsString()
   @MaxLength(64)
   doctorId?: string;
+}
+
+/** GET /payments/practitioners: the dentists a payments filter can pick. */
+export class PaymentPractitionersQueryDto {
+  @ApiProperty({
+    enum: PaymentPurpose,
+    description:
+      'installment: dentists with at least one installment payment; treatment_fee: dentists with at least one treatment fee on record. Archived orders do not count.',
+  })
+  @IsEnum(PaymentPurpose)
+  purpose!: PaymentPurpose;
+}
+
+export class PaymentPractitionerDto {
+  @ApiProperty()
+  id!: string;
+
+  @ApiProperty()
+  fullName!: string;
+
+  @ApiProperty({
+    description: 'Tells two dentists of the same name apart.',
+  })
+  email!: string;
+}
+
+export class PaymentPractitionersDto {
+  @ApiProperty({ type: PaymentPractitionerDto, isArray: true })
+  data!: PaymentPractitionerDto[];
 }
 
 export class PaymentBucketDto {

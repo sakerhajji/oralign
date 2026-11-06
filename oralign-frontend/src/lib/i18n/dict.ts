@@ -2590,6 +2590,15 @@ export const dict = {
     replaceLogo: { en: 'Replace logo', fr: 'Remplacer le logo' } as T,
     uploadLogo: { en: 'Upload logo', fr: 'Téléverser le logo' } as T,
     removeLogo: { en: 'Remove', fr: 'Supprimer' } as T,
+    // Under the logo buttons: where the logo is printed, what is accepted.
+    logoHint: {
+      en: 'Printed on invoices, receipts and payment reports (PDF). PNG, JPEG or WebP, 4 MB max.',
+      fr: 'Imprimé sur les factures, les reçus et les rapports de paiement (PDF). PNG, JPEG ou WebP, 4 Mo max.',
+    } as T,
+    logoDefaultHint: {
+      en: 'No logo uploaded: payment reports carry the official Oralign logo.',
+      fr: 'Aucun logo importé : les rapports de paiement portent le logo officiel Oralign.',
+    } as T,
     companyName: { en: 'Company name', fr: 'Raison sociale' } as T,
     taxRegistrationNumber: { en: 'Tax registration number', fr: 'Matricule fiscal' } as T,
     phone: { en: 'Phone', fr: 'Téléphone' } as T,

@@ -5,6 +5,7 @@ import { MockPaymentGateway } from './gateways/mock-payment.gateway';
 import { PAYMENT_GATEWAY } from './gateways/payment-gateway.interface';
 import { PaymentsService } from './services/payments.service';
 import { PaymentsSummaryService } from './services/payments-summary.service';
+import { PaymentPractitionersService } from './services/payment-practitioners.service';
 import { ClicToPayClient } from './clictopay/clictopay.client';
 import { ClicToPayPaymentsService } from './services/clictopay-payments.service';
 import { ClicToPayReconciliationService } from './services/clictopay-reconciliation.service';
@@ -42,6 +43,7 @@ const controllers = [
   providers: [
     PaymentsService,
     PaymentsSummaryService,
+    PaymentPractitionersService,
     ClicToPayClient,
     ClicToPayPaymentsService,
     ClicToPayReconciliationService,
@@ -50,6 +52,8 @@ const controllers = [
       useClass: MockPaymentGateway,
     },
   ],
-  exports: [PaymentsService, ClicToPayPaymentsService],
+  // PaymentsSummaryService: the payments report sums "received" exactly
+  // as the desk's figures do.
+  exports: [PaymentsService, ClicToPayPaymentsService, PaymentsSummaryService],
 })
 export class PaymentsModule {}

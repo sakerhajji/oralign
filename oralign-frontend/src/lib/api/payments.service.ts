@@ -1,4 +1,5 @@
 import apiClient from './client';
+import { asBlob, blobError, fileNameFromHeaders } from './blob-download';
 import type {
   ConfirmPaymentDto,
   HostedPaymentSession,
@@ -6,12 +7,20 @@ import type {
   Payment,
   PaymentFilterDto,
   PaymentListItem,
+  PaymentPractitioner,
   PaymentPurpose,
+  PaymentsReportRequest,
   PaymentsSummary,
   PaymentsSummaryParams,
   RecordCashPaymentDto,
   RejectPaymentDto,
 } from '@/lib/types';
+
+/** The PDF of the payments report, named as the server named it. */
+export interface PaymentsReportFile {
+  blob: Blob;
+  fileName: string;
+}
 
 /**
  * Payments API. The backend owns idempotency + the single SUCCESS
@@ -162,6 +171,47 @@ export const paymentsService = {
       params: withoutEmptyValues({ ...params }),
     });
     return res.data;
+  },
+
+  /**
+   * Admin: the dentists with at least one payment of `purpose` — the
+   * options of the desk's practitioner filter.
+   */
+  listPractitioners: async (
+    purpose: PaymentPurpose,
+  ): Promise<PaymentPractitioner[]> => {
+    const res = await apiClient.get<{ data: PaymentPractitioner[] }>(
+      '/payments/practitioners',
+      { params: { purpose } },
+    );
+    return res.data.data;
+  },
+
+  /**
+   * The payments report as a PDF, built on the server from every row
+   * matching the period and the tabs' filters (never from the rows on
+   * screen). A refusal (e.g. REPORT_TOO_LARGE) comes back as an Error
+   * carrying the server's message and errorCode.
+   */
+  downloadReport: async (
+    request: PaymentsReportRequest,
+  ): Promise<PaymentsReportFile> => {
+    try {
+      const res = await apiClient.post('/payments/report', request, {
+        responseType: 'blob',
+        // A long report takes Chromium a few seconds to print.
+        timeout: 120_000,
+      });
+      return {
+        blob: asBlob(res.data, 'application/pdf'),
+        fileName: fileNameFromHeaders(
+          res.headers as Record<string, unknown>,
+          'Oralign_Rapport_Paiements.pdf',
+        ),
+      };
+    } catch (error) {
+      throw await blobError(error, 'Could not generate the payments report.');
+    }
   },
 
   adminGetPayment: async (paymentId: string): Promise<Payment> => {

@@ -336,6 +336,9 @@ export interface PaymentFilterDto {
    */
   from?: string;
   to?: string;
+  /** Installment rank on its quote, both bounds included (1 = the first). */
+  installmentMin?: number;
+  installmentMax?: number;
   /** @deprecated creation-date range in UTC days; use `from` / `to`. */
   createdFrom?: string;
   /** @deprecated creation-date range in UTC days; use `from` / `to`. */
@@ -383,6 +386,43 @@ export interface PaymentsSummaryParams {
   to?: string;
   /** Admins only; the server ignores it for a dentist. */
   doctorId?: string;
+}
+
+/** GET /payments/practitioners: a dentist the payments filter can pick. */
+export interface PaymentPractitioner {
+  id: string;
+  fullName: string;
+  /** Tells two dentists of the same name apart. */
+  email: string;
+}
+
+/** Which money a payments report covers. */
+export type PaymentsReportKind = 'treatment_fee' | 'installment' | 'consolidated';
+
+/** One tab's filters, as POST /payments/report takes them. */
+export interface PaymentsReportSection {
+  search?: string;
+  doctorId?: string;
+  methods?: PaymentMethod[];
+  statuses?: PaymentRecordStatus[];
+  sort?: 'recent' | 'oldest' | 'amount-desc' | 'amount-asc';
+  /** Installments only. */
+  installmentMin?: number;
+  installmentMax?: number;
+}
+
+/**
+ * POST /payments/report — the PDF of what the payments desk shows. No
+ * date: today; `allDates`: no date filter on the rows (counted up to `to`).
+ */
+export interface PaymentsReportRequest {
+  kind: PaymentsReportKind;
+  from?: string;
+  to?: string;
+  allDates?: boolean;
+  lang?: 'fr' | 'en';
+  treatmentFees?: PaymentsReportSection;
+  installments?: PaymentsReportSection;
 }
 
 export type TreatmentFeeSortBy = 'paidAt' | 'amount';

@@ -39,12 +39,15 @@ import {
   CreateClicToPaySessionDto,
   DeclareBankTransferDto,
   PaymentFilterDto,
+  PaymentPractitionersDto,
+  PaymentPractitionersQueryDto,
   PaymentsSummaryDto,
   PaymentSummaryQueryDto,
   RecordCashPaymentDto,
   RejectPaymentDto,
 } from '../dto/payment.dto';
 import { ClicToPayPaymentsService } from '../services/clictopay-payments.service';
+import { PaymentPractitionersService } from '../services/payment-practitioners.service';
 import { PaymentsService } from '../services/payments.service';
 import { PaymentsSummaryService } from '../services/payments-summary.service';
 
@@ -79,6 +82,7 @@ export class PaymentsController {
     private readonly payments: PaymentsService,
     private readonly clicToPayPayments: ClicToPayPaymentsService,
     private readonly summaries: PaymentsSummaryService,
+    private readonly practitioners: PaymentPractitionersService,
   ) {}
 
   // ─── Doctor-facing — ClicToPay hosted checkout ────────────────
@@ -254,6 +258,26 @@ export class PaymentsController {
     @CurrentUser() user: JwtPayload,
   ): Promise<PaymentsSummaryDto> {
     return this.summaries.summarise(query, {
+      userId: user.sub,
+      role: user.role,
+    });
+  }
+
+  // The dentist filter of the payments desk: only the dentists who have a
+  // payment of that kind. A static path, like `payments/summary`.
+  @Get('payments/practitioners')
+  @Roles(UserRole.admin, UserRole.super_admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Admin: the dentists with at least one payment of the given kind (installment or treatment_fee) on a live order, sorted by name then e-mail.',
+  })
+  @ApiOkResponse({ type: PaymentPractitionersDto })
+  async listPractitioners(
+    @Query() query: PaymentPractitionersQueryDto,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<PaymentPractitionersDto> {
+    return this.practitioners.list(query.purpose, {
       userId: user.sub,
       role: user.role,
     });

@@ -1,4 +1,5 @@
 import apiClient from './client';
+import { asBlob, blobError, saveBlob } from './blob-download';
 import type {
   CreateInvoiceInput,
   Invoice,
@@ -16,74 +17,6 @@ import type {
  * payment-receipt downloads — that flow is untouched and this one has a
  * different surface (CRUD + exports) and a different RBAC (admin only).
  */
-
-/**
- * Trigger a browser download from an authenticated response. `<a href>`
- * cannot be used: the request would reach the API without the
- * Authorization header and bounce on the JwtAuthGuard.
- */
-function saveBlob(
-  blob: Blob,
-  fallbackName: string,
-  headers: Record<string, unknown>,
-): void {
-  const disposition = String(
-    headers['content-disposition'] ?? headers['Content-Disposition'] ?? '',
-  );
-  // RFC 5987 `filename*=UTF-8''…` wins over the ASCII fallback, so an
-  // accented client name survives the round trip.
-  const utf8 = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
-  const plain = /filename="?([^";]+)"?/i.exec(disposition);
-  let name = fallbackName;
-  if (utf8) {
-    try {
-      name = decodeURIComponent(utf8[1]);
-    } catch {
-      name = plain?.[1] ?? fallbackName;
-    }
-  } else if (plain) {
-    name = plain[1];
-  }
-
-  const url = window.URL.createObjectURL(blob);
-  try {
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = name.replace(/[\\/:*?"<>|]/g, '_');
-    // Some browsers only honour a programmatic click on a mounted node.
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-  } finally {
-    window.URL.revokeObjectURL(url);
-  }
-}
-
-function asBlob(data: unknown, type: string): Blob {
-  return data instanceof Blob ? data : new Blob([data as BlobPart], { type });
-}
-
-/**
- * An error thrown on a `responseType: 'blob'` request carries its JSON
- * body as a Blob, so the usual message extraction reads empty. Unwrap it
- * so a 409 explanation still reaches the toast.
- */
-async function blobError(error: unknown, fallback: string): Promise<Error> {
-  const response = (error as { response?: { data?: unknown } })?.response;
-  if (response?.data instanceof Blob) {
-    try {
-      const text = await response.data.text();
-      const parsed = JSON.parse(text) as { message?: string | string[] };
-      const message = Array.isArray(parsed.message)
-        ? parsed.message[0]
-        : parsed.message;
-      if (message) return new Error(message);
-    } catch {
-      // Not JSON — fall through to the generic message.
-    }
-  }
-  return error instanceof Error ? error : new Error(fallback);
-}
 
 /** Drop empty values so the API never sees `?search=` or `?statuses=`. */
 function cleanParams(filters: InvoiceFilters): Record<string, unknown> {

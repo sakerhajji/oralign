@@ -19,6 +19,7 @@ jest.mock('../../quotations/services/quotation.service', () => ({
 }));
 
 import { ClicToPayPaymentsService } from '../services/clictopay-payments.service';
+import { PaymentPractitionersService } from '../services/payment-practitioners.service';
 import { PaymentsService } from '../services/payments.service';
 import { PaymentsSummaryService } from '../services/payments-summary.service';
 import { PaymentsController } from './payments.controller';
@@ -37,17 +38,20 @@ describe('PaymentsController over HTTP', () => {
   const paymentGroupBy = jest.fn();
   const orderGroupBy = jest.fn();
   const listPayments = jest.fn();
+  const findUsers = jest.fn();
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
       controllers: [PaymentsController],
       providers: [
         PaymentsSummaryService,
+        PaymentPractitionersService,
         {
           provide: PrismaService,
           useValue: {
             payment: { groupBy: paymentGroupBy },
             dentalOrder: { groupBy: orderGroupBy },
+            user: { findMany: findUsers },
           },
         },
         { provide: PaymentsService, useValue: { listPayments } },
@@ -87,6 +91,7 @@ describe('PaymentsController over HTTP', () => {
     paymentGroupBy.mockReset().mockResolvedValue([]);
     orderGroupBy.mockReset().mockResolvedValue([]);
     listPayments.mockReset().mockResolvedValue({ data: [], total: 0 });
+    findUsers.mockReset().mockResolvedValue([]);
   });
 
   const get = (url: string) => request(app.getHttpServer()).get(url);
@@ -147,6 +152,64 @@ describe('PaymentsController over HTTP', () => {
       caller = asUser('u-des', UserRole.designer);
       const res = await get('/api/payments/summary');
       expect(res.status).toBe(403);
+    });
+  });
+
+  describe('GET /api/payments/practitioners', () => {
+    it('lists, for an admin, the dentists with a payment of the asked kind', async () => {
+      caller = asUser('u-admin', UserRole.admin);
+      findUsers.mockResolvedValue([
+        { id: 'd-1', fullName: 'Dr Ben Ali', email: 'a@example.com' },
+        { id: 'd-2', fullName: 'Dr Ben Ali', email: 'b@example.com' },
+      ]);
+
+      const res = await get(
+        '/api/payments/practitioners?purpose=treatment_fee',
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        data: [
+          { id: 'd-1', fullName: 'Dr Ben Ali', email: 'a@example.com' },
+          { id: 'd-2', fullName: 'Dr Ben Ali', email: 'b@example.com' },
+        ],
+      });
+      const [[args]] = findUsers.mock.calls as [[{ where: unknown }]];
+      expect(args.where).toEqual({
+        doctorOrders: {
+          some: { deletedAt: null, treatmentFeePaymentMethod: { not: null } },
+        },
+      });
+    });
+
+    it('reads installments from the Payment rows of live orders', async () => {
+      caller = asUser('u-admin', UserRole.super_admin);
+      await get('/api/payments/practitioners?purpose=installment');
+      const [[args]] = findUsers.mock.calls as [[{ where: unknown }]];
+      expect(args.where).toEqual({
+        doctorOrders: {
+          some: {
+            deletedAt: null,
+            payments: { some: { purpose: 'installment' } },
+          },
+        },
+      });
+    });
+
+    it('is closed to a dentist, whose lists are always their own', async () => {
+      const res = await get('/api/payments/practitioners?purpose=installment');
+      expect(res.status).toBe(403);
+      expect(findUsers).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      '/api/payments/practitioners',
+      '/api/payments/practitioners?purpose=refund',
+    ])('answers %s with a 400', async (url) => {
+      caller = asUser('u-admin', UserRole.admin);
+      const res = await get(url);
+      expect(res.status).toBe(400);
+      expect(findUsers).not.toHaveBeenCalled();
     });
   });
 

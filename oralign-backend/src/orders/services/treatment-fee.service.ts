@@ -20,17 +20,15 @@ import {
   type TreatmentFeeEvent,
 } from '../../notifications/events/notification-events';
 import { isAdmin, type Caller } from '../../common/access/caller';
-import { businessDayRange } from '../../common/time/business-day';
-import { parseSearchAmount } from '../../common/utils/amount-search.util';
-import { OrderResponseDto, SortOrder } from '../dto/order.dto';
+import { OrderResponseDto } from '../dto/order.dto';
 import {
-  TreatmentFeeSortBy,
   type TreatmentFeeFilterDto,
   type TreatmentFeePageDto,
   type TreatmentFeeRowDto,
 } from '../dto/treatment-fee.dto';
 import { OrderService } from './order.service';
 import { OrderAuditService } from './order-audit.service';
+import { treatmentFeeOrderBy, treatmentFeeWhere } from './treatment-fee-query';
 import {
   mapOrderToDto,
   orderInclude,
@@ -543,70 +541,4 @@ export class TreatmentFeeService {
       'Bank transfer is not available until company bank details are configured.',
     );
   }
-}
-
-/**
- * Orders whose fee has a payment on record (the welcome-gift orders have
- * none), archived ones left out. A paid-date period leaves out the fees
- * not paid yet: a transfer awaiting confirmation has no paid date.
- */
-function treatmentFeeWhere(
-  filters: TreatmentFeeFilterDto,
-  doctorId: string | undefined,
-): Prisma.DentalOrderWhereInput {
-  const where: Prisma.DentalOrderWhereInput = {
-    deletedAt: null,
-    treatmentFeePaymentMethod: filters.methods?.length
-      ? { in: filters.methods }
-      : { not: null },
-  };
-  if (doctorId) where.doctorId = doctorId;
-  if (filters.statuses?.length) {
-    where.treatmentFeePaymentStatus = { in: filters.statuses };
-  }
-  const paid = businessDayRange(filters.from, filters.to);
-  if (paid.gte || paid.lt) where.treatmentFeePaidAt = paid;
-  // The search carries its own OR: it goes in an AND list, so it can
-  // never overwrite another condition.
-  const search = filters.search?.trim();
-  if (search) where.AND = [{ OR: treatmentFeeSearch(search) }];
-  return where;
-}
-
-/**
- * Newest payment first by default, and there the fees awaiting
- * confirmation (no paid date yet) come on top: they are the ones that
- * need an action. Oldest first puts them last. The id ends every sort so
- * rows sharing a value keep one stable order across pages.
- */
-function treatmentFeeOrderBy(
-  filters: TreatmentFeeFilterDto,
-): Prisma.DentalOrderOrderByWithRelationInput[] {
-  const direction = filters.sortOrder ?? SortOrder.desc;
-  if (filters.sortBy === TreatmentFeeSortBy.amount) {
-    return [{ treatmentFeeAmount: direction }, { id: direction }];
-  }
-  const nulls = direction === SortOrder.desc ? 'first' : 'last';
-  return [
-    { treatmentFeePaidAt: { sort: direction, nulls } },
-    { updatedAt: direction },
-    { id: direction },
-  ];
-}
-
-/**
- * Order code, dentist and patient names, the receipt number (TF-…), and
- * the exact amount when the term reads as one.
- */
-function treatmentFeeSearch(term: string): Prisma.DentalOrderWhereInput[] {
-  const text = { contains: term, mode: 'insensitive' } as const;
-  const conditions: Prisma.DentalOrderWhereInput[] = [
-    { orderCode: text },
-    { doctor: { fullName: text } },
-    { patient: { fullName: text } },
-    { treatmentFeeInvoiceNumber: text },
-  ];
-  const amount = parseSearchAmount(term);
-  if (amount) conditions.push({ treatmentFeeAmount: amount });
-  return conditions;
 }

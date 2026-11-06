@@ -1,75 +1,50 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { usePathname, useSearchParams } from 'next/navigation';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { RefreshCw } from 'lucide-react';
 import {
-  EMPTY_HISTORY_FILTERS,
-  HISTORY_PAGE_SIZE,
-  SEARCH_MAX_LENGTH,
-  hasActiveFilters,
-  historyUrlSearch,
   includesDay,
   periodRange,
-  readHistoryUrlState,
-  sameFilters,
-  statusForTab,
   takingsRange,
   toFeeParams,
   toInstallmentParams,
   toSummaryParams,
   withoutSort,
-  type HistoryFilters,
   type HistoryTab,
-  type MethodFilter,
 } from '@/components/payments/history/history-filters';
-import { HistoryToolbar, type TabTotals } from '@/components/payments/history/history-toolbar';
-import { InstallmentsTable } from '@/components/payments/history/installments-table';
-import {
-  EmptyList,
-  ListMessage,
-  UndatedFeesNote,
-} from '@/components/payments/history/list-messages';
+import { FeesPanel, InstallmentsPanel } from '@/components/payments/history/history-tab-panels';
+import { ListMessage } from '@/components/payments/history/list-messages';
+import { PeriodFilter } from '@/components/payments/history/period-filter';
+import { periodName, rangeText } from '@/components/payments/history/period-text';
+import { ReportExport } from '@/components/payments/history/report-export';
 import { HistoryListSkeleton } from '@/components/payments/history/row-parts';
 import { TakingsSummary } from '@/components/payments/history/takings-summary';
-import { TreatmentFeesTable } from '@/components/payments/history/treatment-fees-table';
-import { ListPagination } from '@/components/shared/list-pagination';
+import { useDeskState } from '@/components/payments/history/use-desk-state';
 import { Button } from '@/components/ui/button';
-import { Figure, FigureRow } from '@/components/ui/figure-row';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Tabs, TabsContent } from '@/components/ui/tabs';
-import type { TreatmentFeeRow } from '@/lib/api/orders.service';
-import { extractApiError } from '@/lib/api/error';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
-  useAllPayments,
-  useDentistOptions,
-  useMyPayments,
   usePaymentsSummary,
   usePaymentsTotal,
-  useTreatmentFeesHistory,
   useTreatmentFeesTotal,
 } from '@/lib/hooks';
+import { invalidatePaymentViews } from '@/lib/hooks/payment-keys';
 import { useT } from '@/lib/i18n/lang-context';
 import { useAuth } from '@/lib/providers/auth-provider';
-import type { PaymentListItem } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { businessToday, formatBusinessTime } from '@/lib/utils/business-day';
 
-const NO_INSTALLMENTS: PaymentListItem[] = [];
-const NO_FEES: TreatmentFeeRow[] = [];
-const NO_DENTISTS: { id: string; fullName: string }[] = [];
-
-/**
- * A view that covers today refreshes itself this often while it stays
- * open (a front-desk screen left on "today" all morning); React Query
- * pauses it in a background tab.
- */
+/** The takings covering today refresh themselves this often (see the lists). */
 const LIVE_REFRESH_MS = 60_000;
 
 /**
- * The payments desk. Waits for the signed-in user (the role decides the
- * endpoint, the columns and the wording), so a hard reload never
- * flashes the "no access" card.
+ * The payment history: what was collected over a period (three cards, by
+ * method), then the two kinds of payments in two tabs — treatment fees
+ * and installment payments — each with its own search and filters, and
+ * the PDF report of it all. Waits for the signed-in user (the role
+ * decides the endpoints, the columns and the wording), so a hard reload
+ * never flashes the "no access" card.
  */
 export function PaymentHistoryContent() {
   const { user, isAdmin, isDentist } = useAuth();
@@ -100,296 +75,121 @@ function useBusinessToday(): [string, () => void] {
 }
 
 function PaymentsDesk({ isAdmin }: { isAdmin: boolean }) {
-  const { t } = useT();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
-
-  // ── Desk state: React owns it, the URL mirrors it ────────────────
-  const [initial] = useState(() => readHistoryUrlState(searchParams, { isAdmin }));
-  const [tab, setTab] = useState<HistoryTab>(initial.tab);
-  const [filters, setFilters] = useState<HistoryFilters>(initial.filters);
-  const [page, setPage] = useState(initial.page);
-  const [searchKey, setSearchKey] = useState(0);
+  const { t, lang } = useT();
+  const queryClient = useQueryClient();
+  const desk = useDeskState(isAdmin);
+  const { state, setPeriod, setTab } = desk;
   const [today, syncToday] = useBusinessToday();
-  const listTopRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const search = historyUrlSearch({ tab, page, filters }, window.location.search);
-    if (search !== window.location.search) {
-      window.history.replaceState(null, '', `${pathname}${search}${window.location.hash}`);
-    }
-  }, [tab, page, filters, pathname]);
-
-  // Every change of what is listed goes back to the first page.
-  const changeFilters = (patch: Partial<HistoryFilters>) => {
-    const next = { ...filters, ...patch };
-    next.search = next.search.slice(0, SEARCH_MAX_LENGTH);
-    if (sameFilters(next, filters)) return;
-    setFilters(next);
-    setPage(1);
-  };
-  const clearFilters = () => {
-    setFilters({ ...EMPTY_HISTORY_FILTERS, sort: filters.sort });
-    setSearchKey((key) => key + 1);
-    setPage(1);
-    // Both "clear" buttons vanish with the filters: the keyboard carries
-    // on from the list they just widened (the panel is a tab stop),
-    // rather than from the top of the page. Not the search box: on a
-    // phone that would raise the keyboard. No scroll: the view stays put.
-    listTopRef.current?.focus({ preventScroll: true });
-  };
-  const changeTab = (next: HistoryTab) => {
-    if (next === tab) return;
-    setTab(next);
-    setPage(1);
-    // A fee is only ever paid or to confirm: "failed" does not follow.
-    const status = statusForTab(filters.status, next);
-    if (status !== filters.status) setFilters({ ...filters, status });
-  };
-  const goToPage = (next: number) => {
-    setPage(next);
-    const top = listTopRef.current;
-    if (top && top.getBoundingClientRect().top < 0) {
-      top.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  };
-
-  // ── Data ─────────────────────────────────────────────────────────
-  const range = useMemo(() => periodRange(filters, today), [filters, today]);
-  const installmentBase = useMemo(
-    () => toInstallmentParams(filters, range, { isAdmin }),
-    [filters, range, isAdmin],
-  );
-  const feeBase = useMemo(() => toFeeParams(filters, range, { isAdmin }), [filters, range, isAdmin]);
-  const installmentPage = useMemo(
-    () => ({ ...installmentBase, page, limit: HISTORY_PAGE_SIZE }),
-    [installmentBase, page],
-  );
-  const feePage = useMemo(
-    () => ({ ...feeBase, page, limit: HISTORY_PAGE_SIZE }),
-    [feeBase, page],
-  );
-
-  // A list or takings that cover today keep themselves current. Only the
-  // list's first page: deeper pages would shift under the reader as new
-  // payments push rows down.
-  const takingsDays = takingsRange(range, today);
-  const listRefresh = page === 1 && includesDay(range, today) ? LIVE_REFRESH_MS : false;
-  const takingsRefresh = includesDay(takingsDays, today) ? LIVE_REFRESH_MS : false;
-
-  // Only the open tab's list runs, on the caller's own endpoint (a
-  // dentist would get a 403 from the admin one).
-  const onInstallments = tab === 'echeances';
-  const adminInstallments = useAllPayments(installmentPage, {
-    enabled: isAdmin && onInstallments,
-    refetchInterval: listRefresh,
+  const range = useMemo(() => periodRange(state.period, today), [state.period, today]);
+  const summaryParams = useMemo(() => toSummaryParams(range, today), [range, today]);
+  const summary = usePaymentsSummary(summaryParams, {
+    refetchInterval: includesDay(takingsRange(range, today), today) ? LIVE_REFRESH_MS : false,
   });
-  const ownInstallments = useMyPayments(installmentPage, {
-    enabled: !isAdmin && onInstallments,
-    refetchInterval: listRefresh,
+
+  // Each tab's count follows the period and that tab's own filters.
+  const feeFilters = state.filters.frais;
+  const installmentFilters = state.filters.echeances;
+  const feeCountParams = useMemo(
+    () => withoutSort(toFeeParams(feeFilters, range, { isAdmin })),
+    [feeFilters, range, isAdmin],
+  );
+  const installmentCountParams = useMemo(
+    () => withoutSort(toInstallmentParams(installmentFilters, range, { isAdmin })),
+    [installmentFilters, range, isAdmin],
+  );
+  const feeCount = useTreatmentFeesTotal(feeCountParams);
+  const installmentCount = usePaymentsTotal(installmentCountParams, {
+    scope: isAdmin ? 'all' : 'mine',
   });
-  const installments = isAdmin ? adminInstallments : ownInstallments;
-  const fees = useTreatmentFeesHistory(feePage, {
-    enabled: !onInstallments,
-    refetchInterval: listRefresh,
-  });
-  const list = onInstallments ? installments : fees;
-
-  // Each tab's total follows the search and filters, never the sort.
-  const installmentCount = usePaymentsTotal(
-    useMemo(() => withoutSort(installmentBase), [installmentBase]),
-    { scope: isAdmin ? 'all' : 'mine' },
-  );
-  const feeCount = useTreatmentFeesTotal(useMemo(() => withoutSort(feeBase), [feeBase]));
-  const totals: TabTotals = { echeances: installmentCount.data, frais: feeCount.data };
-  // The open tab shows the total of the rows on screen, so the two can
-  // never disagree while one of them refreshes.
-  if (list.data && !list.isPlaceholderData) totals[tab] = list.data.total;
-
-  const summary = usePaymentsSummary(
-    useMemo(() => toSummaryParams(filters, range, { isAdmin }), [filters, range, isAdmin]),
-    { refetchInterval: takingsRefresh },
-  );
-  const dentists = useDentistOptions({ enabled: isAdmin });
-  const dentistList = dentists.data?.data ?? NO_DENTISTS;
-
-  // Fees to confirm have no payment date, so a period hides them all;
-  // under "every status" the fees tab says how many it cannot show (the
-  // same search, method and dentist, any date).
-  const dated = Boolean(range.from || range.to);
-  const showUndated =
-    !onInstallments && dated && statusForTab(filters.status, 'frais') === 'all';
-  const undatedFees = useTreatmentFeesTotal(
-    useMemo(
-      () =>
-        withoutSort(
-          toFeeParams(
-            { ...filters, period: 'all', from: '', to: '', status: 'pending' },
-            { from: null, to: null },
-            { isAdmin },
-          ),
-        ),
-      [filters, isAdmin],
-    ),
-    { enabled: showUndated },
-  );
-
-  const installmentRows = installments.data?.data ?? NO_INSTALLMENTS;
-  const feeRows = fees.data?.data ?? NO_FEES;
-  const rowCount = onInstallments ? installmentRows.length : feeRows.length;
-  const total = list.data?.total ?? 0;
-  const totalPages = Math.max(1, list.data?.totalPages ?? 1);
-  const refreshing = list.isPlaceholderData;
-  const filtered = hasActiveFilters(filters);
-
-  // The takings are scoped like the list's dentist filter: say whose.
-  const dentistName =
-    isAdmin && filters.doctor !== 'all'
-      ? (dentistList.find((dentist) => dentist.id === filters.doctor)?.fullName ??
-        t('paymentsDesk.filters.dentistUnlisted'))
-      : null;
-
-  // A takings figure is "open" when the list shows exactly what it
-  // counts: paid, that method, the takings' days, no search.
-  const pickedTakings: MethodFilter | null =
-    dated && filters.status === 'paid' && filters.search === '' ? filters.method : null;
-  const pickTakings = (method: MethodFilter) => {
-    if (pickedTakings === method) {
-      changeFilters({ method: 'all', status: 'all' });
-      return;
-    }
-    if (filters.search) setSearchKey((key) => key + 1);
-    changeFilters({
-      search: '',
-      method,
-      status: 'paid',
-      // No period: the figures are today's, so the list goes to today.
-      ...(dated ? {} : { period: 'today' as const, from: '', to: '' }),
-    });
+  const totals: Partial<Record<HistoryTab, number>> = {
+    frais: feeCount.data,
+    echeances: installmentCount.data,
   };
 
-  // A page past the end (filters narrowed, rows moved) snaps back once
-  // real data has arrived, instead of showing an empty page.
-  if (list.data && !list.isPlaceholderData && page > totalPages) {
-    setPage(totalPages);
-  }
-
-  // Where an order or a receipt opened from here returns: this desk, as is.
-  const returnTo = `${pathname}${historyUrlSearch({ tab, page, filters }, '')}`;
-
+  const rangeLabel = rangeText(range, today, lang, t);
+  const periodLabel = periodName(state.period, range, today, lang, t);
+  const showAllDates = useCallback(
+    () => setPeriod({ key: 'all', from: '', to: '' }),
+    [setPeriod],
+  );
   const refresh = () => {
     syncToday();
-    void summary.refetch();
-    void list.refetch();
-    void installmentCount.refetch();
-    void feeCount.refetch();
-    // refetch() runs even a disabled query: only when its note is on.
-    if (showUndated) void undatedFees.refetch();
+    invalidatePaymentViews(queryClient);
   };
 
-  const showAnyDate = () => changeFilters({ period: 'all', from: '', to: '' });
+  const panelProps = (tab: HistoryTab) => ({
+    filters: state.filters[tab],
+    page: state.pages[tab],
+    range,
+    today,
+    isAdmin,
+    returnTo: desk.returnTo,
+    searchKey: desk.searchKeys[tab],
+    onFiltersChange: (patch: Parameters<typeof desk.patchFilters>[1]) =>
+      desk.patchFilters(tab, patch),
+    onReset: () => desk.resetFilters(tab),
+    onPage: (page: number) => desk.setPage(tab, page),
+    onAllDates: showAllDates,
+  });
 
   return (
     <DeskFrame>
       <DeskHeader
         onRefresh={refresh}
-        refreshing={summary.isFetching || list.isFetching}
+        refreshing={summary.isFetching}
         updatedAt={summary.dataUpdatedAt}
+        action={
+          <ReportExport
+            state={state}
+            today={today}
+            isAdmin={isAdmin}
+            totals={totals}
+            rangeLabel={rangeLabel}
+          />
+        }
       />
+
+      <PeriodFilter period={state.period} range={range} today={today} onChange={setPeriod} />
 
       <TakingsSummary
         summary={summary}
-        range={takingsDays}
-        today={today}
         isAdmin={isAdmin}
-        dentistName={dentistName}
-        picked={pickedTakings}
-        onPick={pickTakings}
+        periodLabel={periodLabel}
+        rangeLabel={rangeLabel}
       />
 
       <Tabs
-        value={tab}
-        onValueChange={(next) => changeTab(next as HistoryTab)}
-        className="gap-3"
+        value={state.tab}
+        onValueChange={(next) => setTab(next as HistoryTab)}
+        className="gap-4"
       >
-        <HistoryToolbar
-          tab={tab}
-          totals={totals}
-          filters={filters}
-          onFiltersChange={changeFilters}
-          isAdmin={isAdmin}
-          dentists={dentistList}
-          busy={refreshing}
-          searchKey={searchKey}
-          canClear={filtered}
-          onClear={clearFilters}
-          range={range}
-          today={today}
-        />
+        {/* The strip sits on a full-width rule; it scrolls sideways on a
+            narrow phone instead of wrapping. */}
+        <div className="no-scrollbar -mx-4 overflow-x-auto border-b px-4 lg:mx-0 lg:px-0">
+          <TabsList variant="line" aria-label={t('paymentsDesk.tabs.aria')} className="h-auto gap-5 pb-[5px]">
+            {(['frais', 'echeances'] as const).map((tab) => (
+              <TabsTrigger key={tab} value={tab} className="flex-none px-0.5 text-[15px]">
+                {tab === 'frais' ? t('paymentsDesk.tabs.fees') : t('paymentsDesk.tabs.installments')}
+                <span
+                  className={cn(
+                    'min-w-6 rounded-full bg-muted px-1.5 text-xs font-medium text-muted-foreground tabular-nums',
+                    totals[tab] === undefined && 'invisible',
+                  )}
+                >
+                  {totals[tab] ?? 0}
+                </span>
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
 
-        {/* The open tab's panel (Radix makes it a tab stop: show its focus). */}
-        <TabsContent
-          value={tab}
-          ref={listTopRef}
-          className="flex scroll-mt-4 flex-col gap-3 rounded-xl focus-visible:ring-[3px] focus-visible:ring-ring/50"
-        >
-          {showUndated && undatedFees.data ? (
-            <UndatedFeesNote count={undatedFees.data} onAnyDate={showAnyDate} />
-          ) : null}
-
-          {list.isPending ? (
-            <HistoryListSkeleton />
-          ) : list.isError && !list.data ? (
-            <ListMessage
-              title={t('paymentsDesk.empty.errorTitle')}
-              detail={extractApiError(list.error).message}
-              action={
-                <Button variant="outline" size="sm" onClick={() => void list.refetch()}>
-                  <RefreshCw aria-hidden="true" />
-                  {t('paymentsDesk.retry')}
-                </Button>
-              }
-            />
-          ) : rowCount === 0 ? (
-            // An empty previous result stays a placeholder until the new
-            // one lands: its message would describe the wrong filters.
-            refreshing ? (
-              <HistoryListSkeleton />
-            ) : (
-              <EmptyList
-                tab={tab}
-                isAdmin={isAdmin}
-                filters={filters}
-                range={range}
-                onClear={clearFilters}
-                onAnyDate={showAnyDate}
-              />
-            )
-          ) : onInstallments ? (
-            <InstallmentsTable
-              rows={installmentRows}
-              isAdmin={isAdmin}
-              busy={refreshing}
-              returnTo={returnTo}
-              today={today}
-            />
-          ) : (
-            <TreatmentFeesTable
-              rows={feeRows}
-              isAdmin={isAdmin}
-              busy={refreshing}
-              returnTo={returnTo}
-              today={today}
-            />
-          )}
-
-          <ListPagination
-            page={Math.min(page, totalPages)}
-            totalPages={totalPages}
-            total={total}
-            pageSize={HISTORY_PAGE_SIZE}
-            onPageChange={goToPage}
-          />
+        {/* Only the open tab's panel is mounted: only its list is fetched. */}
+        <TabsContent value="frais" className="outline-none">
+          <FeesPanel {...panelProps('frais')} />
+        </TabsContent>
+        <TabsContent value="echeances" className="outline-none">
+          <InstallmentsPanel {...panelProps('echeances')} />
         </TabsContent>
       </Tabs>
     </DeskFrame>
@@ -401,11 +201,8 @@ function PaymentsDesk({ isAdmin }: { isAdmin: boolean }) {
 function DeskFrame({ children }: { children: ReactNode }) {
   return (
     <div className="@container/main flex min-w-0 flex-1 flex-col">
-      {/* Bottom room on phones: the support bubble floats there. The
-          phone gaps are tighter than the Patients page's: the takings sit
-          above the toolbar, and the first row should still start in the
-          upper part of the screen. */}
-      <div className="flex min-w-0 flex-col gap-3 px-4 pt-4 pb-24 md:gap-5 md:pt-6 md:pb-8 lg:px-6">
+      {/* Bottom room on phones: the support bubble floats there. */}
+      <div className="flex min-w-0 flex-col gap-4 px-4 pt-4 pb-24 md:gap-5 md:pt-6 md:pb-8 lg:px-6">
         {children}
       </div>
     </div>
@@ -416,38 +213,47 @@ function DeskHeader({
   onRefresh,
   refreshing = false,
   updatedAt = 0,
+  action,
 }: {
   onRefresh?: () => void;
   refreshing?: boolean;
   /** When the figures on screen were fetched (ms; 0 while none are). */
   updatedAt?: number;
+  /** The page's main action (the PDF report). */
+  action?: ReactNode;
 }) {
   const { t, lang } = useT();
   return (
-    <header className="flex items-center justify-between gap-3">
-      <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
-        {t('paymentsDesk.title')}
-      </h1>
-      {onRefresh && (
-        <div className="flex items-center gap-1">
+    <header className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+      <div className="min-w-0">
+        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
+          {t('paymentsDesk.title')}
+        </h1>
+        <p className="mt-1 text-sm text-muted-foreground">{t('paymentsDesk.subtitle')}</p>
+      </div>
+      {(onRefresh || action) && (
+        <div className="flex items-center gap-1 sm:gap-2">
           {/* How fresh the figures are, beside the way to refresh them. */}
           {updatedAt > 0 && (
-            <span className="text-xs text-muted-foreground tabular-nums">
+            <span className="hidden text-xs text-muted-foreground tabular-nums md:inline">
               {t('paymentsDesk.updatedAt', {
                 time: formatBusinessTime(new Date(updatedAt).toISOString(), lang),
               })}
             </span>
           )}
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onRefresh}
-            aria-label={t('paymentsDesk.refresh')}
-            title={t('paymentsDesk.refresh')}
-            className="text-muted-foreground"
-          >
-            <RefreshCw className={cn(refreshing && 'animate-spin')} aria-hidden="true" />
-          </Button>
+          {onRefresh && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onRefresh}
+              aria-label={t('paymentsDesk.refresh')}
+              title={t('paymentsDesk.refresh')}
+              className="text-muted-foreground"
+            >
+              <RefreshCw className={cn(refreshing && 'animate-spin')} aria-hidden="true" />
+            </Button>
+          )}
+          {action}
         </div>
       )}
     </header>
@@ -466,36 +272,33 @@ function NoAccess() {
 
 /** The desk's own layout with grey bars, before the user (or the URL) is known. */
 export function PaymentsPageSkeleton() {
-  const { t } = useT();
   return (
     <DeskFrame>
-      <div className="flex items-center justify-between gap-3">
-        <Skeleton className="h-7 w-32" />
-        <Skeleton className="size-8 rounded-lg" />
-      </div>
-      <div className="flex flex-col gap-2">
-        <Skeleton className="h-5 w-56" />
-        <FigureRow className="sm:grid-cols-4">
-          <Figure size="lg" label={t('paymentsDesk.method.cash')} value={null} />
-          <Figure size="lg" label={t('paymentsDesk.method.card')} value={null} />
-          <Figure size="lg" label={t('paymentsDesk.method.bank_transfer')} value={null} />
-          <Figure size="lg" label={t('paymentsDesk.takings.total')} value={null} strong />
-        </FigureRow>
-      </div>
-      <div className="flex flex-col gap-3">
-        <div className="flex gap-4 border-b pb-2">
-          <Skeleton className="h-5 w-28" />
-          <Skeleton className="h-5 w-40" />
+      <div className="flex items-start justify-between gap-3">
+        <div className="space-y-2">
+          <Skeleton className="h-7 w-56" />
+          <Skeleton className="h-4 w-80 max-w-[70vw]" />
         </div>
-        <div className="flex flex-col gap-2 xl:flex-row">
-          <Skeleton className="h-9 w-full rounded-lg xl:max-w-md" />
-          <div className="grid grid-cols-2 gap-2 sm:flex xl:ml-auto">
-            <Skeleton className="h-9 w-full rounded-lg sm:w-44" />
-            <Skeleton className="h-9 w-full rounded-lg sm:w-44" />
-            <Skeleton className="h-9 w-full rounded-lg sm:w-40" />
-            <Skeleton className="h-9 w-full rounded-lg sm:w-44" />
-          </div>
-        </div>
+        <Skeleton className="h-9 w-44 rounded-lg" />
+      </div>
+      <div className="flex gap-1.5 overflow-hidden">
+        {Array.from({ length: 8 }, (_, index) => (
+          <Skeleton key={index} className="h-8 w-24 shrink-0 rounded-lg" />
+        ))}
+      </div>
+      <div className="grid gap-2 sm:grid-cols-3 sm:gap-3">
+        {Array.from({ length: 3 }, (_, index) => (
+          <Skeleton key={index} className="h-[74px] rounded-xl sm:h-[122px]" />
+        ))}
+      </div>
+      <div className="flex gap-5 border-b pb-2">
+        <Skeleton className="h-5 w-44" />
+        <Skeleton className="h-5 w-44" />
+      </div>
+      <div className="flex flex-col gap-2 md:flex-row">
+        <Skeleton className="h-9 w-full rounded-lg md:max-w-md" />
+        <Skeleton className="h-9 w-full rounded-lg md:w-64" />
+        <Skeleton className="h-9 w-28 rounded-lg" />
       </div>
       <HistoryListSkeleton />
     </DeskFrame>

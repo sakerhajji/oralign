@@ -43,7 +43,8 @@ const COLS = {
   dentist: 'hidden w-36 2xl:table-cell',
   installment: 'hidden w-20 2xl:table-cell',
   method: 'w-32',
-  status: 'w-32',
+  // "Vérification requise" / "Verification required" on one line.
+  status: 'w-40',
   amount: 'w-32 text-right',
   // Room for the admin's inline number editor.
   receiptAdmin: 'w-48 pr-4 text-right',

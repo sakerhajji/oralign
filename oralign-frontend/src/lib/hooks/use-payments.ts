@@ -9,7 +9,7 @@ import {
   type UseQueryResult,
 } from '@tanstack/react-query';
 import { toast } from '@/lib/toast';
-import { paymentsService } from '@/lib/api/payments.service';
+import { paymentsService, type PaymentsReportFile } from '@/lib/api/payments.service';
 import { invoicesService } from '@/lib/api/invoices.service';
 import { extractApiError, extractApiErrorMessage } from '@/lib/api/error';
 import { isWelcomeGiftNothingDue } from '@/lib/api/welcome-gift.service';
@@ -27,6 +27,8 @@ import type {
   Payment,
   PaymentFilterDto,
   PaymentListItem,
+  PaymentPractitioner,
+  PaymentsReportRequest,
   PaymentsSummary,
   PaymentsSummaryParams,
   RecordCashPaymentDto,
@@ -144,6 +146,37 @@ export function usePaymentsSummary(
     staleTime: PAYMENT_STALE_TIME,
     refetchOnMount: 'always',
     refetchOnWindowFocus: true,
+  });
+}
+
+/**
+ * Admin: the dentists a payments tab can be narrowed to — only those with
+ * a payment of that kind. Rarely changes: kept for five minutes.
+ */
+export function usePaymentPractitioners(
+  purpose: PaymentPurpose,
+  options: { enabled?: boolean } = {},
+): UseQueryResult<PaymentPractitioner[], Error> {
+  return useQuery({
+    queryKey: paymentKeys.practitioners(purpose),
+    queryFn: () => paymentsService.listPractitioners(purpose),
+    enabled: options.enabled ?? true,
+    staleTime: 5 * 60_000,
+  });
+}
+
+/**
+ * Generate the payments report PDF on the server. The caller decides what
+ * to do with the file (download it, or print it); errors are left to the
+ * caller too, which shows them where the report was asked for.
+ */
+export function usePaymentsReport(): UseMutationResult<
+  PaymentsReportFile,
+  Error,
+  PaymentsReportRequest
+> {
+  return useMutation({
+    mutationFn: (request) => paymentsService.downloadReport(request),
   });
 }
 

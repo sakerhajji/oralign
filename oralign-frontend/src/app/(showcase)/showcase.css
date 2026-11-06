@@ -71,8 +71,12 @@ html:has([data-theme="showcase"]) {
   max-width: 100%;
 }
 
-/* Smooth scroll + sticky-header offset for anchor jumps */
-html { scroll-behavior: smooth; }
+/* Smooth scroll + sticky-header offset for anchor jumps. The smooth glide
+   only for visitors who have not asked for reduced motion (a jump of a
+   screen or more is exactly what that setting is for). */
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}
 [data-theme="showcase"] section[id],
 [data-theme="showcase"] [id="footer"] {
   scroll-margin-top: 88px;
@@ -436,3 +440,47 @@ html:has([data-theme="showcase"][dir="rtl"]) {
 /* ─── SCROLLBAR ─── */
 [data-theme="showcase"] ::-webkit-scrollbar { width: 2px; }
 [data-theme="showcase"] ::-webkit-scrollbar-thumb { background: var(--sc-black); }
+
+/* ─── QR WELCOME (/qr) ─────────────────────────────────────────────
+   The page a printed code opens. Everything is in the server HTML and
+   readable at once; for visitors who have not asked for reduced motion,
+   the welcome settles in (logo, then words, then the cards, each rising a
+   few pixels), the contact sheet slides up and the film opens over the
+   page. Opacity and transform only: nothing is laid out again. */
+@media (prefers-reduced-motion: no-preference) {
+  [data-theme="showcase"] .sc-qr-in {
+    animation: sc-qr-rise 700ms var(--sc-ease) both;
+  }
+  [data-theme="showcase"] .sc-qr-sheet[open] {
+    animation: sc-qr-sheet-up 380ms var(--sc-ease) both;
+  }
+  [data-theme="showcase"] .sc-qr-film[open] {
+    animation: sc-qr-fade 260ms ease-out both;
+  }
+  [data-theme="showcase"] .sc-qr-sheet[open]::backdrop,
+  [data-theme="showcase"] .sc-qr-film[open]::backdrop {
+    animation: sc-qr-fade 260ms ease-out both;
+  }
+}
+@media (prefers-reduced-motion: no-preference) and (min-width: 640px) {
+  /* Wider screens: the sheet is a centred card, it settles instead. */
+  [data-theme="showcase"] .sc-qr-sheet[open] {
+    animation-name: sc-qr-pop;
+  }
+}
+@keyframes sc-qr-rise {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes sc-qr-sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: none; }
+}
+@keyframes sc-qr-pop {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes sc-qr-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

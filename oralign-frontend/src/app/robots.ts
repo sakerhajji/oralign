@@ -34,7 +34,6 @@ const PRIVATE_PATHS = [
   '/onboarding/',
   '/created_for_you/',
   '/payment/',
-  '/qr',
 ];
 
 const AI_CRAWLERS = [

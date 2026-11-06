@@ -76,6 +76,13 @@ const nextConfig: NextConfig = {
       { source: "/practitioner/blog", destination: "/blog", permanent: true },
       // Any remaining practitioner marketing URL → the secured platform sign-in.
       { source: "/practitioner/:path*", destination: "/login", permanent: true },
+      // The second run of printed QR codes encodes /qr2: it lands on the
+      // same card as /qr. Temporary (307) on purpose: a printed code
+      // outlives any page, and a 308 would pin every phone that scanned it
+      // to today's target. Matching ignores case (caseSensitiveRoutes is
+      // off), so /QR2 lands too; an upper-case /QR is folded in src/proxy.ts
+      // (a rule for it here would also match /qr itself and loop).
+      { source: "/qr2", destination: "/qr", permanent: false },
     ];
   },
   async headers() {

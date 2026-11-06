@@ -34,6 +34,17 @@ export default function proxy(request: NextRequest): NextResponse {
     return NextResponse.next();
   }
 
+  // Printed QR codes lead to /qr. Some QR generators upper-case the whole
+  // URL (it makes a smaller code) and page paths are case-sensitive, so
+  // /QR or /Qr would end on a 404: send them to the card. Not a redirect
+  // in next.config.ts: its matching ignores case and a rule for /QR would
+  // also catch /qr itself. 307, like /qr2: the code outlives the page.
+  if (pathname !== '/qr' && pathname.toLowerCase() === '/qr') {
+    const card = request.nextUrl.clone();
+    card.pathname = '/qr';
+    return NextResponse.redirect(card, 307);
+  }
+
   const accessToken = request.cookies.get('accessToken')?.value;
   const isAuthenticated = Boolean(accessToken);
 

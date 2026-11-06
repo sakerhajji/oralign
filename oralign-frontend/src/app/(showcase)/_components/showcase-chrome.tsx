@@ -65,9 +65,16 @@ const dmSans = localFont({
 export async function ShowcaseChrome({
   children,
   forcedLang,
+  bare = false,
 }: {
   children: ReactNode;
   forcedLang?: Lang;
+  /**
+   * No navigation header and no floating language rail: for a page that is
+   * its own entrance (the /qr welcome a printed code opens), which carries
+   * its own language switch. Fonts, language, footer and JSON-LD stay.
+   */
+  bare?: boolean;
 }) {
   return (
     <div
@@ -91,8 +98,8 @@ export async function ShowcaseChrome({
         Skip to content
       </a>
       <LangProvider forced={forcedLang}>
-        <Header />
-        <FloatingLang />
+        {!bare && <Header />}
+        {!bare && <FloatingLang />}
         <main id="main">{children}</main>
         <Footer />
       </LangProvider>

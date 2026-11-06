@@ -27,19 +27,15 @@ interface FormatPriceOptions {
 }
 
 /**
- * Format a monetary amount with its currency code.
- *
- * @param amount   number | numeric string | null | undefined (→ 0)
- * @param currency ISO code from the priced record / billing settings.
- *                 Falls back to TND only when null/blank is passed.
+ * The number part of `formatPrice` alone ("1 234,500"), for a layout that
+ * sets the currency apart (a figure with its unit as a smaller suffix).
+ * The caller still shows the record's currency next to it.
  */
-export function formatPrice(
+export function formatAmount(
   amount: number | string | null | undefined,
-  currency: string | null | undefined = DEFAULT_MERCHANT_CURRENCY,
   options: FormatPriceOptions = {},
 ): string {
   const { locale = 'fr-FR', fractionDigits = 3 } = options;
-  const ccy = (currency ?? '').trim() || DEFAULT_MERCHANT_CURRENCY;
 
   const num =
     typeof amount === 'number'
@@ -55,5 +51,25 @@ export function formatPrice(
   });
 
   // Use a real minus sign for negatives (credits / adjustments).
-  return `${safe < 0 ? '−' : ''}${formatted} ${ccy}`;
+  return `${safe < 0 ? '−' : ''}${formatted}`;
+}
+
+/** The currency code `formatPrice` prints for `currency`. */
+export function currencyCode(currency: string | null | undefined): string {
+  return (currency ?? '').trim() || DEFAULT_MERCHANT_CURRENCY;
+}
+
+/**
+ * Format a monetary amount with its currency code.
+ *
+ * @param amount   number | numeric string | null | undefined (→ 0)
+ * @param currency ISO code from the priced record / billing settings.
+ *                 Falls back to TND only when null/blank is passed.
+ */
+export function formatPrice(
+  amount: number | string | null | undefined,
+  currency: string | null | undefined = DEFAULT_MERCHANT_CURRENCY,
+  options: FormatPriceOptions = {},
+): string {
+  return `${formatAmount(amount, options)} ${currencyCode(currency)}`;
 }

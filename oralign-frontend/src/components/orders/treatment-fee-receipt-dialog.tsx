@@ -1,13 +1,11 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { format } from 'date-fns';
+import { useMemo, useState, type ReactNode } from 'react';
 import {
   AlertTriangle,
   Banknote,
   Calendar,
   CheckCircle2,
-  Clock,
   CreditCard,
   Download,
   ExternalLink,
@@ -18,7 +16,6 @@ import {
   Stethoscope,
   User,
 } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -28,35 +25,43 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { ImageLightbox } from '@/components/ui/image-lightbox';
+import { PaymentStatusBadge } from '@/components/payments/payment-status-badge';
 import { useConfirmTreatmentFeePayment } from '@/lib/hooks';
 import { resolveUploadUrl } from '@/lib/api/company-billing.service';
 import { cn } from '@/lib/utils';
+import { formatBusinessDay } from '@/lib/utils/business-day';
+import { formatPrice } from '@/lib/utils/currency';
 import { useT } from '@/lib/i18n/lang-context';
-import { PaymentMethod } from '@/lib/types';
+import { PaymentMethod, PaymentRecordStatus } from '@/lib/types';
 
 /**
- * Admin-facing treatment-fee bank-transfer receipt confirmation.
+ * The dentist's bank-transfer proof (justificatif), with the admin's
+ * confirmation when the caller allows it. The payments desk opens it
+ * read-only for installments and fees alike.
  *
  * Desktop-first design:
  *
  *   ┌─────────────────────────────────────────────────────┐
- *   │ Bank-transfer receipt   [Awaiting confirmation]  X │
+ *   │ Bank transfer proof     [To be confirmed]        X │
  *   │ Order ORD-1234                                       │
  *   ├──────────────────────────┬──────────────────────────┤
- *   │                          │  PATIENT                  │
- *   │    [Receipt photo]       │  Ahlem r9i9              │
+ *   │                          │  Patient                  │
+ *   │    [Proof photo]         │  Ahlem r9i9              │
  *   │    object-contain on     │                           │
- *   │    a soft backdrop —     │  DOCTOR                   │
+ *   │    a soft backdrop —     │  Doctor                   │
  *   │    click → lightbox      │  Dr. Hajji Saker         │
  *   │                          │                           │
- *   │                          │  AMOUNT      350 TND     │
- *   │                          │  METHOD      Bank transfer│
- *   │                          │  SUBMITTED   Jun 7, 2026 │
+ *   │                          │  Amount      350 TND     │
+ *   │                          │  Method      Bank transfer│
+ *   │                          │  Submitted   7 juin 2026 │
  *   ├──────────────────────────┴──────────────────────────┤
  *   │                       [Cancel]  [✓ Confirm payment] │
  *   └─────────────────────────────────────────────────────┘
  *
- *   Below md: the two columns stack — receipt on top, details below,
+ *   Read-only (no Confirm): the footer's button reads Close, and the
+ *   caller may add one `footerAction` beside it.
+ *
+ *   Below md: the two columns stack — proof on top, details below,
  *   footer still sticky. The image scales down with the viewport so
  *   the dialog always fits without scrolling on phones.
  *
@@ -87,12 +92,29 @@ export interface TreatmentFeeReceiptDialogProps {
   /** ISO date string when the doctor uploaded the proof (or recorded intent). */
   submittedAt?: string | null;
   /**
+   * What `submittedAt` is: the day the transfer was declared (default),
+   * or the day it was paid — a treatment fee keeps no declaration date,
+   * so the payments desk passes its payment date.
+   */
+  dateLabel?: 'submitted' | 'paid';
+  /**
+   * The payment's status for the header badge. Defaults to awaiting
+   * confirmation, the state of every proof opened to be confirmed; the
+   * payments history passes the row's real status.
+   */
+  status?: PaymentRecordStatus | null;
+  /**
    * When true the modal renders the "Confirm payment" footer button.
    * Drives off the caller's authz check + the order's current status.
    */
   canConfirm: boolean;
   /** Optional success callback (parent closes the dialog + refreshes). */
   onConfirmed?: () => void;
+  /**
+   * Another action for the footer, beside Close — e.g. the way to the
+   * queue where an installment transfer is confirmed.
+   */
+  footerAction?: ReactNode;
 }
 
 export function TreatmentFeeReceiptDialog({
@@ -107,10 +129,13 @@ export function TreatmentFeeReceiptDialog({
   patientName,
   method,
   submittedAt,
+  dateLabel = 'submitted',
+  status = PaymentRecordStatus.AWAITING_CONFIRMATION,
   canConfirm,
   onConfirmed,
+  footerAction,
 }: TreatmentFeeReceiptDialogProps) {
-  const { t } = useT();
+  const { t, lang } = useT();
   const fileUrl = useMemo(() => resolveUploadUrl(proofPath), [proofPath]);
   const fileName = extractFilename(proofPath) ?? `receipt-${orderCode}`;
   const proofKind = classifyProof(proofPath);
@@ -152,13 +177,7 @@ export function TreatmentFeeReceiptDialog({
                   {t('feeUi.receiptDialog.orderCode', { code: orderCode })}
                 </DialogDescription>
               </div>
-              <Badge
-                variant="outline"
-                className="shrink-0 gap-1.5 border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700"
-              >
-                <Clock className="h-3 w-3" />
-                {t('paymentsCommon.status.awaiting_confirmation')}
-              </Badge>
+              <PaymentStatusBadge status={status} className="shrink-0" />
             </div>
           </DialogHeader>
 
@@ -181,7 +200,7 @@ export function TreatmentFeeReceiptDialog({
 
             {/* Summary column — fixed 42% on desktop */}
             <div className="flex min-h-0 flex-col overflow-y-auto bg-card p-6 lg:w-[42%] lg:flex-shrink-0 lg:p-7">
-              <h3 className="mb-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              <h3 className="mb-4 text-sm font-medium">
                 {t('feeUi.receiptDialog.summary')}
               </h3>
               <dl className="space-y-4">
@@ -201,7 +220,7 @@ export function TreatmentFeeReceiptDialog({
                   label={t('feeUi.receiptDialog.amount')}
                   value={
                     <span className="text-lg font-bold tabular-nums">
-                      {amount ?? 0} {currency}
+                      {formatPrice(amount ?? 0, currency)}
                     </span>
                   }
                   highlight
@@ -216,8 +235,14 @@ export function TreatmentFeeReceiptDialog({
                 {submittedAt && (
                   <DetailRow
                     icon={<Calendar className="h-3.5 w-3.5" />}
-                    label={t('feeUi.receiptDialog.submitted')}
-                    value={format(new Date(submittedAt), 'MMM d, yyyy')}
+                    label={t(
+                      dateLabel === 'paid'
+                        ? 'feeUi.receiptDialog.paid'
+                        : 'feeUi.receiptDialog.submitted',
+                    )}
+                    // The dashboard's day format, in Tunis time (the days
+                    // the payments desk lists and counts by).
+                    value={formatBusinessDay(submittedAt, lang)}
                   />
                 )}
                 <DetailRow
@@ -239,11 +264,13 @@ export function TreatmentFeeReceiptDialog({
                 plain language so the admin understands they're moving
                 the order forward, not just closing the dialog.
                */}
-              <div className="mt-auto pt-6">
-                <p className="rounded-lg border border-blue-100 bg-blue-50/60 p-4 text-xs leading-relaxed text-blue-900/80">
-                  {t('feeUi.receiptDialog.confirmHint')}
-                </p>
-              </div>
+              {canConfirm && (
+                <div className="mt-auto pt-6">
+                  <p className="rounded-lg border border-blue-100 bg-blue-50/60 p-4 text-xs leading-relaxed text-blue-900/80">
+                    {t('feeUi.receiptDialog.confirmHint')}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 
@@ -255,8 +282,10 @@ export function TreatmentFeeReceiptDialog({
               disabled={confirm.isPending}
               onClick={() => onOpenChange(false)}
             >
-              {t('common.cancel')}
+              {/* Cancel only means something next to Confirm. */}
+              {canConfirm ? t('common.cancel') : t('common.close')}
             </Button>
+            {footerAction}
             {canConfirm && (
               <Button
                 type="button"
@@ -338,12 +367,7 @@ function DetailRow({
         {icon}
       </div>
       <div className="min-w-0">
-        <p
-          className={cn(
-            'text-[11px] font-semibold uppercase tracking-wide text-muted-foreground',
-            highlight && 'text-emerald-700',
-          )}
-        >
+        <p className={cn('text-xs text-muted-foreground', highlight && 'text-emerald-700')}>
           {label}
         </p>
         <div

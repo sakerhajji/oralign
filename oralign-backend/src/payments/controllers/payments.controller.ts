@@ -14,7 +14,14 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { diskStorage } from 'multer';
 import { extname, join } from 'path';
@@ -32,11 +39,14 @@ import {
   CreateClicToPaySessionDto,
   DeclareBankTransferDto,
   PaymentFilterDto,
+  PaymentsSummaryDto,
+  PaymentSummaryQueryDto,
   RecordCashPaymentDto,
   RejectPaymentDto,
 } from '../dto/payment.dto';
 import { ClicToPayPaymentsService } from '../services/clictopay-payments.service';
 import { PaymentsService } from '../services/payments.service';
+import { PaymentsSummaryService } from '../services/payments-summary.service';
 
 const PROOF_UPLOAD_ROOT = join(process.cwd(), 'uploads', 'payments');
 mkdirSync(PROOF_UPLOAD_ROOT, { recursive: true });
@@ -68,6 +78,7 @@ export class PaymentsController {
   constructor(
     private readonly payments: PaymentsService,
     private readonly clicToPayPayments: ClicToPayPaymentsService,
+    private readonly summaries: PaymentsSummaryService,
   ) {}
 
   // ─── Doctor-facing — ClicToPay hosted checkout ────────────────
@@ -224,6 +235,27 @@ export class PaymentsController {
     return this.payments.listPayments({
       ...filters,
       caller: { userId: user.sub, role: user.role as UserRole },
+    });
+  }
+
+  // Takings of a period (today by default): what a dentist paid, or what
+  // the lab received. A static path: keep it above any GET
+  // `payments/:paymentId` route of this controller.
+  @Get('payments/summary')
+  @Roles(UserRole.dentist, UserRole.admin, UserRole.super_admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Money received over a period of Africa/Tunis days (today when no date is given), per kind (installments, treatment fees) and per method. Successful payments only, archived orders excluded. Dentists get their own orders; admins every order or one dentist.',
+  })
+  @ApiOkResponse({ type: PaymentsSummaryDto })
+  async summary(
+    @Query() query: PaymentSummaryQueryDto,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<PaymentsSummaryDto> {
+    return this.summaries.summarise(query, {
+      userId: user.sub,
+      role: user.role,
     });
   }
 

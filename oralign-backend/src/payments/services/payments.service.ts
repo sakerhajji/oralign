@@ -12,6 +12,7 @@ import {
   OrderStatus,
   Payment,
   PaymentMethod,
+  PaymentPurpose,
   PaymentRecordStatus,
   Prisma,
   QuotationPaymentStatus,
@@ -21,6 +22,7 @@ import {
 import { randomUUID } from 'crypto';
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   NotFoundException,
 } from '../../common/exceptions/app.exception';
@@ -38,6 +40,13 @@ import { NotificationEvents } from '../../notifications/events/notification-even
 import { env } from '../../common/config/env';
 import { QuotationService } from '../../quotations/services/quotation.service';
 import { isAdmin, type Caller } from '../../common/access/caller';
+import { lookupActorName } from '../../common/access/actor-snapshot';
+import { businessDayRange } from '../../common/time/business-day';
+import { parseSearchAmount } from '../../common/utils/amount-search.util';
+import {
+  assertInvoiceNumberFree,
+  invoiceNumberTaken,
+} from '../../common/billing/invoice-number';
 
 /**
  * Shape consumed by the shared payment-list executor. Mirrors the
@@ -55,20 +64,53 @@ interface PaymentListOptions {
   // method filter — legacy single + canonical multi
   paymentMethod?: PaymentMethod;
   methods?: PaymentMethod[];
+  purpose?: PaymentPurpose;
   // search + structural filters
   search?: string;
   doctorId?: string;
   patientId?: string;
-  // date range
+  // business days ('YYYY-MM-DD', Africa/Tunis) of the date the payment happened
+  from?: string;
+  to?: string;
+  // deprecated: UTC days of createdAt
   createdFrom?: string;
   createdTo?: string;
-  // sorting
-  sortBy?: 'createdAt' | 'amount' | 'paidAt' | 'status';
+  // sorting; eventAt = the date the payment happened (paidAt ?? createdAt)
+  sortBy?: 'createdAt' | 'amount' | 'paidAt' | 'status' | 'eventAt';
   sortOrder?: 'asc' | 'desc';
 }
 
 /** TTL for the idempotency-key → result mapping. 24h matches the spec. */
 const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Payment columns a dentist never reads, in their history or on one
+ * payment: the admin's notes, which admin recorded, confirmed or rejected
+ * the payment, and the idempotency key. Admins keep every column.
+ */
+const HIDDEN_FROM_DENTISTS = {
+  notes: true,
+  idempotencyKey: true,
+  initiatedById: true,
+  confirmedById: true,
+  rejectedById: true,
+} satisfies Prisma.PaymentOmit;
+
+/** The relations every row of a payment list carries. */
+const PAYMENT_LIST_INCLUDE = {
+  quotation: { select: { id: true, orderId: true, packName: true } },
+  order: {
+    select: {
+      id: true,
+      orderCode: true,
+      doctor: { select: { id: true, fullName: true } },
+      patient: { select: { id: true, fullName: true } },
+    },
+  },
+  installment: {
+    select: { id: true, installmentNumber: true, amount: true },
+  },
+} satisfies Prisma.PaymentInclude;
 
 /**
  * Single-source-of-truth payment service.
@@ -839,6 +881,7 @@ export class PaymentsService {
    *   • added in 20260525000002_payment_indexes:
    *       (status, createdAt) — admin queue narrowing + sort
    *       (paymentMethod, status) — method-filtered queries
+   *   • (status, paidAt) — the takings of a period (PaymentsSummaryService)
    */
   private async runFilteredQuery(
     opts: PaymentListOptions & { caller: Caller; forceScope: 'all' | 'doctor' },
@@ -848,29 +891,25 @@ export class PaymentsService {
     const skip = (page - 1) * take;
 
     const where = this.buildPaymentWhere(opts);
-    const orderBy = this.buildPaymentOrderBy(opts);
+    const omit = isAdmin(opts.caller) ? undefined : HIDDEN_FROM_DENTISTS;
 
     const [rows, total] = await Promise.all([
-      this.prisma.payment.findMany({
-        where,
-        skip,
-        take,
-        orderBy,
-        include: {
-          quotation: { select: { id: true, orderId: true, packName: true } },
-          order: {
-            select: {
-              id: true,
-              orderCode: true,
-              doctor: { select: { id: true, fullName: true } },
-              patient: { select: { id: true, fullName: true } },
-            },
-          },
-          installment: {
-            select: { id: true, installmentNumber: true, amount: true },
-          },
-        },
-      }),
+      opts.sortBy === 'eventAt'
+        ? this.findPageByEventDate(
+            where,
+            opts.sortOrder ?? 'desc',
+            skip,
+            take,
+            omit,
+          )
+        : this.prisma.payment.findMany({
+            where,
+            skip,
+            take,
+            orderBy: this.buildPaymentOrderBy(opts),
+            include: PAYMENT_LIST_INCLUDE,
+            omit,
+          }),
       this.prisma.payment.count({ where }),
     ]);
     return {
@@ -882,25 +921,65 @@ export class PaymentsService {
     };
   }
 
+  /**
+   * One page in the order of the date each payment happened: when it was
+   * paid, otherwise when it was made. The list shows that date and the
+   * period filters on it (eventDateFilter), but Prisma cannot sort on
+   * COALESCE(paidAt, createdAt). So the page is cut from the merge of two
+   * runs the database sorts, the paid rows by paidAt and the others by
+   * createdAt, each ending on the id: the first skip + take rows of the
+   * merge are always among the first skip + take rows of each run.
+   */
+  private async findPageByEventDate(
+    where: Prisma.PaymentWhereInput,
+    direction: Prisma.SortOrder,
+    skip: number,
+    take: number,
+    omit: typeof HIDDEN_FROM_DENTISTS | undefined,
+  ) {
+    const window = skip + take;
+    const dates = { id: true, paidAt: true, createdAt: true } as const;
+    const [paid, unpaid] = await Promise.all([
+      this.prisma.payment.findMany({
+        where: { AND: [where, { paidAt: { not: null } }] },
+        orderBy: [{ paidAt: direction }, { id: direction }],
+        take: window,
+        select: dates,
+      }),
+      this.prisma.payment.findMany({
+        where: { AND: [where, { paidAt: null }] },
+        orderBy: [{ createdAt: direction }, { id: direction }],
+        take: window,
+        select: dates,
+      }),
+    ]);
+    const sign = direction === 'asc' ? 1 : -1;
+    const ids = [...paid, ...unpaid]
+      .map((row) => ({
+        id: row.id,
+        at: (row.paidAt ?? row.createdAt).getTime(),
+      }))
+      .sort((a, b) => sign * (a.at - b.at || compareIds(a.id, b.id)))
+      .slice(skip, window)
+      .map((row) => row.id);
+    if (ids.length === 0) return [];
+
+    const rows = await this.prisma.payment.findMany({
+      where: { id: { in: ids } },
+      include: PAYMENT_LIST_INCLUDE,
+      omit,
+    });
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    return ids.flatMap((id) => byId.get(id) ?? []);
+  }
+
   /** Compose the Prisma where clause from the DTO + scope rules. */
   private buildPaymentWhere(
     opts: PaymentListOptions & { caller: Caller; forceScope: 'all' | 'doctor' },
   ): Prisma.PaymentWhereInput {
-    const where: Prisma.PaymentWhereInput = {};
-
-    // RBAC scope — dentists see only payments on their own orders.
-    // We compose into `order: {...}` so filters that ALSO touch order
-    // can layer onto the same nested relational filter.
-    // Payments of archived orders stay in the ledger but leave the
-    // working lists (pending queue / history) — the admin trash view of
-    // orders is where archived work is reviewed.
-    const orderWhere: Prisma.DentalOrderWhereInput = { deletedAt: null };
-    if (opts.forceScope === 'doctor') {
-      orderWhere.doctorId = opts.caller.userId;
-    } else if (opts.doctorId) {
-      orderWhere.doctorId = opts.doctorId;
-    }
-    if (opts.patientId) orderWhere.patientId = opts.patientId;
+    const where: Prisma.PaymentWhereInput = {
+      order: this.paymentOrderScope(opts),
+    };
 
     // Multi-value statuses — explicit list wins, legacy `status`
     // single-value falls back when no list is provided.
@@ -917,126 +996,105 @@ export class PaymentsService {
       where.paymentMethod = opts.paymentMethod;
     }
 
-    // Inclusive date range on createdAt — [from 00:00:00 → to 23:59:59 UTC].
-    // We trim incoming strings so a stray space doesn't fail Date()
-    // and silently fall through. Malformed values are logged + skipped
-    // so the rest of the filter still applies; better than 500-ing on
-    // a typo. Note: HTML date inputs feed `YYYY-MM-DD` which `new Date()`
-    // parses as UTC midnight — keep that in mind when comparing to
-    // payment.createdAt which is also stored UTC.
-    const createdRange: Prisma.DateTimeFilter = {};
-    if (opts.createdFrom) {
-      const raw = String(opts.createdFrom).trim();
-      const d = new Date(raw);
-      if (!Number.isNaN(d.getTime())) {
-        createdRange.gte = d;
-      } else {
-        this.logger.warn(`createdFrom "${raw}" is not a valid date — ignored.`);
-      }
-    }
-    if (opts.createdTo) {
-      const raw = String(opts.createdTo).trim();
-      const d = new Date(raw);
-      if (!Number.isNaN(d.getTime())) {
-        d.setUTCHours(23, 59, 59, 999);
-        createdRange.lte = d;
-      } else {
-        this.logger.warn(`createdTo "${raw}" is not a valid date — ignored.`);
-      }
-    }
-    if (createdRange.gte || createdRange.lte) {
-      where.createdAt = createdRange;
-      // Prisma types gte/lte as `string | Date`; we only ever assign
-      // Date here so the cast is safe. Logged as ISO for traceable
-      // payments-query diagnostics.
-      const fmt = (v: string | Date | undefined) =>
-        v instanceof Date ? v.toISOString() : (v ?? '∞');
-      this.logger.debug(
-        `payments date range: gte=${fmt(createdRange.gte)} lte=${fmt(
-          createdRange.lte,
-        )}`,
-      );
-    }
+    if (opts.purpose) where.purpose = opts.purpose;
 
-    // Free-text search — order code, doctor name, patient name, and
-    // transaction id (covers gateway tx ids on CARD, bank references
-    // on BANK_TRANSFER, receipt numbers on CASH — all stored in
-    // `transactionId` per the schema convention).
-    if (opts.search && opts.search.length > 0) {
-      const search = opts.search;
-      where.OR = [
-        { transactionId: { contains: search, mode: 'insensitive' } },
-        {
-          order: {
-            ...(Object.keys(orderWhere).length > 0 ? orderWhere : {}),
-            OR: [
-              { orderCode: { contains: search, mode: 'insensitive' } },
-              {
-                doctor: { fullName: { contains: search, mode: 'insensitive' } },
-              },
-              {
-                patient: { fullName: { contains: search, mode: 'insensitive' } },
-              },
-            ],
-          },
-        },
-      ];
-      // When search is set we move the RBAC + structural order filters
-      // INTO the order branch of the OR — so non-search rows still
-      // have to match the scope. The bankReference / transactionId
-      // branches keep the scope via the outer where: add it back.
-      if (Object.keys(orderWhere).length > 0) {
-        where.order = orderWhere;
-      }
-    } else if (Object.keys(orderWhere).length > 0) {
-      where.order = orderWhere;
-    }
+    const createdAt = legacyCreatedRange(opts.createdFrom, opts.createdTo);
+    if (createdAt) where.createdAt = createdAt;
+
+    // Conditions carrying their own OR go in an AND list, so the period
+    // and the search can never overwrite each other.
+    const and: Prisma.PaymentWhereInput[] = [];
+    const period = eventDateFilter(opts.from, opts.to);
+    if (period) and.push(period);
+    const search = opts.search?.trim();
+    if (search) and.push({ OR: paymentSearchConditions(search) });
+    if (and.length > 0) where.AND = and;
 
     return where;
   }
 
-  /** Compose Prisma orderBy from the DTO sort enum. */
+  /**
+   * The orders a payment list reads: a dentist only their own. Payments of
+   * archived orders stay in the ledger but leave the working lists
+   * (pending queue / history) — the admin trash view of orders is where
+   * archived work is reviewed.
+   */
+  private paymentOrderScope(
+    opts: PaymentListOptions & { caller: Caller; forceScope: 'all' | 'doctor' },
+  ): Prisma.DentalOrderWhereInput {
+    const order: Prisma.DentalOrderWhereInput = { deletedAt: null };
+    if (opts.forceScope === 'doctor') {
+      order.doctorId = opts.caller.userId;
+    } else if (opts.doctorId) {
+      order.doctorId = opts.doctorId;
+    }
+    if (opts.patientId) order.patientId = opts.patientId;
+    return order;
+  }
+
+  /**
+   * Compose Prisma orderBy from the DTO sort enum (eventAt is paged by
+   * findPageByEventDate). Every sort ends on the id, in the sort's
+   * direction: rows sharing a sort value keep one stable order, so none
+   * shows on two pages or on none.
+   */
   private buildPaymentOrderBy(
     opts: PaymentListOptions,
   ): Prisma.PaymentOrderByWithRelationInput[] {
     const direction = opts.sortOrder ?? 'desc';
+    const byId = { id: direction };
     switch (opts.sortBy) {
       case 'amount':
-        return [{ amount: direction }, { createdAt: 'desc' }];
+        return [{ amount: direction }, { createdAt: 'desc' }, byId];
       case 'paidAt':
-        // Successful first when desc — Prisma orders NULL last on
-        // descending, so paid rows surface above pending ones.
-        return [{ paidAt: direction }, { createdAt: 'desc' }];
+        // Postgres sorts NULLs first in a descending sort: without
+        // `nulls: 'last'` every unpaid attempt would top a "recently
+        // paid" list. Last in both directions.
+        return [
+          { paidAt: { sort: direction, nulls: 'last' } },
+          { createdAt: 'desc' },
+          byId,
+        ];
       case 'status':
-        return [{ status: direction }, { createdAt: 'desc' }];
+        return [{ status: direction }, { createdAt: 'desc' }, byId];
       case 'createdAt':
       default:
-        return [{ createdAt: direction }];
+        return [{ createdAt: direction }, byId];
     }
   }
 
-  async getPayment(id: string, caller: Caller): Promise<Payment> {
+  /**
+   * One payment: an admin reads any, a dentist only one of their own
+   * orders, without the admin-internal columns (as in their history).
+   */
+  async getPayment(id: string, caller: Caller) {
+    const callerIsAdmin = isAdmin(caller);
     const payment = await this.prisma.payment.findUnique({
       where: { id },
       include: {
         order: { select: { doctorId: true } },
       },
+      omit: callerIsAdmin ? undefined : HIDDEN_FROM_DENTISTS,
     });
     if (!payment) throw new NotFoundException('Payment not found.');
     const isOwner =
       caller.role === UserRole.dentist &&
       payment.order.doctorId === caller.userId;
-    if (!isAdmin(caller) && !isOwner) {
+    if (!callerIsAdmin && !isOwner) {
       throw new ForbiddenException('You cannot access this payment.');
     }
     return payment;
   }
 
   /**
-   * Admin-only: override the printed invoice / receipt number on a
-   * payment. The unique index guarantees no two receipts share a
-   * number — a collision surfaces as a clean 400 rather than a Prisma
-   * stack trace.
+   * Admin-only: override the printed receipt number of a successful
+   * installment payment. The receipt and its automatic invoice print one
+   * number (InvoiceService.update keeps the same rule from the invoice
+   * side), so a new number follows the invoice desk's rules
+   * (assertInvoiceNumberFree: free on every document, outside the future
+   * range of the automatic counters) and both rows are renamed in one
+   * transaction; the invoice's audit trail records it, as an edit from
+   * the invoice desk would.
    */
   async updateInvoiceNumber(
     id: string,
@@ -1052,21 +1110,66 @@ export class PaymentsService {
     if (!trimmed) {
       throw new BadRequestException('Invoice number cannot be empty.');
     }
-    const existing = await this.prisma.payment.findUnique({ where: { id } });
-    if (!existing) throw new NotFoundException('Payment not found.');
+    const payment = await this.prisma.payment.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        status: true,
+        purpose: true,
+        invoiceNumber: true,
+        invoice: { select: { id: true, invoiceNumber: true } },
+      },
+    });
+    if (!payment) throw new NotFoundException('Payment not found.');
+    assertReceiptNumberEditable(payment);
+
+    const invoice =
+      payment.invoice && payment.invoice.invoiceNumber !== trimmed
+        ? payment.invoice
+        : null;
+    // Saving again the number the receipt and its invoice already print
+    // renames nothing, so there is nothing to check.
+    if (payment.invoiceNumber !== trimmed || invoice) {
+      await assertInvoiceNumberFree(this.prisma, trimmed, {
+        paymentId: payment.id,
+        invoiceId: payment.invoice?.id,
+      });
+    }
+    const actorName = invoice
+      ? await lookupActorName(this.prisma, caller.userId)
+      : null;
     try {
-      return await this.prisma.payment.update({
-        where: { id },
-        data: { invoiceNumber: trimmed },
+      return await this.prisma.$transaction(async (tx) => {
+        const updated = await tx.payment.update({
+          where: { id },
+          data: { invoiceNumber: trimmed },
+        });
+        if (invoice) {
+          await tx.invoice.update({
+            where: { id: invoice.id },
+            data: { invoiceNumber: trimmed },
+          });
+          await tx.invoiceAuditLog.create({
+            data: {
+              invoiceId: invoice.id,
+              actorId: caller.userId,
+              actorName,
+              action: 'updated',
+              changes: {
+                invoiceNumber: { from: invoice.invoiceNumber, to: trimmed },
+              },
+            },
+          });
+        }
+        return updated;
       });
     } catch (err) {
+      // A concurrent writer took the number between the check and the commit.
       if (
         err instanceof Prisma.PrismaClientKnownRequestError &&
         err.code === 'P2002'
       ) {
-        throw new BadRequestException(
-          `Invoice number "${trimmed}" is already used by another receipt.`,
-        );
+        throw invoiceNumberTaken(trimmed);
       }
       throw err;
     }
@@ -1152,5 +1255,101 @@ export class PaymentsService {
         `Cache set failed for idempotency key ${key}: ${(err as Error).message}`,
       );
     }
+  }
+}
+
+/**
+ * Deprecated createdFrom/createdTo, kept exactly as they always worked:
+ * whole UTC days of createdAt, [from 00:00, to 23:59:59.999] UTC. New
+ * clients send from/to (business days of the date the payment happened).
+ */
+function legacyCreatedRange(
+  from?: string,
+  to?: string,
+): Prisma.DateTimeFilter | undefined {
+  const range: Prisma.DateTimeFilter = {};
+  const start = from ? new Date(from.trim()) : null;
+  if (start && !Number.isNaN(start.getTime())) range.gte = start;
+  const end = to ? new Date(to.trim()) : null;
+  if (end && !Number.isNaN(end.getTime())) {
+    end.setUTCHours(23, 59, 59, 999);
+    range.lte = end;
+  }
+  return range.gte || range.lte ? range : undefined;
+}
+
+/**
+ * Business days of the date a payment happened: when it was received if
+ * it was, otherwise when it was made (an attempt, a transfer still
+ * awaiting confirmation). A transfer declared on Monday and confirmed on
+ * Wednesday is Wednesday's money.
+ */
+function eventDateFilter(
+  from?: string,
+  to?: string,
+): Prisma.PaymentWhereInput | null {
+  const range = businessDayRange(from, to);
+  if (!range.gte && !range.lt) return null;
+  return { OR: [{ paidAt: range }, { paidAt: null, createdAt: range }] };
+}
+
+/**
+ * The id order the database gives a run sorted on the same date. Payment
+ * ids are lowercase uuids, the hyphens at the same places, which the C
+ * and the language collations all order like this.
+ */
+function compareIds(a: string, b: string): number {
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
+}
+
+/**
+ * Free-text search: the references a payment is known by (transactionId
+ * holds the gateway id, the bank reference or the cash receipt; then the
+ * receipt number FAC-… and the ClicToPay order reference ORA-…), the
+ * order code, the doctor and patient names, and the exact amount when the
+ * term reads as one. The caller's order scope stays on the outer where.
+ */
+function paymentSearchConditions(term: string): Prisma.PaymentWhereInput[] {
+  const text = { contains: term, mode: 'insensitive' } as const;
+  const conditions: Prisma.PaymentWhereInput[] = [
+    { transactionId: text },
+    { invoiceNumber: text },
+    { merchantOrderNumber: text },
+    {
+      order: {
+        OR: [
+          { orderCode: text },
+          { doctor: { fullName: text } },
+          { patient: { fullName: text } },
+        ],
+      },
+    },
+  ];
+  const amount = parseSearchAmount(term);
+  if (amount) conditions.push({ amount });
+  return conditions;
+}
+
+/**
+ * Only a settled installment has a FAC- receipt. A treatment-fee card
+ * attempt is receipted on the order (TF-…), and an unsettled payment has
+ * no receipt at all.
+ */
+function assertReceiptNumberEditable(payment: {
+  status: PaymentRecordStatus;
+  purpose: PaymentPurpose;
+}): void {
+  if (payment.purpose !== PaymentPurpose.installment) {
+    throw new ConflictException(
+      "This is a treatment-fee card payment: its receipt is the order's treatment-fee receipt (TF-…), not an installment receipt.",
+      'INVOICE_NUMBER_NOT_EDITABLE',
+    );
+  }
+  if (payment.status !== PaymentRecordStatus.success) {
+    throw new ConflictException(
+      `Only a successful payment has a receipt number; this one is ${payment.status}.`,
+      'INVOICE_NUMBER_NOT_EDITABLE',
+    );
   }
 }

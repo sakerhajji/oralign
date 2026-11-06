@@ -23,50 +23,22 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
-import { PaymentMethod, PaymentRecordStatus, type Payment } from '@/lib/types';
+import { PaymentMethod, type PaymentListItem } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { formatPrice } from '@/lib/utils/currency';
 import { TreatmentFeeReceiptDialog } from '@/components/orders/treatment-fee-receipt-dialog';
+import { PaymentStatusBadge } from '@/components/payments/payment-status-badge';
 import { useT } from '@/lib/i18n/lang-context';
 
 /**
- * Shared payment-history table used by:
- *  • /dashboard/payments/history   (role-aware — admin sees every
- *                                   payment in the system, dentist
- *                                   sees only their own)
- *  • /dashboard/payments/pending   (admin queue — same row layout
- *                                   with extra action buttons the
- *                                   caller renders via `renderActions`)
- *
- * Legacy `/account/billing` and `/dashboard/payments/mine` routes
- * now permanent-redirect to /dashboard/payments/history.
- *
- * Reuses the existing PaginatedResponse envelope and exposes a single
- * `renderActions` slot for queue-specific buttons (Confirm / Reject)
- * so the consumer keeps the imperative side-effects but the visual
- * grammar stays identical across all surfaces.
+ * Payment table of the admin confirmation queue
+ * (/dashboard/payments/pending): the row layout with action buttons the
+ * caller renders via `renderActions` (Confirm / Reject), so the queue
+ * keeps the imperative side-effects. The payments history has its own
+ * desk (components/payments/history); both show the same status badge.
  */
 
-export interface PaymentRow extends Payment {
-  // The list endpoints already include this — type it inline so the
-  // table component compiles against the real shape without forcing
-  // every caller to widen the global Payment type.
-  order?: {
-    id: string;
-    orderCode: string;
-    doctor?: { id: string; fullName: string } | null;
-    patient?: { id: string; fullName: string } | null;
-  } | null;
-  quotation?: {
-    id: string;
-    orderId: string;
-    packName?: string | null;
-  } | null;
-  installment?: {
-    id: string;
-    installmentNumber: number;
-    amount: string;
-  } | null;
-}
+export type PaymentRow = PaymentListItem;
 
 // Each method gets its own icon + colour palette so the column reads at
 // a glance — green for cash (physical), indigo for cards (gateway),
@@ -120,29 +92,6 @@ function MethodChip({ method }: { method?: PaymentMethod }) {
       {t(`paymentsCommon.method.${method}`)}
     </span>
   );
-}
-
-function StatusBadge({ status }: { status: PaymentRecordStatus }) {
-  const { t } = useT();
-  const label = t(`paymentsCommon.status.${status}`);
-  switch (status) {
-    case PaymentRecordStatus.SUCCESS:
-      return <Badge className="bg-emerald-600">{label}</Badge>;
-    case PaymentRecordStatus.AWAITING_CONFIRMATION:
-      return <Badge className="bg-amber-500">{label}</Badge>;
-    case PaymentRecordStatus.PENDING:
-      return <Badge variant="secondary">{label}</Badge>;
-    case PaymentRecordStatus.UNKNOWN:
-      return <Badge className="bg-amber-100 text-amber-900">{label}</Badge>;
-    case PaymentRecordStatus.REJECTED:
-      return <Badge variant="destructive">{label}</Badge>;
-    case PaymentRecordStatus.FAILED:
-      return <Badge variant="destructive">{label}</Badge>;
-    case PaymentRecordStatus.CANCELLED:
-      return <Badge variant="outline">{label}</Badge>;
-    default:
-      return <Badge variant="outline">{status}</Badge>;
-  }
 }
 
 /**
@@ -212,7 +161,7 @@ export function PaymentHistoryTable({
           <TableHead>{t('paymentsCommon.columns.order')}</TableHead>
           <TableHead>{t('paymentsCommon.columns.method')}</TableHead>
           <TableHead>{t('paymentsCommon.columns.installment')}</TableHead>
-          <TableHead>{t('paymentsCommon.columns.amount')}</TableHead>
+          <TableHead className="text-right">{t('paymentsCommon.columns.amount')}</TableHead>
           <TableHead>{t('paymentsCommon.columns.status')}</TableHead>
           <TableHead>{t('paymentsCommon.columns.proof')}</TableHead>
           {renderActions ? (
@@ -267,30 +216,25 @@ export function PaymentHistoryTable({
                 ) : null}
               </TableCell>
               <TableCell>
-                {/* `paymentMethod` is the wire field name (Prisma
-                    column). `method` is the legacy alias still kept
-                    on the Payment type for backward compat — we
-                    fall through to it so older API payloads keep
-                    rendering instead of showing "—". */}
-                <MethodChip method={p.paymentMethod ?? p.method} />
+                <MethodChip method={p.paymentMethod} />
               </TableCell>
               <TableCell className="text-xs">
                 {p.installment ? (
                   <>
                     #{p.installment.installmentNumber}
-                    <div className="text-muted-foreground">
-                      {p.installment.amount} {p.currency}
+                    <div className="text-muted-foreground tabular-nums">
+                      {formatPrice(p.installment.amount, p.currency)}
                     </div>
                   </>
                 ) : (
                   <span className="text-muted-foreground">—</span>
                 )}
               </TableCell>
-              <TableCell className="font-mono">
-                {p.amount} {p.currency}
+              <TableCell className="text-right font-medium tabular-nums">
+                {formatPrice(p.amount, p.currency)}
               </TableCell>
               <TableCell>
-                <StatusBadge status={p.status} />
+                <PaymentStatusBadge status={p.status} />
               </TableCell>
               <TableCell>
                 {proofAvailable ? (
@@ -347,8 +291,9 @@ export function PaymentHistoryTable({
         currency={activeReceipt.currency ?? 'TND'}
         doctorName={activeReceipt.order?.doctor?.fullName ?? null}
         patientName={activeReceipt.order?.patient?.fullName ?? null}
-        method={activeReceipt.paymentMethod ?? activeReceipt.method ?? null}
-        submittedAt={activeReceipt.createdAt}
+        method={activeReceipt.paymentMethod ?? null}
+        submittedAt={activeReceipt.declaredAt ?? activeReceipt.createdAt}
+        status={activeReceipt.status}
         canConfirm={false}
       />
     )}

@@ -20,6 +20,12 @@ import {
   MinLength,
   ValidateIf,
 } from 'class-validator';
+import { IsCalendarDate } from '../../common/decorators/is-calendar-date.decorator';
+import {
+  toOptionalTrimmed,
+  toQueryList,
+} from '../../common/dto/query-transforms';
+import { BUSINESS_TIME_ZONE } from '../../common/time/business-day';
 
 export class CreateClicToPaySessionDto {
   @ApiProperty({ description: 'Order being paid. Amount is resolved server-side.' })
@@ -57,6 +63,8 @@ export enum PaymentSortBy {
   amount = 'amount',
   paidAt = 'paidAt',
   status = 'status',
+  /** The date the payment happened: paidAt when paid, else createdAt. */
+  eventAt = 'eventAt',
 }
 
 export enum PaymentSortOrder {
@@ -132,9 +140,9 @@ export class RecordCashPaymentDto {
  *                         overwritten with the JWT user id)
  *
  * Designed to scale to hundreds of thousands of rows: every filter is
- * server-side, sorting is server-side, and the (orderId, status) +
- * (status, createdAt) indexes cover the common access paths. Search
- * is ILIKE on order code; for very large scale, swap to a tsvector.
+ * server-side, sorting is server-side, and the (orderId, status),
+ * (status, createdAt) and (status, paidAt) indexes cover the common
+ * access paths. Search is ILIKE; for very large scale, swap to a tsvector.
  */
 export class PaymentFilterDto {
   @ApiPropertyOptional({ default: 1, minimum: 1 })
@@ -167,7 +175,7 @@ export class PaymentFilterDto {
       'Filter by one or more PaymentRecordStatus values. Accepts a comma-separated string or repeated query params.',
   })
   @IsOptional()
-  @Transform(({ value }) => normaliseEnumArray(value))
+  @Transform(({ value }) => toQueryList(value))
   @IsArray()
   @ArrayMaxSize(10)
   @IsEnum(PaymentRecordStatus, { each: true })
@@ -188,22 +196,30 @@ export class PaymentFilterDto {
       'Filter by one or more PaymentMethod values. Accepts a comma-separated string or repeated query params.',
   })
   @IsOptional()
-  @Transform(({ value }) => normaliseEnumArray(value))
+  @Transform(({ value }) => toQueryList(value))
   @IsArray()
   @ArrayMaxSize(5)
   @IsEnum(PaymentMethod, { each: true })
   methods?: PaymentMethod[];
 
   @ApiPropertyOptional({
+    enum: PaymentPurpose,
     description:
-      'Free-text search across order code, doctor name, patient name, and bank reference. Case-insensitive.',
+      'installment: the quote installments. treatment_fee: the card attempts of treatment fees, which GET /orders/admin/treatment-fees already lists from the orders themselves.',
   })
+  @IsOptional()
+  @IsEnum(PaymentPurpose)
+  purpose?: PaymentPurpose;
+
+  @ApiPropertyOptional({
+    maxLength: 120,
+    description:
+      'Free-text search, case-insensitive: order code, doctor name, patient name, transaction id (gateway id, bank reference, cash receipt), receipt number (FAC-…), ClicToPay reference (ORA-…), and the exact amount when the term is one ("1500", "1500,5", "1 500,000", "1 500,000 TND"). Trimmed; blank means no search.',
+  })
+  @Transform(({ value }) => toOptionalTrimmed(value))
   @IsOptional()
   @IsString()
   @MaxLength(120)
-  @Transform(({ value }) =>
-    typeof value === 'string' ? value.trim() : value,
-  )
   search?: string;
 
   @ApiPropertyOptional({
@@ -223,7 +239,29 @@ export class PaymentFilterDto {
   patientId?: string;
 
   @ApiPropertyOptional({
-    description: 'ISO date — payments created ON or AFTER this date.',
+    example: '2026-11-01',
+    description:
+      'First day, included (YYYY-MM-DD, Africa/Tunis days), of the date the payment happened: when it was received, or when it was made if it never was (an attempt, a transfer awaiting confirmation).',
+  })
+  @Transform(({ value }) => toOptionalTrimmed(value))
+  @IsOptional()
+  @IsCalendarDate()
+  from?: string;
+
+  @ApiPropertyOptional({
+    example: '2026-11-06',
+    description:
+      'Last day, included (YYYY-MM-DD, Africa/Tunis days). Before `from`: 400 INVALID_DATE_RANGE.',
+  })
+  @Transform(({ value }) => toOptionalTrimmed(value))
+  @IsOptional()
+  @IsCalendarDate()
+  to?: string;
+
+  @ApiPropertyOptional({
+    deprecated: true,
+    description:
+      'Deprecated, use `from`. ISO date — payments created ON or AFTER this date (UTC day).',
     example: '2025-01-01',
   })
   @IsOptional()
@@ -231,7 +269,9 @@ export class PaymentFilterDto {
   createdFrom?: string;
 
   @ApiPropertyOptional({
-    description: 'ISO date — payments created ON or BEFORE this date.',
+    deprecated: true,
+    description:
+      'Deprecated, use `to`. ISO date — payments created ON or BEFORE this date (UTC day).',
     example: '2025-12-31',
   })
   @IsOptional()
@@ -241,6 +281,8 @@ export class PaymentFilterDto {
   @ApiPropertyOptional({
     enum: PaymentSortBy,
     default: PaymentSortBy.createdAt,
+    description:
+      'eventAt: the date the payment happened, when it was received or else when it was made (the date `from` / `to` filter on). paidAt: the payments not received come last. Every sort ends on the id.',
   })
   @IsOptional()
   @IsEnum(PaymentSortBy)
@@ -256,20 +298,119 @@ export class PaymentFilterDto {
 }
 
 /**
- * Normalises a query param that may arrive as:
- *   • undefined / null
- *   • a comma-separated string ("a,b,c")
- *   • a repeated query array (["a","b","c"])
- * into a clean array. Empty strings are dropped so a stray comma
- * doesn't fail validation.
+ * Takings query (GET /payments/summary). No date at all means today; one
+ * bound leaves the period open on the other side.
  */
-function normaliseEnumArray(value: unknown): unknown {
-  if (value === undefined || value === null || value === '') return undefined;
-  if (Array.isArray(value)) return value.filter(Boolean);
-  return String(value)
-    .split(',')
-    .map((v) => v.trim())
-    .filter(Boolean);
+export class PaymentSummaryQueryDto {
+  @ApiPropertyOptional({
+    example: '2026-11-01',
+    description:
+      'First day, included (YYYY-MM-DD, Africa/Tunis days). Neither `from` nor `to`: today.',
+  })
+  @Transform(({ value }) => toOptionalTrimmed(value))
+  @IsOptional()
+  @IsCalendarDate()
+  from?: string;
+
+  @ApiPropertyOptional({
+    example: '2026-11-06',
+    description:
+      'Last day, included (YYYY-MM-DD, Africa/Tunis days). Before `from`: 400 INVALID_DATE_RANGE.',
+  })
+  @Transform(({ value }) => toOptionalTrimmed(value))
+  @IsOptional()
+  @IsCalendarDate()
+  to?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Admin only: the takings of one dentist. Ignored for a dentist, who always gets their own.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  doctorId?: string;
+}
+
+export class PaymentBucketDto {
+  @ApiProperty({
+    example: '1250.500',
+    description: 'Sum in TND, always written with 3 decimals.',
+  })
+  amount!: string;
+
+  @ApiProperty({ example: 3, description: 'Number of payments summed.' })
+  count!: number;
+}
+
+export class PaymentMethodBucketsDto {
+  @ApiProperty({ type: PaymentBucketDto })
+  cash!: PaymentBucketDto;
+
+  @ApiProperty({ type: PaymentBucketDto })
+  card!: PaymentBucketDto;
+
+  @ApiProperty({ type: PaymentBucketDto })
+  bank_transfer!: PaymentBucketDto;
+}
+
+export class PaymentPurposeSummaryDto extends PaymentBucketDto {
+  @ApiProperty({ type: PaymentMethodBucketsDto })
+  methods!: PaymentMethodBucketsDto;
+}
+
+export class PaymentPurposeSummariesDto {
+  @ApiProperty({
+    type: PaymentPurposeSummaryDto,
+    description: 'Quote installments.',
+  })
+  installment!: PaymentPurposeSummaryDto;
+
+  @ApiProperty({
+    type: PaymentPurposeSummaryDto,
+    description: 'Treatment fees, read from the orders.',
+  })
+  treatment_fee!: PaymentPurposeSummaryDto;
+}
+
+/** Money received (successful payments) over a period, per kind and per method. */
+export class PaymentsSummaryDto {
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: '2026-11-06',
+    description: 'First day of the resolved period; null when open.',
+  })
+  from!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: '2026-11-06',
+    description: 'Last day of the resolved period; null when open.',
+  })
+  to!: string | null;
+
+  @ApiProperty({ enum: [BUSINESS_TIME_ZONE] })
+  timeZone!: typeof BUSINESS_TIME_ZONE;
+
+  @ApiProperty({ enum: ['TND'] })
+  currency!: 'TND';
+
+  @ApiProperty({
+    type: PaymentBucketDto,
+    description: 'Both kinds, every method.',
+  })
+  total!: PaymentBucketDto;
+
+  @ApiProperty({
+    type: PaymentMethodBucketsDto,
+    description: 'Both kinds, per method.',
+  })
+  methods!: PaymentMethodBucketsDto;
+
+  @ApiProperty({ type: PaymentPurposeSummariesDto })
+  purposes!: PaymentPurposeSummariesDto;
 }
 
 // ─── Dev-only mock helper bodies ────────────────────────────────

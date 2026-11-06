@@ -266,7 +266,7 @@ function PatientsRows({ patients, inTrash, activeId, onOpen }: PatientsListProps
             type="button"
             onClick={() => onOpen(patient)}
             data-state={patient.id === activeId ? 'active' : undefined}
-            className="flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/40 focus-visible:bg-muted/60 focus-visible:outline-none active:bg-muted/60 data-[state=active]:bg-muted"
+            className="flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/40 focus-visible:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset focus-visible:outline-none active:bg-muted/60 data-[state=active]:bg-muted"
           >
             <PatientAvatar patient={patient} className="size-10" />
             <span className="min-w-0 flex-1">

@@ -587,6 +587,9 @@ model DentalOrder {
   @@index([orderCode])
   @@index([deletedAt])
   @@index([createdAt])
+  // The treatment fees received over a period (payments summary, history
+  // filtered by paid date).
+  @@index([treatmentFeePaymentStatus, treatmentFeePaidAt])
 }
 
 model OrderAuditLog {
@@ -1652,6 +1655,8 @@ model Payment {
   @@index([orderId, createdAt(sort: Desc)])
   // Reconciliation sweep: live attempts, oldest first.
   @@index([provider, status, lastProviderCheckAt])
+  // The money received over a period: successful payments by paid date.
+  @@index([status, paidAt])
 }
 
 // ─────────────────────────────────────────

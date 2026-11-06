@@ -24,6 +24,7 @@ import {
   ApiBearerAuth,
   ApiBody,
   ApiConsumes,
+  ApiOkResponse,
   ApiOperation,
   ApiParam,
   ApiQuery,
@@ -55,6 +56,11 @@ import {
   UpdateOrderStatusDto,
   UpdateToothInstructionsDto,
 } from '../dto/order.dto';
+import {
+  TreatmentFeeFilterDto,
+  TreatmentFeePageDto,
+  TreatmentFeeQueueQueryDto,
+} from '../dto/treatment-fee.dto';
 import { ChunkedUploadService } from '../services/chunked-upload.service';
 import { OrderService } from '../services/order.service';
 import { OrderFilesService } from '../services/order-files.service';
@@ -384,19 +390,17 @@ export class OrderController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Admin: bank-transfer treatment-fee payments awaiting confirmation.',
+      'Admin: bank-transfer treatment-fee payments awaiting confirmation, most recent first.',
   })
-  @ApiQuery({ name: 'page', required: false, type: Number })
-  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiOkResponse({ type: TreatmentFeePageDto })
   async listPendingTreatmentFees(
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-    @CurrentUser() user?: JwtPayload,
-  ) {
+    @Query() query: TreatmentFeeQueueQueryDto,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<TreatmentFeePageDto> {
     return this.treatmentFees.listPendingTreatmentFees({
-      page: page ? Number(page) : undefined,
-      limit: limit ? Number(limit) : undefined,
-      caller: { userId: user!.sub, role: user!.role },
+      page: query.page,
+      limit: query.limit,
+      caller: { userId: user.sub, role: user.role },
     });
   }
 
@@ -410,19 +414,16 @@ export class OrderController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Treatment-fee payments (history). Admins see every order; dentists see only their own. Sorted by paid date desc.',
+      'Treatment-fee payments (history), filtered and paginated. Admins see every order, or one dentist; dentists see only their own. Newest payment first by default, the fees awaiting confirmation on top.',
   })
-  @ApiQuery({ name: 'page', required: false, type: Number })
-  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiOkResponse({ type: TreatmentFeePageDto })
   async listTreatmentFees(
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-    @CurrentUser() user?: JwtPayload,
-  ) {
-    return this.treatmentFees.listTreatmentFees({
-      page: page ? Number(page) : undefined,
-      limit: limit ? Number(limit) : undefined,
-      caller: { userId: user!.sub, role: user!.role },
+    @Query() filters: TreatmentFeeFilterDto,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<TreatmentFeePageDto> {
+    return this.treatmentFees.listTreatmentFees(filters, {
+      userId: user.sub,
+      role: user.role,
     });
   }
 

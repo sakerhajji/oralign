@@ -20,7 +20,15 @@ import {
   type TreatmentFeeEvent,
 } from '../../notifications/events/notification-events';
 import { isAdmin, type Caller } from '../../common/access/caller';
-import { OrderResponseDto } from '../dto/order.dto';
+import { businessDayRange } from '../../common/time/business-day';
+import { parseSearchAmount } from '../../common/utils/amount-search.util';
+import { OrderResponseDto, SortOrder } from '../dto/order.dto';
+import {
+  TreatmentFeeSortBy,
+  type TreatmentFeeFilterDto,
+  type TreatmentFeePageDto,
+  type TreatmentFeeRowDto,
+} from '../dto/treatment-fee.dto';
 import { OrderService } from './order.service';
 import { OrderAuditService } from './order-audit.service';
 import {
@@ -238,13 +246,14 @@ export class TreatmentFeeService {
    * Payment "pending confirmations" list so the admin /pending page
    * can render both in one consistent layout.
    *
-   * Filter envelope: { page, limit } — same as the installment list.
+   * Filter envelope: { page, limit } — same as the installment list, and
+   * the same page count: 0 pages when nothing waits.
    */
   async listPendingTreatmentFees(args: {
     page?: number;
     limit?: number;
     caller: Caller;
-  }) {
+  }): Promise<TreatmentFeePageDto> {
     if (!isAdmin(args.caller)) {
       throw new ForbiddenException(
         'Only admins can view the treatment-fee queue.',
@@ -276,49 +285,39 @@ export class TreatmentFeeService {
       total,
       page,
       limit,
-      totalPages: Math.max(1, Math.ceil(total / limit)),
+      totalPages: Math.ceil(total / limit),
     };
   }
 
   /**
-   * Admin history of treatment-fee payments. Returns every order
-   * where a method has been recorded, sorted by paid date (most
-   * recent first; unpaid rows fall to the bottom).
+   * Treatment-fee history: every order whose fee has a payment method on
+   * record, filtered, sorted (newest payment first by default, the fees
+   * still awaiting confirmation on top) and paginated.
    */
-  async listTreatmentFees(args: {
-    page?: number;
-    limit?: number;
-    caller: Caller;
-  }) {
-    const callerIsAdmin = isAdmin(args.caller);
-    const isDentist = args.caller.role === UserRole.dentist;
-    if (!callerIsAdmin && !isDentist) {
+  async listTreatmentFees(
+    filters: TreatmentFeeFilterDto,
+    caller: Caller,
+  ): Promise<TreatmentFeePageDto> {
+    const callerIsAdmin = isAdmin(caller);
+    if (!callerIsAdmin && caller.role !== UserRole.dentist) {
       // Only admins and dentists ever ask for the treatment-fee
       // history. Any other role (designer, etc.) gets a 403.
       throw new ForbiddenException(
         'You are not allowed to view the treatment-fee history.',
       );
     }
-    const page = Math.max(1, args.page ?? 1);
-    const limit = Math.min(100, Math.max(1, args.limit ?? 20));
-    const skip = (page - 1) * limit;
-
-    const where: Prisma.DentalOrderWhereInput = {
-      deletedAt: null,
-      treatmentFeePaymentMethod: { not: null },
-      // Doctors only ever see THEIR OWN orders. Admins see every
-      // doctor's. The doctorId filter is added at the DB layer so a
-      // pagination scan stays O(matching rows) for the doctor case
-      // instead of paging through the full system list and filtering
-      // in-memory.
-      ...(isDentist ? { doctorId: args.caller.userId } : {}),
-    };
+    const page = Math.max(1, filters.page ?? 1);
+    const limit = Math.min(100, Math.max(1, filters.limit ?? 25));
+    // Doctors only ever see THEIR OWN orders, whatever doctorId they
+    // send; admins every doctor's, or the one they pick.
+    const doctorId = callerIsAdmin ? filters.doctorId : caller.userId;
+    const where = treatmentFeeWhere(filters, doctorId);
 
     const [rows, total] = await Promise.all([
       this.prisma.dentalOrder.findMany({
         where,
-        orderBy: [{ treatmentFeePaidAt: 'desc' }, { updatedAt: 'desc' }],
-        skip,
+        orderBy: treatmentFeeOrderBy(filters),
+        skip: (page - 1) * limit,
         take: limit,
         select: this.treatmentFeeSelect,
       }),
@@ -330,7 +329,7 @@ export class TreatmentFeeService {
       total,
       page,
       limit,
-      totalPages: Math.max(1, Math.ceil(total / limit)),
+      totalPages: Math.ceil(total / limit),
     };
   }
 
@@ -457,6 +456,7 @@ export class TreatmentFeeService {
     treatmentFeePaymentStatus: true,
     treatmentFeePaidAt: true,
     treatmentFeeProofPath: true,
+    treatmentFeeInvoiceNumber: true,
     submittedAt: true,
     updatedAt: true,
     doctor: { select: { id: true, fullName: true, email: true } },
@@ -472,11 +472,12 @@ export class TreatmentFeeService {
     treatmentFeePaymentStatus: PaymentRecordStatus | null;
     treatmentFeePaidAt: Date | null;
     treatmentFeeProofPath: string | null;
+    treatmentFeeInvoiceNumber: string | null;
     submittedAt: Date | null;
     updatedAt: Date;
     doctor?: { id: string; fullName: string; email: string } | null;
     patient?: { id: string; fullName: string } | null;
-  }) {
+  }): TreatmentFeeRowDto {
     return {
       orderId: row.id,
       orderCode: row.orderCode,
@@ -488,6 +489,7 @@ export class TreatmentFeeService {
       proofPath: row.treatmentFeeProofPath,
       submittedAt: row.submittedAt,
       updatedAt: row.updatedAt,
+      invoiceNumber: row.treatmentFeeInvoiceNumber,
       doctor: row.doctor ?? null,
       patient: row.patient ?? null,
     };
@@ -541,4 +543,70 @@ export class TreatmentFeeService {
       'Bank transfer is not available until company bank details are configured.',
     );
   }
+}
+
+/**
+ * Orders whose fee has a payment on record (the welcome-gift orders have
+ * none), archived ones left out. A paid-date period leaves out the fees
+ * not paid yet: a transfer awaiting confirmation has no paid date.
+ */
+function treatmentFeeWhere(
+  filters: TreatmentFeeFilterDto,
+  doctorId: string | undefined,
+): Prisma.DentalOrderWhereInput {
+  const where: Prisma.DentalOrderWhereInput = {
+    deletedAt: null,
+    treatmentFeePaymentMethod: filters.methods?.length
+      ? { in: filters.methods }
+      : { not: null },
+  };
+  if (doctorId) where.doctorId = doctorId;
+  if (filters.statuses?.length) {
+    where.treatmentFeePaymentStatus = { in: filters.statuses };
+  }
+  const paid = businessDayRange(filters.from, filters.to);
+  if (paid.gte || paid.lt) where.treatmentFeePaidAt = paid;
+  // The search carries its own OR: it goes in an AND list, so it can
+  // never overwrite another condition.
+  const search = filters.search?.trim();
+  if (search) where.AND = [{ OR: treatmentFeeSearch(search) }];
+  return where;
+}
+
+/**
+ * Newest payment first by default, and there the fees awaiting
+ * confirmation (no paid date yet) come on top: they are the ones that
+ * need an action. Oldest first puts them last. The id ends every sort so
+ * rows sharing a value keep one stable order across pages.
+ */
+function treatmentFeeOrderBy(
+  filters: TreatmentFeeFilterDto,
+): Prisma.DentalOrderOrderByWithRelationInput[] {
+  const direction = filters.sortOrder ?? SortOrder.desc;
+  if (filters.sortBy === TreatmentFeeSortBy.amount) {
+    return [{ treatmentFeeAmount: direction }, { id: direction }];
+  }
+  const nulls = direction === SortOrder.desc ? 'first' : 'last';
+  return [
+    { treatmentFeePaidAt: { sort: direction, nulls } },
+    { updatedAt: direction },
+    { id: direction },
+  ];
+}
+
+/**
+ * Order code, dentist and patient names, the receipt number (TF-…), and
+ * the exact amount when the term reads as one.
+ */
+function treatmentFeeSearch(term: string): Prisma.DentalOrderWhereInput[] {
+  const text = { contains: term, mode: 'insensitive' } as const;
+  const conditions: Prisma.DentalOrderWhereInput[] = [
+    { orderCode: text },
+    { doctor: { fullName: text } },
+    { patient: { fullName: text } },
+    { treatmentFeeInvoiceNumber: text },
+  ];
+  const amount = parseSearchAmount(term);
+  if (amount) conditions.push({ treatmentFeeAmount: amount });
+  return conditions;
 }

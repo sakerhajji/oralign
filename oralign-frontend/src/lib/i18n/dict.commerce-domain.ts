@@ -780,9 +780,11 @@ export const commerceDomainDict = {
       copy: { en: 'Copy', fr: 'Copier' } as T,
     },
 
-    // treatment-fee-receipt-dialog.tsx — admin receipt confirmation
+    // treatment-fee-receipt-dialog.tsx — the dentist's transfer proof
+    // (« justificatif »), confirmed by an admin. "Reçu" is the lab's own
+    // receipt (FAC-… / TF-…), never this file.
     receiptDialog: {
-      title: { en: 'Bank-transfer receipt', fr: 'Reçu de virement bancaire' } as T,
+      title: { en: 'Bank transfer proof', fr: 'Justificatif de virement' } as T,
       orderCode: { en: 'Order {code}', fr: 'Commande {code}' } as T,
       summary: { en: 'Payment summary', fr: 'Récapitulatif du paiement' } as T,
       patient: { en: 'Patient', fr: 'Patient' } as T,
@@ -790,32 +792,39 @@ export const commerceDomainDict = {
       amount: { en: 'Amount', fr: 'Montant' } as T,
       method: { en: 'Method', fr: 'Mode' } as T,
       submitted: { en: 'Submitted', fr: 'Soumis le' } as T,
-      receipt: { en: 'Receipt', fr: 'Reçu' } as T,
+      paid: { en: 'Paid on', fr: 'Payé le' } as T,
+      receipt: { en: 'File', fr: 'Fichier' } as T,
       confirmHint: {
         en: 'Confirming will mark the treatment fee as paid and unblock the treatment plan. This action is logged with your admin user id.',
         fr: 'La confirmation marquera les honoraires de traitement comme payés et débloquera le plan de traitement. Cette action est journalisée avec votre identifiant administrateur.',
       } as T,
       confirmBtn: { en: 'Confirm payment', fr: 'Confirmer le paiement' } as T,
       lightboxAlt: {
-        en: 'Bank-transfer receipt for {code}',
-        fr: 'Reçu de virement bancaire — {code}',
+        en: 'Bank transfer proof for {code}',
+        fr: 'Justificatif de virement — {code}',
       } as T,
       lightboxCaption: {
-        en: '{code} — bank-transfer receipt',
-        fr: '{code} — reçu de virement bancaire',
+        en: '{code} — bank transfer proof',
+        fr: '{code} — justificatif de virement',
       } as T,
-      noReceiptTitle: { en: 'No receipt attached', fr: 'Aucun reçu joint' } as T,
+      noReceiptTitle: { en: 'No proof attached', fr: 'Aucun justificatif joint' } as T,
       noReceiptDesc: {
         en: 'The doctor recorded a bank-transfer intent but did not upload a proof file.',
         fr: 'Le praticien a déclaré un virement bancaire mais n’a pas téléversé de justificatif.',
       } as T,
-      iframeTitle: { en: 'Receipt — {name}', fr: 'Reçu — {name}' } as T,
-      openFullAria: { en: 'Open receipt in full view', fr: 'Ouvrir le reçu en plein écran' } as T,
-      receiptImgAlt: {
-        en: 'Bank-transfer receipt {name}',
-        fr: 'Reçu de virement bancaire {name}',
+      iframeTitle: { en: 'Proof — {name}', fr: 'Justificatif — {name}' } as T,
+      openFullAria: {
+        en: 'Open the proof in full view',
+        fr: 'Ouvrir le justificatif en plein écran',
       } as T,
-      loadErrorTitle: { en: 'Couldn’t load the receipt', fr: 'Impossible de charger le reçu' } as T,
+      receiptImgAlt: {
+        en: 'Bank transfer proof {name}',
+        fr: 'Justificatif de virement {name}',
+      } as T,
+      loadErrorTitle: {
+        en: 'Couldn’t load the proof',
+        fr: 'Impossible de charger le justificatif',
+      } as T,
       noPreviewTitle: { en: 'Preview not available', fr: 'Aperçu indisponible' } as T,
       loadErrorDesc: {
         en: 'The image couldn’t be loaded inline. Download to inspect the proof.',
@@ -825,7 +834,7 @@ export const commerceDomainDict = {
         en: 'This file format can’t be previewed in the browser. Download to inspect it.',
         fr: 'Ce format de fichier ne peut pas être prévisualisé dans le navigateur. Téléchargez-le pour l’examiner.',
       } as T,
-      downloadReceipt: { en: 'Download receipt', fr: 'Télécharger le reçu' } as T,
+      downloadReceipt: { en: 'Download the proof', fr: 'Télécharger le justificatif' } as T,
       openInNewTab: { en: 'Open in new tab', fr: 'Ouvrir dans un nouvel onglet' } as T,
       zoomIn: { en: 'Enlarge', fr: 'Agrandir' } as T,
       pdfMobileHint: {

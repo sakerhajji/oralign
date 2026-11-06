@@ -45,6 +45,7 @@ import { usersDeskDomainDict } from './dict.users-desk-domain';
 import { settingsDeskDomainDict } from './dict.settings-desk-domain';
 import { patientDeskDomainDict } from './dict.patient-desk-domain';
 import { listUiDomainDict } from './dict.list-ui-domain';
+import { paymentsDeskDomainDict } from './dict.payments-desk-domain';
 
 export const dict = {
   ...chromeDomainDict,
@@ -56,6 +57,7 @@ export const dict = {
   ...settingsDeskDomainDict,
   ...patientDeskDomainDict,
   ...listUiDomainDict,
+  ...paymentsDeskDomainDict,
 
   // ─── Generic / cross-cutting ────────────────────────────────────
   common: {
@@ -2142,40 +2144,20 @@ export const dict = {
   },
 
   // ─── ANCHOR · payments cluster ─────────────────────────────────
-  // Reserved for the dedicated /dashboard/payments translation pass.
-  // Agent inserts a `paymentsHistory`, `paymentsMine`, `paymentsPending`
-  // and `paymentsInvoice` block here.
+  // The payments desk (/dashboard/payments/history) and the payment
+  // status labels live in dict.payments-desk-domain.ts (`paymentsDesk`).
 
   // Shared payments vocabulary — used by every page in the
   // /dashboard/payments cluster so a doctor and an admin reading two
   // different surfaces always see the same label for the same enum.
+  // (A payment's status reads `paymentsDesk.status.*`, through the one
+  // PaymentStatusBadge.)
   paymentsCommon: {
-    // PaymentRecordStatus → human label. Mirrors orders.statusLabel
-    // for the *order* lifecycle; these cover the *payment record*
-    // lifecycle and intentionally stay distinct.
-    status: {
-      success: { en: 'Successful', fr: 'Succès' } as T,
-      awaiting_confirmation: {
-        en: 'Awaiting confirmation',
-        fr: 'En attente de confirmation',
-      } as T,
-      pending: { en: 'Pending', fr: 'En attente' } as T,
-      unknown: {
-        en: 'Verification required',
-        fr: 'Vérification requise',
-      } as T,
-      rejected: { en: 'Rejected', fr: 'Rejetée' } as T,
-      failed: { en: 'Failed', fr: 'Échouée' } as T,
-      cancelled: { en: 'Cancelled', fr: 'Annulée' } as T,
-      expired: { en: 'Session expired', fr: 'Session expirée' } as T,
-    },
-
     // PaymentMethod → human label.
     method: {
       card: { en: 'Card', fr: 'Carte' } as T,
       bank_transfer: { en: 'Bank transfer', fr: 'Virement bancaire' } as T,
       cash: { en: 'Cash', fr: 'Espèces' } as T,
-      mock: { en: 'Test (mock)', fr: 'Test (mock)' } as T,
     },
 
     // Reused widgets / column titles
@@ -2203,174 +2185,48 @@ export const dict = {
       } as T,
       view: { en: 'View', fr: 'Consulter' } as T,
       openQuote: { en: 'Open quote', fr: 'Ouvrir le devis' } as T,
-      viewInvoice: { en: 'View invoice', fr: 'Voir la facture' } as T,
       previous: { en: 'Previous', fr: 'Précédent' } as T,
       next: { en: 'Next', fr: 'Suivant' } as T,
-      refresh: { en: 'Refresh', fr: 'Actualiser' } as T,
     },
 
     // Empty / loading
     emptyDefault: { en: 'No payments yet.', fr: 'Aucun paiement pour le moment.' } as T,
     submittedShort: { en: 'Submitted {date}', fr: 'Soumis le {date}' } as T,
+    // The admin's inline receipt-number editor (invoice-number-editor.tsx):
+    // the payments desk calls the FAC-… document a receipt (« reçu »).
     invoiceNumberPh: { en: 'FAC-000123', fr: 'FAC-000123' } as T,
     invoiceNumberAria: {
-      en: 'Invoice number',
-      fr: 'Numéro de facture',
+      en: 'Receipt number',
+      fr: 'Numéro du reçu',
     } as T,
     saveInvoiceAria: {
-      en: 'Save invoice number',
-      fr: 'Enregistrer le numéro de facture',
+      en: 'Save the receipt number',
+      fr: 'Enregistrer le numéro du reçu',
     } as T,
     cancelAria: { en: 'Cancel', fr: 'Annuler' } as T,
-    editInvoiceAria: {
-      en: 'Edit invoice number',
-      fr: 'Modifier le numéro de facture',
+    editReceiptNumberAria: {
+      en: 'Edit receipt number {number}',
+      fr: 'Modifier le numéro du reçu {number}',
     } as T,
-  },
-
-  // /dashboard/payments/history — the full role-aware payment history
-  // page. Used both by admins (sees every payment) and doctors (sees
-  // their own).
-  paymentsHistory: {
-    title: { en: 'Payment history', fr: 'Historique des paiements' } as T,
-    subtitleAdmin: {
-      en: 'Every payment recorded by the platform — card, bank transfer and cash combined. Search, filter, and sort to find any record across the full history.',
-      fr: 'Tous les paiements enregistrés par la plateforme — carte, virement bancaire et espèces réunis. Recherchez, filtrez et triez pour retrouver tout enregistrement dans l’historique complet.',
+    editReceiptNumberEmptyAria: {
+      en: 'Set the receipt number',
+      fr: 'Saisir le numéro du reçu',
     } as T,
-    subtitleDoctor: {
-      en: 'Every payment recorded against your orders, newest first. Search by order code or amount, filter by method or status.',
-      fr: 'Tous les paiements enregistrés sur vos commandes, du plus récent au plus ancien. Recherchez par code de commande ou par montant, filtrez par mode ou par statut.',
-    } as T,
-
-    searchPhAdmin: {
-      en: 'Search order code, doctor, patient, or transaction…',
-      fr: 'Rechercher un code de commande, un praticien, un patient ou une transaction…',
-    } as T,
-    searchPhDoctor: {
-      en: 'Search order code or transaction…',
-      fr: 'Rechercher un code de commande ou une transaction…',
-    } as T,
-    filters: { en: 'Filters', fr: 'Filtres' } as T,
-
-    fromDate: { en: 'From date', fr: 'Date de début' } as T,
-    toDate: { en: 'To date', fr: 'Date de fin' } as T,
-    doctor: { en: 'Doctor', fr: 'Praticien' } as T,
-    clearFilters: { en: 'Clear filters', fr: 'Effacer les filtres' } as T,
-    methodsCount: {
-      en: 'Methods ({count} selected)',
-      fr: 'Modes ({count} sélectionné(s))',
-    } as T,
-    statusCount: {
-      en: 'Status ({count} selected)',
-      fr: 'Statut ({count} sélectionné(s))',
-    } as T,
-
-    active: { en: 'Active:', fr: 'Actifs :' } as T,
-    chipSearch: { en: 'Search: "{value}"', fr: 'Recherche : « {value} »' } as T,
-    chipMethodsOne: { en: '1 method', fr: '1 mode' } as T,
-    chipMethodsMany: { en: '{count} methods', fr: '{count} modes' } as T,
-    chipStatusOne: { en: '1 status', fr: '1 statut' } as T,
-    chipStatusMany: { en: '{count} statuses', fr: '{count} statuts' } as T,
-    chipDoctor: { en: 'Doctor: {name}', fr: 'Praticien : {name}' } as T,
-    chipDoctorSelected: { en: 'Selected', fr: 'Sélectionné' } as T,
-    chipFrom: { en: 'From {date}', fr: 'Depuis le {date}' } as T,
-    chipTo: { en: 'To {date}', fr: 'Jusqu’au {date}' } as T,
-
-    cardTitleAdmin: { en: 'Installment payments', fr: 'Paiements échelonnés' } as T,
-    cardTitleDoctor: { en: 'My payments', fr: 'Mes paiements' } as T,
-    countEntriesOne: { en: '1 entry', fr: '1 enregistrement' } as T,
-    countEntriesMany: { en: '{count} entries', fr: '{count} enregistrements' } as T,
-    sortedPrefix: { en: 'Sorted: {label}', fr: 'Trié : {label}' } as T,
-
-    emptyNoMatch: {
-      en: 'No payments match these filters.',
-      fr: 'Aucun paiement ne correspond à ces filtres.',
-    } as T,
-    emptyAdmin: {
-      en: 'No payments recorded yet.',
-      fr: 'Aucun paiement enregistré pour le moment.',
-    } as T,
-    emptyDoctor: {
-      en: 'You have not made any payments yet.',
-      fr: 'Vous n’avez encore effectué aucun paiement.',
-    } as T,
-
-    errorTitle: { en: 'Could not load payments.', fr: 'Impossible de charger les paiements.' } as T,
-    errorStaleBackendTitle: {
-      en: 'Backend may need a rebuild.',
-      fr: 'Le backend doit peut-être être reconstruit.',
-    } as T,
-    errorStaleBackendBody: {
-      en: "A 400 here typically means the running backend container is an older build that doesn't recognise the new filter fields. Rebuild and restart it:",
-      fr: 'Un code 400 ici signifie en général que le conteneur backend en cours d’exécution est une version plus ancienne qui ne reconnaît pas les nouveaux champs de filtre. Reconstruisez-le et redémarrez :',
-    } as T,
-    errorTryAgain: { en: 'Try again', fr: 'Réessayer' } as T,
-
-    sortBy: { en: 'Sort by', fr: 'Trier par' } as T,
-    sort: { en: 'Sort', fr: 'Trier' } as T,
-    sortOptions: {
-      'date-desc': { en: 'Newest first', fr: 'Plus récents d’abord' } as T,
-      'date-asc': { en: 'Oldest first', fr: 'Plus anciens d’abord' } as T,
-      'paid-desc': { en: 'Recently paid', fr: 'Récemment payés' } as T,
-      'amount-desc': { en: 'Highest amount', fr: 'Montant le plus élevé' } as T,
-      'amount-asc': { en: 'Lowest amount', fr: 'Montant le plus bas' } as T,
-      'status-asc': { en: 'Status (A→Z)', fr: 'Statut (A→Z)' } as T,
+    // The API's refusals (errorCode → copy; its own text is English only).
+    invoiceNumberErrors: {
+      taken: {
+        en: 'The number {number} is already used by another receipt or invoice.',
+        fr: 'Le numéro {number} est déjà utilisé par un autre reçu ou une autre facture.',
+      } as T,
+      notEditable: {
+        en: 'Only a paid installment has a receipt number to edit.',
+        fr: 'Seule une échéance payée a un numéro de reçu à modifier.',
+      } as T,
+      reserved: {
+        en: 'This number belongs to the automatic sequence still to come: pick a lower number or another prefix.',
+        fr: 'Ce numéro fait partie de la numérotation automatique à venir : choisissez un numéro inférieur ou un autre préfixe.',
+      } as T,
     },
-
-    rowsPerPage: { en: 'Rows per page', fr: 'Lignes par page' } as T,
-    paginationRange: {
-      en: '{from}–{to} of {total} payments',
-      fr: '{from}–{to} sur {total} paiements',
-    } as T,
-    pageOf: { en: 'Page {page} of {total}', fr: 'Page {page} sur {total}' } as T,
-
-    // Doctor search picker
-    pickerSearchPh: { en: 'Search doctor name…', fr: 'Rechercher un praticien…' } as T,
-    pickerClearAria: { en: 'Clear search', fr: 'Effacer la recherche' } as T,
-    pickerClearDoctorAria: {
-      en: 'Clear doctor filter',
-      fr: 'Effacer le filtre praticien',
-    } as T,
-    pickerSearching: { en: 'Searching…', fr: 'Recherche en cours…' } as T,
-    pickerNoMatch: {
-      en: 'No doctors match "{value}".',
-      fr: 'Aucun praticien ne correspond à « {value} ».',
-    } as T,
-    pickerNoneAvailable: { en: 'No doctors available.', fr: 'Aucun praticien disponible.' } as T,
-    pickerShowingTop: {
-      en: 'Showing top {count}. Type to narrow.',
-      fr: 'Affichage des {count} premiers. Tapez pour affiner.',
-    } as T,
-
-    // Treatment-fee sections
-    treatmentFeesTitleAdmin: {
-      en: 'Treatment fee payments',
-      fr: 'Paiements des honoraires de traitement',
-    } as T,
-    treatmentFeesTitleDoctor: {
-      en: 'My treatment fee payments',
-      fr: 'Mes paiements d’honoraires de traitement',
-    } as T,
-    treatmentFeesDescAdmin: {
-      en: 'Every treatment-fee payment across the system — card, bank transfer, and cash. Separate from installment payments below.',
-      fr: 'Tous les paiements d’honoraires de traitement de la plateforme — carte, virement bancaire et espèces. Distincts des paiements échelonnés ci-dessous.',
-    } as T,
-    treatmentFeesDescDoctor: {
-      en: 'Treatment fees you have paid on your orders — card, bank transfer, and cash. Separate from installment payments below.',
-      fr: 'Les honoraires de traitement que vous avez réglés sur vos commandes — carte, virement bancaire et espèces. Distincts des paiements échelonnés ci-dessous.',
-    } as T,
-    treatmentFeesTotalSuffix: { en: '{count} total', fr: '{count} au total' } as T,
-    treatmentFeesEmpty: {
-      en: 'No treatment-fee payments recorded yet.',
-      fr: 'Aucun paiement d’honoraires de traitement enregistré pour le moment.',
-    } as T,
-    treatmentFeeInvoiceTitle: {
-      en: 'View the treatment-fee invoice',
-      fr: 'Voir la facture des honoraires de traitement',
-    } as T,
-    treatmentFeeInvoiceLabel: { en: 'Invoice', fr: 'Facture' } as T,
-    openOrderTitle: { en: 'Open order', fr: 'Ouvrir la commande' } as T,
-    openOrderLabel: { en: 'Order', fr: 'Commande' } as T,
   },
 
   // /dashboard/payments/mine — legacy route that permanent-redirects
@@ -2402,6 +2258,7 @@ export const dict = {
       en: '{count} payments in queue',
       fr: '{count} paiements en file',
     } as T,
+    pageOf: { en: 'Page {page} of {total}', fr: 'Page {page} sur {total}' } as T,
     queueEmpty: {
       en: 'Nothing to confirm — queue is empty.',
       fr: 'Rien à confirmer — la file est vide.',

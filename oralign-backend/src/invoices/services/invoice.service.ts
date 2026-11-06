@@ -10,6 +10,11 @@ import { CompanyBillingSettingsService } from '../../quotations/services/company
 import { lookupActorName } from '../../common/access/actor-snapshot';
 import type { Caller } from '../../common/access/caller';
 import {
+  assertInvoiceNumberFree,
+  invoiceNumberTaken,
+  type InvoiceNumberOwner,
+} from '../../common/billing/invoice-number';
+import {
   CreateInvoiceDto,
   InvoiceFilterDto,
   InvoiceLineInputDto,
@@ -367,10 +372,7 @@ export class InvoiceService {
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2002'
       ) {
-        throw new ConflictException(
-          `Invoice number ${invoiceNumber} is already used.`,
-          'INVOICE_NUMBER_TAKEN',
-        );
+        throw invoiceNumberTaken(invoiceNumber);
       }
       throw error;
     }
@@ -455,7 +457,12 @@ export class InvoiceService {
       Boolean(dto.invoiceNumber) &&
       dto.invoiceNumber!.trim() !== before.invoiceNumber;
     if (numberChanged) {
-      invoiceNumber = await this.assertNumberFree(dto.invoiceNumber!.trim());
+      // An automatic invoice shares its number with its payment's receipt:
+      // that receipt is renamed with it below, so it does not count as taken.
+      invoiceNumber = await this.assertNumberFree(dto.invoiceNumber!.trim(), {
+        invoiceId: before.id,
+        paymentId: before.paymentId,
+      });
     }
 
     const status = dto.status ?? before.status;
@@ -552,10 +559,7 @@ export class InvoiceService {
       ) {
         // TOCTOU on the number check: another writer took it between the
         // pre-check and the commit. Same 409 as the pre-check.
-        throw new ConflictException(
-          `Invoice number ${invoiceNumber} is already used.`,
-          'INVOICE_NUMBER_TAKEN',
-        );
+        throw invoiceNumberTaken(invoiceNumber);
       }
       throw error;
     }
@@ -623,47 +627,17 @@ export class InvoiceService {
   // ─── Internals ──────────────────────────────────────────────────────
 
   /**
-   * Reject a number already taken. Checked against BOTH sequences: the
-   * manual invoices and the payment receipts share one counter, so a
-   * collision there would print two documents with the same number.
+   * Reject a number another document prints (an invoice, an installment
+   * receipt, a treatment-fee receipt) or one inside the future range of
+   * the automatic counters. The rules are shared with the receipt-number
+   * editor of the payments desk (PaymentsService.updateInvoiceNumber), so
+   * neither desk accepts a number the other refuses.
    */
-  private async assertNumberFree(candidate: string): Promise<string> {
-    const [invoice, payment] = await Promise.all([
-      this.prisma.invoice.findUnique({ where: { invoiceNumber: candidate } }),
-      this.prisma.payment.findUnique({ where: { invoiceNumber: candidate } }),
-    ]);
-    if (invoice || payment) {
-      throw new ConflictException(
-        `Invoice number ${candidate} is already used.`,
-        'INVOICE_NUMBER_TAKEN',
-      );
-    }
-
-    // The FUTURE range of the automatic counters is reserved. Accepting
-    // FAC-000150 by hand while the counter sits at 100 would make the
-    // 50th automatic allocation collide — and an automatic invoice that
-    // cannot be created is a payment left without its document.
-    const settings = await this.billingSettings.getActive();
-    if (settings) {
-      const counters: [prefix: string, next: number][] = [
-        [settings.invoicePrefix || 'FAC', settings.invoiceNextNumber],
-        [
-          settings.treatmentFeeInvoicePrefix || 'TF',
-          settings.treatmentFeeInvoiceNextNumber,
-        ],
-      ];
-      for (const [prefix, next] of counters) {
-        const head = `${prefix}-`;
-        if (!candidate.startsWith(head)) continue;
-        const tail = candidate.slice(head.length);
-        if (/^\d+$/.test(tail) && Number(tail) >= next) {
-          throw new ConflictException(
-            `Invoice number ${candidate} is inside the automatic ${prefix} sequence (next: ${head}${String(next).padStart(6, '0')}). Pick a number below it or a different prefix.`,
-            'INVOICE_NUMBER_RESERVED',
-          );
-        }
-      }
-    }
+  private async assertNumberFree(
+    candidate: string,
+    owner?: InvoiceNumberOwner,
+  ): Promise<string> {
+    await assertInvoiceNumberFree(this.prisma, candidate, owner);
     return candidate;
   }
 

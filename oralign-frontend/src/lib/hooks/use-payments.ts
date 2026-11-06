@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  keepPreviousData,
   useMutation,
   useQuery,
   useQueryClient,
@@ -10,12 +11,14 @@ import {
 import { toast } from '@/lib/toast';
 import { paymentsService } from '@/lib/api/payments.service';
 import { invoicesService } from '@/lib/api/invoices.service';
-import { extractApiErrorMessage } from '@/lib/api/error';
+import { extractApiError, extractApiErrorMessage } from '@/lib/api/error';
 import { isWelcomeGiftNothingDue } from '@/lib/api/welcome-gift.service';
 import { useT } from '@/lib/i18n/lang-context';
 import { paymentPlanKeys } from './use-quotation-payment-plan';
 import { quotationKeys } from './use-quotations';
 import { orderKeys } from './use-orders';
+import { invoiceKeys } from './use-admin-invoices';
+import { invalidatePaymentViews, paymentKeys } from './payment-keys';
 import { PaymentPurpose } from '@/lib/types';
 import type {
   ConfirmPaymentDto,
@@ -23,29 +26,30 @@ import type {
   PaginatedResponse,
   Payment,
   PaymentFilterDto,
+  PaymentListItem,
+  PaymentsSummary,
+  PaymentsSummaryParams,
   RecordCashPaymentDto,
   RejectPaymentDto,
 } from '@/lib/types';
 
-export const paymentKeys = {
-  all: ['payments'] as const,
-  pending: (filters: Record<string, unknown>) =>
-    [...paymentKeys.all, 'pending', filters] as const,
-  history: (filters: Record<string, unknown>) =>
-    [...paymentKeys.all, 'history', filters] as const,
-  mine: (filters: Record<string, unknown>) =>
-    [...paymentKeys.all, 'mine', filters] as const,
-  detail: (id: string) => [...paymentKeys.all, 'detail', id] as const,
-  /** Rendered receipt PDF; `invoiceNumber` in the key re-fetches after an admin renumbers it. */
-  invoicePdf: (id: string, lang: string, invoiceNumber?: string | null) =>
-    [...paymentKeys.detail(id), 'invoice-pdf', lang, invoiceNumber ?? null] as const,
-};
+export { paymentKeys } from './payment-keys';
 
 const PAYMENT_STALE_TIME = 10_000;
 
+/**
+ * Options of the payments desk's live queries. `refetchInterval` keeps a
+ * view that covers today current while it stays open (React Query pauses
+ * it in a background tab).
+ */
+export interface LiveQueryOptions {
+  enabled?: boolean;
+  refetchInterval?: number | false;
+}
+
 export function usePendingConfirmations(
   filters: PaymentFilterDto = {},
-): UseQueryResult<PaginatedResponse<Payment>, Error> {
+): UseQueryResult<PaginatedResponse<PaymentListItem>, Error> {
   return useQuery({
     queryKey: paymentKeys.pending(filters as Record<string, unknown>),
     queryFn: () => paymentsService.listPendingConfirmations(filters),
@@ -56,17 +60,20 @@ export function usePendingConfirmations(
 }
 
 /**
- * Admin payment history — every payment in the system. Use this on
- * the `/dashboard/payments/history` page. Refetch policy mirrors the
- * pending queue so an admin who has both tabs open sees them stay in
- * sync as new payments land.
+ * Admin payment history — every payment in the system. While a new
+ * filter or page loads, the previous rows stay on screen
+ * (`isPlaceholderData`) instead of flashing a skeleton.
  */
 export function useAllPayments(
   filters: PaymentFilterDto = {},
-): UseQueryResult<PaginatedResponse<Payment>, Error> {
+  options: LiveQueryOptions = {},
+): UseQueryResult<PaginatedResponse<PaymentListItem>, Error> {
   return useQuery({
     queryKey: paymentKeys.history(filters as Record<string, unknown>),
     queryFn: () => paymentsService.listAllPayments(filters),
+    enabled: options.enabled ?? true,
+    refetchInterval: options.refetchInterval ?? false,
+    placeholderData: keepPreviousData,
     staleTime: PAYMENT_STALE_TIME,
     refetchOnMount: 'always',
     refetchOnWindowFocus: true,
@@ -74,16 +81,66 @@ export function useAllPayments(
 }
 
 /**
- * Doctor's own payment history — backend automatically scopes by the
- * caller's userId. Admins can call this too and still receive every
- * row (the doctor-scoping branch only triggers for the dentist role).
+ * Doctor's own payment history — the backend scopes it to the caller's
+ * orders. Same placeholder behaviour as `useAllPayments`.
  */
 export function useMyPayments(
   filters: PaymentFilterDto = {},
-): UseQueryResult<PaginatedResponse<Payment>, Error> {
+  options: LiveQueryOptions = {},
+): UseQueryResult<PaginatedResponse<PaymentListItem>, Error> {
   return useQuery({
     queryKey: paymentKeys.mine(filters as Record<string, unknown>),
     queryFn: () => paymentsService.listMyPayments(filters),
+    enabled: options.enabled ?? true,
+    refetchInterval: options.refetchInterval ?? false,
+    placeholderData: keepPreviousData,
+    staleTime: PAYMENT_STALE_TIME,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+  });
+}
+
+/**
+ * How many payments match `filters` — one `limit: 1` request on the same
+ * endpoint as the list (`scope`), keyed like it. `undefined` until known.
+ */
+export function usePaymentsTotal(
+  filters: PaymentFilterDto,
+  options: { scope: 'all' | 'mine'; enabled?: boolean },
+): UseQueryResult<number, Error> {
+  const countFilters: PaymentFilterDto = { ...filters, page: 1, limit: 1 };
+  const all = options.scope === 'all';
+  return useQuery({
+    queryKey: all
+      ? paymentKeys.history(countFilters as Record<string, unknown>)
+      : paymentKeys.mine(countFilters as Record<string, unknown>),
+    queryFn: () =>
+      all
+        ? paymentsService.listAllPayments(countFilters)
+        : paymentsService.listMyPayments(countFilters),
+    select: (data: PaginatedResponse<PaymentListItem>) => data.total,
+    enabled: options.enabled ?? true,
+    placeholderData: keepPreviousData,
+    staleTime: PAYMENT_STALE_TIME,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+  });
+}
+
+/**
+ * Money received over a range of business days (none → today), for the
+ * caller's scope. The previous figures stay (dimmed by the caller) while
+ * another range loads.
+ */
+export function usePaymentsSummary(
+  params: PaymentsSummaryParams,
+  options: Pick<LiveQueryOptions, 'refetchInterval'> = {},
+): UseQueryResult<PaymentsSummary, Error> {
+  return useQuery({
+    queryKey: paymentKeys.summary(params as Record<string, unknown>),
+    queryFn: () => paymentsService.getSummary(params),
+    refetchInterval: options.refetchInterval ?? false,
+    placeholderData: keepPreviousData,
     staleTime: PAYMENT_STALE_TIME,
     refetchOnMount: 'always',
     refetchOnWindowFocus: true,
@@ -104,16 +161,17 @@ export function useAdminPayment(
 
 /**
  * Every payment mutation invalidates the same fan-out: the payment
- * itself, the pending queue, the installments + batches of the quote
- * the payment belongs to, the quote summary, the order summary, and
- * the orders list (because the order status can move on SUCCESS).
+ * itself, every payments list, count and the takings summary, the
+ * installments + batches of the quote the payment belongs to, the quote
+ * summary, the order summary, and the orders list (because the order
+ * status can move on SUCCESS).
  */
 function invalidateAfterPayment(
   queryClient: ReturnType<typeof useQueryClient>,
   payment: Payment,
   orderId?: string,
 ) {
-  queryClient.invalidateQueries({ queryKey: paymentKeys.all });
+  invalidatePaymentViews(queryClient);
   if (payment.quotationId) {
     queryClient.invalidateQueries({
       queryKey: paymentPlanKeys.installments(payment.quotationId),
@@ -132,10 +190,19 @@ function invalidateAfterPayment(
   queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
 }
 
+/** The API's refusals of a receipt number, by errorCode. */
+const INVOICE_NUMBER_ERRORS: Record<string, string> = {
+  INVOICE_NUMBER_TAKEN: 'paymentsCommon.invoiceNumberErrors.taken',
+  INVOICE_NUMBER_NOT_EDITABLE: 'paymentsCommon.invoiceNumberErrors.notEditable',
+  INVOICE_NUMBER_RESERVED: 'paymentsCommon.invoiceNumberErrors.reserved',
+};
+
 /**
  * Admin-only: set/override a payment's printed invoice number. On
  * success the whole payments fan-out is invalidated so the new number
- * shows in the history + mine lists and any open invoice preview.
+ * shows in the history + mine lists and any open invoice preview — and
+ * the invoices desk too: the API renames the payment's automatic invoice
+ * in the same transaction.
  */
 export function useUpdateInvoiceNumber(): UseMutationResult<
   { id: string; invoiceNumber: string | null },
@@ -148,11 +215,18 @@ export function useUpdateInvoiceNumber(): UseMutationResult<
     mutationFn: ({ paymentId, invoiceNumber }) =>
       invoicesService.updateInvoiceNumber(paymentId, invoiceNumber),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: paymentKeys.all });
+      invalidatePaymentViews(queryClient);
+      void queryClient.invalidateQueries({ queryKey: invoiceKeys.all });
       toast.success(t('toasts.payments.invoiceNumberUpdated'));
     },
-    onError: (error) => {
-      toast.error(extractApiErrorMessage(error));
+    onError: (error, { invoiceNumber }) => {
+      // The API writes its refusals in English: a known one gets the
+      // dashboard's own words, anything else keeps the server's.
+      const { errorCode } = extractApiError(error);
+      const key = errorCode ? INVOICE_NUMBER_ERRORS[errorCode] : undefined;
+      toast.error(
+        key ? t(key, { number: invoiceNumber.trim() }) : extractApiErrorMessage(error),
+      );
     },
   });
 }
@@ -175,6 +249,7 @@ export function usePayByCard(): UseMutationResult<
     language?: 'fr' | 'en' | 'ar';
   }
 > {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ orderId, installmentId, idempotencyKey, language }) =>
       paymentsService.createClicToPaySession({
@@ -185,6 +260,8 @@ export function usePayByCard(): UseMutationResult<
         language,
         pageView: HOSTED_PAGE_VIEW,
       }),
+    // The attempt is a payment row from now on ("in progress").
+    onSuccess: () => invalidatePaymentViews(queryClient),
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });
 }
@@ -205,6 +282,7 @@ export function useCreateTreatmentFeeCardSession(): UseMutationResult<
         language,
         pageView: HOSTED_PAGE_VIEW,
       }),
+    onSuccess: () => invalidatePaymentViews(queryClient),
     onError: (err, { orderId }) => {
       // Fees waived by the welcome gift — nothing to pay.
       if (isWelcomeGiftNothingDue(err)) {

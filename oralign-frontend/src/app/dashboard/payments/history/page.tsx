@@ -1,19 +1,13 @@
 'use client';
 
 import { Suspense } from 'react';
-import { useT } from '@/lib/i18n/lang-context';
-import { PaymentHistoryContent } from './history-content';
+import { PaymentHistoryContent, PaymentsPageSkeleton } from './history-content';
 
-function PaymentHistoryFallback() {
-  const { t } = useT();
-  return (
-    <div className="p-6 text-sm text-muted-foreground">{t('common.loading')}</div>
-  );
-}
-
+// `useSearchParams` (the desk's tab, filters and page live in the URL)
+// needs a Suspense boundary; its fallback mirrors the loaded page.
 export default function PaymentHistoryPage() {
   return (
-    <Suspense fallback={<PaymentHistoryFallback />}>
+    <Suspense fallback={<PaymentsPageSkeleton />}>
       <PaymentHistoryContent />
     </Suspense>
   );

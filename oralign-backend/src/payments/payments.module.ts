@@ -4,6 +4,7 @@ import { PaymentsController } from './controllers/payments.controller';
 import { MockPaymentGateway } from './gateways/mock-payment.gateway';
 import { PAYMENT_GATEWAY } from './gateways/payment-gateway.interface';
 import { PaymentsService } from './services/payments.service';
+import { PaymentsSummaryService } from './services/payments-summary.service';
 import { ClicToPayClient } from './clictopay/clictopay.client';
 import { ClicToPayPaymentsService } from './services/clictopay-payments.service';
 import { ClicToPayReconciliationService } from './services/clictopay-reconciliation.service';
@@ -40,6 +41,7 @@ const controllers = [
   controllers,
   providers: [
     PaymentsService,
+    PaymentsSummaryService,
     ClicToPayClient,
     ClicToPayPaymentsService,
     ClicToPayReconciliationService,

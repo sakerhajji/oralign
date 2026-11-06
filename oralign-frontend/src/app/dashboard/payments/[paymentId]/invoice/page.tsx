@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { ArrowLeft, Download, FileText, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -12,6 +12,7 @@ import { useT } from '@/lib/i18n/lang-context';
 import { paymentKeys, useAdminPayment } from '@/lib/hooks/use-payments';
 import { invoicesService } from '@/lib/api/invoices.service';
 import { InvoiceNumberEditor } from '@/components/payments/invoice-number-editor';
+import { safeDashboardReturnTo } from '@/lib/orders/order-navigation';
 import { cn } from '@/lib/utils';
 
 type InvoiceLang = 'fr' | 'en';
@@ -27,6 +28,9 @@ type InvoiceLang = 'fr' | 'en';
 export default function InvoicePreviewPage() {
   const params = useParams<{ paymentId: string }>();
   const paymentId = params.paymentId;
+  // Opened from the payments desk: back returns to it, filters kept.
+  const backHref =
+    safeDashboardReturnTo(useSearchParams().get('returnTo')) ?? '/dashboard/payments/history';
   const { isAdmin } = useAuth();
   const { lang: dashLang, t } = useT();
 
@@ -96,7 +100,7 @@ export default function InvoicePreviewPage() {
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-4 sm:p-6">
       <Link
-        href="/dashboard/payments/history"
+        href={backHref}
         className="inline-flex w-fit items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="h-4 w-4" />

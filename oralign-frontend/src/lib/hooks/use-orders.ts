@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  keepPreviousData,
   useMutation,
   useQuery,
   useQueryClient,
@@ -9,8 +10,10 @@ import {
 } from '@tanstack/react-query';
 import { toast } from '@/lib/toast';
 import { extractApiErrorMessage, toastMutationError, ordersService } from '@/lib/api';
+import type { TreatmentFeeRow } from '@/lib/api/orders.service';
 import { isWelcomeGiftNothingDue } from '@/lib/api/welcome-gift.service';
 import { useT } from '@/lib/i18n/lang-context';
+import { invalidatePaymentViews, treatmentFeeKeys } from './payment-keys';
 import { welcomeGiftKeys } from './use-welcome-gift';
 import {
   CreateOrderDto,
@@ -24,6 +27,7 @@ import {
   PaginatedResponse,
   ToothInstruction,
   ToothInstructionType,
+  TreatmentFeeFilterParams,
   UpdateOrderDto,
 } from '@/lib/types';
 
@@ -260,6 +264,9 @@ export function usePayTreatmentFee(): UseMutationResult<
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
       queryClient.invalidateQueries({ queryKey: orderKeys.history(id) });
+      // Cash lands in the day's takings; a declared transfer joins the
+      // fees to confirm.
+      invalidatePaymentViews(queryClient);
       if (method === 'bank_transfer') {
         toast.success(t('toasts.orders.bankTransferRecorded'));
       } else {
@@ -285,6 +292,7 @@ export function useUploadTreatmentFeeProof(): UseMutationResult<
       syncOrderCaches(queryClient, order);
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
       queryClient.invalidateQueries({ queryKey: orderKeys.history(id) });
+      invalidatePaymentViews(queryClient);
       toast.success(t('toasts.orders.receiptUploaded'));
     },
     onError: (error, { id }) => onTreatmentFeeError(queryClient, t, error, id),
@@ -306,9 +314,9 @@ export function useConfirmTreatmentFeePayment(): UseMutationResult<
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
       queryClient.invalidateQueries({ queryKey: orderKeys.history(id) });
-      // Bust both treatment-fee list caches so the confirmed row
-      // hops from the pending queue into the history table.
-      queryClient.invalidateQueries({ queryKey: ['treatment-fees'] });
+      // The confirmed fee leaves the queue, turns paid in the history
+      // and counts in that day's takings.
+      invalidatePaymentViews(queryClient);
       toast.success(t('toasts.orders.bankTransferConfirmed'));
     },
     onError: (error) => toastMutationError(error),
@@ -324,21 +332,50 @@ export function usePendingTreatmentFees(
   params: { page?: number; limit?: number } = {},
 ) {
   return useQuery({
-    queryKey: ['treatment-fees', 'pending', params],
+    queryKey: treatmentFeeKeys.pending(params),
     queryFn: () => ordersService.listPendingTreatmentFees(params),
     staleTime: 1000 * 15,
     refetchInterval: 1000 * 30,
   });
 }
 
-/** Admin: paginated treatment-fee payment history. */
+const TREATMENT_FEE_STALE_TIME = 10_000;
+
+/**
+ * Treatment fees, filtered and paged (a dentist gets their own). The
+ * previous rows stay on screen while another filter or page loads.
+ */
 export function useTreatmentFeesHistory(
-  params: { page?: number; limit?: number } = {},
-) {
+  filters: TreatmentFeeFilterParams = {},
+  options: { enabled?: boolean; refetchInterval?: number | false } = {},
+): UseQueryResult<PaginatedResponse<TreatmentFeeRow>, Error> {
   return useQuery({
-    queryKey: ['treatment-fees', 'history', params],
-    queryFn: () => ordersService.listTreatmentFees(params),
-    staleTime: 1000 * 60,
+    queryKey: treatmentFeeKeys.history(filters as Record<string, unknown>),
+    queryFn: () => ordersService.listTreatmentFees(filters),
+    enabled: options.enabled ?? true,
+    refetchInterval: options.refetchInterval ?? false,
+    placeholderData: keepPreviousData,
+    staleTime: TREATMENT_FEE_STALE_TIME,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+  });
+}
+
+/** How many treatment fees match `filters` (one `limit: 1` request). */
+export function useTreatmentFeesTotal(
+  filters: TreatmentFeeFilterParams,
+  options: { enabled?: boolean } = {},
+): UseQueryResult<number, Error> {
+  const countFilters: TreatmentFeeFilterParams = { ...filters, page: 1, limit: 1 };
+  return useQuery({
+    queryKey: treatmentFeeKeys.history(countFilters as Record<string, unknown>),
+    queryFn: () => ordersService.listTreatmentFees(countFilters),
+    select: (data: PaginatedResponse<TreatmentFeeRow>) => data.total,
+    enabled: options.enabled ?? true,
+    placeholderData: keepPreviousData,
+    staleTime: TREATMENT_FEE_STALE_TIME,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
   });
 }
 

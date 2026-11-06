@@ -207,13 +207,8 @@ export interface Payment {
   amount: string;
   currency: string;
   purpose?: PaymentPurpose;
-  // Backend serialises the Prisma column verbatim as `paymentMethod`.
-  // `method` is kept as an optional alias for any legacy consumer
-  // that still reads it; the table + every new caller should rely
-  // on `paymentMethod`.
+  /** The Prisma column, serialised verbatim. */
   paymentMethod: PaymentMethod;
-  /** @deprecated — historical alias for `paymentMethod`. */
-  method?: PaymentMethod;
   status: PaymentRecordStatus;
   idempotencyKey?: string | null;
   transactionId?: string | null;
@@ -228,10 +223,38 @@ export interface Payment {
   confirmedById?: string | null;
   rejectedById?: string | null;
   initiatedAt?: string | null;
+  /** Bank transfer: when the dentist declared it. */
+  declaredAt?: string | null;
+  /** When the money counts as received; null until the payment succeeds. */
+  paidAt?: string | null;
   confirmedAt?: string | null;
   rejectedAt?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * A row of the payment list endpoints (history, the dentist's own list,
+ * the confirmation queue): the payment with its order, quote and
+ * installment. Archived orders' payments never appear in these lists.
+ */
+export interface PaymentListItem extends Payment {
+  order?: {
+    id: string;
+    orderCode: string;
+    doctor?: { id: string; fullName: string } | null;
+    patient?: { id: string; fullName: string } | null;
+  } | null;
+  quotation?: {
+    id: string;
+    orderId: string;
+    packName?: string | null;
+  } | null;
+  installment?: {
+    id: string;
+    installmentNumber: number;
+    amount: string;
+  } | null;
 }
 
 export interface HostedPaymentSession {
@@ -272,6 +295,11 @@ export enum PaymentSortBy {
   AMOUNT = 'amount',
   PAID_AT = 'paidAt',
   STATUS = 'status',
+  /**
+   * The date the payment happened: when it was received, else when it
+   * was made — the date `from`/`to` filter on and the desk's Date column.
+   */
+  EVENT_AT = 'eventAt',
 }
 
 export enum PaymentSortOrder {
@@ -281,29 +309,100 @@ export enum PaymentSortOrder {
 
 /**
  * Filter shape for the payment history + pending queue. Mirrors the
- * backend `PaymentFilterDto`. Multi-value `methods` and `statuses`
- * arrays are sent as comma-separated strings on the wire (service
- * layer handles the join).
+ * backend `PaymentFilterDto` (whose validation pipe refuses any unknown
+ * field). Multi-value `methods` and `statuses` arrays are sent as
+ * comma-separated strings on the wire (service layer handles the join).
  */
 export interface PaymentFilterDto {
   page?: number;
   limit?: number;
   // Legacy single-value (kept for backward compat — multi versions win).
-  method?: PaymentMethod;
   paymentMethod?: PaymentMethod;
   status?: PaymentRecordStatus;
   // Canonical multi-value filters.
   methods?: PaymentMethod[];
   statuses?: PaymentRecordStatus[];
-  // Search + structural narrowing.
+  /** Installments and treatment-fee card attempts share the table. */
+  purpose?: PaymentPurpose;
+  // Search + structural narrowing. The search also matches invoice
+  // numbers, the gateway reference and an exact amount.
   search?: string;
   doctorId?: string;
   patientId?: string;
-  // Date range.
+  /**
+   * Inclusive calendar days 'YYYY-MM-DD', cut in Africa/Tunis days, on
+   * the payment's event date: when it was paid, or when it was created
+   * for a payment that never was.
+   */
+  from?: string;
+  to?: string;
+  /** @deprecated creation-date range in UTC days; use `from` / `to`. */
   createdFrom?: string;
+  /** @deprecated creation-date range in UTC days; use `from` / `to`. */
   createdTo?: string;
   // Sorting.
   sortBy?: PaymentSortBy;
+  sortOrder?: PaymentSortOrder;
+}
+
+/** Money received in one bucket: amount with exactly 3 decimals, e.g. "1250.500". */
+export interface PaymentsSummaryBucket {
+  amount: string;
+  count: number;
+}
+
+export interface PaymentsSummaryByMethod {
+  cash: PaymentsSummaryBucket;
+  card: PaymentsSummaryBucket;
+  bank_transfer: PaymentsSummaryBucket;
+}
+
+/**
+ * GET /payments/summary — the money received (successful payments only)
+ * over a range of Africa/Tunis days: installments and treatment fees,
+ * each counted once, archived orders and waived fees left out. A dentist
+ * only ever gets their own orders. `from` / `to` echo the resolved range
+ * (no range asked → today).
+ */
+export interface PaymentsSummary {
+  from: string | null;
+  to: string | null;
+  timeZone: 'Africa/Tunis';
+  currency: 'TND';
+  total: PaymentsSummaryBucket;
+  methods: PaymentsSummaryByMethod;
+  purposes: {
+    installment: PaymentsSummaryBucket & { methods: PaymentsSummaryByMethod };
+    treatment_fee: PaymentsSummaryBucket & { methods: PaymentsSummaryByMethod };
+  };
+}
+
+export interface PaymentsSummaryParams {
+  /** 'YYYY-MM-DD' (Africa/Tunis). Neither bound → today. */
+  from?: string;
+  to?: string;
+  /** Admins only; the server ignores it for a dentist. */
+  doctorId?: string;
+}
+
+export type TreatmentFeeSortBy = 'paidAt' | 'amount';
+
+/**
+ * GET /orders/admin/treatment-fees — mirrors the backend
+ * `TreatmentFeeFilterDto`. `from` / `to` filter on the day the fee was
+ * paid (a fee still to confirm has none, so a range leaves it out).
+ * Newest first lists the fees still to confirm on top.
+ */
+export interface TreatmentFeeFilterParams {
+  page?: number;
+  limit?: number;
+  search?: string;
+  from?: string;
+  to?: string;
+  doctorId?: string;
+  methods?: PaymentMethod[];
+  statuses?: PaymentRecordStatus[];
+  sortBy?: TreatmentFeeSortBy;
   sortOrder?: PaymentSortOrder;
 }
 

@@ -1,4 +1,5 @@
 import apiClient from './client';
+import { serialisePaymentFilters } from './payments.service';
 import {
   CreateOrderDto,
   DentalOrder,
@@ -13,24 +14,29 @@ import {
   PaymentRecordStatus,
   ToothInstruction,
   ToothInstructionType,
+  TreatmentFeeFilterParams,
   UpdateOrderDto,
 } from '@/lib/types';
 
 /**
- * Row returned by the admin treatment-fee list endpoints. The shape
- * intentionally mirrors a subset of the installment Payment row so
- * the UI can switch between sources without rewriting the table.
+ * Row returned by the treatment-fee list endpoints: one order's fee
+ * (the fee lives on the order, not in the Payment table).
  */
 export interface TreatmentFeeRow {
   orderId: string;
   orderCode: string;
+  /** null when no fee was set; 0 when the welcome gift waived it. */
   amount: number | null;
   method: PaymentMethod | null;
   status: PaymentRecordStatus | null;
+  /** null while a bank transfer waits for confirmation. */
   paidAt: string | null;
   proofPath: string | null;
+  /** The ORDER's submission, not the payment's. */
   submittedAt: string | null;
   updatedAt: string;
+  /** The fee receipt's number (TF-…), null until one is issued. */
+  invoiceNumber: string | null;
   doctor: { id: string; fullName: string; email: string } | null;
   patient: { id: string; fullName: string } | null;
 }
@@ -215,11 +221,18 @@ export const ordersService = {
     return response.data;
   },
 
-  /** Admin: full treatment-fee payment history. */
-  listTreatmentFees: async (params: { page?: number; limit?: number }) => {
+  /**
+   * Treatment fees, filtered and paged (admins: every dentist's; a
+   * dentist: their own — the server scopes it).
+   */
+  listTreatmentFees: async (
+    params: TreatmentFeeFilterParams = {},
+  ): Promise<PaginatedResponse<TreatmentFeeRow>> => {
     const response = await apiClient.get<
       PaginatedResponse<TreatmentFeeRow>
-    >('/orders/admin/treatment-fees', { params });
+    >('/orders/admin/treatment-fees', {
+      params: serialisePaymentFilters(params),
+    });
     return response.data;
   },
 

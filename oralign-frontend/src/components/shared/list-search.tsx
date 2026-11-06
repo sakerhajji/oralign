@@ -25,6 +25,7 @@ export function ListSearch({
   placeholder,
   ariaLabel,
   busy = false,
+  maxLength,
   className,
 }: {
   /** The committed (trimmed) search, never the raw input text. */
@@ -34,6 +35,8 @@ export function ListSearch({
   ariaLabel: string;
   /** A newer result set is loading behind the rows on screen. */
   busy?: boolean;
+  /** The longest search the API accepts. */
+  maxLength?: number;
   className?: string;
 }) {
   const { t } = useT();
@@ -78,6 +81,7 @@ export function ListSearch({
         }}
         placeholder={placeholder}
         aria-label={ariaLabel}
+        maxLength={maxLength}
         autoComplete="off"
         spellCheck={false}
         enterKeyHint="search"

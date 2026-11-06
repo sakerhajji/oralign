@@ -127,7 +127,7 @@ export function PendingPaymentsContent() {
       {data && data.totalPages > 1 ? (
         <div className="flex items-center justify-between text-xs">
           <span className="text-muted-foreground">
-            {t('paymentsHistory.pageOf', {
+            {t('paymentsPending.pageOf', {
               page: data.page,
               total: data.totalPages,
             })}

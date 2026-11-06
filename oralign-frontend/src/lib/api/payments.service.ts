@@ -5,7 +5,10 @@ import type {
   PaginatedResponse,
   Payment,
   PaymentFilterDto,
+  PaymentListItem,
   PaymentPurpose,
+  PaymentsSummary,
+  PaymentsSummaryParams,
   RecordCashPaymentDto,
   RejectPaymentDto,
 } from '@/lib/types';
@@ -118,8 +121,8 @@ export const paymentsService = {
 
   listPendingConfirmations: async (
     filters: PaymentFilterDto = {},
-  ): Promise<PaginatedResponse<Payment>> => {
-    const res = await apiClient.get<PaginatedResponse<Payment>>(
+  ): Promise<PaginatedResponse<PaymentListItem>> => {
+    const res = await apiClient.get<PaginatedResponse<PaymentListItem>>(
       '/admin/payments/pending-confirmations',
       { params: serialisePaymentFilters(filters) },
     );
@@ -129,8 +132,8 @@ export const paymentsService = {
   /** Admin: full payment history across every order in the system. */
   listAllPayments: async (
     filters: PaymentFilterDto = {},
-  ): Promise<PaginatedResponse<Payment>> => {
-    const res = await apiClient.get<PaginatedResponse<Payment>>(
+  ): Promise<PaginatedResponse<PaymentListItem>> => {
+    const res = await apiClient.get<PaginatedResponse<PaymentListItem>>(
       '/admin/payments',
       { params: serialisePaymentFilters(filters) },
     );
@@ -140,11 +143,24 @@ export const paymentsService = {
   /** Doctor (or admin) — payments tied to the caller's own orders. */
   listMyPayments: async (
     filters: PaymentFilterDto = {},
-  ): Promise<PaginatedResponse<Payment>> => {
-    const res = await apiClient.get<PaginatedResponse<Payment>>(
+  ): Promise<PaginatedResponse<PaymentListItem>> => {
+    const res = await apiClient.get<PaginatedResponse<PaymentListItem>>(
       '/payments/mine',
       { params: serialisePaymentFilters(filters) },
     );
+    return res.data;
+  },
+
+  /**
+   * Money received over a range of Africa/Tunis days, by method, for the
+   * caller's scope (a dentist: their own orders). No range → today.
+   */
+  getSummary: async (
+    params: PaymentsSummaryParams = {},
+  ): Promise<PaymentsSummary> => {
+    const res = await apiClient.get<PaymentsSummary>('/payments/summary', {
+      params: withoutEmptyValues({ ...params }),
+    });
     return res.data;
   },
 
@@ -189,29 +205,28 @@ export const paymentsService = {
 };
 
 /**
- * Normalise PaymentFilterDto to the wire shape: arrays joined as
- * comma strings (backend's DTO handles both `methods=a,b` and
- * `methods=a&methods=b`), empty values dropped so the URL stays
- * clean AND React-Query keys don't churn on "empty vs missing".
+ * Normalise a payment or treatment-fee filter to the wire shape: the
+ * `methods` / `statuses` arrays joined as comma strings (both backend
+ * DTOs accept `methods=a,b` and `methods=a&methods=b`), empty values
+ * dropped so the URL stays clean (the strict validation pipe would
+ * refuse an empty enum value).
  */
-function serialisePaymentFilters(
-  filters: PaymentFilterDto,
+export function serialisePaymentFilters(
+  filters: object,
 ): Record<string, unknown> {
   const params: Record<string, unknown> = { ...filters };
-  if (Array.isArray(filters.methods)) {
-    if (filters.methods.length > 0) {
-      params.methods = filters.methods.join(',');
-    } else {
-      delete params.methods;
+  for (const key of ['methods', 'statuses']) {
+    const values = params[key];
+    if (Array.isArray(values)) {
+      params[key] = values.length > 0 ? values.join(',') : undefined;
     }
   }
-  if (Array.isArray(filters.statuses)) {
-    if (filters.statuses.length > 0) {
-      params.statuses = filters.statuses.join(',');
-    } else {
-      delete params.statuses;
-    }
-  }
+  return withoutEmptyValues(params);
+}
+
+function withoutEmptyValues(
+  params: Record<string, unknown>,
+): Record<string, unknown> {
   for (const k of Object.keys(params)) {
     const v = params[k];
     if (v === undefined || v === null || v === '') delete params[k];

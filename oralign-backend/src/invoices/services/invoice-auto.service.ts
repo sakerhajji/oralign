@@ -1,6 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { InvoiceStatus, PaymentRecordStatus, Prisma } from '@prisma/client';
+import {
+  InvoiceStatus,
+  PaymentPurpose,
+  PaymentRecordStatus,
+  Prisma,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CompanyBillingSettingsService } from '../../quotations/services/company-billing-settings.service';
 import { getInvoiceLabels, type InvoiceLanguage } from './invoice-i18n';
@@ -116,8 +121,13 @@ export class InvoiceAutoService {
       },
     });
 
-    // Only a settled payment is invoiceable.
-    if (!payment || payment.status !== PaymentRecordStatus.success) {
+    // Only a settled installment is invoiceable: a treatment fee paid by
+    // card is receipted on its order (TF-…), never with a FAC- invoice.
+    if (
+      !payment ||
+      payment.status !== PaymentRecordStatus.success ||
+      payment.purpose !== PaymentPurpose.installment
+    ) {
       return { created: false };
     }
 
@@ -247,10 +257,16 @@ export class InvoiceAutoService {
   /**
    * Mint the invoices for payments that succeeded before this feature
    * existed (or whose listener failed). Idempotent by construction.
+   * Installments only: the treatment-fee card attempts never get an
+   * invoice, so scanning them would also eat the batch on every run.
    */
   async backfill(limit = 500): Promise<{ scanned: number; created: number }> {
     const pending = await this.prisma.payment.findMany({
-      where: { status: PaymentRecordStatus.success, invoice: { is: null } },
+      where: {
+        status: PaymentRecordStatus.success,
+        purpose: PaymentPurpose.installment,
+        invoice: { is: null },
+      },
       select: { id: true },
       orderBy: { createdAt: 'asc' },
       take: limit,

@@ -8,7 +8,6 @@ import type { Locale } from 'date-fns';
 import {
   Banknote,
   CreditCard,
-  ExternalLink,
   FileText,
   Landmark,
   ReceiptText,
@@ -31,18 +30,15 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import {
-  usePendingTreatmentFees,
-  useTreatmentFeesHistory,
-} from '@/lib/hooks';
-import { useAuth } from '@/lib/providers/auth-provider';
+import { usePendingTreatmentFees } from '@/lib/hooks';
 import type { TreatmentFeeRow } from '@/lib/api/orders.service';
-import { PaymentMethod, PaymentRecordStatus } from '@/lib/types';
+import { PaymentMethod } from '@/lib/types';
 import {
   DEFAULT_MERCHANT_CURRENCY,
   formatPrice,
 } from '@/lib/utils/currency';
 import { TreatmentFeeReceiptDialog } from '@/components/orders/treatment-fee-receipt-dialog';
+import { PaymentStatusBadge } from '@/components/payments/payment-status-badge';
 import { useT } from '@/lib/i18n/lang-context';
 
 /**
@@ -68,18 +64,6 @@ const METHOD_META: Record<
   },
 };
 
-const STATUS_TONE: Record<PaymentRecordStatus, string> = {
-  [PaymentRecordStatus.PENDING]: 'bg-amber-100 text-amber-800',
-  [PaymentRecordStatus.UNKNOWN]: 'bg-amber-100 text-amber-900',
-  [PaymentRecordStatus.AWAITING_CONFIRMATION]:
-    'bg-blue-100 text-blue-800',
-  [PaymentRecordStatus.SUCCESS]: 'bg-emerald-100 text-emerald-800',
-  [PaymentRecordStatus.FAILED]: 'bg-red-100 text-red-800',
-  [PaymentRecordStatus.REJECTED]: 'bg-red-100 text-red-800',
-  [PaymentRecordStatus.CANCELLED]: 'bg-muted text-muted-foreground',
-  [PaymentRecordStatus.EXPIRED]: 'bg-muted text-muted-foreground',
-};
-
 function PaymentMethodBadge({
   method,
 }: {
@@ -98,28 +82,9 @@ function PaymentMethodBadge({
   );
 }
 
-function StatusBadge({
-  status,
-}: {
-  status: PaymentRecordStatus | null;
-}) {
-  const { t } = useT();
-  if (!status) return <span className="text-muted-foreground">—</span>;
-  return (
-    <Badge
-      variant="outline"
-      className={`${STATUS_TONE[status]} border-transparent`}
-    >
-      {t(`paymentsCommon.status.${status}`)}
-    </Badge>
-  );
-}
-
 /**
- * Row table primitive shared by the pending + history sections so
- * style stays in lockstep. `renderActions` lets callers slot in the
- * right-edge buttons per surface (Confirm on /pending; ExternalLink
- * to the order on /history).
+ * The queue's table. `renderActions` slots in the right-edge buttons
+ * (Review & confirm).
  */
 function TreatmentFeeTable({
   rows,
@@ -211,7 +176,7 @@ function TreatmentFeeTable({
               <PaymentMethodBadge method={row.method} />
             </TableCell>
             <TableCell>
-              <StatusBadge status={row.status} />
+              <PaymentStatusBadge status={row.status} />
             </TableCell>
             <TableCell className="text-right tabular-nums">
               {row.amount !== null ? formatPrice(row.amount) : '—'}
@@ -342,123 +307,3 @@ export function PendingTreatmentFeesSection() {
   );
 }
 
-/**
- * "Treatment fee history" — drop into the admin /payments/history
- * page. Hidden when there's no history yet so we don't ship an empty
- * card to fresh installations.
- */
-export function TreatmentFeesHistorySection() {
-  const { t } = useT();
-  const { isAdmin } = useAuth();
-  const { data, isLoading } = useTreatmentFeesHistory({ page: 1, limit: 20 });
-  const rows = data?.data ?? [];
-  // Active row whose receipt is being inspected in the modal viewer.
-  // History rows are read-only — the dialog mounts with canConfirm
-  // disabled because these fees are already settled.
-  const [activeReceipt, setActiveReceipt] = useState<TreatmentFeeRow | null>(
-    null,
-  );
-
-  if (!isLoading && rows.length === 0) return null;
-
-  return (
-    <>
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <ReceiptText className="size-5 text-primary" />
-                {isAdmin
-                  ? t('paymentsHistory.treatmentFeesTitleAdmin')
-                  : t('paymentsHistory.treatmentFeesTitleDoctor')}
-              </CardTitle>
-              <CardDescription>
-                {isAdmin
-                  ? t('paymentsHistory.treatmentFeesDescAdmin')
-                  : t('paymentsHistory.treatmentFeesDescDoctor')}
-              </CardDescription>
-            </div>
-            {data?.total ? (
-              <Badge variant="secondary">
-                {t('paymentsHistory.treatmentFeesTotalSuffix', {
-                  count: data.total,
-                })}
-              </Badge>
-            ) : null}
-          </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          <TreatmentFeeTable
-            rows={rows}
-            isLoading={isLoading}
-            emptyMessage={t('paymentsHistory.treatmentFeesEmpty')}
-            onViewProof={(row) => setActiveReceipt(row)}
-            renderActions={(row) => (
-              <>
-                {/*
-                  Only a settled fee has an invoice — the sequential
-                  TF-XXXXXX number is allocated on the first render of a
-                  paid fee. Pending / awaiting rows show just the Order
-                  link until the payment lands.
-                 */}
-                {row.status === PaymentRecordStatus.SUCCESS && (
-                  <Button
-                    asChild
-                    size="sm"
-                    variant="outline"
-                    className="gap-1"
-                    title={t('paymentsHistory.treatmentFeeInvoiceTitle')}
-                  >
-                    <Link
-                      href={`/dashboard/orders/${row.orderId}/treatment-fee-invoice`}
-                    >
-                      <ReceiptText className="size-3.5" />
-                      {t('paymentsHistory.treatmentFeeInvoiceLabel')}
-                    </Link>
-                  </Button>
-                )}
-                <Button
-                  asChild
-                  size="sm"
-                  variant="ghost"
-                  className="gap-1"
-                  title={t('paymentsHistory.openOrderTitle')}
-                >
-                  <Link href={`/dashboard/orders/${row.orderId}`}>
-                    <ExternalLink className="size-3.5" />
-                    {t('paymentsHistory.openOrderLabel')}
-                  </Link>
-                </Button>
-              </>
-            )}
-          />
-        </CardContent>
-      </Card>
-
-      {/*
-        Shared dialog — same one the pending queue and the order-detail
-        banner use. canConfirm=false because this surface is purely
-        historical (the fee is already settled).
-       */}
-      {activeReceipt && (
-        <TreatmentFeeReceiptDialog
-          open={!!activeReceipt}
-          onOpenChange={(next) => {
-            if (!next) setActiveReceipt(null);
-          }}
-          orderId={activeReceipt.orderId}
-          orderCode={activeReceipt.orderCode}
-          proofPath={activeReceipt.proofPath}
-          amount={activeReceipt.amount}
-          currency={DEFAULT_MERCHANT_CURRENCY}
-          doctorName={activeReceipt.doctor?.fullName ?? null}
-          patientName={activeReceipt.patient?.fullName ?? null}
-          method={activeReceipt.method}
-          submittedAt={activeReceipt.paidAt ?? activeReceipt.submittedAt ?? null}
-          canConfirm={false}
-        />
-      )}
-    </>
-  );
-}

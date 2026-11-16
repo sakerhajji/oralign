@@ -1,4 +1,10 @@
-import { Gender, OrderStatus, Prisma, UserRole } from '@prisma/client';
+import {
+  Gender,
+  OrderStatus,
+  OrderType,
+  Prisma,
+  UserRole,
+} from '@prisma/client';
 import type { PrismaService } from '../../prisma/prisma.service';
 import type { Caller } from '../../common/access/caller';
 import { OrderAccessPolicy } from '../../common/access/order-access.policy';
@@ -51,7 +57,14 @@ const listInclude = (orders: Prisma.DentalOrderWhereInput) => ({
     where: orders,
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     take: 1,
-    select: { id: true, orderCode: true, status: true, createdAt: true },
+    select: {
+      id: true,
+      orderCode: true,
+      status: true,
+      orderType: true,
+      parentOrderId: true,
+      createdAt: true,
+    },
   },
 });
 
@@ -444,6 +457,8 @@ describe('PatientService.getPatients (patients list)', () => {
                 id: 'o3',
                 orderCode: 'Sarah_Morgan_20261102',
                 status: OrderStatus.paid,
+                orderType: OrderType.initial,
+                parentOrderId: null,
                 createdAt: latestAt,
               },
             ],
@@ -483,6 +498,9 @@ describe('PatientService.getPatients (patients list)', () => {
           id: 'o3',
           orderCode: 'Sarah_Morgan_20261102',
           status: OrderStatus.paid,
+          orderType: OrderType.initial,
+          parentOrderId: null,
+          isCurrent: true,
           createdAt: latestAt,
         },
       });

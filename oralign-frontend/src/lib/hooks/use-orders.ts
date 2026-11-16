@@ -9,7 +9,12 @@ import {
   UseQueryResult,
 } from '@tanstack/react-query';
 import { toast } from '@/lib/toast';
-import { extractApiErrorMessage, toastMutationError, ordersService } from '@/lib/api';
+import {
+  extractApiError,
+  extractApiErrorMessage,
+  toastMutationError,
+  ordersService,
+} from '@/lib/api';
 import type { TreatmentFeeRow } from '@/lib/api/orders.service';
 import { isWelcomeGiftNothingDue } from '@/lib/api/welcome-gift.service';
 import { useT } from '@/lib/i18n/lang-context';
@@ -33,6 +38,42 @@ import {
 
 const ORDER_LIST_STALE_TIME = 15_000;
 const ORDER_DETAIL_STALE_TIME = 10_000;
+
+/**
+ * Root of the supplemental-request queries (`supplementalOrderKeys.all`).
+ * Spelled out rather than imported: that module imports `orderKeys` from
+ * here, and an order status change or delete must refresh both.
+ */
+const SUPPLEMENTAL_ORDERS_KEY = ['supplemental-orders'] as const;
+
+/**
+ * Refusals the generic order endpoints return for a supplemental child,
+ * or for a case that still has live ones. The backend words them in
+ * English on purpose; their copy lives with the supplemental feature.
+ */
+const SUPPLEMENTAL_FLOW_ERROR_CODES: ReadonlySet<string> = new Set([
+  'SUPPLEMENTAL_DEDICATED_FLOW',
+  'SUPPLEMENTAL_ACTIVE_CHILDREN',
+  'TREATMENT_FEE_INITIAL_ONLY',
+]);
+
+/** Same on-screen time `toastMutationError` gives a 409 explanation. */
+const REFUSAL_TOAST_MS = 9_000;
+
+type Translate = (path: string, vars?: Record<string, string | number>) => string;
+
+function toastOrderMutationError(t: Translate, error: unknown): void {
+  const { errorCode } = extractApiError(error);
+  if (errorCode && SUPPLEMENTAL_FLOW_ERROR_CODES.has(errorCode)) {
+    const key = `supplemental.errors.${errorCode}`;
+    const copy = t(key);
+    if (copy !== key) {
+      toast.error(copy, { duration: REFUSAL_TOAST_MS });
+      return;
+    }
+  }
+  toastMutationError(error);
+}
 
 function patchOrderInLists(
   queryClient: ReturnType<typeof useQueryClient>,
@@ -85,7 +126,7 @@ function syncOrderCaches(
  */
 function onTreatmentFeeError(
   queryClient: ReturnType<typeof useQueryClient>,
-  t: (path: string) => string,
+  t: Translate,
   error: unknown,
   orderId: string,
 ) {
@@ -94,7 +135,7 @@ function onTreatmentFeeError(
     toast.error(t('welcomeGift.errors.nothingDue'));
     return;
   }
-  toastMutationError(error);
+  toastOrderMutationError(t, error);
 }
 
 export const orderKeys = {
@@ -213,7 +254,7 @@ export function useUpdateOrder(): UseMutationResult<
       queryClient.invalidateQueries({ queryKey: orderKeys.history(variables.id) });
       toast.success(t('toasts.orders.updated'));
     },
-    onError: (error) => toastMutationError(error),
+    onError: (error) => toastOrderMutationError(t, error),
   });
 }
 
@@ -238,7 +279,7 @@ export function useSubmitOrder(): UseMutationResult<
       queryClient.invalidateQueries({ queryKey: welcomeGiftKeys.status() });
       toast.success(t('toasts.orders.submitted'));
     },
-    onError: (error) => toastMutationError(error),
+    onError: (error) => toastOrderMutationError(t, error),
   });
 }
 
@@ -319,7 +360,7 @@ export function useConfirmTreatmentFeePayment(): UseMutationResult<
       invalidatePaymentViews(queryClient);
       toast.success(t('toasts.orders.bankTransferConfirmed'));
     },
-    onError: (error) => toastMutationError(error),
+    onError: (error) => toastOrderMutationError(t, error),
   });
 }
 
@@ -404,6 +445,7 @@ export function useOverrideOrderStatus(): UseMutationResult<
       // shown next to those tabs stay accurate.
       queryClient.invalidateQueries({ queryKey: ['treatment-plans'] });
       queryClient.invalidateQueries({ queryKey: ['quotations'] });
+      queryClient.invalidateQueries({ queryKey: SUPPLEMENTAL_ORDERS_KEY });
       toast.success(t('toasts.orders.statusUpdated'));
     },
     onError: (error) => toastMutationError(error),
@@ -422,10 +464,11 @@ export function useDeleteOrder(): UseMutationResult<
     onSuccess: (_data, id) => {
       removeOrderFromLists(queryClient, id);
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: SUPPLEMENTAL_ORDERS_KEY });
       queryClient.removeQueries({ queryKey: orderKeys.detail(id) });
       toast.success(t('toasts.orders.deleted'));
     },
-    onError: (error) => toastMutationError(error),
+    onError: (error) => toastOrderMutationError(t, error),
   });
 }
 
@@ -469,7 +512,7 @@ export function useRestoreOrder(): UseMutationResult<
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
       toast.success(t('toasts.orders.restored'));
     },
-    onError: (error) => toastMutationError(error),
+    onError: (error) => toastOrderMutationError(t, error),
   });
 }
 
@@ -500,6 +543,7 @@ export function useBulkUpdateOrderStatus(): UseMutationResult<
       }
       queryClient.invalidateQueries({ queryKey: ['treatment-plans'] });
       queryClient.invalidateQueries({ queryKey: ['quotations'] });
+      queryClient.invalidateQueries({ queryKey: SUPPLEMENTAL_ORDERS_KEY });
       if (updated === 0) {
         toast.info(t('toasts.orders.bulkNoChange'));
       } else if (skipped > 0) {
@@ -543,7 +587,7 @@ export function useBulkDeleteOrders(): UseMutationResult<
         toast.success(t('toasts.orders.bulkDeleted', { count: deleted }));
       }
     },
-    onError: (error) => toastMutationError(error),
+    onError: (error) => toastOrderMutationError(t, error),
   });
 }
 
@@ -647,7 +691,7 @@ export function useUpdateToothInstructions(): UseMutationResult<
       queryClient.invalidateQueries({ queryKey: ['treatment-plans'] });
       toast.success(t('toasts.orders.odontogramSaved'));
     },
-    onError: (error) => toastMutationError(error),
+    onError: (error) => toastOrderMutationError(t, error),
   });
 }
 

@@ -12,6 +12,7 @@ import { treatmentPlansService } from '@/lib/api/treatment-plans.service';
 import { extractApiErrorMessage } from '@/lib/api/error';
 import { useT } from '@/lib/i18n/lang-context';
 import { orderKeys } from './use-orders';
+import { supplementalErrorMessage } from './use-supplemental-orders';
 import {
   TreatmentPlanStatus,
   type TreatmentAttachmentCategory,
@@ -93,7 +94,9 @@ export function useCreateTreatmentPlan(): UseMutationResult<
       invalidatePlan(queryClient, plan);
       toast.success(t('toasts.treatmentPlans.created', { name: plan.name }));
     },
-    onError: (err) => toast.error(extractApiErrorMessage(err)),
+    // A supplemental request may be refused by code (not quotable / no
+    // plan for its kind): show the translated reason.
+    onError: (err) => toast.error(supplementalErrorMessage(err, t)),
   });
 }
 

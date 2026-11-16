@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { Gender, OrderStatus } from '@prisma/client';
+import { Gender, OrderStatus, OrderType } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -287,6 +287,14 @@ export class PatientLatestOrderDto {
   orderCode!: string;
   @ApiProperty({ enum: OrderStatus })
   status!: OrderStatus;
+  @ApiProperty({ enum: OrderType })
+  orderType!: OrderType;
+  @ApiProperty({ required: false, nullable: true })
+  parentOrderId?: string | null;
+  @ApiProperty({
+    description: 'True while the newest order is still in an active workflow.',
+  })
+  isCurrent!: boolean;
   @ApiProperty()
   createdAt!: Date;
 }

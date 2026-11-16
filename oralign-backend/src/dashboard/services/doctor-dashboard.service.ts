@@ -8,6 +8,7 @@ import {
   QuotationPaymentStatus,
   QuotationStatus,
 } from '@prisma/client';
+import { INITIAL_ORDERS_ONLY } from '../../orders/order-kind';
 import { PrismaService } from '../../prisma/prisma.service';
 
 const CACHE_TTL_MS = 30_000; // 30 s — per-doctor, smaller blast radius
@@ -74,6 +75,10 @@ export class DoctorDashboardService {
     const dayStart = startOfDay(now);
     const monthStart = startOfMonth(now);
     const prevMonthStart = startOfMonth(subMonths(now, 1));
+    // Every ORDER count below counts cases: a supplemental request is part
+    // of its case, not a new one. Money (revenue, debt, payments) keeps
+    // the requests: what they cost is real (see orderFilter below).
+    const caseFilter = { doctorId, deletedAt: null, ...INITIAL_ORDERS_ONLY };
 
     const [
       ordersTotal,
@@ -87,34 +92,31 @@ export class DoctorDashboardService {
       patientsTotal,
       newPatientsThisMonth,
     ] = await this.prisma.$transaction([
-      this.prisma.dentalOrder.count({ where: { doctorId, deletedAt: null } }),
+      this.prisma.dentalOrder.count({ where: caseFilter }),
       this.prisma.dentalOrder.count({
-        where: { doctorId, deletedAt: null, createdAt: { gte: dayStart } },
+        where: { ...caseFilter, createdAt: { gte: dayStart } },
       }),
       this.prisma.dentalOrder.count({
-        where: { doctorId, deletedAt: null, createdAt: { gte: monthStart } },
+        where: { ...caseFilter, createdAt: { gte: monthStart } },
       }),
       this.prisma.dentalOrder.count({
         where: {
-          doctorId,
-          deletedAt: null,
+          ...caseFilter,
           createdAt: { gte: prevMonthStart, lt: monthStart },
         },
       }),
       this.prisma.dentalOrder.count({
         where: {
-          doctorId,
-          deletedAt: null,
+          ...caseFilter,
           status: { in: [OrderStatus.submitted, OrderStatus.under_review] },
         },
       }),
       this.prisma.dentalOrder.count({
-        where: { doctorId, deletedAt: null, status: OrderStatus.finished },
+        where: { ...caseFilter, status: OrderStatus.finished },
       }),
       this.prisma.dentalOrder.count({
         where: {
-          doctorId,
-          deletedAt: null,
+          ...caseFilter,
           status: {
             in: [
               OrderStatus.treatment_planning,
@@ -127,8 +129,7 @@ export class DoctorDashboardService {
       }),
       this.prisma.dentalOrder.count({
         where: {
-          doctorId,
-          deletedAt: null,
+          ...caseFilter,
           status: {
             in: [
               OrderStatus.quotation_sent,
@@ -171,8 +172,10 @@ export class DoctorDashboardService {
     // Draft / sent / rejected / canceled quotes have no committed
     // price → they must NOT appear in unpaid or outstanding.
     //
-    // Every counter uses the same `orderFilter` so cancelled/deleted
-    // orders are excluded consistently across all cards.
+    // The three ORDER counts use `caseFilter`, like the total, so the
+    // invariant holds; the money aggregates and the payment counts use
+    // `orderFilter` (supplemental requests included). Both exclude
+    // archived orders consistently across all cards.
     const orderFilter = { doctorId, deletedAt: null };
     const QUALIFYING_QUOTE = {
       deletedAt: null,
@@ -183,7 +186,7 @@ export class DoctorDashboardService {
       await this.prisma.$transaction([
         this.prisma.dentalOrder.count({
           where: {
-            ...orderFilter,
+            ...caseFilter,
             quotation: {
               ...QUALIFYING_QUOTE,
               paymentStatus: QuotationPaymentStatus.paid,
@@ -192,7 +195,7 @@ export class DoctorDashboardService {
         }),
         this.prisma.dentalOrder.count({
           where: {
-            ...orderFilter,
+            ...caseFilter,
             quotation: {
               ...QUALIFYING_QUOTE,
               paymentStatus: {
@@ -206,7 +209,7 @@ export class DoctorDashboardService {
         }),
         this.prisma.dentalOrder.count({
           where: {
-            ...orderFilter,
+            ...caseFilter,
             // "Order isn't a committed debt yet" — funnels everything
             // that doesn't qualify as paid OR unpaid:
             //   • No quotation row at all (DRAFT order)
@@ -245,11 +248,11 @@ export class DoctorDashboardService {
     }
 
     // Revenue + outstanding still come from quotation aggregates
-    // because they need the price/paid columns. Same `orderFilter`
-    // + same QUALIFYING_QUOTE filter so the money sums and the
-    // counts above stay in lockstep — a quotation that doesn't
-    // qualify as paid/unpaid above cannot inflate revenue or
-    // outstanding here either.
+    // because they need the price/paid columns. Same QUALIFYING_QUOTE
+    // filter as the counts above, so a quotation that doesn't qualify
+    // as paid/unpaid there cannot inflate revenue or outstanding here
+    // either. `orderFilter`, not `caseFilter`: a chargeable
+    // supplemental request's quote is real money.
     const [paidAgg, unpaidAgg, allAgg] = await this.prisma.$transaction([
       this.prisma.quotation.aggregate({
         _count: { _all: true },
@@ -394,8 +397,7 @@ export class DoctorDashboardService {
       if (max && !latestPaidWithPack.pack?.isUnlimitedSteps) {
         const used = await this.prisma.dentalOrder.count({
           where: {
-            doctorId,
-            deletedAt: null,
+            ...caseFilter,
             createdAt: { gte: latestPaidWithPack.approvedAt },
           },
         });

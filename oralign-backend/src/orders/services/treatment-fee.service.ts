@@ -29,6 +29,7 @@ import {
 import { OrderService } from './order.service';
 import { OrderAuditService } from './order-audit.service';
 import { treatmentFeeOrderBy, treatmentFeeWhere } from './treatment-fee-query';
+import { assertTreatmentFeeApplies } from '../order-kind';
 import {
   mapOrderToDto,
   orderInclude,
@@ -86,6 +87,7 @@ export class TreatmentFeeService {
       );
     }
     const current = await this.orders.findAccessibleOrder(id, caller);
+    assertTreatmentFeeApplies(current);
 
     if (current.treatmentFeePaidAt) {
       return mapOrderToDto(current);
@@ -192,6 +194,7 @@ export class TreatmentFeeService {
   ): Promise<OrderResponseDto> {
     this.orders.ensureCanCreateOrModify(caller);
     const current = await this.orders.findAccessibleOrder(id, caller);
+    assertTreatmentFeeApplies(current);
     if (current.treatmentFeePaidAt) {
       throw new BadRequestException(
         'Treatment fee is already paid — receipt upload not allowed.',
@@ -346,6 +349,7 @@ export class TreatmentFeeService {
       );
     }
     const current = await this.orders.findAccessibleOrder(id, caller);
+    assertTreatmentFeeApplies(current);
     if (current.treatmentFeePaidAt) {
       return mapOrderToDto(current);
     }

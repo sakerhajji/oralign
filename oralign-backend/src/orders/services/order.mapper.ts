@@ -80,6 +80,8 @@ export function mapOrderToDto(order: OrderWithRelations): OrderResponseDto {
     patientId: order.patientId,
     assignedDesignerId: order.assignedDesignerId ?? undefined,
     status: order.status,
+    orderType: order.orderType,
+    parentOrderId: order.parentOrderId ?? undefined,
     patientStage: order.patientStage ?? undefined,
     chiefComplaint: order.chiefComplaint ?? undefined,
     archTreatment: order.archTreatment ?? undefined,
@@ -134,6 +136,8 @@ export function mapOrderToDto(order: OrderWithRelations): OrderResponseDto {
     createdAt: order.createdAt,
     updatedAt: order.updatedAt,
     submittedAt: order.submittedAt ?? undefined,
+    coverageStartedAt: order.coverageStartedAt ?? undefined,
+    coverageExpiresAt: order.coverageExpiresAt ?? undefined,
     treatmentFeePaidAt: order.treatmentFeePaidAt ?? undefined,
     // Decimal → Number at the DTO boundary so the frontend can format
     // it with the rest of the money fields without a Decimal lib.

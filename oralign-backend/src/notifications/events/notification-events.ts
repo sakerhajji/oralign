@@ -16,7 +16,12 @@
  * wildcards later (`payment.*`).
  */
 
-import type { PaymentMethod, UserRole } from '@prisma/client';
+import type {
+  OrderType,
+  PaymentMethod,
+  SupplementalCoverageStatus,
+  UserRole,
+} from '@prisma/client';
 
 export const NotificationEvents = {
   UserRegistered: 'user.registered',
@@ -30,6 +35,10 @@ export const NotificationEvents = {
   OrderCreated: 'order.created',
   OrderSubmitted: 'order.submitted',
   OrderStatusChanged: 'order.statusChanged',
+  /** A doctor (or an admin) submitted a supplemental request — admins review it. */
+  SupplementalOrderSubmitted: 'supplementalOrder.submitted',
+  /** An admin approved or rejected a supplemental request — the doctor hears. */
+  SupplementalOrderReviewed: 'supplementalOrder.reviewed',
   TreatmentPlanReady: 'treatmentPlan.ready',
   TreatmentPlanUpdated: 'treatmentPlan.updated',
   /** Doctor approved the treatment plan — fans out to the admin team. */
@@ -107,6 +116,19 @@ export interface OrderEvent {
 export interface OrderStatusChangedEvent extends OrderEvent {
   previousStatus: string;
   nextStatus: string;
+}
+
+export interface SupplementalOrderEvent extends OrderEvent {
+  /** The initial case the request belongs to. */
+  parentOrderId: string;
+  requestType: Exclude<OrderType, 'initial'>;
+}
+
+export interface SupplementalOrderReviewedEvent extends SupplementalOrderEvent {
+  decision: 'approved' | 'rejected';
+  coverageStatus: SupplementalCoverageStatus;
+  /** The admin's reason (always set on a rejection). */
+  reason: string | null;
 }
 
 export interface TreatmentPlanEvent {

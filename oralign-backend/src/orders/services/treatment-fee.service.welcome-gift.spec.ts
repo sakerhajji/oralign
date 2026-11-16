@@ -1,4 +1,5 @@
 import {
+  OrderType,
   PaymentMethod,
   PaymentRecordStatus,
   Prisma,
@@ -35,6 +36,7 @@ const order = (over: Record<string, unknown> = {}) => ({
   treatmentFeeAmount: null,
   cbctFeeAmount: new Prisma.Decimal('50.000'),
   welcomeGiftAppliedAt: null,
+  orderType: OrderType.initial,
   doctor: { fullName: 'Dr Test' },
   patient: { fullName: 'Patient' },
   ...over,
@@ -121,5 +123,57 @@ describe('TreatmentFeeService — welcome-gift orders have nothing to pay', () =
       treatmentFeePaymentStatus: PaymentRecordStatus.success,
       treatmentFeeAmount: 350,
     });
+  });
+});
+
+describe('TreatmentFeeService — supplemental requests carry no treatment fee', () => {
+  const child = () => order({ orderType: OrderType.warranty });
+  const initialOnly = {
+    statusCode: 400,
+    errorCode: 'TREATMENT_FEE_INITIAL_ONLY',
+  };
+
+  it.each([
+    ['cash recorded by an admin', PaymentMethod.cash, admin],
+    [
+      'a bank transfer declared by the doctor',
+      PaymentMethod.bank_transfer,
+      doctor,
+    ],
+  ])('refuses %s', async (_l, method, caller) => {
+    const { service, prisma } = makeService(child());
+
+    await expect(
+      service.payTreatmentFee('o-1', method, caller),
+    ).rejects.toMatchObject(initialOnly);
+    expect(prisma.companyBillingSettings.findFirst).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('refuses a bank-transfer receipt upload', async () => {
+    const { service, prisma } = makeService(child());
+
+    await expect(
+      service.uploadTreatmentFeeProof(
+        'o-1',
+        '/uploads/treatment-fee-proofs/x.pdf',
+        doctor,
+      ),
+    ).rejects.toMatchObject(initialOnly);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('refuses an admin confirmation (mark paid)', async () => {
+    const { service, prisma } = makeService(
+      order({
+        orderType: OrderType.replacement,
+        treatmentFeePaymentStatus: PaymentRecordStatus.awaiting_confirmation,
+      }),
+    );
+
+    await expect(
+      service.confirmTreatmentFeePayment('o-1', admin),
+    ).rejects.toMatchObject(initialOnly);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 });

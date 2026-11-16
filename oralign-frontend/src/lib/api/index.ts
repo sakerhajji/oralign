@@ -11,6 +11,7 @@ export { dentistProfileService } from './dentist-profile.service';
 export { workingHoursService } from './working-hours.service';
 export { patientsService } from './patients.service';
 export { ordersService } from './orders.service';
+export { supplementalOrdersService } from './supplemental-orders.service';
 export { packsService } from './packs.service';
 export { quotationPaymentPlanService } from './quotation-payment-plan.service';
 export { paymentsService } from './payments.service';

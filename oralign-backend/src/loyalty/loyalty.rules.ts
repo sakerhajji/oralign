@@ -1,4 +1,4 @@
-import { OrderStatus, Prisma } from '@prisma/client';
+import { OrderStatus, OrderType, Prisma } from '@prisma/client';
 import type { QuarterRef } from './loyalty.types';
 import { quarterPeriod } from './loyalty.types';
 
@@ -7,9 +7,18 @@ export interface LoyaltyTierRule {
   discountPercent: number;
 }
 
+/**
+ * The only order kind that counts as a treatment. Supplemental requests
+ * (refinements, replacements, transfer templates, warranty claims) belong
+ * to a case that already counted; letting them count would grant tiers
+ * on free warranty work and lost-aligner replacements.
+ */
+export const LOYALTY_COUNTED_ORDER_TYPE = OrderType.initial;
+
 export interface LoyaltyOrderCandidate {
   id: string;
   doctorId: string;
+  orderType: OrderType;
   status: OrderStatus;
   createdAt: Date;
   deletedAt: Date | null;
@@ -46,7 +55,8 @@ export function hasAppliedLoyaltyDiscount(
 /**
  * Completion determines eligibility; the immutable order creation date
  * determines the source quarter. This deliberately ignores treatment-plan
- * and pack cardinality, so one order can contribute at most one unit.
+ * and pack cardinality, so one order can contribute at most one unit, and
+ * only an initial case counts (LOYALTY_COUNTED_ORDER_TYPE).
  */
 export function classifyOrderForQuarter(
   order: LoyaltyOrderCandidate,
@@ -54,6 +64,7 @@ export function classifyOrderForQuarter(
 ): LoyaltyOrderClassification {
   const { start, end } = quarterPeriod(ref);
   if (
+    order.orderType !== LOYALTY_COUNTED_ORDER_TYPE ||
     order.deletedAt !== null ||
     order.status !== OrderStatus.finished ||
     order.createdAt < start ||

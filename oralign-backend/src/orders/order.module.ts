@@ -11,6 +11,11 @@ import { UploadCleanupService } from './services/upload-cleanup.service';
 import { OrderAuditService } from './services/order-audit.service';
 import { WelcomeGiftService } from './services/welcome-gift.service';
 import { WelcomeGiftController } from './controllers/welcome-gift.controller';
+import { SupplementalOrderController } from './controllers/supplemental-order.controller';
+import { SupplementalAudit } from './supplemental/supplemental-audit';
+import { SupplementalClock } from './supplemental/supplemental-clock';
+import { SupplementalOrderService } from './supplemental/supplemental-order.service';
+import { SupplementalReviewService } from './supplemental/supplemental-review.service';
 // UploadCleanupService is the app's single retention scheduler; the
 // support-trash sweep itself lives in SupportService (which owns that
 // model and the /uploads/support layout). SupportModule imports only
@@ -19,7 +24,11 @@ import { SupportModule } from '../support/support.module';
 
 @Module({
   imports: [PrismaModule, SupportModule],
-  controllers: [OrderController, WelcomeGiftController],
+  controllers: [
+    OrderController,
+    WelcomeGiftController,
+    SupplementalOrderController,
+  ],
   providers: [
     // Order domain, one concern per service (see each file's header):
     //   OrderService        - lifecycle: create / submit / status / bulk / odontogram + access guards
@@ -27,6 +36,9 @@ import { SupportModule } from '../support/support.module';
     //   OrderExportService  - streaming lab ZIP + order-sheet PDF
     //   TreatmentFeeService - the flat treatment fee (pay / proof / confirm / admin lists)
     //   WelcomeGiftService  - once-per-doctor gift: banner status + waiver applied on submit
+    //   SupplementalOrderService  - supplemental requests: eligibility, draft, submit
+    //   SupplementalReviewService - admin review + rejected warranty → paid replacement
+    //   (pure rules of both live next to them in ./supplemental)
     OrderService,
     OrderAuditService,
     WelcomeGiftService,
@@ -36,12 +48,18 @@ import { SupportModule } from '../support/support.module';
     OrderPdfService,
     ChunkedUploadService,
     UploadCleanupService,
+    SupplementalOrderService,
+    SupplementalReviewService,
+    SupplementalAudit,
+    SupplementalClock,
   ],
   exports: [
     OrderService,
     OrderFilesService,
     TreatmentFeeService,
     OrderAuditService,
+    SupplementalOrderService,
+    SupplementalReviewService,
   ],
 })
 export class OrderModule {}

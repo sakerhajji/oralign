@@ -1,17 +1,26 @@
 import { Logger } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
+import {
+  OrderType,
+  SupplementalCoverageStatus,
+  UserRole,
+} from '@prisma/client';
 import type { OrderNotificationService } from '../../mail/order-notification.service';
 import type { NotificationsService } from '../services/notifications.service';
 import { NotificationsListener } from './notifications.listener';
 
 function makeListener() {
   type BroadcastArgs = Parameters<NotificationsService['broadcastToAdmins']>[0];
+  type CreateArgs = Parameters<NotificationsService['create']>[0];
   const broadcastToAdmins = jest
     .fn<Promise<number>, [BroadcastArgs]>()
     .mockResolvedValue(1);
+  const create = jest
+    .fn<Promise<unknown>, [CreateArgs]>()
+    .mockResolvedValue({});
   const notifyDentistPendingApproval = jest.fn().mockResolvedValue(undefined);
   const notifications = {
     broadcastToAdmins,
+    create,
   } as unknown as NotificationsService;
   const orderNotifications = {
     notifyDentistPendingApproval,
@@ -20,6 +29,7 @@ function makeListener() {
   return {
     listener: new NotificationsListener(notifications, orderNotifications),
     broadcastToAdmins,
+    create,
     notifyDentistPendingApproval,
   };
 }
@@ -61,5 +71,61 @@ describe('NotificationsListener user registration', () => {
     await expect(listener.onUserRegistered(payload)).resolves.toBeUndefined();
     expect(broadcastToAdmins).toHaveBeenCalledTimes(1);
     logError.mockRestore();
+  });
+});
+
+describe('NotificationsListener supplemental requests', () => {
+  const request = {
+    orderId: 'child-1',
+    orderCode: 'CASE-001-WAR-01',
+    parentOrderId: 'parent-1',
+    requestType: OrderType.warranty,
+    doctorId: 'u-doc',
+    doctorName: 'Amine',
+    patientName: 'Sarah Morgan',
+  } as const;
+
+  it('asks the admins to review a submitted request, named in both languages', async () => {
+    const { listener, broadcastToAdmins } = makeListener();
+
+    await listener.onSupplementalOrderSubmitted(request);
+
+    const [notification] = broadcastToAdmins.mock.calls[0];
+    expect(notification.link).toBe('/dashboard/orders/child-1');
+    expect(notification.title).toEqual({
+      en: 'Supplemental request to review: warranty claim',
+      fr: 'Demande complémentaire à examiner : demande de garantie',
+    });
+    expect(notification.metadata).toEqual({
+      orderId: 'child-1',
+      parentOrderId: 'parent-1',
+      requestType: OrderType.warranty,
+    });
+  });
+
+  it('tells the owning doctor about a decision, with the reason', async () => {
+    const { listener, create } = makeListener();
+
+    await listener.onSupplementalOrderReviewed({
+      ...request,
+      decision: 'rejected',
+      coverageStatus: SupplementalCoverageStatus.warranty_rejected,
+      reason: 'Wear, not a defect',
+    });
+
+    const [notification] = create.mock.calls[0];
+    expect(notification.recipientId).toBe('u-doc');
+    expect(notification.title).toEqual({
+      en: 'Supplemental request declined: warranty claim',
+      fr: 'Demande complémentaire refusée : demande de garantie',
+    });
+    expect(notification.message).toEqual({
+      en: 'patient Sarah Morgan · CASE-001-WAR-01 · Wear, not a defect',
+      fr: 'patient Sarah Morgan · CASE-001-WAR-01 · Wear, not a defect',
+    });
+    expect(notification.metadata).toMatchObject({
+      decision: 'rejected',
+      coverageStatus: SupplementalCoverageStatus.warranty_rejected,
+    });
   });
 });

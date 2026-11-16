@@ -37,6 +37,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { OrderStatusBadge } from '@/components/orders/order-status-badge';
+import { OrderKindBadge } from './order-kind-badge';
 import {
   OrderPatientCell,
   OrderReviewBadge,
@@ -44,8 +45,10 @@ import {
 import { useOrderPrefetch, useOrders } from '@/lib/hooks';
 import { useT } from '@/lib/i18n/lang-context';
 import {
+  buildOrderEditHref,
   buildOrderNavigationHref,
   handleOrderNavigation,
+  hasOrderEditor,
 } from '@/lib/orders/order-navigation';
 import {
   type DentalOrder,
@@ -602,8 +605,11 @@ export function DoctorLatestOrders() {
                             emptyContactLabel={t('dashboard.orders.noContact')}
                           />
                         </TableCell>
-                        <TableCell className="font-mono text-sm font-medium text-foreground">
-                          {order.orderCode}
+                        <TableCell>
+                          <span className="block font-mono text-sm font-medium text-foreground">
+                            {order.orderCode}
+                          </span>
+                          <OrderKindBadge order={order} className="mt-1" />
                         </TableCell>
                         <TableCell>
                           <span className="block max-w-[190px] truncate text-sm font-medium">
@@ -639,13 +645,15 @@ export function DoctorLatestOrders() {
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-3">
-                            <Link
-                              href={`/dashboard/orders/${order.id}/edit`}
-                              className="text-xs font-medium text-muted-foreground transition hover:text-foreground"
-                              onClick={(event) => event.stopPropagation()}
-                            >
-                              {t('dashboard.orders.editShort')}
-                            </Link>
+                            {hasOrderEditor(order) ? (
+                              <Link
+                                href={buildOrderEditHref(order)}
+                                className="text-xs font-medium text-muted-foreground transition hover:text-foreground"
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                {t('dashboard.orders.editShort')}
+                              </Link>
+                            ) : null}
                             <Link
                               href={buildOrderNavigationHref(order, {
                                 returnTo,
@@ -809,6 +817,7 @@ function OrderCard({
           <span className="font-mono font-semibold text-foreground">
             {order.orderCode}
           </span>
+          <OrderKindBadge order={order} />
           <span aria-hidden="true">•</span>
           <span className="font-medium text-foreground">
             {t('dashboard.orders.created', {

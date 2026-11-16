@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import type { QuarterRef } from '../loyalty.types';
 import { quarterPeriod } from '../loyalty.types';
 import {
+  LOYALTY_COUNTED_ORDER_TYPE,
   type LoyaltyDoctorMetrics,
   summarizeOrdersForQuarter,
 } from '../loyalty.rules';
@@ -21,11 +22,13 @@ export class LoyaltyEligibilityService {
       where: {
         createdAt: { gte: start, lt: end },
         status: OrderStatus.finished,
+        orderType: LOYALTY_COUNTED_ORDER_TYPE,
         deletedAt: null,
       },
       select: {
         id: true,
         doctorId: true,
+        orderType: true,
         status: true,
         createdAt: true,
         deletedAt: true,

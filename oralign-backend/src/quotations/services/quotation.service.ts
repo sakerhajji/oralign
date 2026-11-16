@@ -30,6 +30,11 @@ import { NotificationEvents } from '../../notifications/events/notification-even
 import { isAdmin, type Caller } from '../../common/access/caller';
 import { lookupActorName } from '../../common/access/actor-snapshot';
 import { assertNoDependents } from '../../common/deletion/deletion-blocked';
+import {
+  isQuotable,
+  QUOTABLE_ORDER_SELECT,
+  QUOTATION_ELIGIBILITY_ERROR,
+} from '../quotation-eligibility';
 
 /** Round to 3 decimal places — TND is 3-decimal officially. */
 const round = (n: number): number =>
@@ -79,6 +84,25 @@ export class QuotationService {
   private assertOrderReadable(orderId: string, caller: Caller) {
     // Delegates to the single shared rule (common/access/order-access.policy).
     return this.orderAccess.requireReadable(orderId, caller);
+  }
+
+  /**
+   * 400 SUPPLEMENTAL_NOT_QUOTABLE for a supplemental request that is not
+   * approved as chargeable (see quotation-eligibility.ts). No treatment
+   * plan is required: a chargeable child is quoted with or without one.
+   */
+  private async assertQuotable(orderId: string): Promise<void> {
+    const order = await this.prisma.dentalOrder.findUnique({
+      where: { id: orderId },
+      select: QUOTABLE_ORDER_SELECT,
+    });
+    if (!order) throw new NotFoundException('Order not found');
+    if (!isQuotable(order)) {
+      throw new BadRequestException(
+        'Only a supplemental request approved as chargeable can be quoted.',
+        QUOTATION_ELIGIBILITY_ERROR.SUPPLEMENTAL_NOT_QUOTABLE,
+      );
+    }
   }
 
   /**
@@ -271,6 +295,7 @@ export class QuotationService {
             finishingIncludedLabel: true,
             maxStepsPerArch: true,
             includedCorrections: true,
+            treatmentValidityMonths: true,
             isUnlimitedSteps: true,
             isUnlimitedCorrections: true,
           },
@@ -309,6 +334,7 @@ export class QuotationService {
       throw new ForbiddenException('Only admins can create a quotation.');
     }
     await this.assertOrderReadable(orderId, caller);
+    await this.assertQuotable(orderId);
 
     const existing = await this.prisma.quotation.findUnique({
       where: { orderId },

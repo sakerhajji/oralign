@@ -63,6 +63,12 @@ import { QuoteStep } from './quote-step';
 interface Props {
   orderId: string;
   role: UserRole;
+  /**
+   * Whether an admin may start a quote here (default true). False for a
+   * supplemental request that is free (included, warranty): the backend
+   * refuses to quote it, so the form is not offered.
+   */
+  canCreate?: boolean;
 }
 
 const STATUS_TONE: Record<QuotationStatus, string> = {
@@ -95,7 +101,7 @@ const LANGUAGES = [DevisLanguage.FR, DevisLanguage.EN, DevisLanguage.AR];
 // Entry point
 // ─────────────────────────────────────────────────────────────────────────
 
-export function QuoteReview({ orderId, role }: Props) {
+export function QuoteReview({ orderId, role, canCreate = true }: Props) {
   const { t } = useT();
   const isAdmin = role === UserRole.ADMIN || role === UserRole.SUPER_ADMIN;
   const isDoctor = role === UserRole.DENTIST;
@@ -120,7 +126,7 @@ export function QuoteReview({ orderId, role }: Props) {
     );
   }
 
-  if (!quote && isAdmin) {
+  if (!quote && isAdmin && canCreate) {
     return (
       <AdminCreate
         orderId={orderId}

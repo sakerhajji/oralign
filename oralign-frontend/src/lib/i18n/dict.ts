@@ -46,6 +46,7 @@ import { settingsDeskDomainDict } from './dict.settings-desk-domain';
 import { patientDeskDomainDict } from './dict.patient-desk-domain';
 import { listUiDomainDict } from './dict.list-ui-domain';
 import { paymentsDeskDomainDict } from './dict.payments-desk-domain';
+import { supplementalOrdersDomainDict } from './dict.supplemental-orders-domain';
 
 export const dict = {
   ...chromeDomainDict,
@@ -58,6 +59,7 @@ export const dict = {
   ...patientDeskDomainDict,
   ...listUiDomainDict,
   ...paymentsDeskDomainDict,
+  ...supplementalOrdersDomainDict,
 
   // ─── Generic / cross-cutting ────────────────────────────────────
   common: {
@@ -456,6 +458,53 @@ export const dict = {
           fr: 'Chargement du schéma dentaire…',
         } as T,
         saving: { en: 'Saving…', fr: 'Enregistrement…' } as T,
+        clear: { en: 'Clear', fr: 'Effacer' } as T,
+        // Colour picker opened on a tooth when several colours are on offer.
+        popover: {
+          tooth: { en: 'Tooth', fr: 'Dent' } as T,
+          pickAria: {
+            en: 'Pick instruction color for tooth {n}',
+            fr: 'Choisir une instruction pour la dent {n}',
+          } as T,
+        },
+        // Between-teeth contact layer (IPR, residual spaces…): the slots
+        // between two teeth and the popover that edits one contact.
+        contact: {
+          title: { en: 'Contact {from}–{to}', fr: 'Contact {from}–{to}' } as T,
+          defaultUnit: { en: 'IPR (mm)', fr: 'IPR (mm)' } as T,
+          amountValue: { en: '{unit}: {value}', fr: '{unit} : {value}' } as T,
+          step: { en: 'STEP', fr: 'STEP' } as T,
+          stepValue: { en: 'STEP {note}', fr: 'STEP {note}' } as T,
+          stepPlaceholder: { en: 'e.g. 10', fr: 'ex. 10' } as T,
+          add: { en: 'Add {unit} · {contact}', fr: 'Ajouter {unit} · {contact}' } as T,
+          edit: {
+            en: 'Edit {values} · {contact}',
+            fr: 'Modifier {values} · {contact}',
+          } as T,
+          save: { en: 'Save', fr: 'Enregistrer' } as T,
+        },
+        legend: {
+          toothMarks: { en: 'Tooth-level marks', fr: 'Marques par dent' } as T,
+          fromOrder: {
+            en: 'From the order (read-only)',
+            fr: 'Issues de la commande (lecture seule)',
+          } as T,
+          orderBadge: { en: 'Order', fr: 'Commande' } as T,
+          noTeeth: { en: 'No teeth assigned', fr: 'Aucune dent' } as T,
+          betweenTeeth: { en: 'Between teeth', fr: 'Entre les dents' } as T,
+          betweenTeethWithStep: {
+            en: 'Between-teeth (IPR · step)',
+            fr: 'Entre les dents (IPR · step)',
+          } as T,
+          iprAmount: { en: 'IPR amount (mm)', fr: 'Quantité d’IPR (mm)' } as T,
+          step: {
+            en: 'Step / treatment growth',
+            fr: 'Step / progression du traitement',
+          } as T,
+          contactsNone: { en: 'No contacts set', fr: 'Aucun contact' } as T,
+          contactsOne: { en: '{count} contact', fr: '{count} contact' } as T,
+          contactsMany: { en: '{count} contacts', fr: '{count} contacts' } as T,
+        },
       },
 
       // ── Image-edit dialog (crop / rotate / flip) ────────────────
@@ -883,6 +932,19 @@ export const dict = {
     deletePermanently: { en: 'Delete permanently', fr: 'Suppression définitive' } as T,
     restore: { en: 'Restore', fr: 'Restaurer' } as T,
     editOrder: { en: 'Edit order', fr: 'Modifier la commande' } as T,
+    // A supplemental child opened without a returnTo goes back to its case.
+    backToParentCase: {
+      en: 'Back to the initial case',
+      fr: 'Retour au dossier initial',
+    } as T,
+    deleteSupplementalTitle: {
+      en: 'Delete this request draft?',
+      fr: 'Supprimer ce brouillon de demande ?',
+    } as T,
+    deleteSupplementalDescription: {
+      en: 'The draft is removed from the case. The initial order is not changed.',
+      fr: 'Le brouillon est retiré du dossier. La commande initiale n’est pas modifiée.',
+    } as T,
 
     // Admin / designer bulk export — one ZIP of every order file + data
     // Fiche de commande seule (PDF) — visible aussi par le dentiste.
@@ -1059,6 +1121,53 @@ export const dict = {
           en: "Welcome gift applied",
           fr: "Cadeau de bienvenue appliqué",
         } as T,
+        // Supplemental requests: `supplemental_*` on the request itself,
+        // `supplemental_child_*` on the case it belongs to.
+        supplemental_created: {
+          en: "Supplemental request created",
+          fr: "Demande complémentaire créée",
+        } as T,
+        supplemental_child_created: {
+          en: "Supplemental request opened for this case",
+          fr: "Demande complémentaire ouverte pour ce dossier",
+        } as T,
+        supplemental_draft_updated: {
+          en: "Request draft updated",
+          fr: "Brouillon de la demande modifié",
+        } as T,
+        supplemental_draft_archived: {
+          en: "Request draft deleted",
+          fr: "Brouillon de la demande supprimé",
+        } as T,
+        supplemental_child_archived: {
+          en: "Supplemental request draft deleted",
+          fr: "Brouillon de demande complémentaire supprimé",
+        } as T,
+        supplemental_submitted: {
+          en: "Supplemental request sent",
+          fr: "Demande complémentaire envoyée",
+        } as T,
+        supplemental_child_submitted: {
+          en: "Supplemental request sent for this case",
+          fr: "Demande complémentaire envoyée pour ce dossier",
+        } as T,
+        supplemental_reviewed: {
+          en: "Supplemental request reviewed",
+          fr: "Demande complémentaire examinée",
+        } as T,
+        supplemental_child_reviewed: {
+          en: "Supplemental request reviewed for this case",
+          fr: "Demande complémentaire examinée pour ce dossier",
+        } as T,
+        supplemental_converted: {
+          en: "Rejected warranty turned into a paid replacement",
+          fr: "Garantie refusée transformée en remplacement payant",
+        } as T,
+        // Any other supplemental action the backend logs.
+        supplemental_other: {
+          en: "Supplemental request updated",
+          fr: "Demande complémentaire mise à jour",
+        } as T,
       },
       fields: {
         status: { en: "Status", fr: "Statut" } as T,
@@ -1082,6 +1191,83 @@ export const dict = {
           en: "Fee status",
           fr: "Statut des honoraires",
         } as T,
+        // Supplemental request answers (draft diff and review).
+        reviewStatus: { en: "Request status", fr: "Statut de la demande" } as T,
+        coverageStatus: { en: "Coverage", fr: "Prise en charge" } as T,
+        reviewReason: { en: "Decision reason", fr: "Motif de la décision" } as T,
+        correctionNumber: { en: "Correction no.", fr: "Correction n°" } as T,
+        reason: { en: "Reason for the request", fr: "Motif de la demande" } as T,
+        reasonDetails: { en: "Reason details", fr: "Précisions sur le motif" } as T,
+        currentUpperAligner: {
+          en: "Current upper aligner",
+          fr: "Aligneur supérieur actuel",
+        } as T,
+        currentLowerAligner: {
+          en: "Current lower aligner",
+          fr: "Aligneur inférieur actuel",
+        } as T,
+        passiveOppositeArch: {
+          en: "Passive aligners on the opposite arch",
+          fr: "Aligneurs passifs sur l’arcade opposée",
+        } as T,
+        newUpperScan: { en: "New upper scan", fr: "Nouveau scan maxillaire" } as T,
+        newLowerScan: { en: "New lower scan", fr: "Nouveau scan mandibulaire" } as T,
+        clinicalObjective: { en: "Clinical objective", fr: "Objectif clinique" } as T,
+        movementRestriction: {
+          en: "Teeth not to move",
+          fr: "Dents à ne pas déplacer",
+        } as T,
+        apRelationshipRight: {
+          en: "A-P relationship, right",
+          fr: "Relation antéro-postérieure droite",
+        } as T,
+        apRelationshipLeft: {
+          en: "A-P relationship, left",
+          fr: "Relation antéro-postérieure gauche",
+        } as T,
+        apOptions: { en: "A-P options", fr: "Options antéro-postérieures" } as T,
+        elasticCutouts: { en: "Cutouts for elastics", fr: "Découpes pour élastiques" } as T,
+        attachmentPolicy: { en: "Attachments", fr: "Taquets" } as T,
+        existingAttachmentPolicy: {
+          en: "Existing attachments",
+          fr: "Taquets existants",
+        } as T,
+        iprPolicy: { en: "IPR plan", fr: "Plan de RIP" } as T,
+        previousIpr: { en: "IPR already performed", fr: "RIP déjà réalisée" } as T,
+        precisionCutPolicy: { en: "Cutouts", fr: "Découpes" } as T,
+        residualSpacePolicy: { en: "Residual spaces", fr: "Espaces résiduels" } as T,
+        impressionMethod: { en: "Impressions", fr: "Empreintes" } as T,
+        upperInstructions: {
+          en: "Upper arch instructions",
+          fr: "Consignes maxillaires",
+        } as T,
+        lowerInstructions: {
+          en: "Lower arch instructions",
+          fr: "Consignes mandibulaires",
+        } as T,
+        teeth: { en: "Selected teeth", fr: "Dents sélectionnées" } as T,
+        contacts: { en: "Contacts", fr: "Contacts" } as T,
+        replacementFromAligner: { en: "From aligner", fr: "De l’aligneur" } as T,
+        replacementToAligner: { en: "To aligner", fr: "À l’aligneur" } as T,
+        quantity: { en: "Quantity", fr: "Quantité" } as T,
+        replacementReason: {
+          en: "Replacement reason",
+          fr: "Motif du remplacement",
+        } as T,
+        urgency: { en: "Urgency", fr: "Urgence" } as T,
+        sourceTreatmentPlanId: {
+          en: "Source treatment plan",
+          fr: "Plan de traitement source",
+        } as T,
+        transferPurpose: { en: "Tray purpose", fr: "Usage de la gouttière" } as T,
+        transferNotes: { en: "Tray notes", fr: "Notes sur la gouttière" } as T,
+        warrantyDefectCategory: { en: "Defect", fr: "Défaut" } as T,
+        warrantyDiscoveredAt: {
+          en: "Defect noticed on",
+          fr: "Défaut constaté le",
+        } as T,
+        warrantyLotReference: { en: "Lot reference", fr: "Référence du lot" } as T,
+        warrantyComments: { en: "Warranty comments", fr: "Commentaires garantie" } as T,
       },
       details: {
         planVersion: { en: "Plan version", fr: "Version du plan" } as T,
@@ -1095,6 +1281,11 @@ export const dict = {
         fileCount: { en: "Files", fr: "Fichiers" } as T,
         instructionCount: { en: "Instructions", fr: "Instructions" } as T,
         fileName: { en: "File", fr: "Fichier" } as T,
+        requestType: { en: "Request type", fr: "Type de demande" } as T,
+        decision: { en: "Decision", fr: "Décision" } as T,
+        coverageStatus: { en: "Coverage", fr: "Prise en charge" } as T,
+        correctionNumber: { en: "Correction no.", fr: "Correction n°" } as T,
+        childOrder: { en: "Related order", fr: "Commande associée" } as T,
       },
     },
 
@@ -1885,6 +2076,11 @@ export const dict = {
     // Row actions menu
     deletedSuffix: { en: '· deleted', fr: '· supprimée' } as T,
     viewOrder: { en: 'View order', fr: 'Voir la commande' } as T,
+    supplementalRequests: {
+      en: 'Supplemental requests',
+      fr: 'Demandes complémentaires',
+    } as T,
+    openParentCase: { en: 'Open the initial case', fr: 'Ouvrir le dossier initial' } as T,
     editShort: { en: 'Edit', fr: 'Modifier' } as T,
     detailShort: { en: 'Detail', fr: 'Détail' } as T,
     editOrder: { en: 'Edit order', fr: 'Modifier la commande' } as T,
@@ -2986,6 +3182,19 @@ export const dict = {
     unlimitedStepsCb: { en: 'Unlimited steps', fr: 'Étapes illimitées' } as T,
     includedCorrectionsLabel: { en: 'Included corrections', fr: 'Corrections incluses' } as T,
     unlimitedCorrectionsCb: { en: 'Unlimited corrections', fr: 'Corrections illimitées' } as T,
+    validityMonthsLabel: {
+      en: 'Coverage period (months)',
+      fr: 'Durée de prise en charge (mois)',
+    } as T,
+    validityMonthsPlaceholder: { en: 'e.g. 24', fr: 'p. ex. 24' } as T,
+    validityMonthsHint: {
+      en: 'Number of months, counted from the first delivery of aligners to the patient, during which additional aligners can be included in the pack. Leave empty if not defined: those requests are then reviewed by an administrator.',
+      fr: 'Nombre de mois, comptés à partir de la première remise d’aligneurs au patient, pendant lesquels des aligneurs supplémentaires peuvent être inclus dans le forfait. Laissez vide si la durée n’est pas définie : ces demandes sont alors validées par l’administration.',
+    } as T,
+    validityMonthsInvalid: {
+      en: 'Enter a whole number of months between {min} and {max}.',
+      fr: 'Saisissez un nombre entier de mois entre {min} et {max}.',
+    } as T,
     packPriceLabel: { en: 'Pack price', fr: 'Prix du forfait' } as T,
     pricePlaceholder: { en: 'e.g. 1950.000', fr: 'p. ex. 1950.000' } as T,
     priceHelpEdited: {
@@ -3717,7 +3926,6 @@ export const dict = {
       fr: 'Cliquez à l’extérieur ou appuyez sur Échap pour fermer',
     } as T,
     closePreview: { en: 'Close preview', fr: 'Fermer l’aperçu' } as T,
-    modelBadge: { en: '{ext} model', fr: 'Modèle {ext}' } as T,
     saveDraftFirst: {
       en: 'Save the draft before uploading files',
       fr: 'Enregistrez le brouillon avant de téléverser des fichiers',

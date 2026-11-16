@@ -10,6 +10,7 @@ import {
   UserRole,
   VerificationStatus,
 } from '@prisma/client';
+import { INITIAL_ORDERS_ONLY, isInitialOrder } from '../../orders/order-kind';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DashboardRangeDto, AdminAnalyticsLimitDto } from '../dto/dashboard.dto';
 
@@ -39,6 +40,16 @@ const subMonths = (d: Date, n: number): Date => {
   x.setMonth(x.getMonth() - n);
   return x;
 };
+
+/**
+ * Live CASES: what every order COUNT of the admin dashboard counts. A
+ * supplemental request is part of its case; money keeps it (its quote,
+ * its payments are real).
+ */
+const LIVE_CASES = {
+  deletedAt: null,
+  ...INITIAL_ORDERS_ONLY,
+} satisfies Prisma.DentalOrderWhereInput;
 
 const toNumber = (value: Prisma.Decimal | number | null | undefined): number => {
   if (value == null) return 0;
@@ -177,18 +188,18 @@ export class AdminDashboardService {
         },
       }),
       this.prisma.pack.count({ where: { deletedAt: null, isActive: true } }),
-      this.prisma.dentalOrder.count({ where: { deletedAt: null } }),
+      this.prisma.dentalOrder.count({ where: LIVE_CASES }),
       this.prisma.dentalOrder.count({
         where: {
-          deletedAt: null,
+          ...LIVE_CASES,
           createdAt: { gte: range.from, lte: range.to },
         },
       }),
       this.prisma.dentalOrder.count({
-        where: { deletedAt: null, createdAt: { gte: dayStart } },
+        where: { ...LIVE_CASES, createdAt: { gte: dayStart } },
       }),
       this.prisma.dentalOrder.count({
-        where: { deletedAt: null, createdAt: { gte: monthStart } },
+        where: { ...LIVE_CASES, createdAt: { gte: monthStart } },
       }),
     ]);
 
@@ -457,6 +468,7 @@ export class AdminDashboardService {
       },
       select: {
         doctorId: true,
+        orderType: true,
         quotation: {
           select: {
             packId: true,
@@ -480,7 +492,10 @@ export class AdminDashboardService {
         revenue: 0,
         outstanding: 0,
       };
-      cur.orders += 1;
+      // A supplemental request is part of its case: it adds money
+      // below, never an order (nor a paid order).
+      const isCase = isInitialOrder(o);
+      if (isCase) cur.orders += 1;
       // QUALIFYING-QUOTE rule for paid / outstanding accounting:
       //   • packId set (admin priced the order)
       //   • status = approved (doctor committed to the quote)
@@ -498,7 +513,7 @@ export class AdminDashboardService {
       const total = toNumber(o.quotation.totalPrice ?? 0);
       const paid = toNumber(o.quotation.paidAmount ?? 0);
       if (o.quotation.paymentStatus === QuotationPaymentStatus.paid) {
-        cur.paidOrders += 1;
+        if (isCase) cur.paidOrders += 1;
         cur.revenue += total;
       } else {
         cur.outstanding += Math.max(0, total - paid);
@@ -671,7 +686,7 @@ export class AdminDashboardService {
       }),
       this.prisma.dentalOrder.findMany({
         where: {
-          deletedAt: null,
+          ...LIVE_CASES,
           createdAt: { gte: range.from, lte: range.to },
         },
         select: { createdAt: true },

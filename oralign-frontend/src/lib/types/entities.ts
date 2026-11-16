@@ -2,7 +2,7 @@
 // Split out of the former 2,000-line lib/types/index.ts; import via '@/lib/types'.
 
 import type { OrderFileCategory, PaymentMethod, PaymentRecordStatus } from './billing';
-import { ArchTreatment, DayOfWeek, Gender, OrderStatus, PatientStage, ToothInstructionType, UserRole, VerificationStatus } from './enums';
+import { ArchTreatment, DayOfWeek, Gender, OrderStatus, OrderType, PatientStage, ToothInstructionType, UserRole, VerificationStatus } from './enums';
 import type { TreatmentPlanStatus } from './treatment-plan';
 
 // ==========================================
@@ -150,6 +150,9 @@ export interface PatientLatestOrder {
   id: string;
   orderCode: string;
   status: OrderStatus;
+  orderType: OrderType;
+  parentOrderId?: string | null;
+  isCurrent: boolean;
   createdAt: string;
 }
 
@@ -242,6 +245,8 @@ export interface DentalOrder {
   patientId: string;
   assignedDesignerId?: string;
   status: OrderStatus;
+  orderType: OrderType;
+  parentOrderId?: string;
   patientStage?: PatientStage;
   chiefComplaint?: string;
   archTreatment?: ArchTreatment;
@@ -284,6 +289,8 @@ export interface DentalOrder {
   createdAt: string;
   updatedAt: string;
   submittedAt?: string;
+  coverageStartedAt?: string;
+  coverageExpiresAt?: string;
   // Treatment-fee gate fields. The doctor pays this professional fee
   // BEFORE the admin can start the treatment plan; the UI surfaces a
   // "Pay treatment fee" / "Mark as paid" card while paidAt is null

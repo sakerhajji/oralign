@@ -101,6 +101,8 @@ export const patientDeskDomainDict = {
     actions: {
       newPatient: { en: 'New patient', fr: 'Nouveau patient' } as T,
       newOrder: { en: 'New order', fr: 'Nouvelle commande' } as T,
+      currentOrder: { en: 'Open current order', fr: 'Ouvrir la commande en cours' } as T,
+      latestOrder: { en: 'Open latest order', fr: 'Ouvrir la dernière commande' } as T,
       edit: { en: 'Edit', fr: 'Modifier' } as T,
       trash: { en: 'Move to trash', fr: 'Mettre à la corbeille' } as T,
       trashBlocked: {

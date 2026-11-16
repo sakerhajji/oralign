@@ -2,7 +2,9 @@
 
 import {
   Archive,
+  ArrowRightLeft,
   CircleDollarSign,
+  ClipboardPlus,
   Clock3,
   FileCheck2,
   FileClock,
@@ -14,6 +16,7 @@ import {
   RefreshCw,
   Send,
   ShieldCheck,
+  Trash2,
   Upload,
   UserRound,
 } from 'lucide-react';
@@ -66,6 +69,29 @@ const ACTION_ICONS: Record<string, typeof History> = {
   batch_unlocked: PackageCheck,
   batch_delivered: PackageCheck,
   welcome_gift_applied: Gift,
+  supplemental_created: FilePenLine,
+  supplemental_child_created: FilePenLine,
+  supplemental_draft_updated: RefreshCw,
+  supplemental_draft_archived: Trash2,
+  supplemental_child_archived: Trash2,
+  supplemental_submitted: Send,
+  supplemental_child_submitted: Send,
+  supplemental_reviewed: ShieldCheck,
+  supplemental_child_reviewed: ShieldCheck,
+  supplemental_converted: ArrowRightLeft,
+};
+
+/**
+ * Supplemental-request actions the backend may add later still read as
+ * one, under a generic label and icon, instead of their raw key.
+ */
+const SUPPLEMENTAL_ACTION_PREFIX = 'supplemental_';
+const SUPPLEMENTAL_FALLBACK_ACTION = 'supplemental_other';
+
+/** Enum-valued fields whose values carry their own dictionary labels. */
+const VALUE_LABEL_PREFIXES: Record<string, string> = {
+  reviewStatus: 'supplemental.status',
+  coverageStatus: 'supplemental.coverage',
 };
 
 const POSITIVE_ACTIONS = new Set([
@@ -86,6 +112,8 @@ const WARNING_ACTIONS = new Set([
   'payment_cancelled',
   'archived',
   'file_deleted',
+  'supplemental_draft_archived',
+  'supplemental_child_archived',
 ]);
 
 export function OrderHistory({ orderId }: { orderId: string }) {
@@ -174,7 +202,10 @@ function HistoryRow({
   lang: 'en' | 'fr';
 }) {
   const { t } = useT();
-  const Icon = ACTION_ICONS[entry.action] ?? History;
+  // Unknown supplemental actions still get the supplemental icon.
+  const Icon =
+    ACTION_ICONS[entry.action] ??
+    (isSupplementalAction(entry.action) ? ClipboardPlus : History);
   const metadata = entry.metadata ?? {};
   const changes = Object.entries(entry.changes ?? {});
   const message = typeof metadata.message === 'string' ? metadata.message : null;
@@ -260,13 +291,9 @@ function HistoryRow({
                   {fieldLabel(field, t)}
                 </dt>
                 <dd className="mt-1 flex min-w-0 items-center gap-2 text-xs">
-                  <span className="min-w-0 truncate text-muted-foreground" title={formatValue(change.from, t)}>
-                    {formatValue(change.from, t)}
-                  </span>
+                  <ChangeValue field={field} value={change.from} className="text-muted-foreground" />
                   <span aria-hidden="true">→</span>
-                  <span className="min-w-0 truncate font-medium" title={formatValue(change.to, t)}>
-                    {formatValue(change.to, t)}
-                  </span>
+                  <ChangeValue field={field} value={change.to} className="font-medium" />
                 </dd>
               </div>
             ))}
@@ -286,10 +313,44 @@ function RoleBadge({ role }: { role: UserRole }) {
   );
 }
 
+function ChangeValue({
+  field,
+  value,
+  className,
+}: {
+  field: string;
+  value: unknown;
+  className: string;
+}) {
+  const { t } = useT();
+  const text = formatFieldValue(field, value, t);
+  return (
+    <span className={cn('min-w-0 truncate', className)} title={text}>
+      {text}
+    </span>
+  );
+}
+
+function isSupplementalAction(action: string): boolean {
+  return action.startsWith(SUPPLEMENTAL_ACTION_PREFIX);
+}
+
 function actionLabel(action: string, t: Translate) {
   const key = `orderDetail.history.actions.${action}`;
   const translated = t(key);
-  return translated === key ? action.replaceAll('_', ' ') : translated;
+  if (translated !== key) return translated;
+  if (isSupplementalAction(action)) {
+    return t(`orderDetail.history.actions.${SUPPLEMENTAL_FALLBACK_ACTION}`);
+  }
+  return action.replaceAll('_', ' ');
+}
+
+/** A dictionary label when one exists for `prefix.value`, else null. */
+function labelOf(prefix: string, value: unknown, t: Translate): string | null {
+  if (typeof value !== 'string' || value === '') return null;
+  const key = `${prefix}.${value}`;
+  const translated = t(key);
+  return translated === key ? null : translated;
 }
 
 function fieldLabel(field: string, t: Translate) {
@@ -307,9 +368,21 @@ function formatValue(
   if (typeof value === 'boolean') {
     return value ? t('common.yes') : t('common.no');
   }
-  if (Array.isArray(value)) return value.map(String).join(', ') || '—';
-  if (typeof value === 'object') return JSON.stringify(value);
+  // Lists of records (selected teeth, contacts) read item by item.
+  if (Array.isArray(value)) {
+    return value.map((item) => formatValue(item, t)).join(', ') || '—';
+  }
+  if (typeof value === 'object') {
+    return Object.values(value)
+      .map((item) => formatValue(item, t))
+      .join(' ');
+  }
   return String(value).replaceAll('_', ' ');
+}
+
+function formatFieldValue(field: string, value: unknown, t: Translate): string {
+  const prefix = VALUE_LABEL_PREFIXES[field];
+  return (prefix && labelOf(prefix, value, t)) || formatValue(value, t);
 }
 
 function metadataDetails(
@@ -346,6 +419,15 @@ function metadataDetails(
   add('fileCount', metadata.count);
   add('instructionCount', metadata.instructionCount);
   add('fileName', metadata.fileName);
+  const addLabelled = (key: string, prefix: string, value: unknown) => {
+    const label = labelOf(prefix, value, t);
+    if (label) add(key, label);
+  };
+  addLabelled('requestType', 'supplemental.type', metadata.requestType);
+  addLabelled('decision', 'supplemental.status', metadata.decision);
+  addLabelled('coverageStatus', 'supplemental.coverage', metadata.coverageStatus);
+  add('correctionNumber', metadata.correctionNumber);
+  add('childOrder', metadata.orderCode ?? metadata.childOrderId);
 
   return details;
 }

@@ -16,6 +16,8 @@ import {
   TreatmentPlanDecisionEvent,
   TreatmentPlanEvent,
   UserRegisteredEvent,
+  SupplementalOrderEvent,
+  SupplementalOrderReviewedEvent,
 } from '../events/notification-events';
 
 /**
@@ -64,6 +66,20 @@ function doctorByline(parts: {
   if (parts.orderCode) segments.push(parts.orderCode);
   return segments.join(' · ');
 }
+
+/** Bell wording of each supplemental request kind. */
+const SUPPLEMENTAL_REQUEST_LABELS: Record<
+  SupplementalOrderEvent['requestType'],
+  { en: string; fr: string }
+> = {
+  additional_aligners: {
+    en: 'additional aligners',
+    fr: 'aligneurs supplémentaires',
+  },
+  replacement: { en: 'replacement aligners', fr: 'aligneurs de remplacement' },
+  transfer_template: { en: 'transfer template', fr: 'gouttière de transfert' },
+  warranty: { en: 'warranty claim', fr: 'demande de garantie' },
+};
 
 /**
  * Human-readable language label for the bell — the document language
@@ -261,6 +277,73 @@ export class NotificationsListener {
           previousStatus: payload.previousStatus,
           nextStatus: payload.nextStatus,
           tail,
+        },
+      });
+    });
+  }
+
+  // ─── Supplemental requests ──────────────────────────────────────────
+
+  @OnEvent(NotificationEvents.SupplementalOrderSubmitted, { async: true })
+  async onSupplementalOrderSubmitted(
+    payload: SupplementalOrderEvent,
+  ): Promise<void> {
+    await this.safe('supplementalOrder.submitted', async () => {
+      const kind = SUPPLEMENTAL_REQUEST_LABELS[payload.requestType];
+      const byline = adminByline(payload);
+      await this.notifications.broadcastToAdmins({
+        type: NotificationType.order_submitted,
+        title: {
+          en: `Supplemental request to review: ${kind.en}`,
+          fr: `Demande complémentaire à examiner : ${kind.fr}`,
+        },
+        message: {
+          en: `${byline.en || payload.orderCode} sent a ${kind.en} request for review.`,
+          fr: `${byline.fr || payload.orderCode} a envoyé une demande « ${kind.fr} » à examiner.`,
+        },
+        link: `/dashboard/orders/${payload.orderId}`,
+        metadata: {
+          orderId: payload.orderId,
+          parentOrderId: payload.parentOrderId,
+          requestType: payload.requestType,
+        },
+      });
+    });
+  }
+
+  @OnEvent(NotificationEvents.SupplementalOrderReviewed, { async: true })
+  async onSupplementalOrderReviewed(
+    payload: SupplementalOrderReviewedEvent,
+  ): Promise<void> {
+    await this.safe('supplementalOrder.reviewed', async () => {
+      const kind = SUPPLEMENTAL_REQUEST_LABELS[payload.requestType];
+      const approved = payload.decision === 'approved';
+      const tail = doctorByline(payload);
+      const reason = payload.reason ? ` · ${payload.reason}` : '';
+      await this.notifications.create({
+        recipientId: payload.doctorId,
+        type: NotificationType.order_status_changed,
+        title: approved
+          ? {
+              en: `Supplemental request approved: ${kind.en}`,
+              fr: `Demande complémentaire acceptée : ${kind.fr}`,
+            }
+          : {
+              en: `Supplemental request declined: ${kind.en}`,
+              fr: `Demande complémentaire refusée : ${kind.fr}`,
+            },
+        message: {
+          en: `${tail}${reason}`,
+          fr: `${tail}${reason}`,
+        },
+        link: `/dashboard/orders/${payload.orderId}`,
+        metadata: {
+          orderId: payload.orderId,
+          parentOrderId: payload.parentOrderId,
+          requestType: payload.requestType,
+          decision: payload.decision,
+          coverageStatus: payload.coverageStatus,
+          reason: payload.reason,
         },
       });
     });

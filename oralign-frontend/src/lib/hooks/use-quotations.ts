@@ -12,6 +12,7 @@ import { quotationsService } from '@/lib/api/quotations.service';
 import { extractApiErrorMessage } from '@/lib/api/error';
 import { useT } from '@/lib/i18n/lang-context';
 import { orderKeys } from './use-orders';
+import { supplementalErrorMessage } from './use-supplemental-orders';
 import type { DevisLanguage, Quotation, UpsertQuotationDto } from '@/lib/types';
 
 export const quotationKeys = {
@@ -69,7 +70,9 @@ export function useCreateQuotation(): UseMutationResult<
       invalidateQuotation(queryClient, quote);
       toast.success(t('toasts.quotations.draftCreated'));
     },
-    onError: (err) => toast.error(extractApiErrorMessage(err)),
+    // A supplemental request may be refused by code (not quotable / no
+    // plan for its kind): show the translated reason.
+    onError: (err) => toast.error(supplementalErrorMessage(err, t)),
   });
 }
 

@@ -1,4 +1,4 @@
-import { OrderStatus, Prisma } from '@prisma/client';
+import { OrderStatus, OrderType, Prisma } from '@prisma/client';
 import {
   classifyOrderForQuarter,
   hasAppliedLoyaltyDiscount,
@@ -19,6 +19,7 @@ const order = (
 ): LoyaltyOrderCandidate => ({
   id: 'order-1',
   doctorId: 'doctor-1',
+  orderType: OrderType.initial,
   status: OrderStatus.finished,
   createdAt: new Date('2026-03-15T10:00:00.000Z'),
   deletedAt: null,
@@ -75,6 +76,25 @@ describe('order-based loyalty rules', () => {
 
   it('counts a completed order with no applied loyalty discount', () => {
     expect(classifyOrderForQuarter(order(), q1)).toBe('eligible');
+  });
+
+  it.each([
+    OrderType.additional_aligners,
+    OrderType.replacement,
+    OrderType.transfer_template,
+    OrderType.warranty,
+  ])('never counts a finished %s request as a treatment', (orderType) => {
+    expect(classifyOrderForQuarter(order({ orderType }), q1)).toBe(
+      'ineligible',
+    );
+    const metrics = summarizeOrdersForQuarter(
+      [order({ id: 'case-1' }), order({ id: 'child-1', orderType })],
+      q1,
+    );
+    expect(metrics.get('doctor-1')).toEqual({
+      eligibleOrderCount: 1,
+      excludedDiscountedOrderCount: 0,
+    });
   });
 
   it.each([5, 10])(

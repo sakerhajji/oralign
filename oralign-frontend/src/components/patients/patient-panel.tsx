@@ -11,6 +11,7 @@ import {
   ShieldX,
   Trash2,
 } from 'lucide-react';
+import { OrderKindBadge } from '@/components/dashboard/order-kind-badge';
 import { OrderStatusBadge } from '@/components/orders/order-status-badge';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -395,7 +396,10 @@ function PatientOrders({
                 )}
               >
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium">{order.orderCode}</span>
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="truncate text-sm font-medium">{order.orderCode}</span>
+                    <OrderKindBadge order={order} />
+                  </span>
                   <span className="block truncate text-xs text-muted-foreground tabular-nums">
                     {t('patientDesk.panel.orderCreated', {
                       date: formatBusinessDay(order.createdAt, lang),

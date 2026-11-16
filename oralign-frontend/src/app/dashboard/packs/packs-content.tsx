@@ -770,6 +770,25 @@ function FormSection({
 // backend persists the localized bags and the matching PackPrice rows
 // atomically, so the admin saves once.
 
+/** Bounds the backend accepts for `Pack.treatmentValidityMonths`. */
+const VALIDITY_MONTHS_MIN = 1;
+const VALIDITY_MONTHS_MAX = 120;
+
+/**
+ * The coverage period as typed: blank means "not defined" (null), anything
+ * else must be a whole number of months within the accepted bounds.
+ */
+function parseValidityMonths(raw: string): { months: number | null; valid: boolean } {
+  const trimmed = raw.trim();
+  if (trimmed === '') return { months: null, valid: true };
+  const months = Number(trimmed);
+  const valid =
+    Number.isInteger(months) &&
+    months >= VALIDITY_MONTHS_MIN &&
+    months <= VALIDITY_MONTHS_MAX;
+  return { months: valid ? months : null, valid };
+}
+
 function PackFormDialog({
   open,
   onClose,
@@ -821,6 +840,11 @@ function PackFormDialog({
   const [includedCorrections, setIncludedCorrections] = useState(() =>
     pack?.includedCorrections != null ? String(pack.includedCorrections) : '',
   );
+  const [treatmentValidityMonths, setTreatmentValidityMonths] = useState(() =>
+    pack?.treatmentValidityMonths != null
+      ? String(pack.treatmentValidityMonths)
+      : '',
+  );
   const [isUnlimitedCorrections, setIsUnlimitedCorrections] = useState(
     () => pack?.isUnlimitedCorrections ?? false,
   );
@@ -851,11 +875,13 @@ function PackFormDialog({
   const nameValid = nameFr.trim() !== '';
   const stepsValid =
     isUnlimitedSteps || (maxSteps.trim() !== '' && Number(maxSteps) >= 1);
+  const validity = parseValidityMonths(treatmentValidityMonths);
   const submitting = create.isPending || update.isPending;
   const canSubmit =
     nameValid &&
     hasAnyPrice &&
     stepsValid &&
+    validity.valid &&
     !twoInvalid &&
     !singleInvalid &&
     !submitting;
@@ -885,6 +911,8 @@ function PackFormDialog({
         : includedCorrections.trim() === ''
           ? undefined
           : Number(includedCorrections),
+      // On edit, an empty period clears it; on create it is just omitted.
+      treatmentValidityMonths: validity.months ?? (editing ? null : undefined),
       isUnlimitedSteps,
       isUnlimitedCorrections,
       isActive,
@@ -962,7 +990,7 @@ function PackFormDialog({
 
           {/* 2 · Treatment */}
           <FormSection title={t('packsAdmin.sectionTreatment')}>
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <div className="grid gap-2">
                 <Label htmlFor="pack-steps">{t('packsAdmin.alignersLabel')}</Label>
                 <Input
@@ -1012,6 +1040,38 @@ function PackFormDialog({
                   />
                   {t('packsAdmin.unlimitedCorrectionsCb')}
                 </label>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="pack-validity-months">
+                  {t('packsAdmin.validityMonthsLabel')}
+                </Label>
+                <Input
+                  id="pack-validity-months"
+                  type="number"
+                  inputMode="numeric"
+                  min={VALIDITY_MONTHS_MIN}
+                  max={VALIDITY_MONTHS_MAX}
+                  step={1}
+                  value={treatmentValidityMonths}
+                  onChange={(e) => setTreatmentValidityMonths(e.target.value)}
+                  placeholder={t('packsAdmin.validityMonthsPlaceholder')}
+                  aria-invalid={!validity.valid || undefined}
+                  aria-describedby="pack-validity-months-hint"
+                />
+                <p
+                  id="pack-validity-months-hint"
+                  className="text-xs text-muted-foreground"
+                >
+                  {t('packsAdmin.validityMonthsHint')}
+                </p>
+                {!validity.valid ? (
+                  <p className="text-[11px] text-destructive" role="alert">
+                    {t('packsAdmin.validityMonthsInvalid', {
+                      min: VALIDITY_MONTHS_MIN,
+                      max: VALIDITY_MONTHS_MAX,
+                    })}
+                  </p>
+                ) : null}
               </div>
             </div>
             <BilingualField

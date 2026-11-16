@@ -28,6 +28,7 @@ import {
 import { TreatmentChatGateway } from '../gateways/treatment-chat.gateway';
 import { isAdmin, type Caller } from '../../common/access/caller';
 import { lookupActorName } from '../../common/access/actor-snapshot';
+import { PLAN_GATE_SELECT, planCreationGate } from '../treatment-plan-gate';
 
 const PLANNER_ROLES: UserRole[] = [
   UserRole.admin,
@@ -137,30 +138,24 @@ export class TreatmentPlanService {
       throw new ForbiddenException('Only planners can create treatment plans.');
     }
 
-    // ── Treatment-fee gate ────────────────────────────────────────
-    // The doctor must pay the professional/clinical fee BEFORE the
-    // admin starts the treatment plan. We look up the configured
-    // default — if the tenant has set it > 0 and the order's
-    // `treatmentFeePaidAt` is still null, refuse to create.
-    //
-    // Tenants who never configured a fee (=0) keep the legacy flow:
-    // the gate is bypassed entirely so this change is non-breaking
-    // for installations that haven't opted into the new policy.
-    //
-    // Direct prisma query (vs. injecting the settings service) keeps
-    // this module free of a cross-module dependency just for a single
-    // numeric read on the singleton row.
-    //
-    // The welcome gift (`welcomeGiftAppliedAt`) waived the fee:
-    // nothing is owed, so the gate is satisfied without any payment.
+    // ── Plan gate (treatment-plan-gate.ts) ────────────────────────
+    // An initial case is planned once its professional fee is paid or
+    // waived by the welcome gift; a refinement once its request is
+    // approved; the other supplemental kinds never.
     const orderRecord = await this.prisma.dentalOrder.findUnique({
       where: { id: orderId },
-      select: { treatmentFeePaidAt: true, welcomeGiftAppliedAt: true },
+      select: PLAN_GATE_SELECT,
     });
-    if (
-      !orderRecord?.treatmentFeePaidAt &&
-      !orderRecord?.welcomeGiftAppliedAt
-    ) {
+    if (!orderRecord) throw new NotFoundException('Order not found');
+    const gate = planCreationGate(orderRecord);
+    if (gate.kind === 'refused') {
+      throw new BadRequestException(gate.message, gate.errorCode);
+    }
+    if (gate.kind === 'treatment_fee_due') {
+      // Tenants who never configured a fee (= 0) keep the legacy flow:
+      // the gate is bypassed so the policy stays opt-in. Direct prisma
+      // query (vs. injecting the settings service) keeps this module
+      // free of a cross-module dependency for one numeric read.
       const settings = await this.prisma.companyBillingSettings.findFirst({
         where: { isActive: true },
         orderBy: { updatedAt: 'desc' },

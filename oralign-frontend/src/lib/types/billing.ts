@@ -89,6 +89,7 @@ export interface Pack {
   // `maxStepsPerArch` doubles as "aligners per arch" (null when unlimited).
   maxStepsPerArch?: number | null;
   includedCorrections?: number | null;
+  treatmentValidityMonths?: number | null;
   isUnlimitedSteps: boolean;
   isUnlimitedCorrections: boolean;
   isForOrthodontists: boolean;
@@ -120,6 +121,7 @@ export interface CreatePackDto {
   finishingIncludedLabel?: { fr?: string; en?: string };
   maxStepsPerArch?: number;
   includedCorrections?: number;
+  treatmentValidityMonths?: number | null;
   isUnlimitedSteps?: boolean;
   isUnlimitedCorrections?: boolean;
   isForOrthodontists?: boolean;

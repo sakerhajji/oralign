@@ -45,6 +45,7 @@ import {
   useUploadPatientProfilePhoto,
 } from '@/lib/hooks';
 import { useT } from '@/lib/i18n/lang-context';
+import { buildOrderNavigationHref } from '@/lib/orders/order-navigation';
 import { useAuth } from '@/lib/providers/auth-provider';
 import type { Patient, PatientListItem } from '@/lib/types';
 
@@ -277,13 +278,18 @@ function PatientsDesk({ isAdmin, userId }: { isAdmin: boolean; userId: string })
     if (patientId === id) closePatient();
   };
 
-  const runAction = (patient: Patient, action: PatientAction) => {
+  const runAction = (patient: Patient | PatientListItem, action: PatientAction) => {
     switch (action) {
       case 'edit':
         setForm({ open: true, patient });
         break;
       case 'new-order':
         router.push(`/dashboard/orders/new?patientId=${encodeURIComponent(patient.id)}`);
+        break;
+      case 'latest-order':
+        if ('latestOrder' in patient && patient.latestOrder) {
+          router.push(buildOrderNavigationHref(patient.latestOrder));
+        }
         break;
       case 'trash':
         setConfirm({ kind: 'trash', patient });

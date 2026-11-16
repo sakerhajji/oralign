@@ -1,13 +1,11 @@
 'use client';
 
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   CalendarDays,
   Camera,
   Check,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
@@ -36,7 +34,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -89,6 +86,21 @@ import {
   ClinicalOrderFiles,
 } from '@/components/orders/order-file-upload';
 import { TreatmentFeePaymentDialog } from '@/components/orders/treatment-fee-payment-dialog';
+import {
+  ChoiceCard,
+  FieldError,
+  FieldsetCard,
+  OptionPill,
+  ReviewInfo,
+  ReviewSection,
+  TextAreaField,
+  TextInput,
+  ToggleTile,
+  WizardFooter,
+  WizardPanel,
+  WizardStepHeader,
+  WizardStepper,
+} from '@/components/orders/wizard';
 import {
   WelcomeGiftFeeLine,
   WelcomeGiftNote,
@@ -151,8 +163,6 @@ import {
 } from '@/lib/chief-complaint';
 import { createOrderSchema, isE164Phone } from '@/lib/schemas';
 import { cn } from '@/lib/utils';
-
-const BRAND_ACTIVE_BORDER = 'border-primary';
 
 /**
  * Static step blueprint. Strings live in the i18n dictionary; this
@@ -455,7 +465,7 @@ export function OrderWizard({
     (doctor) => doctor.id === form.doctorId,
   );
   const activeStep = steps[step];
-  const ActiveIcon = activeStep.icon;
+  const stepperSteps = steps.map((s) => ({ key: s.titleKey, title: t(s.titleKey) }));
 
   // ── Chief complaint (order "Reason for consultation") ──────────────
   // Edited as a checkbox multi-select (shared CLINICAL_CONDITION_OPTIONS)
@@ -939,21 +949,22 @@ export function OrderWizard({
 
   return (
     <div className="mx-auto w-full max-w-[1220px] space-y-7">
-      <OrderStepper currentStep={step} onStepChange={requestStep} />
+      <WizardStepper
+        steps={stepperSteps}
+        currentStep={step}
+        onStepChange={requestStep}
+        ariaLabel={t('orderForm.advanced.wizardStepsAria')}
+        stepLabel={t('orderForm.step')}
+        ofLabel={t('orderForm.of')}
+      />
 
-      <header className="mx-auto max-w-5xl text-center">
-        <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-primary/10 text-primary">
-          <ActiveIcon className="h-5 w-5" />
-        </div>
-        <h1 className="text-balance text-xl font-bold tracking-tight text-foreground md:text-2xl">
-          {t(activeStep.headingKey)}
-        </h1>
-        <p className="mx-auto mt-3 max-w-5xl text-sm leading-6 text-muted-foreground">
-          {t(activeStep.descriptionKey)}
-        </p>
-      </header>
+      <WizardStepHeader
+        icon={activeStep.icon}
+        title={t(activeStep.headingKey)}
+        description={t(activeStep.descriptionKey)}
+      />
 
-      <main className="rounded-md border bg-card p-4 shadow-[0_12px_35px_rgba(15,23,42,0.12)] md:p-5 lg:p-6">
+      <WizardPanel>
         {step === 0 && (
           <PatientStep
             isAdmin={isAdmin}
@@ -1099,7 +1110,7 @@ export function OrderWizard({
             />
           </div>
         )}
-      </main>
+      </WizardPanel>
 
       {/* Paid-order lock notice — once the treatment fee is settled, a
           doctor can no longer edit the order (only an admin can). */}
@@ -1160,7 +1171,7 @@ export function OrderWizard({
         </label>
       )}
 
-      <footer className="flex flex-col gap-3 rounded-md border bg-card p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+      <WizardFooter>
         <Button
           type="button"
           variant="outline"
@@ -1249,7 +1260,7 @@ export function OrderWizard({
             </Button>
           )}
         </div>
-      </footer>
+      </WizardFooter>
 
       {/* Staged-but-not-uploaded CBCT files. Cancel keeps the doctor on
           the step so they can finish the upload; the destructive action
@@ -1325,102 +1336,6 @@ export function OrderWizard({
         />
       )}
     </div>
-  );
-}
-
-function OrderStepper({
-  currentStep,
-  onStepChange,
-}: {
-  currentStep: number;
-  onStepChange: (step: number) => void;
-}) {
-  const { t } = useT();
-  const current = steps[currentStep];
-  // Total = step count + N-1 progress bars. The progress bars take `flex-1`
-  // so they expand to fill whatever width the container provides — the
-  // stepper always exactly fits its parent without a horizontal scroll.
-
-  return (
-    <nav aria-label={t('orderForm.advanced.wizardStepsAria')} className="space-y-3">
-      {/* Mobile-only context line — shows the title clearly because the
-          circles below are too small for inline labels at phone widths. */}
-      <div className="flex items-center justify-between gap-3 sm:hidden">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-          {t('orderForm.step')} {currentStep + 1} {t('orderForm.of')} {steps.length}
-        </span>
-        <span className="truncate text-sm font-semibold text-foreground">
-          {t(current.titleKey)}
-        </span>
-      </div>
-
-      {/* Step rail — circles stretched evenly across the available width. */}
-      <ol
-        role="list"
-        className="relative flex w-full items-center pb-6 sm:pb-8"
-      >
-        {steps.map((step, index) => {
-          const active = index === currentStep;
-          const complete = index < currentStep;
-          return (
-            <Fragment key={step.titleKey}>
-              <li className="relative flex shrink-0 flex-col items-center">
-                <button
-                  type="button"
-                  // Free navigation — every step circle is clickable so the
-                  // user can jump back and forth without finishing earlier
-                  // steps. The Next button still validates before moving
-                  // forward; this is just a quick-jump shortcut.
-                  onClick={() => onStepChange(index)}
-                  aria-current={active ? 'step' : undefined}
-                  aria-label={`${t('orderForm.step')} ${index + 1}: ${t(step.titleKey)}`}
-                  className={cn(
-                    'group relative grid h-8 w-8 cursor-pointer place-items-center rounded-full border-2 text-xs font-bold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 sm:h-9 sm:w-9 sm:text-sm',
-                    active &&
-                      'scale-110 border-primary bg-primary text-primary-foreground shadow-md shadow-primary/25',
-                    complete &&
-                      'border-primary bg-primary/10 text-primary hover:bg-primary/20',
-                    !active && !complete &&
-                      'border-border bg-background text-muted-foreground hover:border-primary/60 hover:text-foreground',
-                  )}
-                >
-                  {complete ? (
-                    <Check className="h-4 w-4" />
-                  ) : (
-                    <span>{index + 1}</span>
-                  )}
-                </button>
-
-                {/* Label — absolutely positioned below the circle so its
-                    presence (or absence below sm) doesn't push the
-                    connector lines out of alignment. */}
-                <span
-                  className={cn(
-                    'pointer-events-none absolute top-full mt-1.5 hidden whitespace-nowrap text-[11px] font-medium transition-colors sm:block',
-                    active ? 'text-foreground' : 'text-muted-foreground',
-                  )}
-                >
-                  {t(step.titleKey)}
-                </span>
-              </li>
-
-              {/* Connector — `flex-1` makes it absorb every spare pixel,
-                  so seven circles + six connectors always span the row
-                  without scroll. Coloured to track completion. */}
-              {index < steps.length - 1 && (
-                <span
-                  aria-hidden
-                  className={cn(
-                    'mx-1 h-0.5 flex-1 rounded-full transition-colors sm:mx-2',
-                    complete ? 'bg-primary' : 'bg-border',
-                  )}
-                />
-              )}
-            </Fragment>
-          );
-        })}
-      </ol>
-    </nav>
   );
 }
 
@@ -2137,11 +2052,11 @@ function TreatmentStep({
     // the planner reads each control as the same kind of choice.
     <div className="space-y-6">
       {/* ─── Patient stage ────────────────────────────────────────────── */}
-      <fieldset className="space-y-3 rounded-lg border bg-card p-4">
-        <legend className="px-1 text-sm font-semibold">{t('orderForm.treatment.patientStageLegend')}</legend>
-        <p className="text-xs text-muted-foreground">
-          {t('orderForm.treatment.patientStageHint')}
-        </p>
+      <FieldsetCard
+        legend={t('orderForm.treatment.patientStageLegend')}
+        hint={t('orderForm.treatment.patientStageHint')}
+        error={errors.patientStage}
+      >
         <div
           role="radiogroup"
           aria-label={t('orderForm.treatment.patientStageLegend')}
@@ -2158,15 +2073,14 @@ function TreatmentStep({
             />
           ))}
         </div>
-        <FieldError message={errors.patientStage} />
-      </fieldset>
+      </FieldsetCard>
 
       {/* ─── Arch treatment ───────────────────────────────────────────── */}
-      <fieldset className="space-y-3 rounded-lg border bg-card p-4">
-        <legend className="px-1 text-sm font-semibold">{t('orderForm.treatment.archTreatmentLegend')}</legend>
-        <p className="text-xs text-muted-foreground">
-          {t('orderForm.treatment.archTreatmentHint')}
-        </p>
+      <FieldsetCard
+        legend={t('orderForm.treatment.archTreatmentLegend')}
+        hint={t('orderForm.treatment.archTreatmentHint')}
+        error={errors.archTreatment}
+      >
         <div
           role="radiogroup"
           aria-label={t('orderForm.treatment.archTreatmentLegend')}
@@ -2200,8 +2114,7 @@ function TreatmentStep({
             }}
           />
         </div>
-        <FieldError message={errors.archTreatment} />
-      </fieldset>
+      </FieldsetCard>
 
       {/* ─── Chief complaint (multi-select "Reason for consultation") ───
           Same checkbox field the patient form uses, so the two surfaces
@@ -2223,11 +2136,11 @@ function TreatmentStep({
       </div>
 
       {/* ─── Treatment plan ───────────────────────────────────────────── */}
-      <fieldset className="space-y-3 rounded-lg border bg-card p-4">
-        <legend className="px-1 text-sm font-semibold">{t('orderForm.treatment.treatmentPlanLegend')}</legend>
-        <p className="text-xs text-muted-foreground">
-          {t('orderForm.treatment.treatmentPlanHint')}
-        </p>
+      <FieldsetCard
+        legend={t('orderForm.treatment.treatmentPlanLegend')}
+        hint={t('orderForm.treatment.treatmentPlanHint')}
+        error={errors.treatmentPlan}
+      >
         <div
           role="radiogroup"
           aria-label={t('orderForm.treatment.treatmentPlanLegend')}
@@ -2243,15 +2156,13 @@ function TreatmentStep({
             />
           ))}
         </div>
-        <FieldError message={errors.treatmentPlan} />
-      </fieldset>
+      </FieldsetCard>
 
       {/* ─── A-P relationship ─────────────────────────────────────────── */}
-      <fieldset className="space-y-3 rounded-lg border bg-card p-4">
-        <legend className="px-1 text-sm font-semibold">{t('orderForm.treatment.apLegend')}</legend>
-        <p className="text-xs text-muted-foreground">
-          {t('orderForm.treatment.apHint')}
-        </p>
+      <FieldsetCard
+        legend={t('orderForm.treatment.apLegend')}
+        hint={t('orderForm.treatment.apHint')}
+      >
         <div
           role="radiogroup"
           aria-label={t('orderForm.treatment.apLegend')}
@@ -2267,7 +2178,7 @@ function TreatmentStep({
             />
           ))}
         </div>
-      </fieldset>
+      </FieldsetCard>
     </div>
   );
 }
@@ -2594,11 +2505,10 @@ function AdvancedMovementStep({
           Single-select (radio) — clinical team asked for one elastic
           configuration per case. Multi-elastic cases capture the
           secondary type in the notes field. */}
-      <fieldset className="space-y-3 rounded-lg border bg-card p-4">
-        <legend className="px-1 text-sm font-semibold">{t('orderForm.advanced.elastics')}</legend>
-        <p className="text-xs text-muted-foreground">
-          {t('orderForm.advanced.elasticsHint')}
-        </p>
+      <FieldsetCard
+        legend={t('orderForm.advanced.elastics')}
+        hint={t('orderForm.advanced.elasticsHint')}
+      >
         <div
           role="radiogroup"
           aria-label={t('orderForm.advanced.elastics')}
@@ -2622,14 +2532,13 @@ function AdvancedMovementStep({
           disabled={disabled || elastics.type === 'No elastics'}
           onChange={setElasticsNotes}
         />
-      </fieldset>
+      </FieldsetCard>
 
       {/* ─── Open bite ────────────────────────────────────────────────── */}
-      <fieldset className="space-y-3 rounded-lg border bg-card p-4">
-        <legend className="px-1 text-sm font-semibold">{t('orderForm.advanced.openBite')}</legend>
-        <p className="text-xs text-muted-foreground">
-          {t('orderForm.advanced.openBiteAsk')}
-        </p>
+      <FieldsetCard
+        legend={t('orderForm.advanced.openBite')}
+        hint={t('orderForm.advanced.openBiteAsk')}
+      >
         <div
           role="radiogroup"
           aria-label={t('orderForm.advanced.openBiteAsk')}
@@ -2670,14 +2579,13 @@ function AdvancedMovementStep({
             </div>
           </>
         )}
-      </fieldset>
+      </FieldsetCard>
 
       {/* ─── Midline ──────────────────────────────────────────────────── */}
-      <fieldset className="space-y-3 rounded-lg border bg-card p-4">
-        <legend className="px-1 text-sm font-semibold">{t('orderForm.treatment.midline')}</legend>
-        <p className="text-xs text-muted-foreground">
-          {t('orderForm.advanced.midlineHint')}
-        </p>
+      <FieldsetCard
+        legend={t('orderForm.treatment.midline')}
+        hint={t('orderForm.advanced.midlineHint')}
+      >
         <div
           role="radiogroup"
           aria-label={t('orderForm.treatment.midline')}
@@ -2693,16 +2601,15 @@ function AdvancedMovementStep({
             />
           ))}
         </div>
-      </fieldset>
+      </FieldsetCard>
 
       {/* ─── IPR ────────────────────────────────────────────────────────
           Three direct clinical choices keep the field readable: priority,
           if necessary, or no IPR. */}
-      <fieldset className="space-y-3 rounded-lg border bg-card p-4">
-        <legend className="px-1 text-sm font-semibold">IPR</legend>
-        <p className="text-xs text-muted-foreground">
-          {t('orderForm.advanced.iprHint')}
-        </p>
+      <FieldsetCard
+        legend="IPR"
+        hint={t('orderForm.advanced.iprHint')}
+      >
         <div
           role="radiogroup"
           aria-label="IPR"
@@ -2718,14 +2625,13 @@ function AdvancedMovementStep({
             />
           ))}
         </div>
-      </fieldset>
+      </FieldsetCard>
 
       {/* ─── Bite ramps ─────────────────────────────────────────────────── */}
-      <fieldset className="space-y-3 rounded-lg border bg-card p-4">
-        <legend className="px-1 text-sm font-semibold">{t('orderForm.advanced.biteRamps')}</legend>
-        <p className="text-xs text-muted-foreground">
-          {t('orderForm.advanced.biteRampsHint')}
-        </p>
+      <FieldsetCard
+        legend={t('orderForm.advanced.biteRamps')}
+        hint={t('orderForm.advanced.biteRampsHint')}
+      >
         <div
           role="radiogroup"
           aria-label={t('orderForm.advanced.biteRamps')}
@@ -2741,14 +2647,13 @@ function AdvancedMovementStep({
             />
           ))}
         </div>
-      </fieldset>
+      </FieldsetCard>
 
       {/* ─── Expansion ────────────────────────────────────────────────── */}
-      <fieldset className="space-y-3 rounded-lg border bg-card p-4">
-        <legend className="px-1 text-sm font-semibold">{t('orderForm.advanced.expansion')}</legend>
-        <p className="text-xs text-muted-foreground">
-          {t('orderForm.advanced.expansionHint')}
-        </p>
+      <FieldsetCard
+        legend={t('orderForm.advanced.expansion')}
+        hint={t('orderForm.advanced.expansionHint')}
+      >
         <div
           role="radiogroup"
           aria-label={t('orderForm.advanced.expansion')}
@@ -2766,14 +2671,13 @@ function AdvancedMovementStep({
             );
           })}
         </div>
-      </fieldset>
+      </FieldsetCard>
 
       {/* ─── Crossbite ─────────────────────────────────────────────────── */}
-      <fieldset className="space-y-3 rounded-lg border bg-card p-4">
-        <legend className="px-1 text-sm font-semibold">{t('orderForm.advanced.crossbite')}</legend>
-        <p className="text-xs text-muted-foreground">
-          {t('orderForm.advanced.crossbiteAsk')}
-        </p>
+      <FieldsetCard
+        legend={t('orderForm.advanced.crossbite')}
+        hint={t('orderForm.advanced.crossbiteAsk')}
+      >
         <div
           role="radiogroup"
           aria-label={t('orderForm.advanced.crossbiteAsk')}
@@ -2814,14 +2718,13 @@ function AdvancedMovementStep({
             </div>
           </>
         )}
-      </fieldset>
+      </FieldsetCard>
 
       {/* ─── Spaces — single source of truth ────────────────────────────── */}
-      <fieldset className="space-y-3 rounded-lg border bg-card p-4">
-        <legend className="px-1 text-sm font-semibold">{t('orderForm.advanced.spaces')}</legend>
-        <p className="text-xs text-muted-foreground">
-          {t('orderForm.advanced.spacesHint')}
-        </p>
+      <FieldsetCard
+        legend={t('orderForm.advanced.spaces')}
+        hint={t('orderForm.advanced.spacesHint')}
+      >
         <div
           role="radiogroup"
           aria-label={t('orderForm.advanced.spaces')}
@@ -2863,15 +2766,13 @@ function AdvancedMovementStep({
             );
           }}
         />
-      </fieldset>
+      </FieldsetCard>
 
       {/* ─── Extractions — odontogram picks + free-text notes ──────── */}
-      <fieldset className="space-y-3 rounded-lg border bg-card p-4">
-        <legend className="px-1 text-sm font-semibold">{t('orderForm.advanced.extractions')}</legend>
-        <p className="text-xs text-muted-foreground">
-          {t('orderForm.advanced.extractionsHint')}
-        </p>
-
+      <FieldsetCard
+        legend={t('orderForm.advanced.extractions')}
+        hint={t('orderForm.advanced.extractionsHint')}
+      >
         <div className="rounded-md border bg-muted/30 p-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             {t('orderForm.advanced.extractionsTeethTitle')}
@@ -2902,7 +2803,7 @@ function AdvancedMovementStep({
           disabled={disabled}
           onChange={(value) => updateField('extractions', value)}
         />
-      </fieldset>
+      </FieldsetCard>
     </div>
   );
 }
@@ -3230,59 +3131,7 @@ function ReviewStep({
   );
 }
 
-// ─── Review-step layout helpers ────────────────────────────────────
-// Intentional duplicates of <Section>/<Info> from /dashboard/orders/[id]
-// so the wizard's final step LOOKS like the order detail page the
-// planner / doctor will land on after submit. Kept local to avoid a
-// circular import — the detail page lives in an app/ route and the
-// wizard lives in components/, so we keep the helpers next to their
-// only caller here. If the detail page ever shifts to a shared
-// component, swap in via a single import line.
-
-function ReviewSection({
-  icon: Icon,
-  title,
-  children,
-}: {
-  icon: typeof Target;
-  title: string;
-  children: ReactNode;
-}) {
-  return (
-    <section className="rounded-2xl border bg-card shadow-sm">
-      <header className="flex items-center gap-3 border-b px-4 py-3 sm:px-6 sm:py-4">
-        <span className="grid h-9 w-9 place-items-center rounded-full bg-primary/10 text-primary">
-          <Icon className="h-4 w-4" />
-        </span>
-        <h2 className="text-base font-semibold sm:text-lg">{title}</h2>
-      </header>
-      <div className="px-4 py-4 sm:px-6 sm:py-5">{children}</div>
-    </section>
-  );
-}
-
-function ReviewInfo({
-  label,
-  value,
-  wide,
-}: {
-  label: string;
-  value?: string | null;
-  wide?: boolean;
-}) {
-  const safeValue =
-    typeof value === 'string' && value.trim().length > 0 ? value : '—';
-  return (
-    <div className={wide ? 'sm:col-span-2 lg:col-span-3' : undefined}>
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        {label}
-      </p>
-      <p className="mt-1 whitespace-pre-wrap text-sm font-medium text-foreground">
-        {safeValue}
-      </p>
-    </div>
-  );
-}
+// ─── Review-step value formatters ────────────────────────────────
 
 function reviewGenderLabel(gender?: Gender | string | null): string | undefined {
   switch (gender) {
@@ -3364,206 +3213,3 @@ function formatClinicalConditions(
   if (hasOther) parts.push(other.trim());
   return parts.length > 0 ? parts.join(' — ') : undefined;
 }
-
-function ChoiceCard({
-  active,
-  title,
-  description,
-  onClick,
-  disabled,
-}: {
-  active: boolean;
-  title: string;
-  description: string;
-  onClick: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(
-        'flex min-h-12 items-start justify-between gap-3 rounded-md border bg-background px-4 py-3 text-left transition hover:border-primary/70 disabled:cursor-not-allowed disabled:opacity-60',
-        active && `${BRAND_ACTIVE_BORDER} shadow-sm`,
-      )}
-    >
-      <span>
-        <span className="block text-sm font-semibold">{title}</span>
-        <span className="mt-0.5 block text-xs text-muted-foreground">
-          {description}
-        </span>
-      </span>
-      {active && <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" />}
-    </button>
-  );
-}
-
-function TextInput({
-  label,
-  value,
-  onChange,
-  placeholder,
-  icon,
-  error,
-  disabled,
-  type = 'text',
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-  icon?: ReactNode;
-  error?: string;
-  disabled?: boolean;
-  type?: string;
-}) {
-  return (
-    <div className="grid gap-2">
-      <Label>{label}</Label>
-      <div className="relative">
-        {icon && (
-          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-            {icon}
-          </span>
-        )}
-        <Input
-          type={type}
-          value={value}
-          disabled={disabled}
-          placeholder={placeholder}
-          onChange={(event) => onChange(event.target.value)}
-          className={cn('h-11', icon && 'pl-10', error && 'border-red-500')}
-        />
-      </div>
-      <FieldError message={error} />
-    </div>
-  );
-}
-
-function TextAreaField({
-  label,
-  value,
-  onChange,
-  placeholder,
-  error,
-  disabled,
-  compact,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-  error?: string;
-  disabled?: boolean;
-  compact?: boolean;
-}) {
-  return (
-    <div className="grid gap-2">
-      <Label>{label}</Label>
-      <textarea
-        value={value}
-        disabled={disabled}
-        placeholder={placeholder}
-        onChange={(event) => onChange(event.target.value)}
-        className={cn(
-          'w-full rounded-md border border-input bg-background px-3 py-3 text-sm outline-none transition placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60',
-          compact ? 'min-h-24' : 'min-h-28',
-          error && 'border-red-500 focus-visible:ring-red-500',
-        )}
-      />
-      <FieldError message={error} />
-    </div>
-  );
-}
-
-function ToggleTile({
-  label,
-  description,
-  checked,
-  disabled,
-  onCheckedChange,
-}: {
-  label: string;
-  /** Optional helper line shown beneath the label. */
-  description?: string;
-  checked: boolean;
-  disabled?: boolean;
-  onCheckedChange: (checked: boolean) => void;
-}) {
-  return (
-    <div className="flex h-full min-h-16 items-center justify-between gap-3 rounded-md border bg-background px-4 py-3">
-      <div className="min-w-0">
-        <Label className="text-sm font-semibold">{label}</Label>
-        {description ? (
-          <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
-        ) : null}
-      </div>
-      <Switch checked={checked} disabled={disabled} onCheckedChange={onCheckedChange} />
-    </div>
-  );
-}
-
-/**
- * Universal pill-style choice button used by every "pick one" control
- * in the order wizard — Expansion segments, IPR options, treatment-plan
- * stage, A-P relationship, open bite, midline, bite ramps, crossbite,
- * materials, etc. Single source of truth so the form has one look
- * instead of two competing radio aesthetics.
- *
- * When nested inside a parent with role="radiogroup" the pill exposes
- * itself as role="radio" with aria-checked, which gives screen readers
- * the standard radio-button experience (arrow keys to move, space to
- * select). Otherwise it's a plain button.
- */
-function OptionPill({
-  label,
-  active,
-  disabled,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={active}
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(
-        // `relative` so the absolute-positioned check badge can pin
-        // itself to the top-right corner without nudging the label.
-        // `pr-9` reserves room for the badge so a long label
-        // ("Don't Move 6 - 7 only") never gets clipped by it.
-        'group relative inline-flex min-h-11 items-center justify-center rounded-md border bg-background px-3 pr-9 text-sm font-semibold transition',
-        'hover:border-primary/70',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1',
-        'disabled:cursor-not-allowed disabled:opacity-60',
-        active && 'border-primary bg-primary/5 text-primary shadow-sm',
-      )}
-    >
-      <span className="text-center">{label}</span>
-      {/* Selection check badge — same visual the ChoiceCard uses, so
-          every radio-style block in the wizard reads identically. */}
-      {active && (
-        <CheckCircle2
-          className="absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-primary"
-          aria-hidden
-        />
-      )}
-    </button>
-  );
-}
-
-// ReviewCard removed — replaced by the larger ReviewSection / ReviewInfo
-// helpers that mirror the order-detail page layout (see ReviewStep).
-
-function FieldError({ message }: { message?: string }) {
-  if (!message) return null;
-  return <p className="text-xs text-red-600">{message}</p>;
-}
-

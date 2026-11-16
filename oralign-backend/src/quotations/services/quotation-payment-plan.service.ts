@@ -27,6 +27,11 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { NotificationEvents } from '../../notifications/events/notification-events';
 import { isAdmin, type Caller } from '../../common/access/caller';
+import {
+  firstHandOverAt,
+  startCoverageWindow,
+} from '../../orders/coverage-window';
+import { INITIAL_ORDERS_ONLY } from '../../orders/order-kind';
 
 /**
  * Payment attempts that block re-planning the installments: money that
@@ -41,6 +46,40 @@ const LIVE_PAYMENT_STATUSES: PaymentRecordStatus[] = [
 ];
 
 const MONEY_EPSILON = new Prisma.Decimal('0.001');
+
+/**
+ * The initial cases the boot coverage pass can change: handed over, with
+ * a window not started yet, or started without an expiry while the live
+ * quotation now knows the pack validity. A case whose validity is still
+ * unknown (older quotes, packs without one) is left out: the pass would
+ * open a transaction for it on every boot and write nothing.
+ */
+export const COVERAGE_BACKFILL_CANDIDATES = {
+  ...INITIAL_ORDERS_ONLY,
+  deletedAt: null,
+  AND: [
+    {
+      OR: [
+        { coverageStartedAt: null },
+        {
+          coverageExpiresAt: null,
+          quotation: { deletedAt: null, treatmentValidityMonths: { gt: 0 } },
+        },
+      ],
+    },
+    {
+      OR: [
+        { alignerDeliveries: { some: {} } },
+        {
+          quotation: {
+            deletedAt: null,
+            stepBatches: { some: { status: BatchStatus.delivered } },
+          },
+        },
+      ],
+    },
+  ],
+} satisfies Prisma.DentalOrderWhereInput;
 
 /**
  * Service dedicated to the pack-aware quotation lifecycle:
@@ -67,9 +106,13 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
     private readonly events: EventEmitter2,
   ) {}
 
+  /** One-shot reconciliation at boot: statuses first, then coverage. */
+  async onApplicationBootstrap(): Promise<void> {
+    await this.reconcileFinishedOrders();
+    await this.reconcileCoverageWindows();
+  }
+
   /**
-   * One-shot reconciliation at boot.
-   *
    * The auto-finish hook inside `deliverBatch` only fires when an
    * admin actually clicks "Mark as delivered". Any order whose
    * batches were ALL marked delivered BEFORE the auto-finish code
@@ -85,7 +128,7 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
    * Skipped if the table is empty (very common in fresh dev
    * databases) — the count short-circuit avoids logging noise.
    */
-  async onApplicationBootstrap(): Promise<void> {
+  private async reconcileFinishedOrders(): Promise<void> {
     try {
       const candidates = await this.prisma.dentalOrder.findMany({
         where: {
@@ -132,6 +175,44 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
       // reconciliation for the same rows.
       this.logger.error(
         `Boot-time order reconciliation failed: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  /**
+   * Backfill of the coverage window of cases whose aligners were handed
+   * over without starting it (delivered before the window was tracked, or
+   * before their pack validity was known). The window starts at the FIRST
+   * recorded hand-over, never at boot time; startCoverageWindow keeps the
+   * pass idempotent, and only the cases it can change are visited
+   * (COVERAGE_BACKFILL_CANDIDATES). Errors are logged, never fatal, like
+   * the pass above.
+   */
+  private async reconcileCoverageWindows(): Promise<void> {
+    try {
+      const candidates = await this.prisma.dentalOrder.findMany({
+        where: COVERAGE_BACKFILL_CANDIDATES,
+        select: { id: true },
+      });
+
+      let started = 0;
+      for (const { id } of candidates) {
+        const changed = await this.prisma.$transaction(async (tx) => {
+          const handedOverAt = await firstHandOverAt(tx, id);
+          return handedOverAt
+            ? startCoverageWindow(tx, id, handedOverAt)
+            : false;
+        });
+        if (changed) started++;
+      }
+      if (started > 0) {
+        this.logger.log(
+          `Reconciled the coverage window of ${started} case(s) on boot, from their first delivery.`,
+        );
+      }
+    } catch (err) {
+      this.logger.error(
+        `Boot-time coverage reconciliation failed: ${(err as Error).message}`,
       );
     }
   }
@@ -223,6 +304,7 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
           archType,
           maxStepsPerArch: pack.maxStepsPerArch,
           includedCorrections: pack.includedCorrections,
+          treatmentValidityMonths: pack.treatmentValidityMonths,
           isUnlimitedSteps: pack.isUnlimitedSteps,
           isUnlimitedCorrections: pack.isUnlimitedCorrections,
           isForOrthodontists: pack.isForOrthodontists,
@@ -581,14 +663,18 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
         // so re-clicking "Deliver" doesn't double-ping the doctor.
         return { batch, justDelivered: false, orderJustFinished: false };
       }
+      const deliveredAt = new Date();
       const updated = await tx.quoteStepBatch.update({
         where: { id: batchId },
         data: {
           status: BatchStatus.delivered,
-          deliveredAt: new Date(),
+          deliveredAt,
           deliveredById: caller.userId,
         },
       });
+      // The first delivered batch hands the case's aligners over: it
+      // starts the coverage window (a no-op for later batches).
+      await startCoverageWindow(tx, batch.quotation.orderId, deliveredAt);
 
       // ── Auto-finish the order when EVERY batch is delivered.
       //

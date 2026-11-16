@@ -1,4 +1,5 @@
 import {
+  OrderType,
   PaymentProvider,
   PaymentPurpose,
   PaymentRecordStatus,
@@ -374,7 +375,8 @@ describe('ClicToPayPaymentsService', () => {
     ).rejects.toMatchObject({ errorCode: 'PAYMENT_IDEMPOTENCY_CONFLICT' });
   });
 
-  it('refuses a card session for an order whose fee the welcome gift waived', async () => {
+  /** The attempt transaction, run for real against one locked order row. */
+  const runAttemptAgainst = (order: Record<string, unknown>) => {
     prisma.payment.findUnique.mockResolvedValue(null); // no idempotency replay
     prisma.payment.findFirst.mockResolvedValue(null); // nothing to resume
     const tx = {
@@ -383,10 +385,12 @@ describe('ClicToPayPaymentsService', () => {
         findUnique: jest.fn().mockResolvedValue({
           id: 'order-1',
           doctorId: 'doctor-1',
+          orderType: OrderType.initial,
           deletedAt: null,
           treatmentFeePaidAt: null,
-          welcomeGiftAppliedAt: new Date('2026-11-04'),
+          welcomeGiftAppliedAt: null,
           cbctFeeAmount: new Prisma.Decimal('50.000'),
+          ...order,
         }),
       },
       payment: { findFirst: jest.fn(), count: jest.fn(), create: jest.fn() },
@@ -395,10 +399,26 @@ describe('ClicToPayPaymentsService', () => {
     prisma.$transaction.mockImplementation(
       (run: (client: typeof tx) => unknown) => run(tx),
     );
+    return tx;
+  };
+
+  it.each([
+    [
+      'whose fee the welcome gift waived',
+      { welcomeGiftAppliedAt: new Date('2026-11-04') },
+      'WELCOME_GIFT_NOTHING_DUE',
+    ],
+    [
+      'that is a supplemental request',
+      { orderType: OrderType.replacement },
+      'TREATMENT_FEE_INITIAL_ONLY',
+    ],
+  ])('refuses a card session for an order %s', async (_l, order, errorCode) => {
+    const tx = runAttemptAgainst(order);
 
     await expect(createTreatmentFeeSession()).rejects.toMatchObject({
       statusCode: 400,
-      errorCode: 'WELCOME_GIFT_NOTHING_DUE',
+      errorCode,
     });
     // Refused under the row lock, before any amount or attempt exists.
     expect(tx.$queryRaw).toHaveBeenCalled();

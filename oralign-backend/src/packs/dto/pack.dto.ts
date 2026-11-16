@@ -9,6 +9,7 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  Max,
   MaxLength,
   Min,
   MinLength,
@@ -118,6 +119,17 @@ export class CreatePackDto {
   @IsInt()
   @Min(0)
   includedCorrections?: number | null;
+
+  @ApiPropertyOptional({
+    example: 24,
+    description: 'Structured treatment coverage duration in months.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(120)
+  treatmentValidityMonths?: number | null;
 
   @ApiPropertyOptional({ default: false })
   @IsOptional()
@@ -243,6 +255,14 @@ export class UpdatePackDto {
   @IsInt()
   @Min(0)
   includedCorrections?: number | null;
+
+  @ApiPropertyOptional({ description: 'Structured treatment coverage duration in months.' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(120)
+  treatmentValidityMonths?: number | null;
 
   @ApiPropertyOptional()
   @IsOptional()

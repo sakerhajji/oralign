@@ -4,6 +4,7 @@ import {
   MediaProcessingStatus,
   OrderFileCategory,
   OrderStatus,
+  OrderType,
   PatientStage,
   PaymentMethod,
   ToothInstructionType,
@@ -674,6 +675,10 @@ export class OrderResponseDto {
   @ApiProperty({ enum: OrderStatus })
   status!: OrderStatus;
   @ApiProperty({ enum: PatientStage, required: false })
+  @ApiProperty({ enum: OrderType })
+  orderType!: OrderType;
+  @ApiProperty({ required: false })
+  parentOrderId?: string;
   patientStage?: PatientStage;
   @ApiProperty({ required: false })
   chiefComplaint?: string;
@@ -745,6 +750,10 @@ export class OrderResponseDto {
   @ApiProperty({ required: false })
   submittedAt?: Date;
   @ApiProperty({ required: false, description: 'When the treatment fee was marked paid; gates treatment-plan creation.' })
+  @ApiProperty({ required: false })
+  coverageStartedAt?: Date;
+  @ApiProperty({ required: false })
+  coverageExpiresAt?: Date;
   treatmentFeePaidAt?: Date;
   @ApiProperty({ required: false, description: 'Snapshot of treatment fee amount at payment time.' })
   treatmentFeeAmount?: number;

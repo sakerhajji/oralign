@@ -1,5 +1,6 @@
 import {
   OrderStatus,
+  OrderType,
   PaymentMethod,
   PaymentProvider,
   PaymentPurpose,
@@ -20,6 +21,7 @@ const admin: Caller = { userId: 'u-admin', role: UserRole.admin };
 const D = (v: string | number) => new Prisma.Decimal(v);
 
 type OrderRow = {
+  orderType: OrderType;
   doctorId: string;
   useCbctWithScans: boolean;
   cbctFeeAmount: Prisma.Decimal | null;
@@ -30,6 +32,7 @@ type OrderRow = {
 
 /** The order being submitted: a CBCT draft priced 50 on its snapshot. */
 const draft = (over: Partial<OrderRow> = {}): OrderRow => ({
+  orderType: OrderType.initial,
   doctorId: 'u-doc',
   useCbctWithScans: true,
   cbctFeeAmount: D('50.000'),
@@ -526,6 +529,25 @@ describe('WelcomeGiftService.applyOnSubmit', () => {
     expectNothingWritten(foreign);
     expectNothingWritten(missing);
   });
+
+  it.each([
+    OrderType.additional_aligners,
+    OrderType.replacement,
+    OrderType.transfer_template,
+    OrderType.warranty,
+  ])(
+    'is a no-op for a %s request: the gift stays for the next case',
+    async (orderType) => {
+      const { service } = makeService();
+      const tx = makeTx({ order: draft({ orderType }) });
+
+      await expect(apply(service, tx)).resolves.toBe(false);
+      // Decided before any rule is read: the mark is not even looked at.
+      expect(tx.companyBillingSettings.findFirst).not.toHaveBeenCalled();
+      expect(tx.user.findUnique).not.toHaveBeenCalled();
+      expectNothingWritten(tx);
+    },
+  );
 });
 
 describe('WelcomeGiftService.getStatus', () => {

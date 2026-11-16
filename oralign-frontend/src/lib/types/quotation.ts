@@ -238,6 +238,7 @@ export interface Quotation {
   archType?: ArchType | null;
   maxStepsPerArch?: number | null;
   includedCorrections?: number | null;
+  treatmentValidityMonths?: number | null;
   isUnlimitedSteps?: boolean | null;
   isUnlimitedCorrections?: boolean | null;
   isForOrthodontists?: boolean | null;
@@ -268,6 +269,7 @@ export interface PackLocalizedSummary {
   finishingIncludedLabel?: Partial<Localized<string>> | null;
   maxStepsPerArch?: number | null;
   includedCorrections?: number | null;
+  treatmentValidityMonths?: number | null;
   isUnlimitedSteps?: boolean | null;
   isUnlimitedCorrections?: boolean | null;
 }

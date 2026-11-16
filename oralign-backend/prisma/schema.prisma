@@ -64,6 +64,164 @@ enum OrderStatus {
   cancelled
 }
 
+enum OrderType {
+  initial
+  additional_aligners
+  replacement
+  transfer_template
+  warranty
+}
+
+enum SupplementalCoverageStatus {
+  review_required
+  included
+  chargeable
+  warranty_approved
+  warranty_rejected
+}
+
+enum SupplementalReviewStatus {
+  draft
+  pending
+  approved
+  rejected
+}
+
+enum SupplementalRequestReason {
+  finishing
+  tracking_problem
+  treatment_plan_change
+  dental_restoration
+  non_compliance
+  other
+}
+
+enum SupplementalClinicalObjective {
+  adjust_current_position
+  preserve_previous_goal
+  new_goal
+}
+
+// ── Additional-aligner form: one enum per question, so an answer can only
+// be a value that question offers (src/orders/supplemental owns the rules).
+
+// Q7, per side: the antero-posterior correction asked for.
+enum SupplementalApCorrection {
+  maintain
+  improve_canine
+  improve_canine_molar
+  class_one
+}
+
+// Q7 therapeutic options (multi-select).
+enum SupplementalApOption {
+  posterior_ipr
+  elastics_simulation
+  sequential_distalization
+  mandibular_advancement
+  orthognathic_surgery
+}
+
+// Q6: teeth that must not move.
+enum SupplementalTeethScope {
+  none
+  selected_teeth
+}
+
+// Q8: new attachments.
+enum SupplementalAttachmentPlan {
+  as_needed
+  avoid_selected_teeth
+}
+
+// Q9: attachments already bonded.
+enum SupplementalExistingAttachments {
+  remove_all
+  remove_selected
+  keep_conventional
+  keep_all
+}
+
+// Q10a: IPR in the new series.
+enum SupplementalIprPlan {
+  as_needed
+  none
+  avoid_selected_teeth
+}
+
+// Q10b: IPR performed during the previous series.
+enum SupplementalPreviousIpr {
+  as_prescribed
+  none
+  different
+}
+
+// Q11: cut-outs (hooks / buttons) in the aligners.
+enum SupplementalCutoutPlan {
+  none
+  same_as_previous
+  selected_teeth
+}
+
+// Q12: residual spaces.
+enum SupplementalResidualSpaces {
+  none
+  close_specified
+}
+
+// Scans step: how the new arch records reach the lab.
+enum SupplementalImpressionMethod {
+  intraoral_scan
+  physical_impression
+}
+
+// What a tooth selected on a supplemental request means
+// (SupplementalToothSelection.purpose).
+enum SupplementalToothPurpose {
+  do_not_move
+  no_attachment
+  remove_attachment
+  no_ipr
+  cutout
+  transfer_tray
+}
+
+// What a contact between two adjacent teeth means
+// (SupplementalToothContact.purpose).
+enum SupplementalContactPurpose {
+  performed_ipr
+  residual_space
+}
+
+enum ReplacementReason {
+  lost
+  broken
+  deformed
+  other
+}
+
+enum SupplementalUrgency {
+  standard
+  urgent
+}
+
+enum TransferTemplatePurpose {
+  attachment_placement
+  auxiliary_placement
+  attachment_and_auxiliary
+  other
+}
+
+enum WarrantyDefectCategory {
+  fit
+  crack
+  deformation
+  trim
+  material
+  labeling
+  other
+}
+
 enum TreatmentPlanStatus {
   pending
   ready
@@ -123,6 +281,11 @@ enum ToothInstructionType {
   //              carries the optional "stripping" auxiliary value.
   attachment
   ipr_value
+  // RESERVED, unused. Added for v1 supplemental requests, whose doctor
+  // prescriptions now live in SupplementalToothSelection (purpose cutout);
+  // the 20261112000000 migration moved every row out. Postgres cannot drop
+  // an enum value cheaply, so the value stays: never write it.
+  precision_cut
 }
 
 enum OrderFileCategory {
@@ -358,6 +521,8 @@ model User {
 
   // Patient community submissions reviewed by an admin before publication.
   reviewedCommunitySubmissions CommunitySubmission[] @relation("CommunitySubmissionReviewedBy")
+  createdSupplementalRequests  SupplementalOrderRequest[] @relation("SupplementalRequestCreatedBy")
+  reviewedSupplementalRequests SupplementalOrderRequest[] @relation("SupplementalRequestReviewedBy")
 
   // Manual/admin invoicing. All three are SetNull on the Invoice side:
   // a financial document outlives the account that issued or was billed.
@@ -436,6 +601,12 @@ model DentalOrder {
   patientId                     String
   assignedDesignerId            String?
   status                        OrderStatus               @default(draft)
+  // An initial case has no parent; a supplemental child (any other type)
+  // always points at its initial case. SQL-only CHECK
+  // "DentalOrder_order_type_parent_check" (migration
+  // 20261112000000_supplemental_aligner_form) enforces the pairing.
+  orderType                     OrderType                 @default(initial)
+  parentOrderId                 String?
 
   patientStage                  PatientStage?
   chiefComplaint                String?
@@ -557,6 +728,13 @@ model DentalOrder {
   // maxStepsPerArch (a purchased allowance, not a clinical count).
   totalAligners                 Int?
 
+  // Structured coverage window of an INITIAL case: set once, at the first
+  // real hand-over of aligners (src/orders/coverage-window.ts), expiry =
+  // start + Quotation.treatmentValidityMonths. Never inferred from a
+  // translated marketing label; null on children.
+  coverageStartedAt             DateTime?
+  coverageExpiresAt             DateTime?
+
   // DELETION POLICY: Restrict on both parents. Orders own numbered devis,
   // payments (invoice numbers) and treatment plans — a doctor or patient
   // hard-delete must be blocked while orders exist, never cascade into
@@ -564,6 +742,10 @@ model DentalOrder {
   doctor                        User                      @relation("OrderDoctor", fields: [doctorId], references: [id], onDelete: Restrict)
   patient                       Patient                   @relation(fields: [patientId], references: [id], onDelete: Restrict)
   assignedDesigner              User?                     @relation("OrderDesigner", fields: [assignedDesignerId], references: [id], onDelete: SetNull)
+  parentOrder                   DentalOrder?               @relation("OrderSupplementals", fields: [parentOrderId], references: [id], onDelete: Restrict)
+  supplementalOrders            DentalOrder[]              @relation("OrderSupplementals")
+  supplementalRequest           SupplementalOrderRequest?
+  warrantyConversion            SupplementalOrderRequest?  @relation("WarrantyConversion")
   toothInstructions             OrderToothInstruction[]
   alignerDeliveries             AlignerDelivery[]
   files                         OrderFile[]
@@ -582,6 +764,8 @@ model DentalOrder {
   @@index([doctorId])
   @@index([patientId])
   @@index([assignedDesignerId])
+  @@index([parentOrderId])
+  @@index([orderType])
   @@index([status])
   @@index([status, createdAt, deletedAt])
   @@index([orderCode])
@@ -590,6 +774,137 @@ model DentalOrder {
   // The treatment fees received over a period (payments summary, history
   // filtered by paid date).
   @@index([treatmentFeePaymentStatus, treatmentFeePaidAt])
+}
+
+// One row per supplemental child order: its typed answers and its review.
+// Each request kind uses a validated subset of these columns
+// (src/orders/supplemental/validators decide which are required at submit);
+// relational columns instead of a JSON form blob, so every answer can only
+// hold a value its question offers. The teeth and contacts the doctor
+// prescribes live in the two request-owned tables below, never in
+// OrderToothInstruction, whose planner-owned types the plan editor rewrites.
+model SupplementalOrderRequest {
+  id                           String                           @id @default(uuid())
+  orderId                      String                           @unique
+  order                        DentalOrder                      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  // Actor references, not ownership (DELETION-POLICY rule 4): optional,
+  // SetNull and a display-name snapshot, so purging a staff account never
+  // blocks on, nor blanks, a request. A null creator does not weaken the
+  // idempotency unique below for live users.
+  createdById                  String?
+  createdBy                    User?                            @relation("SupplementalRequestCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdByName                String?
+  reviewedById                 String?
+  reviewedBy                   User?                            @relation("SupplementalRequestReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedByName               String?
+
+  idempotencyKey               String
+  // Computed by the server (coverage policy) at creation and submit; set by
+  // the admin's decision at review. coverageReason explains the computed
+  // value (within_pack_allowance, coverage_expired, ...).
+  coverageStatus               SupplementalCoverageStatus       @default(review_required)
+  coverageReason               String?
+  reviewStatus                 SupplementalReviewStatus         @default(draft)
+  reviewReason                 String?
+  reviewedAt                   DateTime?
+  submittedAt                  DateTime?
+  // Rank of an included correction within the pack allowance, assigned at
+  // approval under the parent row lock.
+  correctionNumber             Int?
+
+  // ── additional_aligners (questions Q1..Q13 of the form) ────────────
+  reason                       SupplementalRequestReason?
+  reasonDetails                String?
+  currentUpperAligner          Int?
+  currentLowerAligner          Int?
+  passiveOppositeArch          Boolean?
+  newUpperScan                 Boolean?
+  newLowerScan                 Boolean?
+  clinicalObjective            SupplementalClinicalObjective?
+  movementRestriction          SupplementalTeethScope?
+  apRelationshipRight          SupplementalApCorrection?
+  apRelationshipLeft           SupplementalApCorrection?
+  apOptions                    SupplementalApOption[]           @default([])
+  // Asked only when elastics_simulation or sequential_distalization is one
+  // of the apOptions; cleared otherwise.
+  elasticCutouts               Boolean?
+  attachmentPolicy             SupplementalAttachmentPlan?
+  existingAttachmentPolicy     SupplementalExistingAttachments?
+  iprPolicy                    SupplementalIprPlan?
+  previousIpr                  SupplementalPreviousIpr?
+  precisionCutPolicy           SupplementalCutoutPlan?
+  residualSpacePolicy          SupplementalResidualSpaces?
+  upperInstructions            String?
+  lowerInstructions            String?
+  impressionMethod             SupplementalImpressionMethod?
+
+  // ── replacement (and the defective aligner of a warranty claim) ─────
+  replacementFromAligner       Int?
+  replacementToAligner         Int?
+  quantity                     Int?
+  replacementReason            ReplacementReason?
+  urgency                      SupplementalUrgency?
+
+  // ── transfer_template ───────────────────────────────────────────────
+  // Always an approved plan of the parent case, chosen by the server; the
+  // version is read from the plan row, never taken from the client.
+  // SetNull: a reference, the version snapshot survives the plan row.
+  sourceTreatmentPlanId        String?
+  sourceTreatmentPlan          TreatmentPlan?                   @relation("SupplementalSourcePlan", fields: [sourceTreatmentPlanId], references: [id], onDelete: SetNull)
+  sourceTreatmentPlanVersion   Int?
+  transferPurpose              TransferTemplatePurpose?
+  transferNotes                String?
+
+  // ── warranty ────────────────────────────────────────────────────────
+  warrantyDefectCategory       WarrantyDefectCategory?
+  // A calendar day (stored at 00:00 UTC), sent as YYYY-MM-DD.
+  warrantyDiscoveredAt         DateTime?
+  warrantyLotReference         String?
+  warrantyComments             String?
+  // The paid replacement the doctor confirmed after a rejected warranty.
+  convertedReplacementOrderId  String?                          @unique
+  convertedReplacementOrder    DentalOrder?                     @relation("WarrantyConversion", fields: [convertedReplacementOrderId], references: [id], onDelete: SetNull)
+
+  teeth                        SupplementalToothSelection[]
+  contacts                     SupplementalToothContact[]
+
+  createdAt                    DateTime                         @default(now())
+  updatedAt                    DateTime                         @updatedAt
+
+  @@unique([createdById, idempotencyKey])
+  @@index([reviewStatus, submittedAt])
+  @@index([coverageStatus])
+}
+
+// A tooth the doctor selected on a supplemental request, and why (FDI
+// number). Which question owns which purpose is one table in code
+// (SUPPLEMENTAL_DETAIL_OWNERS); a purpose whose owning answer is not
+// selected is dropped on every draft save.
+model SupplementalToothSelection {
+  id          String                   @id @default(uuid())
+  requestId   String
+  request     SupplementalOrderRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  purpose     SupplementalToothPurpose
+  toothNumber Int
+
+  @@unique([requestId, purpose, toothNumber])
+}
+
+// A contact between two ADJACENT teeth (same quadrant neighbours, or 11-21
+// and 31-41 across the midline) with an amount in mm: IPR already
+// performed, or a residual space to close. Stored with fromTooth < toTooth;
+// SQL-only CHECK "SupplementalToothContact_pair_check" holds the order and a
+// positive amount.
+model SupplementalToothContact {
+  id        String                     @id @default(uuid())
+  requestId String
+  request   SupplementalOrderRequest   @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  purpose   SupplementalContactPurpose
+  fromTooth Int
+  toTooth   Int
+  amountMm  Decimal                    @db.Decimal(4, 2)
+
+  @@unique([requestId, purpose, fromTooth, toTooth])
 }
 
 model OrderAuditLog {
@@ -846,6 +1161,8 @@ model TreatmentPlan {
   // single tooth, IPR is between two). See the TreatmentPlanIpr model
   // below for the contract.
   iprEntries                  TreatmentPlanIpr[]
+  // Transfer-template requests built from this plan (SetNull on their side).
+  supplementalSourceRequests  SupplementalOrderRequest[]  @relation("SupplementalSourcePlan")
 
   @@unique([orderId, version])
   @@index([orderId])
@@ -1295,6 +1612,7 @@ model Quotation {
   archType               ArchType?
   maxStepsPerArch        Int?
   includedCorrections    Int?
+  treatmentValidityMonths Int?
   isUnlimitedSteps       Boolean          @default(false)
   isUnlimitedCorrections Boolean          @default(false)
   isForOrthodontists     Boolean          @default(false)
@@ -1382,6 +1700,7 @@ model Pack {
   // the "number of aligners per arch" business field.
   maxStepsPerArch          Int?
   includedCorrections      Int?
+  treatmentValidityMonths  Int?
   isUnlimitedSteps         Boolean     @default(false)
   isUnlimitedCorrections   Boolean     @default(false)
   isForOrthodontists       Boolean     @default(false)

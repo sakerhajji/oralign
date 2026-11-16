@@ -15,6 +15,7 @@ import {
   WelcomeGiftStatusDto,
 } from '../dto/welcome-gift.dto';
 import { OrderAuditService } from './order-audit.service';
+import { isInitialOrder } from '../order-kind';
 
 /** OrderAuditLog action written when the gift lands on an order. */
 export const WELCOME_GIFT_AUDIT_ACTION = 'welcome_gift_applied';
@@ -181,6 +182,7 @@ export class WelcomeGiftService {
       where: { id: orderId },
       select: {
         doctorId: true,
+        orderType: true,
         useCbctWithScans: true,
         cbctFeeAmount: true,
         treatmentFeePaidAt: true,
@@ -191,6 +193,9 @@ export class WelcomeGiftService {
     // The lock is keyed on the doctor we were told about; an order that
     // changed hands meanwhile is not decided under the right lock.
     if (!order || order.doctorId !== doctorId) return false;
+    // The gift waives a CASE's fee: a supplemental request has none, and
+    // must never consume the doctor's mark.
+    if (!isInitialOrder(order)) return false;
     // Idempotent per order: an existing gift is kept as frozen.
     if (order.welcomeGiftAppliedAt) return false;
 

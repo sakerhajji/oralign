@@ -204,6 +204,13 @@ const MARK_STYLES: Record<ToothInstructionType, MarkStyle> = {
     labelFr: 'IPR (mm)',
     labelEn: 'IPR (mm)',
   },
+  [ToothInstructionType.precision_cut]: {
+    hex: '#0f766e',
+    outline: '#14b8a6',
+    short: 'PC',
+    labelFr: 'Découpe de précision',
+    labelEn: 'Precision cut',
+  },
 };
 
 // Photo categories embedded as IMAGES in the sheet (everything else —

@@ -1,4 +1,4 @@
-import { OrderStatus, UserRole } from '@prisma/client';
+import { OrderStatus, OrderType, UserRole } from '@prisma/client';
 import type { EventEmitter2 } from '@nestjs/event-emitter';
 import type { PrismaService } from '../../prisma/prisma.service';
 import type { OrderAccessPolicy } from '../../common/access/order-access.policy';
@@ -25,6 +25,7 @@ const draft = {
   id: 'o-1',
   orderCode: 'ORD-1',
   doctorId: 'u-doc',
+  orderType: OrderType.initial,
   status: OrderStatus.draft,
   submittedAt: null,
   useCbctWithScans: false,

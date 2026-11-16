@@ -95,7 +95,7 @@ export function ClinicalConditionsField({
   };
 
   return (
-    <fieldset className="space-y-3 rounded-lg border bg-card p-4">
+    <fieldset className="min-w-0 space-y-3 rounded-lg border bg-card p-4">
       <legend className="px-1 text-sm font-semibold">{resolvedLegend}</legend>
       <p className="text-xs text-muted-foreground">{resolvedDescription}</p>
       {/*

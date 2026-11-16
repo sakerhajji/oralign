@@ -64,6 +64,15 @@ import { extractApiErrorMessage } from '@/lib/api/error';
 import { TreatmentFeePaymentDialog } from '@/components/orders/treatment-fee-payment-dialog';
 import { TreatmentFeeReceiptDialog } from '@/components/orders/treatment-fee-receipt-dialog';
 import { OrderHistory } from '@/components/orders/order-history';
+import {
+  SupplementalOrdersPanel,
+  SupplementalRequestCard,
+} from '@/components/orders/supplemental';
+import { OrderKindBadge } from '@/components/dashboard/order-kind-badge';
+import {
+  useDeleteSupplementalOrder,
+  useSupplementalOrder,
+} from '@/lib/hooks/use-supplemental-orders';
 import { WelcomeGiftDetailCard } from '@/components/welcome-gift/welcome-gift-detail-card';
 import { FreeBadge } from '@/components/welcome-gift/welcome-gift-note';
 import { StruckAmount } from '@/components/welcome-gift/struck-price';
@@ -73,14 +82,28 @@ import {
   Gender,
   OrderFileCategory,
   OrderStatus,
+  OrderType,
   QuotationStatus,
+  SupplementalCoverageStatus,
+  SupplementalReviewStatus,
   TreatmentPlanStatus,
   UserRole,
+  type DentalOrder,
   type OrderFile,
+  type Patient,
+  type SupplementalPermissions,
+  type SupplementalRequest,
 } from '@/lib/types';
 import { formatPrice } from '@/lib/utils/currency';
 import { formatBytes } from '@/lib/utils/bytes';
-import { safeDashboardReturnTo } from '@/lib/orders/order-navigation';
+import {
+  SUPPLEMENTAL_REQUESTS_ANCHOR,
+  buildOrderEditHref,
+  buildParentCaseHref,
+  buildSupplementalRequestsHref,
+  isSupplementalOrder,
+  safeDashboardReturnTo,
+} from '@/lib/orders/order-navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 /**
@@ -154,11 +177,24 @@ export default function OrderDetailPage() {
   const searchParams = useSearchParams();
   const orderQuery = useOrder(params.id);
   const deleteOrder = useDeleteOrder();
+  const deleteSupplemental = useDeleteSupplementalOrder();
   const { isAdmin, isDentist, user } = useAuth();
   const { t, lang } = useT();
   const requestedTab = parseOrderDetailTab(searchParams.get('tab'));
-  const returnHref =
-    safeDashboardReturnTo(searchParams.get('returnTo')) ?? '/dashboard/orders';
+  const explicitReturnHref = safeDashboardReturnTo(searchParams.get('returnTo'));
+  const returnHref = explicitReturnHref ?? '/dashboard/orders';
+
+  // A supplemental child carries its request: the server's permissions
+  // for the caller drive its header actions, its review state its tabs.
+  const childOrderId =
+    orderQuery.data && isSupplementalOrder(orderQuery.data)
+      ? orderQuery.data.id
+      : undefined;
+  const requestQuery = useSupplementalOrder(childOrderId);
+  const requestView = requestQuery.data;
+  // Tabs are picked once per visit; for a child, wait for its request so a
+  // requested tab is not dropped before the review state is known.
+  const tabsReady = !childOrderId || !requestQuery.isPending;
 
   // Pull the full patient record separately — the order endpoint only
   // returns a slim {id,fullName,email,phone} on purpose, but the detail
@@ -202,6 +238,18 @@ export default function OrderDetailPage() {
         seenMarkedForRef.current = null;
       });
   }, [orderQuery.data?.id, isAdmin, queryClient]);
+
+  // Links to a case's supplemental requests (orders list, request card)
+  // land before the order has loaded, so the browser finds no target:
+  // scroll once the section is on the page.
+  const loadedOrderId = orderQuery.data?.id;
+  useEffect(() => {
+    if (!loadedOrderId) return;
+    if (window.location.hash !== `#${SUPPLEMENTAL_REQUESTS_ANCHOR}`) return;
+    document
+      .getElementById(SUPPLEMENTAL_REQUESTS_ANCHOR)
+      ?.scrollIntoView({ block: 'start' });
+  }, [loadedOrderId]);
 
   // ── Admin / designer: download ALL files + data as one ZIP ──────────
   // Fetches the archive as a blob through the authed apiClient (a plain
@@ -277,6 +325,19 @@ export default function OrderDetailPage() {
     }
   };
 
+  const quotable = orderQuery.data
+    ? isQuotable(orderQuery.data, requestView?.request)
+    : false;
+  const workflowTabs = orderQuery.data
+    ? visibleWorkflowTabs({
+        order: orderQuery.data,
+        reviewStatus: requestView?.request.reviewStatus,
+        quotable,
+        isPlanner: isAdmin || user?.role === UserRole.DESIGNER,
+        hasQuotation: !!quotationQuery.data,
+      })
+    : NO_WORKFLOW_TABS;
+
   const defaultTab = useMemo<OrderDetailTab>(() => {
     if (!orderQuery.data) return 'order';
     return computeDefaultTab({
@@ -289,29 +350,19 @@ export default function OrderDetailPage() {
     quotationQuery.data,
   ]);
 
+  const { treatmentPlans: showsTreatmentPlans, quote: showsQuote } = workflowTabs;
   const initialTab = useMemo<OrderDetailTab>(() => {
     if (!orderQuery.data) return 'order';
     return resolveRequestedTab({
       requestedTab,
       defaultTab,
-      isPlanner: isAdmin || user?.role === UserRole.DESIGNER,
-      hasTreatmentPlans: (orderQuery.data.treatmentPlansCount ?? 0) > 0,
-      hasQuotation:
-        !!quotationQuery.data ||
-        POST_QUOTE_STATUSES.has(orderQuery.data.status),
+      visible: { treatmentPlans: showsTreatmentPlans, quote: showsQuote },
     });
-  }, [
-    defaultTab,
-    isAdmin,
-    orderQuery.data,
-    quotationQuery.data,
-    requestedTab,
-    user?.role,
-  ]);
+  }, [defaultTab, orderQuery.data, requestedTab, showsQuote, showsTreatmentPlans]);
 
   useEffect(() => {
     const orderId = orderQuery.data?.id;
-    if (!orderId) return;
+    if (!orderId || !tabsReady) return;
 
     const initKey = `${orderId}:${requestedTab ?? 'default'}`;
     if (initializedOrderIdRef.current === initKey) return;
@@ -319,7 +370,7 @@ export default function OrderDetailPage() {
     initializedOrderIdRef.current = initKey;
     setActiveTab(initialTab);
     setMountedTabs(new Set([initialTab]));
-  }, [initialTab, orderQuery.data?.id, requestedTab]);
+  }, [initialTab, orderQuery.data?.id, requestedTab, tabsReady]);
 
   useEffect(() => {
     setMountedTabs((current) => {
@@ -387,26 +438,42 @@ export default function OrderDetailPage() {
 
   const order = orderQuery.data;
   const patient = patientQuery.data;
+  const isChild = isSupplementalOrder(order);
   const canManage = isAdmin || isDentist;
   // Once the treatment fee is paid, a non-admin (the owning doctor) can no
   // longer edit or delete the order — mirrors the backend guard. Admins
   // keep full control.
   const paidLocked = !!order.treatmentFeePaidAt && !isAdmin;
-  const canEditOrder = canManage && !paidLocked;
-  const hasQuotationSignal =
-    !!quotationQuery.data || POST_QUOTE_STATUSES.has(order.status);
-  const isPlanner = isAdmin || user?.role === UserRole.DESIGNER;
+  const { canEdit: canEditOrder, canDelete: canDeleteOrder } = headerActions({
+    isChild,
+    permissions: requestView?.permissions,
+    canManage,
+    paidLocked,
+  });
+  // A child without a returnTo goes back to its case, not to the list.
+  const backToCase = isChild && !explicitReturnHref && !!order.parentOrderId;
+  const backHref = backToCase ? buildParentCaseHref(order) : returnHref;
   const hasTreatmentPlans = (order.treatmentPlansCount ?? 0) > 0;
-  const shouldShowTreatmentPlansTab = showTreatmentTab({
-    isPlanner,
-    hasTreatmentPlans,
-  });
-  const shouldShowQuoteTab = showQuoteTab({
-    isPlanner,
-    hasQuotation: hasQuotationSignal,
-  });
+  const handleDelete = () => {
+    // A child draft is withdrawn through its request, which logs it on
+    // the case and frees its kind; the generic delete refuses children.
+    if (isSupplementalOrder(order) && order.parentOrderId) {
+      deleteSupplemental.mutate(
+        {
+          requestId: order.id,
+          parentOrderId: order.parentOrderId,
+          patientId: order.patientId,
+        },
+        { onSuccess: () => router.push(buildSupplementalRequestsHref(order)) },
+      );
+      return;
+    }
+    deleteOrder.mutate(order.id, {
+      onSuccess: () => router.push(returnHref),
+    });
+  };
   const visibleTabCount =
-    2 + Number(shouldShowTreatmentPlansTab) + Number(shouldShowQuoteTab);
+    2 + Number(showsTreatmentPlans) + Number(showsQuote);
   const tabListColumns =
     visibleTabCount === 4
       ? 'sm:grid-cols-2 lg:grid-cols-4'
@@ -444,9 +511,11 @@ export default function OrderDetailPage() {
       <header className="flex flex-col gap-4 rounded-2xl border bg-card p-4 shadow-sm sm:flex-row sm:items-start sm:justify-between sm:p-6">
         <div className="min-w-0">
           <Button asChild variant="ghost" size="sm" className="mb-1 px-0">
-            <Link href={returnHref}>
+            <Link href={backHref}>
               <ArrowLeft className="mr-2 h-4 w-4" />
-              {t('orderDetail.backToList')}
+              {backToCase
+                ? t('orderDetail.backToParentCase')
+                : t('orderDetail.backToList')}
             </Link>
           </Button>
           <div className="flex flex-wrap items-center gap-3">
@@ -454,6 +523,7 @@ export default function OrderDetailPage() {
               {order.orderCode}
             </h1>
             <OrderStatusBadge status={order.status} />
+            <OrderKindBadge order={order} />
             {/* Admin manual override — small, low-visual-weight chip
                 tucked next to the status badge so it doesn't compete
                 with the doctor-facing actions. Backend re-enforces
@@ -524,7 +594,7 @@ export default function OrderDetailPage() {
           {canEditOrder && (
             <Button asChild>
               <Link
-                href={`/dashboard/orders/${order.id}/edit`}
+                href={buildOrderEditHref(order)}
                 className="h-10 w-full justify-center sm:w-auto"
               >
                 <Edit className="mr-2 h-4 w-4" />
@@ -532,19 +602,23 @@ export default function OrderDetailPage() {
               </Link>
             </Button>
           )}
-          {canEditOrder && (
+          {canDeleteOrder && (
             <OrderDeleteAction
-              title={t('orderDetail.delete') + ' ?'}
-              description={t('orderDetail.deleteDescription')}
+              title={
+                isChild
+                  ? t('orderDetail.deleteSupplementalTitle')
+                  : t('orderDetail.delete') + ' ?'
+              }
+              description={
+                isChild
+                  ? t('orderDetail.deleteSupplementalDescription')
+                  : t('orderDetail.deleteDescription')
+              }
               actionLabel={t('common.delete')}
               cancelLabel={t('common.cancel')}
               icon={<Trash2 className="mr-2 h-4 w-4" />}
-              disabled={deleteOrder.isPending}
-              onConfirm={() =>
-                deleteOrder.mutate(order.id, {
-                  onSuccess: () => router.push(returnHref),
-                })
-              }
+              disabled={deleteOrder.isPending || deleteSupplemental.isPending}
+              onConfirm={handleDelete}
             />
           )}
           {/* Permanent deletion is trash-first: it lives in the orders
@@ -552,17 +626,28 @@ export default function OrderDetailPage() {
         </div>
       </header>
 
+      {/* A case lists its supplemental requests (and offers a new one);
+          a child shows its own request in the details tab instead. */}
+      {isChild ? null : (
+        <div id={SUPPLEMENTAL_REQUESTS_ANCHOR} className="scroll-mt-24 empty:hidden">
+          <SupplementalOrdersPanel parentOrderId={order.id} />
+        </div>
+      )}
+
       {/* ─── Treatment-fee gate banner ─────────────────────────────────────
           Renders only when there's a configured treatment fee > 0 and the
           order hasn't paid it yet. The doctor sees a "Pay treatment fee"
           CTA; the admin sees "Mark as paid" so they can record cash /
           transfer collection. Either action stamps `treatmentFeePaidAt`,
-          which the backend uses to unlock treatment-plan creation. */}
-      <TreatmentFeeGateBanner
-        order={order}
-        canActAsAdmin={isAdmin}
-        canActAsDoctor={isDentist}
-      />
+          which the backend uses to unlock treatment-plan creation. The fee
+          belongs to the case: a child never carries one. */}
+      {isChild ? null : (
+        <TreatmentFeeGateBanner
+          order={order}
+          canActAsAdmin={isAdmin}
+          canActAsDoctor={isDentist}
+        />
+      )}
 
       {/* ─── Tab visibility + default selection ─────────────────────────────
             Doctors only see what's been created — no empty Quote tab on a
@@ -605,7 +690,7 @@ export default function OrderDetailPage() {
                 {t('orderDetail.tabs.details')}
               </span>
             </TabsTrigger>
-            {shouldShowTreatmentPlansTab && (
+            {showsTreatmentPlans && (
               <TabsTrigger
                 value="treatment-plans"
                 className={ORDER_DETAIL_TAB_TRIGGER_CLASS}
@@ -627,7 +712,7 @@ export default function OrderDetailPage() {
                 }) && <AttentionDot />}
               </TabsTrigger>
             )}
-            {shouldShowQuoteTab && (
+            {showsQuote && (
               <TabsTrigger
                 value="quote"
                 className={ORDER_DETAIL_TAB_TRIGGER_CLASS}
@@ -663,28 +748,12 @@ export default function OrderDetailPage() {
           forceMount
           className="space-y-6 data-[state=inactive]:hidden"
         >
-          {mountedTabs.has('order') && (
+          {!mountedTabs.has('order') ? null : isChild ? (
+            <SupplementalChildDetails order={order} patient={patient} />
+          ) : (
             <>
       {/* ─── 1 · Patient information ──────────────────────────────────── */}
-      <Section icon={UserRound} title={t('orderDetail.patientCard.title')}>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Info label={t('orderForm.patient.pickerLabel')} value={order.patient?.fullName} />
-          <Info label={t('orderDetail.patientCard.dentist')} value={order.doctor?.fullName} />
-          <Info label={t('orderDetail.patientCard.stage')} value={order.patientStage} />
-          <Info label={t('orderDetail.patientCard.sex')} value={genderLabel(patient?.gender, t)} />
-          <Info label={t('orderDetail.patientCard.dob')} value={formatBirthDate(patient?.dateOfBirth, lang)} />
-          <Info label={t('orderForm.patient.age')} value={ageFromDob(patient?.dateOfBirth, t)} />
-          <Info label={t('orderDetail.patientCard.email')} value={order.patient?.email} />
-          <Info label={t('orderDetail.patientCard.phone')} value={order.patient?.phone} />
-          <Info label={t('orderDetail.patientCard.arch')} value={order.archTreatment} />
-          {patient?.address && (
-            <Info label={t('orderDetail.patientCard.address')} value={patient.address} wide />
-          )}
-          {patient?.notes && (
-            <Info label={t('orderDetail.patientCard.notes')} value={patient.notes} wide />
-          )}
-        </div>
-      </Section>
+      <PatientSection order={order} patient={patient} />
 
       {/* ─── 2 · Patient images ───────────────────────────────────────── */}
       <Section icon={Camera} title={t('orderDetail.sections.patientImages')}>
@@ -859,7 +928,11 @@ export default function OrderDetailPage() {
           className="data-[state=inactive]:hidden"
         >
           {mountedTabs.has('quote') ? (
-            <QuoteReview orderId={order.id} role={user?.role as UserRole} />
+            <QuoteReview
+              orderId={order.id}
+              role={user?.role as UserRole}
+              canCreate={quotable}
+            />
           ) : null}
         </TabsContent>
 
@@ -912,9 +985,7 @@ function parseOrderDetailTab(value: string | null): OrderDetailTab | null {
 function resolveRequestedTab(args: {
   requestedTab: OrderDetailTab | null;
   defaultTab: OrderDetailTab;
-  isPlanner: boolean;
-  hasTreatmentPlans: boolean;
-  hasQuotation: boolean;
+  visible: WorkflowTabs;
 }): OrderDetailTab {
   if (!args.requestedTab) {
     return args.defaultTab;
@@ -925,25 +996,89 @@ function resolveRequestedTab(args: {
   if (args.requestedTab === 'history') {
     return 'history';
   }
-  if (
-    args.requestedTab === 'treatment-plans' &&
-    showTreatmentTab({
-      isPlanner: args.isPlanner,
-      hasTreatmentPlans: args.hasTreatmentPlans,
-    })
-  ) {
+  if (args.requestedTab === 'treatment-plans' && args.visible.treatmentPlans) {
     return 'treatment-plans';
   }
-  if (
-    args.requestedTab === 'quote' &&
-    showQuoteTab({
-      isPlanner: args.isPlanner,
-      hasQuotation: args.hasQuotation,
-    })
-  ) {
+  if (args.requestedTab === 'quote' && args.visible.quote) {
     return 'quote';
   }
   return args.defaultTab;
+}
+
+/** Whether the Treatment plan and Quote tabs are shown. */
+interface WorkflowTabs {
+  treatmentPlans: boolean;
+  quote: boolean;
+}
+
+const NO_WORKFLOW_TABS: WorkflowTabs = { treatmentPlans: false, quote: false };
+
+/**
+ * Whether a quote may be started for the order (the backend's rule): a
+ * case always, a child only once its request is approved as chargeable —
+ * an included refinement or an approved warranty is free.
+ */
+function isQuotable(
+  order: Pick<DentalOrder, 'orderType'>,
+  request: Pick<SupplementalRequest, 'reviewStatus' | 'coverageStatus'> | undefined,
+): boolean {
+  if (!isSupplementalOrder(order)) return true;
+  return (
+    request?.reviewStatus === SupplementalReviewStatus.APPROVED &&
+    request.coverageStatus === SupplementalCoverageStatus.CHARGEABLE
+  );
+}
+
+/**
+ * Planners get the empty tabs as entry points to start a plan or a quote;
+ * everyone else only sees a tab with content. A child earns the plan entry
+ * point once its request is approved, and only additional aligners are
+ * ever planned; it earns the quote entry point once it is quotable (see
+ * `isQuotable`). An existing quote always shows its tab.
+ */
+function visibleWorkflowTabs(args: {
+  order: Pick<DentalOrder, 'orderType' | 'status' | 'treatmentPlansCount'>;
+  reviewStatus: SupplementalReviewStatus | undefined;
+  quotable: boolean;
+  isPlanner: boolean;
+  hasQuotation: boolean;
+}): WorkflowTabs {
+  const { order } = args;
+  const child = isSupplementalOrder(order);
+  const approved = args.reviewStatus === SupplementalReviewStatus.APPROVED;
+  const canStartPlan =
+    !child || (approved && order.orderType === OrderType.ADDITIONAL_ALIGNERS);
+  return {
+    treatmentPlans: showTreatmentTab({
+      isPlanner: args.isPlanner && canStartPlan,
+      hasTreatmentPlans: (order.treatmentPlansCount ?? 0) > 0,
+    }),
+    quote: showQuoteTab({
+      isPlanner: args.isPlanner && args.quotable,
+      hasQuotation: args.hasQuotation || POST_QUOTE_STATUSES.has(order.status),
+    }),
+  };
+}
+
+/**
+ * Edit / delete in the header. A case keeps its role rules (the paid lock
+ * mirrors the backend); a child shows exactly what the server grants the
+ * caller on its request, and nothing until that is known.
+ */
+function headerActions(args: {
+  isChild: boolean;
+  permissions: SupplementalPermissions | undefined;
+  canManage: boolean;
+  paidLocked: boolean;
+}): { canEdit: boolean; canDelete: boolean } {
+  if (args.isChild) {
+    return {
+      canEdit: !!args.permissions?.canEdit,
+      canDelete: !!args.permissions?.canDelete,
+    };
+  }
+  const allowed = args.canManage && !args.paidLocked;
+  return { canEdit: allowed, canDelete: allowed };
 }
 
 /**
@@ -1094,9 +1229,93 @@ function Info({
   );
 }
 
+/** Patient record of the order, the first section of the details tab. */
+function PatientSection({
+  order,
+  patient,
+}: {
+  order: DentalOrder;
+  patient: Patient | undefined;
+}) {
+  const { t, lang } = useT();
+  return (
+    <Section icon={UserRound} title={t('orderDetail.patientCard.title')}>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <Info label={t('orderForm.patient.pickerLabel')} value={order.patient?.fullName} />
+        <Info label={t('orderDetail.patientCard.dentist')} value={order.doctor?.fullName} />
+        <Info label={t('orderDetail.patientCard.stage')} value={patientStageLabel(order.patientStage, t)} />
+        <Info label={t('orderDetail.patientCard.sex')} value={genderLabel(patient?.gender, t)} />
+        <Info label={t('orderDetail.patientCard.dob')} value={formatBirthDate(patient?.dateOfBirth, lang)} />
+        <Info label={t('orderForm.patient.age')} value={ageFromDob(patient?.dateOfBirth, t)} />
+        <Info label={t('orderDetail.patientCard.email')} value={order.patient?.email} />
+        <Info label={t('orderDetail.patientCard.phone')} value={order.patient?.phone} />
+        <Info label={t('orderDetail.patientCard.arch')} value={archLabel(order.archTreatment, t)} />
+        {patient?.address && (
+          <Info label={t('orderDetail.patientCard.address')} value={patient.address} wide />
+        )}
+        {patient?.notes && (
+          <Info label={t('orderDetail.patientCard.notes')} value={patient.notes} wide />
+        )}
+      </div>
+    </Section>
+  );
+}
+
+/**
+ * Details tab of a supplemental child: the doctor's request first (its
+ * summary, review and conversion live in the request card), then the
+ * patient, the files sent with the request and its deliveries. The
+ * initial-order sections (clinical objective, odontogram, CBCT, fee) do
+ * not apply to a child.
+ */
+function SupplementalChildDetails({
+  order,
+  patient,
+}: {
+  order: DentalOrder;
+  patient: Patient | undefined;
+}) {
+  const { t } = useT();
+  return (
+    <>
+      <SupplementalRequestCard requestId={order.id} />
+      <PatientSection order={order} patient={patient} />
+      <Section icon={Camera} title={t('orderDetail.sections.patientImages')}>
+        <ClinicalOrderFiles orderId={order.id} readOnly section="patient-images" />
+      </Section>
+      <Section icon={ScanLine} title={t('orderDetail.sections.radiographyScans')}>
+        <ClinicalOrderFiles orderId={order.id} readOnly section="radiography-stl" />
+      </Section>
+      <Section icon={PackageCheck} title={t('alignerDeliveries.sectionTitle')}>
+        <AlignerDeliveriesPanel orderId={order.id} />
+      </Section>
+    </>
+  );
+}
+
 // ─── Patient demographic helpers ───────────────────────────────────────────
 
 type TFn = (path: string, vars?: Record<string, string | number>) => string;
+
+const PATIENT_STAGE_KEYS: Record<string, string> = {
+  initial: 'orderForm.patient.stageInitial',
+  refinement: 'orderForm.patient.stageRefinement',
+  retainer: 'orderForm.patient.stageRetainer',
+};
+
+/** The stored enum value shown in words ("Finition"), never raw. */
+function patientStageLabel(stage: string | null | undefined, t: TFn): string | undefined {
+  if (!stage) return undefined;
+  const key = PATIENT_STAGE_KEYS[stage];
+  return key ? t(key) : stage;
+}
+
+const ARCH_KEYS = new Set(['both', 'upper', 'lower']);
+
+function archLabel(arch: string | null | undefined, t: TFn): string | undefined {
+  if (!arch) return undefined;
+  return ARCH_KEYS.has(arch) ? t(`supplemental.options.archTreatment.${arch}`) : arch;
+}
 
 function genderLabel(gender: string | null | undefined, t: TFn): string | undefined {
   switch (gender) {
@@ -1317,7 +1536,7 @@ function TreatmentFeeGateBanner({
   canActAsAdmin,
   canActAsDoctor,
 }: {
-  order: import('@/lib/types').DentalOrder;
+  order: DentalOrder;
   canActAsAdmin: boolean;
   canActAsDoctor: boolean;
 }) {

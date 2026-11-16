@@ -61,7 +61,14 @@ function listInclude(orderScope: Prisma.DentalOrderWhereInput) {
       where: orderScope,
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 1,
-      select: { id: true, orderCode: true, status: true, createdAt: true },
+      select: {
+        id: true,
+        orderCode: true,
+        status: true,
+        orderType: true,
+        parentOrderId: true,
+        createdAt: true,
+      },
     },
   } satisfies Prisma.PatientInclude;
 }
@@ -634,6 +641,9 @@ export class PatientService {
             id: latest.id,
             orderCode: latest.orderCode,
             status: latest.status,
+            orderType: latest.orderType,
+            parentOrderId: latest.parentOrderId,
+            isCurrent: !INACTIVE_ORDER_STATUSES.includes(latest.status),
             createdAt: latest.createdAt,
           }
         : null,

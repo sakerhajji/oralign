@@ -3,6 +3,7 @@ import { OrderStatus, Prisma } from '@prisma/client';
 import { OrderAccessPolicy } from '../../common/access/order-access.policy';
 import { Caller } from '../../common/access/caller';
 import { ConflictException } from '../../common/exceptions/app.exception';
+import { startCoverageWindow } from '../../orders/coverage-window';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   ALIGNER_DELIVERY_ERROR,
@@ -57,7 +58,9 @@ type DeliveryRow = Prisma.AlignerDeliveryGetPayload<{
  *
  * There is deliberately no update or delete: history is never rewritten.
  * Recording a delivery never changes the order status either — that is
- * the payment schedule's business (QuoteStepBatch), not this log's.
+ * the payment schedule's business (QuoteStepBatch), not this log's. The
+ * first delivery of a case does start its coverage window
+ * (orders/coverage-window.ts), in the same transaction.
  */
 @Injectable()
 export class AlignerDeliveryService {
@@ -135,6 +138,9 @@ export class AlignerDeliveryService {
             createdByName: actor?.fullName ?? null,
           },
         });
+        // The first hand-over starts the case's coverage window, on the
+        // day the aligners reached the patient (idempotent afterwards).
+        await startCoverageWindow(tx, orderId, deliveredAt);
       });
     } catch (error) {
       // The unique index fired: a concurrent identical request committed

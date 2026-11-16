@@ -1,5 +1,5 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
-import { OrderStatus, Prisma, UserRole } from '@prisma/client';
+import { OrderStatus, OrderType, Prisma, UserRole } from '@prisma/client';
 import type { Caller } from '../../common/access/caller';
 import { OrderAccessPolicy } from '../../common/access/order-access.policy';
 import type { PrismaService } from '../../prisma/prisma.service';
@@ -37,6 +37,7 @@ function makeWorld(
     totalAligners: number | null;
     deletedAt: Date | null;
     rows: Row[];
+    orderType: OrderType;
   }> = {},
 ) {
   const order = {
@@ -47,6 +48,10 @@ function makeWorld(
     status: over.status ?? OrderStatus.fabrication,
     totalAligners: over.totalAligners ?? null,
     deletedAt: over.deletedAt ?? null,
+    orderType: over.orderType ?? OrderType.initial,
+    coverageStartedAt: null as Date | null,
+    coverageExpiresAt: null as Date | null,
+    quotation: { treatmentValidityMonths: 6, deletedAt: null },
     createdAt: new Date('2026-09-01T08:00:00.000Z'),
   };
   const rows: Row[] = [...(over.rows ?? [])];
@@ -74,12 +79,21 @@ function makeWorld(
     },
   );
   const lock = jest.fn().mockResolvedValue([{ id: order.id }]);
+  // The coverage compare-and-set: only a window that has not started.
+  const updateCoverage = jest.fn(
+    ({ data }: { data: { coverageStartedAt?: Date } }) => {
+      if (order.coverageStartedAt) return Promise.resolve({ count: 0 });
+      Object.assign(order, data);
+      return Promise.resolve({ count: 1 });
+    },
+  );
 
   const tx = {
     $queryRaw: lock,
     dentalOrder: {
       findUnique: jest.fn(() => Promise.resolve({ ...order })),
       update: updateOrder,
+      updateMany: updateCoverage,
     },
     alignerDelivery: { findMany: findDeliveries, create },
     user: {
@@ -98,7 +112,16 @@ function makeWorld(
     prisma,
     new OrderAccessPolicy(prisma),
   );
-  return { service, order, rows, create, updateOrder, lock, prisma };
+  return {
+    service,
+    order,
+    rows,
+    create,
+    updateOrder,
+    updateCoverage,
+    lock,
+    prisma,
+  };
 }
 
 const persisted = (
@@ -202,6 +225,54 @@ describe('AlignerDeliveryService', () => {
         deliveredRanges: [{ fromAligner: 1, toAligner: 7 }],
         nextAligner: 8,
       });
+    });
+
+    it('starts the coverage window on the FIRST delivery day, then never moves it', async () => {
+      const { service, order, updateCoverage } = makeWorld();
+      await service.record(
+        'o1',
+        {
+          fromAligner: 1,
+          toAligner: 3,
+          deliveredAt: '2026-09-07',
+          totalAligners: 20,
+        },
+        owner,
+        NOW,
+      );
+      await service.record(
+        'o1',
+        { fromAligner: 4, toAligner: 7, deliveredAt: '2026-09-20' },
+        owner,
+        NOW,
+      );
+
+      expect(updateCoverage).toHaveBeenCalledTimes(1);
+      expect(order).toMatchObject({
+        coverageStartedAt: new Date('2026-09-07T00:00:00.000Z'),
+        // 6 months of pack validity on the case's quotation.
+        coverageExpiresAt: new Date('2027-03-07T00:00:00.000Z'),
+      });
+    });
+
+    it('gives a supplemental child no coverage window of its own', async () => {
+      const { service, order, updateCoverage } = makeWorld({
+        orderType: OrderType.replacement,
+      });
+      await service.record(
+        'o1',
+        {
+          fromAligner: 1,
+          toAligner: 1,
+          deliveredAt: '2026-09-07',
+          totalAligners: 1,
+        },
+        owner,
+        NOW,
+      );
+
+      expect(updateCoverage).not.toHaveBeenCalled();
+      expect(order.coverageStartedAt).toBeNull();
     });
 
     it('rejects an overlapping delivery 2 → 5 after 1 → 3 (409) and writes nothing', async () => {

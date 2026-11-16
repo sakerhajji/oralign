@@ -1,4 +1,4 @@
-import { OrderStatus, UserRole } from '@prisma/client';
+import { OrderStatus, OrderType, UserRole } from '@prisma/client';
 import type { EventEmitter2 } from '@nestjs/event-emitter';
 import type { PrismaService } from '../../prisma/prisma.service';
 import type { OrderAccessPolicy } from '../../common/access/order-access.policy';
@@ -24,6 +24,8 @@ const doctor: Caller = { userId: 'u-doc-p', role: UserRole.dentist };
 
 const submitted = {
   id: 'o-1',
+  orderCode: 'ORD-1',
+  orderType: OrderType.initial as OrderType,
   doctorId: 'u-doc-p',
   patientId: 'p-1',
   status: OrderStatus.submitted,
@@ -39,6 +41,8 @@ function makeService(current: typeof submitted) {
         ({ where, data }: { where: { id: string }; data: object }) =>
           Promise.resolve({ ...current, ...where, ...data }),
       ),
+      // No supplemental request on this case: nothing to cascade.
+      findMany: jest.fn().mockResolvedValue([]),
     },
     orderAuditLog: { create: jest.fn().mockResolvedValue({}) },
   };

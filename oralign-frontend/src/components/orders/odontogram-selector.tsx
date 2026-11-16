@@ -5,6 +5,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -18,7 +19,7 @@ import type {
 } from 'react';
 import { Check, Info, Palette, RotateCcw, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { ToothInstruction, ToothInstructionType } from '@/lib/types';
+import { ArchTreatment, ToothInstruction, ToothInstructionType } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -31,14 +32,15 @@ import {
   useToothSpriteProgress,
 } from './tooth-art';
 import { TOOTH_VIEWBOXES } from './tooth-viewboxes';
+import {
+  LOWER_LEFT,
+  LOWER_RIGHT,
+  UPPER_LEFT,
+  UPPER_RIGHT,
+} from './wizard/tooth-contacts';
 import { useT } from '@/lib/i18n/lang-context';
 
-// ── Layout (FDI numbering) ──────────────────────────────────────────────────
-const UPPER_RIGHT = [18, 17, 16, 15, 14, 13, 12, 11] as const;
-const UPPER_LEFT = [21, 22, 23, 24, 25, 26, 27, 28] as const;
-const LOWER_RIGHT = [48, 47, 46, 45, 44, 43, 42, 41] as const;
-const LOWER_LEFT = [31, 32, 33, 34, 35, 36, 37, 38] as const;
-
+// ── Layout (FDI numbering, render order: see tooth-contacts) ────────────────
 const MIRRORED = new Set<number>([...UPPER_LEFT, ...LOWER_RIGHT]);
 const ALL_TEETH = [...UPPER_RIGHT, ...UPPER_LEFT, ...LOWER_RIGHT, ...LOWER_LEFT];
 
@@ -109,6 +111,16 @@ const COLORS: readonly ColorEntry[] = [
     hex: '#ec4899', // pink-500
     outline: '#f472b6',
   },
+  {
+    // Teal swatch — a tooth that needs an aligner cutout (elastic hook,
+    // button). Not in any mode's palette: only callers that pass it in
+    // `palette` (the supplemental request form) can mark it.
+    type: ToothInstructionType.PRECISION_CUT,
+    label: 'Cutout',
+    short: 'CUT',
+    hex: '#0f766e', // teal-700
+    outline: '#14b8a6',
+  },
 ] as const;
 
 const DEFAULT_TOOTH = '#f1e8d4';
@@ -116,6 +128,45 @@ const DEFAULT_OUTLINE = '#f3eeea';
 const COLOR_BY_TYPE = new Map<ToothInstructionType, ColorEntry>(
   COLORS.map((c) => [c.type, c]),
 );
+
+/**
+ * Surface the chart is drawn for; picks the default editable palette.
+ * 'movement'    — order wizard / order detail: the four doctor marks
+ *                 (No Attachments / Do Not Move / No IPR / Extract).
+ * 'attachments' — treatment attachment editor: the pink ATTACHMENT only.
+ * 'treatment'   — full planner odontogram: doctor marks + ATTACHMENT.
+ */
+export type OdontogramMode = 'movement' | 'attachments' | 'treatment';
+
+const DOCTOR_PALETTE = [
+  ToothInstructionType.NO_ATTACHMENTS,
+  ToothInstructionType.DO_NOT_MOVE,
+  ToothInstructionType.NO_IPR,
+  ToothInstructionType.EXTRACT,
+] as const;
+
+const MODE_PALETTES: Record<OdontogramMode, readonly ToothInstructionType[]> = {
+  movement: DOCTOR_PALETTE,
+  attachments: [ToothInstructionType.ATTACHMENT],
+  treatment: [...DOCTOR_PALETTE, ToothInstructionType.ATTACHMENT],
+};
+
+/** Contact amounts above this are not normalised by the popover (mm). */
+const DEFAULT_CONTACT_MAX_MM = 2;
+
+type Translate = ReturnType<typeof useT>['t'];
+
+/** "Contact 11–21": the contact named by its two teeth, lower number first. */
+function contactTitle(
+  t: Translate,
+  toothA: number,
+  toothB: number,
+): string {
+  return t('orderForm.files.tooth.contact.title', {
+    from: Math.min(toothA, toothB),
+    to: Math.max(toothA, toothB),
+  });
+}
 
 /**
  * Ordered, de-duped colours painted on one tooth. `preferEditableFill`
@@ -159,12 +210,7 @@ function glyphArtKeys(toothNumber: number, marks: ColorEntry[]): string[] {
  * The four order-level doctor instruction types among which EXTRACT is
  * exclusive. Non-extraction marks combine freely; EXTRACT stands alone.
  */
-const DOCTOR_MARK_TYPES = new Set<ToothInstructionType>([
-  ToothInstructionType.NO_ATTACHMENTS,
-  ToothInstructionType.DO_NOT_MOVE,
-  ToothInstructionType.NO_IPR,
-  ToothInstructionType.EXTRACT,
-]);
+const DOCTOR_MARK_TYPES = new Set<ToothInstructionType>(DOCTOR_PALETTE);
 
 /**
  * Build the tooth → marks[] map for one instruction list, restricted to
@@ -306,6 +352,14 @@ export const OdontogramSelector = memo(function OdontogramSelector({
   onIprChange,
   readonlyValue,
   mode = 'movement',
+  palette,
+  markLabel,
+  defaultShowLegend = true,
+  hideLegendToggle,
+  contactUnitLabel,
+  contactMaxMm = DEFAULT_CONTACT_MAX_MM,
+  validateContactAmount,
+  visibleArch = ArchTreatment.BOTH,
   title,
   subtitle,
 }: {
@@ -328,6 +382,9 @@ export const OdontogramSelector = memo(function OdontogramSelector({
    * Tooth 18 and 48 cannot have IPR (they're at the start of their
    * respective halves). When omitted, the IPR layer is hidden —
    * preserves the existing wizard / read-only behaviour.
+   *
+   * The layer works in every mode: any between-teeth amount in mm (IPR
+   * performed, residual space…) can use it — see `contactUnitLabel`.
    */
   iprValues?: Map<number, string>;
   /**
@@ -371,16 +428,48 @@ export const OdontogramSelector = memo(function OdontogramSelector({
    * edit the doctor's prescription from this surface.
    */
   readonlyValue?: ToothInstruction[];
+  /** Surface the chart is drawn for (default palette, copy, legend). */
+  mode?: OdontogramMode;
   /**
-   * 'movement'   — order-wizard / order-detail context: EXTRACTION only.
-   *                Only teeth flagged for extraction are colored; the other
-   *                doctor instructions are not selectable on this surface.
-   * 'attachments' — focused treatment attachment context: a single attachment
-   *                colour, the rest of the picker is hidden.
-   * 'treatment'   — full treatment-planning context: movement flags,
-   *                extraction, attachments, and IPR live together.
+   * Editable colour types, replacing the mode's palette. Pass a stable
+   * (module-level) array: the chart's memoised layers key on it.
+   *   • one type → a tooth click / Enter / Space toggles that mark
+   *     directly, no colour popover;
+   *   • empty    → teeth are not selectable (e.g. a contacts-only chart).
    */
-  mode?: 'movement' | 'attachments' | 'treatment';
+  palette?: readonly ToothInstructionType[];
+  /**
+   * Label of the editable mark in the badge strip, legend and tooth
+   * names, instead of the English colour label. Meant for a one-type
+   * palette ("Ne pas bouger", "Découpe"…).
+   */
+  markLabel?: string;
+  /** Whether the colour guide starts open (default true). */
+  defaultShowLegend?: boolean;
+  /** Hide the "View / Hide color guide" button. */
+  hideLegendToggle?: boolean;
+  /**
+   * Name + unit of the contact amount, e.g. "RIP (mm)" or "Espace (mm)":
+   * popover field, slot names and legend row. Default: "IPR (mm)".
+   */
+  contactUnitLabel?: string;
+  /**
+   * Upper bound of the contact amount (mm), default 2: the popover input's
+   * `max`, and the range it normalises ("0.20" → "0.2"). Values outside it
+   * are passed through untouched for the caller's own validation.
+   */
+  contactMaxMm?: number;
+  /**
+   * Checks the typed amount before it is committed: a message keeps the
+   * popover open and is shown under the field; `null` accepts the value.
+   * Pass a stable callback. Without it every amount is committed.
+   */
+  validateContactAmount?: (raw: string) => string | null;
+  /**
+   * Arch(es) drawn, default both. A single-arch surface (a request for the
+   * upper arch only) hides the other arch, so it cannot be marked.
+   */
+  visibleArch?: ArchTreatment;
   /** Override the default section heading. */
   title?: string;
   /** Override the default section subheading. */
@@ -388,7 +477,7 @@ export const OdontogramSelector = memo(function OdontogramSelector({
 }) {
   const { t } = useT();
   const toothSpriteProgress = useToothSpriteProgress();
-  const [showLegend, setShowLegend] = useState(true);
+  const [showLegend, setShowLegend] = useState(defaultShowLegend);
   const [popup, setPopup] = useState<{
     tooth: number;
     x: number;
@@ -416,23 +505,35 @@ export const OdontogramSelector = memo(function OdontogramSelector({
   // doesn't reflow + re-rasterize the tooth SVGs on every frame.
   const [chartHostRef, chartWidth] = useSettledWidth<HTMLDivElement>();
 
-  // Palette by context:
-  // - movement: order-facing surface — the four doctor instructions
-  //   (No Attachments / Do Not Move / No IPR / Extract). A tooth may carry
-  //   SEVERAL of the non-extraction marks at once; EXTRACT is the only
-  //   exclusive one (see `toggleMark`).
-  // - attachments: focused planner surface for pink attachment marks.
-  // - treatment: the full lab/planner odontogram, including attachment.
-  const visibleColors = useMemo<readonly ColorEntry[]>(
-    () => {
-      if (mode === 'attachments') {
-        return COLORS.filter((c) => c.type === ToothInstructionType.ATTACHMENT);
-      }
-      if (mode === 'treatment') return COLORS;
-      return COLORS.filter((c) => c.type !== ToothInstructionType.ATTACHMENT);
-    },
-    [mode],
-  );
+  // Editable palette: the caller's explicit `palette`, else the mode's
+  // (MODE_PALETTES). In COLORS order, so swatches and bands stay stable. A
+  // tooth may carry SEVERAL of the non-extraction marks at once; EXTRACT is
+  // the only exclusive one (see `toggleMark`).
+  const visibleColors = useMemo<readonly ColorEntry[]>(() => {
+    const editable = new Set(palette ?? MODE_PALETTES[mode]);
+    return COLORS.filter((c) => editable.has(c.type));
+  }, [mode, palette]);
+  // An explicit one-type palette → a tap toggles it directly; an empty one
+  // → static teeth. Mode palettes keep the popover, even the one-colour
+  // attachments palette of the plan editor.
+  const toggleColor =
+    palette && visibleColors.length === 1 ? visibleColors[0] : null;
+  const selectable = visibleColors.length > 0;
+  // A contacts-only chart (static teeth, editable slots): each slot's hit
+  // area may spread over the static teeth next to it (see the CSS).
+  const contactsOnly = !selectable && iprEditable;
+  const showUpper = visibleArch !== ArchTreatment.LOWER;
+  const showLower = visibleArch !== ArchTreatment.UPPER;
+  // The planner surfaces always list the doctor's read-only marks and the
+  // between-teeth markers in the legend; elsewhere the contact rows show
+  // only when the caller edits contacts.
+  const plannerLegend = mode === 'treatment' || mode === 'attachments';
+  const contactLegendLabel =
+    plannerLegend || onIprChange
+      ? (contactUnitLabel ?? t('orderForm.files.tooth.legend.iprAmount'))
+      : undefined;
+  const contactUnit =
+    contactUnitLabel ?? t('orderForm.files.tooth.contact.defaultUnit');
 
   // MULTIPLE instructions per tooth — restricted to the mode's current
   // palette so types that don't belong on this surface stay invisible.
@@ -614,6 +715,40 @@ export const OdontogramSelector = memo(function OdontogramSelector({
 
   const closePopup = useCallback(() => setPopup(null), []);
 
+  // One-type palette: a tap (or Enter / Space on the focused tooth) toggles
+  // the mark at once. flushSync commits it in the click's frame, like the
+  // popover's swatches.
+  const toggleTooth = useCallback(
+    (toothNumber: number) => {
+      if (disabledRef.current || !toggleColor) return;
+      flushSync(() => toggleMark(toothNumber, toggleColor.type));
+    },
+    [toggleColor, toggleMark],
+  );
+
+  // Decode the tooth's next image while the pointer or focus rests on it,
+  // so the toggle repaints in the same frame (the popover does the same
+  // for the colours it offers).
+  const prefetchToggleArt = useCallback(
+    (toothNumber: number) => {
+      if (!toggleColor) return;
+      const symbol = canonicalSpriteTooth(toothNumber);
+      prefetchToothArt([
+        toothArtKey(symbol, toggleColor.hex, toggleColor.outline),
+        toothArtKey(symbol, DEFAULT_TOOTH, DEFAULT_OUTLINE),
+      ]);
+    },
+    [toggleColor],
+  );
+
+  // Undefined for an empty palette: the teeth are then static labels.
+  const onToothClick = toggleColor
+    ? toggleTooth
+    : selectable
+      ? openPopup
+      : undefined;
+  const onToothIntent = toggleColor ? prefetchToggleArt : undefined;
+
   // Badge strip under the chart — recomputed only when the marks (or the
   // language) actually change, not on every popup open/close render.
   const markBadges = useMemo(
@@ -637,12 +772,14 @@ export const OdontogramSelector = memo(function OdontogramSelector({
                 <span>
                   {t('orderForm.files.tooth.toothBadge', { n: toothNumber })}
                 </span>
-                <span className="text-muted-foreground">{c?.label}</span>
+                <span className="text-muted-foreground">
+                  {markLabel ?? c?.label}
+                </span>
               </Badge>
             );
           }),
         ),
-    [assignments, t],
+    [assignments, markLabel, t],
   );
 
   // Esc + scroll/resize close. Outside-click is handled in the popover itself
@@ -698,17 +835,19 @@ export const OdontogramSelector = memo(function OdontogramSelector({
                 : t('orderForm.files.tooth.selectorHint'))}
           </p>
         </div>
-        <Button
-          type="button"
-          variant="ghost"
-          className="justify-start text-primary"
-          onClick={() => setShowLegend((s) => !s)}
-        >
-          <Palette className="mr-2 h-4 w-4" />
-          {showLegend
-            ? t('orderForm.files.tooth.hideGuide')
-            : t('orderForm.files.tooth.viewGuide')}
-        </Button>
+        {!hideLegendToggle && (
+          <Button
+            type="button"
+            variant="ghost"
+            className="justify-start text-primary"
+            onClick={() => setShowLegend((s) => !s)}
+          >
+            <Palette className="mr-2 h-4 w-4" />
+            {showLegend
+              ? t('orderForm.files.tooth.hideGuide')
+              : t('orderForm.files.tooth.viewGuide')}
+          </Button>
+        )}
       </div>
 
       {showLegend && (
@@ -716,7 +855,10 @@ export const OdontogramSelector = memo(function OdontogramSelector({
           assignments={assignments}
           readonlyAssignments={readonlyAssignments}
           colors={visibleColors}
-          mode={mode}
+          markLabel={markLabel}
+          showReadonly={plannerLegend}
+          contactLabel={contactLegendLabel}
+          contactStep={plannerLegend || !!iprNotes}
           iprValues={iprValues}
           iprNotes={iprNotes}
         />
@@ -765,6 +907,7 @@ export const OdontogramSelector = memo(function OdontogramSelector({
           className={cn(
             'odo-scroll overflow-x-auto px-2 pt-8 pb-6 sm:px-5',
             !toothSpriteReady && 'odo-chart-loading',
+            contactsOnly && 'odo-contacts-only',
           )}
         >
           {/* Fixed pixel width (settled container width) instead of fluid —
@@ -775,47 +918,63 @@ export const OdontogramSelector = memo(function OdontogramSelector({
             className="mx-auto min-w-[560px] max-w-[1180px] sm:min-w-[640px]"
             style={chartWidth !== undefined ? { width: chartWidth } : undefined}
           >
-            <Arch
-              row="upper"
-              left={UPPER_RIGHT}
-              right={UPPER_LEFT}
-              assignments={assignments}
-              readonlyAssignments={readonlyAssignments}
-              activeTooth={popup?.tooth ?? null}
-              activeIpr={iprPopup?.tooth ?? null}
-              spriteReady={toothSpriteReady}
-              preferEditableFill={preferEditableFill}
-              disabled={disabled}
-              iprValues={iprVisible ? iprValues : undefined}
-              iprNotes={iprVisible ? iprNotes : undefined}
-              onToothClick={openPopup}
-              onIprClick={iprEditable ? openIprPopup : undefined}
-            />
-            <div className="relative my-2 h-px bg-foreground/15">
-              <span className="absolute left-1/2 top-1/2 h-8 w-px -translate-x-1/2 -translate-y-1/2 bg-foreground/30" />
-            </div>
-            <Arch
-              row="lower"
-              left={LOWER_RIGHT}
-              right={LOWER_LEFT}
-              assignments={assignments}
-              readonlyAssignments={readonlyAssignments}
-              activeTooth={popup?.tooth ?? null}
-              activeIpr={iprPopup?.tooth ?? null}
-              spriteReady={toothSpriteReady}
-              preferEditableFill={preferEditableFill}
-              disabled={disabled}
-              iprValues={iprVisible ? iprValues : undefined}
-              iprNotes={iprVisible ? iprNotes : undefined}
-              onToothClick={openPopup}
-              onIprClick={iprEditable ? openIprPopup : undefined}
-            />
+            {showUpper && (
+              <Arch
+                row="upper"
+                left={UPPER_RIGHT}
+                right={UPPER_LEFT}
+                assignments={assignments}
+                readonlyAssignments={readonlyAssignments}
+                activeTooth={popup?.tooth ?? null}
+                activeIpr={iprPopup?.tooth ?? null}
+                spriteReady={toothSpriteReady}
+                preferEditableFill={preferEditableFill}
+                disabled={disabled}
+                iprValues={iprVisible ? iprValues : undefined}
+                iprNotes={iprVisible ? iprNotes : undefined}
+                toggle={!!toggleColor}
+                markLabel={markLabel}
+                contactUnit={contactUnit}
+                onToothClick={onToothClick}
+                onToothIntent={onToothIntent}
+                onIprClick={iprEditable ? openIprPopup : undefined}
+              />
+            )}
+            {showUpper && showLower && (
+              <div className="relative my-2 h-px bg-foreground/15">
+                <span className="absolute left-1/2 top-1/2 h-8 w-px -translate-x-1/2 -translate-y-1/2 bg-foreground/30" />
+              </div>
+            )}
+            {showLower && (
+              <Arch
+                row="lower"
+                left={LOWER_RIGHT}
+                right={LOWER_LEFT}
+                assignments={assignments}
+                readonlyAssignments={readonlyAssignments}
+                activeTooth={popup?.tooth ?? null}
+                activeIpr={iprPopup?.tooth ?? null}
+                spriteReady={toothSpriteReady}
+                preferEditableFill={preferEditableFill}
+                disabled={disabled}
+                iprValues={iprVisible ? iprValues : undefined}
+                iprNotes={iprVisible ? iprNotes : undefined}
+                toggle={!!toggleColor}
+                markLabel={markLabel}
+                contactUnit={contactUnit}
+                onToothClick={onToothClick}
+                onToothIntent={onToothIntent}
+                onIprClick={iprEditable ? openIprPopup : undefined}
+              />
+            )}
           </div>
         </div>
 
       </div>
 
-      {assignments.size > 0 ? (
+      {/* Marks strip: what the chart edits. A chart with no editable colour
+          (contacts only) has no marks to list. */}
+      {!selectable ? null : assignments.size > 0 ? (
         <div className="flex flex-wrap gap-2">{markBadges}</div>
       ) : (
         <div className="flex items-center gap-2 rounded-md border border-dashed p-4 text-sm text-muted-foreground">
@@ -846,9 +1005,13 @@ export const OdontogramSelector = memo(function OdontogramSelector({
 
       {iprPopup && iprEditable && (
         <IprPopover
-          tooth={iprPopup.tooth}
+          fromTooth={iprPopup.fromTooth}
+          toTooth={iprPopup.tooth}
           anchorX={iprPopup.x}
           anchorY={iprPopup.y}
+          unitLabel={contactUnit}
+          maxMm={contactMaxMm}
+          validate={validateContactAmount}
           currentValue={iprValues?.get(iprPopup.tooth)}
           currentNote={iprNotes?.get(iprPopup.tooth)}
           // Single combined commit — popover gathers both fields and
@@ -871,67 +1034,34 @@ export const OdontogramSelector = memo(function OdontogramSelector({
 // ── Legend ─────────────────────────────────────────────────────────────────
 
 /**
- * Long-form clinical descriptions for each tooth-instruction color.
- * Shown in the legend so the team has the *meaning* — not just the
- * label — alongside every swatch. Keys are the enum values so the
- * lookup tolerates legacy data exactly the way the renderer does.
+ * Swatches of the "between teeth" markers (the contact amount and STEP).
+ * The hex values mirror the CSS so the swatch and the chip on the
+ * odontogram match exactly. Kept apart from COLORS so the picker palette
+ * stays focused on tooth-level marks only.
  */
-const COLOR_DESCRIPTION: Record<ToothInstructionType, string> = {
-  [ToothInstructionType.NO_ATTACHMENTS]:
-    'Tooth will not carry an aligner attachment during treatment.',
-  [ToothInstructionType.DO_NOT_MOVE]:
-    'Tooth must stay anchored — planner will not move it.',
-  [ToothInstructionType.NO_IPR]:
-    'Tooth contact is excluded from interproximal reduction.',
-  [ToothInstructionType.EXTRACT]:
-    'Tooth flagged for extraction before or during treatment.',
-  [ToothInstructionType.ATTACHMENT]:
-    'Planner placed an aligner attachment on this tooth.',
-  [ToothInstructionType.IPR_VALUE]:
-    'Legacy per-tooth IPR marker (kept for backwards compatibility).',
-};
+const CONTACT_VALUE_HEX = '#feca16'; // brand amber — matches `.odo-ipr-value`
+const CONTACT_STEP_HEX = '#7c3aed'; // violet-600 — matches `.odo-ipr-note`
 
-/**
- * Extra-legend swatch — the "between teeth" markers (IPR mm and STEP).
- * Hard-coded HEX values mirror the CSS so the swatch and the chip on
- * the odontogram match exactly. Kept here instead of in COLORS so the
- * picker palette stays focused on tooth-level marks only.
- */
-type BetweenTeethEntry = {
-  key: 'ipr_mm' | 'step';
-  label: string;
-  short: string;
-  hex: string;
-  textHex: string;
-  description: string;
-};
-
-const BETWEEN_TEETH: readonly BetweenTeethEntry[] = [
-  {
-    key: 'ipr_mm',
-    label: 'IPR amount (mm)',
-    short: 'IPR',
-    hex: '#feca16',        // brand amber — matches `.odo-ipr-value`
-    textHex: '#191919',
-    description:
-      'Interproximal reduction performed at the chair, in millimetres. The primary clinical decision between two adjacent teeth.',
-  },
-  {
-    key: 'step',
-    label: 'Step / treatment growth',
-    short: 'STEP',
-    hex: '#7c3aed',        // violet-600 — matches `.odo-ipr-note`
-    textHex: '#ffffff',
-    description:
-      'Which aligner step the IPR is performed at — the treatment progression timing. Sits next to the IPR amount as a secondary chip.',
-  },
-] as const;
+/** Teeth carrying `type` in a tooth → marks map, in FDI order. */
+function teethWithMark(
+  map: Map<number, ToothInstructionType[]>,
+  type: ToothInstructionType,
+): number[] {
+  const teeth: number[] = [];
+  map.forEach((types, tooth) => {
+    if (types.includes(type)) teeth.push(tooth);
+  });
+  return teeth.sort((a, b) => a - b);
+}
 
 const ColorLegend = memo(function ColorLegend({
   assignments,
   readonlyAssignments,
   colors,
-  mode,
+  markLabel,
+  showReadonly,
+  contactLabel,
+  contactStep,
   iprValues,
   iprNotes,
 }: {
@@ -944,75 +1074,76 @@ const ColorLegend = memo(function ColorLegend({
   readonlyAssignments?: Map<number, ToothInstructionType[]>;
   /**
    * Restricted palette — only iterate over the colours that are valid
-   * for the current mode. Otherwise the order-page legend would list
+   * for the current chart. Otherwise the order-page legend would list
    * the pink Attachment row even though that colour belongs to the
    * treatment-plan editor.
    */
   colors: readonly ColorEntry[];
-  mode: 'movement' | 'attachments' | 'treatment';
+  /** Caller's label of the editable mark (one-type palettes). */
+  markLabel?: string;
+  /** List the doctor's read-only marks (planner surfaces). */
+  showReadonly: boolean;
+  /** Label of the contact amount row; undefined hides the contact rows. */
+  contactLabel?: string;
+  /** Also list the STEP row under the contact amount. */
+  contactStep: boolean;
   /** Optional IPR (mm) values — drives the populated-tooth counter. */
   iprValues?: Map<number, string>;
   /** Optional STEP values — same idea, separate counter. */
   iprNotes?: Map<number, string>;
 }) {
-  // For 'treatment' and 'attachments' mode the doctor's order marks
-  // (no_attachments / do_not_move / no_ipr / extract) bleed in as
-  // read-only background. Surface them in the legend too so the
-  // planner can read the full picture at a glance.
-  const showReadonly =
-    (mode === 'treatment' || mode === 'attachments') &&
-    !!readonlyAssignments &&
-    readonlyAssignments.size > 0;
-  const showBetweenTeeth = mode === 'treatment' || mode === 'attachments';
+  const { t } = useT();
+  const teethSubtitle = (teeth: number[]) =>
+    teeth.length > 0
+      ? teeth.join(', ')
+      : t('orderForm.files.tooth.legend.noTeeth');
+  const contactsSubtitle = (count: number) => {
+    if (count === 0) return t('orderForm.files.tooth.legend.contactsNone');
+    return count === 1
+      ? t('orderForm.files.tooth.legend.contactsOne', { count })
+      : t('orderForm.files.tooth.legend.contactsMany', { count });
+  };
 
   // Pre-compute the list of read-only doctor marks we'll actually
   // render — empty marks are skipped, so on a fresh treatment plan
   // the section title disappears entirely instead of showing a blank
   // strip of "No teeth assigned" cards.
-  const readonlyRows = showReadonly
-    ? COLORS.filter((c) => c.type !== ToothInstructionType.ATTACHMENT)
-        .map((c) => {
-          const teeth: number[] = [];
-          readonlyAssignments!.forEach((types, tooth) => {
-            if (types.includes(c.type)) teeth.push(tooth);
-          });
-          teeth.sort((a, b) => a - b);
-          return { entry: c, teeth };
-        })
-        .filter((row) => row.teeth.length > 0)
-    : [];
+  const readonlyRows =
+    showReadonly && readonlyAssignments && readonlyAssignments.size > 0
+      ? COLORS.filter((c) => c.type !== ToothInstructionType.ATTACHMENT)
+          .map((c) => ({
+            entry: c,
+            teeth: teethWithMark(readonlyAssignments, c.type),
+          }))
+          .filter((row) => row.teeth.length > 0)
+      : [];
 
   return (
     <div className="space-y-4 rounded-xl border bg-card p-4">
       {/* ─── Tooth-level marks ─────────────────────────────────────── */}
-      <section>
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Tooth-level marks
-        </h3>
-        <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          {colors.map((c) => {
-            const teeth: number[] = [];
-            assignments.forEach((types, tooth) => {
-              if (types.includes(c.type)) teeth.push(tooth);
-            });
-            teeth.sort((a, b) => a - b);
-            return (
+      {colors.length > 0 ? (
+        <section>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {t('orderForm.files.tooth.legend.toothMarks')}
+          </h3>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            {colors.map((c) => (
               <LegendRow
                 key={c.type}
                 hex={c.hex}
-                label={c.label}
-                teeth={teeth}
+                label={markLabel ?? c.label}
+                subtitle={teethSubtitle(teethWithMark(assignments, c.type))}
               />
-            );
-          })}
-        </div>
-      </section>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {/* ─── Doctor's prescription (read-only on treatment view) ──── */}
       {readonlyRows.length > 0 ? (
         <section>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            From the order (read-only)
+            {t('orderForm.files.tooth.legend.fromOrder')}
           </h3>
           <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
             {readonlyRows.map(({ entry, teeth }) => (
@@ -1020,36 +1151,35 @@ const ColorLegend = memo(function ColorLegend({
                 key={`ro-${entry.type}`}
                 hex={entry.hex}
                 label={entry.label}
-                teeth={teeth}
-                readonly
+                subtitle={teethSubtitle(teeth)}
+                badge={t('orderForm.files.tooth.legend.orderBadge')}
               />
             ))}
           </div>
         </section>
       ) : null}
 
-      {/* ─── Between-teeth markers: IPR + Step ─────────────────────── */}
-      {showBetweenTeeth ? (
+      {/* ─── Between-teeth markers: contact amount (+ step) ────────── */}
+      {contactLabel !== undefined ? (
         <section>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Between-teeth (IPR · step)
+            {contactStep
+              ? t('orderForm.files.tooth.legend.betweenTeethWithStep')
+              : t('orderForm.files.tooth.legend.betweenTeeth')}
           </h3>
           <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-            {BETWEEN_TEETH.map((b) => {
-              const populated =
-                b.key === 'ipr_mm'
-                  ? iprValues?.size ?? 0
-                  : iprNotes?.size ?? 0;
-              return (
-                <LegendRow
-                  key={b.key}
-                  hex={b.hex}
-                  label={b.label}
-                  count={populated}
-                  countLabel="contact"
-                />
-              );
-            })}
+            <LegendRow
+              hex={CONTACT_VALUE_HEX}
+              label={contactLabel}
+              subtitle={contactsSubtitle(iprValues?.size ?? 0)}
+            />
+            {contactStep ? (
+              <LegendRow
+                hex={CONTACT_STEP_HEX}
+                label={t('orderForm.files.tooth.legend.step')}
+                subtitle={contactsSubtitle(iprNotes?.size ?? 0)}
+              />
+            ) : null}
           </div>
         </section>
       ) : null}
@@ -1061,37 +1191,22 @@ const ColorLegend = memo(function ColorLegend({
  * Compact legend row — matches the original order-page legend density
  * (one swatch + label + small assignment summary). Used everywhere
  * now: movement marks, doctor read-only marks, and between-teeth
- * markers (IPR amount + Step). One small subtitle hint sits under the
+ * markers (contact amount + Step). One small subtitle hint sits under the
  * label so each row carries both *what* the colour is and *where* it
  * currently shows on the chart.
  */
 function LegendRow({
   hex,
   label,
-  teeth,
-  count,
-  countLabel,
-  readonly,
+  subtitle,
+  badge,
 }: {
   hex: string;
   label: string;
-  teeth?: number[];
-  count?: number;
-  countLabel?: string;
-  readonly?: boolean;
+  subtitle: string;
+  /** Small tag after the label ("Order" on the doctor's read-only marks). */
+  badge?: string;
 }) {
-  let subtitle: React.ReactNode = null;
-  if (teeth) {
-    subtitle =
-      teeth.length > 0
-        ? teeth.join(', ')
-        : 'No teeth assigned';
-  } else if (typeof count === 'number') {
-    subtitle =
-      count > 0
-        ? `${count} ${countLabel ?? 'item'}${count === 1 ? '' : 's'}`
-        : `No ${countLabel ?? 'item'}s set`;
-  }
   return (
     <div className="flex items-start gap-3">
       <span
@@ -1102,9 +1217,9 @@ function LegendRow({
       <div className="min-w-0">
         <p className="flex items-center gap-1.5 text-sm font-semibold leading-tight">
           {label}
-          {readonly ? (
+          {badge ? (
             <span className="rounded bg-muted px-1 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
-              Order
+              {badge}
             </span>
           ) : null}
         </p>
@@ -1142,7 +1257,11 @@ function Arch({
   disabled,
   iprValues,
   iprNotes,
+  toggle,
+  markLabel,
+  contactUnit,
   onToothClick,
+  onToothIntent,
   onIprClick,
 }: {
   row: 'upper' | 'lower';
@@ -1166,10 +1285,17 @@ function Arch({
   disabled?: boolean;
   iprValues?: Map<number, string>;
   iprNotes?: Map<number, string>;
-  onToothClick: (
+  /** A tooth click toggles the one editable mark (see ToothButton). */
+  toggle: boolean;
+  markLabel?: string;
+  /** Name + unit of the contact amount, for the slots' accessible names. */
+  contactUnit: string;
+  /** Omitted when the chart has no editable colour: static teeth. */
+  onToothClick?: (
     tooth: number,
     event: ReactMouseEvent<HTMLButtonElement>,
   ) => void;
+  onToothIntent?: (tooth: number) => void;
   /**
    * Optional — when omitted the slots become read-only (no popup).
    * Receives BOTH the left-side and right-side tooth numbers so the
@@ -1236,7 +1362,10 @@ function Arch({
               spriteReady={spriteReady}
               preferEditableFill={preferEditableFill}
               disabled={disabled}
+              toggle={toggle}
+              markLabel={markLabel}
               onClick={onToothClick}
+              onIntent={onToothIntent}
             />
             {/* IPR slot between this tooth and the next one. The next
                 tooth (teeth[idx + 1]) anchors the slot's storage key. */}
@@ -1247,6 +1376,7 @@ function Arch({
                 row={row}
                 value={slotValue}
                 note={slotNote}
+                unitLabel={contactUnit}
                 active={activeIpr === next}
                 disabled={disabled || !onIprClick}
                 onClick={onIprClick}
@@ -1279,6 +1409,7 @@ function Arch({
             row={row}
             value={midlineValue}
             note={midlineNote}
+            unitLabel={contactUnit}
             active={activeIpr === midline}
             disabled={disabled || !onIprClick}
             onClick={onIprClick}
@@ -1450,10 +1581,23 @@ type ToothButtonProps = {
   spriteReady: boolean;
   preferEditableFill?: boolean;
   disabled?: boolean;
-  onClick: (
+  /**
+   * The click toggles the one editable mark: the button is then a toggle
+   * button (aria-pressed = carries the mark) instead of a popover opener.
+   */
+  toggle: boolean;
+  /** Caller's name for the editable mark, used in the accessible name. */
+  markLabel?: string;
+  /**
+   * Omitted when the chart has no editable colour: the tooth is then a
+   * static label (disabled, no hover lift, not faded).
+   */
+  onClick?: (
     tooth: number,
     event: ReactMouseEvent<HTMLButtonElement>,
   ) => void;
+  /** Pointer or focus rests on the tooth (prefetch its next image). */
+  onIntent?: (tooth: number) => void;
 };
 
 /** Order-sensitive content equality for the small (0–4 entry) mark arrays. */
@@ -1478,8 +1622,12 @@ const ToothButton = memo(
     spriteReady,
     preferEditableFill,
     disabled,
+    toggle,
+    markLabel,
     onClick,
+    onIntent,
   }: ToothButtonProps) {
+    const { t } = useT();
     const marks = resolveToothMarks(types, readonlyTypes, preferEditableFill);
     // Colours painted ON the tooth: ONE colour fills the whole tooth; TWO
     // to FOUR split it into equal coloured bands (SegmentedToothGlyph).
@@ -1513,8 +1661,16 @@ const ToothButton = memo(
     );
 
     const handleClick = useCallback(
-      (e: ReactMouseEvent<HTMLButtonElement>) => onClick(toothNumber, e),
+      (e: ReactMouseEvent<HTMLButtonElement>) => onClick?.(toothNumber, e),
       [onClick, toothNumber],
+    );
+    const handleIntent = useCallback(
+      () => onIntent?.(toothNumber),
+      [onIntent, toothNumber],
+    );
+    const isStatic = !onClick;
+    const markNames = marks.map((c) =>
+      markLabel && types?.includes(c.type) ? markLabel : c.label,
     );
 
     // The label chip — combines the FDI number with the optional short
@@ -1542,16 +1698,21 @@ const ToothButton = memo(
     return (
       <button
         type="button"
-        disabled={disabled}
-        onClick={handleClick}
-        aria-label={`Tooth ${toothNumber}${marks.length ? ` — ${marks.map((c) => c.label).join(', ')}` : ''}`}
-        aria-pressed={active}
+        disabled={disabled || isStatic}
+        onClick={isStatic ? undefined : handleClick}
+        onPointerEnter={onIntent ? handleIntent : undefined}
+        onFocus={onIntent ? handleIntent : undefined}
+        aria-label={`${t('orderForm.files.tooth.toothBadge', { n: toothNumber })}${markNames.length ? ` — ${markNames.join(', ')}` : ''}`}
+        aria-pressed={
+          isStatic ? undefined : toggle ? (types?.length ?? 0) > 0 : active
+        }
         data-tooth={toothNumber}
         data-active={active ? 'true' : undefined}
         className={cn(
           'odo-tooth',
           row === 'upper' ? 'odo-tooth-upper' : 'odo-tooth-lower',
           mirrored && 'odo-tooth-mirrored',
+          isStatic && 'odo-tooth-static',
         )}
         style={style}
       >
@@ -1583,7 +1744,10 @@ const ToothButton = memo(
     prev.spriteReady === next.spriteReady &&
     prev.preferEditableFill === next.preferEditableFill &&
     prev.disabled === next.disabled &&
+    prev.toggle === next.toggle &&
+    prev.markLabel === next.markLabel &&
     prev.onClick === next.onClick &&
+    prev.onIntent === next.onIntent &&
     sameTypes(prev.types, next.types) &&
     sameTypes(prev.readonlyTypes, next.readonlyTypes),
 );
@@ -1601,6 +1765,8 @@ type IprSlotProps = {
   value?: string;
   /** Optional STEP / staging value. Rendered in the purple chip. */
   note?: string;
+  /** Name + unit of the amount ("IPR (mm)"), for the accessible name. */
+  unitLabel: string;
   active?: boolean;
   disabled?: boolean;
   /**
@@ -1623,10 +1789,12 @@ const IprSlot = memo(function IprSlot({
   row,
   value,
   note,
+  unitLabel,
   active,
   disabled,
   onClick,
 }: IprSlotProps) {
+  const { t } = useT();
   const handleClick = useCallback(
     (e: ReactMouseEvent<HTMLButtonElement>) => {
       // The slot is always rendered with an explicit `neighbour` from
@@ -1645,27 +1813,37 @@ const IprSlot = memo(function IprSlot({
   // controls and should not appear pressable — they're a data display.
   const readOnly = !onClick;
 
-  // Human-readable "between X and Y" label — falls back to "tooth N" if
-  // we don't know the neighbour for some reason (defensive — shouldn't
-  // happen in practice given Arch always supplies it).
-  const contactLabel = neighbour
-    ? `between ${neighbour} and ${toothNumber}`
-    : `tooth ${toothNumber}`;
+  // "Contact 11–21" — falls back to "Tooth N" if we don't know the
+  // neighbour (defensive — Arch always supplies it).
+  const contact =
+    typeof neighbour === 'number'
+      ? contactTitle(t, neighbour, toothNumber)
+      : t('orderForm.files.tooth.toothBadge', { n: toothNumber });
+  const values = [
+    hasValue
+      ? t('orderForm.files.tooth.contact.amountValue', {
+          unit: unitLabel,
+          value: value ?? '',
+        })
+      : null,
+    hasNote
+      ? t('orderForm.files.tooth.contact.stepValue', { note: note ?? '' })
+      : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join(' · ');
+  const label = !values
+    ? t('orderForm.files.tooth.contact.add', { unit: unitLabel, contact })
+    : readOnly
+      ? `${values} · ${contact}`
+      : t('orderForm.files.tooth.contact.edit', { values, contact });
 
   return (
     <button
       type="button"
       disabled={disabled || readOnly}
       onClick={readOnly ? undefined : handleClick}
-      aria-label={(() => {
-        const parts: string[] = [];
-        if (hasValue) parts.push(`IPR ${value} mm`);
-        if (hasNote) parts.push(`STEP ${note}`);
-        if (parts.length === 0) return `Add IPR ${contactLabel}`;
-        return readOnly
-          ? `${parts.join(' · ')} ${contactLabel}`
-          : `Edit ${parts.join(' · ')} — ${contactLabel}`;
-      })()}
+      aria-label={label}
       aria-pressed={readOnly ? undefined : active}
       data-active={active ? 'true' : undefined}
       data-readonly={readOnly ? 'true' : undefined}
@@ -1678,21 +1856,7 @@ const IprSlot = memo(function IprSlot({
         (hasValue || hasNote) && 'odo-ipr-on',
         readOnly && 'odo-ipr-readonly',
       )}
-      title={(() => {
-        if (readOnly && (hasValue || hasNote)) {
-          const parts: string[] = [];
-          if (hasValue) parts.push(`IPR ${value} mm`);
-          if (hasNote) parts.push(`STEP ${note}`);
-          return `${parts.join(' · ')} · ${contactLabel}`;
-        }
-        if (hasValue || hasNote) {
-          const parts: string[] = [];
-          if (hasValue) parts.push(`IPR ${value} mm`);
-          if (hasNote) parts.push(`STEP ${note}`);
-          return `Edit ${parts.join(' · ')} — ${contactLabel}`;
-        }
-        return `Click to add IPR ${contactLabel}`;
-      })()}
+      title={label}
     >
       <span className="odo-ipr-bar" aria-hidden />
       {/* Label rendered whenever the contact carries EITHER an IPR mm
@@ -1713,7 +1877,9 @@ const IprSlot = memo(function IprSlot({
           )}
           {hasNote && (
             <span className="odo-ipr-note">
-              <span className="odo-ipr-note-label">Step</span>
+              <span className="odo-ipr-note-label">
+                {t('orderForm.files.tooth.contact.step')}
+              </span>
               {note}
             </span>
           )}
@@ -1751,6 +1917,7 @@ function ColorPopover({
   onClear: () => void;
   onClose: () => void;
 }) {
+  const { t } = useT();
   const popupRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: anchorX, top: anchorY });
 
@@ -1798,13 +1965,14 @@ function ColorPopover({
     <div
       ref={popupRef}
       role="dialog"
-      aria-label={`Pick instruction color for tooth ${tooth}`}
+      aria-label={t('orderForm.files.tooth.popover.pickAria', { n: tooth })}
       className="odo-popover fixed z-[1000] rounded-xl border bg-popover p-3 shadow-xl outline-none"
       style={{ left: pos.left, top: pos.top }}
     >
       <div className="mb-2 flex items-center justify-between gap-3 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
         <span>
-          Tooth <span className="text-foreground">{tooth}</span>
+          {t('orderForm.files.tooth.popover.tooth')}{' '}
+          <span className="text-foreground">{tooth}</span>
         </span>
         {currentTypes.length > 0 && (
           <span className="text-muted-foreground">
@@ -1867,7 +2035,7 @@ function ColorPopover({
         className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border bg-background px-2 py-1.5 text-xs font-medium text-muted-foreground transition hover:border-primary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
       >
         <RotateCcw className="h-3 w-3" />
-        Clear
+        {t('orderForm.files.tooth.clear')}
       </button>
     </div>,
     document.body,
@@ -1876,19 +2044,42 @@ function ColorPopover({
 
 // ── IPR Popover ────────────────────────────────────────────────────────────
 
+/**
+ * The amount as committed: a number inside [0, maxMm] is normalised
+ * ("0.20" → "0.2"); anything else is passed through untouched, so the
+ * caller's own validation (and the backend's) decides what to do with it.
+ */
+function normaliseContactAmount(raw: string, maxMm: number): string {
+  const num = Number(raw);
+  return Number.isFinite(num) && num >= 0 && num <= maxMm ? num.toString() : raw;
+}
+
 function IprPopover({
-  tooth,
+  fromTooth,
+  toTooth,
   anchorX,
   anchorY,
+  unitLabel,
+  maxMm,
+  validate,
   currentValue,
   currentNote,
   onCommit,
   showStripping,
   onClose,
 }: {
-  tooth: number;
+  /** Left-side tooth of the contact (render order). */
+  fromTooth: number;
+  /** Anchor / right-side tooth of the contact (render order). */
+  toTooth: number;
   anchorX: number;
   anchorY: number;
+  /** Name + unit of the amount field ("IPR (mm)", "Espace (mm)"). */
+  unitLabel: string;
+  /** Upper bound of the amount, in mm. */
+  maxMm: number;
+  /** Message refusing the typed amount, or null (see `validateContactAmount`). */
+  validate?: (raw: string) => string | null;
   currentValue?: string;
   /** Existing STEP value. */
   currentNote?: string;
@@ -1903,10 +2094,13 @@ function IprPopover({
   showStripping?: boolean;
   onClose: () => void;
 }) {
+  const { t } = useT();
+  const fieldId = useId();
   const popupRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: anchorX, top: anchorY });
   const [iprDraft, setIprDraft] = useState(currentValue ?? '');
   const [stepDraft, setStepDraft] = useState(currentNote ?? '');
+  const [amountError, setAmountError] = useState<string | null>(null);
 
   useEffect(() => {
     let armed = false;
@@ -1942,16 +2136,17 @@ function IprPopover({
   const handleConfirm = () => {
     const trimmedIpr = iprDraft.trim();
     const trimmedStep = stepDraft.trim();
+    const refusal = trimmedIpr.length > 0 ? (validate?.(trimmedIpr) ?? null) : null;
+    if (refusal) {
+      setAmountError(refusal);
+      return;
+    }
     // Build one payload that carries BOTH fields so the parent persists
     // in a single mutation. Either field can independently be null —
     // entering only an IPR amount or only a STEP is a legal state.
-    const clampMm = (raw: string): string => {
-      const num = Number(raw);
-      return Number.isFinite(num) && num >= 0 && num <= 2 ? num.toString() : raw;
-    };
-
     onCommit({
-      value: trimmedIpr.length > 0 ? clampMm(trimmedIpr) : null,
+      value:
+        trimmedIpr.length > 0 ? normaliseContactAmount(trimmedIpr, maxMm) : null,
       // showStripping=false means the parent never wants the STEP
       // field at all (defensive — current call sites always opt in).
       note: showStripping
@@ -1962,55 +2157,46 @@ function IprPopover({
     });
   };
 
-  // Tooth labelling: figure out the left-side neighbour for a friendlier
-  // "between X and Y" header. We can re-derive it from FDI math because
-  // we always anchor on the right tooth of the contact.
-  //   • 21 → 11 (midline upper)
-  //   • 31 → 41 (midline lower)
-  //   • 17 → 18, 16 → 17, … (within the upper-right half)
-  //   • 22 → 23 visually but the anchor is on the LEFT side of the
-  //     contact in this case; we still want "21 and 22" — i.e. neighbour
-  //     is the FDI predecessor in the same half. Encoded via the table
-  //     below to keep the math obvious.
-  const neighbour = (() => {
-    if (tooth === 21) return 11;
-    if (tooth === 31) return 41;
-    if (tooth >= 12 && tooth <= 18) return tooth + 1; // within UR (11..18 chain runs 11,12,…,18)
-    if (tooth >= 22 && tooth <= 28) return tooth - 1; // within UL (21,22,…,28)
-    if (tooth >= 42 && tooth <= 48) return tooth + 1; // within LR
-    if (tooth >= 32 && tooth <= 38) return tooth - 1; // within LL
-    return undefined;
-  })();
-  const contactLabel = neighbour
-    ? `Between ${neighbour} and ${tooth}`
-    : `Tooth ${tooth}`;
+  const title = contactTitle(t, fromTooth, toTooth);
+  const amountId = `${fieldId}-amount`;
+  const amountErrorId = `${fieldId}-amount-error`;
+  const stepId = `${fieldId}-step`;
 
   return createPortal(
     <div
       ref={popupRef}
       role="dialog"
-      aria-label={`Set IPR amount ${contactLabel}`}
+      aria-label={`${unitLabel} · ${title}`}
       className="odo-popover fixed z-[1000] w-[240px] rounded-xl border bg-popover p-3 shadow-xl outline-none"
       style={{ left: pos.left, top: pos.top }}
     >
       <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-        IPR · {contactLabel}
+        {title}
       </div>
 
-      {/* ─── IPR (mm) — yellow chip on the arch ─────────────────────── */}
-      <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-        IPR (mm)
+      {/* ─── Amount (mm) — yellow chip on the arch ──────────────────── */}
+      <label
+        htmlFor={amountId}
+        className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
+      >
+        {unitLabel}
       </label>
       <div className="flex items-center gap-2">
         <Input
+          id={amountId}
           type="number"
           step="0.1"
           min="0"
-          max="2"
+          max={maxMm}
           inputMode="decimal"
           autoFocus
           value={iprDraft}
-          onChange={(e) => setIprDraft(e.target.value)}
+          aria-invalid={amountError ? true : undefined}
+          aria-describedby={amountError ? amountErrorId : undefined}
+          onChange={(e) => {
+            setIprDraft(e.target.value);
+            setAmountError(null);
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') handleConfirm();
             if (e.key === 'Escape') onClose();
@@ -2020,16 +2206,25 @@ function IprPopover({
         />
         <span className="text-xs text-muted-foreground">mm</span>
       </div>
+      {amountError && (
+        <p id={amountErrorId} role="alert" className="mt-1 text-xs text-red-600">
+          {amountError}
+        </p>
+      )}
 
       {/* ─── STEP — purple chip on the arch ───────────────────────────
           Free text so clinics can use whatever encoding their protocol
           requires (`4`, `S5`, `mid`, etc.) — no numeric clamp. */}
       {showStripping && (
         <>
-          <label className="mb-1 mt-2 block text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-            STEP
+          <label
+            htmlFor={stepId}
+            className="mb-1 mt-2 block text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
+          >
+            {t('orderForm.files.tooth.contact.step')}
           </label>
           <Input
+            id={stepId}
             type="text"
             inputMode="text"
             value={stepDraft}
@@ -2038,7 +2233,7 @@ function IprPopover({
               if (e.key === 'Enter') handleConfirm();
               if (e.key === 'Escape') onClose();
             }}
-            placeholder="e.g. 10"
+            placeholder={t('orderForm.files.tooth.contact.stepPlaceholder')}
             className="h-9"
           />
         </>
@@ -2052,14 +2247,19 @@ function IprPopover({
           // parent does one persist mutation, matching the Save path.
           onClick={() => onCommit({ value: null, note: null })}
           disabled={!currentValue && !currentNote}
-          className="gap-1"
+          className="gap-1 pointer-coarse:h-11"
         >
           <Trash2 className="h-3 w-3" />
-          Clear
+          {t('orderForm.files.tooth.clear')}
         </Button>
-        <Button type="button" size="sm" onClick={handleConfirm} className="gap-1">
+        <Button
+          type="button"
+          size="sm"
+          onClick={handleConfirm}
+          className="gap-1 pointer-coarse:h-11"
+        >
           <Check className="h-3 w-3" />
-          Save
+          {t('orderForm.files.tooth.contact.save')}
         </Button>
       </div>
     </div>,
@@ -2132,6 +2332,19 @@ const ODONTOGRAM_CSS = /* css */ `
 }
 .odo-tooth:active {
   transition-duration: 90ms;
+}
+/* Static teeth (no editable colour, e.g. a contacts-only chart): context,
+   not controls — no hover lift, no not-allowed cursor, not faded. Placed
+   after the hover/disabled rules it overrides (same specificity). */
+.odo-tooth-static,
+.odo-tooth-static:disabled {
+  cursor: default;
+  opacity: 1;
+}
+.odo-tooth-static:hover {
+  will-change: auto;
+  transform: none;
+  filter: none;
 }
 
 .odo-glyph {
@@ -2450,6 +2663,20 @@ const ODONTOGRAM_CSS = /* css */ `
 }
 @media (max-width: 480px) {
   .odo-ipr { width: 8px; min-height: 60px; }
+}
+
+/* Contacts-only chart: the teeth are static, so each slot's hit area can
+   spread over them to a 44 px-wide target (the bar itself stays thin).
+   Lifted above the teeth; where two targets meet, the later slot wins. */
+.odo-contacts-only .odo-ipr { z-index: 1; }
+.odo-contacts-only .odo-ipr::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 44px;
+  transform: translateX(-50%);
 }
 
 /* Respect reduced motion. */

@@ -154,6 +154,7 @@ export class PackService {
           includedCorrections: dto.isUnlimitedCorrections
             ? null
             : dto.includedCorrections ?? null,
+          treatmentValidityMonths: dto.treatmentValidityMonths ?? null,
           isUnlimitedSteps: dto.isUnlimitedSteps ?? false,
           isUnlimitedCorrections: dto.isUnlimitedCorrections ?? false,
           isForOrthodontists: dto.isForOrthodontists ?? false,
@@ -254,6 +255,10 @@ export class PackService {
               : dto.includedCorrections !== undefined
                 ? dto.includedCorrections
                 : undefined,
+          treatmentValidityMonths:
+            dto.treatmentValidityMonths !== undefined
+              ? dto.treatmentValidityMonths
+              : undefined,
           isUnlimitedSteps: dto.isUnlimitedSteps,
           isUnlimitedCorrections: dto.isUnlimitedCorrections,
           isForOrthodontists: dto.isForOrthodontists,

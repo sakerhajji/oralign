@@ -3,12 +3,14 @@
 import type { MouseEvent } from 'react';
 import {
   ArchiveRestore,
+  FolderOpen,
   MoreHorizontal,
   Pencil,
   Plus,
   ShieldX,
   Trash2,
 } from 'lucide-react';
+import { OrderKindBadge } from '@/components/dashboard/order-kind-badge';
 import { OrderStatusBadge } from '@/components/orders/order-status-badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -29,7 +31,13 @@ import { formatPhone } from '@/lib/utils/phone';
 import { PatientAvatar } from './patient-avatar';
 import { patientFacts } from './patient-format';
 
-export type PatientAction = 'edit' | 'new-order' | 'trash' | 'restore' | 'permanent';
+export type PatientAction =
+  | 'edit'
+  | 'new-order'
+  | 'latest-order'
+  | 'trash'
+  | 'restore'
+  | 'permanent';
 
 interface PatientsListProps {
   patients: PatientListItem[];
@@ -257,42 +265,62 @@ function PatientTableRow({
  * the statuses still read down one edge. The phone number joins from sm
  * up, where there is room for it.
  */
-function PatientsRows({ patients, inTrash, activeId, onOpen }: PatientsListProps) {
+function PatientsRows({
+  patients,
+  inTrash,
+  isAdmin,
+  activeId,
+  onOpen,
+  onAction,
+}: PatientsListProps) {
   const { t, lang } = useT();
   return (
     <ul className="divide-y overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10 lg:hidden">
       {patients.map((patient) => (
         <li key={patient.id}>
-          <button
-            type="button"
-            onClick={() => onOpen(patient)}
+          <div
             data-state={patient.id === activeId ? 'active' : undefined}
-            className="flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/40 focus-visible:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset focus-visible:outline-none active:bg-muted/60 data-[state=active]:bg-muted"
+            className="flex min-h-16 items-center gap-1 px-2 transition-colors hover:bg-muted/40 data-[state=active]:bg-muted"
           >
-            <PatientAvatar patient={patient} className="size-10" />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[15px] leading-5 font-medium">
-                {patient.fullName}
-              </span>
-              <span className="mt-1 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-                {!inTrash && patient.latestOrder && (
-                  <OrderStatusBadge status={patient.latestOrder.status} />
-                )}
-                <span className="truncate">
-                  {rowSubline(patient, inTrash, t)}
+            <button
+              type="button"
+              onClick={() => onOpen(patient)}
+              className="flex min-w-0 flex-1 items-center gap-3 rounded-md px-2 py-3 text-left focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none active:bg-muted/60"
+            >
+              <PatientAvatar patient={patient} className="size-10" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[15px] leading-5 font-medium">
+                  {patient.fullName}
+                </span>
+                <span className="mt-1 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+                  {!inTrash && patient.latestOrder && (
+                    <>
+                      <OrderStatusBadge status={patient.latestOrder.status} />
+                      <OrderKindBadge order={patient.latestOrder} />
+                    </>
+                  )}
+                  <span className="truncate">
+                    {rowSubline(patient, inTrash, t)}
+                  </span>
                 </span>
               </span>
-            </span>
-            {inTrash ? (
-              <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-                {patient.deletedAt ? formatBusinessDay(patient.deletedAt, lang) : ''}
-              </span>
-            ) : patient.phone ? (
-              <span className="hidden shrink-0 text-sm text-muted-foreground tabular-nums sm:block">
-                {formatPhone(patient.phone)}
-              </span>
-            ) : null}
-          </button>
+              {inTrash ? (
+                <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                  {patient.deletedAt ? formatBusinessDay(patient.deletedAt, lang) : ''}
+                </span>
+              ) : patient.phone ? (
+                <span className="hidden shrink-0 text-sm text-muted-foreground tabular-nums sm:block">
+                  {formatPhone(patient.phone)}
+                </span>
+              ) : null}
+            </button>
+            <PatientRowMenu
+              patient={patient}
+              inTrash={inTrash}
+              isAdmin={isAdmin}
+              onAction={onAction}
+            />
+          </div>
         </li>
       ))}
     </ul>
@@ -336,7 +364,10 @@ function PatientRecord({ patient }: { patient: PatientListItem }) {
   if (!latestOrder) return <NoOrderLabel />;
   return (
     <div className="flex min-w-0 flex-col items-start gap-1">
-      <OrderStatusBadge status={latestOrder.status} />
+      <span className="flex max-w-full items-center gap-1.5">
+        <OrderStatusBadge status={latestOrder.status} />
+        <OrderKindBadge order={latestOrder} />
+      </span>
       <p className="max-w-full truncate text-xs text-muted-foreground">
         {latestOrder.orderCode}
         {ordersCount > 1 && ` · ${t('patientDesk.list.ordersMany', { count: ordersCount })}`}
@@ -400,6 +431,16 @@ function PatientRowMenu({
           </>
         ) : (
           <>
+            {patient.latestOrder && (
+              <DropdownMenuItem onSelect={() => onAction(patient, 'latest-order')}>
+                <FolderOpen aria-hidden="true" />
+                {t(
+                  patient.latestOrder.isCurrent
+                    ? 'patientDesk.actions.currentOrder'
+                    : 'patientDesk.actions.latestOrder',
+                )}
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem onSelect={() => onAction(patient, 'new-order')}>
               <Plus aria-hidden="true" />
               {t('patientDesk.actions.newOrder')}

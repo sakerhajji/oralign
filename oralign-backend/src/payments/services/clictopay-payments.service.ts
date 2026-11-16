@@ -21,6 +21,7 @@ import {
   NotFoundException,
 } from '../../common/exceptions/app.exception';
 import { NotificationEvents } from '../../notifications/events/notification-events';
+import { assertTreatmentFeeApplies } from '../../orders/order-kind';
 import { PrismaService } from '../../prisma/prisma.service';
 import { QuotationService } from '../../quotations/services/quotation.service';
 import { ClicToPayClient } from '../clictopay/clictopay.client';
@@ -482,6 +483,7 @@ export class ClicToPayPaymentsService {
       const order = await tx.dentalOrder.findUnique({ where: { id: dto.orderId } });
       if (!order || order.deletedAt) throw new NotFoundException('Order not found.');
       this.assertOrderAccess(order.doctorId, caller);
+      assertTreatmentFeeApplies(order);
       if (order.treatmentFeePaidAt) {
         throw new BadRequestException(
           'The treatment fee is already paid.',

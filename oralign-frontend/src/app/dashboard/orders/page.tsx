@@ -25,7 +25,9 @@ import {
   Eye,
   FileText,
   Filter,
+  FolderOpen,
   Loader2,
+  ListPlus,
   MoreHorizontal,
   Plus,
   RefreshCw,
@@ -80,11 +82,17 @@ import {
 } from '@/components/ui/table';
 import { OrderStatusBadge } from '@/components/orders/order-status-badge';
 import { TreatmentFeeBadge } from '@/components/orders/treatment-fee-badge';
+import { OrderKindBadge } from '@/components/dashboard/order-kind-badge';
 import { WelcomeGiftBanner } from '@/components/welcome-gift/welcome-gift-banner';
 import { useAuth } from '@/lib/providers/auth-provider';
 import {
+  buildOrderEditHref,
   buildOrderNavigationHref,
+  buildParentCaseHref,
+  buildSupplementalRequestsHref,
   handleOrderNavigation,
+  hasOrderEditor,
+  isSupplementalOrder,
 } from '@/lib/orders/order-navigation';
 import {
   useBulkDeleteOrders,
@@ -99,6 +107,7 @@ import {
   usePermanentDeleteOrder,
   useRestoreOrder,
 } from '@/lib/hooks';
+import { useDeleteSupplementalOrder } from '@/lib/hooks/use-supplemental-orders';
 import {
   DentalOrder,
   OrderFilterParams,
@@ -253,6 +262,7 @@ export default function OrdersPage() {
   const { isAdmin, isDentist, user } = useAuth();
   const { t, lang } = useT();
   const deleteOrder = useDeleteOrder();
+  const deleteSupplemental = useDeleteSupplementalOrder();
   const permanentDeleteOrder = usePermanentDeleteOrder();
   const restoreOrder = useRestoreOrder();
   const overrideStatus = useOverrideOrderStatus();
@@ -463,6 +473,25 @@ export default function OrdersPage() {
     },
     [overrideStatus],
   );
+
+  // A supplemental draft is withdrawn through its own endpoint, which
+  // also logs it on the case and frees its request kind; the generic
+  // delete refuses children.
+  const deleteListedOrder = useCallback(
+    (order: DentalOrder) => {
+      if (isSupplementalOrder(order) && order.parentOrderId) {
+        deleteSupplemental.mutate({
+          requestId: order.id,
+          parentOrderId: order.parentOrderId,
+          patientId: order.patientId,
+        });
+        return;
+      }
+      deleteOrder.mutate(order.id);
+    },
+    [deleteOrder, deleteSupplemental],
+  );
+  const isDeletingOrder = deleteOrder.isPending || deleteSupplemental.isPending;
 
   const bulkPending =
     bulkUpdateStatus.isPending || bulkDelete.isPending;
@@ -1024,8 +1053,11 @@ export default function OrdersPage() {
                         emptyContactLabel={t('ordersPage.noContact')}
                       />
                     </TableCell>
-                    <TableCell className="font-mono text-sm font-medium text-foreground">
-                      {order.orderCode}
+                    <TableCell>
+                      <span className="block font-mono text-sm font-medium text-foreground">
+                        {order.orderCode}
+                      </span>
+                      <OrderKindBadge order={order} className="mt-1" />
                     </TableCell>
                     <TableCell>
                       <span className="block max-w-[190px] truncate text-sm font-medium">
@@ -1063,14 +1095,18 @@ export default function OrdersPage() {
                           isAdmin={isAdmin}
                           showEmpty
                         />
-                        <TreatmentFeeBadge order={order} />
+                        {/* The treatment fee belongs to the case: a child
+                            is priced by its own quote, or is free. */}
+                        {isSupplementalOrder(order) ? null : (
+                          <TreatmentFeeBadge order={order} />
+                        )}
                       </div>
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-3">
-                        {canManage && !showDeleted ? (
+                        {canManage && hasOrderEditor(order) && !showDeleted ? (
                           <Link
-                            href={`/dashboard/orders/${order.id}/edit`}
+                            href={buildOrderEditHref(order)}
                             className="text-xs font-medium text-muted-foreground transition hover:text-foreground"
                             onClick={(event) => event.stopPropagation()}
                           >
@@ -1090,10 +1126,10 @@ export default function OrdersPage() {
                         canPermanentDelete={isAdmin}
                         isAdmin={isAdmin}
                         isDeletedView={showDeleted}
-                        isDeleting={deleteOrder.isPending}
+                        isDeleting={isDeletingOrder}
                         isPermanentDeleting={permanentDeleteOrder.isPending}
                         isRestoring={restoreOrder.isPending}
-                        onDelete={() => deleteOrder.mutate(order.id)}
+                        onDelete={() => deleteListedOrder(order)}
                         onPermanentDelete={() =>
                           permanentDeleteOrder.mutate(order.id)
                         }
@@ -1120,11 +1156,11 @@ export default function OrdersPage() {
                 canManage={canManage}
                 canPermanentDelete={isAdmin}
                 isDeletedView={showDeleted}
-                isDeleting={deleteOrder.isPending}
+                isDeleting={isDeletingOrder}
                 isPermanentDeleting={permanentDeleteOrder.isPending}
                 isRestoring={restoreOrder.isPending}
                 onPrefetch={() => prefetchOrder(order.id)}
-                onDelete={() => deleteOrder.mutate(order.id)}
+                onDelete={() => deleteListedOrder(order)}
                 onPermanentDelete={() => permanentDeleteOrder.mutate(order.id)}
                 onRestore={() => restoreOrder.mutate(order.id)}
                 onChangeStatus={runSingleStatus}
@@ -1260,6 +1296,11 @@ function OrderRowActions({
   const [softOpen, setSoftOpen] = useState(false);
   const [hardOpen, setHardOpen] = useState(false);
   const [statusPickerOpen, setStatusPickerOpen] = useState(false);
+  // A child is edited and withdrawn only as a draft, and never restored
+  // from the trash: the generic restore would skip its one-per-kind rule.
+  const canEdit = canManage && hasOrderEditor(order);
+  const canDelete = canEdit;
+  const canRestore = !!onRestore && !isSupplementalOrder(order);
   return (
     <>
       <DropdownMenu>
@@ -1292,11 +1333,11 @@ function OrderRowActions({
           {isDeletedView && canPermanentDelete ? (
             <>
               <DropdownMenuSeparator />
-              {onRestore ? (
+              {canRestore ? (
                 <DropdownMenuItem
                   onClick={(event) => {
                     event.preventDefault();
-                    onRestore();
+                    onRestore?.();
                   }}
                   disabled={isRestoring}
                   className="gap-2 text-emerald-700 focus:text-emerald-800"
@@ -1319,10 +1360,10 @@ function OrderRowActions({
             </>
           ) : (
             <>
-              {canManage && (
+              {canEdit && (
                 <DropdownMenuItem asChild>
                   <Link
-                    href={`/dashboard/orders/${order.id}/edit`}
+                    href={buildOrderEditHref(order)}
                     className="gap-2"
                   >
                     <Edit className="h-4 w-4" />
@@ -1330,6 +1371,7 @@ function OrderRowActions({
                   </Link>
                 </DropdownMenuItem>
               )}
+              <SupplementalMenuLink order={order} />
               {isAdmin && onChangeStatus && (
                 <>
                   <DropdownMenuSeparator />
@@ -1345,8 +1387,8 @@ function OrderRowActions({
                   </DropdownMenuItem>
                 </>
               )}
-              {canManage && <DropdownMenuSeparator />}
-              {canManage && (
+              {canDelete && <DropdownMenuSeparator />}
+              {canDelete && (
                 <DropdownMenuItem
                   onClick={(event) => {
                     event.preventDefault();
@@ -1402,6 +1444,35 @@ function OrderRowActions({
         }}
       />
     </>
+  );
+}
+
+/**
+ * Row menu link between a case and its supplemental requests: a child
+ * opens its case, a submitted case jumps to its requests section. A draft
+ * case has none yet, and a child that lost its parent link has no case.
+ */
+function SupplementalMenuLink({ order }: { order: DentalOrder }) {
+  const { t } = useT();
+  if (isSupplementalOrder(order)) {
+    if (!order.parentOrderId) return null;
+    return (
+      <DropdownMenuItem asChild>
+        <Link href={buildParentCaseHref(order)} className="gap-2">
+          <FolderOpen className="h-4 w-4" />
+          {t('ordersPage.openParentCase')}
+        </Link>
+      </DropdownMenuItem>
+    );
+  }
+  if (order.status === OrderStatus.DRAFT) return null;
+  return (
+    <DropdownMenuItem asChild>
+      <Link href={buildSupplementalRequestsHref(order)} className="gap-2">
+        <ListPlus className="h-4 w-4" />
+        {t('ordersPage.supplementalRequests')}
+      </Link>
+    </DropdownMenuItem>
   );
 }
 
@@ -1538,8 +1609,9 @@ function OrderMobileCard({
         </div>
         <div className="flex flex-wrap gap-1.5">
           <OrderStatusBadge status={order.status} />
+          <OrderKindBadge order={order} />
           <OrderReviewBadge order={order} isDoctor={!isAdmin} isAdmin={isAdmin} />
-          <TreatmentFeeBadge order={order} />
+          {isSupplementalOrder(order) ? null : <TreatmentFeeBadge order={order} />}
         </div>
         <div className="grid grid-cols-2 gap-2">
           <MobileMeta

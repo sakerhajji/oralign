@@ -4,6 +4,7 @@ import type { Cache } from 'cache-manager';
 import {
   OrderFileCategory,
   OrderStatus,
+  OrderType,
   Prisma,
   ToothInstructionType,
   UserRole,
@@ -11,6 +12,7 @@ import {
 import { PaginatedResponse } from '../../common/dto/response.dto';
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   NotFoundException,
 } from '../../common/exceptions/app.exception';
@@ -44,6 +46,63 @@ import {
 import { assertNoDependents } from '../../common/deletion/deletion-blocked';
 import { OrderAuditService } from './order-audit.service';
 import { WelcomeGiftService } from './welcome-gift.service';
+import { startCoverageWindow, startsCoverageWindow } from '../coverage-window';
+import {
+  planChildOverride,
+  type ChildOverride,
+  type ChildRequestPatch,
+} from '../supplemental/supplemental-override';
+import {
+  assertInitialOrder,
+  INITIAL_ORDERS_ONLY,
+  isInitialOrder,
+  isPlannerToothScope,
+  openChildrenOf,
+  ORDER_KIND_ERROR,
+} from '../order-kind';
+
+/** An audit row ready to be written (actor resolved, action set). */
+type AuditEntry = Awaited<ReturnType<OrderAuditService['entry']>>;
+
+/** Who an order belongs to; a case's children always follow it. */
+type OrderOwner = { doctorId: string; patientId: string };
+
+/** What a status override needs to know about the order it moves. */
+type OverrideTarget = {
+  id: string;
+  status: OrderStatus;
+  orderType: OrderType;
+  parentOrderId: string | null;
+};
+
+/** The audit diff of an owner change: only the fields that moved. */
+function ownerChanges(
+  before: OrderOwner,
+  after: OrderOwner,
+): Record<string, { from: string; to: string }> {
+  const changes: Record<string, { from: string; to: string }> = {};
+  for (const field of ['doctorId', 'patientId'] as const) {
+    if (before[field] !== after[field]) {
+      changes[field] = { from: before[field], to: after[field] };
+    }
+  }
+  return changes;
+}
+
+/**
+ * The status columns of an admin override. Rolling back to draft clears
+ * submittedAt so the order looks pristine again; moving a never-submitted
+ * draft forward backfills it, so the UIs keyed on it (the "Created /
+ * Submitted" header strap) stay consistent.
+ */
+function overrideStatusData(
+  status: OrderStatus,
+  submittedAt: Date | null,
+  now: Date,
+): Prisma.DentalOrderUncheckedUpdateInput {
+  if (status === OrderStatus.draft) return { status, submittedAt: null };
+  return submittedAt ? { status } : { status, submittedAt: now };
+}
 
 type ClinicalOrderData = Partial<
   Pick<
@@ -177,7 +236,10 @@ export class OrderService {
     return mapOrderToDto(order);
   }
 
-  private creationReplayKey(caller: Caller, key: string | undefined): string | null {
+  private creationReplayKey(
+    caller: Caller,
+    key: string | undefined,
+  ): string | null {
     if (!this.cache || !key || !IDEMPOTENCY_KEY_SHAPE.test(key)) return null;
     return `orders:create:${caller.userId}:${key}`;
   }
@@ -195,7 +257,9 @@ export class OrderService {
     try {
       orderId = (await this.cache!.get<string>(replayKey)) ?? undefined;
     } catch (err) {
-      this.logger.warn(`cache.get(${replayKey}) failed: ${(err as Error).message}`);
+      this.logger.warn(
+        `cache.get(${replayKey}) failed: ${(err as Error).message}`,
+      );
       return null;
     }
     if (!orderId) return null;
@@ -204,15 +268,22 @@ export class OrderService {
       include: orderInclude,
     });
     if (!existing) return null;
-    this.logger.log(`Order creation replayed for ${orderId}; returning the existing draft.`);
+    this.logger.log(
+      `Order creation replayed for ${orderId}; returning the existing draft.`,
+    );
     return mapOrderToDto(existing);
   }
 
-  private async rememberCreation(replayKey: string, orderId: string): Promise<void> {
+  private async rememberCreation(
+    replayKey: string,
+    orderId: string,
+  ): Promise<void> {
     try {
       await this.cache!.set(replayKey, orderId, CREATE_IDEMPOTENCY_TTL_MS);
     } catch (err) {
-      this.logger.warn(`cache.set(${replayKey}) failed: ${(err as Error).message}`);
+      this.logger.warn(
+        `cache.set(${replayKey}) failed: ${(err as Error).message}`,
+      );
     }
   }
 
@@ -267,12 +338,20 @@ export class OrderService {
   ): Promise<OrderResponseDto> {
     this.ensureCanCreateOrModify(caller);
     const current = await this.findAccessibleOrder(id, caller);
+    assertInitialOrder(current);
     this.ensureOrderNotLockedByPayment(current, caller);
 
     const doctorId = isAdmin(caller)
       ? updateOrderDto.doctorId
       : current.doctorId;
     const patientId = updateOrderDto.patientId ?? current.patientId;
+    const owner: OrderOwner = {
+      doctorId: doctorId ?? current.doctorId,
+      patientId,
+    };
+    const reassigned =
+      owner.doctorId !== current.doctorId ||
+      owner.patientId !== current.patientId;
 
     // The welcome gift stays with the doctor who received it (their mark
     // was claimed for it) and is never removed: moving its order would
@@ -310,6 +389,11 @@ export class OrderService {
       data as unknown as Record<string, unknown>,
     );
     const auditEntry = await this.orderAudit.entry(caller, 'updated', changes);
+    const childAuditEntry = reassigned
+      ? await this.orderAudit.entry(caller, 'updated', null, {
+          reassignedWithParent: current.orderCode,
+        })
+      : null;
     const order = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.dentalOrder.update({
         where: { id },
@@ -319,10 +403,49 @@ export class OrderService {
       if (Object.keys(changes).length > 0) {
         await tx.orderAuditLog.create({ data: { orderId: id, ...auditEntry } });
       }
+      if (childAuditEntry) {
+        await this.reassignChildren(tx, id, owner, childAuditEntry);
+      }
       return updated;
     });
 
     return mapOrderToDto(order);
+  }
+
+  /**
+   * A case's supplemental requests belong to the same doctor and patient
+   * as the case: moving the case moves them, in its transaction, with one
+   * audit row per child (archived children included, so a restore can
+   * never bring back a request owned by the previous doctor).
+   */
+  private async reassignChildren(
+    tx: Prisma.TransactionClient,
+    parentOrderId: string,
+    owner: OrderOwner,
+    auditEntry: AuditEntry,
+  ): Promise<void> {
+    const children = await tx.dentalOrder.findMany({
+      where: { parentOrderId },
+      select: { id: true, doctorId: true, patientId: true },
+    });
+    const moved = children.filter(
+      (child) =>
+        child.doctorId !== owner.doctorId ||
+        child.patientId !== owner.patientId,
+    );
+    if (moved.length === 0) return;
+
+    await tx.dentalOrder.updateMany({
+      where: { id: { in: moved.map((child) => child.id) } },
+      data: owner,
+    });
+    await tx.orderAuditLog.createMany({
+      data: moved.map((child) => ({
+        orderId: child.id,
+        ...auditEntry,
+        changes: ownerChanges(child, owner),
+      })),
+    });
   }
 
   /**
@@ -383,6 +506,7 @@ export class OrderService {
   async deleteOrder(id: string, caller: Caller): Promise<{ message: string }> {
     this.ensureCanCreateOrModify(caller);
     const current = await this.findAccessibleOrder(id, caller);
+    assertInitialOrder(current);
     this.ensureOrderNotLockedByPayment(current, caller);
 
     const deletedAt = new Date();
@@ -390,6 +514,15 @@ export class OrderService {
       deletedAt: { from: current.deletedAt, to: deletedAt.toISOString() },
     });
     await this.prisma.$transaction(async (tx) => {
+      // Under the case's row lock, the lock a supplemental creation takes:
+      // no request can be opened between this check and the archive.
+      await this.lockOrderRow(tx, id);
+      if ((await tx.dentalOrder.count({ where: openChildrenOf(id) })) > 0) {
+        throw new ConflictException(
+          'This case has open supplemental requests. Close or archive them before archiving the case.',
+          ORDER_KIND_ERROR.ACTIVE_CHILDREN,
+        );
+      }
       await tx.dentalOrder.update({
         where: { id },
         data: { deletedAt },
@@ -435,9 +568,12 @@ export class OrderService {
     }
     const order = await this.prisma.dentalOrder.findFirst({
       where: { id },
-      select: { id: true, deletedAt: true },
+      select: { id: true, deletedAt: true, orderType: true },
     });
     if (!order) throw new NotFoundException('Order not found');
+    // A child comes back only through its own flow, which re-checks the
+    // one-open-request-per-kind rule.
+    assertInitialOrder(order);
 
     if (order.deletedAt === null) {
       // Already live — no-op (idempotent).
@@ -494,6 +630,9 @@ export class OrderService {
   ): Promise<OrderResponseDto> {
     this.ensureCanCreateOrModify(caller);
     const current = await this.findAccessibleOrder(id, caller);
+    // Before anything else: a child submitted here would skip its review
+    // and could take the doctor's welcome gift.
+    assertInitialOrder(current);
 
     if (current.status !== OrderStatus.draft) {
       throw new BadRequestException('Only draft orders can be submitted');
@@ -589,10 +728,13 @@ export class OrderService {
    * validation — the admin is intentionally allowed to roll forward
    * (skip ahead) OR roll backward (undo a transition that fired by
    * mistake). Related side-tables (treatment plan, quotation) are NOT
-   * touched: changing the status doesn't destroy artefacts.
+   * touched: changing the status doesn't destroy artefacts. The only
+   * side effects are the ones the status itself implies (see
+   * applyStatusSideEffects): the coverage window of a case handed over,
+   * the review state of a supplemental child. Allowed on children: it is
+   * how an approved request moves through quote, payment and fabrication.
    *
-   * The reason field is logged at INFO level for traceability; an
-   * audit-log table is a follow-up feature.
+   * The reason is logged at INFO level and kept in the audit row.
    */
   async overrideStatus(
     id: string,
@@ -619,18 +761,7 @@ export class OrderService {
         (reason ? ` — reason: ${reason}` : ''),
     );
 
-    // When admin rolls all the way back to `draft`, clear the
-    // submittedAt timestamp so the order looks pristine again. When
-    // admin moves a still-unsubmitted draft forward, backfill
-    // submittedAt now so downstream UIs that key off it (e.g. "Created
-    // / Submitted" header strap) stay consistent.
-    const data: Prisma.DentalOrderUncheckedUpdateInput = { status };
-    if (status === OrderStatus.draft) {
-      data.submittedAt = null;
-    } else if (!current.submittedAt) {
-      data.submittedAt = new Date();
-    }
-
+    const now = new Date();
     const auditEntry = await this.orderAudit.entry(
       caller,
       'status_changed',
@@ -638,13 +769,25 @@ export class OrderService {
       reason ? { reason } : null,
     );
     const order = await this.prisma.$transaction(async (tx) => {
-      const updated = await tx.dentalOrder.update({
+      const child = await this.planOverride(tx, current, status, now);
+      if (child?.conflict) throw child.conflict;
+      await tx.dentalOrder.update({
         where: { id },
-        data,
+        data: overrideStatusData(status, current.submittedAt, now),
+      });
+      await this.applyStatusSideEffects(
+        tx,
+        current,
+        status,
+        now,
+        child?.requestPatch ?? null,
+      );
+      await tx.orderAuditLog.create({ data: { orderId: id, ...auditEntry } });
+      // Re-read: the side effects may have written the coverage window.
+      return tx.dentalOrder.findUniqueOrThrow({
+        where: { id },
         include: orderInclude,
       });
-      await tx.orderAuditLog.create({ data: { orderId: id, ...auditEntry } });
-      return updated;
     });
 
     // Tell the doctor the order moved — admin already saw the transition
@@ -695,13 +838,19 @@ export class OrderService {
     // truthful `skipped` count.
     const candidates = await this.prisma.dentalOrder.findMany({
       where: { id: { in: ids }, deletedAt: null },
-      select: { id: true, orderCode: true, status: true, submittedAt: true },
+      select: {
+        id: true,
+        orderCode: true,
+        status: true,
+        submittedAt: true,
+        orderType: true,
+        parentOrderId: true,
+      },
     });
     const toUpdate = candidates.filter((c) => c.status !== status);
-    const skipped = ids.length - toUpdate.length;
 
     if (toUpdate.length === 0) {
-      return { updated: 0, skipped };
+      return { updated: 0, skipped: ids.length };
     }
 
     this.logger.log(
@@ -716,19 +865,30 @@ export class OrderService {
       null,
       { bulk: true, ...(reason ? { reason } : {}) },
     );
-    await this.prisma.$transaction(async (tx) => {
-      // The submittedAt fix-up is per-row because we honour the same
-      // semantics as the single overrideStatus path. Loop-of-updates
-      // is fine here at the 200-id cap; a single updateMany would
-      // collapse submittedAt to one value across the whole batch.
+    const now = new Date();
+    const updated = await this.prisma.$transaction(async (tx) => {
+      // Per row, with exactly the single override's rules (submittedAt
+      // fix-up, side effects). Loop-of-updates is fine at the 200-id
+      // cap; a single updateMany would collapse submittedAt to one value
+      // across the whole batch.
+      let moved = 0;
       for (const order of toUpdate) {
-        const data: Prisma.DentalOrderUncheckedUpdateInput = { status };
-        if (status === OrderStatus.draft) {
-          data.submittedAt = null;
-        } else if (!order.submittedAt) {
-          data.submittedAt = new Date();
-        }
-        await tx.dentalOrder.update({ where: { id: order.id }, data });
+        // A child the override would put at odds with its case (a sibling
+        // of its kind open, the pack allowance used up) is skipped, not
+        // fatal: the rest of the batch still applies.
+        const child = await this.planOverride(tx, order, status, now);
+        if (child?.conflict) continue;
+        await tx.dentalOrder.update({
+          where: { id: order.id },
+          data: overrideStatusData(status, order.submittedAt, now),
+        });
+        await this.applyStatusSideEffects(
+          tx,
+          order,
+          status,
+          now,
+          child?.requestPatch ?? null,
+        );
         await tx.orderAuditLog.create({
           data: {
             orderId: order.id,
@@ -738,10 +898,76 @@ export class OrderService {
             },
           },
         });
+        moved += 1;
       }
+      return moved;
     });
 
-    return { updated: toUpdate.length, skipped };
+    return { updated, skipped: ids.length - updated };
+  }
+
+  /**
+   * The supplemental side of an override, decided before anything is
+   * written (null for an initial case): what blocks it (one open request
+   * per kind, the pack allowance) or the request columns it writes. See
+   * planChildOverride, which takes the case row lock creation and review
+   * take too, so the two cannot interleave.
+   */
+  private planOverride(
+    tx: Prisma.TransactionClient,
+    order: OverrideTarget,
+    status: OrderStatus,
+    now: Date,
+  ): Promise<ChildOverride> | null {
+    if (isInitialOrder(order) || !order.parentOrderId) return null;
+    return planChildOverride(
+      tx,
+      { ...order, parentOrderId: order.parentOrderId },
+      status,
+      now,
+    );
+  }
+
+  /**
+   * What an admin status override does besides the status itself, shared
+   * by the single and the bulk path so the two can never drift:
+   *   • an initial case moved into shipped / finished has its aligners
+   *     handed over: its coverage window starts (idempotent, the first
+   *     hand-over wins);
+   *   • a supplemental child carries its review state along (the request
+   *     patch planOverride decided), in the same transaction.
+   */
+  private async applyStatusSideEffects(
+    tx: Prisma.TransactionClient,
+    order: Pick<OverrideTarget, 'id' | 'orderType'>,
+    status: OrderStatus,
+    now: Date,
+    requestPatch: ChildRequestPatch | null,
+  ): Promise<void> {
+    if (isInitialOrder(order)) {
+      if (startsCoverageWindow(status)) {
+        await startCoverageWindow(tx, order.id, now);
+      }
+      return;
+    }
+    if (requestPatch) {
+      await tx.supplementalOrderRequest.update({
+        where: { orderId: order.id },
+        data: requestPatch,
+      });
+    }
+  }
+
+  /**
+   * Row-lock an order for the rest of the transaction. Writers that must
+   * not interleave on one order (tooth instructions, a case and its
+   * supplemental requests) serialise here.
+   */
+  private async lockOrderRow(
+    tx: Prisma.TransactionClient,
+    id: string,
+  ): Promise<void> {
+    await tx.$queryRaw`SELECT id FROM "DentalOrder" WHERE id = ${id} FOR UPDATE`;
   }
 
   /**
@@ -762,14 +988,15 @@ export class OrderService {
       return { deleted: 0, skipped: 0 };
     }
 
+    // Supplemental children are archived through their own flow only, so
+    // they are skipped here, like a case whose requests are still open.
     const candidates = await this.prisma.dentalOrder.findMany({
-      where: { id: { in: ids }, deletedAt: null },
+      where: { id: { in: ids }, deletedAt: null, ...INITIAL_ORDERS_ONLY },
       select: { id: true, orderCode: true },
     });
-    const skipped = ids.length - candidates.length;
 
     if (candidates.length === 0) {
-      return { deleted: 0, skipped };
+      return { deleted: 0, skipped: ids.length };
     }
 
     this.logger.log(
@@ -780,8 +1007,14 @@ export class OrderService {
     const auditEntry = await this.orderAudit.entry(caller, 'archived', null, {
       bulk: true,
     });
-    await this.prisma.$transaction(async (tx) => {
+    const deleted = await this.prisma.$transaction(async (tx) => {
+      let archived = 0;
       for (const order of candidates) {
+        await this.lockOrderRow(tx, order.id);
+        const openChildren = await tx.dentalOrder.count({
+          where: openChildrenOf(order.id),
+        });
+        if (openChildren > 0) continue;
         await tx.dentalOrder.update({
           where: { id: order.id },
           data: { deletedAt },
@@ -793,10 +1026,12 @@ export class OrderService {
             changes: { deletedAt: { from: null, to: deletedAt.toISOString() } },
           },
         });
+        archived += 1;
       }
+      return archived;
     });
 
-    return { deleted: candidates.length, skipped };
+    return { deleted, skipped: ids.length - deleted };
   }
 
   /**
@@ -814,8 +1049,14 @@ export class OrderService {
     }
     if (ids.length === 0) return { restored: 0, skipped: 0 };
 
+    // Supplemental children are skipped: they come back only through
+    // their own flow (see restoreOrder).
     const candidates = await this.prisma.dentalOrder.findMany({
-      where: { id: { in: ids }, deletedAt: { not: null } },
+      where: {
+        id: { in: ids },
+        deletedAt: { not: null },
+        ...INITIAL_ORDERS_ONLY,
+      },
       select: { id: true },
     });
     const skipped = ids.length - candidates.length;
@@ -896,6 +1137,7 @@ export class OrderService {
             treatmentPlans: true,
             payments: true,
             alignerDeliveries: true,
+            supplementalOrders: true,
           },
         },
         quotation: { select: { id: true } },
@@ -920,6 +1162,10 @@ export class OrderService {
         { label: 'payments', count: order._count.payments },
         { label: 'treatment plans', count: order._count.treatmentPlans },
         { label: 'aligner deliveries', count: order._count.alignerDeliveries },
+        {
+          label: 'supplemental orders',
+          count: order._count.supplementalOrders,
+        },
         // The gift order is the record of the waived fees (amounts, audit)
         // and of the gift the doctor received: archived at most, never
         // purged, so it stays with that doctor (purely a history rule —
@@ -991,6 +1237,12 @@ export class OrderService {
     // editor. assertCanEditOdontogram allows them when assigned.
     this.ensureCanEditOdontogram(caller);
     const target = await this.findAccessibleOrder(id, caller);
+    // On a supplemental child the doctor's prescription lives on the
+    // request; the only write accepted here is the plan editor's
+    // (a planner replacing the attachments of a refinement plan).
+    const plannerWrite =
+      caller.role !== UserRole.dentist && isPlannerToothScope(replaceTypes);
+    if (!plannerWrite) assertInitialOrder(target);
     this.ensureOrderNotLockedByPayment(target, caller);
 
     // IPR / stripping moved to its own table (`TreatmentPlanIpr`).
@@ -1061,7 +1313,7 @@ export class OrderService {
       // Row-level lock on the parent order. Two concurrent calls for
       // the same orderId serialise here, eliminating the delete +
       // createMany race that otherwise throws P2002.
-      await tx.$queryRaw`SELECT id FROM "DentalOrder" WHERE id = ${id} FOR UPDATE`;
+      await this.lockOrderRow(tx, id);
 
       // REPLACE-ALL scope:
       //   • With `scope`: only wipe rows whose type is in the caller's
@@ -1362,10 +1614,13 @@ export class OrderService {
     // *different* patients can share a clean code on the same day.
     const todayStart = new Date(now);
     todayStart.setUTCHours(0, 0, 0, 0);
+    // Cases only: a supplemental child's code extends its case's code
+    // (`<case>-REP-01`) and must not bump the counter of the next case.
     const existingToday = await this.prisma.dentalOrder.count({
       where: {
         createdAt: { gte: todayStart },
         orderCode: { startsWith: stem },
+        ...INITIAL_ORDERS_ONLY,
       },
     });
     return existingToday === 0

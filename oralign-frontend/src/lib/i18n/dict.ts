@@ -333,10 +333,10 @@ export const dict = {
         } as T,
       },
       radiography: {
-        title: { en: 'Radiography & STL scans', fr: 'Radiographies & empreintes STL' } as T,
+        title: { en: 'Radiography & 3D scans', fr: 'Radiographies & empreintes 3D' } as T,
         hint: {
-          en: 'Attach panoramic + cephalometric radiographs, plus the upper / lower digital impressions (STL or DCM).',
-          fr: 'Joignez la panoramique et la téléradiographie de profil, ainsi que les empreintes numériques supérieures et inférieures (STL ou DCM).',
+          en: 'Attach panoramic + cephalometric radiographs, plus the upper / lower digital impressions (STL, PLY, OBJ or DCM).',
+          fr: 'Joignez la panoramique et la téléradiographie de profil, ainsi que les empreintes numériques supérieures et inférieures (STL, PLY, OBJ ou DCM).',
         } as T,
       },
       cbctRequested: { en: 'CBCT requested', fr: 'CBCT demandé' } as T,
@@ -368,7 +368,7 @@ export const dict = {
       // ── Section headers shown by ClinicalOrderFiles ──────────────
       // The order wizard renders three sub-sections that each have
       // their own intro: patient images (8 slots), radiography (2
-      // slots + bulk drop-zone), and STL impressions (4 slots).
+      // slots + bulk drop-zone), and 3D impressions (4 slots).
       sections: {
         patientImagesTitle: { en: 'Patient images', fr: 'Photos du patient' } as T,
         patientImagesDesc: {
@@ -380,7 +380,7 @@ export const dict = {
           en: 'Include panoramic and profile radiography files to support the diagnosis.',
           fr: 'Joignez la panoramique et la téléradiographie de profil pour appuyer le diagnostic.',
         } as T,
-        stlTitle: { en: 'STL files', fr: 'Fichiers STL' } as T,
+        stlTitle: { en: '3D files (STL, PLY, OBJ)', fr: 'Fichiers 3D (STL, PLY, OBJ)' } as T,
         stlDesc: {
           en: 'Upload upper, lower, and occlusion scan files. STL, PLY, and OBJ are supported — up to 1 GB per scan.',
           fr: 'Téléversez les empreintes supérieure, inférieure et d’occlusion. STL, PLY et OBJ acceptés — jusqu’à 1 Go par scan.',
@@ -401,10 +401,10 @@ export const dict = {
         lowerOcclusal: { en: 'Lower occlusal view', fr: 'Vue occlusale inférieure' } as T,
         panoramic: { en: 'Panoramic radiography', fr: 'Radiographie panoramique' } as T,
         profileTele: { en: 'Profile teleradiography', fr: 'Téléradiographie de profil' } as T,
-        upperStl: { en: 'Add Upper STL impression', fr: 'Ajouter empreinte STL supérieure' } as T,
-        lowerStl: { en: 'Add Lower STL impression', fr: 'Ajouter empreinte STL inférieure' } as T,
-        firstOcclusion: { en: 'Add First occlusion STL', fr: 'Ajouter STL première occlusion' } as T,
-        secondOcclusion: { en: 'Add Second occlusion STL', fr: 'Ajouter STL seconde occlusion' } as T,
+        upperStl: { en: 'Add Upper 3D impression', fr: 'Ajouter empreinte 3D supérieure' } as T,
+        lowerStl: { en: 'Add Lower 3D impression', fr: 'Ajouter empreinte 3D inférieure' } as T,
+        firstOcclusion: { en: 'Add First occlusion 3D scan', fr: 'Ajouter scan 3D première occlusion' } as T,
+        secondOcclusion: { en: 'Add Second occlusion 3D scan', fr: 'Ajouter scan 3D seconde occlusion' } as T,
       },
 
       // ── Odontogram-selector strings ──────────────────────────────
@@ -859,7 +859,7 @@ export const dict = {
 
       patientInfo: { en: 'Patient information', fr: 'Informations du patient' } as T,
       patientImages: { en: 'Patient images', fr: 'Photos du patient' } as T,
-      radiographyScans: { en: 'Radiography & STL scans', fr: 'Radiographies & STL' } as T,
+      radiographyScans: { en: 'Radiography & 3D scans', fr: 'Radiographies & empreintes 3D' } as T,
       treatmentObjective: { en: 'Treatment plan & clinical objective', fr: 'Plan de traitement & objectif clinique' } as T,
       toothLevel: { en: 'Tooth-level instructions & movement plan', fr: 'Instructions par dent & plan de mouvement' } as T,
       orderMetadata: { en: 'Order metadata', fr: 'Informations de commande' } as T,
@@ -1332,7 +1332,7 @@ export const dict = {
     // Section titles inside the detail
     sections: {
       patientImages: { en: 'Patient images', fr: 'Photos du patient' } as T,
-      radiographyScans: { en: 'Radiography & STL scans', fr: 'Radiographies & STL' } as T,
+      radiographyScans: { en: 'Radiography & 3D scans', fr: 'Radiographies & empreintes 3D' } as T,
       clinicalObjective: { en: 'Treatment plan & clinical objective', fr: 'Plan de traitement & objectif clinique' } as T,
       toothLevel: { en: 'Tooth-level instructions & movement plan', fr: 'Instructions par dent & plan de mouvement' } as T,
       orderMetadata: { en: 'Order metadata', fr: 'Informations de commande' } as T,
@@ -3867,6 +3867,7 @@ export const dict = {
     } as T,
     stlModel: { en: '3D model', fr: 'Modèle 3D' } as T,
     stlTriangles: { en: '{count} triangles', fr: '{count} triangles' } as T,
+    modelPoints: { en: '{count} points', fr: '{count} points' } as T,
     // ── File card actions + states (order files) ────────────────────
     view: { en: 'View', fr: 'Voir' } as T,
     retry: { en: 'Retry', fr: 'Réessayer' } as T,
@@ -3875,7 +3876,10 @@ export const dict = {
     upload: { en: 'Upload', fr: 'Téléverser' } as T,
     previewUnavailable: { en: 'Preview unavailable', fr: 'Aperçu indisponible' } as T,
     unableToLoadPreview: { en: 'Unable to load preview', fr: 'Impossible de charger l’aperçu' } as T,
-    unableToLoadStl: { en: 'Unable to load STL', fr: 'Impossible de charger le STL' } as T,
+    unableToLoadStl: {
+      en: 'Unable to load the 3D model',
+      fr: 'Impossible de charger le modèle 3D',
+    } as T,
     noFilesYet: { en: 'No files uploaded yet.', fr: 'Aucun fichier téléversé pour le moment.' } as T,
     filesLoadFailed: { en: 'Failed to load files: {message}', fr: 'Échec du chargement des fichiers : {message}' } as T,
     maxZipHint: {
@@ -3918,8 +3922,8 @@ export const dict = {
       en: 'Paste the image copied from "{source}"',
       fr: 'Coller l’image copiée depuis « {source} »',
     } as T,
-    noStlSelected: { en: 'No STL selected', fr: 'Aucun STL sélectionné' } as T,
-    uploadThisStl: { en: 'Upload this STL file', fr: 'Téléverser ce fichier STL' } as T,
+    noStlSelected: { en: 'No 3D file selected', fr: 'Aucun fichier 3D sélectionné' } as T,
+    uploadThisStl: { en: 'Upload this 3D file', fr: 'Téléverser ce fichier 3D' } as T,
     stlFormats: { en: 'STL, PLY, or OBJ', fr: 'STL, PLY ou OBJ' } as T,
     closeHint: {
       en: 'Click outside or press Esc to close',

@@ -5,6 +5,7 @@
  * lightbox/fullscreen. WebP everywhere (universal support); AVIF only
  * at the md size where its encode cost buys the most.
  */
+import type { MeshFormat } from './media.types';
 
 export interface ImageVariantSpec {
   name: 'thumb' | 'md' | 'lg';
@@ -60,7 +61,35 @@ export const RECONCILE_DELAY_MS = 15_000;
 /** Per-model cap on backfilled rows per boot — keeps cold starts calm. */
 export const RECONCILE_BACKFILL_BATCH = 300;
 
-export type MediaKind = 'image' | 'zip' | 'stl';
+export type MediaKind = 'image' | 'zip' | MeshFormat;
+
+/** 3D scan extensions → format. The extension decides (see classifyMedia). */
+export const MESH_EXTENSIONS: ReadonlyMap<string, MeshFormat> = new Map([
+  ['.stl', 'stl'],
+  ['.ply', 'ply'],
+  ['.obj', 'obj'],
+]);
+
+/**
+ * Browsers mostly send '' or application/octet-stream for scans, so these
+ * only matter for a file name without a known extension.
+ */
+const MESH_MIMES: ReadonlyMap<string, MeshFormat> = new Map([
+  ['model/stl', 'stl'],
+  ['application/sla', 'stl'],
+  ['application/vnd.ms-pki.stl', 'stl'],
+  ['model/ply', 'ply'],
+  ['model/x-ply', 'ply'],
+  ['application/ply', 'ply'],
+  ['model/obj', 'obj'],
+]);
+
+/** The 3D format a file name's extension declares, case-insensitively. */
+export function meshFormatOf(fileName: string): MeshFormat | null {
+  const lower = (fileName || '').toLowerCase();
+  const dot = lower.lastIndexOf('.');
+  return dot === -1 ? null : (MESH_EXTENSIONS.get(lower.slice(dot)) ?? null);
+}
 
 /**
  * Single source of truth for "does the pipeline apply to this file".
@@ -78,13 +107,9 @@ export function classifyMedia(
   if ((mimeType && ZIP_MIMES.has(mimeType)) || lower.endsWith('.zip')) {
     return 'zip';
   }
-  if (
-    lower.endsWith('.stl') ||
-    mimeType === 'model/stl' ||
-    mimeType === 'application/sla' ||
-    mimeType === 'application/vnd.ms-pki.stl'
-  ) {
-    return 'stl';
-  }
-  return null;
+  // Extension before mime: a scan.ply sent with a generic or wrong 3D
+  // mime must still be parsed as the PLY it is.
+  return (
+    meshFormatOf(lower) ?? (mimeType ? MESH_MIMES.get(mimeType) : null) ?? null
+  );
 }

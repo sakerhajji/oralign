@@ -9,7 +9,7 @@ import { MediaJob, MediaJobKind, MediaVariants } from './media.types';
 import { stemOf } from './naming';
 import { processImage } from './processors/image.processor';
 import { readZipMetadata } from './processors/zip.processor';
-import { processStl } from './processors/stl.processor';
+import { processMesh } from './processors/mesh/mesh.processor';
 
 const UPLOAD_ROOT = path.join(process.cwd(), 'uploads');
 
@@ -67,7 +67,7 @@ export class MediaProcessingService implements OnModuleInit {
   }
 
   // ──────────────────────────────────────────────────────────────────
-  // OrderFile — images, ZIP bundles, STL scans
+  // OrderFile — images, ZIP bundles, 3D scans (STL / PLY / OBJ)
   // ──────────────────────────────────────────────────────────────────
 
   private async processOrderFile(id: string): Promise<void> {
@@ -364,8 +364,15 @@ export class MediaProcessingService implements OnModuleInit {
         const metadata = await readZipMetadata(absPath);
         return { variants: {}, metadata };
       }
-      case 'stl': {
-        const r = await processStl({ absPath, absDir, relDir, baseName });
+      case 'stl':
+      case 'ply':
+      case 'obj': {
+        const r = await processMesh(kind, {
+          absPath,
+          absDir,
+          relDir,
+          baseName,
+        });
         return { variants: r.variants, metadata: r.metadata };
       }
     }

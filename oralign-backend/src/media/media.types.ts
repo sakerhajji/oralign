@@ -35,8 +35,8 @@ export interface MediaVariantInfo {
 
 /**
  * Variant map persisted in the `variants` JSON column.
- * Image keys: thumb (~300px) | md (~800px) | lg (~1600px) | avif (md-size).
- * STL keys:   thumb (rendered preview) | model (optimized GLB).
+ * Image keys:   thumb (~300px) | md (~800px) | lg (~1600px) | avif (md-size).
+ * 3D scan keys: thumb (rendered preview) | model (optimized GLB).
  */
 export type MediaVariants = Record<string, MediaVariantInfo>;
 
@@ -60,20 +60,41 @@ export interface ZipMetadata {
   suspicious: boolean;
 }
 
-export interface StlMetadata {
-  kind: 'stl';
-  format: 'binary' | 'ascii';
+/** The 3D scan formats the mesh pipeline understands. */
+export type MeshFormat = 'stl' | 'ply' | 'obj';
+
+/**
+ * Geometry facts of a 3D scan. STL rows written before PLY/OBJ support
+ * carry exactly the same shape (the optional flags are simply absent), so
+ * readers keyed on `kind === 'stl'` keep working unchanged.
+ */
+export interface MeshMetadata {
+  /** The scan's true format, the same value as its file category. */
+  kind: MeshFormat;
+  /**
+   * STL: `binary` | `ascii`. PLY: the header's encoding
+   * (`ascii` | `binary_little_endian` | `binary_big_endian`). OBJ: `ascii`.
+   */
+  format: 'binary' | 'ascii' | 'binary_little_endian' | 'binary_big_endian';
+  /** 0 for a point cloud. */
   triangleCount: number;
-  /** Unique vertex count when deduplicated for GLB, else triangleCount*3. */
+  /**
+   * Unique vertex count when deduplicated for the GLB, else the source
+   * count (an STL soup counts 3 per triangle; a point cloud, its points).
+   */
   vertexCount: number;
   bbox: {
     min: [number, number, number];
     max: [number, number, number];
   };
+  /** Set (true) only when the scan carries per-vertex colours. */
+  hasColors?: boolean;
+  /** Set (true) only for vertices without faces: no `model` variant. */
+  pointCloud?: boolean;
 }
 
-export interface StlProcessResult {
-  metadata: StlMetadata;
+export interface MeshProcessResult {
+  metadata: MeshMetadata;
   /** `thumb` (rendered webp) and, when within caps, `model` (GLB). */
   variants: MediaVariants;
 }

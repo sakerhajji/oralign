@@ -3,6 +3,7 @@ import { MediaProcessingStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   classifyMedia,
+  MESH_EXTENSIONS,
   RECONCILE_BACKFILL_BATCH,
   RECONCILE_DELAY_MS,
 } from './media.constants';
@@ -17,7 +18,7 @@ import { MediaProcessingService } from './media-processing.service';
  *      re-running a half-finished one is safe.
  *
  *   2. BACKFILL — rows created BEFORE the pipeline existed (status
- *      null) that classify as image/zip/stl get marked pending and
+ *      null) that classify as image/zip/3D scan get marked pending and
  *      enqueued, capped per model per boot so a large legacy library
  *      optimizes itself over a few restarts instead of hammering the
  *      box on the first one.
@@ -101,6 +102,7 @@ export class MediaReconciliationService implements OnApplicationBootstrap {
     // ── 2. Backfill: pre-pipeline rows ─────────────────────────────
     enqueued += await this.backfillOrderFiles();
     enqueued += await this.backfillTreatmentAttachments();
+    enqueued += await this.backfillMeshScans();
     enqueued += await this.backfillSupportMessages();
     enqueued += await this.backfillSliderMedia();
     enqueued += await this.backfillBlogImages();
@@ -152,6 +154,50 @@ export class MediaReconciliationService implements OnApplicationBootstrap {
       this.processing.enqueue('treatment-attachment', id);
     }
     return eligible.length;
+  }
+
+  /**
+   * 3D scans by extension. PLY/OBJ uploaded before the mesh pipeline
+   * handled them sit at status null behind every never-processable null
+   * row (PDF, video…), which the newest-first windows above may never
+   * get past. Marking them pending queues each exactly once.
+   */
+  private async backfillMeshScans(): Promise<number> {
+    const where = {
+      deletedAt: null,
+      processingStatus: null,
+      OR: [...MESH_EXTENSIONS.keys()].map((ext) => ({
+        fileName: { endsWith: ext, mode: 'insensitive' as const },
+      })),
+    };
+    const query = {
+      where,
+      select: { id: true },
+      orderBy: { createdAt: 'desc' as const },
+      take: RECONCILE_BACKFILL_BATCH,
+    };
+
+    const files = await this.prisma.orderFile.findMany(query);
+    if (files.length > 0) {
+      await this.prisma.orderFile.updateMany({
+        where: { id: { in: files.map((f) => f.id) } },
+        data: { processingStatus: MediaProcessingStatus.pending },
+      });
+      for (const { id } of files) this.processing.enqueue('order-file', id);
+    }
+
+    const attachments =
+      await this.prisma.treatmentMessageAttachment.findMany(query);
+    if (attachments.length > 0) {
+      await this.prisma.treatmentMessageAttachment.updateMany({
+        where: { id: { in: attachments.map((a) => a.id) } },
+        data: { processingStatus: MediaProcessingStatus.pending },
+      });
+      for (const { id } of attachments) {
+        this.processing.enqueue('treatment-attachment', id);
+      }
+    }
+    return files.length + attachments.length;
   }
 
   private async backfillSupportMessages(): Promise<number> {

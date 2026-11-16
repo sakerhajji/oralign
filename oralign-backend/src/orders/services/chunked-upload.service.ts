@@ -18,6 +18,7 @@ import { OrderFileResponseDto } from '../dto/order.dto';
 import { OrderService } from './order.service';
 import { OrderFilesService } from './order-files.service';
 import { UPLOAD_ROOT } from './order-storage';
+import { resolveUploadCategory } from './scan-category';
 import type { Caller } from '../../common/access/caller';
 
 /** Caller identity forwarded from the JWT guard (mirrors OrderService). */
@@ -83,18 +84,22 @@ export class ChunkedUploadService {
     const order = await this.orders.findAccessibleOrder(orderId, caller);
     this.orders.ensureOrderNotLockedByPayment(order, caller);
 
+    // A scan is filed under its true format, exactly as on the single-shot
+    // path, so the guards below and the session itself use that category.
+    const category = resolveUploadCategory(dto.category, dto.fileName);
+
     // Same name/size/extension rules as the single-shot path — enforced
     // on the DECLARED metadata before a single byte is transferred.
     this.files.validateFile(
       { originalname: dto.fileName, size: dto.size },
-      dto.category,
+      category,
     );
 
     // Duplicate guard: the identical payload already lives on this order.
     const duplicate = await this.prisma.orderFile.findFirst({
       where: {
         orderId,
-        category: dto.category,
+        category,
         originalName: dto.fileName,
         size: dto.size,
         deletedAt: null,
@@ -113,7 +118,7 @@ export class ChunkedUploadService {
       where: {
         orderId,
         uploaderId: caller.userId,
-        category: dto.category,
+        category,
         originalName: dto.fileName,
         totalBytes: BigInt(dto.size),
         status: UploadSessionStatus.active,
@@ -129,7 +134,7 @@ export class ChunkedUploadService {
       data: {
         orderId,
         uploaderId: caller.userId,
-        category: dto.category,
+        category,
         originalName: dto.fileName,
         mimeType: dto.mimeType ?? null,
         totalBytes: BigInt(dto.size),

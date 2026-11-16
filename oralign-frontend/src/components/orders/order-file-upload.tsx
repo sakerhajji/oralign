@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   Box,
@@ -28,8 +28,7 @@ import {
 import { toast } from '@/lib/toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { IndeterminateBar, Progress } from '@/components/ui/progress';
-import { readBodyWithProgress } from '@/lib/utils/read-body-with-progress';
+import { Progress } from '@/components/ui/progress';
 import {
   Dialog,
   DialogContent,
@@ -75,6 +74,12 @@ import { OrderFile, OrderFileCategory } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { formatBytes } from '@/lib/utils/bytes';
 import { ImageEditDialog } from './image-edit-dialog';
+import {
+  modelFactsOf,
+  modelFormatOf,
+  type ModelFormat,
+} from './model-viewer/model-format';
+import { ModelViewer } from './model-viewer/model-viewer';
 
 // Category → dict key (resolved with t() at render time so the labels
 // flip with the language toggle).
@@ -94,6 +99,17 @@ const categories = [
   [OrderFileCategory.VIDEO, 'media.categories.videos'],
   [OrderFileCategory.OTHER, 'media.categories.dicom'],
 ] as const;
+
+/** A scan is filed under its true format, whichever 3D slot took it. */
+const MODEL_FORMAT_CATEGORY: Record<ModelFormat, OrderFileCategory> = {
+  stl: OrderFileCategory.STL,
+  ply: OrderFileCategory.PLY,
+  obj: OrderFileCategory.OBJ,
+};
+
+function isModelCategory(category: OrderFileCategory) {
+  return Object.values(MODEL_FORMAT_CATEGORY).includes(category);
+}
 
 // Slot order is meaningful — on a 3-column grid the rows read as:
 //   Row 1 (extraoral):  profile      | face-at-rest | smile
@@ -286,9 +302,7 @@ export function OrderFileUpload({
                 stays at 50 MB. */}
             {category === OrderFileCategory.ZIP
               ? t('media.maxZipHint')
-              : category === OrderFileCategory.STL ||
-                  category === OrderFileCategory.PLY ||
-                  category === OrderFileCategory.OBJ
+              : isModelCategory(category)
                 ? t('media.maxScanHint')
                 : t('media.maxFileHint')}
           </span>
@@ -385,6 +399,10 @@ export function ClinicalOrderFiles({
 
   const uploadSlot = (slot: UploadSlotDefinition, file: File) => {
     const named = withSlotName(slot.key, file);
+    // 3D slots are declared as STL, but a PLY / OBJ keeps its own category;
+    // the slot still finds it through the `<slotKey>__` name prefix.
+    const format = isModelCategory(slot.category) ? modelFormatOf(file.name) : null;
+    const category = format ? MODEL_FORMAT_CATEGORY[format] : slot.category;
     const onProgress = (percent: number) =>
       setActiveUpload((cur) =>
         cur && cur.key === slot.key ? { ...cur, progress: percent } : cur,
@@ -402,7 +420,7 @@ export function ClinicalOrderFiles({
     if (named.size > CHUNKED_UPLOAD_THRESHOLD_BYTES) {
       void (async () => {
         try {
-          await uploadFileChunked(orderId, named, slot.category, {
+          await uploadFileChunked(orderId, named, category, {
             onProgress,
           });
           await queryClient.invalidateQueries({
@@ -427,7 +445,7 @@ export function ClinicalOrderFiles({
       {
         id: orderId,
         files: [named],
-        category: slot.category,
+        category,
         onProgress,
       },
       { onSettled: settle },
@@ -830,20 +848,16 @@ function PreviewSurface({
     return <video src={objectUrl} controls className="h-full w-full bg-black" />;
   }
 
-  if (type === 'model' && extensionFor(file.originalName) === 'stl') {
+  if (type === 'model') {
     // The live three.js viewer is EXPENSIVE (multi-MB fetch + WebGL
     // context per slot) — it only mounts in the fullscreen dialog.
     // Cards show the server-rendered thumbnail (or a placeholder while
     // the pipeline hasn't produced one yet).
     return large ? (
-      <StlModelViewer orderId={orderId} file={file} large />
+      <OrderModelViewer orderId={orderId} file={file} large />
     ) : (
-      <StlStaticPreview orderId={orderId} file={file} />
+      <ModelStaticPreview orderId={orderId} file={file} />
     );
-  }
-
-  if (type === 'model') {
-    return <ModelPlaceholder file={file} large={large} />;
   }
 
   // ZIP archives are NEVER rendered in the browser — show their safe
@@ -1086,7 +1100,7 @@ function SlotFilePreview({
       ) : previewType === 'model' ? (
         // Static server-rendered thumbnail — the live 3D viewer only mounts
         // when the user opens the fullscreen dialog.
-        <StlStaticPreview orderId={orderId} file={file} />
+        <ModelStaticPreview orderId={orderId} file={file} />
       ) : (
         <span className="grid h-full w-full place-items-center text-muted-foreground">
           {previewType === 'pdf' ? (
@@ -1564,16 +1578,12 @@ function StlUploadTile({
 
         {file ? (
           <div className="space-y-3">
-            {extensionFor(file.originalName) === 'stl' ? (
-              // Live interactive 3D viewer, inline. It dynamically imports
-              // three.js and prefers the pipeline's optimized GLB variant
-              // (≈half the bytes of the raw STL, normals computed in the
-              // browser), so the model loads fast while still being fully
-              // rotatable/zoomable right in the slot — no extra click.
-              <StlModelViewer orderId={orderId} file={file} />
-            ) : (
-              <ModelPlaceholder file={file} />
-            )}
+            {/* Live interactive 3D viewer, inline. It dynamically imports
+                three.js and prefers the pipeline's optimized GLB variant
+                (≈half the bytes of the raw scan, normals computed in the
+                browser), so the model loads fast while still being fully
+                rotatable/zoomable right in the slot — no extra click. */}
+            <OrderModelViewer orderId={orderId} file={file} />
             <div className="flex flex-wrap gap-2">
               <FullscreenFileViewer
                 orderId={orderId}
@@ -1639,7 +1649,12 @@ function StlUploadTile({
   );
 }
 
-function StlModelViewer({
+/**
+ * The 3D viewer fed from an order file: its raw upload plus, when the
+ * pipeline produced it, the optimized `model` GLB. A non-3D file that
+ * ended up in a 3D slot gets the static card instead.
+ */
+function OrderModelViewer({
   orderId,
   file,
   large,
@@ -1648,412 +1663,30 @@ function StlModelViewer({
   file: OrderFile;
   large?: boolean;
 }) {
-  const { t } = useT();
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
-  const [errorMessage, setErrorMessage] = useState<string>();
-  const [reloadKey, setReloadKey] = useState(0); // bump to force retry
-  const optimizedModelVariant = file.variants?.model ?? null;
-  // Download progress for the loading overlay. `percent` is null while
-  // the byte total is unknown (no Content-Length and no size hint) and
-  // during the parse/render phase — the bar then shows an indeterminate
-  // sweep instead of a misleading frozen fill.
-  const [loadPhase, setLoadPhase] = useState<'download' | 'render'>('download');
-  const [loadPercent, setLoadPercent] = useState<number | null>(0);
+  const format = modelFormatOf(file.originalName);
+  if (!format) return <ModelStaticPreview orderId={orderId} file={file} tall />;
 
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return undefined;
-
-    let disposed = false;
-    let frameId = 0;
-    let renderer: import('three').WebGLRenderer | undefined;
-    let controls:
-      | import('three/examples/jsm/controls/OrbitControls.js').OrbitControls
-      | undefined;
-    let geometry: import('three').BufferGeometry | undefined;
-    let edgeGeometry: import('three').BufferGeometry | undefined;
-    let material: import('three').Material | undefined;
-    let edgeMaterial: import('three').Material | undefined;
-    let resizeObserver: ResizeObserver | undefined;
-    let abortController: AbortController | undefined;
-
-    const clearCanvas = () => {
-      while (container.firstChild) {
-        container.removeChild(container.firstChild);
-      }
-    };
-
-    /**
-     * Self-diagnosing fetch — surfaces the actual HTTP status and a
-     * trimmed response snippet instead of a generic "Unable to load"
-     * message. Common real-world causes we want visible:
-     *   - 401 → auth token expired between page load and STL render
-     *   - 404 → file row exists in DB but the bytes on disk are gone
-     *   - 413 → nginx body-size limit hit (large STL)
-     *   - network error → CORS / DNS / dropped connection
-     */
-    const fetchStlBuffer = async (
-      signal: AbortSignal,
-      variant?: string,
-      // Best-known byte total for the progress bar when the response
-      // carries no usable Content-Length (e.g. transparently gzip'd).
-      expectedBytes?: number,
-    ) => {
-      const url = buildDownloadUrl(orderId, file.id, variant);
-
-      let response: Response;
-      try {
-        response = await authedFetch(url, { signal });
-      } catch (err) {
-        // Network-level failures (DNS, CORS, offline, mixed-content)
-        // arrive as TypeError("Failed to fetch") with no status code.
-        throw new Error(
-          `Network error contacting ${url}: ${(err as Error).message}`,
-        );
-      }
-
-      if (!response.ok) {
-        // Try to surface the backend's reason without trusting it to
-        // be JSON — exception filters sometimes return text/plain.
-        let detail = '';
-        try {
-          const text = await response.text();
-          detail = text.slice(0, 200);
-        } catch {
-          /* ignore */
-        }
-        throw new Error(
-          `STL download failed (HTTP ${response.status} ${response.statusText})` +
-            (detail ? `: ${detail}` : ''),
-        );
-      }
-
-      // Stream the body so the overlay can show real download progress
-      // (a full-arch scan can be hundreds of MB on a clinic connection —
-      // a frozen "Loading…" reads as a hang). Falls back to the plain
-      // buffered read when streaming isn't available.
-      const arrayBuffer = await readBodyWithProgress(
-        response,
-        expectedBytes,
-        (percent) => {
-          if (!disposed) setLoadPercent(percent);
-        },
-      );
-      if (arrayBuffer.byteLength === 0) {
-        throw new Error('STL download returned 0 bytes.');
-      }
-      return arrayBuffer;
-    };
-
-    const init = async () => {
-      try {
-        setStatus('loading');
-        setLoadPhase('download');
-        setLoadPercent(0);
-        setErrorMessage(undefined);
-        clearCanvas();
-
-        const [THREE, loaderModule, controlsModule] = await Promise.all([
-          import('three'),
-          import('three/examples/jsm/loaders/STLLoader.js'),
-          import('three/examples/jsm/controls/OrbitControls.js'),
-        ]);
-
-        abortController = new AbortController();
-
-        // Prefer the pipeline's optimized GLB (indexed + deduped —
-        // typically 40-60% smaller than the raw STL and parses faster).
-        // Any GLB failure falls back to the original STL so the viewer
-        // never regresses for legacy/unprocessed files.
-        let loadedGeometry: import('three').BufferGeometry | undefined;
-        if (optimizedModelVariant) {
-          try {
-            const glbBuffer = await fetchStlBuffer(
-              abortController.signal,
-              'model',
-              optimizedModelVariant.sizeBytes,
-            );
-            if (disposed) return;
-            setLoadPhase('render');
-            setLoadPercent(null);
-            const gltfModule = await import(
-              'three/examples/jsm/loaders/GLTFLoader.js'
-            );
-            const gltf = await new gltfModule.GLTFLoader().parseAsync(
-              glbBuffer,
-              '',
-            );
-            gltf.scene.traverse((obj) => {
-              const mesh = obj as import('three').Mesh;
-              if (!loadedGeometry && mesh.isMesh) {
-                loadedGeometry = mesh.geometry as import('three').BufferGeometry;
-              }
-            });
-          } catch {
-            loadedGeometry = undefined; // fall through to raw STL
-            setLoadPhase('download');
-            setLoadPercent(0);
-          }
-        }
-
-        if (!loadedGeometry) {
-          const arrayBuffer = await fetchStlBuffer(
-            abortController.signal,
-            undefined,
-            file.size,
-          );
-          if (disposed) return;
-          setLoadPhase('render');
-          setLoadPercent(null);
-          // Yield one frame so the "rendering" overlay paints before the
-          // synchronous STL parse (which can block the thread for a
-          // second or two on a large scan).
-          await new Promise((resolve) => requestAnimationFrame(resolve));
-          if (disposed) return;
-          loadedGeometry = new loaderModule.STLLoader().parse(arrayBuffer);
-        }
-        if (disposed) return;
-
-        const scene = new THREE.Scene();
-        // No scene.background — `alpha: true` keeps the renderer
-        // transparent so the soft light gradient on the container shows
-        // through. That's the "default" look the wrapping card defines.
-        const camera = new THREE.PerspectiveCamera(38, 1, 0.01, 100);
-        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-        renderer.outputColorSpace = THREE.SRGBColorSpace;
-        renderer.domElement.style.display = 'block';
-        renderer.domElement.style.height = '100%';
-        renderer.domElement.style.width = '100%';
-        container.appendChild(renderer.domElement);
-
-        geometry = loadedGeometry;
-        // The pipeline's GLB ships positions only (no normals — half
-        // the bytes), and raw STL needs them computed anyway.
-        geometry.computeVertexNormals();
-        geometry.center();
-        geometry.computeBoundingSphere();
-
-        const radius = geometry.boundingSphere?.radius || 1;
-        const scale = radius > 0 ? 1.35 / radius : 1;
-
-        // Dark grey model material — Tailwind slate-600 (#475569). Reads
-        // as clearly dental but contrasts strongly against the white card.
-        material = new THREE.MeshStandardMaterial({
-          color: 0x596b80,
-          metalness: 0.08,
-          roughness: 0.48,
-          side: THREE.DoubleSide,
-        });
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.scale.setScalar(scale);
-        mesh.rotation.x = -Math.PI / 2;
-        scene.add(mesh);
-
-        // Edge overlay — slate-900 at low opacity so it crisps up the
-        // silhouette against white without dominating the surface shading.
-        edgeMaterial = new THREE.LineBasicMaterial({
-          color: 0x0f172a,
-          transparent: true,
-          opacity: 0.25,
-        });
-        edgeGeometry = new THREE.EdgesGeometry(geometry, 28);
-        const edges = new THREE.LineSegments(edgeGeometry, edgeMaterial);
-        mesh.add(edges);
-
-        // Lighting tuned for a dark model on a white scene — bright
-        // hemisphere keeps shadows soft, key light gives the cusps depth.
-        const ambient = new THREE.HemisphereLight(0xffffff, 0x94a3b8, 2.2);
-        scene.add(ambient);
-
-        const keyLight = new THREE.DirectionalLight(0xffffff, 2.0);
-        keyLight.position.set(3, -4, 5);
-        scene.add(keyLight);
-
-        const fillLight = new THREE.DirectionalLight(0xffffff, 1.1);
-        fillLight.position.set(-4, 3, 3);
-        scene.add(fillLight);
-
-        // Reference grid ("échelle") stays removed — clean white-box
-        // presentation, no floor lines.
-
-        camera.position.set(0, -4.2, 2.2);
-        controls = new controlsModule.OrbitControls(camera, renderer.domElement);
-        controls.enableDamping = true;
-        controls.autoRotate = false;
-        controls.target.set(0, 0, 0);
-        controls.update();
-
-        const resize = () => {
-          if (!renderer || !container) return;
-          const width = Math.max(container.clientWidth, 280);
-          const height = Math.max(container.clientHeight, large ? 360 : 240);
-          camera.aspect = width / height;
-          camera.updateProjectionMatrix();
-          renderer.setSize(width, height, false);
-        };
-
-        resize();
-        resizeObserver = new ResizeObserver(resize);
-        resizeObserver.observe(container);
-
-        const animate = () => {
-          if (disposed || !renderer) return;
-          controls?.update();
-          renderer.render(scene, camera);
-          frameId = window.requestAnimationFrame(animate);
-        };
-
-        animate();
-        setStatus('ready');
-      } catch (error) {
-        if (disposed) return;
-        // Log full error to console — the UI message gets truncated and
-        // we want stack + cause available in DevTools for diagnostics.
-        console.error('[StlModelViewer] load failed:', error);
-        // undefined → the render falls back to the localized
-        // t('media.unableToLoadStl') message.
-        setErrorMessage(error instanceof Error ? error.message : undefined);
-        setStatus('error');
-      }
-    };
-
-    init();
-
-    return () => {
-      disposed = true;
-      abortController?.abort();
-      if (frameId) window.cancelAnimationFrame(frameId);
-      resizeObserver?.disconnect();
-      controls?.dispose();
-      geometry?.dispose();
-      edgeGeometry?.dispose();
-      material?.dispose();
-      edgeMaterial?.dispose();
-      renderer?.dispose();
-      clearCanvas();
-    };
-    // `reloadKey` is part of the deps so clicking Retry replays the effect
-    // without unmounting the component.
-  }, [file.id, optimizedModelVariant, orderId, large, reloadKey]);
-
+  const glb = file.variants?.model;
   return (
-    <div
-      className={cn(
-        // Default theme — soft light gradient. Matches the rest of the
-        // dashboard's card surfaces; transparent canvas sits on top.
-        'relative w-full overflow-hidden rounded-md bg-[radial-gradient(circle_at_top,_hsl(var(--primary)/0.10),_transparent_46%),linear-gradient(180deg,_hsl(var(--background)),_hsl(var(--muted)/0.55))]',
-        large ? 'h-full min-h-[420px]' : 'h-64 md:h-72',
-      )}
-    >
-      <div
-        ref={containerRef}
-        className="h-full w-full"
-      />
-      {status === 'loading' && (
-        <div
-          className="absolute inset-0 grid place-items-center bg-background/70 p-6"
-          role="status"
-          aria-live="polite"
-        >
-          <div className="w-full max-w-xs space-y-2.5 text-center">
-            <p className="text-sm text-muted-foreground">
-              {loadPhase === 'download'
-                ? t('media.loading3d')
-                : t('media.rendering3d')}
-            </p>
-            {loadPercent === null ? (
-              <IndeterminateBar />
-            ) : (
-              <Progress value={loadPercent} className="h-1.5" />
-            )}
-            <p className="text-[11px] tabular-nums text-muted-foreground/80">
-              {loadPercent === null
-                ? loadPhase === 'download'
-                  ? t('media.loadingSizeUnknown')
-                  : t('media.rendering3dHint')
-                : t('media.loadingPercent', { percent: Math.round(loadPercent) })}
-            </p>
-          </div>
-        </div>
-      )}
-      {status === 'error' && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background/85 p-4 text-center">
-          <p className="max-w-md text-sm font-medium text-red-600">
-            {errorMessage ?? t('media.unableToLoadStl')}
-          </p>
-          <div className="flex flex-wrap items-center justify-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setReloadKey((k) => k + 1)}
-              className="gap-2"
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              {t('media.retry')}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => downloadOrderFile(orderId, file)}
-              className="gap-2"
-            >
-              <Download className="h-3.5 w-3.5" />
-              {t('media.downloadInstead')}
-            </Button>
-          </div>
-        </div>
-      )}
-      {status === 'ready' && (
-        <div className="absolute bottom-3 left-3 rounded-full bg-background/85 px-3 py-1 text-xs font-medium shadow-sm">
-          {t('media.dragHint')}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ModelPlaceholder({ file, large }: { file: OrderFile; large?: boolean }) {
-  const { t } = useT();
-  return (
-    <div
-      className={cn(
-        'relative grid place-items-center rounded-md border bg-[radial-gradient(circle_at_top,_hsl(var(--primary)/0.16),_transparent_46%),linear-gradient(135deg,_hsl(var(--muted)),_hsl(var(--background)))]',
-        large ? 'h-full min-h-[420px] w-full' : 'h-full w-full',
-      )}
-    >
-      <div
-        className={cn(
-          'grid place-items-center rounded-md border border-primary/30 bg-background/80 shadow-sm',
-          large ? 'h-20 w-20 rotate-45' : 'h-16 w-16 rotate-45',
-        )}
-      >
-        <Box
-          className={cn(
-            '-rotate-45 text-primary',
-            large ? 'h-8 w-8' : 'h-7 w-7',
-          )}
-        />
-      </div>
-      <span className="absolute bottom-3 rounded-full bg-background/85 px-3 py-1 text-xs font-medium">
-        {t('media.modelBadge', {
-          ext: extensionFor(file.originalName).toUpperCase(),
-        })}
-      </span>
-    </div>
+    <ModelViewer
+      format={format}
+      url={buildDownloadUrl(orderId, file.id)}
+      sizeBytes={file.size}
+      glbUrl={glb ? buildDownloadUrl(orderId, file.id, 'model') : undefined}
+      glbBytes={glb?.sizeBytes}
+      large={large}
+      onDownload={() => downloadOrderFile(orderId, file)}
+    />
   );
 }
 
 /**
- * Static STL preview — the server-rendered thumbnail when the pipeline
+ * Static 3D preview — the server-rendered thumbnail when the pipeline
  * has produced one, otherwise a lightweight placeholder with geometry
  * facts. Never touches three.js and never downloads the model itself;
  * the live viewer mounts exclusively in the fullscreen dialog.
  */
-function StlStaticPreview({
+function ModelStaticPreview({
   orderId,
   file,
   tall,
@@ -2063,7 +1696,7 @@ function StlStaticPreview({
   tall?: boolean;
 }) {
   const { t } = useT();
-  // Only request the variant when the API says it exists — for STL a
+  // Only request the variant when the API says it exists — for a scan a
   // blind request would fall back to the RAW model bytes, which an
   // <img> can't render.
   const hasThumb = Boolean(file.variants?.thumb);
@@ -2073,10 +1706,7 @@ function StlStaticPreview({
     hasThumb,
     'thumb',
   );
-  const stlMeta =
-    file.mediaMetadata && (file.mediaMetadata as { kind?: string }).kind === 'stl'
-      ? (file.mediaMetadata as unknown as import('@/lib/types').StlMediaMetadata)
-      : undefined;
+  const facts = modelFactsOf(file.mediaMetadata);
 
   return (
     <div
@@ -2100,11 +1730,15 @@ function StlStaticPreview({
         <div className="grid place-items-center gap-2 p-4 text-center text-muted-foreground">
           <Box className="h-9 w-9 text-primary/70" />
           <span className="text-xs font-medium">{t('media.stlModel')}</span>
-          {stlMeta && (
+          {facts && (facts.triangleCount > 0 || facts.vertexCount > 0) && (
             <span className="text-[11px]">
-              {t('media.stlTriangles', {
-                count: stlMeta.triangleCount.toLocaleString(),
-              })}
+              {facts.triangleCount > 0
+                ? t('media.stlTriangles', {
+                    count: facts.triangleCount.toLocaleString(),
+                  })
+                : t('media.modelPoints', {
+                    count: facts.vertexCount.toLocaleString(),
+                  })}
             </span>
           )}
         </div>
@@ -3212,7 +2846,7 @@ function getPreviewType(file: OrderFile): PreviewType {
   if (file.mimeType.startsWith('image/')) return 'image';
   if (file.mimeType === 'application/pdf' || extension === 'pdf') return 'pdf';
   if (file.mimeType.startsWith('video/')) return 'video';
-  if (['stl', 'ply', 'obj'].includes(extension)) return 'model';
+  if (modelFormatOf(file.originalName)) return 'model';
   return 'file';
 }
 

@@ -27,6 +27,7 @@ import { OrderService } from './order.service';
 import { OrderAuditService } from './order-audit.service';
 import { mapOrderFileToDto, type OrderWithRelations } from './order.mapper';
 import { maxUploadBytesFor, resolveUploadPath } from './order-storage';
+import { resolveUploadCategory } from './scan-category';
 
 /**
  * Order file storage: upload, list, delete, download (originals + derived
@@ -66,17 +67,27 @@ export class OrderFilesService {
     // display order and the `_NNN` suffix in the generated filename.
     // Soft-deleted rows are counted on purpose: their index must never
     // be reissued, or a new file could land on a path an old DB row
-    // still references.
-    const maxExisting = await this.prisma.orderFile.aggregate({
-      where: { orderId: id, category },
-      _max: { orderIndex: true },
-    });
-    let nextIndex = (maxExisting._max.orderIndex ?? 0) + 1;
+    // still references. Keyed by category because one batch of scans
+    // can span stl/ply/obj (see resolveUploadCategory).
+    const nextIndex = new Map<OrderFileCategory, number>();
+    const takeIndex = async (fileCategory: OrderFileCategory) => {
+      let seq = nextIndex.get(fileCategory);
+      if (seq === undefined) {
+        const maxExisting = await this.prisma.orderFile.aggregate({
+          where: { orderId: id, category: fileCategory },
+          _max: { orderIndex: true },
+        });
+        seq = (maxExisting._max.orderIndex ?? 0) + 1;
+      }
+      nextIndex.set(fileCategory, seq + 1);
+      return seq;
+    };
 
     const savedFiles: Prisma.OrderFileCreateManyInput[] = [];
 
     for (const file of files) {
-      this.validateFile(file, category);
+      const fileCategory = resolveUploadCategory(category, file.originalname);
+      this.validateFile(file, fileCategory);
       // Content-security gate: never persist a file whose BYTES are a
       // script or executable (or a ZIP carrying one) — the extension check
       // above only trusts the attacker-supplied name. See file-security.ts.
@@ -89,12 +100,11 @@ export class OrderFilesService {
           `${verdict.reason ?? 'This file was rejected for security reasons.'}${suffix}`,
         );
       }
-      const saved = await this.saveFileToDisk(id, category, file, {
+      const saved = await this.saveFileToDisk(id, fileCategory, file, {
         doctorName: order.doctor?.fullName,
         patientName: order.patient.fullName,
-        seq: nextIndex,
+        seq: await takeIndex(fileCategory),
       });
-      nextIndex += 1;
       savedFiles.push(saved);
     }
 
@@ -103,7 +113,12 @@ export class OrderFilesService {
       'files_uploaded',
       null,
       {
-        category,
+        // The stored category when the batch shares one (.ply files sent
+        // as `stl` log `ply`); a mixed scan batch keeps the requested one.
+        category:
+          new Set(savedFiles.map((saved) => saved.category)).size === 1
+            ? savedFiles[0].category
+            : category,
         count: savedFiles.length,
         fileNames: savedFiles.map((file) => file.originalName),
       },
@@ -300,11 +315,17 @@ export class OrderFilesService {
    */
   async registerAssembledFile(
     order: OrderWithRelations,
-    category: OrderFileCategory,
+    requestedCategory: OrderFileCategory,
     meta: { originalName: string; mimeType?: string; sizeBytes: number },
     sourceAbsolutePath: string,
     caller: Caller,
   ): Promise<OrderFileResponseDto> {
+    // Sessions opened before scan categories were normalised may still
+    // carry the slot's category for a .ply/.obj payload.
+    const category = resolveUploadCategory(
+      requestedCategory,
+      meta.originalName,
+    );
     const maxExisting = await this.prisma.orderFile.aggregate({
       where: { orderId: order.id, category },
       _max: { orderIndex: true },
@@ -422,7 +443,7 @@ export class OrderFilesService {
       size: file.size,
       generatedName: fileName,
       orderIndex: naming.seq,
-      // pending = the async pipeline applies (image/zip/stl); null =
+      // pending = the async pipeline applies (image/zip/3D scan); null =
       // nothing to derive (pdf, video, …) — readers serve the original.
       processingStatus: classifyMedia(
         file.mimetype ?? 'application/octet-stream',

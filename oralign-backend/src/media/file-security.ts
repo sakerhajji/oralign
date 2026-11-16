@@ -16,8 +16,10 @@
  *      (JPEG/PNG/GIF/WebP/PDF/ZIP/MP4/AVI/HEIC) the content MUST match the
  *      declared extension. A `.jpg` that isn't a JPEG is rejected.
  *   3. Text-marker scan       — for the "loose" formats that have no hard
- *      magic (STL/PLY/OBJ, preamble-less DICOM) scan a bounded prefix for
- *      active-script markers (`<script`, `<?php`, `#!/`, …).
+ *      magic (ASCII STL, PLY/OBJ text, preamble-less DICOM) scan a bounded
+ *      prefix for active-script markers (`<script`, `<?php`, `#!/`, …).
+ *      The 3D scan formats must also fit their own envelope (binary or
+ *      ASCII STL, a valid PLY header, OBJ statements).
  *   4. ZIP entry inspection   — open the archive's central directory ONLY
  *      (yauzl, no inflation → zip-bomb-safe) and reject dangerous entry
  *      extensions, path traversal, absolute paths, and bomb-like ratios.
@@ -34,6 +36,7 @@ import {
   ZIP_SUSPICIOUS_RATIO,
   ZIP_SUSPICIOUS_TOTAL_BYTES,
 } from './media.constants';
+import { type PlyHeader, parsePlyHeader } from './processors/mesh/ply.parser';
 
 export type FileSecurityCode =
   | 'executable'
@@ -405,6 +408,93 @@ function isAsciiStl(buf: Buffer): boolean {
   );
 }
 
+function scriptVerdict(buf: Buffer): FileSecurityVerdict | null {
+  const marker = hasScriptMarker(buf);
+  return marker
+    ? {
+        safe: false,
+        code: 'script',
+        reason: `File contains script/code ("${marker}") and cannot be uploaded.`,
+      }
+    : null;
+}
+
+function typeMismatch(reason: string): FileSecurityVerdict {
+  return { safe: false, code: 'type_mismatch', reason };
+}
+
+/**
+ * A PLY must open with a header the mesh processor itself accepts: the `ply`
+ * magic line and a supported `format … 1.0` line, closed by end_header
+ * within a bounded prefix. The header is text and is scanned for script
+ * markers; a binary body is random bytes, where a marker "match" would be a
+ * false positive, so only an ASCII body is scanned with it.
+ */
+function judgePly(buf: Buffer): FileSecurityVerdict {
+  let header: PlyHeader;
+  try {
+    header = parsePlyHeader(buf);
+  } catch {
+    return (
+      scriptVerdict(buf) ??
+      typeMismatch('File content is not a valid PLY model.')
+    );
+  }
+  const text =
+    header.encoding === 'ascii' ? buf : buf.subarray(0, header.byteLength);
+  return scriptVerdict(text) ?? { safe: true };
+}
+
+/** Statements an OBJ may open with (`vp` is the parameter-space vertex). */
+const OBJ_STATEMENTS: ReadonlySet<string> = new Set([
+  'v',
+  'vt',
+  'vn',
+  'vp',
+  'f',
+  'o',
+  'g',
+  's',
+  'usemtl',
+  'mtllib',
+  'l',
+  'p',
+]);
+
+/** Enough lines to see past any exporter banner into the geometry. */
+const OBJ_PROBE_LINES = 64;
+
+/**
+ * An OBJ is plain text whose first meaningful lines are all OBJ statements
+ * (or `#` comments). A script renamed `.obj` fails on its first code line,
+ * and a compiled COFF object (Windows' other `.obj`) fails the text test.
+ */
+function judgeObj(buf: Buffer, totalBytes: number): FileSecurityVerdict {
+  const notObj = () =>
+    scriptVerdict(buf) ??
+    typeMismatch('File content is not a valid OBJ model.');
+  const prefix = buf.subarray(0, PREFIX_SCAN_BYTES);
+  // Text = no control bytes besides tab/LF/VT/FF/CR (UTF-8 names are fine).
+  for (const byte of prefix) {
+    if (byte < 0x09 || (byte > 0x0d && byte < 0x20) || byte === 0x7f) {
+      return notObj();
+    }
+  }
+  const lines = prefix.toString('latin1').split(/\r\n|\r|\n/);
+  // The last line may be cut off by the prefix bound: never judged.
+  if (totalBytes > prefix.length) lines.pop();
+  let seen = 0;
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (line === '') continue;
+    const keyword = line.startsWith('#') ? '#' : line.split(/\s+/)[0];
+    if (keyword !== '#' && !OBJ_STATEMENTS.has(keyword)) return notObj();
+    if (++seen === OBJ_PROBE_LINES) break;
+  }
+  if (seen === 0) return notObj();
+  return scriptVerdict(buf) ?? { safe: true };
+}
+
 // Magic checks for the strongly-typed formats. Returns true when the
 // content matches the given extension. Extensions not covered here have
 // no reliable magic and are handled by the loose-format path.
@@ -508,23 +598,18 @@ function judgePrefix(
     if (isBinaryStl(buf, totalBytes)) return { safe: true };
 
     if (!isAsciiStl(buf)) {
-      const marker = hasScriptMarker(buf);
-      if (marker) {
-        return {
-          safe: false,
-          code: 'script',
-          reason: `File contains script/code ("${marker}") and cannot be uploaded.`,
-        };
-      }
-      return {
-        safe: false,
-        code: 'type_mismatch',
-        reason: 'File content is not a valid binary or ASCII STL model.',
-      };
+      return (
+        scriptVerdict(buf) ??
+        typeMismatch('File content is not a valid binary or ASCII STL model.')
+      );
     }
   }
 
-  // 4) Other loose formats (.dcm/.ply/.obj/…): no hard magic. Accept only
+  // PLY and OBJ get the same kind of strict envelope (see judgePly/judgeObj).
+  if (ext === '.ply') return judgePly(buf);
+  if (ext === '.obj') return judgeObj(buf, totalBytes);
+
+  // 4) Other loose formats (.dcm/…): no hard magic. Accept only
   //    if there's no active-script marker in the header. DICOM with the
   //    standard preamble (`DICM` @128) is trusted outright; a preamble-less
   //    `.dcm` that is plain TEXT is a disguised script (a real DICOM is
@@ -540,16 +625,7 @@ function judgePrefix(
       };
     }
   }
-  const marker = hasScriptMarker(buf);
-  if (marker) {
-    return {
-      safe: false,
-      code: 'script',
-      reason: `File contains script/code ("${marker}") and cannot be uploaded.`,
-    };
-  }
-
-  return { safe: true };
+  return scriptVerdict(buf) ?? { safe: true };
 }
 
 /**

@@ -430,6 +430,8 @@ const FILE_CATEGORY_FR: Record<string, string> = {
   pano_xray: 'Radio panoramique',
   ceph_xray: 'Téléradiographie',
   stl: 'Scan 3D (STL)',
+  ply: 'Scan 3D (PLY)',
+  obj: 'Scan 3D (OBJ)',
   zip: 'CBCT / DICOM (ZIP)',
   dental_table: 'Tableau de traitement',
   other: 'DICOM',

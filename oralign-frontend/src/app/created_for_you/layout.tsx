@@ -54,11 +54,40 @@ const dmSans = localFont({
   display: 'swap',
 });
 
+// What a messaging app shows for a shared link. The same for every patient:
+// no name or case detail ever reaches a preview. public/ is cached for a
+// year, so a new card needs a new file name.
+const PREVIEW_IMAGE = '/og/treatment-plan.463673a3.png';
+const PREVIEW_TITLE = 'Votre plan de traitement 3D | ORALIGN®';
+const PREVIEW_DESCRIPTION =
+  'Votre plan de traitement, partagé par votre praticien : suivez chaque étape jusqu’au résultat final.';
+
 export const metadata: Metadata = {
-  title: 'Your Treatment · Oralign',
-  description:
-    'A private, secure view of your aligner treatment plan shared by your dentist.',
+  title: { absolute: PREVIEW_TITLE },
+  description: PREVIEW_DESCRIPTION,
   robots: { index: false, follow: false },
+  openGraph: {
+    type: 'website',
+    locale: 'fr_TN',
+    siteName: 'ORALIGN®',
+    title: PREVIEW_TITLE,
+    description: PREVIEW_DESCRIPTION,
+    images: [
+      {
+        url: PREVIEW_IMAGE,
+        width: 1200,
+        height: 630,
+        type: 'image/png',
+        alt: 'ORALIGN : votre plan de traitement 3D, étape par étape',
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: PREVIEW_TITLE,
+    description: PREVIEW_DESCRIPTION,
+    images: [PREVIEW_IMAGE],
+  },
 };
 
 export default function CreatedForYouLayout({

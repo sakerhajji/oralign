@@ -27,12 +27,11 @@ import { SITE_URL } from './(showcase)/_lib/seo/meta';
  * as well — nothing here is private, and being known to the models is
  * part of being found.
  */
-const PRIVATE_PATHS = [
+const ACCOUNT_PATHS = [
   '/api/',
   '/dashboard/',
   '/account/',
   '/onboarding/',
-  '/created_for_you/',
   '/payment/',
 ];
 
@@ -51,11 +50,35 @@ const AI_CRAWLERS = [
   'Applebot-Extended',
 ];
 
+/**
+ * Apps that build the preview of a link someone shared. They may read a
+ * patient link (they only know the ones they are given): it stays noindex,
+ * and its HTML holds the common card, never the patient's data, which the
+ * page loads in the browser.
+ */
+const LINK_PREVIEW_BOTS = [
+  'facebookexternalhit',
+  'Facebot',
+  'WhatsApp',
+  'TelegramBot',
+  'Twitterbot',
+  'LinkedInBot',
+  'Slackbot',
+  'Discordbot',
+];
+const PATIENT_VIEWER_PATH = '/created_for_you/';
+
 export default function robots(): MetadataRoute.Robots {
+  const privatePaths = [...ACCOUNT_PATHS, PATIENT_VIEWER_PATH];
   return {
     rules: [
-      { userAgent: '*', allow: '/', disallow: PRIVATE_PATHS },
-      { userAgent: AI_CRAWLERS, allow: '/', disallow: PRIVATE_PATHS },
+      { userAgent: '*', allow: '/', disallow: privatePaths },
+      { userAgent: AI_CRAWLERS, allow: '/', disallow: privatePaths },
+      {
+        userAgent: LINK_PREVIEW_BOTS,
+        allow: ['/', PATIENT_VIEWER_PATH],
+        disallow: ACCOUNT_PATHS,
+      },
     ],
     sitemap: `${SITE_URL}/sitemap.xml`,
     host: SITE_URL,

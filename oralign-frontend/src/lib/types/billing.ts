@@ -94,6 +94,8 @@ export interface Pack {
   isUnlimitedCorrections: boolean;
   isForOrthodontists: boolean;
   isActive: boolean;
+  /** Position in the catalogue, set by the admin (lowest first). */
+  displayOrder: number;
   createdAt: string;
   updatedAt: string;
   deletedAt?: string | null;

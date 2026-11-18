@@ -19,11 +19,18 @@ import { cn } from '@/lib/utils';
 import { useDoctorAvailablePacks } from '@/lib/hooks';
 import type { AvailablePack } from '@/lib/types';
 import { useT } from '@/lib/i18n/lang-context';
+import { formatPrice } from '@/lib/utils/currency';
+
+// A wrapping row rather than a grid: a row that is not full (one or two
+// packs, or the last packs of the list) sits in the middle of the page
+// instead of against the left edge. Widths match 1 / 2 / 3 columns.
+const CARD_ROW = 'flex flex-wrap justify-center gap-4';
+const CARD_WIDTH = 'w-full md:w-[calc((100%-1rem)/2)] lg:w-[calc((100%-2rem)/3)]';
 
 /**
- * Doctor-facing available packs grid. Mirrors the marketing pack
- * cards but lives inside the dashboard, with a "Current" badge on
- * the pack the doctor most recently paid for.
+ * Doctor-facing available packs, in the order set by the admin. Mirrors
+ * the marketing pack cards but lives inside the dashboard, with a
+ * "Current" badge on the pack the doctor most recently paid for.
  */
 export function AvailablePacks({ recommendedId }: { recommendedId?: string }) {
   const { data, isLoading } = useDoctorAvailablePacks();
@@ -31,9 +38,9 @@ export function AvailablePacks({ recommendedId }: { recommendedId?: string }) {
 
   if (isLoading) {
     return (
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+      <div className={CARD_ROW}>
         {Array.from({ length: 3 }).map((_, i) => (
-          <Skeleton key={i} className="h-64 w-full rounded-2xl" />
+          <Skeleton key={i} className={cn('h-64 rounded-2xl', CARD_WIDTH)} />
         ))}
       </div>
     );
@@ -50,7 +57,7 @@ export function AvailablePacks({ recommendedId }: { recommendedId?: string }) {
   }
 
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+    <div className={CARD_ROW}>
       {data.map((pack) => (
         <PackCard
           key={pack.id}
@@ -69,11 +76,11 @@ function PackCard({
   pack: AvailablePack;
   isRecommended: boolean;
 }) {
-  const { t, lang } = useT();
-  const locale = lang === 'fr' ? 'fr-FR' : 'en-US';
-  const TND = (n: number) =>
-    new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(n) +
-    ' TND';
+  const { t } = useT();
+  const archPrices = [
+    { label: t('quoteUi.attachPack.twoArches'), amount: pack.priceTwoArches },
+    { label: t('quoteUi.attachPack.singleArch'), amount: pack.priceSingleArch },
+  ];
 
   const features: { label: string; ok: boolean }[] = [
     {
@@ -108,7 +115,8 @@ function PackCard({
     // it as informational and let the order form be the single entry.
     <Card
       className={cn(
-        'relative flex h-full flex-col',
+        'relative',
+        CARD_WIDTH,
         // The "Current" pack used to ship with a `ring-2 ring-primary`
         // halo, but the team asked to drop it — the badge on the top-
         // right already tells the doctor which pack is theirs and the
@@ -142,11 +150,25 @@ function PackCard({
         <CardDescription className="line-clamp-2 min-h-[2.5rem]">
           {pack.description ?? t('dashboard.packs.defaultDescription')}
         </CardDescription>
-        <div className="mt-2 flex items-baseline gap-1.5">
-          <span className="text-3xl font-bold tabular-nums">
-            {TND(pack.price)}
-          </span>
-        </div>
+        <dl className="mt-2 divide-y rounded-lg border">
+          {archPrices.map(({ label, amount }) => (
+            <div
+              key={label}
+              className="flex flex-wrap items-baseline justify-between gap-x-3 px-3 py-2"
+            >
+              <dt className="text-muted-foreground">{label}</dt>
+              {amount === null ? (
+                <dd className="text-muted-foreground">
+                  {t('dashboard.packs.archNotOffered')}
+                </dd>
+              ) : (
+                <dd className="text-base font-semibold tabular-nums">
+                  {formatPrice(amount, pack.currency)}
+                </dd>
+              )}
+            </div>
+          ))}
+        </dl>
       </CardHeader>
       <CardContent className="flex-1 space-y-3">
         <ul className="space-y-2 text-sm">

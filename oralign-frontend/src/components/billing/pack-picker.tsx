@@ -100,8 +100,8 @@ export function packFacts(pack: PackFactsSource, t: Translate, lang: string): st
 }
 
 /**
- * Active packs that have at least one active price, cheapest first, with
- * one selectable option per active arcade price.
+ * Active packs that have at least one active price, in the catalogue order
+ * set by the admin, with one selectable option per active arcade price.
  */
 function buildPackGroups(packs: readonly Pack[], t: Translate, lang: string): PackGroup[] {
   return packs
@@ -143,13 +143,7 @@ function buildPackGroups(packs: readonly Pack[], t: Translate, lang: string): Pa
       });
       return { pack, name, facts, options };
     })
-    .filter((group) => group.options.length > 0)
-    .sort(
-      (a, b) =>
-        Math.min(...a.options.map((o) => Number(o.price.price))) -
-          Math.min(...b.options.map((o) => Number(o.price.price))) ||
-        a.name.localeCompare(b.name),
-    );
+    .filter((group) => group.options.length > 0);
 }
 
 interface PackPickerProps {

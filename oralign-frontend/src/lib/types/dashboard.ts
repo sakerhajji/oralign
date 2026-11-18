@@ -156,7 +156,9 @@ export interface AvailablePack {
   isUnlimitedSteps: boolean;
   isUnlimitedCorrections: boolean;
   isForOrthodontists: boolean;
-  price: number;
+  /** null when the pack does not offer this arch. */
+  priceTwoArches: number | null;
+  priceSingleArch: number | null;
   currency: string;
   isCurrent: boolean;
 }

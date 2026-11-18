@@ -1652,6 +1652,7 @@ export const dict = {
       } as T,
       none: { en: 'No packs are currently available.', fr: 'Aucun forfait n’est disponible pour le moment.' } as T,
       recommended: { en: 'Recommended', fr: 'Recommandé' } as T,
+      archNotOffered: { en: 'Not available', fr: 'Non disponible' } as T,
       defaultDescription: {
         en: 'Customized aligner workflow tailored to your clinic.',
         fr: 'Parcours d’aligneurs personnalisé pour votre cabinet.',

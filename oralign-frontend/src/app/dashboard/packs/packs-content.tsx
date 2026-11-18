@@ -15,6 +15,7 @@ import {
   useRestorePack,
   useActivatePack,
   useDeactivatePack,
+  useReorderPacks,
 } from '@/lib/hooks';
 import { useBillingPublicDefaults } from '@/lib/hooks/use-company-billing';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -77,6 +78,8 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import {
+  ChevronDown,
+  ChevronUp,
   MoreHorizontal,
   ArchiveRestore,
   ShieldX,
@@ -244,6 +247,27 @@ function PackCatalogue() {
   const restorePack = useRestorePack();
   const activatePack = useActivatePack();
   const deactivatePack = useDeactivatePack();
+  const reorderPacks = useReorderPacks();
+
+  // Archived packs are out of the catalogue, so they have no position.
+  const orderedIds = packs.filter((pack) => !pack.deletedAt).map((pack) => pack.id);
+
+  const orderButtons = (pack: Pack) => {
+    const index = orderedIds.indexOf(pack.id);
+    if (index < 0) return null;
+    return (
+      <OrderButtons
+        name={packName(pack, lang)}
+        isFirst={index === 0}
+        isLast={index === orderedIds.length - 1}
+        onMove={(step) => {
+          const next = orderedIds.filter((id) => id !== pack.id);
+          next.splice(index + step, 0, pack.id);
+          reorderPacks.mutate(next);
+        }}
+      />
+    );
+  };
 
   const actionsFor = (pack: Pack) => ({
     pack,
@@ -316,6 +340,7 @@ function PackCatalogue() {
               <Table>
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
+                    <TableHead className="w-20">{t('packsDesk.colOrder')}</TableHead>
                     <TableHead>{t('packsAdmin.colName')}</TableHead>
                     <TableHead>{t('packsDesk.included')}</TableHead>
                     <TableHead className="text-right">
@@ -335,10 +360,11 @@ function PackCatalogue() {
                     const description = packDescription(pack, lang);
                     return (
                       <TableRow key={pack.id} className={cn(pack.deletedAt && 'opacity-60')}>
+                        <TableCell>{orderButtons(pack)}</TableCell>
                         <TableCell>
                           <p className="font-medium">{packName(pack, lang)}</p>
                           {description ? (
-                            <p className="line-clamp-1 max-w-md text-xs text-muted-foreground">
+                            <p className="line-clamp-1 max-w-[19rem] text-xs text-muted-foreground xl:max-w-md">
                               {description}
                             </p>
                           ) : null}
@@ -396,6 +422,7 @@ function PackCatalogue() {
                           {packLimits(pack, t)}
                         </p>
                       </div>
+                      {orderButtons(pack)}
                       <RowActions {...actionsFor(pack)} />
                     </div>
                     <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-1 border-t pt-2 text-sm">
@@ -483,6 +510,45 @@ function PackCatalogue() {
         }}
       />
     </>
+  );
+}
+
+/** Moves a pack one place up or down in the catalogue. */
+function OrderButtons({
+  name,
+  isFirst,
+  isLast,
+  onMove,
+}: {
+  name: string;
+  isFirst: boolean;
+  isLast: boolean;
+  onMove: (step: -1 | 1) => void;
+}) {
+  const { t } = useT();
+  return (
+    <div className="flex items-center gap-0.5">
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        disabled={isFirst}
+        aria-label={t('packsDesk.moveUp', { name })}
+        onClick={() => onMove(-1)}
+      >
+        <ChevronUp className="size-4" aria-hidden="true" />
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        disabled={isLast}
+        aria-label={t('packsDesk.moveDown', { name })}
+        onClick={() => onMove(1)}
+      >
+        <ChevronDown className="size-4" aria-hidden="true" />
+      </Button>
+    </div>
   );
 }
 

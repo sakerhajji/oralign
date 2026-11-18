@@ -109,6 +109,50 @@ export function useUpdatePack(): UseMutationResult<
   });
 }
 
+const REORDER_MUTATION_KEY = [...packKeys.all, 'reorder'] as const;
+
+/** `rows` with the packs of `packIds` swapped into that order, in place. */
+function withPackOrder(rows: readonly Pack[], packIds: readonly string[]): Pack[] {
+  const byId = new Map(rows.map((pack) => [pack.id, pack]));
+  const moved = packIds.flatMap((id) => byId.get(id) ?? []);
+  let next = 0;
+  return rows.map((pack) => (packIds.includes(pack.id) ? moved[next++] : pack));
+}
+
+/**
+ * Display order of the catalogue. The table moves at once; clicks are sent
+ * one after the other (same `scope`) so a quick series of moves cannot
+ * land out of order, and the list is re-read after the last one.
+ */
+export function useReorderPacks(): UseMutationResult<
+  { packIds: string[] },
+  Error,
+  string[]
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationKey: REORDER_MUTATION_KEY,
+    scope: { id: 'packs-reorder' },
+    mutationFn: (packIds) => packsService.reorder(packIds),
+    onMutate: async (packIds) => {
+      await queryClient.cancelQueries({ queryKey: packKeys.lists() });
+      queryClient.setQueriesData<PaginatedResponse<Pack>>(
+        { queryKey: packKeys.lists() },
+        (current) =>
+          current
+            ? { ...current, data: withPackOrder(current.data, packIds) }
+            : current,
+      );
+    },
+    onError: (err) => toastMutationError(err),
+    onSettled: () => {
+      if (queryClient.isMutating({ mutationKey: REORDER_MUTATION_KEY }) === 1) {
+        invalidatePacks(queryClient);
+      }
+    },
+  });
+}
+
 export function useDeletePack(): UseMutationResult<
   { id: string; deleted: true },
   Error,

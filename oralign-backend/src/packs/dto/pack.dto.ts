@@ -2,6 +2,10 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ArchType } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  ArrayNotEmpty,
+  ArrayUnique,
+  IsArray,
   IsBoolean,
   IsEnum,
   IsInt,
@@ -9,6 +13,7 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  IsUUID,
   Max,
   MaxLength,
   Min,
@@ -372,6 +377,17 @@ export class UpdatePackPriceDto {
   isActive?: boolean;
 }
 
+/** The packs the admin just arranged, first one shown first. */
+export class ReorderPacksDto {
+  @ApiProperty({ type: [String], description: 'Pack ids in display order.' })
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(200)
+  @ArrayUnique()
+  @IsUUID(undefined, { each: true })
+  packIds!: string[];
+}
+
 export class PackFilterDto {
   @ApiPropertyOptional({ default: 1 })
   @IsOptional()
@@ -396,7 +412,12 @@ export class PackFilterDto {
     description: 'When true, includes soft-deleted + inactive packs.',
   })
   @IsOptional()
-  @Transform(({ value }) => value === true || value === 'true')
+  // Read the raw query value: implicit conversion has already turned the
+  // string "false" into `true` by the time `value` gets here.
+  @Transform(
+    ({ obj }: { obj: { includeInactive?: unknown } }) =>
+      obj.includeInactive === true || obj.includeInactive === 'true',
+  )
   @IsBoolean()
   includeInactive?: boolean;
 }

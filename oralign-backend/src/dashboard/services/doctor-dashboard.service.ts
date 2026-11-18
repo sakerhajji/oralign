@@ -9,6 +9,7 @@ import {
   QuotationStatus,
 } from '@prisma/client';
 import { INITIAL_ORDERS_ONLY } from '../../orders/order-kind';
+import { PACK_DISPLAY_ORDER } from '../../packs/pack-order';
 import { PrismaService } from '../../prisma/prisma.service';
 
 const CACHE_TTL_MS = 30_000; // 30 s — per-doctor, smaller blast radius
@@ -637,14 +638,14 @@ export class DoctorDashboardService {
   }
 
   /**
-   * Available packs the doctor can subscribe / upgrade to. Returns the
-   * full active pack catalogue with the two_arches price snapshot
-   * (consistent with the post-refactor single-price model).
+   * Available packs the doctor can subscribe / upgrade to: the active
+   * catalogue, in the order set by the admin, with the price of each arch
+   * (null when the pack does not offer it).
    */
   async listAvailablePacks(doctorId: string) {
     const packs = await this.prisma.pack.findMany({
       where: { deletedAt: null, isActive: true },
-      orderBy: { createdAt: 'asc' },
+      orderBy: PACK_DISPLAY_ORDER,
       include: {
         prices: {
           where: { isActive: true },
@@ -664,18 +665,25 @@ export class DoctorDashboardService {
       orderBy: { sentAt: 'desc' },
       select: { packId: true },
     });
-    return packs.map((p) => ({
-      id: p.id,
-      name: p.name,
-      description: p.description,
-      maxStepsPerArch: p.maxStepsPerArch,
-      includedCorrections: p.includedCorrections,
-      isUnlimitedSteps: p.isUnlimitedSteps,
-      isUnlimitedCorrections: p.isUnlimitedCorrections,
-      isForOrthodontists: p.isForOrthodontists,
-      price: toNumber(p.prices.find((x) => x.archType === 'two_arches')?.price ?? p.prices[0]?.price ?? 0),
-      currency: p.prices.find((x) => x.archType === 'two_arches')?.currency ?? p.prices[0]?.currency ?? 'TND',
-      isCurrent: current?.packId === p.id,
-    }));
+    return packs.map((p) => {
+      const priceOf = (archType: 'two_arches' | 'single_arch') => {
+        const row = p.prices.find((x) => x.archType === archType);
+        return row ? toNumber(row.price) : null;
+      };
+      return {
+        id: p.id,
+        name: p.name,
+        description: p.description,
+        maxStepsPerArch: p.maxStepsPerArch,
+        includedCorrections: p.includedCorrections,
+        isUnlimitedSteps: p.isUnlimitedSteps,
+        isUnlimitedCorrections: p.isUnlimitedCorrections,
+        isForOrthodontists: p.isForOrthodontists,
+        priceTwoArches: priceOf('two_arches'),
+        priceSingleArch: priceOf('single_arch'),
+        currency: p.prices[0]?.currency ?? 'TND',
+        isCurrent: current?.packId === p.id,
+      };
+    });
   }
 }

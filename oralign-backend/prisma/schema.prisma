@@ -1705,6 +1705,8 @@ model Pack {
   isUnlimitedCorrections   Boolean     @default(false)
   isForOrthodontists       Boolean     @default(false)
   isActive                 Boolean     @default(true)
+  // Position in the catalogue, set by the admin (lowest first).
+  displayOrder             Int         @default(0)
 
   deletedAt                DateTime?
   createdAt                DateTime    @default(now())

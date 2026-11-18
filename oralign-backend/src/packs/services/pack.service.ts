@@ -15,6 +15,7 @@ import {
   UpdatePackDto,
   UpdatePackPriceDto,
 } from '../dto/pack.dto';
+import { PACK_DISPLAY_ORDER, applyPackOrder } from '../pack-order';
 
 /**
  * Arch availability is now DATA-DRIVEN, not name-driven: a pack offers a
@@ -58,7 +59,11 @@ export class PackService {
         where,
         skip,
         take,
-        orderBy: { name: 'asc' },
+        // Archived packs (listed with the inactive ones) stay at the end.
+        orderBy: [
+          { deletedAt: { sort: 'asc', nulls: 'first' } },
+          ...PACK_DISPLAY_ORDER,
+        ],
         include: { prices: true },
       }),
       this.prisma.pack.count({ where }),
@@ -77,9 +82,7 @@ export class PackService {
    * No auth guard fronts this method — it's served by the public
    * `/api/packs/public` route, and the response shape is deliberately
    * limited to fields safe to expose (no audit columns, no admin
-   * filtering primitives). Ordering matches the LITE → ESSENTIAL →
-   * SMART → PRO → PRO+ commercial sequence so the showcase grid is
-   * stable across renders.
+   * filtering primitives). Packs come in the order the admin set.
    */
   async listPublic(): Promise<PackWithPrices[]> {
     return this.prisma.pack.findMany({
@@ -91,7 +94,7 @@ export class PackService {
         // sellable.
         prices: { where: { isActive: true } },
       },
-      orderBy: { createdAt: 'asc' },
+      orderBy: PACK_DISPLAY_ORDER,
     });
   }
 
@@ -134,8 +137,13 @@ export class PackService {
     const currency = dto.currency ?? 'TND';
 
     return this.prisma.$transaction(async (tx) => {
+      // A new pack goes to the end of the catalogue.
+      const { _max: last } = await tx.pack.aggregate({
+        _max: { displayOrder: true },
+      });
       const pack = await tx.pack.create({
         data: {
+          displayOrder: (last.displayOrder ?? 0) + 1,
           // `name` stays the FR fallback; `nameI18n` is the localized bag.
           name: nameFr,
           description: descriptionFr,
@@ -285,6 +293,41 @@ export class PackService {
         where: { id },
         include: { prices: true },
       });
+    });
+  }
+
+  /**
+   * Save the display order the admin arranged. Archived packs have no
+   * place in the catalogue, so naming one (or an unknown id) is refused
+   * rather than silently ignored.
+   */
+  async reorder(packIds: string[]): Promise<{ packIds: string[] }> {
+    return this.prisma.$transaction(async (tx) => {
+      const packs = await tx.pack.findMany({
+        where: { deletedAt: null },
+        orderBy: PACK_DISPLAY_ORDER,
+        select: { id: true, displayOrder: true },
+      });
+      const known = new Set(packs.map((pack) => pack.id));
+      if (packIds.some((id) => !known.has(id))) {
+        throw new BadRequestException(
+          'Only existing, non-archived packs can be reordered.',
+          'PACK_ORDER_UNKNOWN_PACK',
+        );
+      }
+      const ordered = applyPackOrder(
+        packs.map((pack) => pack.id),
+        packIds,
+      );
+      const positionOf = new Map(
+        packs.map((pack) => [pack.id, pack.displayOrder]),
+      );
+      for (const [index, id] of ordered.entries()) {
+        const displayOrder = index + 1;
+        if (positionOf.get(id) === displayOrder) continue;
+        await tx.pack.update({ where: { id }, data: { displayOrder } });
+      }
+      return { packIds: ordered };
     });
   }
 

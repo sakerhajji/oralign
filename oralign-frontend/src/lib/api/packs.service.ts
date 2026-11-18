@@ -59,6 +59,14 @@ export const packsService = {
     return res.data;
   },
 
+  /** Save the display order; packs left out keep their place. */
+  reorder: async (packIds: string[]): Promise<{ packIds: string[] }> => {
+    const res = await apiClient.put<{ packIds: string[] }>('/admin/packs/order', {
+      packIds,
+    });
+    return res.data;
+  },
+
   /** Soft-delete — also marks isActive=false. */
   remove: async (id: string): Promise<{ id: string; deleted: true }> => {
     const res = await apiClient.delete<{ id: string; deleted: true }>(

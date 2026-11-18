@@ -8,6 +8,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -25,6 +26,7 @@ import {
   CreatePackDto,
   CreatePackPriceDto,
   PackFilterDto,
+  ReorderPacksDto,
   UpdatePackDto,
   UpdatePackPriceDto,
 } from '../dto/pack.dto';
@@ -58,6 +60,16 @@ export class PackController {
   @ApiOperation({ summary: 'Create a pack' })
   async create(@Body() dto: CreatePackDto) {
     return this.packService.create(dto);
+  }
+
+  @Put('order')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Set the order packs are displayed in. Packs left out keep their place.',
+  })
+  async reorder(@Body() dto: ReorderPacksDto) {
+    return this.packService.reorder(dto.packIds);
   }
 
   @Get(':id')

@@ -17,8 +17,8 @@ export interface PublicViewerPayload {
   };
   /**
    * Display-only fields. We deliberately omit anything sensitive
-   * (medical history, full patient name, payment data, internal
-   * conversation, file metadata, etc.). The doctor's clinic name is
+   * (medical history, payment data, internal conversation, file
+   * metadata, etc.). The doctor's clinic name is
    * shown so the patient knows who shared the link with them.
    */
   doctor?: {
@@ -26,12 +26,13 @@ export interface PublicViewerPayload {
     clinicName?: string | null;
   };
   /**
-   * Patient first name + gender — both are needed for the welcome
-   * salutation ("Dear Mr. <FirstName>" vs "Dear Ms. <FirstName>"). We
-   * still don't expose the full name, date of birth, or any other
-   * identifying detail.
+   * Patient name + gender, for the welcome salutation ("Dear Mr. <Full
+   * Name>"). The full name is the owner's choice: the link is private to
+   * the patient. No date of birth or other identifying detail is exposed.
+   * `firstName` stays for payloads cached before `fullName` existed.
    */
   patient?: {
+    fullName?: string | null;
     firstName?: string | null;
     gender?: 'male' | 'female' | 'other' | null;
   };
@@ -125,6 +126,7 @@ export class PublicTreatmentViewerService {
         : undefined,
       patient: plan.order.patient
         ? {
+            fullName: plan.order.patient.fullName.trim(),
             firstName: firstNameOf(plan.order.patient.fullName),
             // Prisma exposes the enum as lowercase strings already
             // (e.g. 'male'); pass it through but narrow to the

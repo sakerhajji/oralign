@@ -57,21 +57,20 @@ function usePublicCaseT(): Translate {
 /**
  * Build a warm, VIP-feeling salutation for the patient.
  *
- *   Cher M. John,         (male)
- *   Chère Mme Sarah,      (female)
- *   Cher·e Alex,          (other / unknown)
- *   Bonjour et bienvenue, (no first name on file)
+ *   Cher M. John Smith,     (male)
+ *   Chère Mme Sarah Ben Ali, (female)
+ *   Cher·e Alex Martin,     (other / unknown)
+ *   Bonjour et bienvenue,   (no name on file)
  *
- * Patient first name comes from the doctor's CRM, so it's whatever they
- * typed — we just trim it. We deliberately don't fall back to the full
- * name to avoid leaking surnames to anyone who finds the share link.
+ * The full name comes from the doctor's patient record, so it's whatever
+ * they typed — we just trim it.
  */
 function patientSalutation(
   t: Translate,
-  firstName: string | null | undefined,
+  patientName: string | null | undefined,
   gender: 'male' | 'female' | 'other' | null | undefined,
 ): string {
-  const name = (firstName ?? '').trim();
+  const name = (patientName ?? '').trim();
   if (!name) return t('salutationHello');
   if (gender === 'male') return t('salutationMr', { name });
   if (gender === 'female') return t('salutationMs', { name });
@@ -164,7 +163,11 @@ export default function PublicTreatmentViewerPage() {
   const srcDoc = viewerSlot.srcDoc ?? '';
 
   const salutation = payload
-    ? patientSalutation(t, payload.patient?.firstName, payload.patient?.gender)
+    ? patientSalutation(
+        t,
+        payload.patient?.fullName || payload.patient?.firstName,
+        payload.patient?.gender,
+      )
     : '';
   const doctorName = payload
     ? doctorByline(t, payload.doctor?.fullName, payload.doctor?.clinicName)

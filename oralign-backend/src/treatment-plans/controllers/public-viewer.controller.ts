@@ -13,7 +13,7 @@ export class PublicTreatmentViewerController {
    * Token-only read of a public treatment viewer payload.
    *
    * Returns ONLY display-safe fields (plan name/version, the third-party
-   * viewer URL, doctor/clinic display name, patient first name). No
+   * viewer URL, doctor/clinic display name, patient display name). No
    * conversation, attachments, medical history, or payment data.
    *
    * Rate-limited tighter than the rest of the API because the URL is

@@ -146,6 +146,8 @@ export interface PublicTreatmentViewerPayload {
   };
   doctor?: { fullName?: string | null; clinicName?: string | null };
   patient?: {
+    fullName?: string | null;
+    /** Only read for responses cached before `fullName` existed. */
     firstName?: string | null;
     /** Used to render a gendered salutation (Mr. / Ms.) on the patient
      *  public viewer page. */

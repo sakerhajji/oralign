@@ -139,9 +139,18 @@ export async function seedPacks(prisma: PrismaClient): Promise<void> {
 
     // isActive only on create — a pack the admin deactivated stays off
     // through re-runs.
+    const { _max: last } = await prisma.pack.aggregate({
+      _max: { displayOrder: true },
+    });
     const pack = existing
       ? await prisma.pack.update({ where: { id: existing.id }, data })
-      : await prisma.pack.create({ data: { ...data, isActive: true } });
+      : await prisma.pack.create({
+          data: {
+            ...data,
+            isActive: true,
+            displayOrder: (last.displayOrder ?? 0) + 1,
+          },
+        });
 
     // For each price slot the seed declares, mark any pre-existing
     // active row for that (pack, arch) as archived (isActive=false)

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { AvailablePacks } from '@/components/dashboard/available-packs';
 import { useT } from '@/lib/i18n/lang-context';
 import { PermanentDeleteDialog } from '@/components/shared/permanent-delete-dialog';
@@ -92,6 +92,9 @@ import {
 } from 'lucide-react';
 
 // ─── Visual helpers ──────────────────────────────────────────────
+
+/** Clicks on the same arrow this close together are one continued move. */
+const REPEAT_MOVE_MS = 800;
 
 /** Active price for a specific arch, or null when not offered. */
 function priceForArch(pack: Pack, arch: ArchType): PackPrice | null {
@@ -249,22 +252,45 @@ function PackCatalogue() {
   const deactivatePack = useDeactivatePack();
   const reorderPacks = useReorderPacks();
 
+  const lastMove = useRef<{
+    packId: string;
+    row: number;
+    step: -1 | 1;
+    at: number;
+  } | null>(null);
+
   // Archived packs are out of the catalogue, so they have no position.
   const orderedIds = packs.filter((pack) => !pack.deletedAt).map((pack) => pack.id);
 
+  // A moved pack leaves the row under the pointer and its neighbour takes
+  // its place. A repeat click on that same arrow therefore still means the
+  // pack being moved, not the neighbour (which would just undo the move).
+  const movePack = (packId: string, row: number, step: -1 | 1, at: number) => {
+    const last = lastMove.current;
+    const isRepeat =
+      last !== null &&
+      last.row === row &&
+      last.step === step &&
+      at - last.at < REPEAT_MOVE_MS;
+    const movedId = isRepeat ? last.packId : packId;
+    lastMove.current = { packId: movedId, row, step, at };
+
+    const target = orderedIds.indexOf(movedId) + step;
+    if (target < 0 || target >= orderedIds.length) return;
+    const next = orderedIds.filter((id) => id !== movedId);
+    next.splice(target, 0, movedId);
+    reorderPacks.mutate(next);
+  };
+
   const orderButtons = (pack: Pack) => {
-    const index = orderedIds.indexOf(pack.id);
-    if (index < 0) return null;
+    const row = orderedIds.indexOf(pack.id);
+    if (row < 0) return null;
     return (
       <OrderButtons
         name={packName(pack, lang)}
-        isFirst={index === 0}
-        isLast={index === orderedIds.length - 1}
-        onMove={(step) => {
-          const next = orderedIds.filter((id) => id !== pack.id);
-          next.splice(index + step, 0, pack.id);
-          reorderPacks.mutate(next);
-        }}
+        isFirst={row === 0}
+        isLast={row === orderedIds.length - 1}
+        onMove={(step, at) => movePack(pack.id, row, step, at)}
       />
     );
   };
@@ -523,7 +549,8 @@ function OrderButtons({
   name: string;
   isFirst: boolean;
   isLast: boolean;
-  onMove: (step: -1 | 1) => void;
+  /** `at` is the click's timestamp, in milliseconds. */
+  onMove: (step: -1 | 1, at: number) => void;
 }) {
   const { t } = useT();
   return (
@@ -534,7 +561,7 @@ function OrderButtons({
         size="icon-sm"
         disabled={isFirst}
         aria-label={t('packsDesk.moveUp', { name })}
-        onClick={() => onMove(-1)}
+        onClick={(event) => onMove(-1, event.timeStamp)}
       >
         <ChevronUp className="size-4" aria-hidden="true" />
       </Button>
@@ -544,7 +571,7 @@ function OrderButtons({
         size="icon-sm"
         disabled={isLast}
         aria-label={t('packsDesk.moveDown', { name })}
-        onClick={() => onMove(1)}
+        onClick={(event) => onMove(1, event.timeStamp)}
       >
         <ChevronDown className="size-4" aria-hidden="true" />
       </Button>

@@ -943,6 +943,7 @@ export class TreatmentPlanService {
         id: true,
         deletedAt: true,
         orderId: true,
+        publicToken: true,
         order: {
           select: { doctorId: true, assignedDesignerId: true, deletedAt: true },
         },
@@ -962,6 +963,10 @@ export class TreatmentPlanService {
       where: { id },
       data: { publicToken: token, publicExpiresAt: expiresAt },
     });
+    // The replaced link must stop answering now, not when its cache expires.
+    if (plan.publicToken) {
+      await this.cache.del(`treatment-viewer:${plan.publicToken}`);
+    }
     await this.cache.del(`treatment-viewer:${token}`);
     return updated;
   }

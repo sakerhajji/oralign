@@ -681,6 +681,8 @@ export class DoctorDashboardService {
         isForOrthodontists: p.isForOrthodontists,
         priceTwoArches: priceOf('two_arches'),
         priceSingleArch: priceOf('single_arch'),
+        // For pages still open from the previous release: remove next release.
+        price: priceOf('two_arches') ?? priceOf('single_arch') ?? 0,
         currency: p.prices[0]?.currency ?? 'TND',
         isCurrent: current?.packId === p.id,
       };

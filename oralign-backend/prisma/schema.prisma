@@ -838,7 +838,7 @@ model SupplementalOrderRequest {
   lowerInstructions            String?
   impressionMethod             SupplementalImpressionMethod?
 
-  // ── replacement (and the defective aligner of a warranty claim) ─────
+  // ── replacement ─────────────────────────────────────────────────────
   replacementFromAligner       Int?
   replacementToAligner         Int?
   quantity                     Int?
@@ -856,6 +856,8 @@ model SupplementalOrderRequest {
   transferNotes                String?
 
   // ── warranty ────────────────────────────────────────────────────────
+  // Every defective aligner of the claim, ascending.
+  defectiveAligners            Int[]                            @default([])
   warrantyDefectCategory       WarrantyDefectCategory?
   // A calendar day (stored at 00:00 UTC), sent as YYYY-MM-DD.
   warrantyDiscoveredAt         DateTime?

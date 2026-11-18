@@ -14,7 +14,6 @@ export type StepKey =
   | 'scans'
   | 'photos'
   | 'replacementDetails'
-  | 'optionalPhotos'
   | 'transferDetails'
   | 'transferTeeth'
   | 'warrantyDetails'
@@ -51,6 +50,7 @@ export const VALIDATION_KEY = {
   required: 'supplemental.validation.required',
   details: 'supplemental.validation.details',
   alignerNumber: 'supplemental.validation.alignerNumber',
+  defectiveAligners: 'supplemental.validation.defectiveAligners',
   alignerAbovePlan: 'supplemental.validation.alignerAbovePlan',
   alignerNotDelivered: 'supplemental.validation.alignerNotDelivered',
   currentAlignerMissing: 'supplemental.validation.currentAlignerMissing',

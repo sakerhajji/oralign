@@ -7,18 +7,27 @@ import { useT } from '@/lib/i18n/lang-context';
 import { ArchTreatment, WarrantyDefectCategory } from '@/lib/types';
 import { ClinicalQuestion, fieldDomId, questionErrorId } from '../clinical-question';
 import { OptionGroup } from '../option-group';
-import { ALIGNER_NUMBER_MAX, TEXT_LIMITS } from '../supplemental-constants';
+import { TEXT_LIMITS } from '../supplemental-constants';
+import { alignerCeiling, treatedArches, type Arch } from '../validation/rule-helpers';
+import { DefectiveAlignersField } from './defective-aligners-field';
 import type { StepProps } from './step-props';
-import { WholeNumberField } from './whole-number-field';
 
 const ARCHES = [ArchTreatment.UPPER, ArchTreatment.LOWER] as const;
 const DEFECTS = Object.values(WarrantyDefectCategory);
+const ALL_ARCHES: readonly Arch[] = ['upper', 'lower'];
 
-/** The defective aligner, the defect, when it was noticed, and the lot. */
+/** The defective aligners, the defect, when it was noticed, and the lot. */
 export function WarrantyStep({ draft, set, errors, context }: StepProps) {
   const { t } = useT();
   const legend = (key: string) => t(`supplemental.questions.warranty.${key}`);
-  const delivered = context.eligibility.deliveredUpTo;
+  const chosenArches = treatedArches(draft.archTreatment);
+  const archChosen = chosenArches.length > 0;
+  // Before an arch is chosen both count, so the buttons do not turn into a
+  // text field once one is picked. Null: nothing limits the numbers.
+  const maxAligner = alignerCeiling(archChosen ? chosenArches : ALL_ARCHES, {
+    planTotals: context.eligibility.alignerLimits,
+    deliveredUpTo: context.eligibility.deliveredUpTo,
+  });
   const dateId = fieldDomId('warrantyDiscoveredAt');
   const dateError = errors.warrantyDiscoveredAt ? t(errors.warrantyDiscoveredAt) : undefined;
 
@@ -38,29 +47,24 @@ export function WarrantyStep({ draft, set, errors, context }: StepProps) {
       </ClinicalQuestion>
 
       <ClinicalQuestion
-        fields={['replacementFromAligner']}
-        inline={['replacementFromAligner']}
+        fields={['defectiveAligners']}
         errors={errors}
         number={2}
         required
         legend={legend('aligner')}
         hint={
-          delivered !== null
-            ? t('supplemental.questions.currentAligner.delivered', { max: delivered })
+          archChosen && maxAligner !== null && maxAligner >= 1
+            ? t('supplemental.questions.warranty.alignerRange', { max: maxAligner })
             : undefined
         }
       >
-        <div className="sm:max-w-xs">
-          <WholeNumberField
-            id={fieldDomId('replacementFromAligner')}
-            label={legend('alignerLabel')}
-            value={draft.replacementFromAligner}
-            onChange={(value) => set('replacementFromAligner', value)}
-            min={1}
-            max={delivered ?? ALIGNER_NUMBER_MAX}
-            error={errors.replacementFromAligner}
-          />
-        </div>
+        <DefectiveAlignersField
+          value={draft.defectiveAligners}
+          onChange={(value) => set('defectiveAligners', value)}
+          max={maxAligner}
+          archChosen={archChosen}
+          invalid={!!errors.defectiveAligners}
+        />
       </ClinicalQuestion>
 
       <ClinicalQuestion fields={['warrantyDefectCategory']} errors={errors} number={3} required legend={legend('defect')}>

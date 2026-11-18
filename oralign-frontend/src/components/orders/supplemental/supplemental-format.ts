@@ -1,6 +1,7 @@
 import type { Lang } from '@/lib/i18n/dict';
 import type { SupplementalToothContact } from '@/lib/types';
 import { formatBusinessDay } from '@/lib/utils/business-day';
+import { ALIGNER_NUMBER_MAX } from './supplemental-constants';
 import { roundContactAmount } from './tooth-details';
 
 const LOCALE: Record<Lang, string> = { fr: 'fr-FR', en: 'en-US' };
@@ -35,6 +36,14 @@ export function parseMm(raw: string | null): number | null {
 /** An ISO instant as its business day ("28 juil. 2025"), or null. */
 export function formatDay(iso: string | null | undefined, lang: Lang): string | null {
   return iso ? formatBusinessDay(iso, lang) : null;
+}
+
+/** "1, 2 4" as [1, 2, 4]: valid aligner numbers, ascending, once each. */
+export function parseAlignerNumbers(raw: string): number[] {
+  const numbers = (raw.match(/\d+/g) ?? [])
+    .map(Number)
+    .filter((number) => number >= 1 && number <= ALIGNER_NUMBER_MAX);
+  return [...new Set(numbers)].sort((a, b) => a - b);
 }
 
 /** A whole number typed in a numeric input; `null` when blank or invalid. */

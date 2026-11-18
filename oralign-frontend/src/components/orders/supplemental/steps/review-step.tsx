@@ -6,6 +6,7 @@ import { ReviewSection } from '@/components/orders/wizard';
 import { useT } from '@/lib/i18n/lang-context';
 import { OrderType, SupplementalImpressionMethod } from '@/lib/types';
 import { CoverageExplanation } from '../coverage-explanation';
+import { RequestPhotos, requestPhotoSections } from '../request-photos';
 import { SupplementalSummary } from '../supplemental-summary';
 import { normaliseDraft } from '../supplemental-draft';
 import type { StepProps } from './step-props';
@@ -19,6 +20,7 @@ export function ReviewStep({ draft, context }: StepProps) {
   const answers = normaliseDraft(draft, context.kind);
   const orderId = context.view.order.id;
   const coverage = context.eligibility.requests[context.kind];
+  const photoSections = requestPhotoSections(context.kind, context.files);
   const showScans =
     context.kind === OrderType.ADDITIONAL_ALIGNERS &&
     answers.impressionMethod === SupplementalImpressionMethod.INTRAORAL_SCAN;
@@ -38,9 +40,14 @@ export function ReviewStep({ draft, context }: StepProps) {
         answers={answers}
         sourcePlanVersion={context.view.request.sourceTreatmentPlanVersion}
       />
-      {context.kind !== OrderType.TRANSFER_TEMPLATE && (
+      {photoSections.length > 0 && (
         <ReviewSection icon={Camera} title={t('supplemental.steps.photos.title')}>
-          <ClinicalOrderFiles orderId={orderId} readOnly section="patient-images" />
+          <RequestPhotos
+            orderId={orderId}
+            readOnly
+            sections={photoSections}
+            alignerNumbers={answers.defectiveAligners}
+          />
         </ReviewSection>
       )}
       {showScans && (

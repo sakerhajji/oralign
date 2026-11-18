@@ -89,26 +89,44 @@ export function creationDefaults(
 export interface ConvertedWarranty {
   orderCode: string;
   archTreatment: ArchTreatment | null;
-  replacementFromAligner: number | null;
+  /** Ascending. */
+  defectiveAligners: readonly number[];
+}
+
+/** First and last of ascending numbers, when no number is missing between. */
+function continuousRange(
+  numbers: readonly number[],
+): { first: number; last: number } | null {
+  const first = numbers[0];
+  const last = numbers[numbers.length - 1];
+  return numbers.length > 0 && last - first === numbers.length - 1
+    ? { first, last }
+    : null;
 }
 
 /**
- * The paid replacement of a rejected warranty: the defective aligner of
- * the same arch, once, at standard urgency, its origin in the details.
+ * The paid replacement of a rejected warranty: the defective aligners of
+ * the same arch, once, at standard urgency, its origin in the details. A
+ * replacement is one range: aligners 1, 2 and 4 leave it for the doctor to
+ * fill, since 1 to 4 would bill aligner 3, which nobody claimed.
  */
 export function warrantyReplacementDefaults(
   warranty: ConvertedWarranty,
   parent: Pick<SupplementalParentSnapshot, 'patientStage'>,
 ): ChildDefaults {
+  const range = continuousRange(warranty.defectiveAligners);
   return {
     archTreatment: warranty.archTreatment,
     patientStage: parent.patientStage,
     answers: {
-      replacementFromAligner: warranty.replacementFromAligner,
-      replacementToAligner: warranty.replacementFromAligner,
+      replacementFromAligner: range?.first ?? null,
+      replacementToAligner: range?.last ?? null,
       quantity: QUANTITY_RANGE.replacement.min,
       replacementReason: ReplacementReason.other,
-      reasonDetails: warrantyConversionNote(warranty.orderCode),
+      reasonDetails: warrantyConversionNote(
+        warranty.orderCode,
+        warranty.defectiveAligners,
+      ),
       urgency: SupplementalUrgency.standard,
     },
   };

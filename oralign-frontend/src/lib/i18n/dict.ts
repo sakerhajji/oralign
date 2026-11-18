@@ -1249,6 +1249,7 @@ export const dict = {
         contacts: { en: "Contacts", fr: "Contacts" } as T,
         replacementFromAligner: { en: "From aligner", fr: "De l’aligneur" } as T,
         replacementToAligner: { en: "To aligner", fr: "À l’aligneur" } as T,
+        defectiveAligners: { en: "Defective aligners", fr: "Aligneurs défectueux" } as T,
         quantity: { en: "Quantity", fr: "Quantité" } as T,
         replacementReason: {
           en: "Replacement reason",

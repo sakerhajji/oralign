@@ -382,7 +382,7 @@ describe('SupplementalReviewService.convertRejectedWarranty', () => {
             id: 'warranty-request',
             reviewStatus: SupplementalReviewStatus.rejected,
             coverageStatus: SupplementalCoverageStatus.warranty_rejected,
-            replacementFromAligner: 5,
+            defectiveAligners: [5],
             ...request,
           },
         ),

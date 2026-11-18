@@ -27,6 +27,11 @@ export function useSummaryText(answers: SupplementalDraft) {
     yesNo: (value: boolean | null) => option('yesNo', value === null ? null : value ? 'yes' : 'no'),
     number: (value: number | null) =>
       value === null ? null : t('supplemental.summary.alignerNumber', { number: value }),
+    /** "No. 1, 2, 4". */
+    numbers: (values: readonly number[]) =>
+      values.length === 0
+        ? null
+        : t('supplemental.summary.alignerNumber', { number: values.join(', ') }),
     withDetails,
     /** "Do not move these teeth: 13, 23". */
     withTeeth: (label: string | null, purpose: SupplementalToothPurpose) =>

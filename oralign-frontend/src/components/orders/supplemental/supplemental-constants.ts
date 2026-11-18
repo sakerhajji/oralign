@@ -183,6 +183,16 @@ export const SCAN_FILE_CATEGORIES: readonly OrderFileCategory[] = [
   OrderFileCategory.ZIP,
 ];
 
+/** Warranty photo slots: one per aligner, plus the pouch label. */
+export const ALIGNER_LABEL_SLOT_KEY = 'aligner-label';
+export const alignerSlotKey = (aligner: number) => `aligner-${aligner}`;
+
+/** The aligner a slot key stands for; null for any other slot. */
+export function alignerOfSlot(slotKey: string): number | null {
+  const match = /^aligner-(\d+)$/.exec(slotKey);
+  return match ? Number(match[1]) : null;
+}
+
 export const EVIDENCE_PHOTO_CATEGORIES: readonly OrderFileCategory[] = [
   OrderFileCategory.RIGHT_PHOTO,
   OrderFileCategory.FRONT_PHOTO,

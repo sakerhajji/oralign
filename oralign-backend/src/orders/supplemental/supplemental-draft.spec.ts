@@ -25,6 +25,7 @@ const blankAnswers = (): SupplementalAnswers => ({
     DRAFT_ANSWER_FIELDS.map((field) => [field, null]),
   ) as Record<keyof SupplementalAnswers, null>),
   apOptions: [],
+  defectiveAligners: [],
 });
 
 const draft = (over: Partial<DraftState> = {}): DraftState => ({
@@ -191,6 +192,15 @@ describe('draftChanges', () => {
 });
 
 describe('draftUpdateFromDto', () => {
+  it('sorts the defective aligners and clears them with null', () => {
+    expect(
+      draftUpdateFromDto({ defectiveAligners: [4, 1, 2] }).answers,
+    ).toEqual({ defectiveAligners: [1, 2, 4] });
+    expect(draftUpdateFromDto({ defectiveAligners: null }).answers).toEqual({
+      defectiveAligners: [],
+    });
+  });
+
   it('turns the PUT body into a draft update', () => {
     const dto: UpdateSupplementalOrderDto = {
       archTreatment: ArchTreatment.upper,

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ChevronLeft, ChevronRight, Loader2, Save, Send } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Loader2, Save, Send, X } from 'lucide-react';
 import {
   WizardFooter,
   WizardPanel,
@@ -205,16 +205,29 @@ export function SupplementalWizardForm({
       />
 
       <WizardFooter>
-        <Button
-          type="button"
-          variant="outline"
-          className="h-11"
-          disabled={stepIndex === 0}
-          onClick={() => goTo(stepIndex - 1)}
-        >
-          <ChevronLeft className="mr-2 h-4 w-4" aria-hidden />
-          {t('common.back')}
-        </Button>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button
+            type="button"
+            variant="outline"
+            className="h-11"
+            disabled={stepIndex === 0}
+            onClick={() => goTo(stepIndex - 1)}
+          >
+            <ChevronLeft className="mr-2 h-4 w-4" aria-hidden />
+            {t('common.back')}
+          </Button>
+          {/* Leaving keeps the draft: useSupplementalDraft saves on unmount. */}
+          <Button
+            type="button"
+            variant="ghost"
+            className="h-11"
+            disabled={submitting}
+            onClick={() => router.push(`/dashboard/orders/${view.parentOrder.id}`)}
+          >
+            <X className="mr-2 h-4 w-4" aria-hidden />
+            {t('common.cancel')}
+          </Button>
+        </div>
         <div className="flex flex-col gap-2 sm:flex-row">
           <Button
             type="button"

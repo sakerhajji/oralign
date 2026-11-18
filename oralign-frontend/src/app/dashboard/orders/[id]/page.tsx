@@ -55,6 +55,7 @@ import {
   useBillingPublicDefaults,
   useDeleteOrder,
   useOrder,
+  useOrderFiles,
   usePatient,
 } from '@/lib/hooks';
 import { useQueryClient } from '@tanstack/react-query';
@@ -65,6 +66,8 @@ import { TreatmentFeePaymentDialog } from '@/components/orders/treatment-fee-pay
 import { TreatmentFeeReceiptDialog } from '@/components/orders/treatment-fee-receipt-dialog';
 import { OrderHistory } from '@/components/orders/order-history';
 import {
+  RequestPhotos,
+  requestPhotoSections,
   SupplementalOrdersPanel,
   SupplementalRequestCard,
 } from '@/components/orders/supplemental';
@@ -1276,13 +1279,23 @@ function SupplementalChildDetails({
   patient: Patient | undefined;
 }) {
   const { t } = useT();
+  const files = useOrderFiles(order.id).data ?? [];
+  const photoSections = requestPhotoSections(order.orderType, files);
+  const alignerNumbers = useSupplementalOrder(order.id).data?.request.defectiveAligners ?? [];
   return (
     <>
       <SupplementalRequestCard requestId={order.id} />
       <PatientSection order={order} patient={patient} />
-      <Section icon={Camera} title={t('orderDetail.sections.patientImages')}>
-        <ClinicalOrderFiles orderId={order.id} readOnly section="patient-images" />
-      </Section>
+      {photoSections.length > 0 && (
+        <Section icon={Camera} title={t('supplemental.steps.photos.title')}>
+          <RequestPhotos
+            orderId={order.id}
+            readOnly
+            sections={photoSections}
+            alignerNumbers={alignerNumbers}
+          />
+        </Section>
+      )}
       <Section icon={ScanLine} title={t('orderDetail.sections.radiographyScans')}>
         <ClinicalOrderFiles orderId={order.id} readOnly section="radiography-stl" />
       </Section>

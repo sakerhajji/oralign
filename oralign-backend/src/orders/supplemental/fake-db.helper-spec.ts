@@ -122,6 +122,7 @@ export function requestRow(over: Row = {}): Row {
     impressionMethod: null,
     replacementFromAligner: null,
     replacementToAligner: null,
+    defectiveAligners: [],
     quantity: null,
     replacementReason: null,
     urgency: null,

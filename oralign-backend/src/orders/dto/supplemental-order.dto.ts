@@ -287,7 +287,7 @@ export class UpdateSupplementalOrderDto {
   @Type(() => SupplementalToothContactDto)
   contacts?: SupplementalToothContactDto[] | null;
 
-  // ── replacement (and the defective aligner of a warranty) ───────────
+  // ── replacement ─────────────────────────────────────────────────────
   @ApiPropertyOptional({ nullable: true })
   @IsOptional()
   @IsInt()
@@ -345,6 +345,20 @@ export class UpdateSupplementalOrderDto {
   transferNotes?: string | null;
 
   // ── warranty ────────────────────────────────────────────────────────
+  @ApiPropertyOptional({
+    type: [Number],
+    nullable: true,
+    description: 'Every defective aligner. null clears to [].',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @ArrayMaxSize(ALIGNER_NUMBER_MAX)
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  @Max(ALIGNER_NUMBER_MAX, { each: true })
+  defectiveAligners?: number[] | null;
+
   @ApiPropertyOptional({ enum: WarrantyDefectCategory, nullable: true })
   @IsOptional()
   @IsEnum(WarrantyDefectCategory)

@@ -150,6 +150,13 @@ export const BITE_REGISTRATION_SLOT_KEYS: readonly string[] = [
   'second-occlusion',
 ];
 
+/**
+ * Warranty photo slots (same mirror): `aligner-<n>` shows aligner n, the
+ * label slot shows the pouch and proves nothing about an aligner.
+ */
+export const ALIGNER_PHOTO_SLOT = /^aligner-(\d+)$/;
+export const ALIGNER_LABEL_SLOT_KEY = 'aligner-label';
+
 export const SCAN_FILE_CATEGORIES: readonly OrderFileCategory[] = [
   OrderFileCategory.stl,
   OrderFileCategory.ply,
@@ -391,6 +398,12 @@ export const SUPPLEMENTAL_AUDIT_ACTION = {
 } as const;
 
 /** reasonDetails of the paid replacement a rejected warranty becomes. */
-export function warrantyConversionNote(warrantyCode: string): string {
-  return `Garantie refusée ${warrantyCode}`;
+export function warrantyConversionNote(
+  warrantyCode: string,
+  aligners: readonly number[],
+): string {
+  const note = `Garantie refusée ${warrantyCode}`;
+  return aligners.length > 1
+    ? `${note} (aligneurs ${aligners.join(', ')})`
+    : note;
 }

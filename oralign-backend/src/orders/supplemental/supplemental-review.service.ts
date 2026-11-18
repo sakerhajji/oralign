@@ -267,8 +267,7 @@ export class SupplementalReviewService {
         {
           orderCode: warranty.orderCode,
           archTreatment: warranty.archTreatment,
-          replacementFromAligner:
-            warranty.supplementalRequest.replacementFromAligner,
+          defectiveAligners: warranty.supplementalRequest.defectiveAligners,
         },
         parent,
       ),

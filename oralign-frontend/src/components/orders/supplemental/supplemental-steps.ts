@@ -55,7 +55,6 @@ export const KIND_STEPS: Record<SupplementalKind, readonly StepDefinition[]> = {
   ],
   [OrderType.REPLACEMENT]: [
     { key: 'replacementDetails', icon: ClipboardList, Component: ReplacementStep },
-    { key: 'optionalPhotos', icon: Camera, Component: PhotosStep },
     REVIEW,
   ],
   [OrderType.TRANSFER_TEMPLATE]: [

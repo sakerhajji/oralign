@@ -48,6 +48,20 @@ export function treatedArches(arch: ArchTreatment | null): Arch[] {
   return arches;
 }
 
+/**
+ * Highest aligner number valid on every listed arch: within each plan total
+ * and the last aligner handed over. Null when nothing bounds it.
+ */
+export function alignerCeiling(
+  arches: readonly Arch[],
+  limits: Pick<ValidationContext, 'planTotals' | 'deliveredUpTo'>,
+): number | null {
+  const bounds = [...arches.map((arch) => limits.planTotals[arch]), limits.deliveredUpTo].filter(
+    (bound): bound is number => bound !== null,
+  );
+  return bounds.length > 0 ? Math.min(...bounds) : null;
+}
+
 /** An aligner number must exist in every treated arch and be delivered. */
 export function alignerNumberError(
   value: number | null,

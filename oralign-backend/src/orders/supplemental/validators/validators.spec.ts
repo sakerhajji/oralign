@@ -62,6 +62,7 @@ const blank = (): SupplementalAnswers => ({
     DRAFT_ANSWER_FIELDS.map((field) => [field, null]),
   ) as Record<keyof SupplementalAnswers, null>),
   apOptions: [],
+  defectiveAligners: [],
 });
 
 /** Answers that pass, per kind. */
@@ -97,7 +98,7 @@ const COMPLETE: Record<SupplementalOrderType, Partial<SupplementalAnswers>> = {
     quantity: 2,
   },
   warranty: {
-    replacementFromAligner: 5,
+    defectiveAligners: [1, 2, 5],
     warrantyDefectCategory: WarrantyDefectCategory.crack,
     warrantyDiscoveredAt: calendarDayToDate('2026-06-10'),
     warrantyComments: 'Crack on the upper left molar region',
@@ -537,17 +538,22 @@ describe('warranty', () => {
       ['archTreatment:invalid'],
     ],
     [
-      'a defective aligner never delivered',
-      { answers: { replacementFromAligner: 13 } },
-      ['replacementFromAligner:out_of_range'],
+      'no defective aligner',
+      { answers: { defectiveAligners: [] } },
+      ['defectiveAligners:required'],
+    ],
+    [
+      'one of the defective aligners never delivered',
+      { answers: { defectiveAligners: [2, 13, 14] } },
+      ['defectiveAligners:out_of_range'],
     ],
     [
       'a defective aligner beyond the lower plan (22)',
       {
-        answers: { replacementFromAligner: 23 },
+        answers: { defectiveAligners: [23] },
         parent: { deliveredUpTo: 30 },
       },
-      ['replacementFromAligner:out_of_range'],
+      ['defectiveAligners:out_of_range'],
     ],
     [
       'found tomorrow (Tunis calendar)',
@@ -560,6 +566,16 @@ describe('warranty', () => {
       ['warrantyDiscoveredAt:out_of_range'],
     ],
     ['no evidence photo', { files: [UPPER_SCAN] }, ['evidencePhotos:required']],
+    [
+      'only the pouch label',
+      { files: [slot('aligner-label', File.image)] },
+      ['evidencePhotos:required'],
+    ],
+    [
+      'only a photo of an aligner no longer claimed',
+      { files: [slot('aligner-3', File.image)] },
+      ['evidencePhotos:required'],
+    ],
     [
       'no comments',
       { answers: { warrantyComments: null } },
@@ -604,6 +620,18 @@ describe('assertSubmittable', () => {
       message:
         'The request is incomplete: warrantyComments:required, evidencePhotos:required',
     });
+  });
+});
+
+describe('warranty photos', () => {
+  it('accepts a photo of a claimed aligner', () => {
+    expect(
+      SUBMISSION_VALIDATORS[OrderType.warranty](
+        context(OrderType.warranty, {
+          files: [slot('aligner-2', File.image)],
+        }),
+      ),
+    ).toEqual([]);
   });
 });
 

@@ -53,6 +53,7 @@ export const DRAFT_ANSWER_FIELDS = [
   'sourceTreatmentPlanId',
   'transferPurpose',
   'transferNotes',
+  'defectiveAligners',
   'warrantyDefectCategory',
   'warrantyDiscoveredAt',
   'warrantyLotReference',
@@ -109,7 +110,7 @@ export const ANSWER_FIELDS_BY_TYPE: Record<
     'quantity',
   ],
   warranty: [
-    'replacementFromAligner',
+    'defectiveAligners',
     'warrantyDefectCategory',
     'warrantyDiscoveredAt',
     'warrantyLotReference',
@@ -145,8 +146,8 @@ export function dateToCalendarDay(date: Date): string {
 
 /**
  * The pipe-validated PUT body as a draft update: the calendar day becomes
- * its stored instant, a cleared option list becomes [], contacts are
- * normalised (lower tooth first).
+ * its stored instant, a cleared list becomes [], defective aligners are
+ * sorted, contacts are normalised (lower tooth first).
  */
 export function draftUpdateFromDto(
   dto: UpdateSupplementalOrderDto,
@@ -157,6 +158,7 @@ export function draftUpdateFromDto(
     contacts,
     warrantyDiscoveredAt,
     apOptions,
+    defectiveAligners,
     ...answers
   } = dto;
   return {
@@ -172,6 +174,13 @@ export function draftUpdateFromDto(
                 : calendarDayToDate(warrantyDiscoveredAt),
           }),
       ...(apOptions === undefined ? {} : { apOptions: apOptions ?? [] }),
+      ...(defectiveAligners === undefined
+        ? {}
+        : {
+            defectiveAligners: [...(defectiveAligners ?? [])].sort(
+              (a, b) => a - b,
+            ),
+          }),
     },
     // null (clear) and undefined (unchanged) pass through as they are.
     teeth:

@@ -4,8 +4,13 @@ import {
   SupplementalToothPurpose,
   TransferTemplatePurpose,
 } from '@/lib/types';
-import { EVIDENCE_PHOTO_CATEGORIES, QUANTITY_RANGE } from '../supplemental-constants';
-import { isSingleArch } from '../supplemental-draft';
+import {
+  ALIGNER_LABEL_SLOT_KEY,
+  EVIDENCE_PHOTO_CATEGORIES,
+  QUANTITY_RANGE,
+  alignerOfSlot,
+} from '../supplemental-constants';
+import { isSingleArch, type SupplementalDraft } from '../supplemental-draft';
 import {
   alignerNumberError,
   compact,
@@ -63,25 +68,44 @@ function discoveredAtError(day: string, context: ValidationContext): string | un
   return undefined;
 }
 
-/** Warranty: one arch, a delivered aligner, the defect, a past date, a description. */
+function defectiveAlignersError(draft: SupplementalDraft, context: ValidationContext) {
+  if (draft.defectiveAligners.length === 0) return VALIDATION_KEY.defectiveAligners;
+  const arches = treatedArches(draft.archTreatment);
+  return draft.defectiveAligners
+    .map((aligner) => alignerNumberError(aligner, arches, context))
+    .find(Boolean);
+}
+
+/** Warranty: one arch, delivered aligners, the defect, a past date, a description. */
 export const warrantyDetails: Validator = (draft, context) =>
   compact({
     archTreatment: required(!isSingleArch(draft.archTreatment)),
-    replacementFromAligner: alignerNumberError(
-      draft.replacementFromAligner,
-      treatedArches(draft.archTreatment),
-      context,
-    ),
+    defectiveAligners: defectiveAlignersError(draft, context),
     warrantyDefectCategory: required(draft.warrantyDefectCategory === null),
     warrantyDiscoveredAt: discoveredAtError(draft.warrantyDiscoveredAt, context),
     warrantyComments: required(isBlank(draft.warrantyComments)),
   });
 
-export function hasEvidencePhoto(files: ValidationContext['files']): boolean {
-  return files.some((file) => EVIDENCE_PHOTO_CATEGORIES.includes(file.category));
+/**
+ * A photo that can prove the claim: not the pouch label, not an aligner no
+ * longer claimed. Photos from before the aligner slots still count.
+ */
+function showsClaimedAligner(
+  file: ValidationContext['files'][number],
+  claimed: readonly number[],
+): boolean {
+  if (!EVIDENCE_PHOTO_CATEGORIES.includes(file.category)) return false;
+  const slotKey = file.originalName.includes('__')
+    ? file.originalName.split('__')[0].toLowerCase()
+    : null;
+  if (slotKey === ALIGNER_LABEL_SLOT_KEY) return false;
+  const aligner = slotKey ? alignerOfSlot(slotKey) : null;
+  return aligner === null || claimed.includes(aligner);
 }
 
-export const evidencePhotos: Validator = (_draft, context) =>
+export const evidencePhotos: Validator = (draft, context) =>
   compact({
-    photos: hasEvidencePhoto(context.files) ? undefined : VALIDATION_KEY.evidencePhotos,
+    photos: context.files.some((file) => showsClaimedAligner(file, draft.defectiveAligners))
+      ? undefined
+      : VALIDATION_KEY.evidencePhotos,
   });

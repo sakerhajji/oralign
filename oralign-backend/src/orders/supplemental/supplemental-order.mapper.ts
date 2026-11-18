@@ -60,6 +60,7 @@ export function draftStateOf(child: LoadedChild): DraftState {
       sourceTreatmentPlanId: request.sourceTreatmentPlanId,
       transferPurpose: request.transferPurpose,
       transferNotes: request.transferNotes,
+      defectiveAligners: request.defectiveAligners,
       warrantyDefectCategory: request.warrantyDefectCategory,
       warrantyDiscoveredAt: request.warrantyDiscoveredAt,
       warrantyLotReference: request.warrantyLotReference,

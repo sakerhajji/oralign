@@ -75,6 +75,11 @@ import { cn } from '@/lib/utils';
 import { formatBytes } from '@/lib/utils/bytes';
 import { ImageEditDialog } from './image-edit-dialog';
 import {
+  ALIGNER_LABEL_SLOT_KEY,
+  alignerOfSlot,
+  alignerSlotKey,
+} from './supplemental/supplemental-constants';
+import {
   modelFactsOf,
   modelFormatOf,
   type ModelFormat,
@@ -239,13 +244,48 @@ const stlSlots = [
   },
 ] as const;
 
-type ClinicalFileSection = 'patient-images' | 'radiography-stl';
+/**
+ * Warranty claim: one photo per defective aligner, plus the pouch label.
+ * An aligner unticked after its photo was added keeps its place, so the
+ * photo is never sent to the lab without being shown.
+ */
+function alignerEvidenceSlots(
+  files: readonly OrderFile[],
+  alignerNumbers: readonly number[],
+): (UploadSlotDefinition & { icon: typeof ImageIcon })[] {
+  const withPhoto = files.flatMap((file) => {
+    const aligner = file.originalName.includes('__')
+      ? alignerOfSlot(file.originalName.split('__')[0])
+      : null;
+    return aligner === null ? [] : [aligner];
+  });
+  const numbers = [...new Set([...alignerNumbers, ...withPhoto])].sort(
+    (a, b) => a - b,
+  );
+  const photoSlot = { category: OrderFileCategory.IMAGE, icon: ImageIcon, accept: 'image/*' };
+  return [
+    ...numbers.map((number) => ({
+      ...photoSlot,
+      key: alignerSlotKey(number),
+      titleKey: 'supplemental.questions.photos.slots.aligner',
+      titleVars: { number },
+    })),
+    {
+      ...photoSlot,
+      key: ALIGNER_LABEL_SLOT_KEY,
+      titleKey: 'supplemental.questions.photos.slots.alignerLabel',
+    },
+  ];
+}
+
+type ClinicalFileSection = 'patient-images' | 'radiography-stl' | 'aligner-evidence';
 type UploadSlotDefinition = {
   key: string;
   /** Dotted dict path resolved with `useT()` at render time. The raw
    *  English label that used to live in a `title` field is now in the
    *  dictionary so the slot name flips with the language switcher. */
   titleKey: string;
+  titleVars?: Record<string, number>;
   category: OrderFileCategory;
   icon?: typeof ImageIcon;
   accept?: string;
@@ -343,6 +383,7 @@ export function ClinicalOrderFiles({
   orderId,
   readOnly,
   section,
+  alignerNumbers = [],
   cbctRequested,
   cbctToggle,
   onStagedCountChange,
@@ -350,6 +391,8 @@ export function ClinicalOrderFiles({
   orderId?: string;
   readOnly?: boolean;
   section: ClinicalFileSection;
+  /** `aligner-evidence`: the aligners that get a photo place. */
+  alignerNumbers?: readonly number[];
   /**
    * Whether this order is marked as using a CBCT / DICOM bundle. Gates
    * the ZIP/CBCT upload block in the radiography-stl section:
@@ -451,6 +494,35 @@ export function ClinicalOrderFiles({
       { onSettled: settle },
     );
   };
+
+  if (section === 'aligner-evidence') {
+    const slots = alignerEvidenceSlots(files, alignerNumbers);
+    return (
+      <div className="flex flex-wrap items-stretch justify-center gap-6">
+        {slots.map((slot) => (
+          <div
+            key={slot.key}
+            className="w-full max-w-[320px] sm:max-w-[300px] md:w-[44%] xl:w-[30%]"
+          >
+            <ClinicalMediaSlot
+              orderId={orderId}
+              title={t(slot.titleKey, slot.titleVars)}
+              icon={slot.icon}
+              accept={slot.accept}
+              disabled={readOnly || uploadFiles.isPending}
+              readOnly={readOnly}
+              uploading={activeUpload?.key === slot.key}
+              progress={activeUpload?.key === slot.key ? activeUpload.progress : null}
+              file={fileForSlot(files, slot, slots)}
+              onSelect={(file) => uploadSlot(slot, file)}
+              clipboard={clipboard}
+              onClipboard={setClipboard}
+            />
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   if (section === 'patient-images') {
     // The slot list is laid out in two grids so the trailing occlusal row
@@ -2873,8 +2945,15 @@ function withSlotName(slotKey: string, file: File) {
   });
 }
 
+/** True when at least one file sits in a patient photo slot. */
+export function hasPatientImageFiles(files: readonly OrderFile[]) {
+  return patientImageSlots.some((slot) =>
+    fileForSlot(files, slot, patientImageSlots),
+  );
+}
+
 function fileForSlot(
-  files: OrderFile[],
+  files: readonly OrderFile[],
   slot: UploadSlotDefinition,
   allSlots: readonly UploadSlotDefinition[],
 ) {
@@ -2897,7 +2976,7 @@ function fileForSlot(
   );
 }
 
-function latestByCreatedAt(files: OrderFile[]) {
+function latestByCreatedAt(files: readonly OrderFile[]) {
   return [...files].sort(
     (first, second) =>
       new Date(second.createdAt).getTime() - new Date(first.createdAt).getTime(),

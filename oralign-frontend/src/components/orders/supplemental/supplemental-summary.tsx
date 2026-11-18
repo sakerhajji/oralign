@@ -78,7 +78,7 @@ function WarrantySummary({ answers: a }: SummaryProps) {
     <ReviewSection icon={ShieldCheck} title={s.t('supplemental.type.warranty')}>
       <div className={GRID}>
         <ReviewInfo label={q('arch')} value={s.option('archTreatment', a.archTreatment)} />
-        <ReviewInfo label={q('defectiveAligner')} value={s.number(a.replacementFromAligner)} />
+        <ReviewInfo label={q('defectiveAligner')} value={s.numbers(a.defectiveAligners)} />
         <ReviewInfo label={q('defect')} value={s.option('defect', a.warrantyDefectCategory)} />
         <ReviewInfo label={q('discoveredAt')} value={s.day(a.warrantyDiscoveredAt)} />
         <ReviewInfo label={q('lotReference')} value={a.warrantyLotReference} />

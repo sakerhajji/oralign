@@ -74,6 +74,8 @@ export interface SupplementalRequestAnswers {
   urgency: SupplementalUrgency | null;
   transferPurpose: TransferTemplatePurpose | null;
   transferNotes: string | null;
+  /** Every defective aligner of a warranty claim, ascending. */
+  defectiveAligners: number[];
   warrantyDefectCategory: WarrantyDefectCategory | null;
   /** Calendar day 'YYYY-MM-DD' (ISO instant accepted when reading). */
   warrantyDiscoveredAt: string | null;

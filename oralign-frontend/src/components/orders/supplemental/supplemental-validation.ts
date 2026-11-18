@@ -55,7 +55,6 @@ const STEP_VALIDATORS: Record<StepKey, Validator> = {
   scans,
   photos,
   replacementDetails,
-  optionalPhotos: noRules,
   transferDetails,
   transferTeeth,
   warrantyDetails,

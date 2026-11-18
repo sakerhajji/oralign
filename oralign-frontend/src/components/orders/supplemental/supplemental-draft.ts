@@ -60,7 +60,7 @@ export const KIND_FIELDS: Record<SupplementalKind, readonly DraftField[]> = {
     'archTreatment', 'transferPurpose', 'transferNotes', 'quantity', 'teeth',
   ],
   [OrderType.WARRANTY]: [
-    'archTreatment', 'replacementFromAligner', 'warrantyDefectCategory',
+    'archTreatment', 'defectiveAligners', 'warrantyDefectCategory',
     'warrantyDiscoveredAt', 'warrantyLotReference', 'warrantyComments',
   ],
 };
@@ -131,6 +131,7 @@ export function draftFromView(view: SupplementalOrderView): SupplementalDraft {
     urgency: r.urgency ?? null,
     transferPurpose: r.transferPurpose ?? null,
     transferNotes: r.transferNotes ?? '',
+    defectiveAligners: r.defectiveAligners ?? [],
     warrantyDefectCategory: r.warrantyDefectCategory ?? null,
     // The API may send an ISO instant; the date input wants the day.
     warrantyDiscoveredAt: r.warrantyDiscoveredAt?.slice(0, 10) ?? '',

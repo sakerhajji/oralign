@@ -56,8 +56,9 @@ const dmSans = localFont({
 
 // What a messaging app shows for a shared link. The same for every patient:
 // no name or case detail ever reaches a preview. public/ is cached for a
-// year, so a new card needs a new file name.
-const PREVIEW_IMAGE = '/og/treatment-plan.463673a3.png';
+// year, so a new card needs a new file name. WhatsApp often crops the card
+// to a centred square: everything that must be read stays inside it.
+const PREVIEW_IMAGE = '/og/treatment-plan.81898853.png';
 const PREVIEW_TITLE = 'Votre plan de traitement 3D | ORALIGN®';
 const PREVIEW_DESCRIPTION =
   'Votre plan de traitement, partagé par votre praticien : suivez chaque étape jusqu’au résultat final.';
@@ -75,8 +76,8 @@ export const metadata: Metadata = {
     images: [
       {
         url: PREVIEW_IMAGE,
-        width: 1200,
-        height: 630,
+        width: 2400,
+        height: 1260,
         type: 'image/png',
         alt: 'ORALIGN : votre plan de traitement 3D, étape par étape',
       },

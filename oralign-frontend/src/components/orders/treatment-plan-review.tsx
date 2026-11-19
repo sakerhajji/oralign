@@ -4,12 +4,10 @@ import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { format } from 'date-fns';
 import {
-  CalendarClock,
   Check,
   ClipboardPaste,
   Globe,
   Image as ImageIcon,
-  Link2,
   Loader2,
   Lock,
   Maximize2,
@@ -45,7 +43,6 @@ import {
   useApproveTreatmentPlan,
   useDeleteDentalTreatmentTableImage,
   useDeleteMovementTableImage,
-  useGeneratePublicLink,
   useMarkTreatmentPlanReady,
   useRejectTreatmentPlan,
   useRemoveTreatmentPlanIpr,
@@ -57,6 +54,7 @@ import {
 } from '@/lib/hooks/use-treatment-plans';
 import { useUpdateToothInstructions } from '@/lib/hooks/use-orders';
 import { useAuth } from '@/lib/providers/auth-provider';
+import { dateLocaleOf, PatientLinkPanel } from './treatment-plan-patient-link';
 import { TreatmentConversation } from './treatment-conversation';
 import {
   OrderFile,
@@ -159,7 +157,7 @@ export function TreatmentPlanReview({
   socketConnected = false,
   onPlanCreated,
 }: Props) {
-  const { t } = useT();
+  const { t, lang } = useT();
   const reviewQuery = useTreatmentPlanReview(treatmentPlanId);
   const review = reviewQuery.data;
   const { user } = useAuth();
@@ -205,7 +203,9 @@ export function TreatmentPlanReview({
                 {t('treatmentReview.approvedBanner.approvedPrefix')}
                 {review.approvedAt
                   ? ` ${t('treatmentReview.approvedBanner.approvedOn', {
-                      date: format(new Date(review.approvedAt), 'MMM d, yyyy'),
+                      date: format(new Date(review.approvedAt), 'PP', {
+                        locale: dateLocaleOf(lang),
+                      }),
                     })}`
                   : ''}
                 . {t('treatmentReview.approvedBanner.inManufacturing')}
@@ -343,9 +343,8 @@ function PlanHeader({
    *  it. Currently unused. */
   isDoctor: boolean;
 }) {
-  const { t } = useT();
-  const generate = useGeneratePublicLink();
-  const [renderedAt] = useState(() => Date.now());
+  const { t, lang } = useT();
+  const dateLocale = dateLocaleOf(lang);
   // Public-link generation is now also available to doctors (the order
   // owner) so they can hand the link directly to their patient without
   // routing through an admin.
@@ -355,19 +354,9 @@ function PlanHeader({
     role === UserRole.DESIGNER ||
     role === UserRole.DENTIST;
 
-  const publicUrl = review.publicToken
-    ? `${typeof window !== 'undefined' ? window.location.origin : ''}/created_for_you/${review.publicToken}`
-    : null;
-  const publicExpiresAt = review.publicExpiresAt
-    ? new Date(review.publicExpiresAt)
-    : null;
-  const isPublicLinkExpired = !!(
-    publicExpiresAt && publicExpiresAt.getTime() < renderedAt
-  );
-
   return (
     <Card>
-      <CardHeader className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+      <CardHeader>
         <div className="min-w-0">
           <CardTitle className="flex flex-wrap items-center gap-2 text-lg">
             {review.name}
@@ -378,81 +367,21 @@ function PlanHeader({
           </CardTitle>
           <p className="text-xs text-muted-foreground">
             {t('treatmentReview.header.createdLabel')}{' '}
-            {format(new Date(review.createdAt), 'MMM d, yyyy HH:mm')}
+            {format(new Date(review.createdAt), 'PP HH:mm', { locale: dateLocale })}
             {review.approvedAt &&
-              ` · ${t('treatmentReview.header.approvedLabel')} ${format(new Date(review.approvedAt), 'MMM d, yyyy')}`}
+              ` · ${t('treatmentReview.header.approvedLabel')} ${format(new Date(review.approvedAt), 'PP', { locale: dateLocale })}`}
             {review.rejectedAt &&
-              ` · ${t('treatmentReview.header.rejectedLabel')} ${format(new Date(review.rejectedAt), 'MMM d, yyyy')}`}
+              ` · ${t('treatmentReview.header.rejectedLabel')} ${format(new Date(review.rejectedAt), 'PP', { locale: dateLocale })}`}
           </p>
         </div>
-
-        {canSharePublicly && (
-          <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap lg:w-auto lg:justify-end">
-            {publicUrl && (
-              <div
-                className={cn(
-                  'flex w-full flex-col gap-2 rounded-xl border p-3 text-xs sm:min-w-[320px] lg:max-w-md',
-                  isPublicLinkExpired
-                    ? 'border-red-200 bg-red-50 text-red-900'
-                    : 'border-emerald-200 bg-emerald-50 text-emerald-900',
-                )}
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="inline-flex items-center gap-1.5 font-semibold">
-                    <CalendarClock className="h-3.5 w-3.5" />
-                    {isPublicLinkExpired
-                      ? t('treatmentReview.header.patientLinkExpired')
-                      : t('treatmentReview.header.patientLinkActive')}
-                  </span>
-                  {publicExpiresAt ? (
-                    <span>
-                      {t('treatmentReview.header.expiresOn', {
-                        date: format(publicExpiresAt, 'MMM d, yyyy'),
-                      })}
-                    </span>
-                  ) : null}
-                </div>
-                <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
-                  <code className="min-w-0 flex-1 truncate rounded-md bg-white/70 px-2 py-1.5 text-[11px] text-muted-foreground">
-                    {publicUrl}
-                  </code>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-9 shrink-0 gap-2 bg-white/80"
-                    onClick={() => {
-                      void navigator.clipboard?.writeText(publicUrl);
-                      toast.success(t('treatmentReview.header.patientLinkCopied'));
-                    }}
-                    title={publicUrl}
-                  >
-                    <Link2 className="h-4 w-4" />
-                    {t('treatmentReview.header.copyPatientLink')}
-                  </Button>
-                </div>
-              </div>
-            )}
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              className="h-10 gap-2 sm:h-9"
-              onClick={() => generate.mutate({ id: review.id, validDays: 30 })}
-              disabled={generate.isPending}
-            >
-              {generate.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Link2 className="h-4 w-4" />
-              )}
-              {review.publicToken
-                ? t('treatmentReview.header.rotatePatientLink')
-                : t('treatmentReview.header.generatePatientLink')}
-            </Button>
-          </div>
-        )}
       </CardHeader>
+      {canSharePublicly && (
+        <PatientLinkPanel
+          planId={review.id}
+          token={review.publicToken}
+          expiresAt={review.publicExpiresAt}
+        />
+      )}
     </Card>
   );
 }
@@ -1874,7 +1803,7 @@ function ApprovalActions({
 }: {
   review: NonNullable<ReturnType<typeof useTreatmentPlanReview>['data']>;
 }) {
-  const { t } = useT();
+  const { t, lang } = useT();
   const approve = useApproveTreatmentPlan();
   const reject = useRejectTreatmentPlan();
   const [rejectOpen, setRejectOpen] = useState(false);
@@ -1912,7 +1841,9 @@ function ApprovalActions({
             description: t('treatmentReview.approval.alreadyApproved'),
             date: review.approvedAt
               ? t('treatmentReview.approval.approvedDate', {
-                  date: format(new Date(review.approvedAt), 'MMM d, yyyy'),
+                  date: format(new Date(review.approvedAt), 'PP', {
+                    locale: dateLocaleOf(lang),
+                  }),
                 })
               : null,
             icon: Check,
@@ -1926,7 +1857,9 @@ function ApprovalActions({
               description: t('treatmentReview.approval.wasRejected'),
               date: review.rejectedAt
                 ? t('treatmentReview.approval.rejectedDate', {
-                    date: format(new Date(review.rejectedAt), 'MMM d, yyyy'),
+                    date: format(new Date(review.rejectedAt), 'PP', {
+                      locale: dateLocaleOf(lang),
+                    }),
                   })
                 : null,
               icon: X,

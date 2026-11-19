@@ -72,10 +72,18 @@ export const treatmentDomainDict = {
       createdLabel: { en: 'Created', fr: 'Créé le' } as T,
       approvedLabel: { en: 'Approved', fr: 'Approuvé le' } as T,
       rejectedLabel: { en: 'Rejected', fr: 'Rejeté le' } as T,
-      copyPatientLink: {
-        en: 'Copy patient link',
-        fr: 'Copier le lien patient',
+      patientLinkField: { en: 'Patient link', fr: 'Lien patient' } as T,
+      patientLinkHint: {
+        en: 'The patient sees the treatment plan without creating an account. The link stays valid for {days} days.',
+        fr: 'Le patient consulte son plan de traitement sans créer de compte. Le lien reste valable {days} jours.',
       } as T,
+      copyLink: { en: 'Copy link', fr: 'Copier le lien' } as T,
+      linkCopied: { en: 'Copied', fr: 'Copié' } as T,
+      patientLinkCopyFailed: {
+        en: 'The link could not be copied. It is selected: copy it by hand.',
+        fr: 'Le lien n’a pas pu être copié. Il est sélectionné : copiez-le manuellement.',
+      } as T,
+      openPatientLink: { en: 'Open the patient page', fr: 'Ouvrir la page du patient' } as T,
       patientLinkCopied: {
         en: 'Patient link copied.',
         fr: 'Lien patient copié.',
@@ -92,9 +100,19 @@ export const treatmentDomainDict = {
         en: 'Expires {date}',
         fr: 'Expire le {date}',
       } as T,
+      expiredOn: { en: 'Expired {date}', fr: 'Expiré le {date}' } as T,
       rotatePatientLink: {
-        en: 'Rotate patient link',
+        en: 'Renew patient link',
         fr: 'Renouveler le lien patient',
+      } as T,
+      renewLink: { en: 'Renew', fr: 'Renouveler' } as T,
+      renewConfirmTitle: {
+        en: 'Renew the patient link?',
+        fr: 'Renouveler le lien patient ?',
+      } as T,
+      renewConfirmBody: {
+        en: 'The current link stops working immediately. The new link is valid for {days} days: remember to send it to the patient.',
+        fr: 'Le lien actuel cessera de fonctionner immédiatement. Le nouveau lien sera valable {days} jours : pensez à l’envoyer au patient.',
       } as T,
       generatePatientLink: {
         en: 'Generate patient link',

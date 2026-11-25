@@ -2,7 +2,7 @@
 
 import { useId, useState, type ReactNode } from 'react';
 import { toast } from '@/lib/toast';
-import { Download, Globe, Loader2, RotateCcw, Send } from 'lucide-react';
+import { Download, Globe, Loader2, RotateCcw, Send, Trash2 } from 'lucide-react';
 import {
   PackChoiceFields,
   useResolvedPackChoice,
@@ -24,6 +24,11 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { DecimalInput } from '@/components/ui/decimal-input';
+import {
+  DiscountField,
+  discountLabel,
+  type DiscountMode,
+} from '@/components/billing/discount-field';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -35,7 +40,12 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { formatTimestampDay } from '@/lib/utils/calendar-date';
-import { formatPrice } from '@/lib/utils/currency';
+import { formatAmount, formatPrice } from '@/lib/utils/currency';
+import {
+  previewInclusiveSplit,
+  previewPercentOf,
+  previewPlanStamps,
+} from '@/lib/billing/tax-split';
 import { useT } from '@/lib/i18n/lang-context';
 import { quotationsService } from '@/lib/api/quotations.service';
 import {
@@ -47,16 +57,22 @@ import {
   useSendQuotation,
   useUpdateQuotation,
 } from '@/lib/hooks/use-quotations';
-import { useAttachPackToQuotation } from '@/lib/hooks/use-quotation-payment-plan';
+import {
+  useAttachPackToQuotation,
+  useInstallments,
+} from '@/lib/hooks/use-quotation-payment-plan';
 import { useCompanyBilling } from '@/lib/hooks/use-company-billing';
 import { useOrder } from '@/lib/hooks/use-orders';
 import {
   ArchType,
   DevisLanguage,
+  InstallmentStatus,
   type Quotation,
   QuotationStatus,
+  type UpsertQuotationDto,
   UserRole,
 } from '@/lib/types';
+import { formatRate, PriceIncludesTaxNote } from '@/components/payments/withholding';
 import { QuotePackPanel } from './quote-pack-panel';
 import { QuoteStep } from './quote-step';
 
@@ -100,6 +116,19 @@ const LANGUAGES = [DevisLanguage.FR, DevisLanguage.EN, DevisLanguage.AR];
 // ─────────────────────────────────────────────────────────────────────────
 // Entry point
 // ─────────────────────────────────────────────────────────────────────────
+
+
+/**
+ * A devis can be downloaded once it has been issued: a stored file, or a
+ * numbered quote out of draft, which the server renders on demand (the
+ * billing migration cleared the stored files that still printed TVA 0 %).
+ */
+function devisAvailable(quote: Quotation): boolean {
+  return (
+    !!quote.pdfFilePath ||
+    (quote.status !== QuotationStatus.DRAFT && !!quote.quotationNumber)
+  );
+}
 
 export function QuoteReview({ orderId, role, canCreate = true }: Props) {
   const { t } = useT();
@@ -150,6 +179,8 @@ export function QuoteReview({ orderId, role, canCreate = true }: Props) {
       orderId={orderId}
       patientName={patientName}
       orderCode={orderCode}
+      defaultTvaRate={settings?.defaultTvaRate ?? 19}
+      stampDuty={settings?.stampDuty ?? 0}
     />
   ) : (
     <DoctorLayout
@@ -345,65 +376,161 @@ function AdminCreate({
 interface QuoteForm {
   language: DevisLanguage;
   deliveryFees: number;
+  /** The remise amount, always the effective one (derived in % mode). */
   discountAmount: number;
+  /** How the admin types the remise: an amount, or a % of the gross. */
+  discountMode: DiscountMode;
+  discountPercent: number;
   notes: string;
   adminMessage: string;
 }
+
+/**
+ * Statuses at which the admin still edits fees, discount and notes. A
+ * total change rebalances the unpaid installments server-side; the paid
+ * ones never move.
+ */
+const EDITABLE_STATUSES: ReadonlySet<QuotationStatus> = new Set([
+  QuotationStatus.DRAFT,
+  QuotationStatus.SENT,
+  QuotationStatus.APPROVED,
+]);
+
+/** Money arrives as numbers or decimal strings; 0 when missing. */
+const toAmount = (value: number | string | null | undefined): number => {
+  const n = Number(value ?? 0);
+  return Number.isFinite(n) ? n : 0;
+};
+
+/** a - b, exact to the millime. */
+const minusMoney = (a: number, b: number): number =>
+  (Math.round(a * 1000) - Math.round(b * 1000)) / 1000;
+
+/** Σ amounts, exact to the millime. */
+const sumMoney = (...values: number[]): number =>
+  values.reduce((acc, v) => acc + Math.round(v * 1000), 0) / 1000;
+
+/** Phone-sized tap targets (44 px), the usual compact height from `sm` up. */
+const TAP = 'h-11 sm:h-8';
 
 function AdminLayout({
   quote,
   orderId,
   patientName,
   orderCode,
+  defaultTvaRate,
+  stampDuty,
 }: {
   quote: Quotation;
   orderId: string;
   patientName: string;
   orderCode: string;
+  /** Company default, used for quotes stored without a rate. */
+  defaultTvaRate: number;
+  stampDuty: number;
 }) {
   const { t } = useT();
   const update = useUpdateQuotation();
+  const storedPercent = toAmount(quote.discountPercent);
+  const storedMode: DiscountMode = storedPercent > 0 ? 'percent' : 'amount';
   const [form, setForm] = useState<QuoteForm>(() => ({
     language: quote.language,
     deliveryFees: quote.deliveryFees,
     discountAmount: quote.discountAmount,
+    discountMode: storedMode,
+    discountPercent: storedPercent,
     notes: quote.notes ?? '',
     adminMessage: quote.adminMessage ?? '',
   }));
+  // The gross a percentage applies to: pack price (or fees) + delivery.
+  const grossOf = (deliveryFees: number) =>
+    sumMoney(quote.treatmentFees, quote.fabricationFees, deliveryFees);
   const patch = (changes: Partial<QuoteForm>) =>
-    setForm((current) => ({ ...current, ...changes }));
+    setForm((current) => {
+      const next = { ...current, ...changes };
+      // In % mode the amount follows the percentage and the fees, with the
+      // server's rounding, so every figure below is the one it will store.
+      if (next.discountMode === 'percent') {
+        next.discountAmount = previewPercentOf(
+          grossOf(next.deliveryFees),
+          next.discountPercent,
+        );
+      }
+      return next;
+    });
+  // Switching keeps the remise: the amount becomes its percentage of the
+  // gross (2 decimals), and back.
+  const switchDiscountMode = (mode: DiscountMode) => {
+    if (mode === form.discountMode) return;
+    if (mode === 'percent') {
+      const gross = grossOf(form.deliveryFees);
+      const percent =
+        gross > 0 ? Math.min(100, Math.round((form.discountAmount / gross) * 10000) / 100) : 0;
+      patch({ discountMode: 'percent', discountPercent: percent });
+    } else {
+      patch({ discountMode: 'amount' });
+    }
+  };
 
-  const isDraft = quote.status === QuotationStatus.DRAFT;
+  const editable = EDITABLE_STATUSES.has(quote.status);
   const hasPack = !!quote.packId;
-  // Only drafts can be saved; once sent, the language picker alone stays
-  // live (it re-renders the PDF, it does not edit the quote).
   const totalDirty =
-    isDraft &&
+    editable &&
     (form.deliveryFees !== quote.deliveryFees ||
-      form.discountAmount !== quote.discountAmount);
+      form.discountAmount !== quote.discountAmount ||
+      form.discountMode !== storedMode ||
+      (form.discountMode === 'percent' && form.discountPercent !== storedPercent));
   const dirty =
     totalDirty ||
-    (isDraft &&
+    (editable &&
       (form.language !== quote.language ||
         form.notes !== (quote.notes ?? '') ||
         form.adminMessage !== (quote.adminMessage ?? '')));
 
+  // Settled so far (cash + retenue). The new total may not go below it.
+  const received = toAmount(quote.receivedAmount ?? quote.paidAmount);
+  const newTotal = Math.max(
+    0,
+    quote.treatmentFees + form.deliveryFees - form.discountAmount,
+  );
+  const belowPaid = hasPack && received > 0 && minusMoney(newTotal, received) < 0;
+
   const saveDraft = async () => {
     if (!dirty) return;
+    // The inline warning explains it; the server would refuse it anyway.
+    if (belowPaid) throw new Error('QUOTE_TOTAL_BELOW_PAID');
+    // Only what the admin changed travels. Money above all: the server
+    // recomputes the totals (fees read TTC) from the money fields it
+    // receives, so a quote priced the older way (HT + TVA, fabrication
+    // fees) keeps its figures when only its notes or language change.
+    // When money does travel, every fee but the two edited here is the
+    // stored one, never a zero.
+    const money: UpsertQuotationDto = totalDirty
+      ? {
+          // `treatmentFees` carries the pack-price snapshot; forwarded
+          // untouched so the backend recomputes the pack total.
+          treatmentFees: quote.treatmentFees,
+          fabricationFees: quote.fabricationFees,
+          deliveryFees: form.deliveryFees,
+          // A percentage travels as such (the server derives the amount
+          // and prints "Remise (10 %)"); an amount clears any percentage.
+          ...(form.discountMode === 'percent'
+            ? { discountPercent: form.discountPercent }
+            : { discountAmount: form.discountAmount, discountPercent: null }),
+          // A quote stored at 0 % (older pack quotes) lets the server
+          // pick the company rate instead of keeping 0.
+          tvaRate: quote.tvaRate > 0 ? quote.tvaRate : undefined,
+          currency: quote.currency,
+        }
+      : {};
     await update.mutateAsync({
       id: quote.id,
       dto: {
-        language: form.language,
-        // `treatmentFees` carries the pack-price snapshot; forwarded
-        // untouched so the backend recomputes the pack total.
-        treatmentFees: quote.treatmentFees,
-        fabricationFees: 0,
-        deliveryFees: form.deliveryFees,
-        discountAmount: form.discountAmount,
-        tvaRate: quote.tvaRate,
-        currency: quote.currency,
-        notes: form.notes,
-        adminMessage: form.adminMessage,
+        ...money,
+        language: form.language !== quote.language ? form.language : undefined,
+        notes: form.notes !== (quote.notes ?? '') ? form.notes : undefined,
+        adminMessage:
+          form.adminMessage !== (quote.adminMessage ?? '') ? form.adminMessage : undefined,
       },
     });
   };
@@ -422,7 +549,11 @@ function AdminLayout({
           quote={quote}
           form={form}
           onChange={patch}
+          onDiscountModeChange={switchDiscountMode}
+          editable={editable}
           totalDirty={totalDirty}
+          belowPaid={belowPaid}
+          received={received}
         />
         {hasPack ? (
           <QuotePackPanel
@@ -439,7 +570,7 @@ function AdminLayout({
             description={t('quoteEditor.needsPack')}
           />
         )}
-        <NotesStep form={form} onChange={patch} disabled={!isDraft} />
+        <NotesStep form={form} onChange={patch} disabled={!editable} />
       </div>
 
       <QuoteSummary
@@ -449,8 +580,14 @@ function AdminLayout({
         orderCode={orderCode}
         form={form}
         onLanguageChange={(language) => patch({ language })}
+        editable={editable}
         dirty={dirty}
         totalDirty={totalDirty}
+        belowPaid={belowPaid}
+        received={received}
+        newTotal={newTotal}
+        defaultTvaRate={defaultTvaRate}
+        stampDuty={stampDuty}
         saving={update.isPending}
         saveDraft={saveDraft}
       />
@@ -462,16 +599,23 @@ function AdjustmentsStep({
   quote,
   form,
   onChange,
+  onDiscountModeChange,
+  editable,
   totalDirty,
+  belowPaid,
+  received,
 }: {
   quote: Quotation;
   form: QuoteForm;
   onChange: (changes: Partial<QuoteForm>) => void;
+  onDiscountModeChange: (mode: DiscountMode) => void;
+  editable: boolean;
   totalDirty: boolean;
+  belowPaid: boolean;
+  received: number;
 }) {
   const { t } = useT();
   const hasPack = !!quote.packId;
-  const isDraft = quote.status === QuotationStatus.DRAFT;
 
   return (
     <QuoteStep
@@ -491,20 +635,32 @@ function AdjustmentsStep({
               currency={quote.currency}
               value={form.deliveryFees}
               onChange={(deliveryFees) => onChange({ deliveryFees })}
-              disabled={!isDraft}
+              disabled={!editable}
             />
-            <MoneyField
+            <DiscountField
               label={t('quoteEditor.discount')}
               currency={quote.currency}
-              value={form.discountAmount}
-              onChange={(discountAmount) => onChange({ discountAmount })}
-              disabled={!isDraft}
+              mode={form.discountMode}
+              amount={form.discountAmount}
+              percent={form.discountPercent}
+              percentAmount={form.discountAmount}
+              onModeChange={onDiscountModeChange}
+              onAmountChange={(discountAmount) => onChange({ discountAmount })}
+              onPercentChange={(discountPercent) => onChange({ discountPercent })}
+              disabled={!editable}
+              inputClassName="h-11 sm:h-8"
             />
           </div>
-          {totalDirty ? (
+          {belowPaid ? (
+            <p role="alert" className="mt-3 text-xs text-destructive">
+              {t('quoteEditor.totalBelowPaid', {
+                paid: formatPrice(received, quote.currency),
+              })}
+            </p>
+          ) : totalDirty ? (
             <p className="mt-3 text-xs text-amber-700 dark:text-amber-400">
               {quote.paymentMode
-                ? t('quoteEditor.adjustWipesPlan')
+                ? t('quoteEditor.adjustRebalances')
                 : t('quoteEditor.saveBeforePlan')}
             </p>
           ) : null}
@@ -529,15 +685,20 @@ function MoneyField({
 }) {
   const id = useId();
   return (
-    <div className="grid gap-2">
-      <Label htmlFor={id}>{label}</Label>
+    <div className="grid content-start gap-2">
+      {/* Same label height as the remise field and its TND / % switch, so
+          the two inputs sit on one line. */}
+      <div className="flex min-h-9 items-center">
+        <Label htmlFor={id}>{label}</Label>
+      </div>
       <div className="relative">
         <DecimalInput
           id={id}
           value={value}
           onValueChange={onChange}
+          onFocus={(event) => event.currentTarget.select()}
           disabled={disabled}
-          className="pr-12 tabular-nums"
+          className="h-11 pr-12 tabular-nums sm:h-8"
         />
         <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-muted-foreground">
           {currency}
@@ -619,8 +780,14 @@ function QuoteSummary({
   orderCode,
   form,
   onLanguageChange,
+  editable,
   dirty,
   totalDirty,
+  belowPaid,
+  received,
+  newTotal,
+  defaultTvaRate,
+  stampDuty,
   saving,
   saveDraft,
 }: {
@@ -630,8 +797,16 @@ function QuoteSummary({
   orderCode: string;
   form: QuoteForm;
   onLanguageChange: (language: DevisLanguage) => void;
+  editable: boolean;
   dirty: boolean;
   totalDirty: boolean;
+  belowPaid: boolean;
+  /** Settled so far: cash + retenue. */
+  received: number;
+  /** TTC total the form would save. */
+  newTotal: number;
+  defaultTvaRate: number;
+  stampDuty: number;
   saving: boolean;
   saveDraft: () => Promise<void>;
 }) {
@@ -645,41 +820,84 @@ function QuoteSummary({
 
   const isDraft = quote.status === QuotationStatus.DRAFT;
   const hasPack = !!quote.packId;
-  const hasPdf = !!quote.pdfFilePath;
-  const canCancel = isDraft || quote.status === QuotationStatus.SENT;
+  const hasPdf = devisAvailable(quote);
+  // The server says what is allowed; older payloads fall back to the
+  // former rules (draft or sent can be deleted, sent can be recalled).
+  const canDelete = quote.canDelete ?? (isDraft || quote.status === QuotationStatus.SENT);
+  const canRecall = !isDraft && (quote.canRecall ?? quote.status === QuotationStatus.SENT);
   const busy = saving || generate.isPending || send.isPending;
+  // A devis renders once it has a price: the pack's, or the total a quote
+  // made before packs carries on its own. Such an older quote only takes
+  // language and notes edits here, so re-rendering it in another
+  // language stays one click away.
+  const renderable = hasPack || toAmount(quote.totalTtc) > 0;
 
   const money = (amount: number) => formatPrice(amount, quote.currency);
-  const net = Math.max(0, quote.treatmentFees + form.deliveryFees - form.discountAmount);
   const arch = quote.archType ?? ArchType.TWO_ARCHES;
   const packLine = hasPack
     ? `${quote.pack ? packName(quote.pack, lang) : (quote.packName ?? '')} · ${archLabel(arch, t)}`
     : t('quoteEditor.noPack');
 
-  // Sending needs a pack and a plan; a pending total change would wipe
-  // the plan on save, so it must be saved (and the plan redone) first.
+  // The quote's own split (HT + TVA (+ stamp) = TTC). While the total is
+  // being edited, the same split is previewed on the new total.
+  const savedTtc = toAmount(quote.totalTtc);
+  const savedHt = toAmount(quote.subTotalHt);
+  const savedTva = toAmount(quote.tvaAmount);
+  const savedStamp = Math.max(0, minusMoney(minusMoney(savedTtc, savedHt), savedTva));
+  const savedRate = toAmount(quote.tvaRate);
+  const figures = totalDirty
+    ? (() => {
+        const rate = savedRate > 0 ? savedRate : defaultTvaRate;
+        const split = previewInclusiveSplit(newTotal, rate, savedStamp);
+        return { ht: split.ht, tva: split.tva, stamp: split.stamp, ttc: split.total, rate };
+      })()
+    : { ht: savedHt, tva: savedTva, stamp: savedStamp, ttc: savedTtc, rate: savedRate };
+  const leftToPay = Math.max(0, minusMoney(figures.ttc, received));
+  // Every payment of the plan gets its own facture, so one droit de timbre
+  // each, added on top of the devis (which carries none). The plan view
+  // reads the same installments query.
+  const installments = useInstallments(quote.id, hasPack && !!quote.paymentMode);
+  const paymentCount = (installments.data ?? []).filter(
+    (inst) => inst.status !== InstallmentStatus.CANCELLED,
+  ).length;
+  const plan = previewPlanStamps(figures.ttc, paymentCount, stampDuty);
+
+  // Sending needs a pack and a plan. A pending total change is saved
+  // first (run), and the server rebalances the unpaid installments.
   const sendBlocker = !hasPack
     ? t('quoteEditor.sendNeedsPack')
-    : totalDirty && quote.paymentMode
-      ? t('quoteEditor.adjustWipesPlan')
-      : !quote.paymentMode
-        ? t('quoteEditor.sendNeedsPlan')
-        : null;
+    : !quote.paymentMode
+      ? t('quoteEditor.sendNeedsPlan')
+      : null;
 
   const statusHint = isDraft
     ? t('quoteUi.review.footerDraft')
     : quote.status === QuotationStatus.SENT
       ? t('quoteUi.review.footerSent')
-      : t('quoteUi.review.footerLocked');
+      : quote.status === QuotationStatus.APPROVED
+        ? t('quoteUi.review.footerApproved')
+        : t('quoteUi.review.footerLocked');
 
   const run = async (action: () => Promise<unknown>) => {
     try {
-      if (isDraft) await saveDraft();
+      if (editable) await saveDraft();
       await action();
     } catch {
       /* the mutation hooks toast their own errors */
     }
   };
+
+  const saveButton = (
+    <Button
+      variant="outline"
+      onClick={() => saveDraft().catch(() => undefined)}
+      disabled={!dirty || busy || belowPaid}
+      className={TAP}
+    >
+      {saving ? <Loader2 className="size-4 animate-spin" /> : null}
+      {t('common.save')}
+    </Button>
+  );
 
   const downloadPdf = async () => {
     try {
@@ -721,16 +939,79 @@ function QuoteSummary({
           ) : null}
           {form.discountAmount > 0 ? (
             <SummaryRow
-              label={t('quoteEditor.discount')}
+              label={discountLabel(
+                t('quoteEditor.discount'),
+                form.discountMode,
+                form.discountPercent,
+                lang,
+              )}
               value={`− ${money(form.discountAmount)}`}
             />
           ) : null}
-          <div className="flex items-baseline justify-between gap-3 border-t pt-3">
-            <dt className="font-medium">{t('quoteUi.review.netToBill')}</dt>
-            <dd className="text-lg font-semibold tabular-nums">
-              {hasPack ? money(net) : '—'}
-            </dd>
-          </div>
+          {hasPack ? (
+            <>
+              <div className="space-y-2 border-t pt-3">
+                <SummaryRow label={t('quoteEditor.totalHt')} value={money(figures.ht)} />
+                <SummaryRow
+                  label={t('quoteEditor.tvaLine', { rate: formatRate(figures.rate, lang) })}
+                  value={money(figures.tva)}
+                />
+                {figures.stamp > 0 ? (
+                  <SummaryRow label={t('quoteEditor.stampLine')} value={money(figures.stamp)} />
+                ) : null}
+              </div>
+              <div className="border-t pt-3">
+                <div className="flex items-baseline justify-between gap-3">
+                  <dt className="font-medium">{t('quoteEditor.totalTtc')}</dt>
+                  <dd className="text-lg font-semibold tabular-nums">{money(figures.ttc)}</dd>
+                </div>
+                {plan.count > 0 && plan.stamps > 0 ? (
+                  <div className="mt-2 space-y-2">
+                    <SummaryRow
+                      label={
+                        plan.count > 1
+                          ? t('withholdingUi.stampTimes', {
+                              count: plan.count,
+                              stamp: formatAmount(plan.stampEach),
+                            })
+                          : t('withholdingUi.stamp')
+                      }
+                      value={`+ ${money(plan.stamps)}`}
+                    />
+                    <div className="flex items-baseline justify-between gap-3">
+                      <dt className="min-w-0 font-medium">{t('withholdingUi.totalWithStamps')}</dt>
+                      <dd className="shrink-0 font-semibold tabular-nums">{money(plan.total)}</dd>
+                    </div>
+                  </div>
+                ) : null}
+                <PriceIncludesTaxNote
+                  className="mt-1"
+                  tvaRate={figures.rate > 0 ? figures.rate : defaultTvaRate}
+                  stamp={stampDuty}
+                  currency={quote.currency}
+                />
+                {totalDirty ? (
+                  <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                    {t('quoteEditor.previewNote')}
+                  </p>
+                ) : null}
+              </div>
+              {received > 0 ? (
+                <div className="space-y-2 border-t pt-3">
+                  <SummaryRow label={t('quoteEditor.alreadyPaid')} value={money(received)} />
+                  <div className="flex items-baseline justify-between gap-3">
+                    <dt className="font-medium">{t('quoteEditor.leftToPay')}</dt>
+                    <dd className="font-semibold tabular-nums">{money(leftToPay)}</dd>
+                  </div>
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <div className="flex items-baseline justify-between gap-3 border-t pt-3">
+              <dt className="font-medium">{t('quoteEditor.totalTtc')}</dt>
+              <dd className="text-lg font-semibold tabular-nums">—</dd>
+            </div>
+          )}
         </dl>
 
         <div className="grid gap-2 border-t p-5">
@@ -752,8 +1033,8 @@ function QuoteSummary({
             <>
               <Button
                 onClick={() => run(() => send.mutateAsync(quote.id))}
-                disabled={!!sendBlocker || busy}
-                className="w-full gap-2"
+                disabled={!!sendBlocker || busy || belowPaid}
+                className={cn('w-full gap-2', TAP)}
               >
                 {send.isPending ? (
                   <Loader2 className="size-4 animate-spin" />
@@ -765,66 +1046,60 @@ function QuoteSummary({
               {sendBlocker ? (
                 <p className="text-xs text-muted-foreground">{sendBlocker}</p>
               ) : null}
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  variant="outline"
-                  onClick={() => saveDraft().catch(() => undefined)}
-                  disabled={!dirty || busy}
-                >
-                  {saving ? <Loader2 className="size-4 animate-spin" /> : null}
-                  {t('common.save')}
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() =>
-                    run(() => generate.mutateAsync({ id: quote.id, lang: form.language }))
-                  }
-                  disabled={busy || !hasPack}
-                >
-                  {generate.isPending ? <Loader2 className="size-4 animate-spin" /> : null}
-                  {hasPdf ? t('quoteUi.review.regeneratePdf') : t('quoteUi.review.generatePdf')}
-                </Button>
-              </div>
             </>
-          ) : (
-            <>
-              {quote.status === QuotationStatus.SENT ? (
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    if (!confirmRecall) {
-                      setConfirmRecall(true);
-                      return;
-                    }
-                    recall.mutate(quote.id, { onSuccess: () => setConfirmRecall(false) });
-                  }}
-                  onBlur={() => setConfirmRecall(false)}
-                  disabled={recall.isPending}
-                  className="w-full gap-2"
-                >
-                  {recall.isPending ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : (
-                    <RotateCcw className="size-4" />
-                  )}
-                  {confirmRecall
-                    ? t('quoteUi.review.confirmRecall')
-                    : t('quoteUi.review.recallToEdit')}
-                </Button>
-              ) : null}
+          ) : null}
+          {editable ? (
+            <div className="grid grid-cols-2 gap-2">
+              {saveButton}
               <Button
                 variant="outline"
-                onClick={() => run(() => generate.mutateAsync({ id: quote.id, lang: form.language }))}
-                disabled={busy}
-                className="w-full gap-2"
+                onClick={() =>
+                  run(() => generate.mutateAsync({ id: quote.id, lang: form.language }))
+                }
+                disabled={busy || !renderable || belowPaid}
+                className={TAP}
               >
                 {generate.isPending ? <Loader2 className="size-4 animate-spin" /> : null}
-                {t('quoteUi.review.regeneratePdf')}
+                {hasPdf ? t('quoteUi.review.regeneratePdf') : t('quoteUi.review.generatePdf')}
               </Button>
-            </>
+            </div>
+          ) : (
+            <Button
+              variant="outline"
+              onClick={() => run(() => generate.mutateAsync({ id: quote.id, lang: form.language }))}
+              disabled={busy}
+              className={cn('w-full gap-2', TAP)}
+            >
+              {generate.isPending ? <Loader2 className="size-4 animate-spin" /> : null}
+              {t('quoteUi.review.regeneratePdf')}
+            </Button>
           )}
+          {canRecall ? (
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (!confirmRecall) {
+                  setConfirmRecall(true);
+                  return;
+                }
+                recall.mutate(quote.id, { onSuccess: () => setConfirmRecall(false) });
+              }}
+              onBlur={() => setConfirmRecall(false)}
+              disabled={recall.isPending || busy}
+              className={cn('w-full gap-2', TAP)}
+            >
+              {recall.isPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <RotateCcw className="size-4" />
+              )}
+              {confirmRecall
+                ? t('quoteUi.review.confirmRecall')
+                : t('quoteUi.review.recallToEdit')}
+            </Button>
+          ) : null}
           {hasPdf ? (
-            <Button variant="ghost" onClick={downloadPdf} className="w-full gap-2">
+            <Button variant="ghost" onClick={downloadPdf} className={cn('w-full gap-2', TAP)}>
               <Download className="size-4" />
               {t('quoteEditor.downloadPdf')}
             </Button>
@@ -840,7 +1115,7 @@ function QuoteSummary({
         </div>
       </div>
 
-      {canCancel ? <CancelQuoteButton quote={quote} orderId={orderId} /> : null}
+      {canDelete ? <DeleteQuoteButton quote={quote} orderId={orderId} /> : null}
     </aside>
   );
 }
@@ -854,7 +1129,12 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function CancelQuoteButton({ quote, orderId }: { quote: Quotation; orderId: string }) {
+/**
+ * Shown only while nothing was received and no payment is in progress
+ * (`quote.canDelete`). The cancel endpoint deletes the quote and its
+ * schedule, so the dialog says so plainly.
+ */
+function DeleteQuoteButton({ quote, orderId }: { quote: Quotation; orderId: string }) {
   const { t } = useT();
   const cancel = useCancelQuotation();
   return (
@@ -864,15 +1144,20 @@ function CancelQuoteButton({ quote, orderId }: { quote: Quotation; orderId: stri
           variant="ghost"
           size="sm"
           disabled={cancel.isPending}
-          className="w-full text-destructive hover:bg-destructive/10 hover:text-destructive"
+          className="h-11 w-full gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive sm:h-7"
         >
-          {t('quoteEditor.cancelQuote')}
+          {cancel.isPending ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            <Trash2 className="size-3.5" />
+          )}
+          {t('quoteEditor.deleteQuote')}
         </Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>{t('quoteEditor.cancelTitle')}</AlertDialogTitle>
-          <AlertDialogDescription>{t('quoteEditor.cancelDesc')}</AlertDialogDescription>
+          <AlertDialogTitle>{t('quoteEditor.deleteTitle')}</AlertDialogTitle>
+          <AlertDialogDescription>{t('quoteEditor.deleteDesc')}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>{t('quoteEditor.keepQuote')}</AlertDialogCancel>
@@ -880,7 +1165,7 @@ function CancelQuoteButton({ quote, orderId }: { quote: Quotation; orderId: stri
             variant="destructive"
             onClick={() => cancel.mutate({ id: quote.id, orderId })}
           >
-            {t('quoteEditor.cancelQuote')}
+            {t('quoteEditor.deleteQuote')}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -938,7 +1223,7 @@ function DoctorLayout({
     );
   }
 
-  const hasPdf = !!quote.pdfFilePath;
+  const hasPdf = devisAvailable(quote);
 
   const handleDownloadPdf = async () => {
     if (!hasPdf) return;
@@ -1089,7 +1374,7 @@ function DoctorLayout({
         approve to start the payment plan" gate underneath made the
         page read like a two-step process when it's really one. The
         backend auto-flips the quote to `approved` the moment the
-        first payment lands (see PaymentsService.approveQuoteIfSent)
+        first payment lands (see QuotationService.approveOnFirstPayment)
         so the audit trail stays intact.
 
        */}

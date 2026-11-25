@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Patch,
   Post,
   Put,
   Query,
@@ -115,7 +116,9 @@ export class QuotationController {
   @Roles(...ADMIN_ROLES)
   @ApiOperation({
     summary:
-      'Update quotation fees / language / notes (admin, draft state only).',
+      'Update quotation fees / language / notes (admin; draft, sent or approved). Fees are TTC. ' +
+      'A new total rebalances the unpaid installments in proportion; paid ones never move. ' +
+      'Errors: 400 QUOTE_TOTAL_BELOW_PAID, 409 QUOTE_PAYMENT_IN_FLIGHT, 409 QUOTE_PLAN_REQUIRED.',
   })
   @ApiParam({ name: 'id', type: String })
   @ApiResponse({ status: 200, type: QuotationResponseDto })
@@ -130,12 +133,26 @@ export class QuotationController {
     });
   }
 
+  /** Same edit under PATCH: the update is partial, both verbs are accepted. */
+  @Patch('quotations/:id')
+  @Roles(...ADMIN_ROLES)
+  @ApiOperation({ summary: 'Alias of PUT quotations/:id.' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiResponse({ status: 200, type: QuotationResponseDto })
+  async patch(
+    @Param('id') id: string,
+    @Body() dto: UpdateQuotationDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.update(id, dto, user);
+  }
+
   @Post('quotations/:id/send')
   @HttpCode(HttpStatus.OK)
   @Roles(...ADMIN_ROLES)
   @ApiOperation({
     summary:
-      'Send a draft quotation to the doctor. Locks in quotationNumber + company/clinic snapshots, transitions order.status to quotation_sent.',
+      'Send a draft quotation to the doctor. Locks in quotationNumber + company/clinic snapshots, renders the stored devis PDF, transitions order.status to quotation_sent.',
   })
   @ApiParam({ name: 'id', type: String })
   @ApiResponse({ status: 200, type: QuotationResponseDto })
@@ -179,14 +196,14 @@ export class QuotationController {
       userId: user.sub,
       role: user.role as UserRole,
     });
-    return this.pdfService.generateAndPersist(quote);
+    return this.service.present(await this.pdfService.generateAndPersist(quote));
   }
 
   @Get('quotations/:id/pdf')
   @SkipThrottle()
   @ApiOperation({
     summary:
-      'Stream the generated PDF (admin, owning dentist). RBAC-gated, not served via the public /uploads static route.',
+      'Stream the generated PDF (admin, owning dentist). RBAC-gated, not served via the public /uploads static route. A sent or approved quote whose file is missing is rendered on the spot, in its own language.',
   })
   @ApiParam({ name: 'id', type: String })
   async downloadPdf(
@@ -198,8 +215,11 @@ export class QuotationController {
       userId: user.sub,
       role: user.role as UserRole,
     });
+    // A numbered quote whose devis file is gone (dropped as stale by a
+    // migration, or missing on disk) is rendered again instead of a 404.
+    const stored = await this.pdfService.ensureStoredPdf(quote);
     const { stream, fileName, mimeType } =
-      await this.pdfService.openPdfStream(quote);
+      await this.pdfService.openPdfStream(stored);
     res.setHeader('Content-Type', mimeType);
     res.setHeader('Content-Disposition', contentDispositionFileName(fileName));
     stream.pipe(res);
@@ -210,7 +230,7 @@ export class QuotationController {
   @Roles(...ADMIN_ROLES)
   @ApiOperation({
     summary:
-      'Cancel a draft/sent quotation. Frees the order slot so admin can re-issue a fresh quote.',
+      'Delete a quotation at any status while no money was received and no payment is in progress (failed / expired / rejected / cancelled attempts do not block it). Frees the order slot so admin can re-issue a fresh quote. Errors: 409 QUOTE_PAYMENT_RECEIVED, 409 QUOTE_PAYMENT_IN_FLIGHT.',
   })
   @ApiParam({ name: 'id', type: String })
   async cancel(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
@@ -225,7 +245,7 @@ export class QuotationController {
   @Roles(...ADMIN_ROLES)
   @ApiOperation({
     summary:
-      'Recall a sent quotation back to draft so admin can correct it (wrong pack, wrong fees, wrong language, typo). The order goes back to treatment_approved and the doctor receives a "revision incoming" bell ping.',
+      'Recall a sent or approved quotation back to draft so admin can correct it (wrong pack, wrong fees, wrong language, typo), while no money was received and none is in progress. The order goes back to treatment_approved and the doctor receives a "revision incoming" bell ping. Errors: 409 QUOTE_PAYMENT_RECEIVED, 409 QUOTE_PAYMENT_IN_FLIGHT.',
   })
   @ApiParam({ name: 'id', type: String })
   @ApiResponse({ status: 200, type: QuotationResponseDto })

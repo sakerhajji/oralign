@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   Copy,
   CreditCard,
+  FilePen,
   FileText,
   Landmark,
   Loader2,
@@ -25,6 +26,12 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import {
+  isWithholdingChoiceConflict,
+  PriceIncludesTaxNote,
+  WithholdingChoice,
+} from '@/components/payments/withholding';
+import { previewPaymentCharge } from '@/lib/billing/tax-split';
 import { cn } from '@/lib/utils';
 import { formatPrice } from '@/lib/utils/currency';
 import { useT } from '@/lib/i18n/lang-context';
@@ -37,7 +44,7 @@ import {
 } from '@/lib/hooks';
 import type { BankDetails, DentalOrder } from '@/lib/types';
 
-type MethodKey = 'card' | 'bank_transfer' | 'cash';
+type MethodKey = 'card' | 'bank_transfer' | 'cash' | 'cheque';
 
 interface MethodConfig {
   key: MethodKey;
@@ -46,10 +53,10 @@ interface MethodConfig {
 }
 
 /**
- * The three options visible inside the dialog. Order matches the user
- * spec: Bank transfer → Card → Cash. Cash is admin-only and is
- * filtered out for the doctor view because cash collection happens
- * in-clinic and gets recorded by the admin.
+ * The options visible inside the dialog. Order matches the user
+ * spec: Bank transfer → Card → Cash → Cheque. Cash and cheque are
+ * admin-only and are filtered out for the doctor view because they are
+ * collected in-clinic and recorded by the admin.
  *
  * Labels + descriptions live in the dictionary under
  * `feeUi.methods.<key>` and are resolved with t() at render time
@@ -59,7 +66,12 @@ const METHODS: MethodConfig[] = [
   { key: 'bank_transfer', icon: Landmark },
   { key: 'card', icon: CreditCard },
   { key: 'cash', icon: Banknote, adminOnly: true },
+  { key: 'cheque', icon: FilePen, adminOnly: true },
 ];
+
+/** a + b - c in millimes, so 99.9 + 1.1 never prints 100.99999. */
+const addMoney = (a: number, b: number, minus = 0) =>
+  (Math.round(a * 1000) + Math.round(b * 1000) - Math.round(minus * 1000)) / 1000;
 
 /**
  * Treatment-fee payment dialog.
@@ -109,9 +121,11 @@ export function TreatmentFeePaymentDialog({
   // Settings-driven amount + currency so the doctor sees what the
   // admin set under /account/billing-settings, not a stale hard-coded
   // value. The CBCT supplement snapshotted on the ORDER (server-side,
-  // at request time) is added on top. An amount already stamped on the
+  // at request time) is added on top. An amount already recorded on the
   // order (paid / awaiting confirmation) always wins — it's the
-  // authoritative total for that order.
+  // authoritative total for that order. That figure is the CASH (fee due
+  // + droit de timbre - retenue à la source), so the amount due adds the
+  // retenue back and takes the stamp off.
   const baseFee = defaults?.defaultTreatmentFee ?? 0;
   const cbctFee = order.cbctFeeAmount ?? 0;
   // Defensive: fees waived by the welcome gift leave nothing
@@ -120,7 +134,13 @@ export function TreatmentFeePaymentDialog({
   const waivedByGift = !!order.welcomeGift;
   const amount = waivedByGift
     ? 0
-    : (order.treatmentFeeAmount ?? baseFee + cbctFee);
+    : order.treatmentFeeAmount != null
+      ? addMoney(
+          Number(order.treatmentFeeAmount),
+          Number(order.treatmentFeeWithholdingAmount ?? 0),
+          Number(order.treatmentFeeStampAmount ?? 0),
+        )
+      : addMoney(baseFee, cbctFee);
   const currency =
     order.cbctFeeCurrency ?? defaults?.defaultCurrency ?? 'TND';
   const bankDetails = defaults?.bankDetails ?? null;
@@ -149,6 +169,26 @@ export function TreatmentFeePaymentDialog({
 
   const [selected, setSelected] = useState<MethodKey | null>(null);
   const [proofFile, setProofFile] = useState<File | null>(null);
+
+  // Retenue à la source: offered when the company rate is above 0. A
+  // practitioner who already declared with it finds it ticked again.
+  // Display only — the server computes the retenue from the choice.
+  const withholdingRate = defaults?.withholdingRate ?? 0;
+  const [applyWithholding, setApplyWithholding] = useState(
+    () => Number(order.treatmentFeeWithholdingAmount ?? 0) > 0,
+  );
+  const wantsWithholding = applyWithholding && withholdingRate > 0;
+  // The fee's facture carries its own droit de timbre, added on top; the
+  // retenue is taken on the fee TTC (stamp excluded). A new payment
+  // snapshots the current stamp, as the server does.
+  const stampDuty = Math.max(0, Number(defaults?.stampDuty ?? 0) || 0);
+  const charge = previewPaymentCharge(amount, stampDuty, withholdingRate, wantsWithholding);
+  // What actually changes hands: the fee + the stamp - the retenue.
+  const toPay = charge.cash;
+  // Only the retenue-choice conflict gets the inline explanation; any
+  // other refusal (a transfer awaiting confirmation…) is the toast's.
+  const attemptConflict =
+    cardSession.isError && isWithholdingChoiceConflict(cardSession.error);
   const selectedMethod =
     selected && methods.some((m) => m.key === selected) ? selected : null;
   const selectedMethodConfig = selectedMethod
@@ -183,6 +223,7 @@ export function TreatmentFeePaymentDialog({
           orderId: order.id,
           idempotencyKey,
           language: lang === 'en' ? 'en' : 'fr',
+          applyWithholding: wantsWithholding,
         },
         {
           onSuccess: (session) => {
@@ -195,8 +236,14 @@ export function TreatmentFeePaymentDialog({
       );
       return;
     }
+    // Cash or cheque, recorded by an admin with the practitioner's choice.
     pay.mutate(
-      { id: order.id, method: selectedMethod, amount },
+      {
+        id: order.id,
+        method: selectedMethod,
+        amount: toPay,
+        applyWithholding: wantsWithholding,
+      },
       {
         onSuccess: () => {
           onPaid?.();
@@ -211,7 +258,12 @@ export function TreatmentFeePaymentDialog({
   const handleBankTransferUpload = () => {
     if (!proofFile) return;
     uploadProof.mutate(
-      { id: order.id, proof: proofFile, amount },
+      {
+        id: order.id,
+        proof: proofFile,
+        amount: toPay,
+        applyWithholding: wantsWithholding,
+      },
       {
         onSuccess: () => {
           onPaid?.();
@@ -258,41 +310,56 @@ export function TreatmentFeePaymentDialog({
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable] lg:grid lg:grid-cols-[38%_minmax(0,1fr)] lg:overflow-hidden">
           {/* Summary rail — stable context, fixed 38% on desktop */}
           <aside className="flex flex-col border-b bg-muted/30 p-5 sm:p-6 lg:min-h-0 lg:overflow-y-auto lg:border-b-0 lg:border-r lg:p-7">
+            {/* The headline is what changes hands: fee + stamp - retenue. */}
             <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              {t('feeUi.payDialog.amountDue')}
+              {t('feeUi.payDialog.amountToPay')}
             </p>
             <p className="mt-1.5 text-3xl font-bold tabular-nums text-foreground sm:text-4xl">
-              {formatPrice(amount, currency)}
+              {formatPrice(toPay, currency)}
             </p>
-            {/* Price breakdown — only when the order carries a CBCT
-                supplement, so plain orders keep the single clean figure. */}
-            {!waivedByGift && cbctFee > 0 && order.treatmentFeeAmount == null && (
-              <dl className="mt-3 space-y-1 rounded-lg border bg-card p-3 text-sm">
-                <div className="flex items-center justify-between gap-3">
-                  <dt className="text-muted-foreground">
-                    {t('feeUi.payDialog.breakdownBase')}
-                  </dt>
-                  <dd className="font-medium tabular-nums">
-                    {formatPrice(baseFee, currency)}
-                  </dd>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <dt className="text-muted-foreground">
-                    {t('feeUi.payDialog.breakdownCbct')}
-                  </dt>
-                  <dd className="font-medium tabular-nums">
-                    {formatPrice(cbctFee, currency)}
-                  </dd>
-                </div>
-                <div className="flex items-center justify-between gap-3 border-t pt-1.5">
-                  <dt className="font-semibold">
-                    {t('feeUi.payDialog.breakdownTotal')}
-                  </dt>
-                  <dd className="font-semibold tabular-nums">
-                    {formatPrice(amount, currency)}
-                  </dd>
-                </div>
-              </dl>
+            {hasAmountDue && (
+              <PriceIncludesTaxNote
+                tvaRate={defaults?.defaultTvaRate ?? 19}
+                stamp={stampDuty}
+                currency={currency}
+                className="mt-1"
+              />
+            )}
+            {/* The breakdown: fee TTC (with its CBCT supplement on its own
+                line when the order carries one), the droit de timbre, the
+                retenue when ticked, and what to pay / wire / collect. The
+                retenue checkbox shows when the company rate is above 0. */}
+            {hasAmountDue && !isResolvingAmount && (
+              <WithholdingChoice
+                className="mt-3"
+                charge={charge}
+                kind="fee"
+                dueLines={
+                  !waivedByGift && cbctFee > 0 && order.treatmentFeeAmount == null
+                    ? [
+                        { label: t('feeUi.payDialog.breakdownBase'), amount: baseFee },
+                        { label: t('feeUi.payDialog.breakdownCbct'), amount: cbctFee },
+                      ]
+                    : undefined
+                }
+                rate={withholdingRate}
+                currency={currency}
+                checked={applyWithholding}
+                onCheckedChange={(next) => {
+                  setApplyWithholding(next);
+                  // A refused card session was about the other choice.
+                  if (cardSession.isError) cardSession.reset();
+                }}
+                disabled={busy}
+                audience={isAdmin ? 'admin' : 'payer'}
+                netLabel={
+                  isBankTransferSelected
+                    ? t('withholdingUi.toTransfer')
+                    : selectedMethod === 'cash' || selectedMethod === 'cheque'
+                      ? t('withholdingUi.toCollect')
+                      : undefined
+                }
+              />
             )}
             <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
               {t('feeUi.payDialog.feeIntro')}
@@ -310,6 +377,11 @@ export function TreatmentFeePaymentDialog({
                 {isBankTransferSelected
                   ? t('feeUi.payDialog.footnoteBank')
                   : t('feeUi.payDialog.footnoteDefault')}
+                {/* Every payment produces an invoice, e-mailed to the
+                    practitioner. */}
+                {!isAdmin && (
+                  <span className="mt-1 block">{t('feeUi.payDialog.invoiceNote')}</span>
+                )}
               </p>
             </div>
           </aside>
@@ -383,6 +455,18 @@ export function TreatmentFeePaymentDialog({
                 </div>
               )}
 
+              {/* The card session was refused: an open card payment carries
+                  the other retenue choice. */}
+              {attemptConflict && (
+                <div
+                  role="alert"
+                  className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
+                >
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>{t('withholdingUi.choiceConflict')}</span>
+                </div>
+              )}
+
               {/*
                 Step 2 (bank transfer only) — the clinic's bank details
                 come BEFORE the receipt upload: the doctor needs the
@@ -393,7 +477,26 @@ export function TreatmentFeePaymentDialog({
                   bankDetails={bankDetails}
                   beneficiary={beneficiary}
                   beneficiaryAddress={beneficiaryAddress}
-                  amount={amount}
+                  amount={toPay}
+                  amountNote={
+                    charge.withholding > 0
+                      ? t(
+                          charge.stamp > 0
+                            ? 'feeUi.bank.amountStampNetNote'
+                            : 'feeUi.bank.amountNetNote',
+                          {
+                            due: formatPrice(charge.due, currency),
+                            stamp: formatPrice(charge.stamp, currency),
+                            withheld: formatPrice(charge.withholding, currency),
+                          },
+                        )
+                      : charge.stamp > 0
+                        ? t('feeUi.bank.amountStampNote', {
+                            due: formatPrice(charge.due, currency),
+                            stamp: formatPrice(charge.stamp, currency),
+                          })
+                        : undefined
+                  }
                   currency={currency}
                   paymentReference={order.orderCode}
                 />
@@ -519,9 +622,12 @@ export function TreatmentFeePaymentDialog({
               )}
               {selectedMethod === 'cash'
                 ? t('feeUi.payDialog.recordCashBtn')
-                : t('feeUi.payDialog.payAmountBtn', {
-                    amount: `${amount} ${currency}`,
-                  })}
+                : selectedMethod === 'cheque'
+                  ? t('feeUi.payDialog.recordChequeBtn')
+                  : t('feeUi.payDialog.payAmountBtn', {
+                      // The net: what the card is charged.
+                      amount: formatPrice(toPay, currency),
+                    })}
             </Button>
           ) : null}
         </div>
@@ -615,13 +721,17 @@ function BankTransferInstructions({
   beneficiary,
   beneficiaryAddress,
   amount,
+  amountNote,
   currency,
   paymentReference,
 }: {
   bankDetails: BankDetails | null;
   beneficiary: string | null;
   beneficiaryAddress: string | null;
+  /** What to transfer: the amount due + the stamp - any retenue. */
   amount: number;
+  /** "1 000,000 TND dus + 1,000 TND de timbre − 10,000 TND de retenue". */
+  amountNote?: string;
   currency: string;
   paymentReference: string;
 }) {
@@ -715,7 +825,8 @@ function BankTransferInstructions({
         <div className="grid gap-2 sm:grid-cols-2">
           <HighlightCard
             label={t('feeUi.bank.amountToTransfer')}
-            value={`${amount} ${currency}`}
+            value={formatPrice(amount, currency)}
+            note={amountNote}
             // Money goes one step bigger than the reference — eyes
             // should land here first when scanning the panel.
             valueClassName="text-base tabular-nums"
@@ -787,11 +898,14 @@ function SelectedMethodStrip({
 function HighlightCard({
   label,
   value,
+  note,
   valueClassName,
   copyable,
 }: {
   label: string;
   value: string;
+  /** One muted line under the value. */
+  note?: string;
   valueClassName?: string;
   copyable?: boolean;
 }) {
@@ -811,6 +925,7 @@ function HighlightCard({
       >
         {value}
       </p>
+      {note && <p className="mt-0.5 text-[11px] leading-snug text-primary/80">{note}</p>}
     </div>
   );
 }

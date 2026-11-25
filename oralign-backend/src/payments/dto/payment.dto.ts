@@ -8,6 +8,7 @@ import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsIn,
@@ -22,6 +23,7 @@ import {
 } from 'class-validator';
 import { IsCalendarDate } from '../../common/decorators/is-calendar-date.decorator';
 import {
+  rawBoolean,
   toOptionalTrimmed,
   toQueryList,
 } from '../../common/dto/query-transforms';
@@ -56,6 +58,17 @@ export class CreateClicToPaySessionDto {
   @IsOptional()
   @IsIn(['DESKTOP', 'MOBILE'])
   pageView?: 'DESKTOP' | 'MOBILE';
+
+  @ApiPropertyOptional({
+    type: Boolean,
+    default: false,
+    description:
+      'Apply the retenue à la source (installment and treatment_fee). Rate and amount are computed server-side, on the amount due (stamp excluded); the card is charged the due + the droit de timbre - the retenue. 400 WITHHOLDING_DISABLED when the company rate is 0; 409 WITHHOLDING_CHOICE_CONFLICT when a live attempt was opened with the other choice; 409 PAYMENT_CHARGE_CHANGED when a live attempt with the same choice charges another amount than a new one would (opened before the stamp, the retenue rate or the due changed); 409 PAYMENT_ATTEMPT_IN_PROGRESS stays for a transfer awaiting confirmation on the installment.',
+  })
+  @IsOptional()
+  @Transform(rawBoolean)
+  @IsBoolean()
+  applyWithholding?: boolean;
 }
 
 export enum PaymentSortBy {
@@ -84,6 +97,19 @@ export class DeclareBankTransferDto {
   @IsString()
   @MaxLength(120)
   bankReference?: string;
+
+  // Multipart: the field arrives as the string "true" / "false" and is read
+  // raw, so "false" stays false (implicit conversion would make it true).
+  @ApiPropertyOptional({
+    type: Boolean,
+    default: false,
+    description:
+      'Apply the retenue à la source: the transfer is then due + droit de timbre - retenue (the retenue is computed on the due, stamp excluded); without it, due + stamp. Multipart string "true" / "false".',
+  })
+  @IsOptional()
+  @Transform(rawBoolean)
+  @IsBoolean()
+  applyWithholding?: boolean;
 }
 
 /**
@@ -111,13 +137,23 @@ export class RejectPaymentDto {
   rejectionReason!: string;
 }
 
+/** The in-person methods an admin records on an installment. */
+export const RECORDED_PAYMENT_METHODS = [
+  PaymentMethod.cash,
+  PaymentMethod.cheque,
+] as const;
+export type RecordedPaymentMethod = (typeof RECORDED_PAYMENT_METHODS)[number];
+
 /**
- * Admin records a cash payment directly. Amount is loaded from the
- * installment server-side — the receipt + notes are optional admin
- * metadata.
+ * Admin records a cash or cheque payment directly. Amount is loaded from
+ * the installment server-side — the receipt (or cheque number) + notes
+ * are optional admin metadata.
  */
 export class RecordCashPaymentDto {
-  @ApiPropertyOptional({ example: 'CSH-1042' })
+  @ApiPropertyOptional({
+    example: 'CSH-1042',
+    description: 'Cash receipt or cheque number.',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(120)
@@ -128,6 +164,25 @@ export class RecordCashPaymentDto {
   @IsString()
   @MaxLength(1000)
   notes?: string;
+
+  @ApiPropertyOptional({
+    enum: RECORDED_PAYMENT_METHODS,
+    default: PaymentMethod.cash,
+  })
+  @IsOptional()
+  @IsIn(RECORDED_PAYMENT_METHODS)
+  method?: RecordedPaymentMethod;
+
+  @ApiPropertyOptional({
+    type: Boolean,
+    default: false,
+    description:
+      'The practitioner applied the retenue à la source: the cash or cheque received is due + droit de timbre - retenue (the retenue is computed on the due, stamp excluded); without it, due + stamp.',
+  })
+  @IsOptional()
+  @Transform(rawBoolean)
+  @IsBoolean()
+  applyWithholding?: boolean;
 }
 
 /**
@@ -392,7 +447,8 @@ export class PaymentPractitionersDto {
 export class PaymentBucketDto {
   @ApiProperty({
     example: '1250.500',
-    description: 'Sum in TND, always written with 3 decimals.',
+    description:
+      'Cash received in TND, always written with 3 decimals: stamps included, retenues kept back by the practitioner excluded.',
   })
   amount!: string;
 
@@ -409,6 +465,9 @@ export class PaymentMethodBucketsDto {
 
   @ApiProperty({ type: PaymentBucketDto })
   bank_transfer!: PaymentBucketDto;
+
+  @ApiProperty({ type: PaymentBucketDto })
+  cheque!: PaymentBucketDto;
 }
 
 export class PaymentPurposeSummaryDto extends PaymentBucketDto {

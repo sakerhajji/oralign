@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import {
   CompanyBillingSettings,
+  InvoiceStatus,
   Payment,
   PaymentMethod,
   PaymentRecordStatus,
@@ -13,11 +14,17 @@ import { CompanyBillingSettingsService } from '../../quotations/services/company
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotFoundException } from '../../common/exceptions/app.exception';
 import {
+  resolveTvaRate,
+  splitInclusive,
+  toAmount,
+} from '../../common/billing/tax-split';
+import {
   getInvoiceLabels,
   InvoiceLabels,
   InvoiceLanguage,
   pickInvoiceTranslation,
 } from './invoice-i18n';
+import { invoicePaymentReference } from './payment-reference';
 
 const UPLOAD_ROOT = path.join(process.cwd(), 'uploads');
 
@@ -64,6 +71,8 @@ export type InvoicePaymentView = Pick<
   | 'paidAt'
   | 'createdAt'
   | 'invoiceNumber'
+  | 'withholdingAmount'
+  | 'stampAmount'
 >;
 
 export interface InvoiceRenderPayload {
@@ -127,8 +136,10 @@ export interface InvoiceRenderPayload {
   // when it synthesises a Payment row that never existed.
   rows?: InvoiceLineRow[];
   totals?: InvoiceTotalLine[];
-  /** Overrides the "Reçu de paiement" heading (a manual invoice is not a receipt). */
+  /** Overrides the document heading. */
   documentTitle?: string;
+  /** Column headers when the rows are HT (a stored invoice). */
+  columnLabels?: { unitPrice: string; amount: string };
   /**
    * Replaces the two leading lines of the "Facturé à" box — the
    * "Médecin: …" / "Pour le patient: … (Commande: …)" pair, which is
@@ -136,6 +147,159 @@ export interface InvoiceRenderPayload {
    * order. The rest of the box (address, phone, tax id) is unchanged.
    */
   billedToLead?: { text: string; strong?: boolean }[];
+  /** Lines appended at the END of the "Facturé à" box (patient, order). */
+  billedToTail?: { text: string; strong?: boolean }[];
+  /**
+   * A stored invoice speaks for itself: its own issue date, its own
+   * status vocabulary (Brouillon / Émise / Payée / Annulée) and the
+   * settlement line built from its stored method and reference — never
+   * the payment-receipt wording the two legacy flows derive.
+   */
+  record?: {
+    issueDate: Date;
+    statusLabel: string;
+    statusPaid: boolean;
+    /** "Mode de paiement : … · Réglée le … · Réf. …"; null hides the block. */
+    paymentText: string | null;
+    showBank: boolean;
+  };
+}
+
+/** The money columns of a stored invoice, as numbers. */
+export interface InvoiceRecordMoney {
+  status: InvoiceStatus;
+  pricesIncludeTax: boolean;
+  tvaRate: number;
+  discountAmount: number;
+  /** Set when the remise was typed as a percentage: printed "Remise (10 %)". */
+  discountPercent?: number | null;
+  stampDuty: number;
+  subTotalHt: number;
+  tvaAmount: number;
+  totalTtc: number;
+  withholdingRate: number | null;
+  withholdingAmount: number;
+  netPayable: number;
+}
+
+/**
+ * The totals block of a stored invoice, read from the row (InvoiceService
+ * owns the maths; a PDF prints exactly what was stored), in the order the
+ * owner asked for:
+ *   [Total TTC brut | Total HT brut, Remise]   only with a discount
+ *   Total HT, TVA (r %), Droit de timbre (when > 0), Total TTC
+ *   [Retenue à la source (r %), Net à payer]  only with a withholding
+ *   [Montant payé = net]                       only when paid
+ * The stamp is ADDED (HT + TVA + timbre = Total TTC), the retenue is on
+ * the TTC without the stamp, and Net à payer = Total TTC - retenue.
+ * The last money row of the list is the dark "final" one.
+ */
+export function buildInvoiceRecordTotals(
+  inv: InvoiceRecordMoney,
+  labels: InvoiceLabels,
+  money: (value: number) => string,
+  rate: (value: number) => string,
+): InvoiceTotalLine[] {
+  const totals: InvoiceTotalLine[] = [];
+  const discount = Math.max(0, inv.discountAmount);
+  const withholding = Math.max(0, inv.withholdingAmount);
+  // Rows written before the column existed carry netPayable = totalTtc
+  // (migration backfill); the fallback only guards a row left at 0.
+  const net =
+    withholding > 0 || inv.netPayable > 0 ? inv.netPayable : inv.totalTtc;
+
+  // With a discount the reader needs the gross figure, the discount, then
+  // the net. TTC pricing discounts the TTC of the lines (the stamp is
+  // added after, so it is no part of the gross); HT pricing the HT.
+  if (discount > 0) {
+    const grossTtc =
+      Math.round((inv.totalTtc - Math.max(0, inv.stampDuty) + discount) * 1000) /
+      1000;
+    totals.push(
+      inv.pricesIncludeTax
+        ? { label: labels.grossTtc, value: money(grossTtc) }
+        : { label: labels.grossHt, value: money(inv.subTotalHt + discount) },
+    );
+    const percent = Number(inv.discountPercent ?? 0);
+    totals.push({
+      label:
+        percent > 0
+          ? `${labels.discount} (${rate(percent)} %)`
+          : labels.discount,
+      value: `- ${money(discount)}`,
+    });
+  }
+  totals.push({ label: labels.subtotalHt, value: money(inv.subTotalHt) });
+  totals.push({
+    label: `${labels.vatRate} (${rate(inv.tvaRate)} %)`,
+    value: money(inv.tvaAmount),
+  });
+  if (inv.stampDuty > 0) {
+    totals.push({ label: labels.stampDuty, value: money(inv.stampDuty) });
+  }
+  totals.push({
+    label: labels.totalTtc,
+    value: money(inv.totalTtc),
+    kind: withholding > 0 ? 'normal' : 'final',
+  });
+  if (withholding > 0) {
+    totals.push({
+      label: labels.withholding(
+        inv.withholdingRate ? rate(inv.withholdingRate) : null,
+      ),
+      value: `- ${money(withholding)}`,
+    });
+    totals.push({ label: labels.netPayable, value: money(net), kind: 'final' });
+  }
+  if (inv.status === InvoiceStatus.paid) {
+    totals.push({ label: labels.amountPaid, value: money(net), kind: 'paid' });
+  }
+  return totals;
+}
+
+/**
+ * The settlement line of a stored invoice: "Mode de paiement : Carte
+ * bancaire · Réglée le 19 nov. 2026 · Réf. 123". "Réglée le" only when the
+ * invoice is paid; null when there is nothing to say (the block is hidden).
+ */
+export function invoiceRecordPaymentText(args: {
+  method: PaymentMethod | null;
+  reference: string | null;
+  paidAt: Date | null;
+  paid: boolean;
+  labels: InvoiceLabels;
+  formatDate: (date: Date) => string;
+}): string | null {
+  const { labels } = args;
+  const parts: string[] = [];
+  if (args.method) {
+    parts.push(`${labels.paymentMethod}${labels.sep}${paymentMethodLabel(args.method, labels)}`);
+  }
+  if (args.paid && args.paidAt) {
+    parts.push(`${labels.settledOn} ${args.formatDate(args.paidAt)}`);
+  }
+  // A generated placeholder (cash_<uuid>…) is never printed as a reference.
+  const reference = invoicePaymentReference(args.reference);
+  if (reference) parts.push(`${labels.referenceShort} ${reference}`);
+  return parts.length > 0 ? parts.join(' · ') : null;
+}
+
+export function paymentMethodLabel(
+  method: PaymentMethod,
+  labels: InvoiceLabels,
+): string {
+  switch (method) {
+    case PaymentMethod.card:
+      return labels.methodCard;
+    case PaymentMethod.bank_transfer:
+      return labels.methodBankTransfer;
+    case PaymentMethod.cash:
+      return labels.methodCash;
+    case PaymentMethod.cheque:
+      return labels.methodCheque;
+    default:
+      return String(method);
+  }
 }
 
 /**
@@ -275,6 +439,15 @@ export class InvoicePdfService implements OnModuleDestroy {
         lines: { orderBy: { position: 'asc' } },
         order: { select: { orderCode: true } },
         patient: { select: { fullName: true } },
+        // The clinic name is read from the practitioner's profile: the
+        // client snapshot has no column for it. The name tells whether the
+        // invoice bills that practitioner (see billedToLead below).
+        doctor: {
+          select: {
+            fullName: true,
+            dentistProfile: { select: { clinicName: true } },
+          },
+        },
       },
     });
     if (!invoice) {
@@ -286,14 +459,12 @@ export class InvoicePdfService implements OnModuleDestroy {
       language ?? ((invoice.language === 'en' ? 'en' : 'fr') as InvoiceLanguage);
     const labels = getInvoiceLabels(lang);
     const currency = invoice.currency || settings.defaultCurrency || 'TND';
-    const n = (v: unknown): number => Number(v ?? 0);
+    const n = (v: unknown): number => this.toNumber(v);
 
-    // The client block. mergeClinic prefers the snapshot over the live
-    // doctor profile, so this renders a manual client and a linked
-    // practitioner through the very same markup.
+    // The address / phone / e-mail / tax id come from the invoice's client
+    // snapshot through the same mergeClinic seam the receipts use. The
+    // name and the clinic lead the box instead (billedToLead).
     const clientSnapshot = {
-      // NOT the client name: `billedToLead` already prints it in bold at
-      // the top of the box, and repeating it here showed it twice.
       clinicName: null,
       clinicAddress: invoice.clientAddress,
       city: invoice.clientCity,
@@ -310,61 +481,63 @@ export class InvoicePdfService implements OnModuleDestroy {
       amount: n(line.lineHt),
     }));
 
-    const money = (v: number): string =>
-      this.formatMoney(v, currency, lang);
+    const totals = buildInvoiceRecordTotals(
+      {
+        status: invoice.status,
+        pricesIncludeTax: invoice.pricesIncludeTax,
+        tvaRate: n(invoice.tvaRate),
+        discountAmount: n(invoice.discountAmount),
+        discountPercent:
+          invoice.discountPercent === null ? null : n(invoice.discountPercent),
+        stampDuty: n(invoice.stampDuty),
+        subTotalHt: n(invoice.subTotalHt),
+        tvaAmount: n(invoice.tvaAmount),
+        totalTtc: n(invoice.totalTtc),
+        withholdingRate:
+          invoice.withholdingRate === null ? null : n(invoice.withholdingRate),
+        withholdingAmount: n(invoice.withholdingAmount),
+        netPayable: n(invoice.netPayable),
+      },
+      labels,
+      (v) => this.formatMoney(v, currency, lang),
+      (v) => this.formatRate(v, lang),
+    );
 
-    const discount = n(invoice.discountAmount);
-    const stamp = n(invoice.stampDuty);
-    const subTotalHt = n(invoice.subTotalHt);
-    const totals: InvoiceTotalLine[] = [];
-
-    // With a discount the reader needs to see all three steps:
-    // gross HT, the discount taken off, then the net HT that VAT applies
-    // to. Without one, a single "Total HT" line — the usual case.
-    if (discount > 0) {
-      totals.push({
-        label: labels.subtotalHt,
-        value: money(subTotalHt + discount),
-      });
-      totals.push({ label: labels.discount, value: `- ${money(discount)}` });
-    }
-    totals.push({ label: labels.subtotalHt, value: money(subTotalHt) });
-    totals.push({
-      label: `${labels.vatAmount} (${n(invoice.tvaRate)}%)`,
-      value: money(n(invoice.tvaAmount)),
-    });
-    if (stamp > 0) {
-      totals.push({ label: labels.stampDuty, value: money(stamp) });
-    }
-    totals.push({
-      label: labels.totalTtc,
-      value: money(n(invoice.totalTtc)),
-      kind: 'final',
-    });
-    if (invoice.status === 'paid') {
-      totals.push({
-        label: labels.amountPaid,
-        value: money(n(invoice.totalTtc)),
-        kind: 'paid',
-      });
-    }
+    const paid = invoice.status === InvoiceStatus.paid;
+    const sep = labels.sep;
+    // "Docteur : <name>" + the clinic only for an invoice written under the
+    // rule "the customer is the practitioner": linked to a practitioner AND
+    // billed in that practitioner's name. Invoices made before that rule
+    // billed a patient (doctorId = the patient's dentist) or a clinic name;
+    // labelling those "Docteur" would print a patient as the doctor. They
+    // keep their plain client name.
+    const practitionerName = invoice.doctorId
+      ? invoice.doctor?.fullName.trim()
+      : undefined;
+    const billsPractitioner =
+      Boolean(practitionerName) &&
+      invoice.clientName.trim() === practitionerName;
+    const billedToLead = billsPractitioner
+      ? [
+          { text: `${labels.doctor}${sep}${invoice.clientName}`, strong: true },
+          { text: invoice.doctor?.dentistProfile?.clinicName ?? '' },
+        ]
+      : [{ text: invoice.clientName, strong: true }];
 
     return {
       payment: {
         id: invoice.id,
         amount: invoice.totalTtc,
-        // Drives the status pill + the green "paid" treatment.
-        status:
-          invoice.status === 'paid'
-            ? PaymentRecordStatus.success
-            : invoice.status === 'cancelled'
-              ? PaymentRecordStatus.failed
-              : PaymentRecordStatus.pending,
-        paymentMethod: PaymentMethod.cash,
-        transactionId: null,
+        // Drives nothing visible on a record (the `record` block below
+        // overrides status, date and settlement); kept coherent anyway.
+        status: paid ? PaymentRecordStatus.success : PaymentRecordStatus.pending,
+        paymentMethod: invoice.paymentMethod ?? PaymentMethod.cash,
+        transactionId: invoice.paymentReference,
         paidAt: invoice.paidAt,
         createdAt: invoice.issueDate,
         invoiceNumber: invoice.invoiceNumber,
+        withholdingAmount: invoice.withholdingAmount,
+        stampAmount: invoice.stampDuty,
       },
       quotation: {
         id: invoice.id,
@@ -381,11 +554,13 @@ export class InvoicePdfService implements OnModuleDestroy {
           doctor: {
             id: invoice.doctorId ?? '',
             fullName: invoice.clientName,
-            email: invoice.clientEmail ?? '',
-            phone: invoice.clientPhone,
+            // Blank on purpose: the snapshot already prints the e-mail and
+            // phone once; the receipt seam would print them a second time.
+            email: '',
+            phone: null,
             dentistProfile: null,
           },
-          patient: { fullName: invoice.patient?.fullName ?? invoice.clientName },
+          patient: { fullName: invoice.patient?.fullName ?? '' },
         },
       },
       installment: null,
@@ -394,9 +569,40 @@ export class InvoicePdfService implements OnModuleDestroy {
       rows,
       totals,
       documentTitle: labels.invoiceTitle,
-      // Only the client's own name leads the box. The address, phone and
-      // tax id below it come from the same clinicSnapshot seam.
-      billedToLead: [{ text: invoice.clientName, strong: true }],
+      columnLabels: { unitPrice: labels.unitPriceHt, amount: labels.amountHt },
+      // Owner decision: the customer of every new invoice is the
+      // practitioner; older rows keep the client they billed.
+      billedToLead,
+      billedToTail: [
+        {
+          text: invoice.patient
+            ? `${labels.patient}${sep}${invoice.patient.fullName}`
+            : '',
+        },
+        {
+          text: invoice.order
+            ? `${labels.order}${sep}${invoice.order.orderCode}`
+            : '',
+        },
+      ],
+      record: {
+        issueDate: invoice.issueDate,
+        statusLabel: this.invoiceStatusLabel(invoice.status, labels),
+        statusPaid: paid,
+        paymentText: invoiceRecordPaymentText({
+          method: invoice.paymentMethod,
+          reference: invoice.paymentReference,
+          paidAt: invoice.paidAt,
+          paid,
+          labels,
+          formatDate: (d) => this.formatDate(d, lang),
+        }),
+        // The RIB is what an unpaid invoice is settled against, and what a
+        // transfer was wired to.
+        showBank:
+          invoice.paymentMethod === PaymentMethod.bank_transfer ||
+          invoice.status === InvoiceStatus.issued,
+      },
     };
   }
 
@@ -540,6 +746,8 @@ export class InvoicePdfService implements OnModuleDestroy {
         orderCode: true,
         createdAt: true,
         treatmentFeeAmount: true,
+        treatmentFeeWithholdingAmount: true,
+        treatmentFeeStampAmount: true,
         treatmentFeePaymentMethod: true,
         treatmentFeePaymentStatus: true,
         treatmentFeePaidAt: true,
@@ -575,34 +783,12 @@ export class InvoicePdfService implements OnModuleDestroy {
       );
     }
 
-    // Lazily allocate a stable, sequential TF-XXXXXX number the first
-    // time a *paid* treatment-fee invoice is rendered, then persist it
-    // so re-downloads keep the same number and an admin can override it
-    // later. Mirrors the installment-receipt allocation; the
-    // `treatmentFeeInvoiceNumber: null` filter makes it a no-op when a
-    // concurrent render already numbered the row. Unpaid / awaiting rows
-    // stay unnumbered and fall back to the id-derived `TF-XXXXXXXX`.
-    let invoiceNumber = order.treatmentFeeInvoiceNumber;
-    if (
-      order.treatmentFeePaymentStatus === PaymentRecordStatus.success &&
-      !invoiceNumber
-    ) {
-      const allocated =
-        await this.settingsService.allocateTreatmentFeeInvoiceNumber();
-      const res = await this.prisma.dentalOrder.updateMany({
-        where: { id: order.id, treatmentFeeInvoiceNumber: null },
-        data: { treatmentFeeInvoiceNumber: allocated },
-      });
-      if (res.count > 0) {
-        invoiceNumber = allocated;
-      } else {
-        const fresh = await this.prisma.dentalOrder.findUnique({
-          where: { id: order.id },
-          select: { treatmentFeeInvoiceNumber: true },
-        });
-        invoiceNumber = fresh?.treatmentFeeInvoiceNumber ?? allocated;
-      }
-    }
+    // No number is allocated here any more: a settled fee is invoiced in
+    // the single FAC- series by InvoiceAutoService, which writes that
+    // number onto the order. This renderer is only the last-resort
+    // fallback, so it prints what the order carries (or an id-derived
+    // TF-XXXXXXXX for an unsettled fee) and never advances a counter.
+    const invoiceNumber = order.treatmentFeeInvoiceNumber;
 
     const settings = await this.settingsService.requireActive();
     const finalLanguage: InvoiceLanguage = language ?? 'fr';
@@ -618,6 +804,10 @@ export class InvoicePdfService implements OnModuleDestroy {
       paidAt: order.treatmentFeePaidAt,
       createdAt: order.createdAt,
       invoiceNumber,
+      withholdingAmount:
+        order.treatmentFeeWithholdingAmount ?? new Prisma.Decimal(0),
+      // Charged on top with the fee's payment; none before 2026-11-20.
+      stampAmount: order.treatmentFeeStampAmount ?? new Prisma.Decimal(0),
     };
 
     return {
@@ -628,8 +818,9 @@ export class InvoicePdfService implements OnModuleDestroy {
         // time (follows defaultCurrency); fall back to TND for orders
         // without one — same value the fee has always been billed in.
         currency: order.cbctFeeCurrency ?? 'TND',
-        // Treatment fee is a flat professional fee — no VAT line.
-        tvaRate: 0,
+        // The fee is priced TTC like everything else (owner decision,
+        // 2026-11-19): the company rate, split backwards.
+        tvaRate: resolveTvaRate(null, settings.defaultTvaRate),
         totalTtc: this.toNumber(order.treatmentFeeAmount),
         packName: null,
         companySnapshot: null,
@@ -796,8 +987,19 @@ export class InvoicePdfService implements OnModuleDestroy {
       .join(', ');
     const clinicCity = [clinic.city, clinic.country].filter(Boolean).join(', ');
     const brandName = (company.companyName ?? 'ORALIGN').trim() || 'ORALIGN';
-    const statusLabel = this.statusLabel(payment.status, labels);
-    const statusPaid = payment.status === PaymentRecordStatus.success;
+    const record = payload.record;
+    const statusLabel =
+      record?.statusLabel ?? this.statusLabel(payment.status, labels);
+    const statusPaid =
+      record?.statusPaid ?? payment.status === PaymentRecordStatus.success;
+    // The document's own date: a stored invoice's issue date, otherwise
+    // the day the money landed. Never the render day — re-downloading an
+    // invoice must not re-date it.
+    const documentDate = record?.issueDate ?? payment.paidAt ?? payment.createdAt;
+    const paymentText = record
+      ? record.paymentText
+      : this.paymentSummary(payload, labels);
+    const showBank = record ? record.showBank : this.shouldShowBank(payment);
 
     return `<!doctype html>
 <html lang="${this.htmlAttr(language)}" dir="ltr">
@@ -1043,7 +1245,7 @@ export class InvoicePdfService implements OnModuleDestroy {
         </div>
         <div class="doc-meta">
           <div class="meta-line">${this.html(labels.number)}: <strong>${this.html(this.invoiceNumber(payment, numberFallbackPrefix))}</strong></div>
-          <div class="meta-line">${this.html(labels.date)}: ${this.html(this.formatDate(new Date(), language))}</div>
+          <div class="meta-line">${this.html(labels.date)}: ${this.html(this.formatDate(documentDate, language))}</div>
           <div class="status${statusPaid ? ' paid' : ''}">${this.html(labels.status)}: ${this.html(statusLabel)}</div>
         </div>
       </section>
@@ -1091,6 +1293,7 @@ export class InvoicePdfService implements OnModuleDestroy {
                 ? `${labels.taxNumber}: ${clinic.taxId}`
                 : '',
             },
+            ...(payload.billedToTail ?? []),
           ])}
         </article>
       </section>
@@ -1101,8 +1304,8 @@ export class InvoicePdfService implements OnModuleDestroy {
             <tr>
               <th class="desc">${this.html(labels.description)}</th>
               <th class="qty">${this.html(labels.quantity)}</th>
-              <th class="unit">${this.html(labels.unitPrice)}</th>
-              <th class="amount">${this.html(labels.amount)}</th>
+              <th class="unit">${this.html(payload.columnLabels?.unitPrice ?? labels.unitPrice)}</th>
+              <th class="amount">${this.html(payload.columnLabels?.amount ?? labels.amount)}</th>
             </tr>
           </thead>
           <tbody>
@@ -1114,15 +1317,19 @@ export class InvoicePdfService implements OnModuleDestroy {
         </section>
       </section>
 
-      <section class="text-block">
+      ${
+        paymentText
+          ? `<section class="text-block">
         <h2 class="text-block-title">${this.html(labels.paymentDetails)}</h2>
-        <p class="text-block-body">${this.html(this.paymentSummary(payload, labels))}</p>
-      </section>
+        <p class="text-block-body">${this.html(paymentText)}</p>
+      </section>`
+          : ''
+      }
 
       <footer class="footer">
         <p>${this.html(labels.legalNotice)}</p>
         ${legal ? `<p>${this.html(legal)}</p>` : ''}
-        ${this.shouldShowBank(payment) && bank && Object.values(bank).some(Boolean)
+        ${showBank && bank && Object.values(bank).some(Boolean)
           ? `<div class="bank-title">${this.html(labels.bankDetails)}</div>
              <div class="bank-grid">
                ${this.renderBankLine(labels.bankName, bank.bankName)}
@@ -1225,17 +1432,32 @@ export class InvoicePdfService implements OnModuleDestroy {
     };
   }
 
+  /**
+   * What a payment settled on the devis (TTC, stamp excluded): cash +
+   * retenue - the stamp charged on top, in millimes. Never negative.
+   */
+  private settledOf(payment: InvoicePaymentView): number {
+    const millimes = (v: unknown) => Math.round(this.toNumber(v) * 1000);
+    const settled =
+      millimes(payment.amount) +
+      Math.max(0, millimes(payment.withholdingAmount)) -
+      Math.max(0, millimes(payment.stampAmount));
+    return Math.max(0, settled) / 1000;
+  }
+
   private buildLineItems(
     payload: InvoiceRenderPayload,
     labels: InvoiceLabels,
   ): InvoiceLineRow[] {
     const { payment, quotation, installment } = payload;
-    const amount = this.toNumber(payment.amount);
+    // The TTC billed = what the payment settled: cash received + what the
+    // practitioner withheld - the stamp charged on top (its own row).
+    const amount = this.settledOf(payment);
 
     // Treatment-fee invoice whose order snapshotted a CBCT supplement →
     // break the single billed amount into its two components so the
     // doctor sees what the supplement cost. The rows sum back to the
-    // same `payment.amount`, so the totals section is untouched.
+    // same settled amount, so the totals section is untouched.
     // Installment / pack receipts never carry `cbctFeeAmount`.
     const cbctFee = Math.max(0, this.toNumber(payload.cbctFeeAmount ?? 0));
     if (!installment && cbctFee > 0) {
@@ -1286,69 +1508,45 @@ export class InvoicePdfService implements OnModuleDestroy {
     labels: InvoiceLabels,
   ): InvoiceTotalLine[] {
     const { payment, quotation, settings, language } = payload;
-    // The TTC the customer was billed for the line item itself.
-    const total = this.toNumber(payment.amount);
-    const tvaRate = this.toNumber(quotation.tvaRate);
-    // "Droit de timbre" — the configured fiscal stamp duty added to the
-    // invoice total. Clamp to >= 0 so a stray negative setting can't
-    // subtract from the total. When it's 0 the totals block is
-    // byte-identical to the pre-stamp-duty behaviour (backward compat).
-    const stampDuty = Math.max(0, this.toNumber(settings.stampDuty));
-    const grandTotal = total + stampDuty;
-    // The line item we render is the payment amount only — for a
-    // partial installment the quote-level TVA already factored into
-    // the schedule, so we display a flat subtotal/total here. We still
-    // surface the TVA breakdown when the quote carries a non-zero rate
-    // so the receipt reads as a proper tax-compliant document.
-    const showTva = tvaRate > 0;
-    const subtotal = showTva ? total / (1 + tvaRate / 100) : total;
-    const tvaAmount = showTva ? total - subtotal : 0;
+    const money = (v: number): string =>
+      this.formatMoney(v, quotation.currency, language);
+    // Prices are TTC (TVA inside) and the droit de timbre is ADDED on top
+    // of every payment (owner decision, 2026-11-20). What the payment
+    // settled (cash + retenue - stamp) is split backwards into HT and TVA,
+    // the payment's own stamp is added, the retenue comes off:
+    //   HT + TVA = settled    settled + timbre = Total TTC
+    //   Total TTC - retenue = Net à payer = the cash
+    // The stamp is the one the payment snapshotted, never the live
+    // setting: a payment made before 2026-11-20 carries none.
+    const withheld = Math.max(0, this.toNumber(payment.withholdingAmount));
+    const cash = this.toNumber(payment.amount);
+    const stamp = Math.max(0, this.toNumber(payment.stampAmount));
+    const rate = resolveTvaRate(quotation.tvaRate, settings.defaultTvaRate);
+    const split = splitInclusive(this.settledOf(payment), rate, 0);
+    const total = split.total.plus(stamp);
 
     const lines: InvoiceTotalLine[] = [
+      { label: labels.subtotalHt, value: money(toAmount(split.ht)) },
       {
-        label: labels.subtotalHt,
-        value: this.formatMoney(subtotal, quotation.currency, language),
+        label: `${labels.vatRate} (${this.formatRate(rate, language)} %)`,
+        value: money(toAmount(split.tva)),
       },
     ];
-    if (showTva) {
-      lines.push({
-        label: `${labels.vatRate} (${tvaRate.toFixed(2)} %)`,
-        value: this.formatMoney(tvaAmount, quotation.currency, language),
-      });
+    if (stamp > 0) {
+      lines.push({ label: labels.stampDuty, value: money(toAmount(stamp)) });
     }
-
-    // Amount the paid row reflects — the grand total when a stamp duty
-    // applies, otherwise the bare TTC.
-    let amountPaid = total;
-    if (stampDuty > 0) {
-      // TTC + stamp duty + grand total breakdown.
-      lines.push({
-        label: labels.totalTtc,
-        value: this.formatMoney(total, quotation.currency, language),
-      });
-      lines.push({
-        label: labels.stampDuty,
-        value: this.formatMoney(stampDuty, quotation.currency, language),
-      });
-      lines.push({
-        label: labels.totalDue,
-        value: this.formatMoney(grandTotal, quotation.currency, language),
-        kind: 'final',
-      });
-      amountPaid = grandTotal;
-    } else {
-      // No stamp duty → keep the legacy single dark "Total TTC" row.
-      lines.push({
-        label: labels.totalTtc,
-        value: this.formatMoney(total, quotation.currency, language),
-        kind: 'final',
-      });
-      amountPaid = total;
+    lines.push({
+      label: labels.totalTtc,
+      value: money(toAmount(total)),
+      kind: withheld > 0 ? 'normal' : 'final',
+    });
+    if (withheld > 0) {
+      lines.push({ label: labels.withholding(null), value: `- ${money(withheld)}` });
+      lines.push({ label: labels.netPayable, value: money(cash), kind: 'final' });
     }
-
     lines.push({
       label: labels.amountPaid,
-      value: this.formatMoney(amountPaid, quotation.currency, language),
+      value: money(cash),
       // Green-highlight the paid row only when the payment actually
       // landed — for a pending/rejected snapshot we still print the
       // neutral row so the document doesn't lie about the state.
@@ -1408,9 +1606,8 @@ export class InvoicePdfService implements OnModuleDestroy {
   ): string {
     const { payment, language } = payload;
     const method = this.methodLabel(payment.paymentMethod, labels);
-    const tx = payment.transactionId
-      ? `${labels.transactionRef}: ${payment.transactionId}`
-      : '';
+    const reference = invoicePaymentReference(payment.transactionId);
+    const tx = reference ? `${labels.transactionRef}: ${reference}` : '';
     const when = this.formatDate(
       payment.paidAt ?? payment.createdAt,
       language,
@@ -1567,16 +1764,32 @@ export class InvoicePdfService implements OnModuleDestroy {
     method: PaymentMethod,
     labels: InvoiceLabels,
   ): string {
-    switch (method) {
-      case PaymentMethod.card:
-        return labels.methodCard;
-      case PaymentMethod.bank_transfer:
-        return labels.methodBankTransfer;
-      case PaymentMethod.cash:
-        return labels.methodCash;
+    return paymentMethodLabel(method, labels);
+  }
+
+  /** A stored invoice's own status, in its own (feminine) vocabulary. */
+  private invoiceStatusLabel(
+    status: InvoiceStatus,
+    labels: InvoiceLabels,
+  ): string {
+    switch (status) {
+      case InvoiceStatus.paid:
+        return labels.invoiceStatusPaid;
+      case InvoiceStatus.issued:
+        return labels.invoiceStatusIssued;
+      case InvoiceStatus.cancelled:
+        return labels.invoiceStatusCancelled;
       default:
-        return method;
+        return labels.invoiceStatusDraft;
     }
+  }
+
+  /** 19 -> "19", 1.5 -> "1,5" (fr) / "1.5" (en). */
+  private formatRate(rate: number, language: InvoiceLanguage): string {
+    const value = Number.isFinite(rate) ? rate : 0;
+    return value.toLocaleString(language === 'en' ? 'en-GB' : 'fr-FR', {
+      maximumFractionDigits: 2,
+    });
   }
 
   private html(value: unknown): string {

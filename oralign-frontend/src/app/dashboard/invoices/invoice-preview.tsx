@@ -11,11 +11,17 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { formatRate } from '@/components/payments/withholding';
 import { adminInvoicesService } from '@/lib/api/admin-invoices.service';
 import { extractApiErrorMessage } from '@/lib/api/error';
 import { useT } from '@/lib/i18n/lang-context';
 import { useDownloadInvoicePdf } from '@/lib/hooks';
 import type { Invoice } from '@/lib/types';
+
+/** Prisma Decimal arrives as a string over the wire. */
+const n = (value: unknown): number => Number(value ?? 0);
+/** The amounts as this dialog always printed them: 3 decimals and the currency. */
+const amount = (value: unknown, currency: string) => `${n(value).toFixed(3)} ${currency}`;
 
 /**
  * Read the invoice PDF without leaving the list.
@@ -75,10 +81,14 @@ export function InvoicePreviewDialog({
           <DialogTitle>{invoice?.invoiceNumber ?? ''}</DialogTitle>
           <DialogDescription>
             {invoice
-              ? `${invoice.clientName} · ${Number(invoice.totalTtc ?? 0).toFixed(3)} ${invoice.currency}`
+              ? `${invoice.clientName} · ${amount(invoice.totalTtc, invoice.currency)}`
               : ''}
           </DialogDescription>
         </DialogHeader>
+
+        {/* What the PDF says about the money, readable before it loads:
+            the method, the retenue à la source and the net to pay. */}
+        {invoice ? <PaymentFacts invoice={invoice} /> : null}
 
         <div className="min-h-[60svh] overflow-hidden rounded-lg border bg-muted/20">
           {loading ? (
@@ -123,5 +133,38 @@ export function InvoicePreviewDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function PaymentFacts({ invoice }: { invoice: Invoice }) {
+  const { t, lang } = useT();
+  const withheld = n(invoice.withholdingAmount);
+  const facts = [
+    invoice.paymentMethod
+      ? t('invoicesAdmin.previewMethod', {
+          method: t(`paymentsDesk.methodLong.${invoice.paymentMethod}`),
+        })
+      : null,
+    invoice.paymentReference
+      ? t('invoicesAdmin.previewReference', { reference: invoice.paymentReference })
+      : null,
+    withheld > 0
+      ? `${t('invoicesAdmin.previewWithholding', {
+          rate: formatRate(invoice.withholdingRate, lang),
+        })} − ${amount(withheld, invoice.currency)}`
+      : null,
+    withheld > 0
+      ? `${t('invoicesAdmin.previewNetPayable')} ${amount(invoice.netPayable, invoice.currency)}`
+      : null,
+  ].filter((fact): fact is string => Boolean(fact));
+  if (facts.length === 0) return null;
+  return (
+    <ul className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
+      {facts.map((fact) => (
+        <li key={fact} className="tabular-nums">
+          {fact}
+        </li>
+      ))}
+    </ul>
   );
 }

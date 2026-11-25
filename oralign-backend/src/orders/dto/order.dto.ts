@@ -26,6 +26,7 @@ import {
   MinLength,
   ValidateNested,
 } from 'class-validator';
+import { rawBoolean } from '../../common/dto/query-transforms';
 
 const normalizeOptionalString = (value: unknown) => {
   if (typeof value !== 'string') return value;
@@ -321,9 +322,44 @@ export class InitChunkedUploadDto {
  * rejects any extra `amount` field a client tries to smuggle in.
  */
 export class PayTreatmentFeeDto {
-  @ApiProperty({ enum: PaymentMethod })
+  @ApiProperty({
+    enum: PaymentMethod,
+    description:
+      'cash / cheque: admin only. bank_transfer: records the intent. card: refused (hosted checkout).',
+  })
   @IsEnum(PaymentMethod)
   method!: PaymentMethod;
+
+  @ApiProperty({
+    required: false,
+    type: Boolean,
+    default: false,
+    description:
+      'Apply the retenue à la source: rate and amount computed server-side, treatmentFeeAmount is then the cash (due + stamp - retenue; the retenue is on the TTC without the stamp). 400 WITHHOLDING_DISABLED when the company rate is 0.',
+  })
+  @IsOptional()
+  @Transform(rawBoolean)
+  @IsBoolean()
+  applyWithholding?: boolean;
+}
+
+/**
+ * Text fields of POST /orders/:id/treatment-fee/proof (multipart; the
+ * `proof` file rides beside them). The amount is never one of them.
+ */
+export class TreatmentFeeProofDto {
+  // Multipart: read raw so the string "false" stays false.
+  @ApiProperty({
+    required: false,
+    type: Boolean,
+    default: false,
+    description:
+      'Apply the retenue à la source to the declared transfer. Multipart string "true" / "false".',
+  })
+  @IsOptional()
+  @Transform(rawBoolean)
+  @IsBoolean()
+  applyWithholding?: boolean;
 }
 
 // ── Sort fields the list endpoint honours ────────────────────────
@@ -756,8 +792,14 @@ export class OrderResponseDto {
   coverageExpiresAt?: Date;
   @ApiProperty({ required: false, description: 'When the treatment fee was marked paid; gates treatment-plan creation.' })
   treatmentFeePaidAt?: Date;
-  @ApiProperty({ required: false, description: 'Snapshot of treatment fee amount at payment time.' })
+  @ApiProperty({ required: false, description: 'Cash collected for the treatment fee (fee due + droit de timbre - retenue), snapshotted at payment time. Fee due = this + treatmentFeeWithholdingAmount - treatmentFeeStampAmount.' })
   treatmentFeeAmount?: number;
+  @ApiProperty({ required: false, nullable: true, type: Number, description: 'Retenue à la source rate (%) applied on the treatment fee; null when none.' })
+  treatmentFeeWithholdingRate?: number | null;
+  @ApiProperty({ required: false, nullable: true, type: Number, description: 'Retenue à la source amount kept back on the treatment fee (computed on the fee due, stamp excluded); null when none.' })
+  treatmentFeeWithholdingAmount?: number | null;
+  @ApiProperty({ required: false, nullable: true, type: Number, description: 'Droit de timbre charged on top of the treatment fee with its payment; null when nothing was paid or declared, or on fees paid before 2026-11-20 (no stamp then).' })
+  treatmentFeeStampAmount?: number | null;
   @ApiProperty({ required: false, description: 'CBCT supplement price snapshotted server-side when CBCT was requested on the draft order. Absent when CBCT is not requested or the paid supplement is disabled.' })
   cbctFeeAmount?: number;
   @ApiProperty({ required: false, description: 'Currency of the CBCT supplement snapshot.' })

@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { InvoiceStatus, Prisma } from '@prisma/client';
+import { InvoiceStatus, Prisma, UserRole } from '@prisma/client';
 import {
   BadRequestException,
   ConflictException,
@@ -15,6 +15,14 @@ import {
   type InvoiceNumberOwner,
 } from '../../common/billing/invoice-number';
 import {
+  computeWithholding,
+  dec,
+  inclusiveInvoiceTotals,
+  percentOf,
+  round3,
+  toAmount,
+} from '../../common/billing/tax-split';
+import {
   CreateInvoiceDto,
   InvoiceFilterDto,
   InvoiceLineInputDto,
@@ -22,6 +30,7 @@ import {
   InvoiceSortOrder,
   UpdateInvoiceDto,
 } from '../dto/invoice.dto';
+import { issueDateFilter } from './invoice-period';
 
 /**
  * TND carries 3 decimals — the same rounding QuotationService uses, so a
@@ -29,6 +38,15 @@ import {
  */
 const round = (n: number): number =>
   Math.round((Number.isFinite(n) ? n : 0) * 1000) / 1000;
+
+/**
+ * What an invoice bills, stamp excluded: its Total TTC minus the droit de
+ * timbre added on top (every facture carries its own). Never negative.
+ */
+const billedWithoutStamp = (inv: {
+  totalTtc: Prisma.Decimal | number;
+  stampDuty: Prisma.Decimal | number;
+}): Prisma.Decimal => Prisma.Decimal.max(0, dec(inv.totalTtc).minus(dec(inv.stampDuty)));
 
 const num = (v: Prisma.Decimal | number | null | undefined): number =>
   v === null || v === undefined ? 0 : Number(v);
@@ -48,6 +66,29 @@ export interface InvoiceTotals {
   lineHt: number[];
 }
 
+/** Everything an invoice stores about money, in either pricing mode. */
+export interface InvoiceMoney extends InvoiceTotals {
+  /** The stamp actually added on top (TTC mode: 0 when the lines bill nothing). */
+  stampApplied: number;
+  /** Stored per line as `unitPrice`: the HT unit price (derived in TTC mode). */
+  unitPrice: number[];
+  /** Stored per line as `unitPriceTtc`: the typed TTC price, null in HT mode. */
+  unitPriceTtc: (number | null)[];
+  withholdingRate: number | null;
+  withholdingAmount: number;
+  netPayable: number;
+}
+
+export interface InvoiceMoneyInput {
+  pricesIncludeTax: boolean;
+  tvaRate: number;
+  /** HT in HT mode, TTC in TTC mode — the same unit as the lines. */
+  discountAmount: number;
+  stampDuty: number;
+  /** Retenue à la source (%), null/0 = none. */
+  withholdingRate: number | null;
+}
+
 /** Statuses past which an edit must leave a trace. */
 const LOCKED_STATUSES: InvoiceStatus[] = [
   InvoiceStatus.issued,
@@ -62,6 +103,41 @@ const INVOICE_INCLUDE = {
   doctor: { select: { id: true, fullName: true, email: true } },
 } as const;
 
+// ─── JSON shape ───────────────────────────────────────────────────────
+// Prisma serialises Decimal as a string. The API contract says "numbers
+// as numbers": every money column of an invoice and of its lines goes out
+// as a JS number with 3 decimals, so the screens never parse strings.
+
+type DecimalToNumber<V> = V extends Prisma.Decimal ? number : V;
+type PlainLine<L> = { [P in keyof L]: DecimalToNumber<L[P]> };
+export type InvoiceJson<T> = {
+  [K in keyof T]: K extends 'lines'
+    ? T[K] extends Array<infer L>
+      ? PlainLine<L>[]
+      : T[K]
+    : DecimalToNumber<T[K]>;
+};
+
+const isDecimal = (v: unknown): v is Prisma.Decimal =>
+  v instanceof Prisma.Decimal || Prisma.Decimal.isDecimal(v);
+
+function plainObject<T extends object>(row: T): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(row)) {
+    out[key] = isDecimal(value) ? toAmount(value) : value;
+  }
+  return out;
+}
+
+/** Decimal columns -> numbers, on the invoice and on each of its lines. */
+export function toInvoiceJson<T extends object>(row: T): InvoiceJson<T> {
+  const out = plainObject(row);
+  if (Array.isArray(out.lines)) {
+    out.lines = (out.lines as object[]).map((line) => plainObject(line));
+  }
+  return out as InvoiceJson<T>;
+}
+
 /**
  * Manual / admin invoicing.
  *
@@ -71,9 +147,9 @@ const INVOICE_INCLUDE = {
  * free line items, an editable client block, a status, and an audit trail.
  *
  * The one rule that matters: **no currency figure is ever taken from the
- * client**. The DTOs carry no totals at all; `computeTotals` derives
+ * client**. The DTOs carry no totals at all; `computeMoney` derives
  * everything from (quantity, unitPrice, per-line VAT, discount, stamp
- * duty) on every create and every update.
+ * duty, withholding rate) on every create and every update.
  */
 @Injectable()
 export class InvoiceService {
@@ -87,7 +163,7 @@ export class InvoiceService {
   // ─── Money ──────────────────────────────────────────────────────────
 
   /**
-   * The single source of truth for every amount on an invoice.
+   * Legacy HT pricing: lines typed HT, TVA and stamp added on top.
    *
    * VAT is computed PER LINE (a line may override the invoice rate), so a
    * mixed-rate invoice is exact rather than approximated from a blended
@@ -141,6 +217,95 @@ export class InvoiceService {
     };
   }
 
+  /**
+   * A remise typed as a percentage: that % of the lines' gross (quantity x
+   * unit price, in the invoice's own unit, TTC or HT), to the millime.
+   */
+  static discountFromPercent(
+    lines: InvoiceLineInputDto[],
+    percent: number,
+  ): number {
+    const gross = lines.reduce(
+      (sum, l) =>
+        sum.plus(
+          round3(
+            dec(Math.max(0, Number(l.quantity ?? 1) || 0)).mul(
+              dec(Math.max(0, Number(l.unitPrice ?? 0) || 0)),
+            ),
+          ),
+        ),
+      dec(0),
+    );
+    return toAmount(percentOf(gross, percent));
+  }
+
+  /**
+   * The single source of truth for every amount an invoice stores.
+   *
+   * TTC mode (the company's normal pricing, every automatic invoice): the
+   * line prices are typed TTC (TVA included, stamp NOT included), HT/TVA
+   * are derived BACKWARDS by the shared helper, and the droit de timbre
+   * is ADDED on top (owner decision 2026-11-20: every payment, so every
+   * facture, carries its own stamp): HT + TVA + timbre = total exactly.
+   * HT mode keeps the historical forward maths (TVA and stamp on top).
+   *
+   * The retenue à la source is taken on the TTC WITHOUT the stamp in both
+   * modes (owner decision), and net = total - retenue.
+   */
+  static computeMoney(
+    lines: InvoiceLineInputDto[],
+    input: InvoiceMoneyInput,
+  ): InvoiceMoney {
+    if (input.pricesIncludeTax) {
+      const t = inclusiveInvoiceTotals(
+        lines.map((l) => ({
+          quantity: l.quantity ?? 1,
+          unitPriceTtc: l.unitPrice ?? 0,
+          tvaRate: l.tvaRate,
+        })),
+        input.tvaRate,
+        input.discountAmount,
+        input.stampDuty,
+        input.withholdingRate,
+      );
+      return {
+        subTotalHt: toAmount(t.subTotalHt),
+        tvaAmount: toAmount(t.tvaAmount),
+        totalTtc: toAmount(t.totalTtc),
+        discountApplied: toAmount(t.discountApplied),
+        lineHt: t.lineHt.map((v) => toAmount(v)),
+        stampApplied: toAmount(t.stamp),
+        unitPrice: t.unitHt.map((v) => toAmount(v)),
+        unitPriceTtc: lines.map((l) => toAmount(l.unitPrice ?? 0)),
+        withholdingRate: t.withholdingRate ? toAmount(t.withholdingRate) : null,
+        withholdingAmount: toAmount(t.withholdingAmount),
+        netPayable: toAmount(t.netPayable),
+      };
+    }
+
+    const legacy = InvoiceService.computeTotals(
+      lines,
+      input.tvaRate,
+      input.discountAmount,
+      input.stampDuty,
+    );
+    const stampApplied = round(Math.max(0, input.stampDuty));
+    // Retenue on the TTC without the stamp; the net still pays the stamp.
+    const withholding = computeWithholding(
+      dec(legacy.totalTtc).minus(stampApplied),
+      input.withholdingRate,
+    );
+    return {
+      ...legacy,
+      stampApplied,
+      unitPrice: lines.map((l) => l.unitPrice ?? 0),
+      unitPriceTtc: lines.map(() => null),
+      withholdingRate: withholding.rate ? toAmount(withholding.rate) : null,
+      withholdingAmount: toAmount(withholding.amount),
+      netPayable: toAmount(dec(legacy.totalTtc).minus(withholding.amount)),
+    };
+  }
+
   // ─── Reads ──────────────────────────────────────────────────────────
 
   async list(filters: InvoiceFilterDto) {
@@ -160,7 +325,7 @@ export class InvoiceService {
     ]);
 
     return {
-      data,
+      data: data.map((row) => toInvoiceJson(row)),
       total,
       page,
       limit,
@@ -183,7 +348,13 @@ export class InvoiceService {
       this.prisma.invoice.aggregate({ where, _count: { _all: true } }),
       this.prisma.invoice.aggregate({
         where: { ...where, status: { not: InvoiceStatus.cancelled } },
-        _sum: { subTotalHt: true, tvaAmount: true, totalTtc: true },
+        _sum: {
+          subTotalHt: true,
+          tvaAmount: true,
+          totalTtc: true,
+          withholdingAmount: true,
+          netPayable: true,
+        },
         _count: { _all: true },
       }),
     ]);
@@ -209,6 +380,8 @@ export class InvoiceService {
       subTotalHt: num(billable._sum.subTotalHt),
       tvaAmount: num(billable._sum.tvaAmount),
       totalTtc: num(billable._sum.totalTtc),
+      withholdingAmount: num(billable._sum.withholdingAmount),
+      netPayable: num(billable._sum.netPayable),
       byStatus,
       totalAllStatuses,
     };
@@ -223,7 +396,155 @@ export class InvoiceService {
       },
     });
     if (!row) throw new NotFoundException('Invoice not found');
-    return row;
+    return toInvoiceJson(row);
+  }
+
+  /**
+   * Practitioner lookup for the create form (owner decision: the invoice
+   * customer is the "Docteur", never a patient). Each match carries the
+   * clinic block the form prefills and the practitioner's recent orders,
+   * with what each one already owes and what was already invoiced on it.
+   */
+  async searchPractitioners(search?: string) {
+    const term = (search ?? '').trim();
+    if (term.length < 2) return { data: [] };
+    const contains = { contains: term, mode: 'insensitive' as const };
+
+    const doctors = await this.prisma.user.findMany({
+      where: {
+        role: UserRole.dentist,
+        deletedAt: null,
+        OR: [
+          { fullName: contains },
+          { email: contains },
+          { phone: contains },
+          { dentistProfile: { is: { clinicName: contains } } },
+        ],
+      },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        phone: true,
+        dentistProfile: {
+          select: {
+            clinicName: true,
+            clinicAddress: true,
+            city: true,
+            country: true,
+            clinicPhone: true,
+            clinicEmail: true,
+            taxId: true,
+          },
+        },
+        doctorOrders: {
+          where: { deletedAt: null },
+          select: {
+            id: true,
+            orderCode: true,
+            status: true,
+            createdAt: true,
+            patientId: true,
+            patient: { select: { fullName: true } },
+            treatmentFeeAmount: true,
+            treatmentFeeWithholdingAmount: true,
+            treatmentFeeStampAmount: true,
+            quotation: {
+              select: {
+                id: true,
+                totalTtc: true,
+                packName: true,
+                status: true,
+                deletedAt: true,
+              },
+            },
+            // What the order already carries on paper, so the admin does
+            // not invoice the same money twice. The treatment-fee facture
+            // also points at the order (orderId), so it is told apart by
+            // treatmentFeeOrderId and summed on its own. Each facture adds
+            // its own stamp on top, so what it bills against the quote or
+            // the fee is its total WITHOUT the stamp.
+            invoices: {
+              where: {
+                deletedAt: null,
+                status: { not: InvoiceStatus.cancelled },
+              },
+              select: {
+                totalTtc: true,
+                stampDuty: true,
+                treatmentFeeOrderId: true,
+              },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 20,
+        },
+      },
+      orderBy: { fullName: 'asc' },
+      take: 10,
+    });
+
+    return {
+      data: doctors.map((d) => ({
+        id: d.id,
+        fullName: d.fullName,
+        email: d.email,
+        phone: d.phone,
+        clinicName: d.dentistProfile?.clinicName ?? null,
+        clinicAddress: d.dentistProfile?.clinicAddress ?? null,
+        city: d.dentistProfile?.city ?? null,
+        country: d.dentistProfile?.country ?? null,
+        clinicPhone: d.dentistProfile?.clinicPhone ?? null,
+        clinicEmail: d.dentistProfile?.clinicEmail ?? null,
+        taxId: d.dentistProfile?.taxId ?? null,
+        orders: d.doctorOrders.map((o) => ({
+          id: o.id,
+          orderCode: o.orderCode,
+          status: o.status,
+          createdAt: o.createdAt,
+          patientId: o.patientId,
+          patientName: o.patient?.fullName ?? null,
+          // Cash collected, and the fee due (TTC, stamp excluded): cash +
+          // what was withheld - the stamp charged on top with the payment.
+          treatmentFeeAmount:
+            o.treatmentFeeAmount === null ? null : toAmount(o.treatmentFeeAmount),
+          treatmentFeeDue:
+            o.treatmentFeeAmount === null
+              ? null
+              : toAmount(
+                  Prisma.Decimal.max(
+                    0,
+                    dec(o.treatmentFeeAmount)
+                      .plus(dec(o.treatmentFeeWithholdingAmount))
+                      .minus(dec(o.treatmentFeeStampAmount)),
+                  ),
+                ),
+          quotation:
+            o.quotation && !o.quotation.deletedAt
+              ? {
+                  id: o.quotation.id,
+                  totalTtc: o.quotation.totalTtc,
+                  packName: o.quotation.packName,
+                  status: o.quotation.status,
+                }
+              : null,
+          // Two figures, never one: "bill the quote" must not subtract the
+          // fee's facture, and "bill the fee" must see that facture. Both
+          // are TTC WITHOUT the stamps, comparable to the quote's TTC and
+          // to the fee due.
+          quoteInvoicedTotal: toAmount(
+            o.invoices
+              .filter((inv) => inv.treatmentFeeOrderId === null)
+              .reduce((sum, inv) => sum.plus(billedWithoutStamp(inv)), dec(0)),
+          ),
+          feeInvoicedTotal: toAmount(
+            o.invoices
+              .filter((inv) => inv.treatmentFeeOrderId === o.id)
+              .reduce((sum, inv) => sum.plus(billedWithoutStamp(inv)), dec(0)),
+          ),
+        })),
+      })),
+    };
   }
 
   private buildWhere(filters: InvoiceFilterDto): Prisma.InvoiceWhereInput {
@@ -238,19 +559,12 @@ export class InvoiceService {
     if (filters.orderId) where.orderId = filters.orderId;
 
     // Period filter — this is what makes "every invoice of March" a
-    // one-click export. `issuedTo` is INCLUSIVE: a bare date lands at
-    // 00:00, so we push it to the end of that day.
-    if (filters.issuedFrom || filters.issuedTo) {
-      const gte = filters.issuedFrom ? new Date(filters.issuedFrom) : undefined;
-      let lte: Date | undefined;
-      if (filters.issuedTo) {
-        lte = new Date(filters.issuedTo);
-        if (/^\d{4}-\d{2}-\d{2}$/.test(filters.issuedTo)) {
-          lte.setHours(23, 59, 59, 999);
-        }
-      }
-      where.issueDate = { ...(gte ? { gte } : {}), ...(lte ? { lte } : {}) };
-    }
+    // one-click export. Bare dates are Tunis days, both included (the
+    // server runs in UTC, where 00:30 in Tunis is still the day before):
+    // the list, the totals, the accounting summary, the CSV and the ZIP
+    // all cut the period the same way.
+    const issueDate = issueDateFilter(filters.issuedFrom, filters.issuedTo);
+    if (issueDate) where.issueDate = issueDate;
 
     const search = filters.search?.trim();
     if (search) {
@@ -299,12 +613,19 @@ export class InvoiceService {
     // Snapshot, not a live read: changing the company stamp duty later
     // must not rewrite invoices that were already issued.
     const stampDuty = dto.stampDuty ?? num(settings.stampDuty);
-    const totals = InvoiceService.computeTotals(
-      lines,
+    const pricesIncludeTax = dto.pricesIncludeTax ?? false;
+    // A remise typed as a percentage becomes its amount on the lines' gross.
+    const discountPercent = dto.discountPercent ?? null;
+    const money = InvoiceService.computeMoney(lines, {
+      pricesIncludeTax,
       tvaRate,
-      dto.discountAmount ?? 0,
+      discountAmount:
+        discountPercent !== null
+          ? InvoiceService.discountFromPercent(lines, discountPercent)
+          : (dto.discountAmount ?? 0),
       stampDuty,
-    );
+      withholdingRate: dto.withholdingRate ?? null,
+    });
 
     const invoiceNumber = dto.invoiceNumber?.trim()
       ? await this.assertNumberFree(dto.invoiceNumber.trim())
@@ -334,11 +655,18 @@ export class InvoiceService {
         currency: settings.defaultCurrency || 'TND',
         language: dto.language ?? 'fr',
         tvaRate,
-        discountAmount: totals.discountApplied,
-        stampDuty,
-        subTotalHt: totals.subTotalHt,
-        tvaAmount: totals.tvaAmount,
-        totalTtc: totals.totalTtc,
+        discountAmount: money.discountApplied,
+        discountPercent,
+        stampDuty: money.stampApplied,
+        subTotalHt: money.subTotalHt,
+        tvaAmount: money.tvaAmount,
+        totalTtc: money.totalTtc,
+        pricesIncludeTax,
+        paymentMethod: dto.paymentMethod ?? null,
+        paymentReference: dto.paymentReference?.trim() || null,
+        withholdingRate: money.withholdingRate,
+        withholdingAmount: money.withholdingAmount,
+        netPayable: money.netPayable,
         notes: dto.notes ?? null,
         companySnapshot: this.buildCompanySnapshot(settings),
         createdById: caller.userId,
@@ -356,9 +684,10 @@ export class InvoiceService {
             position: i,
             description: line.description,
             quantity: line.quantity ?? 1,
-            unitPrice: line.unitPrice ?? 0,
+            unitPrice: money.unitPrice[i],
+            unitPriceTtc: money.unitPriceTtc[i],
             tvaRate: line.tvaRate ?? null,
-            lineHt: totals.lineHt[i],
+            lineHt: money.lineHt[i],
           })),
         },
       },
@@ -378,7 +707,7 @@ export class InvoiceService {
     }
 
     this.logger.log(`Invoice ${created.invoiceNumber} created by ${caller.userId}`);
-    return created;
+    return toInvoiceJson(created);
   }
 
   /**
@@ -388,7 +717,8 @@ export class InvoiceService {
    *
    * Editing an issued/paid invoice is allowed — the admin desk needs it —
    * but it is recorded: `writeAuditLog` diffs the fields that actually
-   * moved and stores who changed what.
+   * moved and stores who changed what. Cancelling one is how an issued or
+   * paid invoice is "deleted": it keeps its number in the sequence.
    */
   async update(id: string, dto: UpdateInvoiceDto, caller: Caller) {
     const before = await this.getById(id, { allowDeleted: true });
@@ -405,20 +735,44 @@ export class InvoiceService {
     // Money is only RECOMPUTED when a money field was actually touched.
     // Editing notes or the client block must not move a millime — that
     // matters most for automatic invoices, whose HT/TVA were derived
-    // BACKWARDS from the paid amount: re-deriving forwards from the
-    // stored line can land 0.001 away from what was actually charged.
+    // BACKWARDS from the paid amount.
     const moneyTouched =
       dto.lines !== undefined ||
       dto.tvaRate !== undefined ||
       dto.discountAmount !== undefined ||
-      dto.stampDuty !== undefined;
+      dto.discountPercent !== undefined ||
+      dto.stampDuty !== undefined ||
+      dto.pricesIncludeTax !== undefined ||
+      dto.withholdingRate !== undefined;
 
     const tvaRate = dto.tvaRate ?? num(before.tvaRate);
     const discountAmount = dto.discountAmount ?? num(before.discountAmount);
+    // A remise typed as a percentage stays a percentage until the admin
+    // types an amount (or sends null): line or price edits recompute it.
+    const storedPercent =
+      before.discountPercent === null ? null : num(before.discountPercent);
+    // An echoed (unchanged) amount is not "typed as an amount".
+    const newAmount =
+      dto.discountAmount !== undefined &&
+      round(dto.discountAmount) !== round(num(before.discountAmount));
+    const discountPercent =
+      dto.discountPercent !== undefined
+        ? dto.discountPercent
+        : newAmount
+          ? null
+          : storedPercent;
     const stampDuty = dto.stampDuty ?? num(before.stampDuty);
+    const pricesIncludeTax = dto.pricesIncludeTax ?? before.pricesIncludeTax;
+    const storedRate =
+      before.withholdingRate === null ? null : num(before.withholdingRate);
+    const requestedRate =
+      dto.withholdingRate === undefined ? storedRate : dto.withholdingRate;
+    const rateChanged =
+      dto.withholdingRate !== undefined &&
+      num(dto.withholdingRate) !== num(storedRate);
 
-    let totals: InvoiceTotals;
-    // The replacement line set, only when the payload actually carries one.
+    let money: InvoiceMoney;
+    // The replacement line set, when the lines must be rewritten.
     let pendingLines: InvoiceLineInputDto[] | null = null;
     if (moneyTouched) {
       const lines: InvoiceLineInputDto[] =
@@ -426,7 +780,12 @@ export class InvoiceService {
         before.lines.map((l) => ({
           description: l.description,
           quantity: num(l.quantity),
-          unitPrice: num(l.unitPrice),
+          // TTC mode recomputes from the price as typed, never from the
+          // derived HT (which already has the TVA and discount out).
+          unitPrice:
+            pricesIncludeTax && l.unitPriceTtc !== null
+              ? num(l.unitPriceTtc)
+              : num(l.unitPrice),
           tvaRate: l.tvaRate ?? undefined,
         }));
       if (lines.length === 0) {
@@ -435,20 +794,49 @@ export class InvoiceService {
           'INVOICE_NO_LINES',
         );
       }
-      totals = InvoiceService.computeTotals(
-        lines,
+      money = InvoiceService.computeMoney(lines, {
+        pricesIncludeTax,
         tvaRate,
-        discountAmount,
+        discountAmount:
+          discountPercent !== null
+            ? InvoiceService.discountFromPercent(lines, discountPercent)
+            : discountAmount,
         stampDuty,
-      );
-      pendingLines = dto.lines ? lines : null;
+        withholdingRate: requestedRate,
+      });
+      // In TTC mode every line's derived HT depends on the discount and
+      // the rate, so the stored lines follow any money edit.
+      pendingLines = dto.lines || pricesIncludeTax ? lines : null;
+
+      // An automatic invoice states what the payment really carried: the
+      // amount the practitioner withheld stays the one recorded at payment
+      // time unless the admin changes the rate on purpose. Like any
+      // retenue it is taken on the TTC without the stamp, so it is capped
+      // there; the net still pays the stamp.
+      const automatic = Boolean(before.paymentId || before.treatmentFeeOrderId);
+      if (automatic && !rateChanged) {
+        const base = Math.max(0, round(money.totalTtc - money.stampApplied));
+        const kept = Math.min(Math.max(0, num(before.withholdingAmount)), base);
+        money = {
+          ...money,
+          withholdingRate: storedRate,
+          withholdingAmount: kept,
+          netPayable: round(money.totalTtc - kept),
+        };
+      }
     } else {
-      totals = {
+      money = {
         subTotalHt: num(before.subTotalHt),
         tvaAmount: num(before.tvaAmount),
         totalTtc: num(before.totalTtc),
         discountApplied: num(before.discountAmount),
         lineHt: [],
+        stampApplied: num(before.stampDuty),
+        unitPrice: [],
+        unitPriceTtc: [],
+        withholdingRate: storedRate,
+        withholdingAmount: num(before.withholdingAmount),
+        netPayable: num(before.netPayable),
       };
     }
 
@@ -457,11 +845,13 @@ export class InvoiceService {
       Boolean(dto.invoiceNumber) &&
       dto.invoiceNumber!.trim() !== before.invoiceNumber;
     if (numberChanged) {
-      // An automatic invoice shares its number with its payment's receipt:
-      // that receipt is renamed with it below, so it does not count as taken.
+      // An automatic invoice shares its number with its payment's receipt
+      // and, for a treatment fee, with its order: those are renamed with
+      // it below, so they do not count as taken.
       invoiceNumber = await this.assertNumberFree(dto.invoiceNumber!.trim(), {
         invoiceId: before.id,
         paymentId: before.paymentId,
+        orderId: before.treatmentFeeOrderId,
       });
     }
 
@@ -492,11 +882,24 @@ export class InvoiceService {
       dueDate: dto.dueDate ? new Date(dto.dueDate) : before.dueDate,
       language: dto.language ?? (before.language as 'fr' | 'en'),
       tvaRate,
-      discountAmount: totals.discountApplied,
-      stampDuty,
-      subTotalHt: totals.subTotalHt,
-      tvaAmount: totals.tvaAmount,
-      totalTtc: totals.totalTtc,
+      discountAmount: money.discountApplied,
+      discountPercent,
+      stampDuty: money.stampApplied,
+      subTotalHt: money.subTotalHt,
+      tvaAmount: money.tvaAmount,
+      totalTtc: money.totalTtc,
+      pricesIncludeTax,
+      paymentMethod:
+        dto.paymentMethod === undefined
+          ? before.paymentMethod
+          : dto.paymentMethod,
+      paymentReference:
+        dto.paymentReference === undefined
+          ? before.paymentReference
+          : dto.paymentReference?.trim() || null,
+      withholdingRate: money.withholdingRate,
+      withholdingAmount: money.withholdingAmount,
+      netPayable: money.netPayable,
       notes: dto.notes ?? before.notes,
       issuedAt: before.issuedAt ?? (entersIssuedOrPaid ? now : null),
       paidAt:
@@ -515,16 +918,18 @@ export class InvoiceService {
     try {
       await this.prisma.$transaction(async (tx) => {
         if (pendingLines) {
+          const lines = pendingLines;
           await tx.invoiceLine.deleteMany({ where: { invoiceId: id } });
           await tx.invoiceLine.createMany({
-            data: pendingLines.map((line, i) => ({
+            data: lines.map((line, i) => ({
               invoiceId: id,
               position: i,
               description: line.description,
               quantity: line.quantity ?? 1,
-              unitPrice: line.unitPrice ?? 0,
+              unitPrice: money.unitPrice[i],
+              unitPriceTtc: money.unitPriceTtc[i],
               tvaRate: line.tvaRate ?? null,
-              lineHt: totals.lineHt[i],
+              lineHt: money.lineHt[i],
             })),
           });
         }
@@ -544,11 +949,26 @@ export class InvoiceService {
         }
         // An automatic invoice and its payment receipt must never show
         // two different numbers: renumbering one renames both, in the
-        // same transaction.
+        // same transaction. Same for a treatment fee and its order.
         if (numberChanged && before.paymentId) {
           await tx.payment.update({
             where: { id: before.paymentId },
             data: { invoiceNumber },
+          });
+        }
+        if (numberChanged && before.treatmentFeeOrderId) {
+          // Only while the order prints this invoice's number. An order
+          // that still prints its legacy TF- receipt keeps it: that is the
+          // document the practitioner holds (the facture's notes name it).
+          await tx.dentalOrder.updateMany({
+            where: {
+              id: before.treatmentFeeOrderId,
+              OR: [
+                { treatmentFeeInvoiceNumber: before.invoiceNumber },
+                { treatmentFeeInvoiceNumber: null },
+              ],
+            },
+            data: { treatmentFeeInvoiceNumber: invoiceNumber },
           });
         }
       });
@@ -573,7 +993,13 @@ export class InvoiceService {
       LOCKED_STATUSES.includes(before.status) ||
       LOCKED_STATUSES.includes(updated.status)
     ) {
-      await this.writeAuditLog(id, caller, before, updated, Boolean(dto.lines));
+      await this.writeAuditLog(
+        id,
+        caller,
+        before,
+        updated,
+        Boolean(dto.lines),
+      );
     }
 
     return updated;
@@ -593,17 +1019,19 @@ export class InvoiceService {
   async restore(id: string) {
     const row = await this.getById(id, { allowDeleted: true });
     if (!row.deletedAt) return row;
-    return this.prisma.invoice.update({
+    const restored = await this.prisma.invoice.update({
       where: { id },
       data: { deletedAt: null },
       include: INVOICE_INCLUDE,
     });
+    return toInvoiceJson(restored);
   }
 
   /**
    * Trash-first permanent delete, mirroring every other purge in the app.
    * A DRAFT can go for good; anything that was ever issued or paid is a
-   * fiscal document and stays archived — the sequence must have no holes.
+   * fiscal document: it is cancelled (status cancelled, number kept),
+   * never purged — the sequence must have no holes.
    */
   async permanentDelete(id: string): Promise<{ message: string }> {
     const row = await this.getById(id, { allowDeleted: true });
@@ -616,7 +1044,7 @@ export class InvoiceService {
     if (row.status !== InvoiceStatus.draft || row.issuedAt) {
       throw new ConflictException(
         `Invoice ${row.invoiceNumber} was issued and cannot be permanently deleted — ` +
-          'a fiscal sequence may not have holes. It stays archived.',
+          'a fiscal sequence may not have holes. Cancel it instead: it keeps its number.',
         'INVOICE_ISSUED',
       );
     }
@@ -628,7 +1056,7 @@ export class InvoiceService {
 
   /**
    * Reject a number another document prints (an invoice, an installment
-   * receipt, a treatment-fee receipt) or one inside the future range of
+   * receipt, a treatment-fee number) or one inside the future range of
    * the automatic counters. The rules are shared with the receipt-number
    * editor of the payments desk (PaymentsService.updateInvoiceNumber), so
    * neither desk accepts a number the other refuses.
@@ -727,10 +1155,18 @@ export class InvoiceService {
       'dueDate',
       'tvaRate',
       'discountAmount',
+      'discountPercent',
       'stampDuty',
       'subTotalHt',
       'tvaAmount',
       'totalTtc',
+      'pricesIncludeTax',
+      'paymentMethod',
+      'paymentReference',
+      'withholdingRate',
+      'withholdingAmount',
+      'netPayable',
+      'treatmentFeeOrderId',
       'notes',
       'language',
     ];
@@ -760,6 +1196,7 @@ export class InvoiceService {
   private plain(value: unknown): unknown {
     if (value === null || value === undefined) return null;
     if (value instanceof Date) return value.toISOString();
+    if (typeof value === 'number') return String(value);
     if (typeof value === 'object' && 'toString' in (value as object)) {
       return String(value);
     }

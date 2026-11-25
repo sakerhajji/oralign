@@ -50,6 +50,8 @@ export enum PaymentMethod {
   CARD = 'card',
   BANK_TRANSFER = 'bank_transfer',
   CASH = 'cash',
+  /** Recorded by an administrator only, like cash. */
+  CHEQUE = 'cheque',
 }
 
 /**
@@ -208,7 +210,27 @@ export interface Payment {
   quotationId: string | null;
   installmentId: string | null;
   orderId: string;
+  /**
+   * Cash charged or received: the installment (TTC) + the stamp - any
+   * retenue à la source.
+   */
   amount: string;
+  /** Retenue à la source rate (%) the practitioner applied; null = none. */
+  withholdingRate?: number | string | null;
+  /** Amount the practitioner kept back (0 when none). */
+  withholdingAmount?: number | string;
+  /**
+   * Droit de timbre charged on top with this payment (its facture's
+   * stamp). 0 on payments made before 2026-11-20.
+   */
+  stampAmount?: number | string;
+  /**
+   * What this payment settles on the quote: amount + withholdingAmount -
+   * stampAmount (= the installment amount).
+   */
+  settledAmount?: number | string;
+  /** The facture's total: amount + withholdingAmount (stamp included). */
+  grossAmount?: number | string;
   currency: string;
   purpose?: PaymentPurpose;
   /** The Prisma column, serialised verbatim. */
@@ -269,7 +291,12 @@ export interface HostedPaymentSession {
   purpose: PaymentPurpose;
   status: PaymentRecordStatus;
   providerStatus: number | null;
+  /** Cash charged: what the payment settles + the stamp - the retenue. */
   amount: string;
+  /** Droit de timbre added on top of this payment. */
+  stampAmount?: number | string;
+  /** What the payment settles (the installment, or the fee + CBCT, TTC). */
+  settledAmount?: number | string;
   currency: string;
   paymentUrl: string | null;
   errorCode: string | null;
@@ -278,6 +305,8 @@ export interface HostedPaymentSession {
 
 export interface DeclareBankTransferDto {
   bankReference?: string;
+  /** Apply the retenue à la source (sent as a multipart string field). */
+  applyWithholding?: boolean;
   // proofFile is sent as multipart FormData — not on the DTO type itself.
 }
 
@@ -292,6 +321,10 @@ export interface RejectPaymentDto {
 export interface RecordCashPaymentDto {
   receiptNumber?: string;
   notes?: string;
+  /** The practitioner kept the retenue à la source back. */
+  applyWithholding?: boolean;
+  /** Cash by default; a cheque is recorded the same way. */
+  method?: PaymentMethod.CASH | PaymentMethod.CHEQUE;
 }
 
 export enum PaymentSortBy {

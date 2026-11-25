@@ -43,12 +43,14 @@ export const paymentsDeskDomainDict = {
       cash: { en: 'Cash', fr: 'Espèces' } as T,
       card: { en: 'Card', fr: 'Carte' } as T,
       bank_transfer: { en: 'Bank transfer', fr: 'Virement' } as T,
+      cheque: { en: 'Cheque', fr: 'Chèque' } as T,
     },
     // Full, for the takings cards (as the PDF summary names them).
     methodLong: {
       cash: { en: 'Cash', fr: 'Espèces' } as T,
       card: { en: 'Bank card', fr: 'Carte bancaire' } as T,
       bank_transfer: { en: 'Bank transfer', fr: 'Virement bancaire' } as T,
+      cheque: { en: 'Cheque', fr: 'Chèque' } as T,
     },
 
     // The global date filter: it drives the cards and both tabs.
@@ -192,20 +194,20 @@ export const paymentsDeskDomainDict = {
       colMethod: { en: 'Method', fr: 'Mode' } as T,
       colStatus: { en: 'Status', fr: 'Statut' } as T,
       colAmount: { en: 'Amount', fr: 'Montant' } as T,
-      colReceipt: { en: 'Receipt', fr: 'Reçu' } as T,
+      colReceipt: { en: 'Invoice', fr: 'Facture' } as T,
       installmentNo: { en: 'No. {n}', fr: 'n° {n}' } as T,
       installmentInline: { en: 'installment {n}', fr: 'échéance {n}' } as T,
       // The date of a fee still to confirm: it has none yet.
       toConfirm: { en: 'To be confirmed', fr: 'À confirmer' } as T,
-      viewReceipt: { en: 'View receipt', fr: 'Voir le reçu' } as T,
-      receiptAria: { en: 'Open receipt {number}', fr: 'Ouvrir le reçu {number}' } as T,
+      viewReceipt: { en: 'View invoice', fr: 'Voir la facture' } as T,
+      receiptAria: { en: 'Open invoice {number}', fr: 'Ouvrir la facture {number}' } as T,
       proofAria: {
         en: 'View the transfer proof',
         fr: 'Voir le justificatif du virement',
       } as T,
       // What a tap on a phone row opens (read by screen readers; the row
       // shows a chevron).
-      actionReceipt: { en: 'Open the receipt', fr: 'Ouvrir le reçu' } as T,
+      actionReceipt: { en: 'Open the invoice', fr: 'Ouvrir la facture' } as T,
       actionProof: { en: 'View the transfer proof', fr: 'Voir le justificatif' } as T,
       actionOrder: { en: 'Open the order', fr: 'Ouvrir la commande' } as T,
       // The proof viewer of an installment transfer, for an admin: it is
@@ -246,8 +248,8 @@ export const paymentsDeskDomainDict = {
         fr: 'Les échéances de devis réglées par carte, en espèces ou par virement apparaissent ici.',
       } as T,
       installmentsBodyDentist: {
-        en: 'Your installment payments and their receipts will show up here.',
-        fr: 'Vos paiements d’échéances et leurs reçus apparaîtront ici.',
+        en: 'Your installment payments and their invoices will show up here.',
+        fr: 'Vos paiements d’échéances et leurs factures apparaîtront ici.',
       } as T,
       feesTitle: {
         en: 'No treatment fees yet',
@@ -258,8 +260,8 @@ export const paymentsDeskDomainDict = {
         fr: 'Les honoraires de traitement réglés ou à confirmer apparaissent ici.',
       } as T,
       feesBodyDentist: {
-        en: 'The treatment fees of your orders and their receipts will show up here.',
-        fr: 'Les honoraires de traitement de vos commandes et leurs reçus apparaîtront ici.',
+        en: 'The treatment fees of your orders and their invoices will show up here.',
+        fr: 'Les honoraires de traitement de vos commandes et leurs factures apparaîtront ici.',
       } as T,
       // "To be confirmed" with a period on the fees tab: such a fee has
       // no payment date, so no period can hold it.
@@ -332,5 +334,80 @@ export const paymentsDeskDomainDict = {
         fr: 'Votre rôle ne donne pas accès aux paiements.',
       } as T,
     },
+  },
+
+  // What a payment charges — components/payments/withholding.tsx, shared
+  // by the payment dialogs and the payments lists. Prices are TTC; the
+  // droit de timbre is ADDED to every payment (each payment has its own
+  // facture), and the practitioner may keep {rate} % of the TTC (stamp
+  // excluded) back as retenue à la source:
+  //   à payer = montant TTC + timbre - retenue
+  withholdingUi: {
+    apply: {
+      en: 'Apply the withholding tax ({rate} %)',
+      fr: 'Appliquer la retenue à la source ({rate} %)',
+    } as T,
+    helpPayer: {
+      en: 'You keep {rate} % of the amount incl. tax (stamp excluded) and pay it to the tax office yourself. The invoice shows the amount withheld.',
+      fr: 'Vous retenez {rate} % du montant TTC (hors timbre) et le reversez vous-même aux impôts. La facture indique la retenue.',
+    } as T,
+    helpAdmin: {
+      en: 'Tick it when the practitioner kept {rate} % of the amount incl. tax (stamp excluded) as withholding tax.',
+      fr: 'Cochez si le praticien a retenu {rate} % du montant TTC (hors timbre) au titre de la retenue à la source.',
+    } as T,
+    // First line of a breakdown: what the payment settles.
+    dueInstallment: {
+      en: 'Installment amount (incl. tax)',
+      fr: 'Montant de l’échéance (TTC)',
+    } as T,
+    dueInstallments: {
+      en: 'Installments amount (incl. tax)',
+      fr: 'Montant des échéances (TTC)',
+    } as T,
+    dueFee: { en: 'Treatment fee (incl. tax)', fr: 'Honoraires (TTC)' } as T,
+    // Added to every payment: "Droit de timbre" / "Droit de timbre (3 × 1,000)".
+    stamp: { en: 'Stamp duty', fr: 'Droit de timbre' } as T,
+    stampTimes: {
+      en: 'Stamp duty ({count} × {stamp})',
+      fr: 'Droit de timbre ({count} × {stamp})',
+    } as T,
+    // Under an installment still to pay, in a payment plan.
+    stampHint: { en: '+ {stamp} stamp duty', fr: '+ {stamp} de timbre' } as T,
+    // A plan's price with one stamp per payment.
+    totalWithStamps: {
+      en: 'Total to pay (stamp duty included)',
+      fr: 'Total à payer (timbres compris)',
+    } as T,
+    withheld: { en: 'Withholding tax ({rate} %)', fr: 'Retenue à la source ({rate} %)' } as T,
+    withheldNoRate: { en: 'Withholding tax', fr: 'Retenue à la source' } as T,
+    // Last line: the cash.
+    toPay: { en: 'To pay', fr: 'À payer' } as T,
+    toTransfer: { en: 'To transfer', fr: 'À virer' } as T,
+    // Last line when the admin records cash or a cheque.
+    toCollect: { en: 'To collect', fr: 'À encaisser' } as T,
+    received: { en: 'Received', fr: 'Encaissé' } as T,
+    // Under an amount in the lists: "Échéance 1 000,000" / "Timbre 1,000" /
+    // "Retenue 10,000"; the hover text joins them with "Encaissé 991,000".
+    dueShortInstallment: { en: 'Installment {amount}', fr: 'Échéance {amount}' } as T,
+    dueShortFee: { en: 'Fee {amount}', fr: 'Honoraires {amount}' } as T,
+    stampShort: { en: 'Stamp {amount}', fr: 'Timbre {amount}' } as T,
+    withheldShort: { en: 'Withheld {amount}', fr: 'Retenue {amount}' } as T,
+    receivedShort: { en: 'Received {amount}', fr: 'Encaissé {amount}' } as T,
+    // Where a price is announced: prices are TTC, the stamp comes on top.
+    ttcNote: {
+      en: 'Price incl. tax: {rate} % VAT included. A stamp duty of {stamp} is added to each payment.',
+      fr: 'Prix TTC : TVA {rate} % incluse. Droit de timbre {stamp} ajouté à chaque paiement.',
+    } as T,
+    ttcNoteNoStamp: {
+      en: 'Price incl. tax: {rate} % VAT included',
+      fr: 'Prix TTC : TVA {rate} % incluse',
+    } as T,
+    // 409 WITHHOLDING_CHOICE_CONFLICT from a card session (installment or
+    // treatment fee). Other PAYMENT_ATTEMPT_IN_PROGRESS refusals keep the
+    // server's message.
+    choiceConflict: {
+      en: 'A card payment is already open for this amount with the other withholding tax choice. Finish it on the payment page you opened, or wait a few minutes for it to expire, then try again.',
+      fr: 'Un paiement par carte est déjà ouvert pour ce montant avec un autre choix de retenue à la source. Terminez-le sur la page de paiement déjà ouverte, ou attendez quelques minutes qu’il expire, puis réessayez.',
+    } as T,
   },
 };

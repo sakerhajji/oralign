@@ -8,13 +8,15 @@ import {
 } from '@tanstack/react-query';
 import { toast } from '@/lib/toast';
 import { adminInvoicesService } from '@/lib/api/admin-invoices.service';
-import { extractApiErrorMessage, toastMutationError } from '@/lib/api/error';
+import { extractApiError, extractApiErrorMessage, toastMutationError } from '@/lib/api/error';
 import { useT } from '@/lib/i18n/lang-context';
 import type {
   CreateInvoiceInput,
   Invoice,
+  InvoiceAccountingSummary,
   InvoiceClientMatch,
   InvoiceFilters,
+  InvoicePeriodParams,
   InvoiceSummary,
   PaginatedResponse,
   UpdateInvoiceInput,
@@ -26,6 +28,9 @@ export const invoiceKeys = {
   list: (filters: InvoiceFilters) => [...invoiceKeys.lists(), filters] as const,
   summary: (filters: InvoiceFilters) =>
     [...invoiceKeys.all, 'summary', filters] as const,
+  // Under `all`: every invoice write refreshes the accountant's figures too.
+  accounting: (period: InvoicePeriodParams) =>
+    [...invoiceKeys.all, 'accounting', period] as const,
   details: () => [...invoiceKeys.all, 'detail'] as const,
   detail: (id: string) => [...invoiceKeys.details(), id] as const,
   clients: (search: string) => [...invoiceKeys.all, 'clients', search] as const,
@@ -61,6 +66,24 @@ export function useInvoiceSummary(
   return useQuery({
     queryKey: invoiceKeys.summary(filters),
     queryFn: () => adminInvoicesService.summary(filters),
+    enabled,
+    staleTime: 10_000,
+    placeholderData: (previous) => previous,
+  });
+}
+
+/**
+ * The récapitulatif comptable of a period. The previous period's figures
+ * stay on screen while the next one loads (`isPlaceholderData`), so
+ * switching presets never collapses the layout.
+ */
+export function useInvoiceAccountingSummary(
+  period: InvoicePeriodParams,
+  enabled = true,
+): UseQueryResult<InvoiceAccountingSummary, Error> {
+  return useQuery({
+    queryKey: invoiceKeys.accounting(period),
+    queryFn: () => adminInvoicesService.accountingSummary(period),
     enabled,
     staleTime: 10_000,
     placeholderData: (previous) => previous,
@@ -162,6 +185,40 @@ export function usePermanentDeleteInvoice() {
   });
 }
 
+/** Send (or re-send) the invoice PDF to the practitioner by e-mail. */
+/**
+ * The API's refusals of an invoice e-mail, by errorCode. They answer 422
+ * (never 502/503, which the classifier reads as "the server restarts"),
+ * so the server's message would reach the toast, but it is written in
+ * English: a known one gets the desk's own words. None clears on a retry.
+ */
+const EMAIL_INVOICE_ERRORS: Record<string, string> = {
+  INVOICE_NO_RECIPIENT: 'invoicesAdmin.emailErrors.noRecipient',
+  MAIL_NOT_CONFIGURED: 'invoicesAdmin.emailErrors.notConfigured',
+  MAIL_SEND_FAILED: 'invoicesAdmin.emailErrors.sendFailed',
+};
+
+export function useEmailInvoice() {
+  const queryClient = useQueryClient();
+  const { t } = useT();
+  return useMutation({
+    mutationFn: (id: string) => adminInvoicesService.sendEmail(id),
+    onSuccess: ({ emailedTo }) => {
+      invalidateInvoices(queryClient);
+      toast.success(t('invoicesAdmin.toastEmailed', { email: emailedTo }));
+    },
+    onError: (err) => {
+      const { errorCode } = extractApiError(err);
+      const key = errorCode ? EMAIL_INVOICE_ERRORS[errorCode] : undefined;
+      if (key) {
+        toast.error(t(key), { duration: 9000 });
+        return;
+      }
+      toastMutationError(err);
+    },
+  });
+}
+
 export function useBulkArchiveInvoices() {
   const queryClient = useQueryClient();
   const { t } = useT();
@@ -198,6 +255,28 @@ export function useExportInvoicesZip() {
   const { t } = useT();
   return useMutation({
     mutationFn: (ids: string[]) => adminInvoicesService.exportZip(ids),
+    onSuccess: () => toast.success(t('invoicesAdmin.toastExported')),
+    onError: (err) => toast.error(extractApiErrorMessage(err)),
+  });
+}
+
+/** Every issued, paid and cancelled invoice of a period, as one ZIP. */
+export function useExportPeriodZip() {
+  const { t } = useT();
+  return useMutation({
+    mutationFn: (period: InvoicePeriodParams) => adminInvoicesService.exportPeriodZip(period),
+    onSuccess: () => toast.success(t('invoicesAdmin.toastExported')),
+    // A 400 here says why (more than 1000 invoices): it stays readable.
+    onError: (err) => toast.error(extractApiErrorMessage(err), { duration: 9000 }),
+  });
+}
+
+/** The récapitulatif comptable of a period, as a PDF in the page's language. */
+export function useDownloadAccountingPdf() {
+  const { t } = useT();
+  return useMutation({
+    mutationFn: ({ period, language }: { period: InvoicePeriodParams; language: 'fr' | 'en' }) =>
+      adminInvoicesService.downloadAccountingPdf(period, language),
     onSuccess: () => toast.success(t('invoicesAdmin.toastExported')),
     onError: (err) => toast.error(extractApiErrorMessage(err)),
   });

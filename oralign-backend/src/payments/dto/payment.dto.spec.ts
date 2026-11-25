@@ -1,5 +1,11 @@
 import { type ArgumentMetadata, ValidationPipe } from '@nestjs/common';
-import { PaymentFilterDto, PaymentSummaryQueryDto } from './payment.dto';
+import {
+  CreateClicToPaySessionDto,
+  DeclareBankTransferDto,
+  PaymentFilterDto,
+  PaymentSummaryQueryDto,
+  RecordCashPaymentDto,
+} from './payment.dto';
 
 /** The global pipe exactly as main.ts configures it. */
 const pipe = new ValidationPipe({
@@ -159,4 +165,50 @@ describe('PaymentSummaryQueryDto (GET /payments/summary)', () => {
       await expect(parseSummary(raw)).rejects.toMatchObject(badRequest);
     },
   );
+});
+
+describe('applyWithholding (read raw, so "false" never becomes true)', () => {
+  const body = <T extends object>(metatype: new () => T) => {
+    const metadata: ArgumentMetadata = { type: 'body', metatype };
+    return (raw: Record<string, unknown>) =>
+      pipe.transform(raw, metadata) as Promise<T>;
+  };
+  const session = body(CreateClicToPaySessionDto);
+  const transfer = body(DeclareBankTransferDto);
+  const cash = body(RecordCashPaymentDto);
+  const card = { orderId: 'o-1', purpose: 'installment', installmentId: 'i-1' };
+
+  it.each([
+    [false, false],
+    ['false', false],
+    [true, true],
+    ['true', true],
+  ])('card session: %p → %p', async (raw, expected) => {
+    await expect(
+      session({ ...card, applyWithholding: raw }),
+    ).resolves.toMatchObject({ applyWithholding: expected });
+  });
+
+  it.each([
+    ['false', false],
+    ['true', true],
+    ['', undefined],
+  ])('transfer declaration (multipart) %p → %p', async (raw, expected) => {
+    const dto = await transfer({ applyWithholding: raw });
+    expect(dto.applyWithholding).toBe(expected);
+  });
+
+  it.each(['yes', '1', 1])('refuses %p', async (raw) => {
+    await expect(transfer({ applyWithholding: raw })).rejects.toMatchObject(
+      badRequest,
+    );
+  });
+
+  it('record-cash: cash or cheque only, cash when absent', async () => {
+    await expect(cash({ method: 'cheque' })).resolves.toMatchObject({
+      method: 'cheque',
+    });
+    expect((await cash({})).method).toBeUndefined();
+    await expect(cash({ method: 'card' })).rejects.toMatchObject(badRequest);
+  });
 });

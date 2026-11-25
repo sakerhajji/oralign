@@ -3,8 +3,10 @@ import { asBlob, blobError, saveBlob } from './blob-download';
 import type {
   CreateInvoiceInput,
   Invoice,
+  InvoiceAccountingSummary,
   InvoiceClientMatch,
   InvoiceFilters,
+  InvoicePeriodParams,
   InvoiceSummary,
   PaginatedResponse,
   UpdateInvoiceInput,
@@ -19,7 +21,7 @@ import type {
  */
 
 /** Drop empty values so the API never sees `?search=` or `?statuses=`. */
-function cleanParams(filters: InvoiceFilters): Record<string, unknown> {
+function cleanParams(filters: object): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(filters)) {
     if (value === undefined || value === null || value === '') continue;
@@ -87,6 +89,16 @@ export const adminInvoicesService = {
   permanentDelete: async (id: string): Promise<{ message: string }> => {
     const res = await apiClient.delete<{ message: string }>(
       `/admin/invoices/${id}/permanent`,
+    );
+    return res.data;
+  },
+
+  /** E-mails the invoice PDF to the practitioner (his account address). */
+  sendEmail: async (
+    id: string,
+  ): Promise<{ emailedTo: string; emailedAt: string }> => {
+    const res = await apiClient.post<{ emailedTo: string; emailedAt: string }>(
+      `/admin/invoices/${id}/email`,
     );
     return res.data;
   },
@@ -164,4 +176,65 @@ export const adminInvoicesService = {
       throw await blobError(error, 'Could not export the selected invoices.');
     }
   },
+
+  /**
+   * The accountant's figures for a period: TVA per rate, stamps, retenues
+   * à la source per practitioner, cash collected per method, months.
+   * Counts issued + paid invoices only; drafts and cancelled come apart.
+   */
+  accountingSummary: async (
+    period: InvoicePeriodParams = {},
+  ): Promise<InvoiceAccountingSummary> => {
+    const res = await apiClient.get<InvoiceAccountingSummary>(
+      '/admin/invoices/accounting-summary',
+      { params: cleanParams(period) },
+    );
+    return res.data;
+  },
+
+  /** The same summary as a PDF, to hand over to the accountant. */
+  downloadAccountingPdf: async (
+    period: InvoicePeriodParams,
+    language: 'fr' | 'en',
+  ): Promise<void> => {
+    try {
+      const res = await apiClient.get('/admin/invoices/accounting-summary/pdf', {
+        params: cleanParams({ ...period, language }),
+        responseType: 'blob',
+      });
+      saveBlob(
+        asBlob(res.data, 'application/pdf'),
+        `recap-comptable-${periodFileSuffix(period)}.pdf`,
+        res.headers as Record<string, unknown>,
+      );
+    } catch (error) {
+      throw await blobError(error, 'Could not download the accounting summary.');
+    }
+  },
+
+  /**
+   * Every issued, paid and cancelled invoice of the period as PDFs in one
+   * ZIP (no ids: the server picks them; it refuses more than 1000).
+   */
+  exportPeriodZip: async (period: InvoicePeriodParams): Promise<void> => {
+    try {
+      const res = await apiClient.post(
+        '/admin/invoices/export/zip',
+        cleanParams(period),
+        { responseType: 'blob' },
+      );
+      saveBlob(
+        asBlob(res.data, 'application/zip'),
+        `factures-${periodFileSuffix(period)}.zip`,
+        res.headers as Record<string, unknown>,
+      );
+    } catch (error) {
+      throw await blobError(error, 'Could not export the invoices of the period.');
+    }
+  },
 };
+
+/** "2026-11-01_2026-11-30" — the fallback file name when the server gives none. */
+function periodFileSuffix(period: InvoicePeriodParams): string {
+  return `${period.issuedFrom ?? 'debut'}_${period.issuedTo ?? 'fin'}`;
+}

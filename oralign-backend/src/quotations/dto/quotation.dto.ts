@@ -32,6 +32,10 @@ import {
  * picks the language, then iterates). The service falls back to 0 for
  * any missing fee and to the default TVA rate / currency from
  * CompanyBillingSettings.
+ *
+ * Every fee is TTC (TVA included). `tvaRate` only says how the total
+ * splits into HT and TVA; it never adds anything on top, and 0 means
+ * "the company rate".
  */
 export class CreateQuotationDto {
   @ApiPropertyOptional({ enum: DevisLanguage, default: DevisLanguage.fr })
@@ -62,6 +66,23 @@ export class CreateQuotationDto {
   @Type(() => Number)
   @Min(0)
   discountAmount?: number;
+
+  // The remise as a percentage of the gross (fees, TTC). When a number is
+  // sent the server derives discountAmount from it and keeps the
+  // percentage; null switches back to a remise typed as an amount.
+  @ApiPropertyOptional({
+    minimum: 0,
+    maximum: 100,
+    nullable: true,
+    description:
+      'Remise en % du brut TTC. Envoye => discountAmount est calcule par le serveur. null => remise en montant.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100)
+  discountPercent?: number | null;
 
   @ApiPropertyOptional({ minimum: 0, maximum: 100 })
   @IsOptional()
@@ -97,6 +118,8 @@ export class CreateQuotationDto {
 // ─── Update ────────────────────────────────────────────────────────────────
 
 // All fields optional — admin can save partial progress while iterating.
+// Accepted at draft, sent and approved; on a pack quote a new total
+// rebalances the unpaid installments (QuotationService.update).
 export class UpdateQuotationDto extends PartialType(CreateQuotationDto) {}
 
 // ─── Reject ────────────────────────────────────────────────────────────────
@@ -179,6 +202,8 @@ export class QuotationResponseDto {
   @ApiProperty() fabricationFees!: number;
   @ApiProperty() deliveryFees!: number;
   @ApiProperty() discountAmount!: number;
+  @ApiPropertyOptional({ nullable: true, description: 'Remise typed as a percentage, null when typed as an amount.' })
+  discountPercent?: number | null;
 
   @ApiProperty() subTotalHt!: number;
   @ApiProperty() tvaRate!: number;
@@ -222,6 +247,44 @@ export class QuotationResponseDto {
     description: 'Quarter number (1-4) that earned the reward',
   })
   loyaltySourceQuarter?: number | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Pack quotes: the TTC the plan covers (Decimal string). Legacy quotes: null.',
+  })
+  totalPrice?: string | null;
+  @ApiProperty({
+    description:
+      'TTC settled so far: Σ (amount + withholdingAmount) of successful payments (Decimal string).',
+  })
+  paidAmount!: string;
+  @ApiPropertyOptional({ description: 'totalPrice - paidAmount (Decimal string)' })
+  remainingAmount?: string | null;
+
+  // ── Computed on every response (not stored) ──────────────────
+  @ApiProperty({
+    description:
+      'A payment attempt that may still settle exists (pending, unknown or awaiting confirmation).',
+  })
+  hasPaymentInFlight!: boolean;
+  @ApiProperty({ description: 'TTC settled so far, as a number (= paidAmount).' })
+  receivedAmount!: number;
+  @ApiProperty({
+    description:
+      'No successful and no in-progress payment: the quote may be deleted (POST quotations/:id/cancel).',
+  })
+  canDelete!: boolean;
+  @ApiProperty({
+    description:
+      'Sent or approved with nothing received and nothing in progress: the quote may be recalled to draft.',
+  })
+  canRecall!: boolean;
+
+  @ApiProperty({
+    description:
+      'A re-plan of the unpaid part can still give its installments steps: true for an unlimited pack, false once the kept (paid or cancelled) batches cover every step.',
+  })
+  freeStepsForReplan!: boolean;
 }
 
 // ─── Pack attachment + payment plan configuration ────────────────
@@ -230,10 +293,10 @@ export class QuotationResponseDto {
 // NEVER provides an amount.
 
 /**
- * Attach a pack + arch to a draft quotation. Service looks up the
- * active PackPrice, snapshots its fields onto the Quotation, sets
- * totalPrice. Cannot be used once the quote is approved or partially
- * paid — those gates are enforced server-side.
+ * Attach a pack + arch to a quotation. Service looks up the active
+ * PackPrice, snapshots its fields onto the Quotation, sets totalPrice
+ * (TTC). Refused once money was received or while a payment is in
+ * progress — those gates are enforced server-side.
  */
 export class AttachPackToQuotationDto {
   @ApiProperty()
@@ -278,10 +341,13 @@ export class PaymentPlanBatchDto {
 /**
  * One row of the installment plan. `batch.fromStep`/`toStep` carry
  * the linked step batch range — the service enforces that:
- *   • ranges within the plan are disjoint
+ *   • ranges within the plan are disjoint, paid batches included
  *   • every step ≤ pack.maxStepsPerArch (when not unlimited)
- *   • Σ amounts == quote.totalPrice (with the diff parked on the
- *     last row to absorb rounding)
+ *   • Σ amounts == quote.totalPrice − Σ paid installments (the whole
+ *     totalPrice while nothing is paid), within 0.001
+ *
+ * Paid installments are never sent: they are kept as they are, and the
+ * rows sent here replace every unpaid one.
  *
  * `availableFrom` defaults to "now" when omitted, but for installments
  * 2+ the admin typically sets a later date.
@@ -316,7 +382,13 @@ export class ConfigurePaymentPlanDto {
 
   // FULL_PAYMENT requires exactly one installment covering the whole
   // step range. INSTALLMENTS requires 2+; the service enforces both.
-  @ApiProperty({ type: [PaymentPlanInstallmentDto] })
+  // Once installments are paid these count the NEW rows only:
+  // FULL_PAYMENT = the balance in one row, INSTALLMENTS = 1+ rows.
+  @ApiProperty({
+    type: [PaymentPlanInstallmentDto],
+    description:
+      'The new unpaid installments. Paid ones are kept and must not be repeated here.',
+  })
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(24)

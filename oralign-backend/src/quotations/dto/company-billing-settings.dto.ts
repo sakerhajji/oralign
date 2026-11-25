@@ -211,19 +211,39 @@ export class UpsertCompanyBillingSettingsDto {
   defaultTreatmentFee?: number;
 
   // "Droit de timbre" — the Tunisian fiscal stamp duty (typically
-  // 1.000 TND) added to the invoice total. Decimal in the DB; carried
-  // as Number across the API so the admin form can use a plain number
-  // input (mirrors defaultTreatmentFee).
+  // 1.000 TND). Prices are TTC (TVA included); the stamp is ADDED on top
+  // of every payment, since every payment gets its own facture (owner
+  // decision 2026-11-20): an installment of 1 000 is paid 1 001, a plan of
+  // 3 installments costs 3 stamps. Snapshotted onto each payment.
+  // Decimal in the DB; carried as Number across the API so the admin
+  // form can use a plain number input (mirrors defaultTreatmentFee).
   @ApiPropertyOptional({
     minimum: 0,
     default: 1,
     description:
-      'Fiscal stamp duty (Droit de timbre) added to every invoice total.',
+      'Fiscal stamp duty (Droit de timbre), ADDED on top of every payment (one facture per payment): an installment of 1000 is paid 1001. Not part of the TTC price; snapshotted onto each payment.',
   })
   @IsOptional()
   @Type(() => Number)
   @Min(0)
   stampDuty?: number;
+
+  // Retenue à la source: % of the amount due (TTC, stamp EXCLUDED) a
+  // practitioner may keep back when paying. 0 turns the option off.
+  // Installment 1000 at 1 %: retenue 10, paid 1000 + 1 - 10 = 991.
+  @ApiPropertyOptional({
+    minimum: 0,
+    maximum: 99.99,
+    default: 1,
+    description:
+      'Retenue a la source (%) the practitioner may apply when paying, computed on the TTC due WITHOUT the stamp duty (1000 at 1 % = 10; paid 1000 + 1 stamp - 10 = 991). 0 = off.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(99.99)
+  withholdingRate?: number;
 
   // CBCT paid supplement — when enabled with a fee > 0, requesting
   // CBCT on a new order adds this supplement to the professional fee.
@@ -400,7 +420,14 @@ export class CompanyBillingSettingsResponseDto {
 
   @ApiProperty() defaultTvaRate!: number;
   @ApiProperty() defaultTreatmentFee!: number;
-  @ApiProperty() stampDuty!: number;
+  @ApiProperty({
+    description: 'Droit de timbre added on top of every payment (one facture per payment).',
+  })
+  stampDuty!: number;
+  @ApiProperty({
+    description: 'Retenue a la source (%), on the TTC due without the stamp. 0 = off.',
+  })
+  withholdingRate!: number;
   @ApiProperty() cbctSupplementEnabled!: boolean;
   @ApiProperty() cbctSupplementFee!: number;
   @ApiProperty() refinementTwoArchesFee!: number;

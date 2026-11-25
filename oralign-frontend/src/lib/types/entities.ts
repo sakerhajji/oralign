@@ -296,7 +296,19 @@ export interface DentalOrder {
   // "Pay treatment fee" / "Mark as paid" card while paidAt is null
   // and the configured default fee is > 0.
   treatmentFeePaidAt?: string;
+  /**
+   * Cash collected for the fee: fee due (TTC) + stamp - retenue. The fee
+   * due is this + withholding - stamp.
+   */
   treatmentFeeAmount?: number;
+  /** Retenue à la source applied to the fee: rate (%) and amount kept back. */
+  treatmentFeeWithholdingRate?: number | null;
+  treatmentFeeWithholdingAmount?: number | null;
+  /**
+   * Droit de timbre charged on top of the fee with its payment. null / 0
+   * on fees paid before 2026-11-20.
+   */
+  treatmentFeeStampAmount?: number | null;
   treatmentFeePaymentMethod?: PaymentMethod;
   treatmentFeePaymentStatus?: PaymentRecordStatus;
   treatmentFeeProofPath?: string;

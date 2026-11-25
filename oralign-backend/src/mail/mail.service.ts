@@ -7,6 +7,7 @@ import {
   renderAppointmentDecisionForPatient,
   renderAppointmentRequestedForPatient,
   renderAppointmentRequestForPractitioner,
+  renderInvoiceForDoctorEmail,
   renderNewOrderForAdminEmail,
   renderNewUserPendingForAdminEmail,
   renderNewOrderForDoctorEmail,
@@ -21,6 +22,13 @@ import { env } from '../common/config/env';
 import { aligned, checkDomainAuth, domainOf, resolveDkim } from './mail-auth';
 
 type Transporter = ReturnType<typeof nodemailer.createTransport>;
+
+/** A file sent with a mail (nodemailer attachment, in-memory content). */
+export interface MailAttachment {
+  filename: string;
+  content: Buffer;
+  contentType?: string;
+}
 
 @Injectable()
 export class MailService {
@@ -319,6 +327,47 @@ export class MailService {
     await this.send({ to: args.to, subject, html });
   }
 
+  // ─── Billing emails ─────────────────────────────────────────────────────
+
+  /**
+   * The invoice of a payment, PDF attached, to the practitioner who paid.
+   * Returns whether it actually went out (false when SMTP is not
+   * configured), so the caller only stamps `emailedAt` on a real send.
+   * SMTP errors are rethrown, like every other send.
+   */
+  async sendInvoiceToDoctor(args: {
+    to: string;
+    lang: Lang;
+    doctorName: string;
+    invoiceNumber: string;
+    orderCode: string | null;
+    /** Total TTC of the facture, droit de timbre included. */
+    totalTtc: number;
+    /** The droit de timbre added on top (printed on its own row). */
+    stampDuty?: number;
+    withholdingRate: number | null;
+    withholdingAmount: number;
+    netPayable: number;
+    currency: string;
+    paid: boolean;
+    dashboardUrl: string | null;
+    pdf: { filename: string; content: Buffer };
+  }): Promise<boolean> {
+    const { html, subject } = renderInvoiceForDoctorEmail(args, args.lang);
+    return this.send({
+      to: args.to,
+      subject,
+      html,
+      attachments: [
+        {
+          filename: args.pdf.filename,
+          content: args.pdf.content,
+          contentType: 'application/pdf',
+        },
+      ],
+    });
+  }
+
   // ─── Appointment emails ─────────────────────────────────────────────────
   //
   // Patients are NOT app Users, so their language can't be looked up from
@@ -378,13 +427,18 @@ export class MailService {
     await this.send({ to: args.to, subject, html });
   }
 
+  /**
+   * Returns true once the SMTP relay accepted the message, false when mail
+   * is disabled (nothing was sent). Real SMTP failures are rethrown.
+   */
   private async send(options: {
     to: string;
     subject: string;
     html: string;
     /** Optional plain-text summary logged when mail is disabled */
     devHint?: string;
-  }): Promise<void> {
+    attachments?: MailAttachment[];
+  }): Promise<boolean> {
     if (!this.transporter) {
       // SMTP not configured. Hint is suppressed in production so we don't
       // leak OTPs or reset URLs into stdout (operators may ship logs to a
@@ -399,7 +453,7 @@ export class MailService {
           'SMTP transporter is not configured but app is running in production',
         );
       }
-      return;
+      return false;
     }
 
     try {
@@ -416,8 +470,18 @@ export class MailService {
         // Give recipients a real mailbox to answer to (a From that can't
         // be replied to is another spam signal). Optional override.
         replyTo: env.mail.replyTo || this.fromAddress,
+        ...(options.attachments?.length
+          ? {
+              attachments: options.attachments.map((a) => ({
+                filename: a.filename,
+                content: a.content,
+                ...(a.contentType ? { contentType: a.contentType } : {}),
+              })),
+            }
+          : {}),
       });
       this.logger.log(`Email sent to ${options.to}: "${options.subject}"`);
+      return true;
     } catch (error) {
       this.logger.error(
         `Failed to send email to ${options.to}: ${(error as Error).message}`,

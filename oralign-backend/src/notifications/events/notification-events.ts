@@ -177,7 +177,22 @@ export interface PaymentEvent {
   doctorId: string;
   doctorName?: string | null;
   patientName?: string | null;
-  amount: string; // Decimal-as-string
+  /**
+   * The cash charged or received (installment + stamp - retenue),
+   * Decimal-as-string.
+   */
+  amount: string;
+  /**
+   * The retenue à la source the practitioner kept back ("0" when none),
+   * Decimal-as-string, computed on the installment (stamp excluded).
+   */
+  withholdingAmount: string;
+  /**
+   * The droit de timbre charged on top with this payment ("0" on payments
+   * made before 2026-11-20), Decimal-as-string.
+   * amount + withholdingAmount - stampAmount = the installment paid.
+   */
+  stampAmount: string;
   currency: string;
   method: PaymentMethod;
   installmentNumber?: number;
@@ -186,9 +201,9 @@ export interface PaymentEvent {
 /**
  * Treatment-fee lifecycle event. Lives at the ORDER level (not the
  * installment Payment level), so we intentionally don't share the
- * PaymentEvent shape — no quotationId, no installmentNumber, no
- * paymentId. The amount + method are the doctor's stated values,
- * verified by the admin at confirm time.
+ * PaymentEvent shape — no quotationId, no installmentNumber. The amount
+ * + method are the doctor's stated values, verified by the admin at
+ * confirm time.
  */
 export interface TreatmentFeeEvent {
   orderId: string;
@@ -196,9 +211,26 @@ export interface TreatmentFeeEvent {
   doctorId: string;
   doctorName?: string | null;
   patientName?: string | null;
-  amount: string; // Decimal-as-string at event time
+  /**
+   * The cash charged or received (fee due + stamp - retenue),
+   * Decimal-as-string.
+   */
+  amount: string;
+  /**
+   * The retenue à la source the practitioner kept back ("0" when none),
+   * computed on the fee due (stamp excluded). Absent on legacy emitters.
+   */
+  withholdingAmount?: string;
+  /**
+   * The droit de timbre charged on top ("0" when none, e.g. a fee paid
+   * before 2026-11-20). amount + withholdingAmount - stampAmount = the fee
+   * due. Absent on legacy emitters.
+   */
+  stampAmount?: string;
   currency: string;
   method: PaymentMethod;
+  /** The settled ClicToPay attempt, for a fee paid by card. */
+  paymentId?: string;
 }
 
 export interface BatchEvent {

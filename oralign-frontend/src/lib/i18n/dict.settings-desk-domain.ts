@@ -48,6 +48,10 @@ export const settingsDeskDomainDict = {
         en: 'Enter a rate between 0 and 100.',
         fr: 'Saisissez un taux compris entre 0 et 100.',
       } as T,
+      invalidWithholdingRate: {
+        en: 'Enter a rate between 0 and 99.99 (up to 2 decimals).',
+        fr: 'Saisissez un taux compris entre 0 et 99,99 (2 décimales au plus).',
+      } as T,
       invalidNextNumber: {
         en: 'Enter a whole number of 1 or more.',
         fr: 'Saisissez un nombre entier supérieur ou égal à 1.',

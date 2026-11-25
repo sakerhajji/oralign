@@ -36,6 +36,8 @@ export const paymentsService = {
     idempotencyKey: string;
     language?: 'fr' | 'en' | 'ar';
     pageView?: 'DESKTOP' | 'MOBILE';
+    /** Pay the amount due minus the retenue à la source. */
+    applyWithholding?: boolean;
   }): Promise<HostedPaymentSession> => {
     const res = await apiClient.post<HostedPaymentSession>(
       '/payments/clictopay/session',
@@ -45,6 +47,7 @@ export const paymentsService = {
         installmentId: args.installmentId,
         language: args.language,
         pageView: args.pageView,
+        applyWithholding: args.applyWithholding ?? false,
       },
       { headers: { 'Idempotency-Key': args.idempotencyKey } },
     );
@@ -98,10 +101,13 @@ export const paymentsService = {
     installmentId: string;
     bankReference?: string;
     proofFile?: File | Blob | null;
+    applyWithholding?: boolean;
   }): Promise<Payment> => {
     const form = new FormData();
     if (args.bankReference) form.append('bankReference', args.bankReference);
     if (args.proofFile) form.append('proofFile', args.proofFile);
+    // Multipart fields are strings; the server reads the raw value.
+    form.append('applyWithholding', args.applyWithholding ? 'true' : 'false');
     const res = await apiClient.post<Payment>(
       `/quotations/${args.quotationId}/installments/${args.installmentId}/declare-bank-transfer`,
       form,

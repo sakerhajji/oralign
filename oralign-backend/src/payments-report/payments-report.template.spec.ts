@@ -310,7 +310,7 @@ describe('payments report template', () => {
           NBSP,
         ),
       );
-      expect(text(html)).toContain('CSH-77 Reçu FAC-000042');
+      expect(text(html)).toContain('CSH-77 Facture FAC-000042');
     });
 
     it('a fee still to confirm has no date yet', () => {

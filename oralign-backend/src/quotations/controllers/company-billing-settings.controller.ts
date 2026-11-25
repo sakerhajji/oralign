@@ -181,6 +181,9 @@ export class PublicBillingDefaultsController {
       properties: {
         defaultTreatmentFee: { type: 'number', example: 100 },
         defaultCurrency: { type: 'string', example: 'TND' },
+        defaultTvaRate: { type: 'number', example: 19 },
+        stampDuty: { type: 'number', example: 1 },
+        withholdingRate: { type: 'number', example: 1 },
         cbctSupplementEnabled: { type: 'boolean', example: false },
         cbctSupplementFee: { type: 'number', example: 0 },
         companyName: { type: 'string', nullable: true },
@@ -203,6 +206,9 @@ export class PublicBillingDefaultsController {
   async getPublicDefaults(): Promise<{
     defaultTreatmentFee: number;
     defaultCurrency: string;
+    defaultTvaRate: number;
+    stampDuty: number;
+    withholdingRate: number;
     cbctSupplementEnabled: boolean;
     cbctSupplementFee: number;
     refinementTwoArchesFee: number;
@@ -252,6 +258,11 @@ export class PublicBillingDefaultsController {
         ? Number(settings.defaultTreatmentFee)
         : 0,
       defaultCurrency: settings?.defaultCurrency ?? 'TND',
+      // Prices are TTC: the payment dialogs show the TVA and the stamp
+      // inside them, and offer the retenue à la source when its rate > 0.
+      defaultTvaRate: settings?.defaultTvaRate ?? 19,
+      stampDuty: settings ? Number(settings.stampDuty) : 1,
+      withholdingRate: settings ? Number(settings.withholdingRate) : 0,
       // CBCT supplement — Number-unwrapped like defaultTreatmentFee so
       // the order form can show the configured price before requesting.
       cbctSupplementEnabled: settings?.cbctSupplementEnabled ?? false,

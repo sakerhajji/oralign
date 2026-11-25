@@ -79,6 +79,19 @@ export class AllExceptionsFilter implements ExceptionFilter {
       const status = exception.getStatus();
       const exceptionResponse = exception.getResponse();
 
+      // Nest's built-in exceptions put their second argument in `error`
+      // (`new ConflictException(message, 'QUOTE_PLAN_REQUIRED')`). Forward
+      // it as `errorCode` when it reads as a machine code, so the client
+      // can react to the code instead of parsing the message. Nest's own
+      // defaults ("Conflict", "Bad Request") never match the pattern.
+      const rawError =
+        typeof exceptionResponse === 'object' && exceptionResponse !== null
+          ? (exceptionResponse as Record<string, unknown>).error
+          : undefined;
+      const errorCode =
+        typeof rawError === 'string' && /^[A-Z][A-Z0-9_]{2,}$/.test(rawError)
+          ? rawError
+          : undefined;
       errorResponse = {
         statusCode: status,
         message:
@@ -86,6 +99,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
           'message' in (exceptionResponse as Record<string, unknown>)
             ? (exceptionResponse as Record<string, string>).message
             : exception.message || 'Http Exception',
+        ...(errorCode ? { errorCode } : {}),
         timestamp: new Date().toISOString(),
       };
       response.status(status).json(errorResponse);

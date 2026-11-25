@@ -1675,6 +1675,10 @@ function TreatmentFeeGateBanner({
           orderCode={order.orderCode}
           proofPath={order.treatmentFeeProofPath ?? null}
           amount={Number(order.treatmentFeeAmount ?? fee)}
+          withholdingAmount={order.treatmentFeeWithholdingAmount}
+          withholdingRate={order.treatmentFeeWithholdingRate}
+          stampAmount={order.treatmentFeeStampAmount}
+          kind="fee"
           currency={currency}
           doctorName={order.doctor?.fullName ?? null}
           patientName={order.patient?.fullName ?? null}

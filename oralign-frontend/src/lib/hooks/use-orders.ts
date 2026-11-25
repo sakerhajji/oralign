@@ -293,13 +293,18 @@ export function useSubmitOrder(): UseMutationResult<
 export function usePayTreatmentFee(): UseMutationResult<
   DentalOrder,
   Error,
-  { id: string; method: 'card' | 'cash' | 'bank_transfer'; amount: number }
+  {
+    id: string;
+    method: 'card' | 'cash' | 'cheque' | 'bank_transfer';
+    amount: number;
+    applyWithholding?: boolean;
+  }
 > {
   const queryClient = useQueryClient();
   const { t } = useT();
   return useMutation({
-    mutationFn: ({ id, method, amount }) =>
-      ordersService.payTreatmentFee(id, method, amount),
+    mutationFn: ({ id, method, amount, applyWithholding }) =>
+      ordersService.payTreatmentFee(id, method, amount, applyWithholding),
     onSuccess: (order, { id, method }) => {
       syncOrderCaches(queryClient, order);
       queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
@@ -322,13 +327,13 @@ export function usePayTreatmentFee(): UseMutationResult<
 export function useUploadTreatmentFeeProof(): UseMutationResult<
   DentalOrder,
   Error,
-  { id: string; proof: File; amount: number }
+  { id: string; proof: File; amount: number; applyWithholding?: boolean }
 > {
   const queryClient = useQueryClient();
   const { t } = useT();
   return useMutation({
-    mutationFn: ({ id, proof, amount }) =>
-      ordersService.uploadTreatmentFeeProof(id, proof, amount),
+    mutationFn: ({ id, proof, amount, applyWithholding }) =>
+      ordersService.uploadTreatmentFeeProof(id, proof, amount, applyWithholding),
     onSuccess: (order, { id }) => {
       syncOrderCaches(queryClient, order);
       queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });

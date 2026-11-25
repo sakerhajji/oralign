@@ -9,6 +9,7 @@ import {
   CreditCard,
   Download,
   ExternalLink,
+  FilePen,
   FileText,
   Landmark,
   Loader2,
@@ -26,6 +27,7 @@ import {
 } from '@/components/ui/dialog';
 import { ImageLightbox } from '@/components/ui/image-lightbox';
 import { PaymentStatusBadge } from '@/components/payments/payment-status-badge';
+import { formatRate, recordedSplit } from '@/components/payments/withholding';
 import { useConfirmTreatmentFeePayment } from '@/lib/hooks';
 import { resolveUploadUrl } from '@/lib/api/company-billing.service';
 import { cn } from '@/lib/utils';
@@ -80,8 +82,24 @@ export interface TreatmentFeeReceiptDialogProps {
   orderCode: string;
   /** Backend-stored relative path (e.g. "/uploads/treatment-fee-proofs/abc.pdf"). */
   proofPath: string | null | undefined;
-  /** Amount the doctor declared — surfaced in the details column. */
+  /**
+   * Amount the doctor declared: the cash (due + stamp - any retenue) —
+   * surfaced in the details column.
+   */
   amount: number | null | undefined;
+  /**
+   * Retenue à la source the practitioner kept back, and its rate. With a
+   * retenue or a stamp, the details show the amount due (TTC), the droit
+   * de timbre, the retenue and the amount paid.
+   */
+  withholdingAmount?: number | string | null;
+  withholdingRate?: number | string | null;
+  /** Droit de timbre charged on top with the payment (0 / null before 2026-11-20). */
+  stampAmount?: number | string | null;
+  /** What the payment settles, when the API sends it (else amount + retenue - stamp). */
+  settledAmount?: number | string | null;
+  /** Labels the amount due: an installment (default) or a treatment fee. */
+  kind?: 'installment' | 'fee';
   /** Currency code, defaults to TND if unset. */
   currency?: string;
   /** Doctor / patient context for the details column. */
@@ -124,6 +142,11 @@ export function TreatmentFeeReceiptDialog({
   orderCode,
   proofPath,
   amount,
+  withholdingAmount,
+  withholdingRate,
+  stampAmount,
+  settledAmount,
+  kind = 'installment',
   currency = 'TND',
   doctorName,
   patientName,
@@ -141,6 +164,13 @@ export function TreatmentFeeReceiptDialog({
   const proofKind = classifyProof(proofPath);
 
   const confirm = useConfirmTreatmentFeePayment();
+  const split = recordedSplit(
+    amount,
+    withholdingAmount,
+    withholdingRate,
+    stampAmount,
+    settledAmount,
+  );
 
   // Click-to-zoom lightbox — same component the clinical photos use,
   // so the admin gets a familiar full-screen viewer when they need to
@@ -215,16 +245,63 @@ export function TreatmentFeeReceiptDialog({
                   value={doctorName ? `Dr. ${doctorName}` : '—'}
                 />
                 <Divider />
-                <DetailRow
-                  icon={<Banknote className="h-3.5 w-3.5" />}
-                  label={t('feeUi.receiptDialog.amount')}
-                  value={
-                    <span className="text-lg font-bold tabular-nums">
-                      {formatPrice(amount ?? 0, currency)}
-                    </span>
-                  }
-                  highlight
-                />
+                {split ? (
+                  <>
+                    {/* With a stamp or a retenue: what was due (TTC), the
+                        stamp added, what the practitioner kept back, and
+                        what reached the account. */}
+                    <DetailRow
+                      icon={<Banknote className="h-3.5 w-3.5" />}
+                      label={t(
+                        kind === 'fee' ? 'withholdingUi.dueFee' : 'withholdingUi.dueInstallment',
+                      )}
+                      value={<span className="tabular-nums">{formatPrice(split.due, currency)}</span>}
+                    />
+                    {split.stamp > 0 ? (
+                      <DetailRow
+                        icon={<Banknote className="h-3.5 w-3.5" />}
+                        label={t('withholdingUi.stamp')}
+                        value={
+                          <span className="tabular-nums">+ {formatPrice(split.stamp, currency)}</span>
+                        }
+                      />
+                    ) : null}
+                    {split.withheld > 0 ? (
+                      <DetailRow
+                        icon={<Banknote className="h-3.5 w-3.5" />}
+                        label={
+                          split.rate !== null
+                            ? t('feeUi.receiptDialog.withheld', { rate: formatRate(split.rate, lang) })
+                            : t('feeUi.receiptDialog.withheldNoRate')
+                        }
+                        value={
+                          <span className="tabular-nums">− {formatPrice(split.withheld, currency)}</span>
+                        }
+                      />
+                    ) : null}
+                    <DetailRow
+                      icon={<Banknote className="h-3.5 w-3.5" />}
+                      label={t('feeUi.receiptDialog.amountPaid')}
+                      value={
+                        <span className="text-lg font-bold tabular-nums">
+                          {formatPrice(split.cash, currency)}
+                        </span>
+                      }
+                      highlight
+                    />
+                  </>
+                ) : (
+                  <DetailRow
+                    icon={<Banknote className="h-3.5 w-3.5" />}
+                    label={t('feeUi.receiptDialog.amount')}
+                    value={
+                      <span className="text-lg font-bold tabular-nums">
+                        {formatPrice(amount ?? 0, currency)}
+                      </span>
+                    }
+                    highlight
+                  />
+                )}
                 <DetailRow
                   icon={<MethodIcon method={method} />}
                   label={t('feeUi.receiptDialog.method')}
@@ -392,6 +469,8 @@ function MethodIcon({ method }: { method?: PaymentMethod | null }) {
     return <CreditCard className="h-3.5 w-3.5" />;
   if (method === PaymentMethod.CASH)
     return <Banknote className="h-3.5 w-3.5" />;
+  if (method === PaymentMethod.CHEQUE)
+    return <FilePen className="h-3.5 w-3.5" />;
   return <Landmark className="h-3.5 w-3.5" />;
 }
 

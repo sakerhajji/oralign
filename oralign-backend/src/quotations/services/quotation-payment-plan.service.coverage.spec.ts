@@ -5,6 +5,8 @@ import type { OrderAccessPolicy } from '../../common/access/order-access.policy'
 import type { Caller } from '../../common/access/caller';
 import type { PackService } from '../../packs/services/pack.service';
 import type { LoyaltyService } from '../../loyalty/services/loyalty.service';
+import type { CompanyBillingSettingsService } from './company-billing-settings.service';
+import type { QuotationPdfService } from './quotation-pdf.service';
 import {
   firstHandOverAt,
   startCoverageWindow,
@@ -13,6 +15,11 @@ import {
   COVERAGE_BACKFILL_CANDIDATES,
   QuotationPaymentPlanService,
 } from './quotation-payment-plan.service';
+
+// The PDF renderer pulls in puppeteer (ESM-only); nothing here renders.
+jest.mock('./quotation-pdf.service', () => ({
+  QuotationPdfService: class QuotationPdfService {},
+}));
 
 // The window rule itself is covered by coverage-window.spec.ts; here only
 // the wiring matters: who calls it, with which transaction and date.
@@ -32,6 +39,8 @@ function makeService(prisma: Record<string, unknown>) {
     {} as PackService,
     {} as LoyaltyService,
     { emit: jest.fn() } as unknown as EventEmitter2,
+    {} as CompanyBillingSettingsService,
+    {} as QuotationPdfService,
   );
 }
 

@@ -9,6 +9,7 @@ import {
   Banknote,
   CreditCard,
   ExternalLink,
+  FilePen,
   FileText,
   Landmark,
 } from 'lucide-react';
@@ -28,6 +29,10 @@ import { cn } from '@/lib/utils';
 import { formatPrice } from '@/lib/utils/currency';
 import { TreatmentFeeReceiptDialog } from '@/components/orders/treatment-fee-receipt-dialog';
 import { PaymentStatusBadge } from '@/components/payments/payment-status-badge';
+import {
+  AmountWithWithholding,
+  recordedSplit,
+} from '@/components/payments/withholding';
 import { useT } from '@/lib/i18n/lang-context';
 
 /**
@@ -59,6 +64,10 @@ const METHOD_META: Record<
   [PaymentMethod.CASH]: {
     icon: Banknote,
     tone: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+  },
+  [PaymentMethod.CHEQUE]: {
+    icon: FilePen,
+    tone: 'border-amber-200 bg-amber-50 text-amber-800',
   },
 };
 
@@ -231,7 +240,20 @@ export function PaymentHistoryTable({
                 )}
               </TableCell>
               <TableCell className="text-right font-medium tabular-nums">
-                {formatPrice(p.amount, p.currency)}
+                {/* Cash received; with a stamp or a retenue, the
+                    installment, the stamp and the retenue under it. */}
+                <AmountWithWithholding
+                  cash={p.amount}
+                  split={recordedSplit(
+                    p.amount,
+                    p.withholdingAmount,
+                    p.withholdingRate,
+                    p.stampAmount,
+                    p.settledAmount,
+                  )}
+                  currency={p.currency}
+                  className="items-end"
+                />
               </TableCell>
               <TableCell>
                 <PaymentStatusBadge status={p.status} />
@@ -288,6 +310,10 @@ export function PaymentHistoryTable({
         orderCode={activeReceipt.order?.orderCode ?? '—'}
         proofPath={activeReceipt.proofUrl ?? null}
         amount={Number(activeReceipt.amount ?? 0)}
+        withholdingAmount={activeReceipt.withholdingAmount}
+        withholdingRate={activeReceipt.withholdingRate}
+        stampAmount={activeReceipt.stampAmount}
+        settledAmount={activeReceipt.settledAmount}
         currency={activeReceipt.currency ?? 'TND'}
         doctorName={activeReceipt.order?.doctor?.fullName ?? null}
         patientName={activeReceipt.order?.patient?.fullName ?? null}

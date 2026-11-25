@@ -4,7 +4,7 @@ import {
   ValidationPipe,
 } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { UserRole } from '@prisma/client';
+import { Prisma, UserRole } from '@prisma/client';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 import type { JwtPayload } from '../../common/decorators/current-user.decorator';
@@ -38,6 +38,8 @@ describe('PaymentsController over HTTP', () => {
   const paymentGroupBy = jest.fn();
   const orderGroupBy = jest.fn();
   const listPayments = jest.fn();
+  const declareBankTransfer = jest.fn();
+  const recordCash = jest.fn();
   const findUsers = jest.fn();
 
   beforeAll(async () => {
@@ -54,7 +56,10 @@ describe('PaymentsController over HTTP', () => {
             user: { findMany: findUsers },
           },
         },
-        { provide: PaymentsService, useValue: { listPayments } },
+        {
+          provide: PaymentsService,
+          useValue: { listPayments, declareBankTransfer, recordCash },
+        },
         { provide: ClicToPayPaymentsService, useValue: {} },
       ],
     })
@@ -91,10 +96,106 @@ describe('PaymentsController over HTTP', () => {
     paymentGroupBy.mockReset().mockResolvedValue([]);
     orderGroupBy.mockReset().mockResolvedValue([]);
     listPayments.mockReset().mockResolvedValue({ data: [], total: 0 });
+    declareBankTransfer.mockReset().mockResolvedValue(withheldPayment);
+    recordCash.mockReset().mockResolvedValue(withheldPayment);
     findUsers.mockReset().mockResolvedValue([]);
   });
 
   const get = (url: string) => request(app.getHttpServer()).get(url);
+  const post = (url: string) => request(app.getHttpServer()).post(url);
+
+  /**
+   * A payment as Prisma returns it: Decimals, an installment of 1 000 with
+   * the 1 TND stamp on top and a 1 % retenue kept back (991 cash).
+   */
+  const withheldPayment = {
+    id: 'p-1',
+    amount: new Prisma.Decimal('991.000'),
+    withholdingRate: new Prisma.Decimal('1.00'),
+    withholdingAmount: new Prisma.Decimal('10.000'),
+    stampAmount: new Prisma.Decimal('1.000'),
+  };
+
+  describe('POST declare-bank-transfer (multipart)', () => {
+    const url = '/api/quotations/q-1/installments/i-1/declare-bank-transfer';
+
+    it.each([
+      ['false', false],
+      ['true', true],
+    ])(
+      'reads applyWithholding=%s from the raw field (no implicit "false" → true)',
+      async (raw, expected) => {
+        const res = await post(url).field('applyWithholding', raw);
+        expect(res.status).toBe(200);
+        expect(declareBankTransfer).toHaveBeenCalledWith(
+          expect.objectContaining({ applyWithholding: expected }),
+        );
+      },
+    );
+
+    it('no field: the retenue is not applied', async () => {
+      const res = await post(url).field('bankReference', 'TRF-1');
+      expect(res.status).toBe(200);
+      expect(declareBankTransfer.mock.calls[0][0].applyWithholding).toBeUndefined();
+    });
+
+    it('anything but true / false is a 400', async () => {
+      const res = await post(url).field('applyWithholding', 'yes');
+      expect(res.status).toBe(400);
+      expect(declareBankTransfer).not.toHaveBeenCalled();
+    });
+
+    it('returns the retenue and stamp fields as numbers, with the gross and the settled amount', async () => {
+      const res = await post(url).field('applyWithholding', 'true');
+      expect(res.body).toMatchObject({
+        amount: '991',
+        withholdingRate: 1,
+        withholdingAmount: 10,
+        stampAmount: 1,
+        grossAmount: 1001,
+        settledAmount: 1000,
+      });
+    });
+  });
+
+  describe('POST admin record-cash', () => {
+    const url = '/api/admin/quotations/q-1/installments/i-1/record-cash';
+
+    it('records a cheque with the retenue', async () => {
+      caller = asUser('u-admin', UserRole.admin);
+      const res = await post(url).send({
+        method: 'cheque',
+        applyWithholding: true,
+        receiptNumber: 'CHQ-1',
+      });
+      expect(res.status).toBe(200);
+      expect(recordCash).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: 'cheque',
+          applyWithholding: true,
+          receiptNumber: 'CHQ-1',
+        }),
+      );
+      expect(res.body).toMatchObject({
+        stampAmount: 1,
+        grossAmount: 1001,
+        settledAmount: 1000,
+      });
+    });
+
+    it.each(['card', 'bank_transfer'])('method %s is a 400', async (method) => {
+      caller = asUser('u-admin', UserRole.admin);
+      const res = await post(url).send({ method });
+      expect(res.status).toBe(400);
+      expect(recordCash).not.toHaveBeenCalled();
+    });
+
+    it('is closed to a dentist', async () => {
+      const res = await post(url).send({ method: 'cash' });
+      expect(res.status).toBe(403);
+      expect(recordCash).not.toHaveBeenCalled();
+    });
+  });
 
   describe('GET /api/payments/summary', () => {
     it('reaches the takings, not a parameter route', async () => {

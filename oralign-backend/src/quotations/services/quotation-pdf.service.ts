@@ -1,5 +1,11 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
-import { ArchType, DevisLanguage, Quotation, QuotationStatus } from '@prisma/client';
+import {
+  ArchType,
+  DevisLanguage,
+  InstallmentStatus,
+  Quotation,
+  QuotationStatus,
+} from '@prisma/client';
 import * as fs from 'fs';
 import * as path from 'path';
 import puppeteer, { Browser } from 'puppeteer-core';
@@ -10,6 +16,7 @@ import {
 } from '../../common/exceptions/app.exception';
 import { getQuotationLabels, isRtl, pickTranslation } from './quotation-i18n';
 import { env } from '../../common/config/env';
+import { isTtcPriced } from '../quote-money';
 
 const UPLOAD_ROOT = path.join(process.cwd(), 'uploads');
 const ARABIC_FONT_PATH =
@@ -31,6 +38,25 @@ interface TotalLine {
   emphasis?: boolean;
 }
 
+interface RenderOptions {
+  /**
+   * Fiscal stamp ADDED to each payment (each payment gets its own
+   * facture); null = unknown, not printed.
+   */
+  stampDuty: number | null;
+  /**
+   * Payments the plan takes (its installments, cancelled ones excluded):
+   * each one carries a stamp. 0 / absent = no plan yet, no stamp rows.
+   */
+  installmentCount?: number;
+}
+
+/** 10 -> "10", 7.5 -> "7,5" in French, "7.5" otherwise. */
+function formatPercent(percent: number, language: string): string {
+  const text = Number(percent.toFixed(2)).toString();
+  return language === 'fr' ? text.replace('.', ',') : text;
+}
+
 /**
  * Browser-backed quotation PDF renderer.
  *
@@ -44,6 +70,8 @@ interface TotalLine {
 export class QuotationPdfService implements OnModuleDestroy {
   private readonly logger = new Logger(QuotationPdfService.name);
   private browserPromise: Promise<Browser> | null = null;
+  /** In-flight download-time renders, by quotation id (ensureStoredPdf). */
+  private readonly onDemandRenders = new Map<string, Promise<Quotation>>();
   private arabicFontBuffer: Buffer | null = null;
   private arabicFontChecked = false;
 
@@ -81,12 +109,125 @@ export class QuotationPdfService implements OnModuleDestroy {
     const absPath = path.join(absDir, safeName);
     const relPath = path.posix.join(relDir, safeName);
 
-    await this.renderToFile(quote, absPath);
+    await this.renderToFile(quote, absPath, {
+      stampDuty: await this.resolveStampDuty(quote),
+      installmentCount: await this.countPlannedPayments(quote),
+    });
 
     return this.prisma.quotation.update({
       where: { id: quote.id },
       data: { pdfFilePath: relPath },
     });
+  }
+
+  /**
+   * Re-render the stored devis after the quote changed, so the file the
+   * practitioner downloads is never stale. Without `force`, only a quote
+   * that already has a stored PDF is rendered (an edit must not create
+   * files nobody asked for); send() forces it.
+   *
+   * Best effort: the business change has already committed, so a missing
+   * Chromium or a render error is logged and the row is returned as is.
+   * generate-pdf stays the explicit retry.
+   */
+  async refreshStoredPdf(
+    quote: Quotation,
+    opts: { force?: boolean } = {},
+  ): Promise<Quotation> {
+    if (!opts.force && !quote.pdfFilePath) return quote;
+    if (!quote.quotationNumber || !quote.companySnapshot) return quote;
+    try {
+      return await this.generateAndPersist(quote);
+    } catch (err) {
+      this.logger.warn(
+        `Could not refresh the PDF of quotation ${quote.id}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return quote;
+    }
+  }
+
+  /**
+   * How many payments the quote's plan takes, each with its own facture
+   * and stamp: the installments not cancelled. The payment-plan service
+   * re-renders the devis after every plan change, so the count printed
+   * is the current one. 0 when there is no plan (or it cannot be read).
+   */
+  private async countPlannedPayments(quote: Quotation): Promise<number> {
+    try {
+      return await this.prisma.quoteInstallment.count({
+        where: {
+          quotationId: quote.id,
+          status: { not: InstallmentStatus.cancelled },
+        },
+      });
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * The stamp the devis note mentions: frozen in the company snapshot
+   * when the number was allocated, or the live setting for snapshots
+   * taken before the stamp was recorded there.
+   */
+  private async resolveStampDuty(quote: Quotation): Promise<number | null> {
+    const company = (quote.companySnapshot as JsonRecord | null) ?? {};
+    if (company.stampDuty !== undefined && company.stampDuty !== null) {
+      return this.toNumber(company.stampDuty);
+    }
+    try {
+      const settings = await this.prisma.companyBillingSettings.findFirst({
+        where: { isActive: true },
+        orderBy: { updatedAt: 'desc' },
+        select: { stampDuty: true },
+      });
+      return settings ? this.toNumber(settings.stampDuty) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The quote with a devis file on disk, rendered now when it has none:
+   * migration 20261119000002 dropped the stale files of the pack quotes
+   * whose TVA it rewrote, and a file can also go missing from uploads/. A
+   * download must re-render that devis (same language, the quote's own
+   * figures) rather than answer "no PDF".
+   *
+   * Only a quote that was numbered and snapshotted, and is no longer a
+   * draft, is rendered here: a draft's devis is the admin's explicit
+   * generate-pdf, never a side effect of a read. Anything else is returned
+   * as is, and openPdfStream answers its 404.
+   *
+   * Concurrent downloads of the same quote share one render, so two
+   * Chromium pages never write the same file at once.
+   */
+  async ensureStoredPdf(quote: Quotation): Promise<Quotation> {
+    if (this.storedPdfExists(quote)) return quote;
+    if (
+      !quote.quotationNumber ||
+      !quote.companySnapshot ||
+      quote.status === QuotationStatus.draft
+    ) {
+      return quote;
+    }
+    const pending = this.onDemandRenders.get(quote.id);
+    if (pending) return pending;
+    const render = this.generateAndPersist(quote).finally(() => {
+      this.onDemandRenders.delete(quote.id);
+    });
+    this.onDemandRenders.set(quote.id, render);
+    this.logger.log(
+      `Rendering the missing devis PDF of quotation ${quote.id} on download`,
+    );
+    return render;
+  }
+
+  private storedPdfExists(quote: Quotation): boolean {
+    if (!quote.pdfFilePath) return false;
+    return fs.existsSync(this.resolveSafe(quote.pdfFilePath));
   }
 
   async openPdfStream(
@@ -126,13 +267,17 @@ export class QuotationPdfService implements OnModuleDestroy {
     }
   }
 
-  private async renderToFile(quote: Quotation, absPath: string): Promise<void> {
+  private async renderToFile(
+    quote: Quotation,
+    absPath: string,
+    options: RenderOptions,
+  ): Promise<void> {
     let page: Awaited<ReturnType<Browser['newPage']>> | null = null;
     try {
       const browser = await this.getBrowser();
       page = await browser.newPage();
       page.setDefaultTimeout(45_000);
-      await page.setContent(this.renderHtml(quote), {
+      await page.setContent(this.renderHtml(quote, options), {
         waitUntil: 'load',
         timeout: 45_000,
       });
@@ -212,7 +357,8 @@ export class QuotationPdfService implements OnModuleDestroy {
     );
   }
 
-  private renderHtml(quote: Quotation): string {
+  /** Visible for the template spec; production goes through renderToFile. */
+  renderHtml(quote: Quotation, options: RenderOptions): string {
     const labels = getQuotationLabels(quote.language);
     const rtl = isRtl(quote.language);
     const company = (quote.companySnapshot as JsonRecord | null) ?? {};
@@ -220,8 +366,10 @@ export class QuotationPdfService implements OnModuleDestroy {
     const logo = this.resolveImageDataUrl(
       company.companyLogoPath as string | null | undefined,
     );
+    const ttcPriced = this.isTtcPriced(quote);
     const rows = this.buildLineItems(quote, labels);
-    const totals = this.buildTotals(quote, labels);
+    const totals = this.buildTotals(quote, labels, ttcPriced, options);
+    const taxNote = ttcPriced ? this.taxNote(quote, labels, options) : '';
     const legal = this.resolveSnapshotTranslation(
       company,
       'legalTextTranslations',
@@ -407,6 +555,15 @@ export class QuotationPdfService implements OnModuleDestroy {
         font-size: 12px;
         font-weight: 800;
       }
+      .tax-note {
+        width: min(100%, 262px);
+        margin: 5px 0 0 auto;
+        color: #555555;
+        font-size: 8.5px;
+        text-align: end;
+        overflow-wrap: anywhere;
+      }
+      body.rtl .tax-note { margin-right: auto; margin-left: 0; }
       .text-block {
         margin-top: 10px;
         border: 1px solid #e2e4e8;
@@ -516,7 +673,7 @@ export class QuotationPdfService implements OnModuleDestroy {
           <thead>
             <tr>
               <th class="desc">${this.html(labels.description)}</th>
-              <th class="amount">${this.html(labels.amount)}</th>
+              <th class="amount">${this.html(ttcPriced ? labels.amountTtc : labels.amount)}</th>
             </tr>
           </thead>
           <tbody>
@@ -526,6 +683,7 @@ export class QuotationPdfService implements OnModuleDestroy {
         <section class="totals">
           ${totals.map((line) => this.renderTotalLine(line)).join('')}
         </section>
+        ${taxNote ? `<p class="tax-note">${this.html(taxNote)}</p>` : ''}
       </section>
 
       ${quote.adminMessage ? this.renderTextBlock(labels.adminMessage, quote.adminMessage) : ''}
@@ -588,8 +746,16 @@ export class QuotationPdfService implements OnModuleDestroy {
     }
 
     if (discountAmount > 0) {
+      // A remise typed as a percentage says so: "Remise (10 %)".
+      const percent = this.toNumber(
+        (quote as { discountPercent?: unknown }).discountPercent,
+        0,
+      );
       rows.push({
-        label: labels.discount,
+        label:
+          percent > 0
+            ? `${labels.discount} (${formatPercent(percent, quote.language)} %)`
+            : labels.discount,
         amount: -discountAmount,
         kind: 'discount',
       });
@@ -597,12 +763,51 @@ export class QuotationPdfService implements OnModuleDestroy {
     return rows;
   }
 
+  /**
+   * True when the line amounts include TVA: their net IS the stored
+   * total. A legacy quote computed forward from HT fees (total = fees +
+   * TVA) keeps its original layout. The rule lives in quote-money.ts so
+   * QuotationService.update re-prices such a quote the same HT way.
+   */
+  private isTtcPriced(quote: Quotation): boolean {
+    return isTtcPriced(quote);
+  }
+
+  /**
+   * "Prix TTC (TVA incluse). Droit de timbre (1,000 TND) ajouté à chaque
+   * paiement : une facture par paiement." (owner decision 2026-11-20).
+   */
+  private taxNote(
+    quote: Quotation,
+    labels: ReturnType<typeof getQuotationLabels>,
+    options: RenderOptions,
+  ): string {
+    const stamp = options.stampDuty;
+    if (stamp === null || !(stamp > 0)) return labels.pricesIncludeTax;
+    return `${labels.pricesIncludeTax} ${labels.stampPerPayment(
+      this.formatMoney(stamp, quote.currency, quote.language),
+    )}`;
+  }
+
+  /**
+   * Totals block: Total HT, TVA, Total TTC (the price). With a payment
+   * plan and a known stamp, two more rows say what the practitioner will
+   * actually pay, since every payment adds its own stamp:
+   *   Droit de timbre (n × 1,000)          n × stamp
+   *   Total à payer (timbres compris)      Total TTC + n × stamp   (final)
+   * Without a plan the stamp count is not known yet: the note says it.
+   */
   private buildTotals(
     quote: Quotation,
     labels: ReturnType<typeof getQuotationLabels>,
+    ttcPriced: boolean,
+    options: RenderOptions = { stampDuty: null },
   ): TotalLine[] {
     const tvaRate = this.toNumber(quote.tvaRate);
-    const showTva = tvaRate > 0 || this.toNumber(quote.tvaAmount) > 0;
+    // A TTC-priced devis always states the TVA inside its total; the
+    // legacy HT layout only printed it when there was one.
+    const showTva =
+      ttcPriced || tvaRate > 0 || this.toNumber(quote.tvaAmount) > 0;
     const lines: TotalLine[] = [
       {
         label: labels.subtotalHt,
@@ -612,16 +817,34 @@ export class QuotationPdfService implements OnModuleDestroy {
 
     if (showTva) {
       lines.push({
-        label: `${labels.vatRate} (${tvaRate.toFixed(2)} %)`,
+        label: `${labels.vatRate} (${this.formatRate(tvaRate, quote.language)} %)`,
         value: this.formatMoney(quote.tvaAmount, quote.currency, quote.language),
       });
     }
 
+    const stamp = options.stampDuty ?? 0;
+    const payments = Math.max(0, Math.floor(options.installmentCount ?? 0));
+    const withStamps = stamp > 0 && payments > 0;
     lines.push({
       label: labels.totalTtc,
       value: this.formatMoney(quote.totalTtc, quote.currency, quote.language),
-      emphasis: true,
+      // One dark row only: the last one.
+      emphasis: !withStamps,
     });
+    if (withStamps) {
+      // Millimes, so n × 1,000 + 2 380,000 never drifts.
+      const stampsM = Math.round(stamp * 1000) * payments;
+      const totalM = Math.round(this.toNumber(quote.totalTtc) * 1000) + stampsM;
+      lines.push({
+        label: labels.stampRow(payments, this.formatAmount(stamp, quote.language)),
+        value: this.formatMoney(stampsM / 1000, quote.currency, quote.language),
+      });
+      lines.push({
+        label: labels.totalWithStamps,
+        value: this.formatMoney(totalM / 1000, quote.currency, quote.language),
+        emphasis: true,
+      });
+    }
     return lines;
   }
 
@@ -792,6 +1015,21 @@ export class QuotationPdfService implements OnModuleDestroy {
     });
     const withSign = numericAmount < 0 ? `-${formatted}` : formatted;
     return `${withSign} ${currency}`;
+  }
+
+  /** formatMoney without the currency: "1,000" inside "(3 × 1,000)". */
+  private formatAmount(amount: number, language: DevisLanguage): string {
+    const locale = language === DevisLanguage.ar ? 'ar-TN' : 'fr-FR';
+    return Math.abs(amount).toLocaleString(locale, {
+      minimumFractionDigits: 3,
+      maximumFractionDigits: 3,
+    });
+  }
+
+  /** 19 → "19", 7.5 → "7,5": a rate needs no trailing zeros. */
+  private formatRate(rate: number, language: DevisLanguage): string {
+    const locale = language === DevisLanguage.ar ? 'ar-TN' : 'fr-FR';
+    return rate.toLocaleString(locale, { maximumFractionDigits: 2 });
   }
 
   private formatDate(date: Date, language: DevisLanguage): string {

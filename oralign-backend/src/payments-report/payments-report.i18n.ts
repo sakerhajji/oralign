@@ -8,7 +8,8 @@ export type ReportSectionKind = 'treatment_fee' | 'installment';
  * Every word the payments report prints, in French and English (the
  * dashboard's two languages). The vocabulary follows the dashboard:
  * "Honoraires de traitement" / "Paiements échelonnés", the payment
- * statuses of the desk, "Espèces / Carte bancaire / Virement bancaire".
+ * statuses of the desk, "Espèces / Chèque / Carte bancaire / Virement
+ * bancaire".
  */
 export interface PaymentsReportLabels {
   locale: string;
@@ -67,6 +68,7 @@ export interface PaymentsReportLabels {
     amount: string;
   };
   installmentOf: (rank: number, total: number | null) => string;
+  /** The label of the document number under a row (FAC-…): a facture. */
   receipt: string;
   toConfirm: string;
   statuses: Record<PaymentRecordStatus, string>;
@@ -143,6 +145,7 @@ const FR: PaymentsReportLabels = {
   summaryTitle: 'Synthèse financière',
   methods: {
     cash: 'Espèces',
+    cheque: 'Chèque',
     card: 'Carte bancaire',
     bank_transfer: 'Virement bancaire',
   },
@@ -170,7 +173,7 @@ const FR: PaymentsReportLabels = {
   },
   installmentOf: (rank, total) =>
     total ? `Échéance ${rank}/${total}` : `Échéance ${rank}`,
-  receipt: 'Reçu',
+  receipt: 'Facture',
   toConfirm: 'À confirmer',
   statuses: {
     success: 'Succès',
@@ -238,6 +241,7 @@ const EN: PaymentsReportLabels = {
   summaryTitle: 'Financial summary',
   methods: {
     cash: 'Cash',
+    cheque: 'Cheque',
     card: 'Bank card',
     bank_transfer: 'Bank transfer',
   },
@@ -265,7 +269,7 @@ const EN: PaymentsReportLabels = {
   },
   installmentOf: (rank, total) =>
     total ? `Installment ${rank}/${total}` : `Installment ${rank}`,
-  receipt: 'Receipt',
+  receipt: 'Invoice',
   toConfirm: 'To be confirmed',
   statuses: {
     success: 'Successful',

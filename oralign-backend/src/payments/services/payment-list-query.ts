@@ -191,6 +191,9 @@ function paymentSearchConditions(term: string): Prisma.PaymentWhereInput[] {
     },
   ];
   const amount = parseSearchAmount(term);
-  if (amount) conditions.push({ amount });
+  // The cash (amount) or the installment it pays: with the stamp added on
+  // top and any retenue à la source the two differ, and either is how
+  // someone remembers it.
+  if (amount) conditions.push({ amount }, { installment: { amount } });
   return conditions;
 }

@@ -12,8 +12,14 @@ import {
   Res,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
-import { SkipThrottle } from '@nestjs/throttler';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiParam,
+  ApiProduces,
+  ApiTags,
+} from '@nestjs/swagger';
+import { SkipThrottle, Throttle } from '@nestjs/throttler';
 import { UserRole } from '@prisma/client';
 import { Response } from 'express';
 import {
@@ -24,17 +30,29 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { ADMIN_ROLES, type Caller } from '../../common/access/caller';
-import { PrismaService } from '../../prisma/prisma.service';
 import {
   CreateInvoiceDto,
   InvoiceFilterDto,
   InvoiceIdsDto,
+  InvoiceZipExportDto,
   UpdateInvoiceDto,
 } from '../dto/invoice.dto';
+import {
+  AccountingSummaryPdfQueryDto,
+  AccountingSummaryQueryDto,
+} from '../dto/invoice-accounting.dto';
+import {
+  InvoiceAccountingService,
+  type AccountingSummary,
+} from '../services/invoice-accounting.service';
 import { InvoiceExportService } from '../services/invoice-export.service';
 import { InvoicePdfService } from '../services/invoice-pdf.service';
 import { InvoiceService } from '../services/invoice.service';
 import { InvoiceAutoService } from '../services/invoice-auto.service';
+import {
+  InvoiceMailService,
+  type InvoiceEmailed,
+} from '../services/invoice-mail.service';
 import { InvoiceLanguage } from '../services/invoice-i18n';
 
 /** RFC 5987 Content-Disposition, same helper the invoice download uses. */
@@ -74,7 +92,8 @@ export class AdminInvoiceController {
     private readonly exports: InvoiceExportService,
     private readonly invoicePdf: InvoicePdfService,
     private readonly autoInvoices: InvoiceAutoService,
-    private readonly prisma: PrismaService,
+    private readonly invoiceMail: InvoiceMailService,
+    private readonly accounting: InvoiceAccountingService,
   ) {}
 
   private caller(user: JwtPayload): Caller {
@@ -102,73 +121,64 @@ export class AdminInvoiceController {
   }
 
   /**
-   * Client lookup for the create form: find an existing patient and hand
-   * back their orders so the admin can prefill the invoice from one.
+   * The accountant's view of a period (Tunis days, both bounds included):
+   * factures comptabilisées (issued + paid, not archived) with HT / TVA /
+   * timbre / TTC / retenues / net, TVA per rate, collections per method,
+   * retenues per practitioner, months; drafts and cancelled apart.
+   * Placed BEFORE `:id` so "accounting-summary" is never read as an id.
+   */
+  @Get('accounting-summary')
+  @ApiOperation({
+    summary:
+      'Recapitulatif comptable d une periode (jours de Tunis) : CA HT, TVA par taux, droit de timbre, TTC, retenues a la source par praticien, encaissements par mode, ventilation mensuelle. Brouillons et annulees a part.',
+  })
+  async accountingSummary(
+    @Query() query: AccountingSummaryQueryDto,
+  ): Promise<AccountingSummary> {
+    return this.accounting.summarise(query);
+  }
+
+  /** The same period as an A4 PDF, for the accountant's file. Before `:id/pdf`. */
+  @Get('accounting-summary/pdf')
+  @Throttle({
+    short: { limit: 6, ttl: 10_000 },
+    medium: { limit: 30, ttl: 60_000 },
+  })
+  @ApiProduces('application/pdf')
+  @ApiOperation({
+    summary:
+      'Le recapitulatif comptable en PDF (A4, francais par defaut, language=en) : recap-comptable-<from>_<to>.pdf.',
+  })
+  async accountingSummaryPdf(
+    @Query() query: AccountingSummaryPdfQueryDto,
+    @CurrentUser() user: JwtPayload,
+    @Res() res: Response,
+  ): Promise<void> {
+    const { buffer, fileName } = await this.accounting.renderPdf(query, {
+      language: query.language,
+      userId: user.sub,
+    });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', contentDisposition(fileName));
+    res.setHeader('Content-Length', buffer.length.toString());
+    // A snapshot of private money data: never cached.
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(HttpStatus.OK).end(buffer);
+  }
+
+  /**
+   * Customer lookup for the create form. The customer of an invoice is
+   * the practitioner ("Docteur"), so this searches practitioners and hands
+   * back their clinic block and recent orders to prefill from.
    * Placed BEFORE `:id` so "clients" is never read as an invoice id.
    */
   @Get('clients')
   @ApiOperation({
     summary:
-      "Recherche d'un patient existant (nom / email / telephone) avec ses commandes, pour preremplir une facture.",
+      'Recherche d un praticien (nom / email / telephone / cabinet) avec son cabinet et ses commandes, pour preremplir une facture.',
   })
   async findClients(@Query('search') search?: string) {
-    const term = (search ?? '').trim();
-    if (term.length < 2) return { data: [] };
-
-    const patients = await this.prisma.patient.findMany({
-      where: {
-        deletedAt: null,
-        OR: [
-          { fullName: { contains: term, mode: 'insensitive' } },
-          { email: { contains: term, mode: 'insensitive' } },
-          { phone: { contains: term, mode: 'insensitive' } },
-        ],
-      },
-      select: {
-        id: true,
-        fullName: true,
-        email: true,
-        phone: true,
-        address: true,
-        doctor: {
-          select: {
-            id: true,
-            fullName: true,
-            email: true,
-            dentistProfile: {
-              select: {
-                clinicName: true,
-                clinicAddress: true,
-                city: true,
-                country: true,
-                clinicPhone: true,
-                clinicEmail: true,
-                taxId: true,
-              },
-            },
-          },
-        },
-        orders: {
-          where: { deletedAt: null },
-          select: {
-            id: true,
-            orderCode: true,
-            status: true,
-            createdAt: true,
-            treatmentFeeAmount: true,
-            quotation: {
-              select: { id: true, totalTtc: true, packName: true, status: true },
-            },
-          },
-          orderBy: { createdAt: 'desc' },
-          take: 20,
-        },
-      },
-      orderBy: { fullName: 'asc' },
-      take: 10,
-    });
-
-    return { data: patients };
+    return this.invoices.searchPractitioners(search);
   }
 
   @Post('backfill')
@@ -265,6 +275,20 @@ export class AdminInvoiceController {
     res.status(HttpStatus.OK).end(buffer);
   }
 
+  @Post(':id/email')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Envoyer (ou renvoyer) le PDF de la facture par e-mail au praticien. Trace dans le journal d audit. Erreurs : 400 INVOICE_NO_RECIPIENT, 422 MAIL_NOT_CONFIGURED, 422 MAIL_SEND_FAILED.',
+  })
+  @ApiParam({ name: 'id', type: String })
+  async email(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<InvoiceEmailed> {
+    return this.invoiceMail.sendManual(id, this.caller(user));
+  }
+
   @Get('export/csv')
   @SkipThrottle()
   @ApiOperation({
@@ -286,10 +310,19 @@ export class AdminInvoiceController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Export ZIP des PDF des factures selectionnees — le paquet que le comptable recoit.',
+      'Export ZIP des PDF — le paquet que le comptable recoit. `ids` : les factures choisies (200 au plus). Sans `ids` : toutes les factures emises, payees et annulees de la periode issuedFrom..issuedTo (jours de Tunis ; ni brouillons ni archivees ; 1000 au plus, sinon 400 TOO_MANY_INVOICES ; aucune : 400 NO_INVOICE_IN_PERIOD), precedees du recapitulatif comptable PDF et du journal des ventes CSV.',
   })
-  async exportZip(@Body() dto: InvoiceIdsDto, @Res() res: Response): Promise<void> {
-    const { archive, fileName } = await this.exports.buildPdfZip(dto.ids);
+  async exportZip(
+    @Body() dto: InvoiceZipExportDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const { archive, fileName } =
+      Array.isArray(dto.ids)
+        ? await this.exports.buildPdfZip(dto.ids)
+        : await this.exports.buildPeriodPdfZip({
+            issuedFrom: dto.issuedFrom,
+            issuedTo: dto.issuedTo,
+          });
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', contentDisposition(fileName));
 

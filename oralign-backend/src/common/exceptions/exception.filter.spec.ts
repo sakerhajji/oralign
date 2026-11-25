@@ -1,4 +1,10 @@
-import { ArgumentsHost, HttpException, HttpStatus, Logger } from '@nestjs/common';
+import {
+  ArgumentsHost,
+  ConflictException as NestConflictException,
+  HttpException,
+  HttpStatus,
+  Logger,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AllExceptionsFilter } from './exception.filter';
 import { ConflictException, NotFoundException } from './app.exception';
@@ -47,6 +53,17 @@ describe('AllExceptionsFilter', () => {
     const { status, body } = run(new HttpException({ message: 'nope' }, HttpStatus.I_AM_A_TEAPOT));
     expect(status).toBe(418);
     expect(body.message).toBe('nope');
+  });
+
+  it('forwards a Nest exception code as errorCode', () => {
+    const { status, body } = run(new NestConflictException('Plan needed', 'QUOTE_PLAN_REQUIRED'));
+    expect(status).toBe(409);
+    expect(body).toMatchObject({ message: 'Plan needed', errorCode: 'QUOTE_PLAN_REQUIRED' });
+  });
+
+  it('does not turn Nest default error names into codes', () => {
+    const { body } = run(new NestConflictException('dupe'));
+    expect(body.errorCode).toBeUndefined();
   });
 
   describe('Prisma known errors get HTTP semantics', () => {

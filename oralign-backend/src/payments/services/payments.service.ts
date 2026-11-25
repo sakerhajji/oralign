@@ -1,11 +1,4 @@
-import {
-  Inject,
-  Injectable,
-  Logger,
-  Optional,
-} from '@nestjs/common';
-import { CACHE_MANAGER } from '@nestjs/cache-manager';
-import { Cache } from 'cache-manager';
+import { Inject, Injectable } from '@nestjs/common';
 import {
   BatchStatus,
   InstallmentStatus,
@@ -17,6 +10,7 @@ import {
   Prisma,
   QuotationPaymentStatus,
   QuotationStatus,
+  QuoteStepBatch as StepBatch,
   UserRole,
 } from '@prisma/client';
 import { randomUUID } from 'crypto';
@@ -36,7 +30,10 @@ import {
   PaymentGateway,
 } from '../gateways/payment-gateway.interface';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { NotificationEvents } from '../../notifications/events/notification-events';
+import {
+  NotificationEvents,
+  type PaymentEvent,
+} from '../../notifications/events/notification-events';
 import { env } from '../../common/config/env';
 import { QuotationService } from '../../quotations/services/quotation.service';
 import { isAdmin, type Caller } from '../../common/access/caller';
@@ -51,6 +48,17 @@ import {
   paymentListWhere,
   type PaymentListFilters,
 } from './payment-list-query';
+import {
+  assertNoOtherPaymentInFlight,
+  isAdminRecordedMethod,
+  paymentChargeData,
+  readChargeSettings,
+  resolvePaymentCharge,
+} from './payment-rules';
+import {
+  advanceOrderWhenPaid,
+  QUOTE_PHASE_ORDER_STATUSES,
+} from '../../quotations/quote-money';
 
 /**
  * Shape consumed by the shared payment-list executor. Mirrors the
@@ -69,9 +77,6 @@ interface PaymentListOptions extends PaymentListFilters {
   sortBy?: 'createdAt' | 'amount' | 'paidAt' | 'status' | 'eventAt';
   sortOrder?: 'asc' | 'desc';
 }
-
-/** TTL for the idempotency-key → result mapping. 24h matches the spec. */
-const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Payment columns a dentist never reads, in their history or on one
@@ -102,6 +107,49 @@ const PAYMENT_LIST_INCLUDE = {
   },
 } satisfies Prisma.PaymentInclude;
 
+interface SettleArgs {
+  paymentId: string;
+  transactionId: string;
+  actor: Caller;
+  notes?: string;
+  /** Under the lock, the payment must still be in this status (400 otherwise). */
+  expectStatus?: PaymentRecordStatus;
+  /** An installment already paid is a 409, not a silently cancelled payment. */
+  conflictIfPaid?: boolean;
+}
+
+/** What a settlement hands its post-commit notifications. */
+interface Settlement {
+  payment: Payment;
+  order: {
+    id: string;
+    doctorId: string;
+    orderCode: string;
+    doctor: { fullName: string } | null;
+    patient: { fullName: string } | null;
+  };
+  installmentNumber: number;
+  batchUnlocked: StepBatch | null;
+  skipNotify: boolean;
+}
+
+/**
+ * What a quote's successful payments settle: the cash received plus the
+ * retenue the practitioner kept back, minus the stamps charged on top
+ * (Payment.amount alone is the cash). Payments made before the stamp was
+ * added have stampAmount 0.
+ */
+export function settledTotal(sum: {
+  amount: Prisma.Decimal | null;
+  withholdingAmount: Prisma.Decimal | null;
+  stampAmount?: Prisma.Decimal | null;
+}): Prisma.Decimal {
+  const zero = new Prisma.Decimal(0);
+  return (sum.amount ?? zero)
+    .plus(sum.withholdingAmount ?? zero)
+    .minus(sum.stampAmount ?? zero);
+}
+
 /**
  * Single-source-of-truth payment service.
  *
@@ -114,22 +162,30 @@ const PAYMENT_LIST_INCLUDE = {
  * Concurrency: every transition wraps in `prisma.$transaction` with a
  * `SELECT … FOR UPDATE` on the installment row — concurrent attempts
  * serialise on Postgres-side row locks rather than racing in JS land.
+ * The same lock guards "one payment at a time": no entry point opens a
+ * payment while another kind is still in flight on that installment.
  *
- * Idempotency: CARD payments carry a caller-supplied (or generated)
- * `idempotencyKey`. We persist the resolved Payment id under that
- * key in Cache (Redis-backed via @nestjs/cache-manager) for 24h so a
- * replayed request resolves to the same row.
+ * Charge of a payment (payment-rules): the droit de timbre is added on
+ * top (Payment.stampAmount: every payment has its own facture) and the
+ * retenue à la source, on the installment, comes off
+ * (Payment.withholdingAmount). Payment.amount is the cash charged or
+ * received. The quote is settled by amount + withholding - stamp (= the
+ * installment), never by the cash alone.
+ *
+ * Card payments live in ClicToPayPaymentsService (hosted checkout, its
+ * own idempotency on Payment.idempotencyKey); they settle through
+ * handleSuccess like every other method.
  */
 @Injectable()
 export class PaymentsService {
-  private readonly logger = new Logger(PaymentsService.name);
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly events: EventEmitter2,
-    @Inject(PAYMENT_GATEWAY) private readonly cardGateway: PaymentGateway,
+    // Kept bound (PaymentsModule still provides the mock gateway) so the
+    // DI signature is stable; no live path charges through it any more —
+    // cards go through ClicToPay.
+    @Inject(PAYMENT_GATEWAY) _cardGateway: PaymentGateway,
     private readonly quotations: QuotationService,
-    @Optional() @Inject(CACHE_MANAGER) private readonly cache?: Cache,
   ) {}
 
   // ─── Authorisation helpers ─────────────────────────────────────
@@ -202,106 +258,30 @@ export class PaymentsService {
     return row;
   }
 
-  // ─── CARD payment ──────────────────────────────────────────────
-
   /**
-   * Doctor pays an installment by card. The flow:
-   *
-   *   1. Authorise + load the installment under FOR UPDATE.
-   *   2. Reject if already paid, available date not reached, or the
-   *      quote is cancelled / not approved.
-   *   3. Persist a Payment row in `pending` state with the
-   *      caller-supplied idempotency key (or a freshly generated one)
-   *      so a webhook replay always finds the same row.
-   *   4. Hand off to the gateway. SUCCESS → call handleSuccess inside
-   *      a fresh transaction. FAILED → mark Payment failed. PENDING
-   *      → leave the row pending for the (future) webhook to settle.
+   * Lock the installment row (FOR UPDATE) and re-check it is still
+   * payable: a concurrent settlement may have paid it since the caller
+   * loaded it. Every installment entry point opens its payment under this
+   * lock, which is what makes the in-flight guard and the insert one step.
    */
-  async payByCard(args: {
-    installmentId: string;
-    caller: Caller;
-    idempotencyKey?: string;
-    headers?: Record<string, string | undefined>;
-  }): Promise<Payment> {
-    const { installmentId, caller } = args;
-    // SECURITY (audit L-5): namespace the idempotency key per caller. The
-    // key is client-supplied, so without the userId prefix a replay lookup
-    // could return ANOTHER user's Payment on a key collision (BOLA). The
-    // prefix scopes both the stored key and the replay lookup to this user.
-    const rawKey = args.idempotencyKey?.trim() || `card_${randomUUID()}`;
-    const idempotencyKey = `${caller.userId}:${rawKey}`;
-
-    // Idempotent fast-path: replayed request → return the existing row.
-    const replayed = await this.findByIdempotencyKey(idempotencyKey);
-    if (replayed) return replayed;
-
-    const row = await this.loadInstallmentForCaller(installmentId, caller);
-    this.assertPayable(row);
-    await this.quotations.approveOnFirstPayment(row.quotationId, caller);
-
-    // Create the pending row OUTSIDE the gateway call so the row
-    // exists even if the gateway throws — the user can retry against
-    // the same idempotency key.
-    const payment = await this.prisma.payment.create({
-      data: {
-        orderId: row.quotation.orderId,
-        quotationId: row.quotationId,
-        installmentId: row.id,
-        amount: row.amount,
-        status: PaymentRecordStatus.pending,
-        paymentMethod: PaymentMethod.card,
-        idempotencyKey,
-        initiatedById: caller.userId,
+  private async lockPayableInstallment(
+    tx: Prisma.TransactionClient,
+    installmentId: string,
+  ) {
+    await tx.$queryRaw`SELECT id FROM "QuoteInstallment" WHERE id = ${installmentId} FOR UPDATE`;
+    const installment = await tx.quoteInstallment.findUnique({
+      where: { id: installmentId },
+      select: {
+        id: true,
+        amount: true,
+        status: true,
+        availableFrom: true,
+        quotation: { select: { status: true } },
       },
     });
-    await this.rememberIdempotency(idempotencyKey, payment.id);
-
-    let charge;
-    try {
-      charge = await this.cardGateway.charge({
-        installmentId: row.id,
-        amount: row.amount,
-        idempotencyKey,
-        metadata: {
-          orderId: row.quotation.orderId,
-          quotationId: row.quotationId,
-        },
-        headers: args.headers,
-      });
-    } catch (err) {
-      // Gateway throw is treated as a failure — the row stays at
-      // `failed` so the doctor sees the outcome and can retry with a
-      // new idempotency key.
-      this.logger.error(
-        `Card gateway threw for payment ${payment.id}: ${(err as Error).message}`,
-      );
-      return this.prisma.payment.update({
-        where: { id: payment.id },
-        data: { status: PaymentRecordStatus.failed },
-      });
-    }
-
-    if (charge.status === 'SUCCESS') {
-      return this.handleSuccess({
-        paymentId: payment.id,
-        transactionId: charge.transactionId,
-        actor: caller,
-      });
-    }
-    if (charge.status === 'FAILED') {
-      return this.prisma.payment.update({
-        where: { id: payment.id },
-        data: {
-          status: PaymentRecordStatus.failed,
-          transactionId: charge.transactionId,
-        },
-      });
-    }
-    // PENDING — the gateway will call back later.
-    return this.prisma.payment.update({
-      where: { id: payment.id },
-      data: { transactionId: charge.transactionId },
-    });
+    if (!installment) throw new NotFoundException('Installment not found.');
+    this.assertPayable(installment);
+    return installment;
   }
 
   // ─── BANK_TRANSFER ─────────────────────────────────────────────
@@ -311,13 +291,19 @@ export class PaymentsService {
    * Payment row sits in `awaiting_confirmation` until an admin reviews
    * the bank statement and confirms (or rejects). Re-declaring on the
    * SAME installment auto-cancels any prior pending declaration so
-   * the queue never carries stale rows.
+   * the queue never carries stale rows; a card attempt still in flight
+   * blocks the declaration (409) so the installment is never paid twice.
+   *
+   * The transfer is the cash: the installment + the stamp, minus the
+   * retenue when the practitioner applies it. The row stores that cash as
+   * `amount`, the retenue and the stamp beside it.
    */
   async declareBankTransfer(args: {
     installmentId: string;
     caller: Caller;
     bankReference?: string;
     proofUrl?: string | null;
+    applyWithholding?: boolean;
   }): Promise<Payment> {
     const row = await this.loadInstallmentForCaller(
       args.installmentId,
@@ -327,23 +313,34 @@ export class PaymentsService {
     await this.ensureBankTransferIsConfigured();
     await this.quotations.approveOnFirstPayment(row.quotationId, args.caller);
 
-    return this.prisma.$transaction(async (tx) => {
+    const created = await this.prisma.$transaction(async (tx) => {
+      const installment = await this.lockPayableInstallment(tx, row.id);
+      await assertNoOtherPaymentInFlight(
+        tx,
+        installment.id,
+        PaymentMethod.bank_transfer,
+      );
+      const charge = resolvePaymentCharge(
+        args.applyWithholding,
+        installment.amount,
+        await readChargeSettings(tx),
+      );
       // Cancel any stale `awaiting_confirmation` declarations on the
       // same installment so the admin never sees two pending rows
       // for the same payment.
       await tx.payment.updateMany({
         where: {
-          installmentId: row.id,
+          installmentId: installment.id,
           status: PaymentRecordStatus.awaiting_confirmation,
         },
         data: { status: PaymentRecordStatus.cancelled },
       });
-      const created = await tx.payment.create({
+      const payment = await tx.payment.create({
         data: {
           orderId: row.quotation.orderId,
           quotationId: row.quotationId,
-          installmentId: row.id,
-          amount: row.amount,
+          installmentId: installment.id,
+          ...paymentChargeData(charge),
           status: PaymentRecordStatus.awaiting_confirmation,
           paymentMethod: PaymentMethod.bank_transfer,
           transactionId: args.bankReference ?? null,
@@ -352,29 +349,37 @@ export class PaymentsService {
           initiatedById: args.caller.userId,
         },
       });
-      // Move the order into `payment_review` to signal the queue —
-      // only when this is the first payment-stage transition.
-      await tx.dentalOrder.update({
-        where: { id: row.quotation.orderId },
-        data: { status: OrderStatus.payment_review },
-      });
-      // Bell ping for admins — their pending-confirmations queue just
-      // grew a row.
-      this.events.emit(NotificationEvents.PaymentDeclared, {
-        paymentId: created.id,
-        quotationId: row.quotationId,
-        orderId: row.quotation.orderId,
-        orderCode: row.quotation.order.orderCode,
-        doctorId: args.caller.userId,
-        doctorName: row.quotation.order.doctor?.fullName ?? null,
-        patientName: row.quotation.order.patient?.fullName ?? null,
-        amount: created.amount.toString(),
-        currency: row.quotation.currency ?? 'TND',
-        method: created.paymentMethod,
-        installmentNumber: row.installmentNumber,
-      });
-      return created;
+      // Move the order into `payment_review` to signal the queue, but
+      // only from the quote / payment phase: an extra installment added
+      // after a total edit can be paid on a case already in fabrication,
+      // shipped or finished, and that case must never go back. One
+      // conditional write, so the status check and the write are one step.
+      await moveOrderWithinPaymentPhase(
+        tx,
+        row.quotation.orderId,
+        OrderStatus.payment_review,
+      );
+      return payment;
     });
+    // Bell ping for admins — their pending-confirmations queue just grew a
+    // row. After the commit, so the listener never reads a row that is not
+    // there yet.
+    this.events.emit(NotificationEvents.PaymentDeclared, {
+      paymentId: created.id,
+      quotationId: row.quotationId,
+      orderId: row.quotation.orderId,
+      orderCode: row.quotation.order.orderCode,
+      doctorId: args.caller.userId,
+      doctorName: row.quotation.order.doctor?.fullName ?? null,
+      patientName: row.quotation.order.patient?.fullName ?? null,
+      amount: created.amount.toString(),
+      withholdingAmount: created.withholdingAmount.toString(),
+      stampAmount: created.stampAmount.toString(),
+      currency: row.quotation.currency ?? 'TND',
+      method: created.paymentMethod,
+      installmentNumber: row.installmentNumber,
+    } satisfies PaymentEvent);
+    return created;
   }
 
   async confirmBankTransfer(
@@ -401,11 +406,18 @@ export class PaymentsService {
         `Cannot confirm a payment in status ${existing.status}.`,
       );
     }
+    // The declared charge (retenue + stamp) is confirmed as declared: the
+    // admin checks the cash on the statement against `amount`.
     return this.handleSuccess({
       paymentId,
       transactionId: existing.transactionId ?? `bank_${randomUUID()}`,
       actor: caller,
       notes,
+      // Re-checked under the installment lock: a concurrent reject must
+      // not be overturned, and an installment paid meanwhile is a 409 the
+      // admin has to see, not a transfer silently cancelled.
+      expectStatus: PaymentRecordStatus.awaiting_confirmation,
+      conflictIfPaid: true,
     });
   }
 
@@ -457,31 +469,48 @@ export class PaymentsService {
     // Tell the doctor the proof was rejected so they can re-submit.
     this.events.emit(NotificationEvents.PaymentRejected, {
       paymentId: rejected.id,
-      quotationId: rejected.quotationId,
+      quotationId: rejected.quotationId!,
       orderId: rejected.orderId,
       orderCode: rejected.order.orderCode,
       doctorId: rejected.order.doctorId,
       doctorName: rejected.order.doctor?.fullName ?? null,
       patientName: rejected.order.patient?.fullName ?? null,
       amount: rejected.amount.toString(),
+      withholdingAmount: rejected.withholdingAmount.toString(),
+      stampAmount: rejected.stampAmount.toString(),
       currency: 'TND',
       method: rejected.paymentMethod,
       installmentNumber: rejected.installment?.installmentNumber,
-    });
+    } satisfies PaymentEvent);
     return rejected;
   }
 
-  // ─── CASH ──────────────────────────────────────────────────────
+  // ─── CASH / CHEQUE ─────────────────────────────────────────────
 
+  /**
+   * Admin records money received in person, cash or cheque (a dentist
+   * never can). Created and settled in ONE transaction under the
+   * installment lock: a cash row is never left `pending`, so it can never
+   * block (or be mistaken for) a payment in flight.
+   */
   async recordCash(args: {
     installmentId: string;
     caller: Caller;
     receiptNumber?: string;
     notes?: string;
+    method?: PaymentMethod;
+    applyWithholding?: boolean;
   }): Promise<Payment> {
     if (!isAdmin(args.caller)) {
       throw new ForbiddenException(
         'Only admins can record cash payments.',
+      );
+    }
+    const method = args.method ?? PaymentMethod.cash;
+    if (!isAdminRecordedMethod(method)) {
+      throw new BadRequestException(
+        'Only a cash or cheque payment can be recorded here.',
+        'PAYMENT_METHOD_NOT_RECORDABLE',
       );
     }
     const row = await this.loadInstallmentForCaller(
@@ -491,24 +520,36 @@ export class PaymentsService {
     );
     this.assertPayable(row);
     await this.quotations.approveOnFirstPayment(row.quotationId, args.caller);
-    const payment = await this.prisma.payment.create({
-      data: {
-        orderId: row.quotation.orderId,
-        quotationId: row.quotationId,
-        installmentId: row.id,
-        amount: row.amount,
-        status: PaymentRecordStatus.pending,
-        paymentMethod: PaymentMethod.cash,
-        transactionId: args.receiptNumber ?? null,
-        notes: args.notes ?? null,
-        initiatedById: args.caller.userId,
-      },
+    const settled = await this.prisma.$transaction(async (tx) => {
+      const installment = await this.lockPayableInstallment(tx, row.id);
+      await assertNoOtherPaymentInFlight(tx, installment.id, method);
+      // Received in person: the installment + the stamp, minus the
+      // retenue when the practitioner keeps it back.
+      const charge = resolvePaymentCharge(
+        args.applyWithholding,
+        installment.amount,
+        await readChargeSettings(tx),
+      );
+      const payment = await tx.payment.create({
+        data: {
+          orderId: row.quotation.orderId,
+          quotationId: row.quotationId,
+          installmentId: installment.id,
+          ...paymentChargeData(charge),
+          status: PaymentRecordStatus.pending,
+          paymentMethod: method,
+          transactionId: args.receiptNumber ?? null,
+          notes: args.notes ?? null,
+          initiatedById: args.caller.userId,
+        },
+      });
+      return this.settleWithin(tx, {
+        paymentId: payment.id,
+        transactionId: payment.transactionId ?? `${method}_${randomUUID()}`,
+        actor: args.caller,
+      });
     });
-    return this.handleSuccess({
-      paymentId: payment.id,
-      transactionId: payment.transactionId ?? `cash_${randomUUID()}`,
-      actor: args.caller,
-    });
+    return this.notifySettlement(settled);
   }
 
   // ─── Dev helpers (mock callback) ───────────────────────────────
@@ -574,250 +615,286 @@ export class PaymentsService {
    *   1. `SELECT … FOR UPDATE` on the installment row to serialise
    *      against concurrent payment attempts.
    *   2. Refuse if the installment is already paid (idempotent — the
-   *      caller gets a 200 with the existing Payment).
+   *      caller gets a 200 with the existing Payment), or 409 when the
+   *      caller asked for it (`conflictIfPaid`, the admin's confirm).
    *   3. Flip the Payment, Installment, StepBatch, and Quotation in
    *      one go.
-   *   4. Move the order to `payment_pending` (partial) or `paid`
-   *      (full) as appropriate.
+   *   4. Move the order to `payment_pending` (partial) or `fabrication`
+   *      (full), only from a quote / payment phase status: an order
+   *      already past it keeps its status.
    *
    * Returns the up-to-date Payment row.
    */
-  async handleSuccess(args: {
-    paymentId: string;
-    transactionId: string;
-    actor: Caller;
-    notes?: string;
-  }): Promise<Payment> {
-    return this.prisma.$transaction(async (tx) => {
-      // Lock the installment row first — Postgres-side serialisation.
-      const installmentId = (
-        await tx.payment.findUnique({
-          where: { id: args.paymentId },
-          select: { installmentId: true },
-        })
-      )?.installmentId;
-      if (!installmentId) throw new NotFoundException('Payment not found.');
+  async handleSuccess(args: SettleArgs): Promise<Payment> {
+    const settled = await this.prisma.$transaction((tx) =>
+      this.settleWithin(tx, args),
+    );
+    return this.notifySettlement(settled);
+  }
 
-      await tx.$queryRaw`SELECT id FROM "QuoteInstallment" WHERE id = ${installmentId} FOR UPDATE`;
-
-      const installment = await tx.quoteInstallment.findUnique({
-        where: { id: installmentId },
-        include: { stepBatch: true, quotation: true },
-      });
-      if (!installment) throw new NotFoundException('Installment vanished.');
-
-      const payment = await tx.payment.findUnique({
+  /**
+   * handleSuccess's transaction body, for a caller that already holds a
+   * transaction (cash and cheque are created and settled in one). The
+   * caller must pass the result to `notifySettlement` after the commit.
+   */
+  private async settleWithin(
+    tx: Prisma.TransactionClient,
+    args: SettleArgs,
+  ): Promise<Settlement> {
+    // Lock the installment row first — Postgres-side serialisation.
+    const installmentId = (
+      await tx.payment.findUnique({
         where: { id: args.paymentId },
-      });
-      if (!payment) throw new NotFoundException('Payment not found.');
+        select: { installmentId: true },
+      })
+    )?.installmentId;
+    if (!installmentId) throw new NotFoundException('Payment not found.');
 
-      // Idempotent path — the row may have been promoted by a
-      // concurrent caller while we waited on the lock. Wrap into the
-      // same envelope the success-path returns so the post-commit
-      // emit-block can treat both shapes uniformly (no notifications
-      // are fired on idempotent replays — the original transition
-      // already pinged).
-      if (payment.status === PaymentRecordStatus.success) {
-        return {
-          payment,
-          order: {
-            id: installment.quotation.orderId,
-            doctorId: '',
-            orderCode: '',
-            doctor: { fullName: '' },
-            patient: null as { fullName: string } | null,
-          },
-          installmentNumber: installment.installmentNumber,
-          batchUnlocked: null,
-          skipNotify: true,
-        };
+    await tx.$queryRaw`SELECT id FROM "QuoteInstallment" WHERE id = ${installmentId} FOR UPDATE`;
+
+    const installment = await tx.quoteInstallment.findUnique({
+      where: { id: installmentId },
+      include: { stepBatch: true, quotation: true },
+    });
+    if (!installment) throw new NotFoundException('Installment vanished.');
+
+    const payment = await tx.payment.findUnique({
+      where: { id: args.paymentId },
+    });
+    if (!payment) throw new NotFoundException('Payment not found.');
+
+    // No notification for these: the original transition already pinged,
+    // or nothing was settled.
+    const quietly = (row: Payment): Settlement => ({
+      payment: row,
+      order: {
+        id: installment.quotation.orderId,
+        doctorId: '',
+        orderCode: '',
+        doctor: { fullName: '' },
+        patient: null,
+      },
+      installmentNumber: installment.installmentNumber,
+      batchUnlocked: null,
+      skipNotify: true,
+    });
+
+    // Idempotent path — the row may have been promoted by a
+    // concurrent caller while we waited on the lock.
+    if (payment.status === PaymentRecordStatus.success) {
+      return quietly(payment);
+    }
+    if (args.expectStatus && payment.status !== args.expectStatus) {
+      throw new BadRequestException(
+        `Cannot confirm a payment in status ${payment.status}.`,
+      );
+    }
+
+    // The installment may have already been marked paid by a
+    // sibling Payment (e.g. CARD raced with BANK_TRANSFER confirm).
+    if (installment.status === InstallmentStatus.paid) {
+      if (args.conflictIfPaid) {
+        throw new ConflictException(
+          "Cette échéance est déjà payée : ce virement ne peut pas être confirmé. Rejetez-le, et remboursez le praticien si l'argent a bien été reçu.",
+          'INSTALLMENT_ALREADY_PAID',
+        );
       }
-
-      // The installment may have already been marked paid by a
-      // sibling Payment (e.g. CARD raced with BANK_TRANSFER confirm).
-      // In that case the LATER payment becomes a duplicate-paid
+      // A card charge that landed anyway becomes a duplicate-paid
       // refunded-style row; we cancel it gracefully and DON'T re-unlock.
-      if (installment.status === InstallmentStatus.paid) {
-        const cancelled = await tx.payment.update({
-          where: { id: payment.id },
-          data: { status: PaymentRecordStatus.cancelled },
-        });
-        return {
-          payment: cancelled,
-          order: {
-            id: installment.quotation.orderId,
-            doctorId: '',
-            orderCode: '',
-            doctor: { fullName: '' },
-            patient: null as { fullName: string } | null,
-          },
-          installmentNumber: installment.installmentNumber,
-          batchUnlocked: null,
-          skipNotify: true,
-        };
-      }
-
-      const now = new Date();
-
-      // Update payment.
-      const updatedPayment = await tx.payment.update({
+      const cancelled = await tx.payment.update({
         where: { id: payment.id },
-        data: {
-          status: PaymentRecordStatus.success,
-          transactionId: args.transactionId,
-          paidAt: now,
-          confirmedAt:
-            payment.paymentMethod === PaymentMethod.card ? null : now,
-          confirmedById:
-            payment.paymentMethod === PaymentMethod.card
-              ? null
-              : args.actor.userId,
-          notes: args.notes ?? payment.notes,
-        },
+        data: { status: PaymentRecordStatus.cancelled },
       });
+      return quietly(cancelled);
+    }
 
-      // Mark installment paid.
-      await tx.quoteInstallment.update({
-        where: { id: installment.id },
-        data: {
-          status: InstallmentStatus.paid,
-          paidAt: now,
-        },
+    const now = new Date();
+
+    // Update payment.
+    const updatedPayment = await tx.payment.update({
+      where: { id: payment.id },
+      data: {
+        status: PaymentRecordStatus.success,
+        transactionId: args.transactionId,
+        paidAt: now,
+        confirmedAt:
+          payment.paymentMethod === PaymentMethod.card ? null : now,
+        confirmedById:
+          payment.paymentMethod === PaymentMethod.card
+            ? null
+            : args.actor.userId,
+        notes: args.notes ?? payment.notes,
+      },
+    });
+
+    // Mark installment paid. Unconditional: a payment settles its whole
+    // installment, the cash plus the retenue the practitioner kept back,
+    // minus the stamp charged on top.
+    await tx.quoteInstallment.update({
+      where: { id: installment.id },
+      data: {
+        status: InstallmentStatus.paid,
+        paidAt: now,
+      },
+    });
+
+    // Unlock batch (if not already delivered — defensive).
+    if (
+      installment.stepBatch &&
+      installment.stepBatch.status === BatchStatus.locked
+    ) {
+      await tx.quoteStepBatch.update({
+        where: { id: installment.stepBatch.id },
+        data: { status: BatchStatus.unlocked, unlockedAt: now },
       });
+    }
 
-      // Unlock batch (if not already delivered — defensive).
-      if (
-        installment.stepBatch &&
-        installment.stepBatch.status === BatchStatus.locked
-      ) {
-        await tx.quoteStepBatch.update({
-          where: { id: installment.stepBatch.id },
-          data: { status: BatchStatus.unlocked, unlockedAt: now },
-        });
-      }
+    // Recalculate quote totals. Settled = cash + retenue - stamp: a
+    // practitioner who kept back the retenue has paid the installment in
+    // full, and the stamp he paid on top belongs to the facture, not to
+    // the devis.
+    const aggregate = await tx.payment.aggregate({
+      where: {
+        quotationId: installment.quotationId,
+        status: PaymentRecordStatus.success,
+      },
+      _sum: { amount: true, withholdingAmount: true, stampAmount: true },
+    });
+    const totalPaid = settledTotal(aggregate._sum);
+    const totalPrice = installment.quotation.totalPrice ?? new Prisma.Decimal(0);
+    // The plan validator accepts installments within 0.001 of the
+    // total (MONEY_EPSILON in quotation-payment-plan.service.ts), so
+    // settlement must honor the same tolerance — otherwise a plan one
+    // millime short of a fractional loyalty net can never reach
+    // `paid`. A tolerated shortfall reports remainingAmount 0.
+    const settled = totalPaid.gte(totalPrice.minus(new Prisma.Decimal('0.001')));
+    const remaining = settled
+      ? new Prisma.Decimal(0)
+      : Prisma.Decimal.max(totalPrice.minus(totalPaid), new Prisma.Decimal(0));
+    const newStatus: QuotationPaymentStatus = totalPaid.eq(0)
+      ? QuotationPaymentStatus.pending
+      : settled
+        ? QuotationPaymentStatus.paid
+        : QuotationPaymentStatus.partially_paid;
 
-      // Recalculate quote totals.
-      const aggregate = await tx.payment.aggregate({
-        where: {
-          quotationId: installment.quotationId,
-          status: PaymentRecordStatus.success,
-        },
-        _sum: { amount: true },
-      });
-      const totalPaid = aggregate._sum.amount ?? new Prisma.Decimal(0);
-      const totalPrice = installment.quotation.totalPrice ?? new Prisma.Decimal(0);
-      // The plan validator accepts installments within 0.001 of the
-      // total (MONEY_EPSILON in quotation-payment-plan.service.ts), so
-      // settlement must honor the same tolerance — otherwise a plan one
-      // millime short of a fractional loyalty net can never reach
-      // `paid`. A tolerated shortfall reports remainingAmount 0.
-      const settled = totalPaid.gte(totalPrice.minus(new Prisma.Decimal('0.001')));
-      const remaining = settled
-        ? new Prisma.Decimal(0)
-        : Prisma.Decimal.max(totalPrice.minus(totalPaid), new Prisma.Decimal(0));
-      const newStatus: QuotationPaymentStatus = totalPaid.eq(0)
-        ? QuotationPaymentStatus.pending
-        : settled
-          ? QuotationPaymentStatus.paid
-          : QuotationPaymentStatus.partially_paid;
+    await tx.quotation.update({
+      where: { id: installment.quotationId },
+      data: {
+        paidAmount: totalPaid,
+        remainingAmount: remaining,
+        paymentStatus: newStatus,
+      },
+    });
 
-      await tx.quotation.update({
-        where: { id: installment.quotationId },
-        data: {
-          paidAmount: totalPaid,
-          remainingAmount: remaining,
-          paymentStatus: newStatus,
-        },
-      });
+    // Propagate order status. When the quotation is fully paid we
+    // jump STRAIGHT to `fabrication` instead of pausing at `paid`:
+    // the moment the money lands, the lab work has effectively
+    // started — there's no business meaning to a long-lived `paid`
+    // state, and surfacing it as a separate tab on the orders page
+    // made the workflow harder to read. Keeps the enum value
+    // available for back-compat in case other callers still set it.
+    //
+    // Both moves only leave the quote / payment phase forwards: an extra
+    // installment (planRebalance after a total edit) can be paid on a case
+    // already in fabrication, shipped or finished, and paying it must
+    // leave that status alone. The full-payment move is the quote edit's
+    // own rule (advanceOrderWhenPaid), so both paths agree on "paid".
+    const orderId = installment.quotation.orderId;
+    if (newStatus === QuotationPaymentStatus.paid) {
+      await advanceOrderWhenPaid(tx, orderId);
+    } else {
+      await moveOrderWithinPaymentPhase(
+        tx,
+        orderId,
+        OrderStatus.payment_pending,
+      );
+    }
+    const order = await tx.dentalOrder.findUnique({
+      where: { id: orderId },
+      select: {
+        id: true,
+        doctorId: true,
+        orderCode: true,
+        doctor: { select: { fullName: true } },
+        // Patient name rides along into every payment notification
+        // so the doctor's bell can read as "500 TND for patient X
+        // (ORD-…) has been confirmed."
+        patient: { select: { fullName: true } },
+      },
+    });
+    if (!order) throw new NotFoundException('Order not found.');
 
-      // Propagate order status. When the quotation is fully paid we
-      // jump STRAIGHT to `fabrication` instead of pausing at `paid`:
-      // the moment the money lands, the lab work has effectively
-      // started — there's no business meaning to a long-lived `paid`
-      // state, and surfacing it as a separate tab on the orders page
-      // made the workflow harder to read. Keeps the enum value
-      // available for back-compat in case other callers still set it.
-      const nextOrderStatus =
-        newStatus === QuotationPaymentStatus.paid
-          ? OrderStatus.fabrication
-          : OrderStatus.payment_pending;
-      const order = await tx.dentalOrder.update({
-        where: { id: installment.quotation.orderId },
-        data: { status: nextOrderStatus },
-        select: {
-          id: true,
-          doctorId: true,
-          orderCode: true,
-          doctor: { select: { fullName: true } },
-          // Patient name rides along into every payment notification
-          // so the doctor's bell can read as "500 TND for patient X
-          // (ORD-…) has been confirmed."
-          patient: { select: { fullName: true } },
-        },
-      });
+    // Stash everything the post-commit emit-block needs. We can't
+    // emit from inside the transaction — listeners run async and
+    // would race the commit. Pulling values out, returning, then
+    // emitting after the closure resolves is the safe pattern.
+    return {
+      payment: updatedPayment,
+      order,
+      installmentNumber: installment.installmentNumber,
+      batchUnlocked:
+        installment.stepBatch?.status === BatchStatus.locked
+          ? installment.stepBatch
+          : null,
+      skipNotify: false,
+    };
+  }
 
-      // Stash everything the post-commit emit-block needs. We can't
-      // emit from inside the transaction — listeners run async and
-      // would race the commit. Pulling values out, returning, then
-      // emitting after the closure resolves is the safe pattern.
-      return {
-        payment: updatedPayment,
-        order,
-        installmentNumber: installment.installmentNumber,
-        batchUnlocked:
-          installment.stepBatch?.status === BatchStatus.locked
-            ? installment.stepBatch
-            : null,
-        skipNotify: false,
-      };
-    }).then(({ payment, order, installmentNumber, batchUnlocked, skipNotify }) => {
-      if (skipNotify) return payment;
-      // ── Post-commit notifications ────────────────────────────────
-      // The DB has already accepted the transition; nothing here can
-      // unwind it. Failures in the listener get logged and swallowed.
-      const sharedPayload = {
-        paymentId: payment.id,
+  /**
+   * Post-commit notifications of a settlement. The DB has already
+   * accepted the transition; nothing here can unwind it. Failures in the
+   * listener get logged and swallowed.
+   */
+  private notifySettlement({
+    payment,
+    order,
+    installmentNumber,
+    batchUnlocked,
+    skipNotify,
+  }: Settlement): Payment {
+    if (skipNotify) return payment;
+    const sharedPayload: PaymentEvent = {
+      paymentId: payment.id,
+      quotationId: payment.quotationId!,
+      orderId: payment.orderId,
+      orderCode: order.orderCode,
+      doctorId: order.doctorId,
+      doctorName: order.doctor?.fullName ?? null,
+      patientName: order.patient?.fullName ?? null,
+      amount: payment.amount.toString(),
+      withholdingAmount: payment.withholdingAmount.toString(),
+      stampAmount: payment.stampAmount.toString(),
+      currency: 'TND',
+      method: payment.paymentMethod,
+      installmentNumber,
+    };
+    if (payment.paymentMethod === PaymentMethod.card) {
+      // Card success: admin gets a "new payment received" ping; the
+      // doctor already saw their own button click resolve.
+      this.events.emit(NotificationEvents.PaymentReceived, sharedPayload);
+    } else if (payment.paymentMethod === PaymentMethod.bank_transfer) {
+      // Admin just confirmed the wire — tell the doctor.
+      this.events.emit(NotificationEvents.PaymentConfirmed, sharedPayload);
+    } else {
+      // Cash or cheque: admin recorded it; broadcast to admin team +
+      // ping doctor. The payload's method tells the two apart.
+      this.events.emit(NotificationEvents.CashPaymentRecorded, sharedPayload);
+    }
+    if (batchUnlocked) {
+      this.events.emit(NotificationEvents.BatchUnlocked, {
+        batchId: batchUnlocked.id,
         quotationId: payment.quotationId!,
         orderId: payment.orderId,
         orderCode: order.orderCode,
         doctorId: order.doctorId,
         doctorName: order.doctor?.fullName ?? null,
         patientName: order.patient?.fullName ?? null,
-        amount: payment.amount.toString(),
-        currency: 'TND',
-        method: payment.paymentMethod,
-        installmentNumber,
-      };
-      if (payment.paymentMethod === PaymentMethod.card) {
-        // Card success: admin gets a "new payment received" ping; the
-        // doctor already saw their own button click resolve.
-        this.events.emit(NotificationEvents.PaymentReceived, sharedPayload);
-      } else if (payment.paymentMethod === PaymentMethod.bank_transfer) {
-        // Admin just confirmed the wire — tell the doctor.
-        this.events.emit(NotificationEvents.PaymentConfirmed, sharedPayload);
-      } else {
-        // Cash: admin recorded it; broadcast to admin team + ping doctor.
-        this.events.emit(
-          NotificationEvents.CashPaymentRecorded,
-          sharedPayload,
-        );
-      }
-      if (batchUnlocked) {
-        this.events.emit(NotificationEvents.BatchUnlocked, {
-          batchId: batchUnlocked.id,
-          quotationId: payment.quotationId!,
-          orderId: payment.orderId,
-          orderCode: order.orderCode,
-          doctorId: order.doctorId,
-          doctorName: order.doctor?.fullName ?? null,
-          patientName: order.patient?.fullName ?? null,
-          fromStep: batchUnlocked.fromStep,
-          toStep: batchUnlocked.toStep,
-          batchNumber: batchUnlocked.batchNumber,
-        });
-      }
-      return payment;
-    });
+        fromStep: batchUnlocked.fromStep,
+        toStep: batchUnlocked.toStep,
+        batchNumber: batchUnlocked.batchNumber,
+      });
+    }
+    return payment;
   }
 
   // ─── Read helpers (controller queries) ─────────────────────────
@@ -1171,36 +1248,25 @@ export class PaymentsService {
    */
   // Implicit "first payment approves the quote" lives in
   // QuotationService.approveOnFirstPayment — one owner of the transition.
+}
 
-  // ─── Idempotency (Redis-backed via Cache Manager) ──────────────
-
-  private async findByIdempotencyKey(key: string): Promise<Payment | null> {
-    if (this.cache) {
-      const cached = await this.cache.get<string>(`payment:idem:${key}`);
-      if (cached) {
-        const payment = await this.prisma.payment.findUnique({
-          where: { id: cached },
-        });
-        if (payment) return payment;
-      }
-    }
-    return this.prisma.payment.findUnique({
-      where: { idempotencyKey: key },
-    });
-  }
-
-  private async rememberIdempotency(key: string, paymentId: string) {
-    if (!this.cache) return;
-    try {
-      await this.cache.set(`payment:idem:${key}`, paymentId, IDEMPOTENCY_TTL_MS);
-    } catch (err) {
-      // Cache is a hint — if Redis is down the @unique constraint on
-      // Payment.idempotencyKey still protects us.
-      this.logger.warn(
-        `Cache set failed for idempotency key ${key}: ${(err as Error).message}`,
-      );
-    }
-  }
+/**
+ * Move an order to `next` only while it is still in the quote / payment
+ * phase (QUOTE_PHASE_ORDER_STATUSES, the rule the quote edit and recall
+ * use). A conditional updateMany rather than read-then-write: Postgres
+ * re-checks the status on the row it updates, so an order moved past the
+ * phase meanwhile is left alone. Returns whether the order moved.
+ */
+async function moveOrderWithinPaymentPhase(
+  tx: Pick<Prisma.TransactionClient, 'dentalOrder'>,
+  orderId: string,
+  next: OrderStatus,
+): Promise<boolean> {
+  const { count } = await tx.dentalOrder.updateMany({
+    where: { id: orderId, status: { in: QUOTE_PHASE_ORDER_STATUSES } },
+    data: { status: next },
+  });
+  return count > 0;
 }
 
 /**

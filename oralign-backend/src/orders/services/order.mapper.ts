@@ -146,6 +146,25 @@ export function mapOrderToDto(order: OrderWithRelations): OrderResponseDto {
       order.treatmentFeeAmount !== undefined
         ? Number(order.treatmentFeeAmount)
         : undefined,
+    // Retenue à la source on the fee (null = not applied) and the stamp
+    // charged on top (null before 2026-11-20). The fee due is
+    // treatmentFeeAmount (cash) + treatmentFeeWithholdingAmount -
+    // treatmentFeeStampAmount.
+    treatmentFeeWithholdingRate:
+      order.treatmentFeeWithholdingRate !== null &&
+      order.treatmentFeeWithholdingRate !== undefined
+        ? Number(order.treatmentFeeWithholdingRate)
+        : null,
+    treatmentFeeWithholdingAmount:
+      order.treatmentFeeWithholdingAmount !== null &&
+      order.treatmentFeeWithholdingAmount !== undefined
+        ? Number(order.treatmentFeeWithholdingAmount)
+        : null,
+    treatmentFeeStampAmount:
+      order.treatmentFeeStampAmount !== null &&
+      order.treatmentFeeStampAmount !== undefined
+        ? Number(order.treatmentFeeStampAmount)
+        : null,
     // CBCT supplement snapshot (Decimal → Number, same convention).
     cbctFeeAmount:
       order.cbctFeeAmount !== null && order.cbctFeeAmount !== undefined

@@ -81,9 +81,13 @@ function setup(
     counts?: { installments?: number; fees?: number };
     installmentGroups?: unknown[];
     feeGroups?: unknown[];
+    feeInvoices?: unknown[];
   } = {},
 ) {
   const prisma = {
+    invoice: {
+      findMany: jest.fn().mockResolvedValue(options.feeInvoices ?? []),
+    },
     payment: {
       count: jest.fn().mockResolvedValue(options.counts?.installments ?? 1),
       findMany: jest
@@ -422,6 +426,33 @@ describe('PaymentsReportService', () => {
         transactionRef: 'ORA-TF-1',
         receiptNumber: 'TF-000003',
         installment: null,
+      });
+    });
+
+    it('a fee invoiced on a facture prints the facture number, read in one query', async () => {
+      const { service, prisma } = setup({
+        fees: [feeRow(), feeRow({ id: 'o-2', treatmentFeeInvoiceNumber: null })],
+        feeInvoices: [
+          { treatmentFeeOrderId: 'o-1', invoiceNumber: 'FAC-000120' },
+          { treatmentFeeOrderId: 'o-2', invoiceNumber: 'FAC-000121' },
+        ],
+      });
+      const model = await service.buildModel(
+        request({ kind: PaymentsReportKind.treatmentFee }),
+        admin,
+      );
+      expect(model.sections[0].rows.map((row) => row.receiptNumber)).toEqual([
+        'FAC-000120',
+        'FAC-000121',
+      ]);
+      expect(prisma.invoice.findMany).toHaveBeenCalledTimes(1);
+      expect(prisma.invoice.findMany).toHaveBeenCalledWith({
+        where: {
+          treatmentFeeOrderId: { in: ['o-1', 'o-2'] },
+          status: { not: 'cancelled' },
+          deletedAt: null,
+        },
+        select: { treatmentFeeOrderId: true, invoiceNumber: true },
       });
     });
 

@@ -196,8 +196,14 @@ export function useAdminPayment(
  * Every payment mutation invalidates the same fan-out: the payment
  * itself, every payments list, count and the takings summary, the
  * installments + batches of the quote the payment belongs to, the quote
- * summary, the order summary, and the orders list (because the order
+ * itself, the order summary, and the orders list (because the order
  * status can move on SUCCESS).
+ *
+ * The quote is read by order (QuoteReview's quotationKeys.byOrder): its
+ * receivedAmount, hasPaymentInFlight, canDelete / canRecall and status
+ * move with every record, declaration, confirmation or rejection, and
+ * the editor gates Delete, Recall, Change pack and the below-paid guard
+ * on them.
  */
 function invalidateAfterPayment(
   queryClient: ReturnType<typeof useQueryClient>,
@@ -214,6 +220,10 @@ function invalidateAfterPayment(
     });
     queryClient.invalidateQueries({
       queryKey: quotationKeys.detail(payment.quotationId),
+    });
+    const quoteOrderId = orderId ?? payment.orderId;
+    queryClient.invalidateQueries({
+      queryKey: quoteOrderId ? quotationKeys.byOrder(quoteOrderId) : quotationKeys.all,
     });
   }
   if (orderId) {
@@ -280,11 +290,12 @@ export function usePayByCard(): UseMutationResult<
     idempotencyKey: string;
     orderId: string;
     language?: 'fr' | 'en' | 'ar';
+    applyWithholding?: boolean;
   }
 > {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ orderId, installmentId, idempotencyKey, language }) =>
+    mutationFn: ({ orderId, installmentId, idempotencyKey, language, applyWithholding }) =>
       paymentsService.createClicToPaySession({
         orderId,
         installmentId,
@@ -292,6 +303,7 @@ export function usePayByCard(): UseMutationResult<
         purpose: PaymentPurpose.INSTALLMENT,
         language,
         pageView: HOSTED_PAGE_VIEW,
+        applyWithholding,
       }),
     // The attempt is a payment row from now on ("in progress").
     onSuccess: () => invalidatePaymentViews(queryClient),
@@ -302,18 +314,24 @@ export function usePayByCard(): UseMutationResult<
 export function useCreateTreatmentFeeCardSession(): UseMutationResult<
   HostedPaymentSession,
   Error,
-  { orderId: string; idempotencyKey: string; language?: 'fr' | 'en' | 'ar' }
+  {
+    orderId: string;
+    idempotencyKey: string;
+    language?: 'fr' | 'en' | 'ar';
+    applyWithholding?: boolean;
+  }
 > {
   const queryClient = useQueryClient();
   const { t } = useT();
   return useMutation({
-    mutationFn: ({ orderId, idempotencyKey, language }) =>
+    mutationFn: ({ orderId, idempotencyKey, language, applyWithholding }) =>
       paymentsService.createClicToPaySession({
         orderId,
         idempotencyKey,
         purpose: PaymentPurpose.TREATMENT_FEE,
         language,
         pageView: HOSTED_PAGE_VIEW,
+        applyWithholding,
       }),
     onSuccess: () => invalidatePaymentViews(queryClient),
     onError: (err, { orderId }) => {
@@ -337,6 +355,7 @@ export function useDeclareBankTransfer(): UseMutationResult<
     bankReference?: string;
     proofFile?: File | Blob | null;
     orderId?: string;
+    applyWithholding?: boolean;
   }
 > {
   const queryClient = useQueryClient();
@@ -347,12 +366,14 @@ export function useDeclareBankTransfer(): UseMutationResult<
       installmentId,
       bankReference,
       proofFile,
+      applyWithholding,
     }) =>
       paymentsService.declareBankTransfer({
         quotationId,
         installmentId,
         bankReference,
         proofFile,
+        applyWithholding,
       }),
     onSuccess: (payment, { orderId }) => {
       invalidateAfterPayment(queryClient, payment, orderId);

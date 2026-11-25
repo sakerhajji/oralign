@@ -63,7 +63,7 @@ describe('TreatmentFeeFilterDto (GET /orders/admin/treatment-fees query)', () =>
     });
   });
 
-  it.each([{ methods: 'cheque' }, { statuses: 'paid' }])(
+  it.each([{ methods: 'crypto' }, { statuses: 'paid' }])(
     'refuses an unknown method or status (%p)',
     async (raw) => {
       await expect(parse(raw)).rejects.toMatchObject(badRequest);

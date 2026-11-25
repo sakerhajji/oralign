@@ -56,7 +56,7 @@ const whereOf = (groupBy: jest.Mock) =>
   (groupBy.mock.calls as GroupByCall[][])[0][0].where;
 
 const zero = { amount: '0.000', count: 0 };
-const zeroMethods = { cash: zero, card: zero, bank_transfer: zero };
+const zeroMethods = { cash: zero, card: zero, bank_transfer: zero, cheque: zero };
 
 describe('PaymentsSummaryService.summarise (takings)', () => {
   describe('queries', () => {
@@ -188,6 +188,8 @@ describe('PaymentsSummaryService.summarise (takings)', () => {
         [
           installments(PaymentMethod.cash, '1500', 2),
           installments(PaymentMethod.card, '1250.5', 1),
+          // Cheques recorded by the admin: their own bucket.
+          installments(PaymentMethod.cheque, '200', 1),
         ],
         [
           fees(PaymentMethod.cash, '350', 1),
@@ -202,20 +204,22 @@ describe('PaymentsSummaryService.summarise (takings)', () => {
         to: '2026-11-06',
         timeZone: 'Africa/Tunis',
         currency: 'TND',
-        total: { amount: '3800.750', count: 6 },
+        total: { amount: '4000.750', count: 7 },
         methods: {
           cash: { amount: '1850.000', count: 3 },
           card: { amount: '1250.500', count: 1 },
           bank_transfer: { amount: '700.250', count: 2 },
+          cheque: { amount: '200.000', count: 1 },
         },
         purposes: {
           installment: {
-            amount: '2750.500',
-            count: 3,
+            amount: '2950.500',
+            count: 4,
             methods: {
               cash: { amount: '1500.000', count: 2 },
               card: { amount: '1250.500', count: 1 },
               bank_transfer: zero,
+              cheque: { amount: '200.000', count: 1 },
             },
           },
           treatment_fee: {
@@ -225,6 +229,7 @@ describe('PaymentsSummaryService.summarise (takings)', () => {
               cash: { amount: '350.000', count: 1 },
               card: zero,
               bank_transfer: { amount: '700.250', count: 2 },
+              cheque: zero,
             },
           },
         },

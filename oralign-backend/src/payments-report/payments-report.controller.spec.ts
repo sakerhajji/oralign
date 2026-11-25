@@ -141,7 +141,7 @@ describe('POST /api/payments/report', () => {
     ],
     [
       'an unknown method',
-      { kind: 'treatment_fee', treatmentFees: { methods: ['cheque'] } },
+      { kind: 'treatment_fee', treatmentFees: { methods: ['crypto'] } },
     ],
     [
       'a rank out of range',

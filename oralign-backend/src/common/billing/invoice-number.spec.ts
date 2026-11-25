@@ -6,7 +6,11 @@ import {
 
 interface Rows {
   /** The invoice already printing the number, if any. */
-  invoice?: { id: string; paymentId: string | null } | null;
+  invoice?: {
+    id: string;
+    paymentId: string | null;
+    treatmentFeeOrderId?: string | null;
+  } | null;
   /** The installment receipt already printing it, if any. */
   receipt?: { id: string } | null;
   /** The order whose treatment-fee receipt already prints it, if any. */
@@ -61,7 +65,7 @@ describe('assertInvoiceNumberFree (one number, one document)', () => {
     ).resolves.toBeUndefined();
     expect(prisma.invoice.findUnique).toHaveBeenCalledWith({
       where: { invoiceNumber: 'FAC-000099' },
-      select: { id: true, paymentId: true },
+      select: { id: true, paymentId: true, treatmentFeeOrderId: true },
     });
     expect(prisma.payment.findUnique).toHaveBeenCalledWith({
       where: { invoiceNumber: 'FAC-000099' },
@@ -136,6 +140,45 @@ describe('assertInvoiceNumberFree (one number, one document)', () => {
           { invoiceId: 'inv-1', paymentId: 'p1' },
         ),
       ).resolves.toBeUndefined();
+    });
+
+    it("a treatment-fee invoice keeps its own order's fee number", async () => {
+      await expect(
+        check(
+          'FAC-000042',
+          {
+            feeReceipt: { id: 'o-1' },
+            invoice: { id: 'inv-1', paymentId: null, treatmentFeeOrderId: 'o-1' },
+          },
+          { invoiceId: 'inv-1', orderId: 'o-1' },
+        ),
+      ).resolves.toBeUndefined();
+    });
+
+    it('renaming the fee number from the order side accepts its own invoice', async () => {
+      await expect(
+        check(
+          'FAC-000042',
+          {
+            feeReceipt: { id: 'o-1' },
+            invoice: { id: 'inv-9', paymentId: 'p-card', treatmentFeeOrderId: 'o-1' },
+          },
+          { orderId: 'o-1', paymentId: 'p-card' },
+        ),
+      ).resolves.toBeUndefined();
+    });
+
+    it("still refuses another order's fee number and another order's fee invoice", async () => {
+      await expect(
+        check('FAC-000042', { feeReceipt: { id: 'o-2' } }, { orderId: 'o-1' }),
+      ).rejects.toMatchObject(taken);
+      await expect(
+        check(
+          'FAC-000042',
+          { invoice: { id: 'inv-2', paymentId: null, treatmentFeeOrderId: 'o-2' } },
+          { invoiceId: 'inv-1', orderId: 'o-1' },
+        ),
+      ).rejects.toMatchObject(taken);
     });
   });
 

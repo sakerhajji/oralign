@@ -6,6 +6,11 @@ import { TreatmentFeeReceiptDialog } from '@/components/orders/treatment-fee-rec
 import { ReceiptNumberLink } from '@/components/payments/invoice-number-editor';
 import { PaymentStatusBadge } from '@/components/payments/payment-status-badge';
 import {
+  AmountWithWithholding,
+  recordedSplit,
+  recordedSplitParts,
+} from '@/components/payments/withholding';
+import {
   Table,
   TableBody,
   TableCaption,
@@ -49,10 +54,24 @@ const COLS = {
 const receiptPath = (row: TreatmentFeeRow) =>
   `/dashboard/orders/${row.orderId}/treatment-fee-invoice`;
 
+/**
+ * A fee row may carry the retenue à la source the practitioner applied
+ * (its amount is then the cash, net of it). Optional: older API rows have
+ * neither field.
+ */
+type FeeRow = TreatmentFeeRow & {
+  withholdingAmount?: number | string | null;
+  withholdingRate?: number | string | null;
+};
+
 /** null when no fee was set; a waived fee is a real 0,000. */
-function feeAmount(row: TreatmentFeeRow): string | null {
+function feeAmount(row: FeeRow): string | null {
   return row.amount === null ? null : formatPrice(row.amount, DEFAULT_MERCHANT_CURRENCY);
 }
+
+/** Fee (+ CBCT) TTC, the stamp added and the retenue kept back, or null on an older row. */
+const feeSplit = (row: FeeRow) =>
+  recordedSplit(row.amount, row.withholdingAmount, row.withholdingRate, row.stampAmount);
 
 /**
  * The treatment-fees tab: one row per order's fee. A fee is dated by the
@@ -66,7 +85,7 @@ export function TreatmentFeesTable({
   returnTo,
   today,
 }: {
-  rows: TreatmentFeeRow[];
+  rows: FeeRow[];
   isAdmin: boolean;
   busy: boolean;
   /** The desk's own URL, for the way back from an order or a receipt. */
@@ -76,7 +95,7 @@ export function TreatmentFeesTable({
 }) {
   const { t, lang } = useT();
   const methodLabel = useMethodLabel();
-  const [proofRow, setProofRow] = useState<TreatmentFeeRow | null>(null);
+  const [proofRow, setProofRow] = useState<FeeRow | null>(null);
 
   const toConfirm = (row: TreatmentFeeRow) =>
     row.status === PaymentRecordStatus.AWAITING_CONFIRMATION;
@@ -152,7 +171,17 @@ export function TreatmentFeesTable({
                     <PaymentStatusBadge status={row.status} />
                   </TableCell>
                   <TableCell className={cn('py-2.5 font-medium tabular-nums', COLS.amount)}>
-                    {amount ?? <Dash />}
+                    {amount === null ? (
+                      <Dash />
+                    ) : (
+                      <AmountWithWithholding
+                        cash={row.amount}
+                        split={feeSplit(row)}
+                        currency={DEFAULT_MERCHANT_CURRENCY}
+                        kind="fee"
+                        className="items-end"
+                      />
+                    )}
                   </TableCell>
                   <TableCell className={cn('py-2.5', COLS.receipt)}>
                     {row.status === PaymentRecordStatus.SUCCESS ? (
@@ -175,13 +204,16 @@ export function TreatmentFeesTable({
 
       <ul className={PHONE_LIST}>
         {rows.map((row) => {
+          const split = feeSplit(row);
           // When, who paid (admins), how, then which order. A fee still to
-          // confirm has no date: its badge says so.
+          // confirm has no date: its badge says so. With a stamp or a
+          // retenue, the fee, the stamp and the retenue last.
           const meta = [
             row.paidAt ? dateTimeLine(row.paidAt, lang, today) : null,
             isAdmin ? row.doctor?.fullName : null,
             methodLabel(row.method),
             row.orderCode,
+            ...recordedSplitParts(split, DEFAULT_MERCHANT_CURRENCY, t, 'fee'),
           ]
             .filter(Boolean)
             .join(' · ');
@@ -209,6 +241,10 @@ export function TreatmentFeesTable({
           orderCode={proofRow.orderCode}
           proofPath={proofRow.proofPath}
           amount={proofRow.amount}
+          withholdingAmount={proofRow.withholdingAmount}
+          withholdingRate={proofRow.withholdingRate}
+          stampAmount={proofRow.stampAmount}
+          kind="fee"
           currency={DEFAULT_MERCHANT_CURRENCY}
           doctorName={proofRow.doctor?.fullName ?? null}
           patientName={proofRow.patient?.fullName ?? null}

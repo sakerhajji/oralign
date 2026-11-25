@@ -854,6 +854,113 @@ export function renderQuoteSentForDoctorEmail(
 }
 
 /**
+ * Sent to the practitioner after a payment, with the FACTURE attached as
+ * a PDF (owner decision, 2026-11-19). Also used for an admin re-send.
+ * Money with 3 decimals: TND counts millimes, and the figures must match
+ * the attached invoice to the millime. The figures are the stored ones:
+ * Total TTC carries the droit de timbre added to every payment (owner
+ * decision, 2026-11-20), the retenue comes off it, the net is the cash.
+ */
+export function renderInvoiceForDoctorEmail(
+  args: {
+    doctorName: string;
+    invoiceNumber: string;
+    orderCode: string | null;
+    /** The facture's Total TTC, stamp included. */
+    totalTtc: number;
+    /** The droit de timbre inside `totalTtc`; 0 / absent = none. */
+    stampDuty?: number;
+    withholdingRate: number | null;
+    withholdingAmount: number;
+    netPayable: number;
+    currency: string;
+    /** Paid invoice: "net payé"; otherwise "net à payer". */
+    paid: boolean;
+    dashboardUrl: string | null;
+  },
+  lang: Lang,
+): { html: string; subject: string } {
+  const money = (v: number) => formatMoney3(v, args.currency, lang);
+  const rate =
+    args.withholdingRate && args.withholdingRate > 0
+      ? ` (${args.withholdingRate.toLocaleString(lang === 'fr' ? 'fr-FR' : 'en-GB', { maximumFractionDigits: 2 })} %)`
+      : '';
+  const order = args.orderCode ? escape(args.orderCode) : '';
+  const stamp = Math.max(0, args.stampDuty ?? 0);
+  const TEXTS = {
+    en: {
+      subject: args.orderCode
+        ? `Invoice ${args.invoiceNumber} — ${args.orderCode}`
+        : `Invoice ${args.invoiceNumber}`,
+      title: `Your invoice`,
+      preheader: `Invoice ${args.invoiceNumber}: ${money(args.totalTtc)}.`,
+      lead: args.paid
+        ? `Thank you for your payment${order ? ` for order <strong>${order}</strong>` : ''}. ` +
+          `Your invoice <strong>${escape(args.invoiceNumber)}</strong> is attached as a PDF.`
+        : `Please find attached invoice <strong>${escape(args.invoiceNumber)}</strong>` +
+          `${order ? ` for order <strong>${order}</strong>` : ''} as a PDF.`,
+      labels: {
+        invoice: `Invoice`,
+        order: `Order`,
+        stamp: `Stamp duty`,
+        total: stamp > 0 ? `Total incl. TVA (stamp duty included)` : `Total (incl. TVA)`,
+        withholding: `Withholding tax${rate}`,
+        net: args.paid ? `Net paid` : `Net amount due`,
+      },
+      button: `View the order`,
+    },
+    fr: {
+      subject: args.orderCode
+        ? `Facture ${args.invoiceNumber} — ${args.orderCode}`
+        : `Facture ${args.invoiceNumber}`,
+      title: `Votre facture`,
+      preheader: `Facture ${args.invoiceNumber}&nbsp;: ${money(args.totalTtc)}.`,
+      lead: args.paid
+        ? `Merci pour votre règlement${order ? ` pour la commande <strong>${order}</strong>` : ''}. ` +
+          `Vous trouverez ci-joint la facture <strong>${escape(args.invoiceNumber)}</strong> au format PDF.`
+        : `Vous trouverez ci-joint la facture <strong>${escape(args.invoiceNumber)}</strong>` +
+          `${order ? ` de la commande <strong>${order}</strong>` : ''} au format PDF.`,
+      labels: {
+        invoice: `Facture`,
+        order: `Commande`,
+        stamp: `Droit de timbre`,
+        total: stamp > 0 ? `Total TTC (timbre compris)` : `Total TTC`,
+        withholding: `Retenue à la source${rate}`,
+        net: args.paid ? `Net payé` : `Net à payer`,
+      },
+      button: `Voir la commande`,
+    },
+  };
+  const t = TEXTS[lang];
+  const rows: Array<{ label: string; value: string }> = [
+    { label: t.labels.invoice, value: args.invoiceNumber },
+  ];
+  if (args.orderCode) rows.push({ label: t.labels.order, value: args.orderCode });
+  // Same order as the facture: the stamp, the Total TTC that carries it,
+  // then the retenue and the net.
+  if (stamp > 0) rows.push({ label: t.labels.stamp, value: money(stamp) });
+  rows.push({ label: t.labels.total, value: money(args.totalTtc) });
+  if (args.withholdingAmount > 0) {
+    rows.push({ label: t.labels.withholding, value: `- ${money(args.withholdingAmount)}` });
+  }
+  rows.push({ label: t.labels.net, value: money(args.netPayable) });
+  return {
+    subject: t.subject,
+    html: shell({
+      lang,
+      title: t.title,
+      preheader: t.preheader,
+      body: `
+        ${greeting(escape(args.doctorName), lang)}
+        ${lead(t.lead)}
+        ${metaTable(rows)}
+        ${args.dashboardUrl ? button(args.dashboardUrl, t.button) : ''}
+      `,
+    }),
+  };
+}
+
+/**
  * Sent to each admin when the doctor approves or rejects a quotation.
  * One template covers both outcomes.
  */
@@ -1250,6 +1357,20 @@ function appointmentDecisionBadge(
 }
 
 // ─── Formatting helpers ─────────────────────────────────────────────────────
+
+/** Money with exactly 3 decimals (TND millimes), e.g. "2 344,300 TND". */
+function formatMoney3(amount: number, currency: string, lang: Lang): string {
+  const value = Number.isFinite(amount) ? amount : 0;
+  try {
+    const formatted = new Intl.NumberFormat(lang === 'fr' ? 'fr-FR' : 'en-GB', {
+      minimumFractionDigits: 3,
+      maximumFractionDigits: 3,
+    }).format(value);
+    return `${formatted} ${currency}`;
+  } catch {
+    return `${value.toFixed(3)} ${currency}`;
+  }
+}
 
 function formatMoney(amount: number, currency: string): string {
   // Intl works server-side in Node — we let it pick the locale, then

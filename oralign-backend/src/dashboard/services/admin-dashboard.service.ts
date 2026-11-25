@@ -11,6 +11,10 @@ import {
   VerificationStatus,
 } from '@prisma/client';
 import { INITIAL_ORDERS_ONLY, isInitialOrder } from '../../orders/order-kind';
+import {
+  paymentSettled,
+  treatmentFeeSettled,
+} from '../../payments/services/payment-rules';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DashboardRangeDto, AdminAnalyticsLimitDto } from '../dto/dashboard.dto';
 
@@ -56,6 +60,16 @@ const toNumber = (value: Prisma.Decimal | number | null | undefined): number => 
   if (typeof value === 'number') return value;
   return Number(value.toString());
 };
+
+/**
+ * The treatment-fee columns revenue needs: the cash, the retenue kept back
+ * and the stamp charged on top (settled = cash + retenue - stamp).
+ */
+const FEE_SETTLED_SUM = {
+  treatmentFeeAmount: true,
+  treatmentFeeWithholdingAmount: true,
+  treatmentFeeStampAmount: true,
+} as const;
 
 /**
  * Admin dashboard service — every KPI + analytics block the admin
@@ -295,7 +309,7 @@ export class AdminDashboardService {
     const [tfRangeAgg, tfMonthAgg, tfPrevMonthAgg, tfTodayAgg] =
       await this.prisma.$transaction([
         this.prisma.dentalOrder.aggregate({
-          _sum: { treatmentFeeAmount: true },
+          _sum: FEE_SETTLED_SUM,
           where: {
             deletedAt: null,
             treatmentFeePaymentStatus: PaymentRecordStatus.success,
@@ -303,7 +317,7 @@ export class AdminDashboardService {
           },
         }),
         this.prisma.dentalOrder.aggregate({
-          _sum: { treatmentFeeAmount: true },
+          _sum: FEE_SETTLED_SUM,
           where: {
             deletedAt: null,
             treatmentFeePaymentStatus: PaymentRecordStatus.success,
@@ -311,7 +325,7 @@ export class AdminDashboardService {
           },
         }),
         this.prisma.dentalOrder.aggregate({
-          _sum: { treatmentFeeAmount: true },
+          _sum: FEE_SETTLED_SUM,
           where: {
             deletedAt: null,
             treatmentFeePaymentStatus: PaymentRecordStatus.success,
@@ -319,7 +333,7 @@ export class AdminDashboardService {
           },
         }),
         this.prisma.dentalOrder.aggregate({
-          _sum: { treatmentFeeAmount: true },
+          _sum: FEE_SETTLED_SUM,
           where: {
             deletedAt: null,
             treatmentFeePaymentStatus: PaymentRecordStatus.success,
@@ -327,10 +341,27 @@ export class AdminDashboardService {
           },
         }),
       ]);
-    const treatmentFeeRange = toNumber(tfRangeAgg._sum.treatmentFeeAmount);
-    const treatmentFeeMonth = toNumber(tfMonthAgg._sum.treatmentFeeAmount);
-    const treatmentFeePrevMonth = toNumber(tfPrevMonthAgg._sum.treatmentFeeAmount);
-    const treatmentFeeToday = toNumber(tfTodayAgg._sum.treatmentFeeAmount);
+    // Revenue is what was SETTLED, not the cash: a fee is settled by the
+    // cash collected plus the retenue à la source the practitioner kept
+    // back, minus the droit de timbre charged on top (the facture's, not
+    // ours), as Quotation.paidAmount counts the installments. The takings
+    // (PaymentsSummaryService) are the cash instead, stamps included.
+    const feeSettled = (sum: {
+      treatmentFeeAmount: Prisma.Decimal | null;
+      treatmentFeeWithholdingAmount: Prisma.Decimal | null;
+      treatmentFeeStampAmount: Prisma.Decimal | null;
+    }) =>
+      toNumber(
+        treatmentFeeSettled({
+          treatmentFeeAmount: sum.treatmentFeeAmount,
+          treatmentFeeWithholdingAmount: sum.treatmentFeeWithholdingAmount,
+          treatmentFeeStampAmount: sum.treatmentFeeStampAmount,
+        }),
+      );
+    const treatmentFeeRange = feeSettled(tfRangeAgg._sum);
+    const treatmentFeeMonth = feeSettled(tfMonthAgg._sum);
+    const treatmentFeePrevMonth = feeSettled(tfPrevMonthAgg._sum);
+    const treatmentFeeToday = feeSettled(tfTodayAgg._sum);
 
     // Quote-only revenue kept separate so averageOrderValue (an "average
     // quote value") isn't skewed by the flat treatment fee.
@@ -682,7 +713,12 @@ export class AdminDashboardService {
           status: PaymentRecordStatus.success,
           paidAt: { gte: range.from, lte: range.to },
         },
-        select: { paidAt: true, amount: true },
+        select: {
+          paidAt: true,
+          amount: true,
+          withholdingAmount: true,
+          stampAmount: true,
+        },
       }),
       this.prisma.dentalOrder.findMany({
         where: {
@@ -725,7 +761,11 @@ export class AdminDashboardService {
     }
     for (const p of payments) {
       const k = keyForDate(p.paidAt);
-      if (k && buckets[k]) buckets[k].revenue += toNumber(p.amount);
+      // Revenue is what the payment settled: cash + the retenue kept back
+      // - the stamp charged on top (Payment.amount is the cash).
+      if (k && buckets[k]) {
+        buckets[k].revenue += toNumber(paymentSettled(p));
+      }
     }
     for (const o of orders) {
       const k = keyForDate(o.createdAt);

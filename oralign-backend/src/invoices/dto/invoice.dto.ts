@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
-import { InvoiceStatus } from '@prisma/client';
+import { InvoiceStatus, PaymentMethod } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -17,14 +17,54 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+import { IsCalendarDate } from '../../common/decorators/is-calendar-date.decorator';
+import { toOptionalTrimmed } from '../../common/dto/query-transforms';
 
-const trim = ({ value }: { value: unknown }): unknown =>
+const trim =({ value }: { value: unknown }): unknown =>
   typeof value === 'string' ? value.trim() : value;
 
 const toBool = ({ value }: { value: unknown }): unknown => {
   if (value === true || value === 'true' || value === '1') return true;
   if (value === false || value === 'false' || value === '0') return false;
   return value;
+};
+
+/**
+ * Boolean read from the RAW payload. The global pipe runs with
+ * enableImplicitConversion, which turns the string "false" into `true`
+ * before any @Transform sees `value`; `obj[key]` is still the original.
+ */
+const rawBool = ({ obj, key }: { obj: Record<string, unknown>; key: string }): unknown => {
+  const raw = obj?.[key];
+  if (raw === true || raw === 'true' || raw === '1' || raw === 1) return true;
+  if (raw === false || raw === 'false' || raw === '0' || raw === 0) return false;
+  return raw;
+};
+
+/**
+ * Nullable number read from the RAW payload: an explicit null (or an empty
+ * string from a cleared input) means "none" and must survive as null
+ * instead of being coerced to 0.
+ */
+const rawNullableNumber = ({
+  obj,
+  key,
+}: {
+  obj: Record<string, unknown>;
+  key: string;
+}): unknown => {
+  const raw = obj?.[key];
+  if (raw === null || raw === '') return null;
+  if (raw === undefined) return undefined;
+  return typeof raw === 'number' ? raw : Number(raw);
+};
+
+/** Nullable string: null and blank both clear the field. */
+const trimOrNull = ({ obj, key }: { obj: Record<string, unknown>; key: string }): unknown => {
+  const raw = obj?.[key];
+  if (raw === null) return null;
+  if (typeof raw === 'string') return raw.trim() === '' ? null : raw.trim();
+  return raw;
 };
 
 /** `"a,b"` or repeated params -> string[]. Mirrors PaymentFilterDto. */
@@ -60,7 +100,11 @@ export class InvoiceLineInputDto {
   @Max(1_000_000)
   quantity?: number;
 
-  @ApiPropertyOptional({ default: 0, description: 'Prix unitaire HT.' })
+  @ApiPropertyOptional({
+    default: 0,
+    description:
+      'Prix unitaire HT, ou TTC (TVA incluse, sans le timbre) quand la facture a pricesIncludeTax = true : le serveur en derive le HT.',
+  })
   @IsOptional()
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 3 })
@@ -178,7 +222,10 @@ export class CreateInvoiceDto {
   @Max(100)
   tvaRate?: number;
 
-  @ApiPropertyOptional({ description: 'Remise globale, en montant HT.' })
+  @ApiPropertyOptional({
+    description:
+      'Remise globale, en montant HT (ou TTC quand pricesIncludeTax = true).',
+  })
   @IsOptional()
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 3 })
@@ -186,14 +233,68 @@ export class CreateInvoiceDto {
   discountAmount?: number;
 
   @ApiPropertyOptional({
+    nullable: true,
     description:
-      'Droit de timbre. Omis => la valeur des parametres de facturation est figee sur la facture.',
+      'Remise en % du brut des lignes (TTC ou HT selon pricesIncludeTax). Envoye => discountAmount est calcule par le serveur. null => remise en montant.',
+  })
+  @IsOptional()
+  @Transform(rawNullableNumber)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100)
+  discountPercent?: number | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Droit de timbre, ajoute au total de la facture (une facture par paiement, un timbre par facture). Omis => la valeur des parametres de facturation est figee sur la facture.',
   })
   @IsOptional()
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 3 })
   @Min(0)
   stampDuty?: number;
+
+  @ApiPropertyOptional({
+    type: Boolean,
+    default: false,
+    description:
+      'true = les prix des lignes (et la remise) sont saisis TTC, TVA incluse ; HT et TVA sont deduits a rebours et le droit de timbre est ajoute (HT + TVA + timbre = total). false = saisie HT historique (TVA et timbre ajoutes).',
+  })
+  @IsOptional()
+  @Transform(rawBool)
+  @IsBoolean()
+  pricesIncludeTax?: boolean;
+
+  @ApiPropertyOptional({
+    enum: PaymentMethod,
+    nullable: true,
+    description: 'Mode de paiement imprime sur la facture. null = non precise.',
+  })
+  @IsOptional()
+  @IsEnum(PaymentMethod)
+  paymentMethod?: PaymentMethod | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'Reference du reglement (numero de cheque, de virement, de transaction).',
+  })
+  @IsOptional()
+  @Transform(trimOrNull)
+  @IsString()
+  @MaxLength(120)
+  paymentReference?: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'Retenue a la source, en %, calculee par le serveur sur le TTC hors droit de timbre ; net a payer = total TTC (timbre compris) - retenue. null ou 0 = aucune.',
+  })
+  @IsOptional()
+  @Transform(rawNullableNumber)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(99.99)
+  withholdingRate?: number | null;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -328,4 +429,40 @@ export class InvoiceIdsDto {
   @ArrayMaxSize(500)
   @IsString({ each: true })
   ids!: string[];
+}
+
+/**
+ * POST admin/invoices/export/zip. `ids` given: those invoices, as before.
+ * `ids` absent: every issued, paid and cancelled invoice (not draft, not
+ * archived) issued in the period, Tunis days, both bounds included.
+ */
+export class InvoiceZipExportDto {
+  @ApiPropertyOptional({
+    type: [String],
+    description:
+      'Les factures choisies (200 au plus). Absent => toute la periode issuedFrom..issuedTo.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(500)
+  @IsString({ each: true })
+  ids?: string[];
+
+  @ApiPropertyOptional({
+    example: '2026-11-01',
+    description: 'Premier jour inclus (YYYY-MM-DD, jours de Tunis). Utilise quand ids est absent.',
+  })
+  @Transform(({ value }) => toOptionalTrimmed(value))
+  @IsOptional()
+  @IsCalendarDate()
+  issuedFrom?: string;
+
+  @ApiPropertyOptional({
+    example: '2026-11-30',
+    description: 'Dernier jour inclus (YYYY-MM-DD, jours de Tunis). Utilise quand ids est absent.',
+  })
+  @Transform(({ value }) => toOptionalTrimmed(value))
+  @IsOptional()
+  @IsCalendarDate()
+  issuedTo?: string;
 }

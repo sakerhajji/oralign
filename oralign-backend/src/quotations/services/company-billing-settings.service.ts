@@ -185,6 +185,7 @@ export class CompanyBillingSettingsService {
           defaultTvaRate: dto.defaultTvaRate ?? 19,
           defaultTreatmentFee: dto.defaultTreatmentFee ?? 0,
           stampDuty: dto.stampDuty ?? 1,
+          withholdingRate: dto.withholdingRate ?? 1,
           cbctSupplementEnabled: dto.cbctSupplementEnabled ?? false,
           cbctSupplementFee: dto.cbctSupplementFee ?? 0,
           refinementTwoArchesFee: dto.refinementTwoArchesFee ?? 0,
@@ -253,6 +254,7 @@ export class CompanyBillingSettingsService {
         defaultTreatmentFee:
           dto.defaultTreatmentFee ?? current.defaultTreatmentFee,
         stampDuty: dto.stampDuty ?? current.stampDuty,
+        withholdingRate: dto.withholdingRate ?? current.withholdingRate,
         cbctSupplementEnabled:
           dto.cbctSupplementEnabled ?? current.cbctSupplementEnabled,
         cbctSupplementFee:
@@ -474,6 +476,7 @@ export class CompanyBillingSettingsService {
       // so the admin form gets a plain number and the invoice total math
       // is pure Number arithmetic.
       stampDuty: Number(settings.stampDuty),
+      withholdingRate: Number(settings.withholdingRate),
       cbctSupplementEnabled: settings.cbctSupplementEnabled,
       // Decimal → Number at the API boundary, same as defaultTreatmentFee.
       cbctSupplementFee: Number(settings.cbctSupplementFee),

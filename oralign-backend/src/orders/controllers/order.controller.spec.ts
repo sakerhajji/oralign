@@ -56,6 +56,8 @@ describe('OrderController treatment-fee lists over HTTP', () => {
   let caller = asUser('u-admin', UserRole.admin);
   const listTreatmentFees = jest.fn();
   const listPendingTreatmentFees = jest.fn();
+  const payTreatmentFee = jest.fn();
+  const uploadTreatmentFeeProof = jest.fn();
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -68,7 +70,12 @@ describe('OrderController treatment-fee lists over HTTP', () => {
         { provide: OrderAuditService, useValue: {} },
         {
           provide: TreatmentFeeService,
-          useValue: { listTreatmentFees, listPendingTreatmentFees },
+          useValue: {
+            listTreatmentFees,
+            listPendingTreatmentFees,
+            payTreatmentFee,
+            uploadTreatmentFeeProof,
+          },
         },
       ],
     })
@@ -104,6 +111,8 @@ describe('OrderController treatment-fee lists over HTTP', () => {
     caller = asUser('u-admin', UserRole.admin);
     listTreatmentFees.mockReset().mockResolvedValue(EMPTY_PAGE);
     listPendingTreatmentFees.mockReset().mockResolvedValue(EMPTY_PAGE);
+    payTreatmentFee.mockReset().mockResolvedValue({ id: 'o-1' });
+    uploadTreatmentFeeProof.mockReset().mockResolvedValue({ id: 'o-1' });
   });
 
   const get = (url: string) => request(app.getHttpServer()).get(url);
@@ -139,7 +148,7 @@ describe('OrderController treatment-fee lists over HTTP', () => {
       'page=abc',
       'limit=500',
       'from=2026-02-30',
-      'methods=cheque',
+      'methods=crypto',
       'purpose=treatment_fee',
     ])('?%s is a 400, before the service', async (query) => {
       const res = await get(`/api/orders/admin/treatment-fees?${query}`);
@@ -195,6 +204,63 @@ describe('OrderController treatment-fee lists over HTTP', () => {
       const res = await get('/api/orders/admin/treatment-fees/pending');
       expect(res.status).toBe(403);
       expect(listPendingTreatmentFees).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('POST /api/orders/:id/treatment-fee/pay', () => {
+    const pay = (body: object) =>
+      request(app.getHttpServer())
+        .post('/api/orders/o-1/treatment-fee/pay')
+        .send(body);
+
+    it.each([
+      [true, true],
+      ['false', false],
+      [undefined, undefined],
+    ])('passes applyWithholding %p as %p', async (raw, expected) => {
+      const res = await pay({ method: 'cheque', applyWithholding: raw });
+      expect(res.status).toBe(200);
+      expect(payTreatmentFee).toHaveBeenCalledWith(
+        'o-1',
+        'cheque',
+        { userId: 'u-admin', role: UserRole.admin },
+        expected,
+      );
+    });
+
+    it('still refuses a smuggled amount', async () => {
+      const res = await pay({ method: 'cash', amount: 1 });
+      expect(res.status).toBe(400);
+      expect(payTreatmentFee).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('POST /api/orders/:id/treatment-fee/proof (multipart)', () => {
+    const proof = () =>
+      request(app.getHttpServer()).post('/api/orders/o-1/treatment-fee/proof');
+
+    it('accepts applyWithholding "false" (then asks for the file)', async () => {
+      const res = await proof().field('applyWithholding', 'false');
+      expect(res.status).toBe(400);
+      // Past the validation pipe: the only complaint is the missing file.
+      expect(res.body.message).toBe('A bank-transfer receipt file is required.');
+      expect(uploadTreatmentFeeProof).not.toHaveBeenCalled();
+    });
+
+    it.each([['yes'], ['1']])('refuses applyWithholding %p', async (raw) => {
+      const res = await proof().field('applyWithholding', raw);
+      expect(res.status).toBe(400);
+      expect(res.body.message).not.toBe(
+        'A bank-transfer receipt file is required.',
+      );
+    });
+
+    it('refuses an amount field: the fee is computed server-side', async () => {
+      const res = await proof().field('amount', '1');
+      expect(res.status).toBe(400);
+      expect(res.body.message).not.toBe(
+        'A bank-transfer receipt file is required.',
+      );
     });
   });
 });

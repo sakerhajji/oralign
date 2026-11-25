@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
+  InvoiceStatus,
   PaymentPurpose,
   PaymentRecordStatus,
   Prisma,
@@ -311,12 +312,40 @@ export class PaymentsReportService {
         where,
       ),
     ]);
+    const invoices = await this.feeInvoiceNumbers(rows.map((row) => row.id));
     return {
       kind: 'treatment_fee',
       criteria: criteriaOf(filters, null),
-      rows: rows.map(feeRow),
+      rows: rows.map((row) => feeRow(row, invoices.get(row.id))),
       collected,
     };
+  }
+
+  /**
+   * The facture (FAC-…) each paid fee was invoiced on, by order id. A fee
+   * invoice points at its order through the plain treatmentFeeOrderId
+   * column (no relation), hence one query for the whole section. A
+   * cancelled or archived invoice is no longer the fee's facture.
+   */
+  private async feeInvoiceNumbers(
+    orderIds: string[],
+  ): Promise<Map<string, string>> {
+    if (orderIds.length === 0) return new Map();
+    const invoices = await this.prisma.invoice.findMany({
+      where: {
+        treatmentFeeOrderId: { in: orderIds },
+        status: { not: InvoiceStatus.cancelled },
+        deletedAt: null,
+      },
+      select: { treatmentFeeOrderId: true, invoiceNumber: true },
+    });
+    return new Map(
+      invoices.flatMap((invoice) =>
+        invoice.treatmentFeeOrderId
+          ? [[invoice.treatmentFeeOrderId, invoice.invoiceNumber] as const]
+          : [],
+      ),
+    );
   }
 
   // ─── Installments ──────────────────────────────────────────────────
@@ -492,7 +521,7 @@ function installmentRow(payment: InstallmentRow): ReportRow {
   };
 }
 
-function feeRow(order: FeeRow): ReportRow {
+function feeRow(order: FeeRow, invoiceNumber?: string): ReportRow {
   const attempt = order.payments[0];
   return {
     date: order.treatmentFeePaidAt,
@@ -504,9 +533,10 @@ function feeRow(order: FeeRow): ReportRow {
     amount: order.treatmentFeeAmount,
     transactionRef:
       attempt?.transactionId ?? attempt?.merchantOrderNumber ?? null,
+    // The fee's facture; before the facture existed, its TF- receipt.
     receiptNumber:
       order.treatmentFeePaymentStatus === PaymentRecordStatus.success
-        ? order.treatmentFeeInvoiceNumber
+        ? (invoiceNumber ?? order.treatmentFeeInvoiceNumber)
         : null,
     installment: null,
   };

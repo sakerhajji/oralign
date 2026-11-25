@@ -114,6 +114,7 @@ export const METHOD_VALUES: readonly PaymentMethod[] = [
   PaymentMethod.CASH,
   PaymentMethod.CARD,
   PaymentMethod.BANK_TRANSFER,
+  PaymentMethod.CHEQUE,
 ];
 const METHOD_FILTER_VALUES: readonly MethodFilter[] = ['all', ...METHOD_VALUES];
 

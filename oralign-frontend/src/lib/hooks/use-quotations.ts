@@ -9,7 +9,7 @@ import {
 } from '@tanstack/react-query';
 import { toast } from '@/lib/toast';
 import { quotationsService } from '@/lib/api/quotations.service';
-import { extractApiErrorMessage } from '@/lib/api/error';
+import { classifyApiError } from '@/lib/api/error';
 import { useT } from '@/lib/i18n/lang-context';
 import { orderKeys } from './use-orders';
 import { supplementalErrorMessage } from './use-supplemental-orders';
@@ -23,6 +23,49 @@ export const quotationKeys = {
 };
 
 const QUOTATION_STALE_TIME = 15_000;
+
+/**
+ * The payment-plan query prefix, written out instead of imported:
+ * use-quotation-payment-plan.ts imports this file (its
+ * paymentPlanKeys.all is the same literal).
+ */
+const PAYMENT_PLAN_PREFIX = ['payment-plan'] as const;
+
+type Translate = ReturnType<typeof useT>['t'];
+
+/** Refusals of a quote edit / re-plan the editor explains in its own words. */
+export const QUOTE_ERROR_CODES = [
+  'QUOTE_TOTAL_BELOW_PAID',
+  'QUOTE_PAYMENT_IN_FLIGHT',
+  'QUOTE_PLAN_REQUIRED',
+  // Delete / recall / pack change once money was received.
+  'QUOTE_PAYMENT_RECEIVED',
+  // Edit of a declined quote.
+  'QUOTE_NOT_EDITABLE',
+] as const;
+export type QuoteErrorCode = (typeof QUOTE_ERROR_CODES)[number];
+
+/** The quote error code a failed request carries, if any. */
+export function quoteErrorCode(error: unknown): QuoteErrorCode | null {
+  const info = classifyApiError(error);
+  const byCode = QUOTE_ERROR_CODES.find((code) => code === info.errorCode);
+  if (byCode) return byCode;
+  // A refusal thrown without the error envelope keeps the code in its text.
+  const message = info.serverMessage ?? '';
+  return QUOTE_ERROR_CODES.find((code) => message.includes(code)) ?? null;
+}
+
+/** A known code gets the dictionary's explanation; anything else the API's words. */
+export function quoteErrorMessage(error: unknown, t: Translate): string {
+  const code = quoteErrorCode(error);
+  return code ? t(`quoteEditor.errors.${code}`) : classifyApiError(error).message;
+}
+
+/** A conflict is an explanation, not a glitch: it stays on screen longer. */
+export function toastQuoteError(error: unknown, t: Translate): void {
+  const conflict = classifyApiError(error).status === 409;
+  toast.error(quoteErrorMessage(error, t), conflict ? { duration: 9000 } : undefined);
+}
 
 /** Order-scoped read. Returns null when no quote exists yet. */
 export function useQuotationForOrder(
@@ -48,10 +91,18 @@ export function useQuotationForOrder(
  */
 function invalidateQuotation(
   queryClient: ReturnType<typeof useQueryClient>,
-  quote: Quotation,
+  quote: Pick<Quotation, 'id' | 'orderId'>,
 ) {
   queryClient.invalidateQueries({ queryKey: quotationKeys.byOrder(quote.orderId) });
   queryClient.invalidateQueries({ queryKey: quotationKeys.detail(quote.id) });
+  // A total change rebalances the unpaid installments server-side, and a
+  // recall or a delete changes what can be paid: refetch the plan too.
+  queryClient.invalidateQueries({
+    queryKey: [...PAYMENT_PLAN_PREFIX, 'installments', quote.id],
+  });
+  queryClient.invalidateQueries({
+    queryKey: [...PAYMENT_PLAN_PREFIX, 'batches', quote.id],
+  });
   queryClient.invalidateQueries({ queryKey: orderKeys.detail(quote.orderId) });
   queryClient.invalidateQueries({ queryKey: orderKeys.history(quote.orderId) });
   queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
@@ -89,7 +140,7 @@ export function useUpdateQuotation(): UseMutationResult<
       invalidateQuotation(queryClient, quote);
       toast.success(t('toasts.quotations.updated'));
     },
-    onError: (err) => toast.error(extractApiErrorMessage(err)),
+    onError: (err) => toastQuoteError(err, t),
   });
 }
 
@@ -102,7 +153,7 @@ export function useSendQuotation(): UseMutationResult<Quotation, Error, string> 
       invalidateQuotation(queryClient, quote);
       toast.success(t('toasts.quotations.sent'));
     },
-    onError: (err) => toast.error(extractApiErrorMessage(err)),
+    onError: (err) => toastQuoteError(err, t),
   });
 }
 
@@ -126,7 +177,7 @@ export function useGenerateQuotationPdf(): UseMutationResult<
       invalidateQuotation(queryClient, quote);
       toast.success(t('toasts.quotations.pdfGenerated'));
     },
-    onError: (err) => toast.error(extractApiErrorMessage(err)),
+    onError: (err) => toastQuoteError(err, t),
   });
 }
 
@@ -138,17 +189,14 @@ export function useCancelQuotation(): UseMutationResult<
   const queryClient = useQueryClient();
   const { t } = useT();
   return useMutation({
+    // The cancel endpoint deletes the quote; allowed while nothing was
+    // received and no payment is in progress (`quote.canDelete`).
     mutationFn: ({ id }) => quotationsService.cancel(id),
-    onSuccess: (_data, { orderId }) => {
-      queryClient.invalidateQueries({
-        queryKey: quotationKeys.byOrder(orderId),
-      });
-      queryClient.invalidateQueries({ queryKey: orderKeys.detail(orderId) });
-      queryClient.invalidateQueries({ queryKey: orderKeys.history(orderId) });
-      queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
-      toast.success(t('toasts.quotations.canceled'));
+    onSuccess: (_data, { id, orderId }) => {
+      invalidateQuotation(queryClient, { id, orderId });
+      toast.success(t('quoteEditor.deletedToast'));
     },
-    onError: (err) => toast.error(extractApiErrorMessage(err)),
+    onError: (err) => toastQuoteError(err, t),
   });
 }
 
@@ -171,7 +219,7 @@ export function useRevertQuotationToDraft(): UseMutationResult<
       invalidateQuotation(queryClient, quote);
       toast.success(t('toasts.quotations.recalled'));
     },
-    onError: (err) => toast.error(extractApiErrorMessage(err)),
+    onError: (err) => toastQuoteError(err, t),
   });
 }
 
@@ -188,7 +236,7 @@ export function useApproveQuotation(): UseMutationResult<
       invalidateQuotation(queryClient, quote);
       toast.success(t('toasts.quotations.approved'));
     },
-    onError: (err) => toast.error(extractApiErrorMessage(err)),
+    onError: (err) => toastQuoteError(err, t),
   });
 }
 
@@ -206,6 +254,6 @@ export function useRejectQuotation(): UseMutationResult<
       invalidateQuotation(queryClient, quote);
       toast.success(t('toasts.quotations.rejected'));
     },
-    onError: (err) => toast.error(extractApiErrorMessage(err)),
+    onError: (err) => toastQuoteError(err, t),
   });
 }

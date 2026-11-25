@@ -47,6 +47,7 @@ const ZERO: Tally = { amount: new Prisma.Decimal(0), count: 0 };
 /** The payment methods, in the order every summary and report lists them. */
 export const METHOD_ORDER: readonly PaymentMethod[] = [
   PaymentMethod.cash,
+  PaymentMethod.cheque,
   PaymentMethod.card,
   PaymentMethod.bank_transfer,
 ];
@@ -63,6 +64,13 @@ export const METHOD_ORDER: readonly PaymentMethod[] = [
  *     fee twice, so they never are.
  * Archived orders are left out, as the lists leave them out, so the
  * totals reconcile with the rows. A waived fee (amount 0) is not money.
+ * The sums are CASH, the money that actually came in: Payment.amount and
+ * DentalOrder.treatmentFeeAmount are both net of the retenue à la source
+ * the practitioner kept back, and both INCLUDE the droit de timbre charged
+ * on top of each payment (owner decision 2026-11-20). On purpose: takings
+ * are what reached the till or the bank, not what the devis were settled
+ * by (that is amount + retenue - stamp, see paymentSettled; the
+ * dashboards' revenue uses it).
  * Each kind is one groupBy: two queries whatever the period.
  *
  * The two "collected" queries are public: the payments report sums the
@@ -180,6 +188,7 @@ function ordersInScope(
 function eachMethod(tally: (method: PaymentMethod) => Tally): MethodTallies {
   return {
     [PaymentMethod.cash]: tally(PaymentMethod.cash),
+    [PaymentMethod.cheque]: tally(PaymentMethod.cheque),
     [PaymentMethod.card]: tally(PaymentMethod.card),
     [PaymentMethod.bank_transfer]: tally(PaymentMethod.bank_transfer),
   };
@@ -227,6 +236,7 @@ function toBucket({ amount, count }: Tally): PaymentBucketDto {
 function toMethodBuckets(tallies: MethodTallies): PaymentMethodBucketsDto {
   return {
     cash: toBucket(tallies.cash),
+    cheque: toBucket(tallies.cheque),
     card: toBucket(tallies.card),
     bank_transfer: toBucket(tallies.bank_transfer),
   };

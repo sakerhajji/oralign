@@ -5,12 +5,19 @@ import { ConflictException } from '../exceptions/app.exception';
  * The rows a renamed document may share its number with. An automatic
  * invoice and its payment's receipt print one number by design, so
  * renaming either one never collides with the other, nor with itself.
+ * The same holds for a treatment-fee invoice and its order: the fee's
+ * number (DentalOrder.treatmentFeeInvoiceNumber) is the invoice's own.
  */
 export interface InvoiceNumberOwner {
   /** The invoice being renamed, or the payment's automatic invoice. */
   invoiceId?: string | null;
   /** The payment whose receipt is renamed, or the invoice's payment. */
   paymentId?: string | null;
+  /**
+   * The order whose treatment fee the document bills: the fee's number
+   * and the fee's invoice (Invoice.treatmentFeeOrderId) are not "taken".
+   */
+  orderId?: string | null;
 }
 
 type InvoiceNumberReader = Pick<
@@ -40,7 +47,7 @@ export async function assertInvoiceNumberFree(
   const [invoice, receipt, feeReceipt, settings] = await Promise.all([
     prisma.invoice.findUnique({
       where: { invoiceNumber: candidate },
-      select: { id: true, paymentId: true },
+      select: { id: true, paymentId: true, treatmentFeeOrderId: true },
     }),
     prisma.payment.findUnique({
       where: { invoiceNumber: candidate },
@@ -65,9 +72,19 @@ export async function assertInvoiceNumberFree(
   const ownInvoice =
     invoice !== null &&
     (invoice.id === owner.invoiceId ||
-      (Boolean(owner.paymentId) && invoice.paymentId === owner.paymentId));
+      (Boolean(owner.paymentId) && invoice.paymentId === owner.paymentId) ||
+      (Boolean(owner.orderId) &&
+        invoice.treatmentFeeOrderId === owner.orderId));
   const ownReceipt = receipt !== null && receipt.id === owner.paymentId;
-  if ((invoice && !ownInvoice) || (receipt && !ownReceipt) || feeReceipt) {
+  const ownFeeReceipt =
+    feeReceipt !== null &&
+    Boolean(owner.orderId) &&
+    feeReceipt.id === owner.orderId;
+  if (
+    (invoice && !ownInvoice) ||
+    (receipt && !ownReceipt) ||
+    (feeReceipt && !ownFeeReceipt)
+  ) {
     throw invoiceNumberTaken(candidate);
   }
 

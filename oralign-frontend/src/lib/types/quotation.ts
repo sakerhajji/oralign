@@ -60,9 +60,12 @@ export interface CompanyBillingSettings {
   // can still override per-quote — this is just the policy default.
   defaultTreatmentFee: number;
   // "Droit de timbre" (Tunisian fiscal stamp, typically 1.000 TND).
-  // Added to the INVOICE total. Decimal on the backend, serialised as a
-  // number at the DTO boundary exactly like `defaultTreatmentFee`.
+  // ADDED to every payment, since each payment gets its own facture
+  // (owner decision 2026-11-20). Decimal on the backend, serialised as a
+  // number like `defaultTreatmentFee`.
   stampDuty: number;
+  // Retenue à la source (%) a practitioner may apply when paying; 0 = off.
+  withholdingRate: number;
   // CBCT paid supplement — when enabled with a fee > 0, requesting CBCT
   // on a NEW order snapshots this amount onto the order. Currency
   // follows defaultCurrency.
@@ -115,8 +118,10 @@ export interface UpsertCompanyBillingSettingsDto {
   websiteDomain?: string;
   defaultTvaRate?: number;
   defaultTreatmentFee?: number;
-  /** "Droit de timbre" — fiscal stamp added to the invoice total. */
+  /** "Droit de timbre" — fiscal stamp added to every payment. */
   stampDuty?: number;
+  /** Retenue à la source (%); 0 turns the option off. */
+  withholdingRate?: number;
   /** CBCT paid supplement toggle + fee (currency = defaultCurrency). */
   cbctSupplementEnabled?: boolean;
   cbctSupplementFee?: number;
@@ -209,6 +214,8 @@ export interface Quotation {
   fabricationFees: number;
   deliveryFees: number;
   discountAmount: number;
+  /** Set when the remise was typed as a percentage of the gross (Decimal string). */
+  discountPercent?: number | string | null;
   subTotalHt: number;
   tvaRate: number;
   tvaAmount: number;
@@ -248,6 +255,20 @@ export interface Quotation {
   paymentMode?: PaymentMode | null;
   paymentStatus?: QuotationPaymentStatus | null;
   doctorApprovedAt?: string | null;
+  // Computed on read. `receivedAmount` = what is settled (cash + retenue -
+  // stamp), the same figure as paidAmount. A quote can be deleted, recalled or have
+  // its pack changed only while nothing was received and nothing is in flight.
+  receivedAmount?: number | string | null;
+  hasPaymentInFlight?: boolean;
+  canDelete?: boolean;
+  canRecall?: boolean;
+  /**
+   * Computed on read: false when the kept installments (paid or
+   * cancelled, whose step batches a re-plan never touches) already cover
+   * every step of a limited pack, so a re-plan has no step left to give.
+   * Missing from older payloads; the plan view then works it out itself.
+   */
+  freeStepsForReplan?: boolean;
   loyaltyDiscountPercent?: string | null;
   loyaltyDiscountAmount?: string | null;
   loyaltySourceYear?: number | null;
@@ -281,6 +302,8 @@ export interface UpsertQuotationDto {
   fabricationFees?: number;
   deliveryFees?: number;
   discountAmount?: number;
+  /** A number: the server derives the remise from it. null: typed as an amount. */
+  discountPercent?: number | null;
   tvaRate?: number;
   currency?: string;
   notes?: string;

@@ -373,6 +373,9 @@ enum PaymentMethod {
   card
   bank_transfer
   cash
+  // Admin-recorded only (like cash). Added 2026-11-19 so a cheque can be
+  // recorded and printed as the invoice's payment method.
+  cheque
 }
 
 enum PaymentPurpose {
@@ -657,7 +660,16 @@ model DentalOrder {
   // treatmentFeeAmount snapshots the amount AT payment time so a
   // later setting change can't rewrite an already-paid order.
   treatmentFeePaidAt            DateTime?
+  // CASH actually collected for the fee: fee due (TTC) + stamp - retenue.
+  // The figure takings sum. The fee due is this + withholding - stamp.
   treatmentFeeAmount            Decimal?                  @db.Decimal(12, 3)
+  // Retenue à la source chosen by the practitioner when paying the fee:
+  // rate snapshot (%) and the amount kept back. NULL / 0 = not applied.
+  treatmentFeeWithholdingRate   Decimal?                  @db.Decimal(5, 2)
+  treatmentFeeWithholdingAmount Decimal?                  @db.Decimal(12, 3)
+  // Droit de timbre charged ON TOP of the fee with its payment (one
+  // facture, one stamp). NULL / 0 on fees paid before 2026-11-20.
+  treatmentFeeStampAmount       Decimal?                  @db.Decimal(12, 3)
 
   // Payment method + status: reuse the same PaymentMethod and
   // PaymentRecordStatus enums the installment Payment table uses, so
@@ -1472,10 +1484,19 @@ model CompanyBillingSettings {
   defaultTreatmentFee     Decimal       @default(0) @db.Decimal(12, 3)
 
   // "Droit de timbre" — the Tunisian fiscal stamp duty (typically
-  // 1.000 TND) added to the INVOICE total. Configured by the admin in
-  // the billing settings. Decimal(12,3) mirrors defaultTreatmentFee so
-  // it rounds identically; cast back to Number at the DTO boundary.
+  // 1.000 TND). Prices are TTC (TVA included); the stamp is ADDED to every
+  // payment, since every payment gets its own facture: an installment of
+  // 1 000 is paid 1 001 (HT + TVA + timbre = total). Owner decision
+  // 2026-11-20. Decimal(12,3) mirrors defaultTreatmentFee; cast back to
+  // Number at the DTO boundary.
   stampDuty               Decimal       @default(1) @db.Decimal(12, 3)
+
+  // Retenue à la source: % of the amount due (TTC, stamp excluded) that a
+  // paying practitioner may keep back and remit to the tax office himself.
+  // He chooses at each payment; 0 = off (never offered). Snapshotted onto
+  // Payment / DentalOrder / Invoice when applied, so editing it here never
+  // rewrites a payment already made.
+  withholdingRate         Decimal       @default(1) @db.Decimal(5, 2)
 
   // ── CBCT paid supplement ─────────────────────────────────────────
   // When enabled with a fee > 0, requesting CBCT on a new order adds
@@ -1569,6 +1590,11 @@ model Quotation {
   fabricationFees     Float            @default(0)
   deliveryFees        Float            @default(0)
   discountAmount      Float            @default(0)
+  // Set when the admin typed the remise as a percentage of the gross
+  // (pack price + fees, TTC): discountAmount is then derived from it on
+  // every money edit, and the devis prints "Remise (10 %)". Null = the
+  // remise was typed as an amount (or comes from the loyalty program).
+  discountPercent     Decimal?         @db.Decimal(5, 2)
 
   // Calculated and persisted so PDFs / summaries don't recompute every read.
   // Always derived from the fees above by computeTotals().
@@ -1896,6 +1922,16 @@ model Payment {
   // is self-contained even if the installment is later edited (only
   // possible before approval).
   amount          Decimal             @db.Decimal(12, 3)
+  // Retenue à la source chosen by the payer when the attempt was created.
+  // `amount` is the CASH charged / received:
+  //   amount = due (installment or fee, TTC) + stampAmount - withholdingAmount
+  // so what the payment settles on the quote is
+  //   amount + withholdingAmount - stampAmount  (= the installment amount).
+  withholdingRate   Decimal?          @db.Decimal(5, 2)
+  withholdingAmount Decimal           @default(0) @db.Decimal(12, 3)
+  // Droit de timbre charged on top with this payment (its facture's stamp).
+  // 0 on payments made before 2026-11-20.
+  stampAmount       Decimal           @default(0) @db.Decimal(12, 3)
   currency        String              @default("TND")
   purpose         PaymentPurpose      @default(installment)
   provider        PaymentProvider     @default(manual)
@@ -2599,12 +2635,39 @@ model Invoice {
   // lines — the frontend never gets to post a total.
   tvaRate        Float         @default(19)
   discountAmount Decimal       @default(0) @db.Decimal(12, 3)
+  // Remise typed as a percentage of the lines' gross (TTC or HT, the
+  // invoice's own unit): discountAmount is derived from it server-side and
+  // the PDF prints "Remise (10 %)". Null = typed as an amount.
+  discountPercent Decimal?     @db.Decimal(5, 2)
   // Snapshotted, not read live at render time: changing the company's
   // stamp duty must not silently rewrite invoices already issued.
   stampDuty      Decimal       @default(0) @db.Decimal(12, 3)
   subTotalHt     Decimal       @default(0) @db.Decimal(12, 3)
   tvaAmount      Decimal       @default(0) @db.Decimal(12, 3)
+  // Total of the invoice, stamp included (HT + TVA + timbre).
   totalTtc       Decimal       @default(0) @db.Decimal(12, 3)
+
+  // true = the lines were entered TTC with the stamp included (the
+  // company's normal pricing): HT and TVA are derived BACKWARDS so that
+  // HT + TVA + timbre = totalTtc exactly. Every automatic invoice uses it.
+  // false = legacy HT entry, TVA and stamp added on top.
+  pricesIncludeTax Boolean     @default(false)
+  // How the invoice was (or is to be) settled. Null on legacy rows.
+  paymentMethod  PaymentMethod?
+  paymentReference String?
+  // Retenue à la source kept back by the practitioner: rate (%) and
+  // amount, computed on totalTtc. netPayable = totalTtc - withholdingAmount
+  // is what is actually paid. Server-computed, never posted.
+  withholdingRate   Decimal?   @db.Decimal(5, 2)
+  withholdingAmount Decimal    @default(0) @db.Decimal(12, 3)
+  netPayable        Decimal    @default(0) @db.Decimal(12, 3)
+  // Treatment fee (+ CBCT) this invoice bills. The idempotency key of the
+  // automatic fee invoice: a fee paid in cash or by transfer has no
+  // Payment row, so `paymentId` cannot key it. Plain column, no FK.
+  treatmentFeeOrderId String?  @unique
+  // Last time the PDF was e-mailed to the practitioner, and to whom.
+  emailedAt      DateTime?
+  emailedTo      String?
 
   notes          String?
   language       String        @default("fr") // 'fr' | 'en', drives the PDF
@@ -2645,6 +2708,10 @@ model InvoiceLine {
   description String
   quantity    Decimal  @default(1) @db.Decimal(12, 3)
   unitPrice   Decimal  @default(0) @db.Decimal(12, 3)
+  // The unit price as typed when the invoice is TTC-priced
+  // (Invoice.pricesIncludeTax). unitPrice then holds the derived HT unit
+  // price, so the PDF and the export keep printing HT per line.
+  unitPriceTtc Decimal? @db.Decimal(12, 3)
   // Per-line VAT override. NULL means "use the invoice rate" — which is
   // the normal case, so a simple invoice stays simple.
   tvaRate     Float?

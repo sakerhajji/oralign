@@ -6,9 +6,10 @@ import { InvoiceStatus } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
 /**
- * Status tone stays quiet on purpose: only the two states an admin acts
- * on — issued (waiting for money) and paid (settled) — carry colour, and
- * every badge carries its label, so nothing is encoded by colour alone.
+ * Status tone stays quiet on purpose: the states an admin acts on —
+ * issued (waiting for money), paid (settled) and cancelled (kept in the
+ * series, out of the totals) — carry colour, and every badge carries its
+ * label, so nothing is encoded by colour alone.
  */
 const STATUS_TONE: Record<InvoiceStatus, string> = {
   [InvoiceStatus.DRAFT]: 'bg-muted text-muted-foreground',
@@ -16,7 +17,8 @@ const STATUS_TONE: Record<InvoiceStatus, string> = {
     'border-sky-300/70 bg-sky-50 text-sky-800 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-300',
   [InvoiceStatus.PAID]:
     'border-emerald-300/70 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300',
-  [InvoiceStatus.CANCELLED]: 'bg-transparent text-muted-foreground',
+  [InvoiceStatus.CANCELLED]:
+    'border-rose-300/70 bg-rose-50 text-rose-800 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300',
 };
 
 const STATUS_LABEL_KEY: Record<InvoiceStatus, string> = {

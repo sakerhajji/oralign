@@ -11,7 +11,7 @@ import { toast } from '@/lib/toast';
 import { quotationPaymentPlanService } from '@/lib/api/quotation-payment-plan.service';
 import { extractApiErrorMessage } from '@/lib/api/error';
 import { useT } from '@/lib/i18n/lang-context';
-import { quotationKeys } from './use-quotations';
+import { quotationKeys, toastQuoteError } from './use-quotations';
 import { orderKeys } from './use-orders';
 import type {
   AttachPackToQuotationDto,
@@ -100,7 +100,7 @@ export function useAttachPackToQuotation(): UseMutationResult<
       invalidatePaymentPlan(queryClient, quote);
       toast.success(t('toasts.quotationPaymentPlan.packAttached'));
     },
-    onError: (err) => toast.error(extractApiErrorMessage(err)),
+    onError: (err) => toastQuoteError(err, t),
   });
 }
 
@@ -118,7 +118,7 @@ export function useConfigurePaymentPlan(): UseMutationResult<
       invalidatePaymentPlan(queryClient, quote);
       toast.success(t('toasts.quotationPaymentPlan.planConfigured'));
     },
-    onError: (err) => toast.error(extractApiErrorMessage(err)),
+    onError: (err) => toastQuoteError(err, t),
   });
 }
 

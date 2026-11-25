@@ -2,7 +2,7 @@
 
 import { useId, type ComponentType } from 'react';
 import type { UseQueryResult } from '@tanstack/react-query';
-import { Banknote, CreditCard, Landmark, RefreshCw } from 'lucide-react';
+import { Banknote, CreditCard, FilePen, Landmark, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { extractApiError } from '@/lib/api/error';
@@ -21,7 +21,17 @@ const METHODS: { method: PaymentMethod; icon: ComponentType<{ className?: string
   { method: PaymentMethod.CASH, icon: Banknote },
   { method: PaymentMethod.CARD, icon: CreditCard },
   { method: PaymentMethod.BANK_TRANSFER, icon: Landmark },
+  { method: PaymentMethod.CHEQUE, icon: FilePen },
 ];
+
+/** A method the summary does not report yet (cheques, before the API has them) took nothing. */
+const NO_TAKINGS: PaymentsSummaryBucket = { amount: '0.000', count: 0 };
+
+/** The summary's bucket for a method; the type predates cheques, hence the widened lookup. */
+function bucketOf(summary: PaymentsSummary, method: PaymentMethod): PaymentsSummaryBucket {
+  const methods = summary.methods as Partial<Record<PaymentMethod, PaymentsSummaryBucket>>;
+  return methods[method] ?? NO_TAKINGS;
+}
 
 /** A grey bar for a value still loading, inside a line of text (Skeleton is a div). */
 function InlineBar({ className }: { className: string }) {
@@ -102,7 +112,7 @@ export function TakingsSummary({
         <ul
           aria-busy={summary.isPlaceholderData || undefined}
           className={cn(
-            'grid gap-2 transition-opacity duration-150 sm:grid-cols-3 sm:gap-3',
+            'grid gap-2 transition-opacity duration-150 sm:grid-cols-2 sm:gap-3 xl:grid-cols-4',
             summary.isPlaceholderData && 'opacity-60',
           )}
         >
@@ -111,7 +121,7 @@ export function TakingsSummary({
               <MethodCard
                 icon={icon}
                 label={t(`paymentsDesk.methodLong.${method}`)}
-                bucket={data?.methods[method]}
+                bucket={data ? bucketOf(data, method) : undefined}
                 unit={unit}
                 currency={data?.currency}
                 periodLabel={periodLabel}

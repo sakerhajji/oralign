@@ -5,7 +5,6 @@ import {
   InstallmentStatus,
   OrderStatus,
   PaymentMode,
-  PaymentRecordStatus,
   Prisma,
   Quotation,
   QuotationPaymentStatus,
@@ -13,6 +12,7 @@ import {
 } from '@prisma/client';
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   NotFoundException,
 } from '../../common/exceptions/app.exception';
@@ -27,25 +27,35 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { NotificationEvents } from '../../notifications/events/notification-events';
 import { isAdmin, type Caller } from '../../common/access/caller';
+import { lookupActorName } from '../../common/access/actor-snapshot';
 import {
   firstHandOverAt,
   startCoverageWindow,
 } from '../../orders/coverage-window';
 import { INITIAL_ORDERS_ONLY } from '../../orders/order-kind';
-
-/**
- * Payment attempts that block re-planning the installments: money that
- * has landed OR that a doctor has declared / a gateway may still settle.
- * Only failed / rejected / cancelled attempts may be orphaned by a wipe
- * (Payment.installment is onDelete: SetNull, so even those survive).
- */
-const LIVE_PAYMENT_STATUSES: PaymentRecordStatus[] = [
-  PaymentRecordStatus.success,
-  PaymentRecordStatus.awaiting_confirmation,
-  PaymentRecordStatus.pending,
-];
-
-const MONEY_EPSILON = new Prisma.Decimal('0.001');
+import {
+  resolveTvaRate,
+  splitInclusive,
+  toAmount,
+} from '../../common/billing/tax-split';
+import {
+  advanceOrderWhenPaid,
+  assertNoMoneyMoved,
+  assertQuoteEditable,
+  hasFreeStepForReplan,
+  IN_FLIGHT_PAYMENT_STATUSES,
+  isKeptInstallment,
+  lockQuoteForEdit,
+  MONEY_EPSILON,
+  presentQuote,
+  QUOTE_ERROR,
+  quoteUpdateAudit,
+  type QuotationView,
+  readOneQuoteMoney,
+  settleQuote,
+} from '../quote-money';
+import { CompanyBillingSettingsService } from './company-billing-settings.service';
+import { QuotationPdfService } from './quotation-pdf.service';
 
 /**
  * The initial cases the boot coverage pass can change: handed over, with
@@ -86,13 +96,15 @@ export const COVERAGE_BACKFILL_CANDIDATES = {
  *   • attachPack    — admin picks a pack + arch, snapshot is taken,
  *                     totalPrice is set from the active PackPrice.
  *   • configurePaymentPlan — admin defines installments + batches.
- *                            Wraps validation + transactional write.
+ *                            Wraps validation + transactional write;
+ *                            paid installments are always kept.
  *
  * Kept SEPARATE from the legacy QuotationService so the existing
- * Float-based flow (treatmentFees + tva → totalTtc) keeps working
+ * Float-based flow (treatmentFees → totalTtc) keeps working
  * untouched. Both services coexist on the same Quotation row; a
  * "legacy" quote has `packId = null` and continues to operate
- * through QuotationService alone.
+ * through QuotationService alone. What "received" and "in flight" mean
+ * for both lives in ../quote-money.ts.
  */
 @Injectable()
 export class QuotationPaymentPlanService implements OnApplicationBootstrap {
@@ -104,6 +116,10 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
     private readonly packs: PackService,
     private readonly loyalty: LoyaltyService,
     private readonly events: EventEmitter2,
+    // Same module, no cycle: the company TVA rate for pack quotes, and the
+    // stored devis PDF re-rendered after a pack or plan change.
+    private readonly settings: CompanyBillingSettingsService,
+    private readonly quotationPdf: QuotationPdfService,
   ) {}
 
   /** One-shot reconciliation at boot: statuses first, then coverage. */
@@ -218,40 +234,31 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
   }
 
   /**
-   * Snapshot a pack + active price onto a quote. Refuses to mutate
-   * a quote that's already in flight (approved or with payments
-   * received) — those must be cancelled + re-issued.
+   * Snapshot a pack + active price onto a quote. Allowed at any status
+   * as long as no money was received and no attempt may still settle
+   * (409 otherwise): the plan built on the old price is wiped, and only
+   * dead attempts can lose their installment link (Payment.installment
+   * is onDelete: SetNull, so they survive).
+   *
+   * Pack prices are TTC: totalPrice = totalTtc = the net (gross pack
+   * price minus the loyalty discount), the amount the plan must cover.
+   * HT and TVA are split backwards from it at the company TVA rate, so
+   * the devis shows HT + TVA = TTC and never "TVA 0 %".
    */
   async attachPack(
     quotationId: string,
     dto: AttachPackToQuotationDto,
     caller: Caller,
-  ): Promise<Quotation> {
+  ): Promise<QuotationView<Quotation>> {
     if (!isAdmin(caller)) {
       throw new ForbiddenException('Only admins can attach a pack to a quote.');
     }
     const quote = await this.prisma.quotation.findUnique({
       where: { id: quotationId },
-      include: {
-        order: { select: { doctorId: true } },
-        payments: {
-          where: { status: { in: LIVE_PAYMENT_STATUSES } },
-          select: { id: true },
-        },
-      },
+      include: { order: { select: { doctorId: true } } },
     });
     if (!quote || quote.deletedAt) {
       throw new NotFoundException('Quotation not found');
-    }
-    if (quote.status === QuotationStatus.approved) {
-      throw new BadRequestException(
-        'Cannot change the pack of an approved quote.',
-      );
-    }
-    if (quote.payments.length > 0) {
-      throw new BadRequestException(
-        'Cannot change the pack — a payment has been recorded or is awaiting confirmation.',
-      );
     }
 
     // archType defaults to two_arches — the admin UI consolidated to
@@ -289,14 +296,35 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
     const loyaltyAmount = loyaltyAmountDecimal.toNumber();
     const netPrice = netDecimal.toNumber();
 
+    const settings = await this.settings.getActive();
+    const tvaRate = resolveTvaRate(null, settings?.defaultTvaRate);
+    const split = splitInclusive(netDecimal, tvaRate, 0);
+    const actorName =
+      quote.status === QuotationStatus.draft
+        ? null
+        : await lookupActorName(this.prisma, caller.userId);
+
     // Reset any previously-configured plan because the totals just
     // changed. Doing this inside the same transaction guarantees the
     // new snapshot + new totalPrice land atomically with the wiped
-    // installments + batches.
+    // installments + batches, and the money check below cannot race a
+    // payment attempt (the rows are locked).
     const updated = await this.prisma.$transaction(async (tx) => {
+      await lockQuoteForEdit(tx, quotationId);
+      const fresh = await tx.quotation.findUnique({
+        where: { id: quotationId },
+      });
+      if (!fresh || fresh.deletedAt) {
+        throw new NotFoundException('Quotation not found');
+      }
+      assertNoMoneyMoved(
+        await readOneQuoteMoney(tx, quotationId),
+        'change the pack',
+      );
+
       await tx.quoteStepBatch.deleteMany({ where: { quotationId } });
       await tx.quoteInstallment.deleteMany({ where: { quotationId } });
-      return tx.quotation.update({
+      const row = await tx.quotation.update({
         where: { id: quotationId },
         data: {
           packId: pack.id,
@@ -309,6 +337,8 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
           isUnlimitedCorrections: pack.isUnlimitedCorrections,
           isForOrthodontists: pack.isForOrthodontists,
           totalPrice: netDecimal,
+          // Nothing was received (checked above under lock): the money
+          // state of the new price starts from zero.
           paidAmount: new Prisma.Decimal(0),
           remainingAmount: netDecimal,
           paymentMode: null,
@@ -325,35 +355,80 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
           // fab/delivery breakdown is set to zero — for pack-based quotes
           // the price IS the bundle. The loyalty discount rides the
           // existing discountAmount column, which the PDF already renders
-          // as a negative line.
+          // as a negative line. All of them are TTC.
           treatmentFees: grossPrice,
           fabricationFees: 0,
           deliveryFees: 0,
           discountAmount: loyaltyAmount,
-          subTotalHt: netPrice,
-          tvaAmount: 0,
-          tvaRate: 0,
+          // A new pack starts from the loyalty remise alone: a percentage
+          // the admin typed on the previous price no longer applies.
+          discountPercent: null,
+          subTotalHt: toAmount(split.ht),
+          tvaAmount: toAmount(split.tva),
+          tvaRate,
           totalTtc: netPrice,
         },
       });
+
+      if (fresh.status !== QuotationStatus.draft) {
+        await tx.orderAuditLog.create({
+          data: quoteUpdateAudit({
+            orderId: fresh.orderId,
+            caller,
+            actorName,
+            changes: {
+              ...(fresh.packName !== pack.name
+                ? { packName: { from: fresh.packName, to: pack.name } }
+                : {}),
+              ...(fresh.totalTtc !== netPrice
+                ? { totalTtc: { from: fresh.totalTtc, to: netPrice } }
+                : {}),
+            },
+            metadata: {
+              quotationId: fresh.id,
+              quotationNumber: fresh.quotationNumber,
+              quotationStatus: fresh.status,
+              kind: 'pack',
+              planCleared: true,
+            },
+          }),
+        });
+      }
+      return row;
     });
 
     this.logger.log(
       `Attached pack ${pack.name} (${archType}) to quote ${quotationId} by ${caller.userId}`,
     );
-    return updated;
+    const rendered = await this.quotationPdf.refreshStoredPdf(updated);
+    return presentQuote(this.prisma, rendered);
   }
 
   /**
    * Define the installment + batch plan. Validation is intentionally
    * heavy — every cross-field check that the spec calls out lives
    * here so the DB is never asked to enforce a business rule.
+   *
+   * Allowed while the quote is draft, sent or approved. Paid and
+   * cancelled installments and their step batches are KEPT
+   * (KEPT_INSTALLMENT_STATUSES): the body lists only the new unpaid rows,
+   * which replace every open row and must
+   *   • sum to totalPrice - Σ kept installments,
+   *   • not overlap the step ranges of the kept batches (refused up front
+   *     when they already hold every pack step, the rule behind the
+   *     quote's freeStepsForReplan flag),
+   * and are numbered after the highest kept installment / batch. With
+   * no kept installment this is the full re-plan it has always been.
+   *
+   * Refused with 409 QUOTE_PAYMENT_IN_FLIGHT while an unpaid installment
+   * has an attempt that may still settle: that attempt copied the row's
+   * amount, and its settlement needs the row to exist.
    */
   async configurePaymentPlan(
     quotationId: string,
     dto: ConfigurePaymentPlanDto,
     caller: Caller,
-  ): Promise<Quotation> {
+  ): Promise<QuotationView<Quotation>> {
     if (!isAdmin(caller)) {
       throw new ForbiddenException(
         'Only admins can configure the payment plan.',
@@ -361,12 +436,6 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
     }
     const quote = await this.prisma.quotation.findUnique({
       where: { id: quotationId },
-      include: {
-        payments: {
-          where: { status: { in: LIVE_PAYMENT_STATUSES } },
-          select: { id: true },
-        },
-      },
     });
     if (!quote || quote.deletedAt) {
       throw new NotFoundException('Quotation not found');
@@ -376,35 +445,9 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
         'Attach a pack first — payment plan requires a snapshotted total price.',
       );
     }
-    if (quote.status === QuotationStatus.approved) {
-      throw new BadRequestException(
-        'Cannot edit the payment plan of an approved quote.',
-      );
-    }
-    if (quote.payments.length > 0) {
-      throw new BadRequestException(
-        'Cannot edit the payment plan — a payment has been recorded or is awaiting confirmation.',
-      );
-    }
+    assertQuoteEditable(quote.status);
 
-    // ── Validation pass ─────────────────────────────────────────
-    if (
-      dto.paymentMode === PaymentMode.full_payment &&
-      dto.installments.length !== 1
-    ) {
-      throw new BadRequestException(
-        'FULL_PAYMENT requires exactly one installment.',
-      );
-    }
-    if (
-      dto.paymentMode === PaymentMode.installments &&
-      dto.installments.length < 2
-    ) {
-      throw new BadRequestException(
-        'INSTALLMENTS requires at least two installments.',
-      );
-    }
-
+    // ── Validation pass (the body alone) ────────────────────────
     // Range checks per installment.
     const maxStep = quote.isUnlimitedSteps
       ? Number.POSITIVE_INFINITY
@@ -457,31 +500,135 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
       }
     }
 
-    // Σ amounts must equal totalPrice. Decimal arithmetic so we don't
-    // hit Number precision artefacts.
-    const sum = rows.reduce(
-      (acc, row) => acc.plus(row.amount),
-      new Prisma.Decimal(0),
-    );
-    const diff = sum.minus(quote.totalPrice).abs();
-    if (diff.gt(MONEY_EPSILON)) {
-      throw new BadRequestException(
-        `Installment amounts (Σ ${sum.toString()}) must equal totalPrice ` +
-          `${quote.totalPrice.toString()}. Difference: ${diff.toString()}.`,
-      );
-    }
+    const actorName =
+      quote.status === QuotationStatus.draft
+        ? null
+        : await lookupActorName(this.prisma, caller.userId);
 
-    // ── Write inside one transaction ────────────────────────────
+    // ── Checks against the stored plan + write, under lock ──────
     const result = await this.prisma.$transaction(async (tx) => {
-      await tx.quoteStepBatch.deleteMany({ where: { quotationId } });
-      await tx.quoteInstallment.deleteMany({ where: { quotationId } });
+      await lockQuoteForEdit(tx, quotationId);
+      const fresh = await tx.quotation.findUnique({
+        where: { id: quotationId },
+        include: {
+          installments: {
+            orderBy: { installmentNumber: 'asc' },
+            include: {
+              stepBatch: true,
+              payments: {
+                where: { status: { in: IN_FLIGHT_PAYMENT_STATUSES } },
+                select: { id: true },
+              },
+            },
+          },
+        },
+      });
+      if (!fresh || fresh.deletedAt) {
+        throw new NotFoundException('Quotation not found');
+      }
+      if (!fresh.totalPrice) {
+        throw new BadRequestException(
+          'Attach a pack first — payment plan requires a snapshotted total price.',
+        );
+      }
+      assertQuoteEditable(fresh.status);
 
+      // Paid rows are frozen, and so are cancelled ones: a total edit
+      // cancels an installment once nothing more is owed for it and
+      // releases its aligners, so its batch may already be unlocked or
+      // delivered and must never be deleted by a re-plan.
+      const kept = fresh.installments.filter(isKeptInstallment);
+      const replaced = fresh.installments.filter(
+        (row) => !isKeptInstallment(row),
+      );
+      if (replaced.some((row) => row.payments.length > 0)) {
+        throw new ConflictException(
+          'A payment is in progress on an unpaid installment. Wait until it is settled or has failed before changing the plan.',
+          QUOTE_ERROR.PAYMENT_IN_FLIGHT,
+        );
+      }
+      // The new rows must sum to what the kept rows leave to pay (a
+      // cancelled row is at 0). Decimal arithmetic so we don't hit Number
+      // precision artefacts.
+      const keptSum = kept.reduce(
+        (acc, row) => acc.plus(row.amount),
+        new Prisma.Decimal(0),
+      );
+      const target = fresh.totalPrice.minus(keptSum);
+      if (kept.length > 0 && target.lte(MONEY_EPSILON)) {
+        throw new BadRequestException(
+          'The kept (paid or cancelled) installments already cover the total of this quotation: there is nothing left to plan.',
+        );
+      }
+
+      // Same rule as the freeStepsForReplan flag the quote carries: once
+      // the kept batches hold every step of the pack, no new row can fit.
+      const keptRanges = kept.flatMap((row) =>
+        row.stepBatch ? [row.stepBatch] : [],
+      );
+      if (!hasFreeStepForReplan(fresh, keptRanges)) {
+        throw new BadRequestException(
+          `No step is left for a new installment: the kept (paid or cancelled) installments already cover steps 1–${fresh.maxStepsPerArch ?? 0}.`,
+        );
+      }
+      this.assertPlanShape(dto.paymentMode, rows.length, kept.length);
+
+      for (const row of rows) {
+        const clash = kept.find(
+          (keptRow) =>
+            keptRow.stepBatch &&
+            row.fromStep <= keptRow.stepBatch.toStep &&
+            row.toStep >= keptRow.stepBatch.fromStep,
+        );
+        if (clash?.stepBatch) {
+          throw new BadRequestException(
+            `Installment #${row.idx + 1}: steps ${row.fromStep}–${row.toStep} overlap the kept installment #${clash.installmentNumber} (${clash.status}, steps ${clash.stepBatch.fromStep}–${clash.stepBatch.toStep}). Paid and cancelled installments keep their steps.`,
+          );
+        }
+      }
+
+      const sum = rows.reduce(
+        (acc, row) => acc.plus(row.amount),
+        new Prisma.Decimal(0),
+      );
+      const diff = sum.minus(target).abs();
+      if (diff.gt(MONEY_EPSILON)) {
+        throw new BadRequestException(
+          kept.length > 0
+            ? `Installment amounts (Σ ${sum.toString()}) must equal what is left to pay ` +
+                `${target.toString()} (totalPrice ${fresh.totalPrice.toString()} − kept installments ${keptSum.toString()}). Difference: ${diff.toString()}.`
+            : `Installment amounts (Σ ${sum.toString()}) must equal totalPrice ` +
+                `${fresh.totalPrice.toString()}. Difference: ${diff.toString()}.`,
+        );
+      }
+
+      // Open rows go (their batches first; dead attempts keep their row
+      // as SetNull). Kept rows and their batches stay untouched.
+      const replacedIds = replaced.map((row) => row.id);
+      if (replacedIds.length > 0) {
+        await tx.quoteStepBatch.deleteMany({
+          where: { installmentId: { in: replacedIds } },
+        });
+        await tx.quoteInstallment.deleteMany({
+          where: { id: { in: replacedIds } },
+        });
+      }
+
+      // New rows continue the numbering after the kept ones: both
+      // numbers are unique per quotation.
+      const firstInstallment =
+        kept.reduce((max, row) => Math.max(max, row.installmentNumber), 0) + 1;
+      const firstBatch =
+        kept.reduce(
+          (max, row) => Math.max(max, row.stepBatch?.batchNumber ?? 0),
+          0,
+        ) + 1;
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
         const installment = await tx.quoteInstallment.create({
           data: {
             quotationId,
-            installmentNumber: i + 1,
+            installmentNumber: firstInstallment + i,
             amount: row.amount,
             availableFrom: row.availableFrom,
             dueDate: row.dueDate,
@@ -492,7 +639,7 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
           data: {
             quotationId,
             installmentId: installment.id,
-            batchNumber: i + 1,
+            batchNumber: firstBatch + i,
             fromStep: row.fromStep,
             toStep: row.toStep,
             status: BatchStatus.locked,
@@ -500,16 +647,93 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
         });
       }
 
-      return tx.quotation.update({
+      const money = await readOneQuoteMoney(tx, quotationId);
+      const settlement = settleQuote(fresh.totalPrice, money.received);
+      const updated = await tx.quotation.update({
         where: { id: quotationId },
-        data: { paymentMode: dto.paymentMode },
+        data: {
+          // A plan that keeps paid rows has several installments, whatever
+          // mode described the new ones.
+          paymentMode:
+            kept.length > 0 ? PaymentMode.installments : dto.paymentMode,
+          paidAmount: settlement.paidAmount,
+          remainingAmount: settlement.remainingAmount,
+          paymentStatus: settlement.paymentStatus,
+        },
       });
+      if (
+        settlement.paymentStatus === QuotationPaymentStatus.paid &&
+        fresh.paymentStatus !== QuotationPaymentStatus.paid
+      ) {
+        await advanceOrderWhenPaid(tx, fresh.orderId);
+      }
+
+      if (fresh.status !== QuotationStatus.draft) {
+        await tx.orderAuditLog.create({
+          data: quoteUpdateAudit({
+            orderId: fresh.orderId,
+            caller,
+            actorName,
+            changes: {},
+            metadata: {
+              quotationId: fresh.id,
+              quotationNumber: fresh.quotationNumber,
+              quotationStatus: fresh.status,
+              kind: 'plan',
+              keptInstallments: kept.map((row) => row.installmentNumber),
+              replacedInstallments: replaced.map((row) => ({
+                installmentNumber: row.installmentNumber,
+                amount: row.amount.toFixed(3),
+              })),
+              installments: rows.map((row, i) => ({
+                installmentNumber: firstInstallment + i,
+                amount: row.amount.toFixed(3),
+                fromStep: row.fromStep,
+                toStep: row.toStep,
+              })),
+            },
+          }),
+        });
+      }
+      return updated;
     });
 
     this.logger.log(
-      `Configured payment plan (${dto.paymentMode}, ${rows.length} installments) on quote ${quotationId}`,
+      `Configured payment plan (${dto.paymentMode}, ${rows.length} new installments) on quote ${quotationId}`,
     );
-    return result;
+    const rendered = await this.quotationPdf.refreshStoredPdf(result);
+    return presentQuote(this.prisma, rendered);
+  }
+
+  /**
+   * FULL_PAYMENT / INSTALLMENTS count rules. Without a kept (paid or
+   * cancelled) row they describe the whole plan, as always. Once rows are
+   * kept they describe the new rows only: FULL_PAYMENT = settle the
+   * balance in one row, INSTALLMENTS = one or more new rows (the plan
+   * already has several).
+   */
+  private assertPlanShape(
+    mode: PaymentMode,
+    newRows: number,
+    keptRows: number,
+  ): void {
+    if (mode === PaymentMode.full_payment && newRows !== 1) {
+      throw new BadRequestException(
+        keptRows > 0
+          ? 'FULL_PAYMENT settles the balance in exactly one new installment, next to the kept (paid or cancelled) installments.'
+          : 'FULL_PAYMENT requires exactly one installment.',
+      );
+    }
+    if (
+      mode === PaymentMode.installments &&
+      newRows < (keptRows > 0 ? 1 : 2)
+    ) {
+      throw new BadRequestException(
+        keptRows > 0
+          ? 'INSTALLMENTS requires at least one new installment next to the kept (paid or cancelled) installments.'
+          : 'INSTALLMENTS requires at least two installments.',
+      );
+    }
   }
 
   /**

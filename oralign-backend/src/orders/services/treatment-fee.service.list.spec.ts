@@ -267,6 +267,10 @@ describe('TreatmentFeeService.listTreatmentFees (treatment-fee history)', () => 
         orderId: 'o-1',
         orderCode: 'Sarah_Morgan_20261106',
         amount: 350,
+        withholdingRate: null,
+        withholdingAmount: 0,
+        // Paid before the stamp was added: no stamp column value.
+        stampAmount: 0,
         method: PaymentMethod.cash,
         status: PaymentRecordStatus.success,
         paidAt,
@@ -278,6 +282,71 @@ describe('TreatmentFeeService.listTreatmentFees (treatment-fee history)', () => 
         patient: { id: 'p-1', fullName: 'Sarah Morgan' },
       });
       expect(page.data[1].invoiceNumber).toBeNull();
+    });
+
+    it('shows the retenue a practitioner kept back, next to the cash', async () => {
+      const { service } = makeService([
+        {
+          id: 'o-3',
+          orderCode: 'RS_20261119',
+          treatmentFeeAmount: new Prisma.Decimal('297.000'),
+          treatmentFeeWithholdingRate: new Prisma.Decimal('1.00'),
+          treatmentFeeWithholdingAmount: new Prisma.Decimal('3.000'),
+          treatmentFeePaymentMethod: PaymentMethod.cheque,
+          treatmentFeePaymentStatus: PaymentRecordStatus.success,
+          treatmentFeePaidAt: new Date('2026-11-19T09:00:00.000Z'),
+          treatmentFeeProofPath: null,
+          treatmentFeeInvoiceNumber: 'FAC-000100',
+          submittedAt: null,
+          updatedAt: new Date('2026-11-19T09:00:00.000Z'),
+          doctor: null,
+          patient: null,
+        },
+      ]);
+
+      const page = await service.listTreatmentFees({}, admin);
+
+      expect(page.data[0]).toMatchObject({
+        amount: 297,
+        withholdingRate: 1,
+        withholdingAmount: 3,
+        method: PaymentMethod.cheque,
+      });
+    });
+
+    it('shows the stamp charged on top: fee due = amount + retenue - stamp', async () => {
+      const { service, findMany } = makeService([
+        {
+          id: 'o-4',
+          orderCode: 'RS_20261120',
+          // 350 + 1 stamp - 3.500 retenue.
+          treatmentFeeAmount: new Prisma.Decimal('347.500'),
+          treatmentFeeWithholdingRate: new Prisma.Decimal('1.00'),
+          treatmentFeeWithholdingAmount: new Prisma.Decimal('3.500'),
+          treatmentFeeStampAmount: new Prisma.Decimal('1.000'),
+          treatmentFeePaymentMethod: PaymentMethod.card,
+          treatmentFeePaymentStatus: PaymentRecordStatus.success,
+          treatmentFeePaidAt: new Date('2026-11-20T09:00:00.000Z'),
+          treatmentFeeProofPath: null,
+          treatmentFeeInvoiceNumber: 'FAC-000101',
+          submittedAt: null,
+          updatedAt: new Date('2026-11-20T09:00:00.000Z'),
+          doctor: null,
+          patient: null,
+        },
+      ]);
+
+      const page = await service.listTreatmentFees({}, admin);
+
+      expect(findManyArgs(findMany).select).toMatchObject({
+        treatmentFeeStampAmount: true,
+      });
+      expect(page.data[0]).toMatchObject({
+        amount: 347.5,
+        withholdingRate: 1,
+        withholdingAmount: 3.5,
+        stampAmount: 1,
+      });
     });
   });
 });

@@ -64,8 +64,16 @@ import {
 } from '@/components/billing/pack-choice';
 import { archLabel, packFacts, packName } from '@/components/billing/pack-picker';
 import { QuoteStep } from '@/components/orders/quote-step';
+import {
+  isWithholdingChoiceConflict,
+  PriceIncludesTaxNote,
+  useQuoteTaxRates,
+  WithholdingChoice,
+  type QuoteTaxRates,
+} from '@/components/payments/withholding';
+import { previewInstallmentCharges, previewPlanStamps } from '@/lib/billing/tax-split';
 import { formatTimestampDay } from '@/lib/utils/calendar-date';
-import { formatPrice } from '@/lib/utils/currency';
+import { formatAmount, formatPrice } from '@/lib/utils/currency';
 import {
   Dialog,
   DialogContent,
@@ -149,6 +157,28 @@ const toDec = (s: string | number | null | undefined): number =>
 const money = (s: string | number | null | undefined, ccy = 'TND'): string =>
   formatPrice(toDec(s), ccy);
 
+/** Σ of decimal-string amounts, exact to the millime. */
+const sumAmounts = (values: Array<string | number | null | undefined>): number =>
+  values.reduce<number>((acc, v) => acc + Math.round(toDec(v) * 1000), 0) / 1000;
+
+/** Statuses at which the admin may still edit the quote and its schedule. */
+const OPEN_STATUSES: ReadonlySet<QuotationStatus> = new Set([
+  QuotationStatus.DRAFT,
+  QuotationStatus.SENT,
+  QuotationStatus.APPROVED,
+]);
+
+/** What the practitioner already settled on this quote (cash + retenue). */
+const receivedOf = (quote: Quotation): number =>
+  toDec(quote.receivedAmount ?? quote.paidAmount);
+
+/** YYYY-MM-DD of a stored timestamp, for a date input. */
+const isoDay = (value: string | null | undefined): string =>
+  value ? value.slice(0, 10) : '';
+
+/** Phone-sized tap targets (44 px), the usual compact height from `sm` up. */
+const TAP = 'h-11 sm:h-8';
+
 // ─────────────────────────────────────────────────────────────────────
 
 export function QuotePackPanel({
@@ -172,9 +202,8 @@ export function QuotePackPanel({
   const installmentsQ = useInstallments(quote.id, needsPlanData);
   const batchesQ = useStepBatches(quote.id, needsPlanData);
   // Lets the admin re-open the pack picker on an already-attached quote to
-  // swap the pack / arcade mode. Only meaningful while the quote is still a
-  // draft (attaching wipes the payment plan; approved/paid quotes are
-  // locked by the backend anyway).
+  // swap the pack / arcade mode. Offered while nothing was received and no
+  // payment is in progress (attaching replaces the payment plan).
   const [editingPack, setEditingPack] = useState(false);
 
   if (!isAdmin && !isDoctor) return null;
@@ -238,8 +267,12 @@ function PackStep({
 }) {
   const { t } = useT();
   const hasPack = !!quote.packId;
-  // Swapping is draft-only: approved / paid quotes are locked server-side.
-  const canChange = quote.status === QuotationStatus.DRAFT;
+  // A pack swap replaces the plan, so it is offered only while nothing was
+  // received and no payment is in progress (the server checks it too).
+  const canChange =
+    OPEN_STATUSES.has(quote.status) &&
+    receivedOf(quote) <= 0 &&
+    !quote.hasPaymentInFlight;
   const showForm = !hasPack || editing;
 
   return (
@@ -255,7 +288,7 @@ function PackStep({
             variant="ghost"
             size="sm"
             onClick={onEdit}
-            className="h-8 gap-1.5 text-muted-foreground"
+            className={cn('gap-1.5 text-muted-foreground', TAP)}
           >
             <Pencil className="size-3.5" />
             {t('quoteEditor.change')}
@@ -428,29 +461,112 @@ function splitAmounts(total: number, n: number): number[] {
   return parts;
 }
 
+type StepRange = { from: number; to: number };
+
 /**
- * Split steps `1..maxSteps` into `n` contiguous, non-overlapping ranges.
- * Unlimited packs (or a missing step count) fall back to one step per
- * tranche so the batches stay distinct. Callers cap `n` at `maxSteps`
- * for limited packs, so each tranche always gets at least one step.
+ * The installments a re-plan keeps. Paid rows are frozen, and so are
+ * cancelled ones: a total edit cancels an installment once nothing more
+ * is owed for it and releases its aligners, so its batch may already be
+ * unlocked or delivered. The server keeps both kinds, batches included
+ * (configurePaymentPlan), and replaces only the pending / overdue rows.
+ */
+const isKeptInstallment = (inst: QuoteInstallment): boolean =>
+  inst.status === InstallmentStatus.PAID || inst.status === InstallmentStatus.CANCELLED;
+
+/** Above this many tranches the stepper stops, for packs without a step count. */
+const STEPLESS_MAX_TRANCHES = 12;
+
+/**
+ * What the kept installments leave to a re-plan: their rows, their step
+ * ranges, their sum (cancelled rows are at 0), the free step segments of
+ * the pack and how many steps those hold, and the highest kept number
+ * (new rows are numbered after it, as the server numbers them).
+ *
+ * Kept ranges are not always the head of the pack: a remainder too small
+ * to spread goes on the first open row and cancels the later ones, so a
+ * free segment can sit between two kept batches.
+ */
+function keptPlanOf(
+  quote: Quotation,
+  installments: QuoteInstallment[],
+  batchByInstallment: ReadonlyMap<string, QuoteStepBatch>,
+) {
+  const maxSteps = quote.maxStepsPerArch ?? 0;
+  // Unlimited packs (or a missing step count) have no step ceiling.
+  const stepless = !!quote.isUnlimitedSteps || maxSteps <= 0;
+  const rows = installments.filter(isKeptInstallment);
+  const ranges: StepRange[] = rows
+    .map((inst) => batchByInstallment.get(inst.id))
+    .filter((b): b is QuoteStepBatch => !!b)
+    .map((b) => ({ from: b.fromStep, to: b.toStep }))
+    .sort((a, b) => a.from - b.from);
+  const free = stepless ? [] : freeSegments(ranges, maxSteps);
+  return {
+    rows,
+    ranges,
+    sum: sumAmounts(rows.map((inst) => inst.amount)),
+    stepless,
+    free,
+    freeSteps: stepless
+      ? STEPLESS_MAX_TRANCHES
+      : free.reduce((acc, s) => acc + s.to - s.from + 1, 0),
+    lastNumber: rows.reduce((acc, inst) => Math.max(acc, inst.installmentNumber), 0),
+  };
+}
+
+/** Steps 1..maxSteps that no kept range covers, as contiguous segments. */
+function freeSegments(kept: StepRange[], maxSteps: number): StepRange[] {
+  const out: StepRange[] = [];
+  let cursor = 1;
+  for (const r of kept) {
+    if (r.from > cursor) out.push({ from: cursor, to: Math.min(r.from - 1, maxSteps) });
+    cursor = Math.max(cursor, r.to + 1);
+  }
+  if (cursor <= maxSteps) out.push({ from: cursor, to: maxSteps });
+  return out.filter((s) => s.from <= s.to);
+}
+
+/**
+ * Split the free steps into `n` contiguous, non-overlapping ranges, one
+ * per tranche, none crossing a kept batch. A limited pack spreads its
+ * free segments evenly (a new plan has one segment, 1..maxSteps; the
+ * last tranche of a segment runs to its end); packs without a step
+ * ceiling give each tranche the next free step, so the batches stay
+ * distinct. Callers cap `n` at the free steps of a limited pack.
  */
 function splitSteps(
-  maxSteps: number,
+  plan: Pick<ReturnType<typeof keptPlanOf>, 'ranges' | 'free' | 'stepless'>,
   n: number,
-  isUnlimited: boolean,
-): Array<{ from: number; to: number }> {
-  if (isUnlimited || maxSteps <= 0) {
-    return Array.from({ length: n }, (_, i) => ({ from: i + 1, to: i + 1 }));
+): StepRange[] {
+  if (plan.stepless) {
+    const out: StepRange[] = [];
+    for (let step = 1; out.length < n; step++) {
+      if (!plan.ranges.some((r) => step >= r.from && step <= r.to)) {
+        out.push({ from: step, to: step });
+      }
+    }
+    return out;
   }
-  const ranges: Array<{ from: number; to: number }> = [];
-  let start = 1;
-  for (let i = 0; i < n; i++) {
-    const remainingSteps = Math.max(1, maxSteps - start + 1);
+  const ranges: StepRange[] = [];
+  const segments = plan.free;
+  let seg = 0;
+  let start = segments[0]?.from ?? 1;
+  for (let i = 0; i < n && seg < segments.length; i++) {
+    const segEnd = segments[seg]!.to;
+    const remainingSteps =
+      segEnd -
+      start +
+      1 +
+      segments.slice(seg + 1).reduce((acc, s) => acc + s.to - s.from + 1, 0);
     const remainingTranches = n - i;
     const size = Math.max(1, Math.round(remainingSteps / remainingTranches));
-    const end = i === n - 1 ? maxSteps : Math.min(maxSteps, start + size - 1);
-    ranges.push({ from: start, to: Math.max(start, end) });
+    const end = i === n - 1 ? segEnd : Math.min(segEnd, start + size - 1);
+    ranges.push({ from: start, to: end });
     start = end + 1;
+    if (start > segEnd) {
+      seg += 1;
+      start = segments[seg]?.from ?? start;
+    }
   }
   return ranges;
 }
@@ -459,38 +575,103 @@ function splitSteps(
 function buildRows(
   total: number,
   n: number,
-  maxSteps: number,
-  isUnlimited: boolean,
+  plan: Pick<ReturnType<typeof keptPlanOf>, 'ranges' | 'free' | 'stepless'>,
 ): DraftRow[] {
   const amounts = splitAmounts(total, n);
-  const steps = splitSteps(maxSteps, n, isUnlimited);
+  const steps = splitSteps(plan, n);
   return amounts.map((amt, i) => ({
     amount: amt.toFixed(3),
-    fromStep: String(steps[i]?.from ?? i + 1),
-    toStep: String(steps[i]?.to ?? i + 1),
+    // No step left for this tranche: empty, and the validation says so.
+    fromStep: steps[i] ? String(steps[i].from) : '',
+    toStep: steps[i] ? String(steps[i].to) : '',
     availableFrom: todayISO(),
     dueDate: '',
   }));
 }
 
-function PlanBuilderCard({ quote }: { quote: Quotation }) {
+/**
+ * The plan editor. Without `installments` it builds the first plan over
+ * the whole total. With them (the admin's "Modifier l'échéancier"), the
+ * kept installments (paid or cancelled) stay read-only, the editor is
+ * seeded with the open rows, its target is `totalPrice − Σ kept`, and
+ * only the new rows are sent: the server keeps the others and their
+ * batches, so the new ranges must stay clear of those batches.
+ */
+function PlanBuilderCard({
+  quote,
+  installments = [],
+  batches = [],
+  onClose,
+}: {
+  quote: Quotation;
+  /** Current plan, when re-planning. */
+  installments?: QuoteInstallment[];
+  batches?: QuoteStepBatch[];
+  /** Re-planning only: leaves the editor (after a save or on Cancel). */
+  onClose?: () => void;
+}) {
   const { t } = useT();
-  const total = toDec(quote.totalPrice);
   const maxSteps = quote.maxStepsPerArch ?? 0;
   const isUnlimited = !!quote.isUnlimitedSteps;
   const configure = useConfigurePaymentPlan();
 
-  // A tranche maps to a distinct step batch, so a limited pack can't have
-  // more tranches than steps. Unlimited packs get a sane upper bound so
-  // the stepper can't run away.
-  const maxTranches = isUnlimited ? 12 : Math.max(2, maxSteps);
+  const batchByInstallment = useMemo(() => {
+    const m = new Map<string, QuoteStepBatch>();
+    batches.forEach((b) => m.set(b.installmentId, b));
+    return m;
+  }, [batches]);
+  const kept = useMemo(
+    () => keptPlanOf(quote, installments, batchByInstallment),
+    [quote, installments, batchByInstallment],
+  );
+  const keptRows = kept.rows;
+  const keptRanges = kept.ranges;
+  const hasKept = keptRows.length > 0;
+  // What the new rows must add up to.
+  const total = Math.max(
+    0,
+    (Math.round(toDec(quote.totalPrice) * 1000) - Math.round(kept.sum * 1000)) / 1000,
+  );
 
-  const [mode, setMode] = useState<PaymentMode>(PaymentMode.FULL_PAYMENT);
-  // Rows are seeded by the auto-distributor and stay editable. Changing
-  // the tranche count (or "Split evenly") re-runs the distribution; a
-  // single cell edit only touches that cell.
-  const [rows, setRows] = useState<DraftRow[]>(() =>
-    buildRows(total, 1, maxSteps, isUnlimited),
+  // A tranche maps to a distinct step batch, so a limited pack can't have
+  // more tranches than (free) steps. Unlimited packs get a sane upper bound
+  // so the stepper can't run away.
+  const maxTranches = isUnlimited
+    ? STEPLESS_MAX_TRANCHES
+    : hasKept
+      ? Math.max(1, kept.freeSteps)
+      : Math.max(2, maxSteps);
+  const canSplit = maxTranches >= 2;
+
+  // Seeded with the open rows when re-planning, else one row.
+  const [rows, setRows] = useState<DraftRow[]>(() => {
+    const open = installments.filter((i) => !isKeptInstallment(i));
+    if (open.length === 0) {
+      return buildRows(total, 1, kept);
+    }
+    // The extra installment a total raise adds on a settled plan carries
+    // no batch (it is then the only open row); the server wants one per
+    // new row, so it takes the free steps, as "split evenly" would. Next
+    // to rows that have batches it stays empty for the admin to fill.
+    const batchless = open.filter((inst) => !batchByInstallment.has(inst.id));
+    const freeRanges =
+      batchless.length === open.length ? splitSteps(kept, batchless.length) : [];
+    return open.map((inst) => {
+      const batch = batchByInstallment.get(inst.id);
+      const range = batch
+        ? { from: batch.fromStep, to: batch.toStep }
+        : freeRanges[batchless.indexOf(inst)];
+      return {
+        amount: toDec(inst.amount).toFixed(3),
+        fromStep: range ? String(range.from) : '',
+        toStep: range ? String(range.to) : '',
+        availableFrom: isoDay(inst.availableFrom) || todayISO(),
+        dueDate: isoDay(inst.dueDate),
+      };
+    });
+  });
+  const [mode, setMode] = useState<PaymentMode>(() =>
+    rows.length > 1 ? PaymentMode.INSTALLMENTS : PaymentMode.FULL_PAYMENT,
   );
 
   const applyMode = (next: PaymentMode) => {
@@ -499,27 +680,29 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
       buildRows(
         total,
         next === PaymentMode.FULL_PAYMENT ? 1 : Math.min(2, maxTranches),
-        maxSteps,
-        isUnlimited,
+        kept,
       ),
     );
   };
 
   const setCount = (n: number) => {
     const clamped = Math.min(maxTranches, Math.max(2, n));
-    setRows(buildRows(total, clamped, maxSteps, isUnlimited));
+    setRows(buildRows(total, clamped, kept));
   };
 
-  const splitEvenly = () =>
-    setRows((rs) => buildRows(total, rs.length, maxSteps, isUnlimited));
+  const splitEvenly = () => setRows((rs) => buildRows(total, rs.length, kept));
 
   const updateRow = (i: number, patch: Partial<DraftRow>) =>
     setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
 
   const count = rows.length;
+  // Display number of a new row: after the highest kept installment, as
+  // the server numbers it (a cancelled row keeps its number).
+  const rowNumber = (i: number) => kept.lastNumber + i + 1;
 
-  // Live validation — sum vs total, overlap, range bounds. Auto-built
-  // rows are valid by construction; this guards manual edits.
+  // Live validation — sum vs target, overlap (between new rows and with
+  // the kept batches), range bounds. Auto-built rows are valid by
+  // construction; this guards manual edits.
   const validation = useMemo(() => {
     const errors: string[] = [];
     const numeric = rows.map((r) => ({
@@ -527,10 +710,7 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
       from: Number(r.fromStep),
       to: Number(r.toStep),
     }));
-    const sum = numeric.reduce(
-      (acc, r) => acc + (isFinite(r.amount) ? r.amount : 0),
-      0,
-    );
+    const sum = sumAmounts(numeric.map((r) => (isFinite(r.amount) ? r.amount : 0)));
     if (Math.abs(sum - total) > 0.001) {
       errors.push(
         t('quoteUi.plan.errSum', {
@@ -541,14 +721,18 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
     }
     for (let i = 0; i < numeric.length; i++) {
       const r = numeric[i]!;
+      const n = kept.lastNumber + i + 1;
       if (!isFinite(r.amount) || r.amount <= 0) {
-        errors.push(t('quoteUi.plan.errPositive', { n: i + 1 }));
+        errors.push(t('quoteUi.plan.errPositive', { n }));
       }
-      if (!isFinite(r.from) || !isFinite(r.to) || r.from > r.to) {
-        errors.push(t('quoteUi.plan.errRange', { n: i + 1 }));
+      if (!isFinite(r.from) || !isFinite(r.to) || r.from < 1 || r.from > r.to) {
+        errors.push(t('quoteUi.plan.errRange', { n }));
       }
       if (!isUnlimited && r.to > maxSteps) {
-        errors.push(t('quoteUi.plan.errMax', { n: i + 1, max: maxSteps }));
+        errors.push(t('quoteUi.plan.errMax', { n, max: maxSteps }));
+      }
+      if (keptRanges.some((p) => r.from <= p.to && r.to >= p.from)) {
+        errors.push(t('quoteUi.plan.errPaidOverlap', { n }));
       }
     }
     const sorted = [...numeric].sort((a, b) => a.from - b.from);
@@ -562,7 +746,7 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
       errors.push(t('quoteUi.plan.errMinTwo'));
     }
     return { errors, sum };
-  }, [rows, total, mode, maxSteps, isUnlimited, t]);
+  }, [rows, total, mode, maxSteps, isUnlimited, kept.lastNumber, keptRanges, t]);
 
   const balanced = Math.abs(validation.sum - total) <= 0.001;
 
@@ -571,47 +755,101 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
       toast.error(validation.errors[0]);
       return;
     }
-    configure.mutate({
-      quotationId: quote.id,
-      dto: {
-        paymentMode: mode,
-        installments: rows.map((r) => ({
-          amount: Number(r.amount),
-          availableFrom: r.availableFrom
-            ? new Date(r.availableFrom).toISOString()
-            : undefined,
-          dueDate: r.dueDate ? new Date(r.dueDate).toISOString() : undefined,
-          batch: {
-            fromStep: Number(r.fromStep),
-            toStep: Number(r.toStep),
-          },
-        })),
+    configure.mutate(
+      {
+        quotationId: quote.id,
+        dto: {
+          // With installments kept (paid or cancelled), the quote stays an
+          // installment plan even when the rest is one new row (the server
+          // accepts one or more new rows in that case).
+          paymentMode: hasKept ? PaymentMode.INSTALLMENTS : mode,
+          installments: rows.map((r) => ({
+            amount: Number(r.amount),
+            availableFrom: r.availableFrom
+              ? new Date(r.availableFrom).toISOString()
+              : undefined,
+            dueDate: r.dueDate ? new Date(r.dueDate).toISOString() : undefined,
+            batch: {
+              fromStep: Number(r.fromStep),
+              toStep: Number(r.toStep),
+            },
+          })),
+        },
       },
-    });
+      { onSuccess: () => onClose?.() },
+    );
   };
 
   return (
     <QuoteStep
       step={3}
-      title={t('quoteEditor.planStep')}
-      description={t('quoteEditor.planStepDesc', {
-        total: money(quote.totalPrice, quote.currency),
-      })}
+      title={onClose ? t('quoteEditor.editPlan') : t('quoteEditor.planStep')}
+      description={
+        hasKept
+          ? t('quoteEditor.planEditDesc', { remaining: money(total, quote.currency) })
+          : t('quoteEditor.planStepDesc', { total: money(total, quote.currency) })
+      }
     >
       <div className="space-y-5">
+        {hasKept ? (
+          <div>
+            <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {t('quoteUi.plan.keptRowsTitle')}
+            </h3>
+            <ul className="divide-y rounded-lg border bg-muted/30">
+              {keptRows.map((inst) => {
+                const batch = batchByInstallment.get(inst.id);
+                return (
+                  <li
+                    key={inst.id}
+                    className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5 text-sm"
+                  >
+                    <Lock
+                      className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+                      aria-hidden="true"
+                    />
+                    <span className="font-medium text-muted-foreground">
+                      #{inst.installmentNumber}
+                    </span>
+                    <span className="font-medium tabular-nums">
+                      {money(inst.amount, quote.currency)}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {t('quoteUi.adminPlan.colSteps')}{' '}
+                      {batch ? `${batch.fromStep} → ${batch.toStep}` : '—'}
+                    </span>
+                    <span className="ml-auto">
+                      <InstallmentStatusBadge status={inst.status} />
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ) : null}
+
         {/* Mode — pay in full or split into tranches */}
-        <div className="inline-flex rounded-lg border bg-muted/40 p-1">
+        <div className="inline-flex max-w-full flex-wrap rounded-lg border bg-muted/40 p-1">
           {[
-            { m: PaymentMode.FULL_PAYMENT, label: t('quoteUi.plan.payInFull') },
-            { m: PaymentMode.INSTALLMENTS, label: t('quoteUi.plan.splitTranches') },
-          ].map(({ m, label }) => (
+            {
+              m: PaymentMode.FULL_PAYMENT,
+              label: hasKept ? t('quoteUi.plan.restInOne') : t('quoteUi.plan.payInFull'),
+              disabled: false,
+            },
+            {
+              m: PaymentMode.INSTALLMENTS,
+              label: hasKept ? t('quoteUi.plan.restSplit') : t('quoteUi.plan.splitTranches'),
+              disabled: !canSplit,
+            },
+          ].map(({ m, label, disabled }) => (
             <button
               key={m}
               type="button"
               onClick={() => applyMode(m)}
               aria-pressed={mode === m}
+              disabled={disabled || configure.isPending}
               className={cn(
-                'rounded-md px-4 py-1.5 text-sm font-medium transition',
+                'min-h-11 rounded-md px-4 py-1.5 text-sm font-medium transition disabled:opacity-50 sm:min-h-0',
                 mode === m
                   ? 'bg-card text-foreground shadow-sm'
                   : 'text-muted-foreground hover:text-foreground',
@@ -634,7 +872,7 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
                   type="button"
                   variant="outline"
                   size="icon"
-                  className="h-8 w-8"
+                  className="h-11 w-11 sm:h-8 sm:w-8"
                   onClick={() => setCount(count - 1)}
                   disabled={count <= 2}
                   aria-label={t('quoteUi.plan.oneFewerAria')}
@@ -648,7 +886,7 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
                   type="button"
                   variant="outline"
                   size="icon"
-                  className="h-8 w-8"
+                  className="h-11 w-11 sm:h-8 sm:w-8"
                   onClick={() => setCount(count + 1)}
                   disabled={count >= maxTranches}
                   aria-label={t('quoteUi.plan.oneMoreAria')}
@@ -701,7 +939,7 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
               {rows.map((row, i) => (
                 <TableRow key={i}>
                   <TableCell className="font-medium text-muted-foreground">
-                    {i + 1}
+                    {rowNumber(i)}
                   </TableCell>
                   <TableCell>
                     <Input
@@ -723,7 +961,7 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
                           updateRow(i, { fromStep: e.target.value })
                         }
                         className="w-16"
-                        aria-label={t('quoteUi.plan.firstStepAria', { n: i + 1 })}
+                        aria-label={t('quoteUi.plan.firstStepAria', { n: rowNumber(i) })}
                       />
                       <span className="text-muted-foreground">→</span>
                       <Input
@@ -734,7 +972,7 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
                           updateRow(i, { toStep: e.target.value })
                         }
                         className="w-16"
-                        aria-label={t('quoteUi.plan.lastStepAria', { n: i + 1 })}
+                        aria-label={t('quoteUi.plan.lastStepAria', { n: rowNumber(i) })}
                       />
                     </div>
                   </TableCell>
@@ -768,14 +1006,14 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
               <div className="mb-4 flex items-center justify-between gap-3">
                 <div>
                   <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    {t('quoteUi.plan.trancheCount')} #{i + 1}
+                    {t('quoteUi.plan.trancheCount')} #{rowNumber(i)}
                   </p>
                   <p className="mt-0.5 text-sm font-semibold">
                     {t('quoteUi.plan.colAmount', { currency: quote.currency })}
                   </p>
                 </div>
                 <Badge variant="outline" className="shrink-0">
-                  #{i + 1}
+                  #{rowNumber(i)}
                 </Badge>
               </div>
 
@@ -806,7 +1044,7 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
                         updateRow(i, { fromStep: e.target.value })
                       }
                       className="h-11"
-                      aria-label={t('quoteUi.plan.firstStepAria', { n: i + 1 })}
+                      aria-label={t('quoteUi.plan.firstStepAria', { n: rowNumber(i) })}
                     />
                     <span className="text-muted-foreground">→</span>
                     <Input
@@ -815,7 +1053,7 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
                       value={row.toStep}
                       onChange={(e) => updateRow(i, { toStep: e.target.value })}
                       className="h-11"
-                      aria-label={t('quoteUi.plan.lastStepAria', { n: i + 1 })}
+                      aria-label={t('quoteUi.plan.lastStepAria', { n: rowNumber(i) })}
                     />
                   </div>
                 </div>
@@ -869,7 +1107,9 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
               <AlertTriangle className="h-4 w-4" />
             )}
             <span>
-              {t('quoteUi.plan.tranchesTotal')}{' '}
+              {hasKept
+                ? t('quoteUi.plan.newTranchesTotal')
+                : t('quoteUi.plan.tranchesTotal')}{' '}
               <strong className="tabular-nums">
                 {money(validation.sum, quote.currency)}
               </strong>{' '}
@@ -898,11 +1138,22 @@ function PlanBuilderCard({ quote }: { quote: Quotation }) {
           </ul>
         ) : null}
 
-        <div className="flex justify-end">
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          {onClose ? (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onClose}
+              disabled={configure.isPending}
+              className="h-11 w-full sm:h-10 sm:w-auto"
+            >
+              {t('common.cancel')}
+            </Button>
+          ) : null}
           <Button
             onClick={submit}
             disabled={configure.isPending || validation.errors.length > 0}
-            className="h-10 w-full gap-2 sm:w-auto"
+            className="h-11 w-full gap-2 sm:h-10 sm:w-auto"
           >
             {configure.isPending ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -993,7 +1244,12 @@ function AdminPlanView({
   const { t, lang } = useT();
   const deliver = useDeliverBatch();
   const [cashTarget, setCashTarget] = useState<QuoteInstallment | null>(null);
+  const [cardTarget, setCardTarget] = useState<QuoteInstallment | null>(null);
+  const [editingPlan, setEditingPlan] = useState(false);
   const [now] = useState(() => Date.now());
+  // Loaded with the plan so the payment dialogs open with the retenue
+  // option already known (no jump once they are open).
+  const rates = useQuoteTaxRates(quote);
   const quoteIsPayable =
     quote.status === QuotationStatus.SENT ||
     quote.status === QuotationStatus.APPROVED;
@@ -1006,6 +1262,33 @@ function AdminPlanView({
     return m;
   }, [batches]);
 
+  // "Modifier l'échéancier": the open rows are re-planned, the kept ones
+  // (paid or cancelled, batches included) stay. Offered while something
+  // is left to pay (the server refuses a re-plan with nothing left) and a
+  // step is left to give it, not while a payment is in flight: that
+  // attempt is tied to an open row. The server says whether a step is
+  // free; an older payload falls back to the kept batches of a limited
+  // pack. Without a free step, an extra installment (no batch) is simply
+  // paid as it is.
+  const kept = keptPlanOf(quote, installments, batchByInstallment);
+  const leftToPlan =
+    (Math.round(toDec(quote.totalPrice) * 1000) - Math.round(kept.sum * 1000)) / 1000;
+  const hasFreeStep = quote.freeStepsForReplan ?? (kept.stepless || kept.freeSteps > 0);
+  const hasSomethingToPlan = leftToPlan > 0 && hasFreeStep;
+  const canEditPlan =
+    OPEN_STATUSES.has(quote.status) && hasSomethingToPlan && !quote.hasPaymentInFlight;
+
+  if (editingPlan) {
+    return (
+      <PlanBuilderCard
+        quote={quote}
+        installments={installments}
+        batches={batches}
+        onClose={() => setEditingPlan(false)}
+      />
+    );
+  }
+
   return (
     <>
       <QuoteStep
@@ -1013,6 +1296,20 @@ function AdminPlanView({
         done
         flush
         title={t('quoteEditor.planStep')}
+        action={
+          canEditPlan ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setEditingPlan(true)}
+              className={cn('gap-1.5 text-muted-foreground', TAP)}
+            >
+              <Pencil className="size-3.5" />
+              {t('quoteEditor.editPlan')}
+            </Button>
+          ) : null
+        }
         description={
           <>
             {t('quoteEditor.planViewDesc')}{' '}
@@ -1023,6 +1320,13 @@ function AdminPlanView({
               {t('quoteEditor.pendingTransfers')}
             </Link>
             .
+            {quote.hasPaymentInFlight &&
+            OPEN_STATUSES.has(quote.status) &&
+            hasSomethingToPlan ? (
+              <span className="mt-1 block text-amber-700 dark:text-amber-400">
+                {t('quoteEditor.planInFlight')}
+              </span>
+            ) : null}
           </>
         }
       >
@@ -1055,6 +1359,7 @@ function AdminPlanView({
                     <TableCell>{inst.installmentNumber}</TableCell>
                     <TableCell className="font-medium tabular-nums">
                       {money(inst.amount, quote.currency)}
+                      {isOpenInstallment(inst) ? <StampHint stamp={rates.stampDuty} /> : null}
                     </TableCell>
                     <TableCell>
                       <InstallmentStatusBadge status={inst.status} />
@@ -1079,9 +1384,8 @@ function AdminPlanView({
                       <div className="flex flex-wrap justify-end gap-2">
                         {isPayable ? (
                           <AdminInstallmentActions
-                            quote={quote}
-                            installment={inst}
                             onRecordCash={() => setCashTarget(inst)}
+                            onPayByCard={() => setCardTarget(inst)}
                           />
                         ) : null}
                         {batch?.status === BatchStatus.UNLOCKED ? (
@@ -1129,6 +1433,7 @@ function AdminPlanView({
                       <p className="mt-1 text-lg font-semibold tabular-nums">
                         {money(inst.amount, quote.currency)}
                       </p>
+                      {isOpenInstallment(inst) ? <StampHint stamp={rates.stampDuty} /> : null}
                     </div>
                     <InstallmentStatusBadge status={inst.status} />
                   </div>
@@ -1160,9 +1465,8 @@ function AdminPlanView({
                     <div className="mt-4 grid gap-2">
                       {isPayable ? (
                         <AdminInstallmentActions
-                          quote={quote}
-                          installment={inst}
                           onRecordCash={() => setCashTarget(inst)}
+                          onPayByCard={() => setCardTarget(inst)}
                           fullWidth
                         />
                       ) : null}
@@ -1195,49 +1499,30 @@ function AdminPlanView({
         key={cashTarget?.id ?? 'closed'}
         target={cashTarget}
         quote={quote}
+        rates={rates}
         onClose={() => setCashTarget(null)}
+      />
+      <AdminCardDialog
+        key={cardTarget ? `card-${cardTarget.id}` : 'card-closed'}
+        target={cardTarget}
+        quote={quote}
+        rates={rates}
+        onClose={() => setCardTarget(null)}
       />
     </>
   );
 }
 
 function AdminInstallmentActions({
-  quote,
-  installment,
   onRecordCash,
+  onPayByCard,
   fullWidth = false,
 }: {
-  quote: Quotation;
-  installment: QuoteInstallment;
   onRecordCash: () => void;
+  onPayByCard: () => void;
   fullWidth?: boolean;
 }) {
-  const { t, lang } = useT();
-  const payCard = usePayByCard();
-
-  const startCardPayment = async () => {
-    const idempotencyKey =
-      typeof crypto !== 'undefined' && 'randomUUID' in crypto
-        ? crypto.randomUUID()
-        : `${quote.id}-${installment.id}-${Date.now()}`;
-
-    try {
-      const session = await payCard.mutateAsync({
-        quotationId: quote.id,
-        installmentId: installment.id,
-        idempotencyKey,
-        orderId: quote.orderId,
-        language: lang === 'en' ? 'en' : 'fr',
-      });
-      const verificationUrl = `/payment/return?paymentId=${encodeURIComponent(
-        session.paymentId,
-      )}`;
-      window.location.assign(session.paymentUrl ?? verificationUrl);
-    } catch {
-      // The mutation hook owns the localized API error toast.
-    }
-  };
-
+  const { t } = useT();
   return (
     <div
       className={cn(
@@ -1247,23 +1532,17 @@ function AdminInstallmentActions({
     >
       <Button
         size="sm"
-        className={cn('min-h-10', fullWidth && 'w-full justify-center')}
-        onClick={startCardPayment}
-        disabled={payCard.isPending}
+        className={cn('min-h-11 sm:min-h-10', fullWidth && 'w-full justify-center')}
+        onClick={onPayByCard}
       >
-        {payCard.isPending ? (
-          <Loader2 className="mr-2 h-4 w-4 shrink-0 animate-spin" />
-        ) : (
-          <CreditCard className="mr-2 h-4 w-4 shrink-0" />
-        )}
+        <CreditCard className="mr-2 h-4 w-4 shrink-0" />
         {t('quoteUi.adminPlan.payByCard')}
       </Button>
       <Button
         size="sm"
         variant="outline"
-        className={cn('min-h-10', fullWidth && 'w-full justify-center')}
+        className={cn('min-h-11 sm:min-h-10', fullWidth && 'w-full justify-center')}
         onClick={onRecordCash}
-        disabled={payCard.isPending}
       >
         <Wallet className="mr-2 h-4 w-4 shrink-0" />
         {t('quoteUi.adminPlan.recordCash')}
@@ -1272,23 +1551,192 @@ function AdminInstallmentActions({
   );
 }
 
-function RecordCashDialog({
+/** An installment still to pay: its payment will carry the stamp. */
+const isOpenInstallment = (inst: QuoteInstallment): boolean =>
+  inst.status === InstallmentStatus.PENDING || inst.status === InstallmentStatus.OVERDUE;
+
+/** The installments that are (or will be) a payment: every one but the cancelled. */
+const paymentCountOf = (installments: QuoteInstallment[]): number =>
+  installments.filter((inst) => inst.status !== InstallmentStatus.CANCELLED).length;
+
+/** "+ 1,000 de timbre" under an open installment's amount. */
+function StampHint({ stamp, className }: { stamp: number; className?: string }) {
+  const { t } = useT();
+  if (!(stamp > 0)) return null;
+  return (
+    <span className={cn('block text-[11px] font-normal text-muted-foreground', className)}>
+      {t('withholdingUi.stampHint', { stamp: formatAmount(stamp) })}
+    </span>
+  );
+}
+
+/**
+ * Admin "Payer par carte" for an installment: the practitioner's retenue
+ * choice first, then the ClicToPay page for the amount charged (the
+ * installment + the stamp - the retenue).
+ */
+function AdminCardDialog({
   target,
   quote,
+  rates,
   onClose,
 }: {
   target: QuoteInstallment | null;
   quote: Quotation;
+  rates: QuoteTaxRates;
+  onClose: () => void;
+}) {
+  const { t, lang } = useT();
+  const payCard = usePayByCard();
+  const [applyWithholding, setApplyWithholding] = useState(false);
+  const [attemptConflict, setAttemptConflict] = useState(false);
+  const apply = rates.withholdingRate > 0 && applyWithholding;
+  const charge = previewInstallmentCharges(
+    [target?.amount],
+    rates.stampDuty,
+    rates.withholdingRate,
+    apply,
+  );
+
+  const start = async () => {
+    if (!target) return;
+    setAttemptConflict(false);
+    const idempotencyKey =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `${quote.id}-${target.id}-${Date.now()}`;
+    try {
+      const session = await payCard.mutateAsync({
+        quotationId: quote.id,
+        installmentId: target.id,
+        idempotencyKey,
+        orderId: quote.orderId,
+        language: lang === 'en' ? 'en' : 'fr',
+        applyWithholding: apply,
+      });
+      const verificationUrl = `/payment/return?paymentId=${encodeURIComponent(
+        session.paymentId,
+      )}`;
+      window.location.assign(session.paymentUrl ?? verificationUrl);
+    } catch (err) {
+      // The mutation hook toasts the API error; an open attempt with the
+      // other retenue choice also gets a plain explanation here. Any other
+      // refusal (a transfer awaiting confirmation…) is the toast's.
+      if (isWithholdingChoiceConflict(err)) setAttemptConflict(true);
+    }
+  };
+
+  return (
+    <Dialog
+      open={!!target}
+      onOpenChange={(o) => {
+        if (!o && !payCard.isPending) onClose();
+      }}
+    >
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{t('quoteUi.adminCard.title')}</DialogTitle>
+          <DialogDescription>
+            {t('quoteUi.adminCard.desc', { n: target?.installmentNumber ?? '' })}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid min-w-0 gap-2">
+          <WithholdingChoice
+            rate={rates.withholdingRate}
+            checked={applyWithholding}
+            onCheckedChange={(checked) => {
+              setApplyWithholding(checked);
+              setAttemptConflict(false);
+            }}
+            charge={charge}
+            currency={quote.currency}
+            disabled={payCard.isPending}
+          />
+          <PriceIncludesTaxNote
+            tvaRate={rates.tvaRate}
+            stamp={rates.stampDuty}
+            currency={quote.currency}
+          />
+          {attemptConflict ? (
+            <p
+              role="alert"
+              className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900"
+            >
+              {t('withholdingUi.choiceConflict')}
+            </p>
+          ) : null}
+        </div>
+        <DialogFooter>
+          <Button
+            variant="ghost"
+            onClick={onClose}
+            disabled={payCard.isPending}
+            className={TAP}
+          >
+            {t('common.cancel')}
+          </Button>
+          <Button
+            onClick={start}
+            disabled={payCard.isPending || !rates.ready}
+            className={cn('gap-2', TAP)}
+          >
+            {payCard.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <CreditCard className="h-4 w-4" />
+            )}
+            {t('quoteUi.adminCard.continue', { amount: money(charge.cash, quote.currency) })}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+type ReceivedMethod = PaymentMethod.CASH | PaymentMethod.CHEQUE;
+
+/**
+ * Admin records money handed over at the clinic: cash or cheque, and
+ * whether the practitioner kept the retenue à la source back.
+ */
+function RecordCashDialog({
+  target,
+  quote,
+  rates,
+  onClose,
+}: {
+  target: QuoteInstallment | null;
+  quote: Quotation;
+  rates: QuoteTaxRates;
   onClose: () => void;
 }) {
   const { t } = useT();
   const record = useRecordCash();
+  const [method, setMethod] = useState<ReceivedMethod>(PaymentMethod.CASH);
+  const [applyWithholding, setApplyWithholding] = useState(false);
   const [receiptNumber, setReceiptNumber] = useState('');
   const [notes, setNotes] = useState('');
+  const apply = rates.withholdingRate > 0 && applyWithholding;
+  const charge = previewInstallmentCharges(
+    [target?.amount],
+    rates.stampDuty,
+    rates.withholdingRate,
+    apply,
+  );
+
+  const methods: Array<{ value: ReceivedMethod; label: string; icon: typeof Wallet }> = [
+    { value: PaymentMethod.CASH, label: t('quoteUi.recordCash.cash'), icon: Wallet },
+    { value: PaymentMethod.CHEQUE, label: t('quoteUi.recordCash.cheque'), icon: FileText },
+  ];
 
   return (
-    <Dialog open={!!target} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent>
+    <Dialog
+      open={!!target}
+      onOpenChange={(o) => {
+        if (!o && !record.isPending) onClose();
+      }}
+    >
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{t('quoteUi.recordCash.title')}</DialogTitle>
           <DialogDescription>
@@ -1298,14 +1746,59 @@ function RecordCashDialog({
             })}
           </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-3">
+        <div className="grid min-w-0 gap-4">
           <div className="grid gap-1.5">
-            <Label htmlFor="receipt">{t('quoteUi.recordCash.receiptNumber')}</Label>
+            <p className="text-sm font-medium">{t('quoteUi.recordCash.methodLabel')}</p>
+            <div className="grid grid-cols-2 gap-1 rounded-lg border bg-muted/30 p-1">
+              {methods.map(({ value, label, icon: Icon }) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={method === value}
+                  onClick={() => setMethod(value)}
+                  disabled={record.isPending}
+                  className={cn(
+                    'flex min-h-11 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium transition disabled:opacity-50 sm:min-h-9',
+                    method === value
+                      ? 'bg-card text-foreground shadow-sm ring-1 ring-border'
+                      : 'text-muted-foreground hover:bg-card/60',
+                  )}
+                >
+                  <Icon className="h-4 w-4 shrink-0" />
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="grid gap-2">
+            <WithholdingChoice
+              rate={rates.withholdingRate}
+              checked={applyWithholding}
+              onCheckedChange={setApplyWithholding}
+              charge={charge}
+              currency={quote.currency}
+              disabled={record.isPending}
+              audience="admin"
+              netLabel={t('withholdingUi.toCollect')}
+            />
+            <PriceIncludesTaxNote
+              tvaRate={rates.tvaRate}
+              stamp={rates.stampDuty}
+              currency={quote.currency}
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="receipt">
+              {method === PaymentMethod.CHEQUE
+                ? t('quoteUi.recordCash.chequeNumber')
+                : t('quoteUi.recordCash.receiptNumber')}
+            </Label>
             <Input
               id="receipt"
               value={receiptNumber}
               onChange={(e) => setReceiptNumber(e.target.value)}
               placeholder={t('common.optional')}
+              className="h-11 sm:h-8"
             />
           </div>
           <div className="grid gap-1.5">
@@ -1319,11 +1812,17 @@ function RecordCashDialog({
           </div>
         </div>
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>
+          <Button
+            variant="ghost"
+            onClick={onClose}
+            disabled={record.isPending}
+            className={TAP}
+          >
             {t('common.cancel')}
           </Button>
           <Button
-            disabled={record.isPending}
+            disabled={record.isPending || !rates.ready}
+            className={cn('gap-2', TAP)}
             onClick={() => {
               if (!target) return;
               record.mutate(
@@ -1334,13 +1833,16 @@ function RecordCashDialog({
                   dto: {
                     receiptNumber: receiptNumber.trim() || undefined,
                     notes: notes.trim() || undefined,
+                    method,
+                    applyWithholding: apply,
                   },
                 },
                 { onSuccess: onClose },
               );
             }}
           >
-            {t('quoteUi.adminPlan.recordCash')}
+            {record.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            {t('quoteUi.recordCash.submit', { amount: money(charge.cash, quote.currency) })}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1401,18 +1903,50 @@ function DoctorPlanView({
   );
   const nextPayable = payable[0];
 
-  // Sum of every payable row — shown both on the timeline header and
-  // inside the dialog when the doctor toggles "all remaining".
-  const payableSum = useMemo(
-    () => payable.reduce((acc, r) => acc + toDec(r.amount), 0),
-    [payable],
+  // Price wording and the stamp, and warms the cache the pay dialog reads
+  // its retenue rate from.
+  const rates = useQuoteTaxRates(quote);
+  // What every payable row costs paid now, one stamp each (the retenue,
+  // the practitioner's choice, comes off in the dialog).
+  const payableCharge = previewInstallmentCharges(
+    payable.map((r) => r.amount),
+    rates.stampDuty,
+    0,
+    false,
   );
+  // The whole plan: the pack total plus one stamp per payment.
+  const plan = previewPlanStamps(quote.totalPrice, paymentCountOf(installments), rates.stampDuty);
 
   return (
     <>
       <Card size="sm">
         <CardContent>
           <PackSummary quote={quote} price={quote.totalPrice} />
+          {plan.count > 0 && plan.stamps > 0 ? (
+            <dl className="mt-2 space-y-1 border-t pt-2 text-sm">
+              <div className="flex items-baseline justify-between gap-3">
+                <dt className="min-w-0 text-muted-foreground">
+                  {plan.count > 1
+                    ? t('withholdingUi.stampTimes', {
+                        count: plan.count,
+                        stamp: formatAmount(plan.stampEach),
+                      })
+                    : t('withholdingUi.stamp')}
+                </dt>
+                <dd className="shrink-0 tabular-nums">+ {money(plan.stamps, quote.currency)}</dd>
+              </div>
+              <div className="flex items-baseline justify-between gap-3 font-medium">
+                <dt className="min-w-0">{t('withholdingUi.totalWithStamps')}</dt>
+                <dd className="shrink-0 tabular-nums">{money(plan.total, quote.currency)}</dd>
+              </div>
+            </dl>
+          ) : null}
+          <PriceIncludesTaxNote
+            className="mt-1 sm:text-right"
+            tvaRate={rates.tvaRate}
+            stamp={rates.stampDuty}
+            currency={quote.currency}
+          />
         </CardContent>
       </Card>
 
@@ -1427,8 +1961,10 @@ function DoctorPlanView({
                 {t('quoteUi.doctor.payAllBefore')}{' '}
                 <strong>{payable.length}</strong>{' '}
                 {t('quoteUi.doctor.payAllMiddle')}{' '}
-                <strong>{payableSum.toFixed(3)} {quote.currency}</strong>{' '}
-                {t('quoteUi.doctor.payAllAfter')}
+                <strong>{money(payableCharge.cash, quote.currency)}</strong>{' '}
+                {payableCharge.stamp > 0
+                  ? t('quoteUi.doctor.payAllAfterStamps')
+                  : t('quoteUi.doctor.payAllAfter')}
               </p>
             </div>
             <DoctorPayActions
@@ -1483,6 +2019,9 @@ function DoctorPlanView({
                     <TableCell>{inst.installmentNumber}</TableCell>
                     <TableCell className="font-mono">
                       {money(inst.amount, quote.currency)}
+                      {isOpenInstallment(inst) ? (
+                        <StampHint stamp={rates.stampDuty} className="font-sans" />
+                      ) : null}
                     </TableCell>
                     <TableCell className="space-y-1">
                       <InstallmentStatusBadge status={inst.status} />
@@ -1544,6 +2083,7 @@ function DoctorPlanView({
                       <p className="mt-1 text-lg font-semibold tabular-nums">
                         {money(inst.amount, quote.currency)}
                       </p>
+                      {isOpenInstallment(inst) ? <StampHint stamp={rates.stampDuty} /> : null}
                     </div>
                     <div className="flex flex-col items-end gap-1">
                       <InstallmentStatusBadge status={inst.status} />
@@ -1665,6 +2205,12 @@ function PaymentMethodDialog({
   const { t, lang } = useT();
   const { data: billingDefaults, isLoading: billingDefaultsLoading } =
     useBillingPublicDefaults(open);
+  const rates = useQuoteTaxRates(quote, open);
+  // Retenue à la source: one choice for the whole payment, applied to each
+  // installment separately (each one is its own invoice).
+  const [applyWithholding, setApplyWithholding] = useState(false);
+  // A card session refused because one is already open with the other choice.
+  const [attemptConflict, setAttemptConflict] = useState(false);
   // Backend currently allows all three methods. If the project later
   // adds `allowedPaymentMethods` on the quote, swap this constant for
   // `quote.allowedPaymentMethods ?? QUOTE_PAYMENT_METHODS`.
@@ -1711,6 +2257,21 @@ function PaymentMethodDialog({
     [hasBalanceDue, hasBankTransfer, isResolvingPaymentOptions],
   );
   const activeMethod = methods.includes(method) ? method : methods[0] ?? null;
+  // The practitioner applies the retenue on what they pay themselves; cash
+  // is recorded by the clinic, which enters the choice there.
+  const offersWithholding =
+    rates.withholdingRate > 0 &&
+    (activeMethod === PaymentMethod.CARD ||
+      activeMethod === PaymentMethod.BANK_TRANSFER);
+  const withholdingApplied = offersWithholding && applyWithholding;
+  // Each installment is its own payment and facture: its own stamp, its
+  // own retenue. `cash` is what the card is charged / what to wire.
+  const charge = previewInstallmentCharges(
+    targets.map((r) => r.amount),
+    rates.stampDuty,
+    rates.withholdingRate,
+    withholdingApplied,
+  );
 
   useEffect(() => {
     if (!open || activeMethod !== PaymentMethod.BANK_TRANSFER) return;
@@ -1731,6 +2292,8 @@ function PaymentMethodDialog({
     setProofFile(null);
     setMethod(PaymentMethod.CARD);
     setScope(defaultScope === 'all' ? 'single' : defaultScope);
+    setApplyWithholding(false);
+    setAttemptConflict(false);
     onClose();
   };
 
@@ -1746,6 +2309,7 @@ function PaymentMethodDialog({
 
     if (activeMethod === PaymentMethod.CARD) {
       setProgress({ done: 0, total: 1 });
+      setAttemptConflict(false);
       try {
         const idempotencyKey =
           typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -1757,14 +2321,19 @@ function PaymentMethodDialog({
           idempotencyKey,
           orderId: quote.orderId,
           language: lang === 'en' ? 'en' : 'fr',
+          applyWithholding: withholdingApplied,
         });
         setProgress({ done: 1, total: 1 });
         const verificationUrl = `/payment/return?paymentId=${encodeURIComponent(
           session.paymentId,
         )}`;
         window.location.assign(session.paymentUrl ?? verificationUrl);
-      } catch {
+      } catch (err) {
         setProgress(null);
+        // The hook toasts the API error; an open attempt with the other
+        // retenue choice also gets a plain explanation in the dialog. Any
+        // other refusal (a transfer awaiting confirmation…) is the toast's.
+        if (isWithholdingChoiceConflict(err)) setAttemptConflict(true);
       }
       return;
     }
@@ -1785,6 +2354,7 @@ function PaymentMethodDialog({
           orderId: quote.orderId,
           bankReference: bankReference.trim() || undefined,
           proofFile,
+          applyWithholding: withholdingApplied,
         });
         setProgress({ done: i + 1, total: targets.length });
       }
@@ -1824,7 +2394,7 @@ function PaymentMethodDialog({
             <div className="min-w-0">
               <DialogTitle className="text-lg font-semibold sm:text-xl">
                 {t('quoteUi.payDialog.title', {
-                  amount: `${total.toFixed(3)} ${quote.currency}`,
+                  amount: money(charge.cash, quote.currency),
                 })}
               </DialogTitle>
               <DialogDescription>
@@ -1853,12 +2423,20 @@ function PaymentMethodDialog({
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable] lg:grid lg:grid-cols-[38%_minmax(0,1fr)] lg:overflow-hidden">
           {/* Amount and order context */}
           <aside className="flex flex-col border-b bg-muted/30 p-5 sm:p-6 lg:min-h-0 lg:overflow-y-auto lg:border-b-0 lg:border-r lg:p-7">
+            {/* What changes hands: the installment(s) + one stamp each -
+                the retenue when ticked. The breakdown sits by the method. */}
             <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              {t('quoteUi.payDialog.amountDue')}
+              {t('quoteUi.payDialog.amountToPay')}
             </p>
             <p className="mt-1.5 text-3xl font-bold tabular-nums text-foreground sm:text-4xl">
-              {total.toFixed(3)} {quote.currency}
+              {money(charge.cash, quote.currency)}
             </p>
+            <PriceIncludesTaxNote
+              className="mt-1.5"
+              tvaRate={rates.tvaRate}
+              stamp={rates.stampDuty}
+              currency={quote.currency}
+            />
             <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
               {scope === 'all'
                 ? t('quoteUi.payDialog.asideAll', { count: payable.length })
@@ -2002,10 +2580,10 @@ function PaymentMethodDialog({
                           count: payable.length,
                         })}{' '}
                         ·{' '}
-                        {payable
-                          .reduce((acc, r) => acc + toDec(r.amount), 0)
-                          .toFixed(3)}{' '}
-                        {quote.currency}
+                        {money(
+                          sumAmounts(payable.map((r) => r.amount)),
+                          quote.currency,
+                        )}
                       </span>
                     </button>
                   </div>
@@ -2073,6 +2651,30 @@ function PaymentMethodDialog({
                 </div>
               ) : null}
 
+              {/* The breakdown: installment(s) TTC, one stamp each, the
+                  retenue when ticked (card and transfer only: cash is
+                  recorded by the clinic with the choice made there). */}
+              {activeMethod && !isResolvingPaymentOptions ? (
+                <WithholdingChoice
+                  rate={rates.withholdingRate}
+                  offer={offersWithholding}
+                  checked={applyWithholding}
+                  onCheckedChange={(checked) => {
+                    setApplyWithholding(checked);
+                    setAttemptConflict(false);
+                  }}
+                  charge={charge}
+                  kind={scope === 'all' ? 'installments' : 'installment'}
+                  currency={quote.currency}
+                  disabled={isPending}
+                  netLabel={
+                    activeMethod === PaymentMethod.BANK_TRANSFER
+                      ? t('withholdingUi.toTransfer')
+                      : undefined
+                  }
+                />
+              ) : null}
+
               {isResolvingPaymentOptions || methods.length === 0 ? (
                 <PaymentOptionNotice
                   hasBalanceDue={hasBalanceDue}
@@ -2110,6 +2712,35 @@ function PaymentMethodDialog({
                           {t('quoteUi.payDialog.btDesc')}
                         </p>
                       </div>
+                    </div>
+
+                    {/* The amount to wire: stamps included, net of the
+                        retenue when applied. */}
+                    <div className="rounded-lg border bg-muted/30 px-3 py-2.5">
+                      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                        <span className="text-xs font-medium text-muted-foreground">
+                          {t('quoteUi.payDialog.btAmountLabel')}
+                        </span>
+                        <span className="text-base font-semibold tabular-nums">
+                          {money(charge.cash, quote.currency)}
+                        </span>
+                      </div>
+                      {charge.stamp > 0 || charge.withholding > 0 ? (
+                        <p className="mt-0.5 text-[11px] text-muted-foreground">
+                          {charge.stamp > 0 && charge.withholding > 0
+                            ? t('quoteUi.payDialog.btAmountStampWithholding', {
+                                stamp: money(charge.stamp, quote.currency),
+                                amount: money(charge.withholding, quote.currency),
+                              })
+                            : charge.stamp > 0
+                              ? t('quoteUi.payDialog.btAmountStamp', {
+                                  stamp: money(charge.stamp, quote.currency),
+                                })
+                              : t('quoteUi.payDialog.btAmountWithholding', {
+                                  amount: money(charge.withholding, quote.currency),
+                                })}
+                        </p>
+                      ) : null}
                     </div>
 
                     <div className="grid gap-1.5">
@@ -2238,6 +2869,15 @@ function PaymentMethodDialog({
                 </div>
               )}
 
+              {attemptConflict ? (
+                <p
+                  role="alert"
+                  className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900"
+                >
+                  {t('withholdingUi.choiceConflict')}
+                </p>
+              ) : null}
+
               {progress ? (
                 <div
                   role="status"
@@ -2260,7 +2900,7 @@ function PaymentMethodDialog({
             variant="outline"
             onClick={close}
             disabled={isPending}
-            className="w-full sm:w-auto"
+            className="h-11 w-full sm:h-9 sm:w-auto"
           >
             {activeMethod ? t('common.cancel') : t('common.close')}
           </Button>
@@ -2268,7 +2908,7 @@ function PaymentMethodDialog({
             <Button
               onClick={submit}
               disabled={isPending}
-              className="w-full gap-1.5 font-medium shadow-sm sm:min-w-[180px] sm:w-auto"
+              className="h-11 w-full gap-1.5 font-medium shadow-sm sm:h-9 sm:min-w-[180px] sm:w-auto"
             >
               {isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -2284,7 +2924,9 @@ function PaymentMethodDialog({
                   ? t('quoteUi.payDialog.payTranches', {
                       count: payable.length,
                     })
-                  : t('quoteUi.payDialog.payByCard')
+                  : t('quoteUi.payDialog.payByCard', {
+                      amount: money(charge.cash, quote.currency),
+                    })
                 : activeMethod === PaymentMethod.BANK_TRANSFER
                   ? scope === 'all'
                     ? t('quoteUi.payDialog.submitDeclarations', {

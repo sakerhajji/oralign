@@ -1087,6 +1087,7 @@ export const dict = {
         } as T,
         quotation_created: { en: "Quotation created", fr: "Devis créé" } as T,
         quotation_sent: { en: "Quotation sent", fr: "Devis envoyé" } as T,
+        quotation_updated: { en: "Quotation modified", fr: "Devis modifié" } as T,
         quotation_approved: {
           en: "Quotation approved",
           fr: "Devis approuvé",
@@ -1170,6 +1171,16 @@ export const dict = {
         } as T,
       },
       fields: {
+        treatmentFees: { en: 'Treatment / pack price (TTC)', fr: 'Prix du pack / traitement (TTC)' } as T,
+        fabricationFees: { en: 'Fabrication fees (TTC)', fr: 'Frais de fabrication (TTC)' } as T,
+        deliveryFees: { en: 'Delivery fees (TTC)', fr: 'Frais de livraison (TTC)' } as T,
+        discountAmount: { en: 'Discount (TTC)', fr: 'Remise (TTC)' } as T,
+        discountPercent: { en: 'Discount (%)', fr: 'Remise (%)' } as T,
+        tvaRate: { en: 'VAT rate (%)', fr: 'Taux de TVA (%)' } as T,
+        subTotalHt: { en: 'Total excl. VAT', fr: 'Total HT' } as T,
+        tvaAmount: { en: 'VAT', fr: 'TVA' } as T,
+        totalTtc: { en: 'Total incl. VAT', fr: 'Total TTC' } as T,
+        adminMessage: { en: 'Message on the quote', fr: 'Message sur le devis' } as T,
         status: { en: "Status", fr: "Statut" } as T,
         orderCode: { en: "Order code", fr: "Code commande" } as T,
         patientId: { en: "Patient", fr: "Patient" } as T,
@@ -1297,7 +1308,7 @@ export const dict = {
       titlePending: { en: 'Bank transfer awaiting confirmation', fr: 'Virement en attente de confirmation' } as T,
       doctorPay: { en: 'Pay treatment fee', fr: 'Payer les honoraires' } as T,
       adminConfirm: { en: 'Review & confirm', fr: 'Vérifier & confirmer' } as T,
-      viewReceipt: { en: 'View receipt', fr: 'Voir le reçu' } as T,
+      viewReceipt: { en: 'View the transfer proof', fr: 'Voir le justificatif' } as T,
       paidOnTeam: {
         en: 'The treatment fee has been settled. The treatment plan can now be sent.',
         fr: 'Les honoraires ont été réglés. Le plan de traitement peut désormais être envoyé.',
@@ -2191,11 +2202,19 @@ export const dict = {
   // ─── ANCHOR · admin invoices ───────────────────────────────────
   // Poste de facturation admin (/dashboard/invoices). Les recus de
   // paiement gardent leurs propres cles dans le cluster payments.
+  // components/billing/discount-field.tsx — remise as an amount or a %.
+  discountField: {
+    mode: { en: 'Discount type', fr: 'Type de remise' } as T,
+    inAmount: { en: 'Discount as an amount', fr: 'Remise en montant' } as T,
+    inPercent: { en: 'Discount as a percentage', fr: 'Remise en pourcentage' } as T,
+    equals: { en: '= {amount}', fr: '= {amount}' } as T,
+  },
+
   invoicesAdmin: {
     title: { en: 'Invoices', fr: 'Factures' } as T,
     intro: {
-      en: 'Every invoice issued by the company — automatic receipts and manual invoices alike.',
-      fr: 'Toutes les factures émises par la société — reçus automatiques et factures manuelles.',
+      en: 'Every invoice issued by the company — automatic invoices of payments and manual invoices alike.',
+      fr: 'Toutes les factures émises par la société — factures automatiques des paiements et factures manuelles.',
     } as T,
     loading: { en: 'Loading invoices…', fr: 'Chargement des factures…' } as T,
     error: { en: 'Could not load invoices.', fr: 'Impossible de charger les factures.' } as T,
@@ -2203,7 +2222,7 @@ export const dict = {
     emptyFiltered: { en: 'No invoice matches these filters.', fr: 'Aucune facture ne correspond à ces filtres.' } as T,
 
     colNumber: { en: 'Number', fr: 'Numéro' } as T,
-    colClient: { en: 'Client', fr: 'Client' } as T,
+    colClient: { en: 'Doctor', fr: 'Docteur' } as T,
     colDate: { en: 'Date', fr: 'Date' } as T,
     colOrder: { en: 'Order', fr: 'Commande' } as T,
     colStatus: { en: 'Status', fr: 'Statut' } as T,
@@ -2217,7 +2236,7 @@ export const dict = {
     statusPaid: { en: 'Paid', fr: 'Payée' } as T,
     statusCancelled: { en: 'Cancelled', fr: 'Annulée' } as T,
 
-    searchPlaceholder: { en: 'Number, client, order…', fr: 'Numéro, client, commande…' } as T,
+    searchPlaceholder: { en: 'Number, doctor, order…', fr: 'Numéro, docteur, commande…' } as T,
     allStatuses: { en: 'All statuses', fr: 'Tous les statuts' } as T,
     from: { en: 'From', fr: 'Du' } as T,
     to: { en: 'To', fr: 'Au' } as T,
@@ -2240,6 +2259,18 @@ export const dict = {
       en: 'Generated automatically from a payment',
       fr: 'Générée automatiquement depuis un paiement',
     } as T,
+    // Row: e-mail to the practitioner, net after withholding, cancel, delete
+    sendEmail: { en: 'Send by e-mail', fr: 'Envoyer par e-mail' } as T,
+    resendEmail: { en: 'Send again by e-mail', fr: 'Renvoyer par e-mail' } as T,
+    emailedOn: { en: 'Sent {date}', fr: 'Envoyée le {date}' } as T,
+    emailedTitle: { en: 'Sent to {email} on {date}', fr: 'Envoyée à {email} le {date}' } as T,
+    netPayableShort: { en: 'Net {amount}', fr: 'Net {amount}' } as T,
+    deleteDraft: { en: 'Delete the draft', fr: 'Supprimer le brouillon' } as T,
+    cancelInvoiceTitle: { en: 'Cancel invoice {number}?', fr: 'Annuler la facture {number} ?' } as T,
+    cancelInvoiceBody: {
+      en: 'The invoice is marked Cancelled. Its number stays in the series and is never reused; it no longer counts in the totals.',
+      fr: 'La facture est marquée Annulée. Son numéro reste dans la série et n’est jamais réutilisé ; elle ne compte plus dans les totaux.',
+    } as T,
     sourceManual: { en: 'Manual', fr: 'Manuelle' } as T,
     sourceManualTitle: {
       en: 'Created by hand from this desk',
@@ -2257,8 +2288,8 @@ export const dict = {
     permanentDelete: { en: 'Delete permanently', fr: 'Supprimer définitivement' } as T,
     permanentTitle: { en: 'Delete this invoice permanently?', fr: 'Supprimer définitivement cette facture ?' } as T,
     permanentBody: {
-      en: 'Only a draft can be erased. An invoice that was ever issued stays archived — a fiscal sequence may not have holes.',
-      fr: 'Seul un brouillon peut être effacé. Une facture déjà émise reste archivée — une séquence fiscale ne peut pas avoir de trous.',
+      en: 'Only a draft that was never issued can be erased. An issued or paid invoice is cancelled instead: it keeps its number.',
+      fr: 'Seul un brouillon jamais émis peut être effacé. Une facture émise ou payée s’annule : elle garde son numéro.',
     } as T,
     selected: { en: '{count} selected', fr: '{count} sélectionnée(s)' } as T,
     exportCsv: { en: 'Export CSV (Excel)', fr: 'Exporter CSV (Excel)' } as T,
@@ -2271,20 +2302,84 @@ export const dict = {
       en: 'Totals are always recomputed by the server from the lines below.',
       fr: 'Les totaux sont toujours recalculés par le serveur à partir des lignes ci-dessous.',
     } as T,
-    clientSection: { en: 'Client', fr: 'Client' } as T,
-    clientSearch: { en: 'Search an existing patient', fr: 'Rechercher un patient existant' } as T,
+    clientSection: { en: 'Doctor', fr: 'Docteur' } as T,
+    clientSectionDesc: {
+      en: 'Search the doctor you are billing: their details and practice fill the invoice. You can also type them in by hand.',
+      fr: 'Recherchez le docteur facturé : ses coordonnées et son cabinet remplissent la facture. Vous pouvez aussi les saisir à la main.',
+    } as T,
+    clientSearch: {
+      en: 'Search a doctor (name, e-mail, phone, practice)',
+      fr: 'Rechercher un docteur (nom, e-mail, téléphone, cabinet)',
+    } as T,
     clientSearchHint: {
-      en: 'Type at least 2 characters. Pick a patient to prefill, or fill the fields by hand.',
-      fr: 'Saisissez au moins 2 caractères. Choisissez un patient pour préremplir, ou remplissez les champs à la main.',
+      en: 'Type at least 2 characters. Pick a doctor to prefill their details, or fill the fields by hand.',
+      fr: 'Saisissez au moins 2 caractères. Choisissez un docteur pour préremplir ses coordonnées, ou remplissez les champs à la main.',
     } as T,
     clientSearching: { en: 'Searching…', fr: 'Recherche…' } as T,
-    clientNoMatch: { en: 'No patient found — fill the client in by hand.', fr: 'Aucun patient trouvé — saisissez le client à la main.' } as T,
+    clientNoMatch: {
+      en: 'No doctor found — type their details in by hand.',
+      fr: 'Aucun docteur trouvé — saisissez ses coordonnées à la main.',
+    } as T,
     clientClear: { en: 'Detach', fr: 'Détacher' } as T,
     ordersOf: { en: 'Orders of {name}', fr: 'Commandes de {name}' } as T,
+    ordersCount: { en: '{count} order(s)', fr: '{count} commande(s)' } as T,
     prefillFromOrder: { en: 'Prefill from this order', fr: 'Préremplir depuis cette commande' } as T,
-    noOrders: { en: 'This patient has no order.', fr: 'Ce patient n’a aucune commande.' } as T,
+    noOrders: { en: 'This doctor has no order.', fr: 'Ce docteur n’a aucune commande.' } as T,
+    errDoctorName: { en: 'The doctor’s name is required.', fr: 'Le nom du docteur est obligatoire.' } as T,
+    // The doctor's orders, under the picked doctor
+    orderQuote: { en: 'Quote {amount}', fr: 'Devis {amount}' } as T,
+    orderFee: { en: 'Treatment fee {amount}', fr: 'Honoraires {amount}' } as T,
+    // What is already on paper, the quote and the fee apart (the fee's
+    // automatic facture also points at the order).
+    orderQuoteInvoiced: {
+      en: 'Quote already invoiced {amount}',
+      fr: 'Devis déjà facturé {amount}',
+    } as T,
+    orderFeeInvoiced: {
+      en: 'Fee already invoiced {amount}',
+      fr: 'Honoraires déjà facturés {amount}',
+    } as T,
+    billQuote: { en: 'Bill the quote', fr: 'Facturer le devis' } as T,
+    billFee: { en: 'Bill the fee', fr: 'Facturer les honoraires' } as T,
+    feeLine: { en: 'Treatment fee — {code}', fr: 'Honoraires de traitement — {code}' } as T,
+    orderLineTtcHint: {
+      en: 'Amount incl. tax taken from the quote (VAT included); the stamp duty is added to the total.',
+      fr: 'Montant TTC repris du devis (TVA incluse) ; le droit de timbre s’ajoute au total.',
+    } as T,
+    feeLineTtcHint: {
+      en: 'Treatment fee due, incl. tax (VAT included); the stamp duty is added to the total.',
+      fr: 'Honoraires dus, TTC (TVA incluse) ; le droit de timbre s’ajoute au total.',
+    } as T,
+    orderPartlyInvoiced: {
+      en: 'This quote is already partly invoiced',
+      fr: 'Ce devis est déjà facturé en partie',
+    } as T,
+    orderPartlyInvoicedBody: {
+      en: '{invoiced} already invoiced out of {total}: the line takes the rest, {remaining}.',
+      fr: '{invoiced} déjà facturés sur {total} : la ligne reprend le reste, {remaining}.',
+    } as T,
+    orderFullyInvoiced: {
+      en: 'This quote is already fully invoiced',
+      fr: 'Ce devis est déjà entièrement facturé',
+    } as T,
+    orderFullyInvoicedBody: {
+      en: '{invoiced} already invoiced out of {total}. The line is added at 0: type an amount if needed.',
+      fr: '{invoiced} déjà facturés sur {total}. La ligne est ajoutée à 0 : saisissez un montant si besoin.',
+    } as T,
+    feeAlreadyInvoiced: {
+      en: 'The treatment fee invoice already exists',
+      fr: 'La facture des honoraires existe déjà',
+    } as T,
+    feeAlreadyInvoicedBody: {
+      en: '{invoiced} of the {total} fee already invoiced: the line is added at {remaining}. Type an amount only to bill it again on purpose.',
+      fr: '{invoiced} déjà facturés sur {total} d’honoraires : la ligne est ajoutée à {remaining}. Saisissez un montant seulement pour les refacturer volontairement.',
+    } as T,
+    packAddedTtcHint: {
+      en: 'Pack price incl. tax ({price}), VAT included; the stamp duty is added to the total.',
+      fr: 'Prix TTC du pack ({price}), TVA incluse ; le droit de timbre s’ajoute au total.',
+    } as T,
 
-    fieldClientName: { en: 'Name / company', fr: 'Nom / société' } as T,
+    fieldClientName: { en: 'Doctor / practice name', fr: 'Nom du docteur / cabinet' } as T,
     fieldEmail: { en: 'Email', fr: 'E-mail' } as T,
     fieldPhone: { en: 'Phone', fr: 'Téléphone' } as T,
     fieldAddress: { en: 'Address', fr: 'Adresse' } as T,
@@ -2306,6 +2401,21 @@ export const dict = {
     lineDescription: { en: 'Description', fr: 'Description' } as T,
     lineQuantity: { en: 'Qty', fr: 'Qté' } as T,
     lineUnitPrice: { en: 'Unit price', fr: 'Prix unitaire' } as T,
+    lineUnitPriceTtc: { en: 'Unit price incl. tax', fr: 'Prix unitaire TTC' } as T,
+    lineUnitPriceHt: { en: 'Unit price excl. tax', fr: 'Prix unitaire HT' } as T,
+    lineTotalTtc: { en: 'Total', fr: 'Total TTC' } as T,
+    pricesIncludeTax: {
+      en: 'Prices typed incl. tax (VAT included, stamp added)',
+      fr: 'Prix saisis TTC (TVA incluse, timbre ajouté)',
+    } as T,
+    pricesIncludeTaxOn: {
+      en: 'Type the prices incl. tax: net and VAT are worked out from them, the stamp duty is added to the total.',
+      fr: 'Saisissez les prix TTC : le HT et la TVA en sont déduits, le droit de timbre s’ajoute au total.',
+    } as T,
+    pricesIncludeTaxOff: {
+      en: 'Type prices excl. tax: VAT and the stamp are added on top.',
+      fr: 'Saisissez des prix HT : la TVA et le timbre s’ajoutent au total.',
+    } as T,
     lineTva: { en: 'VAT %', fr: 'TVA %' } as T,
     lineTotal: { en: 'Net', fr: 'HT' } as T,
     addLine: { en: 'Add a line', fr: 'Ajouter une ligne' } as T,
@@ -2316,9 +2426,34 @@ export const dict = {
     fieldTvaRate: { en: 'VAT rate (%)', fr: 'Taux de TVA (%)' } as T,
     fieldDiscount: { en: 'Discount', fr: 'Remise' } as T,
     fieldStampDuty: { en: 'Stamp duty', fr: 'Droit de timbre' } as T,
+    fieldDiscountTtc: { en: 'Discount incl. tax', fr: 'Remise TTC' } as T,
+    fieldPaymentMethod: { en: 'Payment method', fr: 'Mode de paiement' } as T,
+    paymentMethodNone: { en: 'Not specified', fr: 'Non précisé' } as T,
+    paymentMethodPaidHint: {
+      en: 'Say how it was paid: the method is printed on the paid invoice.',
+      fr: 'Indiquez le mode de paiement : il est imprimé sur la facture payée.',
+    } as T,
+    fieldPaymentReference: { en: 'Payment reference', fr: 'Référence du paiement' } as T,
+    paymentReferencePh: {
+      en: 'Cheque number, transfer reference…',
+      fr: 'N° de chèque, référence du virement…',
+    } as T,
+    fieldWithholdingRate: { en: 'Withholding tax (%)', fr: 'Retenue à la source (%)' } as T,
+    applyWithholdingRate: { en: 'Apply the rate ({rate} %)', fr: 'Appliquer le taux ({rate} %)' } as T,
+    withholdingHint: {
+      en: '0 = none. Worked out on the total incl. tax, stamp duty excluded.',
+      fr: '0 = aucune. Calculée sur le total TTC hors timbre.',
+    } as T,
     previewHt: { en: 'Net', fr: 'Total HT' } as T,
     previewTva: { en: 'VAT', fr: 'TVA' } as T,
+    previewTvaRate: { en: 'VAT ({rate} %)', fr: 'TVA ({rate} %)' } as T,
     previewTtc: { en: 'Total', fr: 'Total TTC' } as T,
+    previewLinesTtc: { en: 'Lines incl. tax', fr: 'Total des lignes TTC' } as T,
+    previewLinesHt: { en: 'Lines excl. tax', fr: 'Total des lignes HT' } as T,
+    previewWithholding: { en: 'Withholding tax ({rate} %)', fr: 'Retenue à la source ({rate} %)' } as T,
+    previewNetPayable: { en: 'Net to pay', fr: 'Net à payer' } as T,
+    previewMethod: { en: 'Method: {method}', fr: 'Mode : {method}' } as T,
+    previewReference: { en: 'Ref. {reference}', fr: 'Réf. {reference}' } as T,
     previewHint: {
       en: 'Preview — the server recomputes and stores the authoritative figures.',
       fr: 'Aperçu — le serveur recalcule et enregistre les montants faisant foi.',
@@ -2327,6 +2462,62 @@ export const dict = {
     auditSection: { en: 'Change log', fr: 'Journal des modifications' } as T,
     auditEmpty: { en: 'No change recorded.', fr: 'Aucune modification enregistrée.' } as T,
     auditBy: { en: 'by {actor}', fr: 'par {actor}' } as T,
+    // components/invoices/invoice-history.tsx — the edit screen's "Historique"
+    historyTitle: { en: 'History', fr: 'Historique' } as T,
+    historyDesc: {
+      en: 'Every change made to this invoice once issued, with who made it.',
+      fr: 'Chaque modification de la facture depuis son émission, avec son auteur.',
+    } as T,
+    historySystem: { en: 'Automatic', fr: 'Automatique' } as T,
+    historyEmpty: { en: '(empty)', fr: '(vide)' } as T,
+    historyYes: { en: 'Yes', fr: 'Oui' } as T,
+    historyNo: { en: 'No', fr: 'Non' } as T,
+    historyLinesReplaced: { en: 'Lines changed', fr: 'Lignes modifiées' } as T,
+    historyChanged: { en: 'changed', fr: 'modifié' } as T,
+    historyShowMore: { en: 'Show {count} more', fr: 'Afficher {count} de plus' } as T,
+    historyAction: {
+      created: { en: 'Created', fr: 'Création' } as T,
+      updated: { en: 'Edited', fr: 'Modification' } as T,
+      status_changed: { en: 'Status changed', fr: 'Changement de statut' } as T,
+      emailed: { en: 'Sent by e-mail', fr: 'Envoyée par e-mail' } as T,
+      cancelled: { en: 'Cancelled', fr: 'Annulation' } as T,
+      archived: { en: 'Archived', fr: 'Archivage' } as T,
+      restored: { en: 'Restored', fr: 'Restauration' } as T,
+    },
+    historyField: {
+      orderId: { en: 'Order', fr: 'Commande' } as T,
+      patientId: { en: 'Patient', fr: 'Patient' } as T,
+      doctorId: { en: 'Doctor (account)', fr: 'Docteur (compte)' } as T,
+      invoiceNumber: { en: 'Number', fr: 'Numéro' } as T,
+      status: { en: 'Status', fr: 'Statut' } as T,
+      clientName: { en: 'Doctor / practice', fr: 'Docteur / cabinet' } as T,
+      clientEmail: { en: 'E-mail', fr: 'E-mail' } as T,
+      clientPhone: { en: 'Phone', fr: 'Téléphone' } as T,
+      clientAddress: { en: 'Address', fr: 'Adresse' } as T,
+      clientCity: { en: 'City', fr: 'Ville' } as T,
+      clientCountry: { en: 'Country', fr: 'Pays' } as T,
+      clientTaxId: { en: 'Tax number', fr: 'Matricule fiscal' } as T,
+      issueDate: { en: 'Issue date', fr: 'Date d’émission' } as T,
+      dueDate: { en: 'Due date', fr: 'Date d’échéance' } as T,
+      tvaRate: { en: 'VAT rate', fr: 'Taux de TVA' } as T,
+      discountAmount: { en: 'Discount', fr: 'Remise' } as T,
+      discountPercent: { en: 'Discount (%)', fr: 'Remise (%)' } as T,
+      stampDuty: { en: 'Stamp duty', fr: 'Droit de timbre' } as T,
+      subTotalHt: { en: 'Total excl. tax', fr: 'Total HT' } as T,
+      tvaAmount: { en: 'VAT', fr: 'TVA' } as T,
+      totalTtc: { en: 'Total incl. tax', fr: 'Total TTC' } as T,
+      notes: { en: 'Notes', fr: 'Notes' } as T,
+      language: { en: 'PDF language', fr: 'Langue du PDF' } as T,
+      pricesIncludeTax: { en: 'Prices typed incl. tax', fr: 'Prix saisis TTC' } as T,
+      paymentMethod: { en: 'Payment method', fr: 'Mode de paiement' } as T,
+      paymentReference: { en: 'Payment reference', fr: 'Référence du paiement' } as T,
+      withholdingRate: { en: 'Withholding rate', fr: 'Taux de retenue' } as T,
+      withholdingAmount: { en: 'Withholding tax', fr: 'Retenue à la source' } as T,
+      netPayable: { en: 'Net to pay', fr: 'Net à payer' } as T,
+      emailedTo: { en: 'Sent to', fr: 'Envoyée à' } as T,
+      emailedAt: { en: 'Sent on', fr: 'Envoyée le' } as T,
+      lines: { en: 'Lines', fr: 'Lignes' } as T,
+    },
 
     cancel: { en: 'Cancel', fr: 'Annuler' } as T,
     save: { en: 'Save', fr: 'Enregistrer' } as T,
@@ -2337,6 +2528,22 @@ export const dict = {
     toastArchived: { en: 'Invoice archived.', fr: 'Facture archivée.' } as T,
     toastRestored: { en: 'Invoice restored.', fr: 'Facture restaurée.' } as T,
     toastPermanentlyDeleted: { en: 'Invoice permanently deleted.', fr: 'Facture supprimée définitivement.' } as T,
+    toastEmailed: { en: 'Invoice sent to {email}.', fr: 'Facture envoyée à {email}.' } as T,
+    // 400 / 422 refusals of "send by e-mail" (the API writes them in English).
+    emailErrors: {
+      noRecipient: {
+        en: 'This invoice has no recipient: link a doctor or fill in the client e-mail.',
+        fr: 'Cette facture n’a pas de destinataire : liez un docteur ou renseignez l’e-mail du client.',
+      } as T,
+      notConfigured: {
+        en: 'E-mail sending is not configured on the server: the invoice was not sent.',
+        fr: 'L’envoi d’e-mails n’est pas configuré sur le serveur : la facture n’a pas été envoyée.',
+      } as T,
+      sendFailed: {
+        en: 'The e-mail server refused the message: the invoice was not sent.',
+        fr: 'Le serveur d’e-mail a refusé le message : la facture n’a pas été envoyée.',
+      } as T,
+    },
     toastBulkArchived: { en: '{count} invoice(s) archived.', fr: '{count} facture(s) archivée(s).' } as T,
     toastExported: { en: 'Export ready.', fr: 'Export prêt.' } as T,
   },
@@ -2356,6 +2563,7 @@ export const dict = {
       card: { en: 'Card', fr: 'Carte' } as T,
       bank_transfer: { en: 'Bank transfer', fr: 'Virement bancaire' } as T,
       cash: { en: 'Cash', fr: 'Espèces' } as T,
+      cheque: { en: 'Cheque', fr: 'Chèque' } as T,
     },
 
     // Reused widgets / column titles
@@ -2378,8 +2586,8 @@ export const dict = {
     // Shared action labels
     actions: {
       viewReceipt: {
-        en: 'View the doctor-uploaded receipt',
-        fr: 'Consulter le reçu téléversé par le praticien',
+        en: 'View the transfer proof uploaded by the doctor',
+        fr: 'Consulter le justificatif téléversé par le praticien',
       } as T,
       view: { en: 'View', fr: 'Consulter' } as T,
       openQuote: { en: 'Open quote', fr: 'Ouvrir le devis' } as T,
@@ -2390,35 +2598,35 @@ export const dict = {
     // Empty / loading
     emptyDefault: { en: 'No payments yet.', fr: 'Aucun paiement pour le moment.' } as T,
     submittedShort: { en: 'Submitted {date}', fr: 'Soumis le {date}' } as T,
-    // The admin's inline receipt-number editor (invoice-number-editor.tsx):
-    // the payments desk calls the FAC-… document a receipt (« reçu »).
+    // The admin's inline invoice-number editor (invoice-number-editor.tsx):
+    // every payment produces a FACTURE (FAC-…).
     invoiceNumberPh: { en: 'FAC-000123', fr: 'FAC-000123' } as T,
     invoiceNumberAria: {
-      en: 'Receipt number',
-      fr: 'Numéro du reçu',
+      en: 'Invoice number',
+      fr: 'Numéro de facture',
     } as T,
     saveInvoiceAria: {
-      en: 'Save the receipt number',
-      fr: 'Enregistrer le numéro du reçu',
+      en: 'Save the invoice number',
+      fr: 'Enregistrer le numéro de facture',
     } as T,
     cancelAria: { en: 'Cancel', fr: 'Annuler' } as T,
     editReceiptNumberAria: {
-      en: 'Edit receipt number {number}',
-      fr: 'Modifier le numéro du reçu {number}',
+      en: 'Edit invoice number {number}',
+      fr: 'Modifier le numéro de facture {number}',
     } as T,
     editReceiptNumberEmptyAria: {
-      en: 'Set the receipt number',
-      fr: 'Saisir le numéro du reçu',
+      en: 'Set the invoice number',
+      fr: 'Saisir le numéro de facture',
     } as T,
     // The API's refusals (errorCode → copy; its own text is English only).
     invoiceNumberErrors: {
       taken: {
-        en: 'The number {number} is already used by another receipt or invoice.',
-        fr: 'Le numéro {number} est déjà utilisé par un autre reçu ou une autre facture.',
+        en: 'The number {number} is already used by another invoice.',
+        fr: 'Le numéro {number} est déjà utilisé par une autre facture.',
       } as T,
       notEditable: {
-        en: 'Only a paid installment has a receipt number to edit.',
-        fr: 'Seule une échéance payée a un numéro de reçu à modifier.',
+        en: 'Only a paid payment has an invoice number to edit.',
+        fr: 'Seul un paiement réglé a un numéro de facture à modifier.',
       } as T,
       reserved: {
         en: 'This number belongs to the automatic sequence still to come: pick a lower number or another prefix.',
@@ -2505,8 +2713,8 @@ export const dict = {
       fr: 'Honoraires de traitement en attente de confirmation',
     } as T,
     treatmentFeesPendingDesc: {
-      en: "Doctor-uploaded bank-transfer receipts for the order's professional fee. Open the receipt to review the proof and confirm in one place.",
-      fr: 'Reçus de virement bancaire téléversés par le praticien pour les honoraires de la commande. Ouvrez le reçu pour vérifier la pièce justificative et confirmer en un seul endroit.',
+      en: "Bank-transfer proofs uploaded by the doctor for the order's professional fee. Open the proof to review it and confirm in one place.",
+      fr: 'Justificatifs de virement téléversés par le praticien pour les honoraires de la commande. Ouvrez le justificatif pour le vérifier et confirmer en un seul endroit.',
     } as T,
     treatmentFeesPendingCount: {
       en: '{count} pending',
@@ -2532,8 +2740,8 @@ export const dict = {
     title: { en: 'Invoice', fr: 'Facture' } as T,
     numberLabel: { en: 'No.', fr: 'N°' } as T,
     receiptPreview: {
-      en: 'Payment receipt preview.',
-      fr: 'Aperçu du reçu de paiement.',
+      en: 'Preview of the payment invoice.',
+      fr: 'Aperçu de la facture du paiement.',
     } as T,
     downloadPdf: { en: 'Download PDF', fr: 'Télécharger le PDF' } as T,
     loading: { en: 'Loading invoice…', fr: 'Chargement de la facture…' } as T,
@@ -2774,8 +2982,8 @@ export const dict = {
   accountBillingSettings: {
     title: { en: 'Billing settings', fr: 'Paramètres de facturation' } as T,
     subtitle: {
-      en: 'Company-wide configuration used by every quotation PDF.',
-      fr: 'Configuration applicable à l’ensemble des devis PDF de la société.',
+      en: 'Company-wide configuration used by every quote and invoice PDF.',
+      fr: 'Configuration applicable à tous les devis et factures PDF de la société.',
     } as T,
     adminsOnly: {
       en: 'Only admins can view the company billing settings.',
@@ -2819,28 +3027,44 @@ export const dict = {
     websiteDomain: { en: 'Website domain', fr: 'Domaine du site web' } as T,
 
     // Quote defaults
-    quoteDefaultsTitle: { en: 'Quote defaults', fr: 'Valeurs par défaut du devis' } as T,
+    quoteDefaultsTitle: { en: 'Quotes and invoices', fr: 'Devis et factures' } as T,
     quoteDefaultsBody: {
-      en: 'These values are auto-applied to every new quotation. The admin can still override them per-quote when editing a specific case.',
-      fr: 'Ces valeurs sont appliquées automatiquement à chaque nouveau devis. L’administrateur peut les remplacer au cas par cas lors de la modification d’un devis.',
+      en: 'These values apply to every new quote and invoice. The admin can still change them on a specific quote.',
+      fr: 'Ces valeurs s’appliquent à chaque nouveau devis et à chaque facture. L’administrateur peut encore les modifier sur un devis précis.',
     } as T,
     // Wording preserved from the source — "TVA" is the Tunisian /
     // Maghreb convention so we keep it inside the FR label too.
     defaultTvaLabel: { en: 'Default TVA (%)', fr: 'TVA par défaut (%)' } as T,
+    defaultTvaHelp: {
+      en: 'Prices are TTC: this rate is already inside them and shown on invoices as HT + TVA.',
+      fr: 'Les prix sont TTC : ce taux est déjà inclus et apparaît sur les factures en HT + TVA.',
+    } as T,
     defaultTreatmentFeeLabel: {
       en: 'Default treatment fee ({currency})',
       fr: 'Honoraires de traitement par défaut ({currency})',
     } as T,
-    // "Droit de timbre" — Tunisian fiscal stamp added to every invoice
-    // total (typically 1.000 TND). Configured here by the admin.
+    // "Droit de timbre" — Tunisian fiscal stamp (typically 1.000 TND)
+    // ADDED to every payment, since each payment gets its own facture.
+    // Configured here by the admin.
     stampDutyLabel: {
       en: 'Stamp duty ({currency})',
       fr: 'Droit de timbre ({currency})',
     } as T,
     stampDutyPlaceholder: { en: '1.000', fr: '1.000' } as T,
     stampDutyHelp: {
-      en: 'Fiscal stamp (“Droit de timbre”) added to every invoice total. Set to 0 to disable.',
-      fr: 'Droit de timbre fiscal ajouté au total de chaque facture. Mettez 0 pour le désactiver.',
+      en: 'Fiscal stamp (“Droit de timbre”) added on top of each payment: every payment gets its own invoice, so a plan of 3 installments carries 3 stamps. Set to 0 to disable.',
+      fr: 'Droit de timbre fiscal ajouté à chaque paiement : chaque paiement a sa propre facture, un échéancier en 3 fois porte donc 3 timbres. Mettez 0 pour le désactiver.',
+    } as T,
+    // ── Retenue à la source (withholding tax) ───────────────────
+    withholdingTitle: { en: 'Withholding tax', fr: 'Retenue à la source' } as T,
+    withholdingHelp: {
+      en: 'When paying, the practitioner may keep this percentage of the amount due (incl. tax, stamp duty excluded) and pay the rest. The invoice shows the amount withheld and the net paid.',
+      fr: 'Au paiement, le praticien peut retenir ce pourcentage du montant dû (TTC hors timbre) et payer le reste. La facture indique la retenue et le net payé.',
+    } as T,
+    withholdingRateLabel: { en: 'Withholding tax (%)', fr: 'Retenue à la source (%)' } as T,
+    withholdingRateHelp: {
+      en: '0 = turned off: practitioners are not offered the option. Up to 2 decimals.',
+      fr: '0 = désactivée : l’option n’est pas proposée aux praticiens. 2 décimales au plus.',
     } as T,
     // ── CBCT paid supplement ────────────────────────────────────
     cbctEnabledLabel: {
@@ -4176,13 +4400,13 @@ export const dict = {
         fr: 'Cadeau appliqué : les frais de ce cas sont offerts.',
       } as T,
       bankTransferRecorded: {
-        en: 'Bank-transfer payment recorded. Upload your receipt next.',
-        fr: 'Paiement par virement bancaire enregistré. Téléversez maintenant votre reçu.',
+        en: 'Bank-transfer payment recorded. Upload the transfer proof next.',
+        fr: 'Paiement par virement bancaire enregistré. Téléversez maintenant le justificatif du virement.',
       } as T,
       treatmentFeePaid: { en: 'Treatment fee paid', fr: 'Honoraires de traitement payés' } as T,
       receiptUploaded: {
-        en: 'Receipt uploaded. An admin will confirm once funds land.',
-        fr: 'Reçu téléversé. Un administrateur confirmera dès réception des fonds.',
+        en: 'Transfer proof uploaded. An admin will confirm once funds land.',
+        fr: 'Justificatif téléversé. Un administrateur confirmera dès réception des fonds.',
       } as T,
       bankTransferConfirmed: { en: 'Bank transfer confirmed', fr: 'Virement bancaire confirmé' } as T,
       statusUpdated: { en: 'Order status updated.', fr: 'Statut de la commande mis à jour.' } as T,

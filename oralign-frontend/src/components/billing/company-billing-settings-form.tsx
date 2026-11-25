@@ -71,7 +71,7 @@ type AmountKey =
  * Number inputs keep the string being typed — emptying one no longer
  * snaps it back to "0" / "1" — and are parsed and validated on save.
  */
-type NumberKey = AmountKey | 'defaultTvaRate' | 'devisNextNumber';
+type NumberKey = AmountKey | 'defaultTvaRate' | 'withholdingRate' | 'devisNextNumber';
 
 type ToggleKey = 'cbctSupplementEnabled' | 'loyaltyEnabled';
 
@@ -127,9 +127,11 @@ function draftFromSettings(settings: CompanyBillingSettings | null): Draft {
       websiteDomain: s?.websiteDomain ?? '',
       defaultTvaRate: String(s?.defaultTvaRate ?? 19),
       defaultTreatmentFee: String(s?.defaultTreatmentFee ?? 0),
-      // "Droit de timbre" — Tunisian fiscal stamp added to every invoice
-      // total. Backend column defaults to 1.000 TND.
+      // "Droit de timbre" — Tunisian fiscal stamp, ADDED to every payment
+      // (each payment has its own facture). Backend column defaults to 1.000 TND.
       stampDuty: String(s?.stampDuty ?? 1),
+      // Retenue à la source offered to practitioners when they pay; 0 = off.
+      withholdingRate: String(s?.withholdingRate ?? 0),
       // CBCT paid supplement — off by default; enabling it prices CBCT
       // requests on NEW orders only (existing orders keep their snapshot).
       cbctSupplementEnabled: s?.cbctSupplementEnabled ?? false,
@@ -172,6 +174,17 @@ function parseRate(raw: string): number | null {
   return value !== null && value <= 100 ? value : null;
 }
 
+/** Retenue à la source: 2 decimals, strictly below 100 (DTO: 0 to 99.99). */
+const PERCENT_RE = /^\d+(?:\.\d{1,2})?$/;
+const MAX_WITHHOLDING = 99.99;
+
+function parseWithholdingRate(raw: string): number | null {
+  const text = raw.trim().replace(',', '.');
+  if (!PERCENT_RE.test(text)) return null;
+  const value = Number(text);
+  return value <= MAX_WITHHOLDING ? value : null;
+}
+
 function parseNextNumber(raw: string): number | null {
   const text = raw.trim();
   if (!/^\d+$/.test(text)) return null;
@@ -189,11 +202,12 @@ const AMOUNT_KEYS: readonly AmountKey[] = [
   'retainersFee',
 ];
 
-type NumberError = 'amount' | 'rate' | 'nextNumber';
+type NumberError = 'amount' | 'rate' | 'percent' | 'nextNumber';
 
 const NUMBER_ERROR_KEYS: Record<NumberError, string> = {
   amount: 'settingsDesk.billing.invalidAmount',
   rate: 'settingsDesk.billing.invalidRate',
+  percent: 'settingsDesk.billing.invalidWithholdingRate',
   nextNumber: 'settingsDesk.billing.invalidNextNumber',
 };
 
@@ -210,6 +224,9 @@ function parseNumbers(fields: FormFields) {
   const rate = parseRate(fields.defaultTvaRate);
   if (rate !== null) values.defaultTvaRate = rate;
   else errors.defaultTvaRate = 'rate';
+  const withholding = parseWithholdingRate(fields.withholdingRate);
+  if (withholding !== null) values.withholdingRate = withholding;
+  else errors.withholdingRate = 'percent';
   const next = parseNextNumber(fields.devisNextNumber);
   if (next !== null) values.devisNextNumber = next;
   else errors.devisNextNumber = 'nextNumber';
@@ -369,6 +386,7 @@ function BillingSettingsEditor({
         defaultTvaRate: n.defaultTvaRate,
         defaultTreatmentFee: n.defaultTreatmentFee,
         stampDuty: n.stampDuty,
+        withholdingRate: n.withholdingRate,
         cbctSupplementEnabled: form.cbctSupplementEnabled,
         // Undefined (= unchanged) only when the supplement is off and its
         // draft is not a number.
@@ -631,6 +649,7 @@ function BillingSettingsEditor({
             inputMode="decimal"
             onValueChange={setText}
             placeholder="19"
+            helper={t('accountBillingSettings.defaultTvaHelp')}
             error={numberError('defaultTvaRate')}
           />
           {/* Professional / clinical fee. This used to be re-typed on
@@ -647,10 +666,10 @@ function BillingSettingsEditor({
             placeholder="0"
             error={numberError('defaultTreatmentFee')}
           />
-          {/* "Droit de timbre" — Tunisian fiscal stamp added to every
-              invoice total (typically 1.000 TND). Decimal(12,3) on the
-              backend, so up to 3 decimals. Set to 0 to disable it on
-              invoices. */}
+          {/* "Droit de timbre" — Tunisian fiscal stamp (typically 1.000
+              TND), included in the TTC price and shown on every invoice.
+              Decimal(12,3) on the backend, so up to 3 decimals. Set to 0 to
+              leave it off invoices. */}
           <Field
             name="stampDuty"
             label={t('accountBillingSettings.stampDutyLabel', { currency })}
@@ -692,6 +711,29 @@ function BillingSettingsEditor({
               placeholder="0"
               helper={t('accountBillingSettings.cbctFeeHelp')}
               error={numberError('cbctSupplementFee')}
+            />
+          </div>
+          {/* ── Retenue à la source ──────────────────────────────────
+              The practitioner may keep this % of the amount due back when
+              paying (he remits it to the tax office). 0 = never offered.
+              Snapshotted on each payment, so changing it never rewrites
+              past invoices. Full width: the help sits beside the rate. */}
+          <div className="grid gap-3 rounded-lg border p-4 sm:col-span-2 sm:grid-cols-2 sm:items-start">
+            <div className="space-y-0.5">
+              <p className="font-medium">{t('accountBillingSettings.withholdingTitle')}</p>
+              <p className="text-xs text-muted-foreground">
+                {t('accountBillingSettings.withholdingHelp')}
+              </p>
+            </div>
+            <Field
+              name="withholdingRate"
+              label={t('accountBillingSettings.withholdingRateLabel')}
+              value={form.withholdingRate}
+              inputMode="decimal"
+              onValueChange={setText}
+              placeholder="1"
+              helper={t('accountBillingSettings.withholdingRateHelp')}
+              error={numberError('withholdingRate')}
             />
           </div>
           {/* ── Beyond-the-pack tariffs (grille 2026) ────────────────

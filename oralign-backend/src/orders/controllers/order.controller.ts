@@ -52,6 +52,7 @@ import {
   OrderResponseDto,
   PayTreatmentFeeDto,
   SubmitOrderDto,
+  TreatmentFeeProofDto,
   UpdateOrderDto,
   UpdateOrderStatusDto,
   UpdateToothInstructionsDto,
@@ -293,11 +294,13 @@ export class OrderController {
     @CurrentUser() user: JwtPayload,
   ): Promise<OrderResponseDto> {
     // Amount is computed server-side (audit M-4) — the client only
-    // chooses the payment method.
-    return this.treatmentFees.payTreatmentFee(id, body.method, {
-      userId: user.sub,
-      role: user.role,
-    });
+    // chooses the payment method and whether the retenue applies.
+    return this.treatmentFees.payTreatmentFee(
+      id,
+      body.method,
+      { userId: user.sub, role: user.role },
+      body.applyWithholding,
+    );
   }
 
   /**
@@ -317,7 +320,7 @@ export class OrderController {
       type: 'object',
       properties: {
         proof: { type: 'string', format: 'binary' },
-        amount: { type: 'number' },
+        applyWithholding: { type: 'string', enum: ['true', 'false'] },
       },
     },
   })
@@ -337,6 +340,7 @@ export class OrderController {
   async uploadTreatmentFeeProof(
     @Param('id') id: string,
     @UploadedFile() proof: Express.Multer.File,
+    @Body() body: TreatmentFeeProofDto,
     @CurrentUser() user: JwtPayload,
   ): Promise<OrderResponseDto> {
     if (!proof) {
@@ -348,10 +352,12 @@ export class OrderController {
     // matches every other media path. The amount is derived server-side
     // (audit M-4), not read from the multipart body.
     const relativePath = `/uploads/treatment-fee-proofs/${proof.filename}`;
-    return this.treatmentFees.uploadTreatmentFeeProof(id, relativePath, {
-      userId: user.sub,
-      role: user.role,
-    });
+    return this.treatmentFees.uploadTreatmentFeeProof(
+      id,
+      relativePath,
+      { userId: user.sub, role: user.role },
+      body.applyWithholding,
+    );
   }
 
   /**

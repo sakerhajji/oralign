@@ -174,8 +174,31 @@ export class TreatmentFeeRowDto {
   @ApiProperty()
   orderCode!: string;
 
-  @ApiProperty({ type: Number, nullable: true, example: 350 })
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 347.5,
+    description:
+      'Cash collected: the fee due + the droit de timbre, net of any retenue à la source.',
+  })
   amount!: number | null;
+
+  @ApiProperty({ type: Number, nullable: true, example: 1 })
+  withholdingRate!: number | null;
+
+  @ApiProperty({
+    example: 3.5,
+    description:
+      'Retenue à la source kept back (0 when none), computed on the fee due (stamp excluded).',
+  })
+  withholdingAmount!: number;
+
+  @ApiProperty({
+    example: 1,
+    description:
+      'Droit de timbre charged on top with the payment (0 on fees paid before 2026-11-20). Fee due = amount + withholdingAmount - stampAmount.',
+  })
+  stampAmount!: number;
 
   @ApiProperty({ enum: PaymentMethod, nullable: true })
   method!: PaymentMethod | null;

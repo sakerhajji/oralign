@@ -32,6 +32,10 @@ import {
   type PaymentRow,
 } from '@/components/payments/payment-history-table';
 import { PendingTreatmentFeesSection } from '@/components/payments/treatment-fees-section';
+import {
+  recordedSplit,
+  RecordedPaymentBreakdown,
+} from '@/components/payments/withholding';
 import { useT } from '@/lib/i18n/lang-context';
 
 export function PendingPaymentsContent() {
@@ -51,6 +55,18 @@ export function PendingPaymentsContent() {
   // `.items` and crashed on first render. Use `.data` consistently.
   const items = (data?.data ?? []) as PaymentRow[];
   const totalCount = data?.total ?? 0;
+  // The transfer being confirmed: what reached the account is the
+  // installment + its droit de timbre - any retenue, so the admin sees
+  // what it settles next to what to look for on the statement.
+  const confirmingSplit = confirming
+    ? recordedSplit(
+        confirming.amount,
+        confirming.withholdingAmount,
+        confirming.withholdingRate,
+        confirming.stampAmount,
+        confirming.settledAmount,
+      )
+    : null;
 
   return (
     <div className="flex flex-col gap-6 p-4 md:p-6">
@@ -164,6 +180,9 @@ export function PendingPaymentsContent() {
               {t('paymentsPending.confirmDialogDesc')}
             </DialogDescription>
           </DialogHeader>
+          {confirming && confirmingSplit ? (
+            <RecordedPaymentBreakdown split={confirmingSplit} currency={confirming.currency} />
+          ) : null}
           <div className="grid gap-2">
             <Label htmlFor="notes">{t('paymentsPending.notesLabel')}</Label>
             <Textarea

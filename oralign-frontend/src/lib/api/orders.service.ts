@@ -25,8 +25,16 @@ import {
 export interface TreatmentFeeRow {
   orderId: string;
   orderCode: string;
-  /** null when no fee was set; 0 when the welcome gift waived it. */
+  /**
+   * Cash collected: fee due (TTC) + stamp - retenue. null when no fee was
+   * set; 0 when the welcome gift waived it.
+   */
   amount: number | null;
+  /** Retenue à la source the practitioner applied: rate (%) and amount kept back. */
+  withholdingRate?: number | null;
+  withholdingAmount?: number;
+  /** Droit de timbre charged on top with the fee (0 on fees paid before 2026-11-20). */
+  stampAmount?: number;
   method: PaymentMethod | null;
   status: PaymentRecordStatus | null;
   /** null while a bank transfer waits for confirmation. */
@@ -35,7 +43,7 @@ export interface TreatmentFeeRow {
   /** The ORDER's submission, not the payment's. */
   submittedAt: string | null;
   updatedAt: string;
-  /** The fee receipt's number (TF-…), null until one is issued. */
+  /** The number of the fee's facture (FAC-…; TF-… on older fees), null until issued. */
   invoiceNumber: string | null;
   doctor: { id: string; fullName: string; email: string } | null;
   patient: { id: string; fullName: string } | null;
@@ -161,15 +169,18 @@ export const ordersService = {
    */
   payTreatmentFee: async (
     id: string,
-    method: 'card' | 'cash' | 'bank_transfer',
+    method: 'card' | 'cash' | 'cheque' | 'bank_transfer',
     // `amount` is accepted for call-site compatibility but is NOT sent:
     // the backend computes the fee server-side (audit M-4) and the strict
     // ValidationPipe rejects any extra body field.
     _amount?: number,
+    // The practitioner keeps the retenue à la source back; the server
+    // computes it from the fee due and the company rate.
+    applyWithholding = false,
   ): Promise<DentalOrder> => {
     const response = await apiClient.post<DentalOrder>(
       `/orders/${id}/treatment-fee/pay`,
-      { method },
+      { method, applyWithholding },
     );
     return response.data;
   },
@@ -185,9 +196,12 @@ export const ordersService = {
     // `amount` kept for call-site compatibility; not sent — the backend
     // derives the fee server-side (audit M-4).
     _amount?: number,
+    applyWithholding = false,
   ): Promise<DentalOrder> => {
     const form = new FormData();
     form.append('proof', proof);
+    // Multipart fields are strings; the server reads the raw value.
+    form.append('applyWithholding', applyWithholding ? 'true' : 'false');
     const response = await apiClient.post<DentalOrder>(
       `/orders/${id}/treatment-fee/proof`,
       form,

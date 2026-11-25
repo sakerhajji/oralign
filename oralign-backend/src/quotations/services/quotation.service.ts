@@ -1,11 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
+  BatchStatus,
   CompanyBillingSettings,
   DentistProfile,
   DevisLanguage,
+  InstallmentStatus,
   OrderStatus,
+  PaymentMode,
   Prisma,
   Quotation,
+  QuotationPaymentStatus,
   QuotationStatus,
   UserRole,
 } from '@prisma/client';
@@ -29,16 +33,43 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { NotificationEvents } from '../../notifications/events/notification-events';
 import { isAdmin, type Caller } from '../../common/access/caller';
 import { lookupActorName } from '../../common/access/actor-snapshot';
-import { assertNoDependents } from '../../common/deletion/deletion-blocked';
 import {
   isQuotable,
   QUOTABLE_ORDER_SELECT,
   QUOTATION_ELIGIBILITY_ERROR,
 } from '../quotation-eligibility';
-
-/** Round to 3 decimal places — TND is 3-decimal officially. */
-const round = (n: number): number =>
-  Math.round((Number.isFinite(n) ? n : 0) * 1000) / 1000;
+import {
+  dec,
+  resolveTvaRate,
+  round3,
+  splitInclusive,
+  toAmount,
+} from '../../common/billing/tax-split';
+import {
+  advanceOrderWhenPaid,
+  assertNoMoneyMoved,
+  assertQuoteEditable,
+  auditDiff,
+  DEAD_PAYMENT_STATUSES,
+  emptyQuoteMoney,
+  hasFreeStepForReplan,
+  IN_FLIGHT_PAYMENT_STATUSES,
+  isTtcPriced,
+  lockQuoteForEdit,
+  type PlanRebalance,
+  planRebalance,
+  presentQuote,
+  presentQuotes,
+  quoteActionFlags,
+  quoteMoneyEdited,
+  type QuoteSettlement,
+  quoteUpdateAudit,
+  type QuotationView,
+  readOneQuoteMoney,
+  resetOrderBeforeQuote,
+  resolveQuoteDiscount,
+  settleQuote,
+} from '../quote-money';
 
 export interface QuoteTotals {
   subTotalHt: number;
@@ -52,9 +83,13 @@ export interface QuoteTotals {
  * Lifecycle:
  *   draft → admin creates + iterates on fees + language
  *   sent  → admin sends to doctor; quotationNumber + snapshot frozen
- *   approved → doctor approved; order moves to `fabrication`
+ *   approved → doctor approved (explicitly or by paying a first time)
  *   rejected → doctor rejected; order moves to `canceled`
- *   canceled → admin canceled (e.g. to re-issue a fresh quote)
+ *
+ * Draft, sent and approved quotes stay editable by the admin; only the
+ * installments already paid are frozen (see update()). Recall and delete
+ * are allowed while no money was received and none is in flight (see
+ * quote-money.ts for what "received" and "in flight" mean).
  *
  * Snapshots — see Prisma comments. `companySnapshot` mirrors
  * CompanyBillingSettings at send time, `clinicSnapshot` mirrors the
@@ -165,6 +200,12 @@ export class QuotationService {
    * Pure function — derives the three calculated fields from fees,
    * discount, and TVA rate. Single source of truth so the front-end's
    * live preview and the persisted record always agree.
+   *
+   * Every fee is TTC (owner decision: prices include TVA), so the total
+   * IS the net of the fees and HT / TVA are split backwards from it. No
+   * stamp is involved here: a devis is not an invoice. The droit de
+   * timbre is ADDED to every payment (each gets its own facture, owner
+   * decision 2026-11-20), on top of this total.
    */
   static computeTotals(
     treatmentFees: number,
@@ -173,20 +214,112 @@ export class QuotationService {
     discountAmount: number,
     tvaRate: number,
   ): QuoteTotals {
-    const grossFees =
-      Math.max(0, treatmentFees) +
-      Math.max(0, fabricationFees) +
-      Math.max(0, deliveryFees);
-    const discount = Math.min(Math.max(0, discountAmount), grossFees);
-    const subTotalHt = grossFees - discount;
-    const safeRate = Math.max(0, Math.min(100, tvaRate));
-    const tvaAmount = (subTotalHt * safeRate) / 100;
-    const totalTtc = subTotalHt + tvaAmount;
+    const net = QuotationService.netOfFees(
+      treatmentFees,
+      fabricationFees,
+      deliveryFees,
+      discountAmount,
+    );
+    const split = splitInclusive(net, tvaRate, 0);
     return {
-      subTotalHt: round(subTotalHt),
-      tvaAmount: round(tvaAmount),
-      totalTtc: round(totalTtc),
+      subTotalHt: toAmount(split.ht),
+      tvaAmount: toAmount(split.tva),
+      totalTtc: toAmount(split.total),
     };
+  }
+
+  /**
+   * The maths quotes used before prices became TTC: the fees are HT and
+   * TVA is added on top. Only an edit of a packless quote still stored
+   * that way uses it (see isTtcPriced), so the edit keeps the quote's TVA;
+   * every new quote is priced with computeTotals.
+   */
+  static computeLegacyHtTotals(
+    treatmentFees: number,
+    fabricationFees: number,
+    deliveryFees: number,
+    discountAmount: number,
+    tvaRate: number,
+  ): QuoteTotals {
+    const ht = QuotationService.netOfFees(
+      treatmentFees,
+      fabricationFees,
+      deliveryFees,
+      discountAmount,
+    );
+    const rate = Prisma.Decimal.min(
+      dec(Math.max(0, Number(tvaRate) || 0)),
+      100,
+    );
+    const tva = round3(ht.mul(rate).div(100));
+    return {
+      subTotalHt: toAmount(ht),
+      tvaAmount: toAmount(tva),
+      totalTtc: toAmount(ht.plus(tva)),
+    };
+  }
+
+  /** Σ fees - discount (capped at the fees), negative inputs read as 0. */
+  private static netOfFees(
+    treatmentFees: number,
+    fabricationFees: number,
+    deliveryFees: number,
+    discountAmount: number,
+  ): Prisma.Decimal {
+    const positive = (n: number) => dec(Math.max(0, Number(n) || 0));
+    const grossFees = positive(treatmentFees)
+      .plus(positive(fabricationFees))
+      .plus(positive(deliveryFees));
+    const discount = Prisma.Decimal.min(positive(discountAmount), grossFees);
+    return round3(grossFees.minus(discount));
+  }
+
+  /**
+   * Fees, rate and totals after an edit of a quote's money. Pack quotes
+   * and quotes priced TTC keep the TTC maths, where a legacy 0 % rate
+   * upgrades to the company rate (the price already included TVA). A
+   * packless quote stored HT keeps its own rate and the HT maths: its
+   * fees never included TVA, and the TTC maths would drop it.
+   */
+  private static editedMoney(
+    stored: Quotation,
+    dto: UpdateQuotationDto,
+    companyTvaRate: number | null | undefined,
+  ) {
+    const fees = {
+      treatmentFees: dto.treatmentFees ?? stored.treatmentFees,
+      fabricationFees: dto.fabricationFees ?? stored.fabricationFees,
+      deliveryFees: dto.deliveryFees ?? stored.deliveryFees,
+      discountAmount: dto.discountAmount ?? stored.discountAmount,
+    };
+    const args = [
+      fees.treatmentFees,
+      fees.fabricationFees,
+      fees.deliveryFees,
+      fees.discountAmount,
+    ] as const;
+    if (isTtcPriced(stored)) {
+      const tvaRate = resolveTvaRate(
+        dto.tvaRate ?? stored.tvaRate,
+        companyTvaRate,
+      );
+      return {
+        ...fees,
+        tvaRate,
+        ...QuotationService.computeTotals(...args, tvaRate),
+      };
+    }
+    const tvaRate = dto.tvaRate ?? stored.tvaRate;
+    return {
+      ...fees,
+      tvaRate,
+      ...QuotationService.computeLegacyHtTotals(...args, tvaRate),
+    };
+  }
+
+  /** The row plus the money flags every quote response carries. */
+  present<T extends Quotation>(quote: T): Promise<QuotationView<T>> {
+    return presentQuote(this.prisma, quote);
   }
 
   // ─── Snapshot ─────────────────────────────────────────────────────────────
@@ -213,6 +346,9 @@ export class QuotationService {
       companyEmail: settings.companyEmail ?? null,
       taxRegistrationNumber: settings.taxRegistrationNumber ?? null,
       tvaRate,
+      // The devis states that this stamp is added to each payment (one
+      // facture per payment); frozen with the rest of the company block.
+      stampDuty: toAmount(settings.stampDuty),
       currency,
       selectedLanguage: language,
       legalText: pickTranslation(settings.legalTextTranslations, language),
@@ -271,18 +407,22 @@ export class QuotationService {
 
   // ─── Public methods ───────────────────────────────────────────────────────
 
-  /** Read by order id — admin, owning dentist, assigned designer. */
+  /**
+   * Read by order id — admin, owning dentist, assigned designer. Carries
+   * the money flags (receivedAmount, hasPaymentInFlight, canDelete,
+   * canRecall) the quote screens use to offer edit / recall / delete.
+   */
   async getForOrder(
     orderId: string,
     caller: Caller,
-  ): Promise<Quotation | null> {
+  ): Promise<QuotationView<Quotation> | null> {
     await this.assertOrderReadable(orderId, caller);
     // Include the attached pack's LOCALIZED display fields (read-only) so
     // the order summary can render the pack name / expiration / finishing
     // in the current UI language for BOTH admin and doctor, without
     // storing translated labels on the quote. Price/identity stay driven
     // by the stable snapshot (packId, archType, totalPrice, currency).
-    return this.prisma.quotation.findFirst({
+    const quote = await this.prisma.quotation.findFirst({
       where: { orderId, deletedAt: null },
       include: {
         pack: {
@@ -302,6 +442,7 @@ export class QuotationService {
         },
       },
     });
+    return quote ? this.present(quote) : null;
   }
 
   /**
@@ -329,7 +470,7 @@ export class QuotationService {
     orderId: string,
     dto: CreateQuotationDto,
     caller: Caller,
-  ): Promise<Quotation> {
+  ): Promise<QuotationView<Quotation>> {
     if (!isAdmin(caller)) {
       throw new ForbiddenException('Only admins can create a quotation.');
     }
@@ -348,7 +489,9 @@ export class QuotationService {
     const settings = await this.settingsService.requireActive();
     const language = dto.language ?? DevisLanguage.fr;
     const currency = dto.currency ?? settings.defaultCurrency ?? 'TND';
-    const tvaRate = dto.tvaRate ?? settings.defaultTvaRate ?? 19;
+    // A price always includes TVA: a 0 % rate is read as "not set" and
+    // takes the company rate, so a devis never prints "TVA 0 %".
+    const tvaRate = resolveTvaRate(dto.tvaRate, settings.defaultTvaRate);
 
     // Treatment fee precedence (top → bottom):
     //   1. Admin-typed value on this quote (explicit override)
@@ -357,16 +500,24 @@ export class QuotationService {
     // Number() unwraps the Prisma Decimal so computeTotals stays Float-only.
     const defaultTreatmentFee = Number(settings.defaultTreatmentFee ?? 0);
     const treatmentFees = dto.treatmentFees ?? defaultTreatmentFee;
+    const discount = resolveQuoteDiscount(dto, {
+      treatmentFees,
+      fabricationFees: 0,
+      deliveryFees: 0,
+      discountAmount: 0,
+      discountPercent: null,
+    });
+    const discountAmount = discount.amount ?? dto.discountAmount ?? 0;
 
     const totals = QuotationService.computeTotals(
       treatmentFees,
       dto.fabricationFees ?? 0,
       dto.deliveryFees ?? 0,
-      dto.discountAmount ?? 0,
+      discountAmount,
       tvaRate,
     );
 
-    return this.prisma.quotation.create({
+    const created = await this.prisma.quotation.create({
       data: {
         orderId,
         language,
@@ -374,7 +525,8 @@ export class QuotationService {
         treatmentFees,
         fabricationFees: dto.fabricationFees ?? 0,
         deliveryFees: dto.deliveryFees ?? 0,
-        discountAmount: dto.discountAmount ?? 0,
+        discountAmount,
+        discountPercent: discount.percent ?? null,
         tvaRate,
         currency,
         notes: dto.notes ?? null,
@@ -386,100 +538,190 @@ export class QuotationService {
         createdByName: await lookupActorName(this.prisma, caller.userId),
       },
     });
+    // A quote created this instant has no payment and no plan: no read
+    // needed.
+    return {
+      ...created,
+      ...quoteActionFlags(
+        created.status,
+        emptyQuoteMoney(),
+        hasFreeStepForReplan(created, []),
+      ),
+    };
   }
 
   /**
-   * Update an existing quote. Admin can edit while status is draft.
-   * Once `sent / approved / rejected / canceled`, the quote becomes
-   * immutable (super_admin can re-open via cancel + recreate).
+   * Update an existing quote (admin). Allowed while the quote is draft,
+   * sent or approved (owner decision 5): everything may change except
+   * the installments already paid, and the total may not go below what
+   * has already been settled.
+   *
+   * Amounts move only when a money field of the body differs from the
+   * stored value (quoteMoneyEdited): a notes, language or message save
+   * leaves fees, totals, plan and settlement untouched. A money edit
+   * prices pack quotes and TTC quotes TTC; a packless quote stored the
+   * legacy HT way keeps the HT + TVA maths (see editedMoney).
+   *
+   * When the total of a pack quote changes, the UNPAID installments are
+   * rebalanced in proportion to their current amounts (count, dates and
+   * step ranges kept); paid rows and their batches never move. See
+   * planRebalance for the 400 / 409 refusals. paidAmount, remainingAmount
+   * and paymentStatus are recomputed from the successful payments.
+   *
+   * The quotation and installment rows are locked for the whole edit, so
+   * a settlement (PaymentsService.handleSuccess) and an edit queue up
+   * instead of interleaving. An edit of a quote the doctor already saw is
+   * written to the order history, and a stored devis PDF is re-rendered.
    */
   async update(
     id: string,
     dto: UpdateQuotationDto,
     caller: Caller,
-  ): Promise<Quotation> {
+  ): Promise<QuotationView<Quotation>> {
     if (!isAdmin(caller)) {
       throw new ForbiddenException('Only admins can edit a quotation.');
     }
     const quote = await this.loadQuotation(id);
     await this.assertOrderReadable(quote.orderId, caller);
+    assertQuoteEditable(quote.status);
 
-    if (quote.status !== QuotationStatus.draft) {
-      throw new BadRequestException(
-        `Quotation cannot be edited while in "${quote.status}" status. Cancel it first.`,
-      );
-    }
+    const settings = await this.settingsService.getActive();
+    const actorName =
+      quote.status === QuotationStatus.draft
+        ? null
+        : await lookupActorName(this.prisma, caller.userId);
 
-    const tvaRate = dto.tvaRate ?? quote.tvaRate;
-    const deliveryFees = dto.deliveryFees ?? quote.deliveryFees;
-    const discountAmount = dto.discountAmount ?? quote.discountAmount;
-    const totals = QuotationService.computeTotals(
-      dto.treatmentFees ?? quote.treatmentFees,
-      dto.fabricationFees ?? quote.fabricationFees,
-      deliveryFees,
-      discountAmount,
-      tvaRate,
-    );
-
-    // Pack-based quotes need their Decimal `totalPrice` field kept in
-    // sync with the new net, otherwise the payment-plan validator
-    // (which compares Σinstallments against `totalPrice`) would still
-    // be looking at the pre-discount pack price. We use the Decimal
-    // arithmetic via `toFixed(3)` so we never round through Number.
-    //
-    // If a plan exists when the totals change, wipe it — the admin
-    // has to reconfigure the installments to match the new total.
-    // Cheaper than silently leaving an out-of-balance plan around.
-    const isPackQuote = !!quote.packId;
-    const newTotalDecimal = isPackQuote
-      ? new Prisma.Decimal(totals.totalTtc.toFixed(3))
-      : null;
-    const totalChanged =
-      isPackQuote &&
-      newTotalDecimal !== null &&
-      (!quote.totalPrice || !quote.totalPrice.equals(newTotalDecimal));
-
-    return this.prisma.$transaction(async (tx) => {
-      if (totalChanged) {
-        // No payment has cleared yet (status === draft asserted above),
-        // so this is safe — the SUCCESS transition can only happen on
-        // installments that already exist after `approve()`.
-        await tx.quoteStepBatch.deleteMany({
-          where: { quotationId: quote.id },
-        });
-        await tx.quoteInstallment.deleteMany({
-          where: { quotationId: quote.id },
-        });
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await lockQuoteForEdit(tx, id);
+      const fresh = await tx.quotation.findUnique({
+        where: { id },
+        include: {
+          installments: {
+            orderBy: { installmentNumber: 'asc' },
+            include: {
+              payments: {
+                where: { status: { in: IN_FLIGHT_PAYMENT_STATUSES } },
+                select: { id: true },
+              },
+            },
+          },
+        },
+      });
+      if (!fresh || fresh.deletedAt) {
+        throw new NotFoundException('Quotation not found.');
       }
-      return tx.quotation.update({
-        where: { id: quote.id },
+      assertQuoteEditable(fresh.status);
+
+      // A remise typed as a percentage becomes its amount here, on the
+      // gross this edit leaves, so every money rule below works on one
+      // figure; the percentage itself is kept for the devis label.
+      const discount = resolveQuoteDiscount(dto, fresh);
+      const input: UpdateQuotationDto =
+        discount.amount === undefined
+          ? dto
+          : { ...dto, discountAmount: discount.amount };
+
+      const next = {
+        language: dto.language ?? fresh.language,
+        currency: dto.currency ?? fresh.currency,
+        notes: dto.notes ?? fresh.notes,
+        adminMessage: dto.adminMessage ?? fresh.adminMessage,
+        ...(discount.percent !== undefined
+          ? { discountPercent: discount.percent }
+          : {}),
+      };
+      // The editor posts every field on each save: only a money field
+      // whose value actually changed re-prices the quote. Otherwise the
+      // fees, rate, totals, plan and settlement are left exactly as
+      // stored, so a notes save never re-prices an old HT devis.
+      const amounts = quoteMoneyEdited(input, fresh)
+        ? QuotationService.editedMoney(fresh, input, settings?.defaultTvaRate)
+        : null;
+
+      // Pack quotes carry the canonical Decimal totalPrice the plan and
+      // the payments are checked against; it follows the new TTC total.
+      const newTotal =
+        fresh.packId && amounts ? round3(amounts.totalTtc) : null;
+      let plan: PlanRebalance = { changes: [], cancelled: [], extra: null };
+      let extraInstallmentNumber: number | null = null;
+      let settlement: QuoteSettlement | null = null;
+      if (newTotal) {
+        const money = await readOneQuoteMoney(tx, id);
+        if (!fresh.totalPrice || !fresh.totalPrice.equals(newTotal)) {
+          plan = planRebalance({
+            newTotal,
+            received: money.received,
+            installments: fresh.installments.map((row) => ({
+              id: row.id,
+              installmentNumber: row.installmentNumber,
+              amount: row.amount,
+              status: row.status,
+              inFlight: row.payments.length > 0,
+            })),
+          });
+          for (const change of plan.changes) {
+            await tx.quoteInstallment.update({
+              where: { id: change.id },
+              data: { amount: change.to },
+            });
+          }
+          if (plan.cancelled.length > 0) {
+            // Nothing more is owed on these rows: they close at 0 and the
+            // aligners they gated become deliverable.
+            const ids = plan.cancelled.map((change) => change.id);
+            await tx.quoteInstallment.updateMany({
+              where: { id: { in: ids } },
+              data: { amount: 0, status: InstallmentStatus.cancelled },
+            });
+            await tx.quoteStepBatch.updateMany({
+              where: { installmentId: { in: ids }, status: BatchStatus.locked },
+              data: { status: BatchStatus.unlocked, unlockedAt: new Date() },
+            });
+          }
+          if (plan.extra) {
+            // Every row is paid and the total went up: bill the difference
+            // as one more installment, payable now, with no step batch (the
+            // aligners are already covered by the paid rows).
+            extraInstallmentNumber =
+              fresh.installments.reduce(
+                (max, row) => Math.max(max, row.installmentNumber),
+                0,
+              ) + 1;
+            await tx.quoteInstallment.create({
+              data: {
+                quotationId: id,
+                installmentNumber: extraInstallmentNumber,
+                amount: plan.extra,
+                availableFrom: new Date(),
+              },
+            });
+          }
+        }
+        settlement = settleQuote(newTotal, money.received);
+      }
+
+      const row = await tx.quotation.update({
+        where: { id },
         data: {
-          language: dto.language ?? quote.language,
-          treatmentFees: dto.treatmentFees ?? quote.treatmentFees,
-          fabricationFees: dto.fabricationFees ?? quote.fabricationFees,
-          deliveryFees,
-          discountAmount,
-          tvaRate,
-          currency: dto.currency ?? quote.currency,
-          notes: dto.notes ?? quote.notes,
-          adminMessage: dto.adminMessage ?? quote.adminMessage,
-          subTotalHt: totals.subTotalHt,
-          tvaAmount: totals.tvaAmount,
-          totalTtc: totals.totalTtc,
-          ...(isPackQuote && newTotalDecimal
+          ...next,
+          ...(amounts ?? {}),
+          ...(newTotal && settlement
             ? {
-                totalPrice: newTotalDecimal,
-                remainingAmount: newTotalDecimal,
+                totalPrice: newTotal,
+                paidAmount: settlement.paidAmount,
+                remainingAmount: settlement.remainingAmount,
+                paymentStatus: settlement.paymentStatus,
               }
             : {}),
+          ...(plan.extra ? { paymentMode: PaymentMode.installments } : {}),
           // The loyalty snapshot documents the discount granted at
           // pack-attach. If the admin manually overrides the discount
           // to a DIFFERENT figure, the snapshot no longer describes
           // this quote (and would inflate the loyalty KPI) — clear it.
-          ...(dto.discountAmount !== undefined &&
-          quote.loyaltyDiscountAmount != null &&
-          !quote.loyaltyDiscountAmount.equals(
-            new Prisma.Decimal(dto.discountAmount.toFixed(3)),
+          ...(input.discountAmount !== undefined &&
+          fresh.loyaltyDiscountAmount != null &&
+          !fresh.loyaltyDiscountAmount.equals(
+            new Prisma.Decimal(input.discountAmount.toFixed(3)),
           )
             ? {
                 loyaltyDiscountPercent: null,
@@ -490,7 +732,72 @@ export class QuotationService {
             : {}),
         },
       });
+
+      if (
+        settlement?.paymentStatus === QuotationPaymentStatus.paid &&
+        fresh.paymentStatus !== QuotationPaymentStatus.paid
+      ) {
+        await advanceOrderWhenPaid(tx, fresh.orderId);
+      }
+
+      if (fresh.status !== QuotationStatus.draft) {
+        const changes = auditDiff(
+          {
+            treatmentFees: fresh.treatmentFees,
+            fabricationFees: fresh.fabricationFees,
+            deliveryFees: fresh.deliveryFees,
+            discountAmount: fresh.discountAmount,
+            tvaRate: fresh.tvaRate,
+            subTotalHt: fresh.subTotalHt,
+            tvaAmount: fresh.tvaAmount,
+            totalTtc: fresh.totalTtc,
+            language: fresh.language,
+            currency: fresh.currency,
+            notes: fresh.notes,
+            adminMessage: fresh.adminMessage,
+          },
+          { ...next, ...(amounts ?? {}) },
+        );
+        const planMoved =
+          plan.changes.length > 0 || plan.cancelled.length > 0 || !!plan.extra;
+        if (Object.keys(changes).length > 0 || planMoved) {
+          await tx.orderAuditLog.create({
+            data: quoteUpdateAudit({
+              orderId: fresh.orderId,
+              caller,
+              actorName,
+              changes,
+              metadata: {
+                quotationId: fresh.id,
+                quotationNumber: fresh.quotationNumber,
+                quotationStatus: fresh.status,
+                kind: 'fees',
+                installments: plan.changes.map((change) => ({
+                  installmentNumber: change.installmentNumber,
+                  from: change.from.toFixed(3),
+                  to: change.to.toFixed(3),
+                })),
+                cancelledInstallments: plan.cancelled.map(
+                  (change) => change.installmentNumber,
+                ),
+                ...(plan.extra && extraInstallmentNumber
+                  ? {
+                      addedInstallment: {
+                        installmentNumber: extraInstallmentNumber,
+                        amount: plan.extra.toFixed(3),
+                      },
+                    }
+                  : {}),
+              },
+            }),
+          });
+        }
+      }
+      return row;
     });
+
+    const rendered = await this.quotationPdf.refreshStoredPdf(updated);
+    return this.present(rendered);
   }
 
   /**
@@ -563,9 +870,12 @@ export class QuotationService {
    * Send the quote to the doctor. Transitions:
    *   quotation.status: draft → sent
    *   order.status: → quotation_sent
-   * Locks in quotationNumber + companySnapshot + clinicSnapshot.
+   * Locks in quotationNumber + companySnapshot + clinicSnapshot, and
+   * renders the stored devis PDF so the practitioner always downloads
+   * the version that was sent (best effort: a renderer failure is logged
+   * and never blocks the send; generate-pdf can retry it).
    */
-  async send(id: string, caller: Caller): Promise<Quotation> {
+  async send(id: string, caller: Caller): Promise<QuotationView<Quotation>> {
     if (!isAdmin(caller)) {
       throw new ForbiddenException('Only admins can send a quotation.');
     }
@@ -612,6 +922,9 @@ export class QuotationService {
       });
       return u;
     });
+    const sent = await this.quotationPdf.refreshStoredPdf(updated, {
+      force: true,
+    });
     // Doctor e-mail is sent by the notification listener on QuotationSent.
     // Bell ping for the doctor — the email goes too, this is just the
     // in-app version that backs the badge in the header. Joins
@@ -638,7 +951,7 @@ export class QuotationService {
         quotationNumber: updated.quotationNumber ?? null,
       });
     }
-    return updated;
+    return this.present(sent);
   }
 
   /**
@@ -657,7 +970,10 @@ export class QuotationService {
    * a flow, so we can't accidentally send a pack quote down the legacy
    * fabrication path (which would skip payment entirely).
    */
-  async approve(id: string, caller: Caller): Promise<Quotation> {
+  async approve(
+    id: string,
+    caller: Caller,
+  ): Promise<QuotationView<Quotation>> {
     const quote = await this.loadQuotation(id);
     const order = await this.assertOrderReadable(quote.orderId, caller);
 
@@ -685,7 +1001,7 @@ export class QuotationService {
     if (handledByPack) {
       const fresh = await this.loadQuotation(id);
       this.emitQuoteDecision(fresh, 'approved');
-      return fresh;
+      return this.present(fresh);
     }
 
     const approved = await this.transitionSentToApproved(
@@ -700,7 +1016,7 @@ export class QuotationService {
     }
     // Admin e-mail via the notification listener (QuotationApproved).
     this.emitQuoteDecision(approved, 'approved');
-    return approved;
+    return this.present(approved);
   }
 
   /**
@@ -783,7 +1099,7 @@ export class QuotationService {
     id: string,
     rejectionReason: string | undefined,
     caller: Caller,
-  ): Promise<Quotation> {
+  ): Promise<QuotationView<Quotation>> {
     const quote = await this.loadQuotation(id);
     const order = await this.assertOrderReadable(quote.orderId, caller);
 
@@ -818,31 +1134,37 @@ export class QuotationService {
     });
     // Admin e-mail via the notification listener (QuotationRejected).
     this.emitQuoteDecision(rejected, 'rejected', rejectionReason);
-    return rejected;
+    return this.present(rejected);
   }
 
   /**
-   * Pull a sent quote back to draft so admin can correct it (wrong
-   * pack, wrong fees, typo in the admin message, wrong language at
-   * send time — anything). The doctor is notified so they don't act
+   * Pull a sent or approved quote back to draft so admin can correct it
+   * (wrong pack, wrong fees, typo in the admin message, wrong language
+   * at send time — anything). The doctor is notified so they don't act
    * on the stale copy.
    *
    * Lifecycle effect:
-   *   • quote.status: sent → draft (sentAt cleared)
-   *   • order.status: quotation_sent → treatment_approved (the
-   *     canonical state right before the quote was issued)
+   *   • quote.status: sent / approved → draft (sentAt, approvedAt and
+   *     doctorApprovedAt cleared: the loyalty program counts treatments by
+   *     doctorApprovedAt, a recalled quote must not count)
+   *   • order.status: back to treatment_approved (the canonical state
+   *     right before the quote was issued) when it is still in the quote
+   *     / payment phase
+   *   • installments and step batches are kept: a draft is not payable,
+   *     and the admin edits or re-plans them before sending again.
    *
-   * Refused on:
-   *   • draft (no-op — already editable; would be confusing)
-   *   • approved / rejected / canceled (terminal; if the quote was
-   *     wrong AND a doctor already approved, that's a refund flow —
-   *     not this method)
+   * Refused while money was received or an attempt may still settle
+   * (409): an approved quote with money on it is edited in place, never
+   * pulled back. Draft, rejected and canceled quotes are refused (400).
    *
    * Authorisation: admin only. The doctor side has the explicit
    * reject path with a reason — this is for the team's own
    * "we made a mistake, hold on" correction loop.
    */
-  async revertToDraft(id: string, caller: Caller): Promise<Quotation> {
+  async revertToDraft(
+    id: string,
+    caller: Caller,
+  ): Promise<QuotationView<Quotation>> {
     if (!isAdmin(caller)) {
       throw new ForbiddenException(
         'Only admins can recall a sent quotation for correction.',
@@ -850,12 +1172,7 @@ export class QuotationService {
     }
     const quote = await this.loadQuotation(id);
     await this.assertOrderReadable(quote.orderId, caller);
-
-    if (quote.status !== QuotationStatus.sent) {
-      throw new BadRequestException(
-        `Only "sent" quotations can be recalled to draft (current: ${quote.status}).`,
-      );
-    }
+    this.assertRecallable(quote.status);
 
     const order = await this.prisma.dentalOrder.findUnique({
       where: { id: quote.orderId },
@@ -868,23 +1185,31 @@ export class QuotationService {
     });
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      // Locked so a payment attempt on one of its installments cannot
+      // start between the check below and the commit.
+      await lockQuoteForEdit(tx, id);
+      const fresh = await tx.quotation.findUnique({ where: { id } });
+      if (!fresh || fresh.deletedAt) {
+        throw new NotFoundException('Quotation not found.');
+      }
+      this.assertRecallable(fresh.status);
+      assertNoMoneyMoved(
+        await readOneQuoteMoney(tx, id),
+        'recall this quotation',
+      );
+
       const u = await tx.quotation.update({
-        where: { id: quote.id },
+        where: { id },
         data: {
           status: QuotationStatus.draft,
           sentAt: null,
+          approvedAt: null,
+          approvedById: null,
+          doctorApprovedAt: null,
+          paymentStatus: QuotationPaymentStatus.pending,
         },
       });
-      // Snap the order back to the pre-send state. We do NOT touch
-      // installments / batches because they're only created when the
-      // doctor approves a pack quote (i.e. post-sent path); a sent
-      // quote that hasn't been approved has no plan rows to worry
-      // about. Belt-and-braces: even if it did, those wouldn't
-      // become payable until the quote re-enters approved state.
-      await tx.dentalOrder.update({
-        where: { id: quote.orderId },
-        data: { status: OrderStatus.treatment_approved },
-      });
+      await resetOrderBeforeQuote(tx, fresh.orderId);
       return u;
     });
 
@@ -901,7 +1226,15 @@ export class QuotationService {
       });
     }
 
-    return updated;
+    return this.present(updated);
+  }
+
+  private assertRecallable(status: QuotationStatus): void {
+    if (status !== QuotationStatus.sent && status !== QuotationStatus.approved) {
+      throw new BadRequestException(
+        `Only "sent" or "approved" quotations can be recalled to draft (current: ${status}).`,
+      );
+    }
   }
 
   /**
@@ -967,16 +1300,26 @@ export class QuotationService {
   }
 
   /**
-   * Cancel a draft/sent quotation (admin). Used to "re-issue" — admin
-   * iterated, decided the fees were wrong, wants to start over.
+   * Delete a quotation (admin), at any status, as long as no money was
+   * received and no attempt may still settle (owner decision 5). Used to
+   * "re-issue" — admin iterated, decided the fees or the pack were wrong,
+   * wants to start over.
    *
-   * Because the table has `orderId @unique`, we MUST physically delete
-   * the row to free the slot. Approved / rejected quotes are NOT
-   * cancelable from this path (they're terminal) so we never lose
-   * audit-worthy records this way:
-   *   • approved → terminal happy path, keep row
-   *   • rejected → order is canceled too, keep row
-   *   • canceled by admin → fresh attempt, drop row
+   * DELETION POLICY: this is the ONE hard delete of a business document.
+   * The table has `orderId @unique` and create() refuses a second quote,
+   * so the row must physically go to free the slot. It is only allowed
+   * while nothing financial hangs off the quote:
+   *   • a successful payment → 409 QUOTE_PAYMENT_RECEIVED
+   *   • a pending / unknown / awaiting-confirmation attempt → 409
+   *     QUOTE_PAYMENT_IN_FLIGHT
+   *   • failed, rejected, cancelled or expired attempts moved no money:
+   *     they are detached from the quote (quotationId → null; they keep
+   *     their order link, and their installment link is nulled by the
+   *     cascade) in the same transaction, so Payment.quotation
+   *     (onDelete: Restrict) no longer blocks the delete.
+   *
+   * The order goes back to treatment_approved when it was still in the
+   * quote / payment phase, and the stored devis PDF is removed.
    */
   async cancel(
     id: string,
@@ -988,24 +1331,16 @@ export class QuotationService {
     const quote = await this.loadQuotation(id);
     await this.assertOrderReadable(quote.orderId, caller);
 
-    if (
-      quote.status === QuotationStatus.approved ||
-      quote.status === QuotationStatus.rejected ||
-      quote.status === QuotationStatus.canceled
-    ) {
-      throw new BadRequestException(
-        `Quotation already in terminal state "${quote.status}".`,
-      );
-    }
-
     // Pull the doctorId before we delete the quote — once the row is
     // gone we can't re-derive the recipient. Only notify when the
-    // quote had actually been sent (admin canceling a draft is
+    // doctor had actually seen the quote (admin deleting a draft is
     // invisible to the doctor). We also pull doctor + patient names +
     // orderCode here so the bell body can read as "Quotation Q-… for
     // patient X (ORD-…) was canceled."
-    const wasSent = quote.status === QuotationStatus.sent;
-    const order = wasSent
+    const wasShown =
+      quote.status === QuotationStatus.sent ||
+      quote.status === QuotationStatus.approved;
+    const order = wasShown
       ? await this.prisma.dentalOrder.findUnique({
           where: { id: quote.orderId },
           select: {
@@ -1017,24 +1352,29 @@ export class QuotationService {
         })
       : null;
 
-    // DELETION POLICY: cancel is the ONE hard delete of a business
-    // document (the orderId @unique forces it so a fresh quote can be
-    // issued). It is only ever allowed while nothing financial hangs off
-    // the quote: any Payment row - even a failed attempt - blocks it with
-    // 409 (Payment.quotation is onDelete: Restrict as backstop).
-    const paymentCount = await this.prisma.payment.count({
-      where: { quotationId: quote.id },
+    const deleted = await this.prisma.$transaction(async (tx) => {
+      await lockQuoteForEdit(tx, id);
+      const fresh = await tx.quotation.findUnique({ where: { id } });
+      if (!fresh || fresh.deletedAt) {
+        throw new NotFoundException('Quotation not found.');
+      }
+      assertNoMoneyMoved(
+        await readOneQuoteMoney(tx, id),
+        'delete this quotation',
+      );
+      await tx.payment.updateMany({
+        where: { quotationId: id, status: { in: DEAD_PAYMENT_STATUSES } },
+        data: { quotationId: null },
+      });
+      await tx.quotation.delete({ where: { id } });
+      await resetOrderBeforeQuote(tx, fresh.orderId);
+      return fresh;
     });
-    assertNoDependents(`Quotation ${quote.quotationNumber ?? quote.id}`, [
-      { label: 'payment records', count: paymentCount },
-    ]);
-
-    await this.prisma.quotation.delete({ where: { id: quote.id } });
     // The row is gone: its rendered devis PDF has no owner any more.
     // After the commit, best-effort — never fails the cancel.
-    void this.quotationPdf.deleteStoredPdf(quote.pdfFilePath);
+    void this.quotationPdf.deleteStoredPdf(deleted.pdfFilePath);
 
-    if (wasSent && order) {
+    if (wasShown && order) {
       this.events.emit(NotificationEvents.QuotationCanceled, {
         quotationId: quote.id,
         orderId: quote.orderId,
@@ -1104,7 +1444,7 @@ export class QuotationService {
     ]);
 
     return {
-      data: rows,
+      data: await presentQuotes(this.prisma, rows),
       total,
       page,
       limit: take,

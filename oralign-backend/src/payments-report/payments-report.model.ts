@@ -78,7 +78,11 @@ export interface ReportRow {
   patient: string | null;
   method: PaymentMethod | null;
   status: PaymentRecordStatus | null;
-  /** Exact amount; null when no fee was set. */
+  /**
+   * Exact amount; null when no fee was set. The CASH of the payment, as the
+   * takings sum it: the droit de timbre charged on top included, the
+   * retenue kept back by the practitioner excluded.
+   */
   amount: Prisma.Decimal | null;
   /** Gateway id, bank reference, cash receipt or our ORA- reference. */
   transactionRef: string | null;
@@ -96,6 +100,9 @@ export interface ReportSection {
   kind: ReportSectionKind;
   criteria: ReportCriteria;
   rows: ReportRow[];
-  /** Successful payments only, summed by the same queries as the desk's figures. */
+  /**
+   * Successful payments only, summed by the same queries as the desk's
+   * figures (PaymentsSummaryService): cash received, stamps included.
+   */
   collected: MethodTallies;
 }

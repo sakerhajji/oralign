@@ -50,6 +50,7 @@ import { ClicToPayPaymentsService } from '../services/clictopay-payments.service
 import { PaymentPractitionersService } from '../services/payment-practitioners.service';
 import { PaymentsService } from '../services/payments.service';
 import { PaymentsSummaryService } from '../services/payments-summary.service';
+import { toPaymentJson } from '../services/payment-rules';
 
 const PROOF_UPLOAD_ROOT = join(process.cwd(), 'uploads', 'payments');
 mkdirSync(PROOF_UPLOAD_ROOT, { recursive: true });
@@ -174,6 +175,7 @@ export class PaymentsController {
       type: 'object',
       properties: {
         bankReference: { type: 'string' },
+        applyWithholding: { type: 'string', enum: ['true', 'false'] },
         proofFile: { type: 'string', format: 'binary' },
       },
     },
@@ -188,12 +190,14 @@ export class PaymentsController {
     const proofUrl = proof
       ? `/uploads/payments/${proof.filename}`
       : null;
-    return this.payments.declareBankTransfer({
+    const payment = await this.payments.declareBankTransfer({
       installmentId,
       caller: { userId: user.sub, role: user.role as UserRole },
       bankReference: dto.bankReference,
       proofUrl,
+      applyWithholding: dto.applyWithholding,
     });
+    return toPaymentJson(payment);
   }
 
   // ─── Doctor reads their own payment ────────────────────────────
@@ -205,10 +209,12 @@ export class PaymentsController {
     @Param('paymentId') paymentId: string,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.payments.getPayment(paymentId, {
-      userId: user.sub,
-      role: user.role as UserRole,
-    });
+    return toPaymentJson(
+      await this.payments.getPayment(paymentId, {
+        userId: user.sub,
+        role: user.role as UserRole,
+      }),
+    );
   }
 
   // ─── Admin-facing — pending confirmations queue ───────────────
@@ -220,10 +226,12 @@ export class PaymentsController {
     @Query() filters: PaymentFilterDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.payments.listPendingConfirmations({
-      ...filters,
-      caller: { userId: user.sub, role: user.role as UserRole },
-    });
+    return toPaymentPage(
+      await this.payments.listPendingConfirmations({
+        ...filters,
+        caller: { userId: user.sub, role: user.role as UserRole },
+      }),
+    );
   }
 
   // Full payment history — admin sees every payment in the system.
@@ -236,10 +244,12 @@ export class PaymentsController {
     @Query() filters: PaymentFilterDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.payments.listPayments({
-      ...filters,
-      caller: { userId: user.sub, role: user.role as UserRole },
-    });
+    return toPaymentPage(
+      await this.payments.listPayments({
+        ...filters,
+        caller: { userId: user.sub, role: user.role as UserRole },
+      }),
+    );
   }
 
   // Takings of a period (today by default): what a dentist paid, or what
@@ -294,10 +304,12 @@ export class PaymentsController {
     @Query() filters: PaymentFilterDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.payments.listPayments({
-      ...filters,
-      caller: { userId: user.sub, role: user.role as UserRole },
-    });
+    return toPaymentPage(
+      await this.payments.listPayments({
+        ...filters,
+        caller: { userId: user.sub, role: user.role as UserRole },
+      }),
+    );
   }
 
   @Get('admin/payments/:paymentId')
@@ -307,10 +319,12 @@ export class PaymentsController {
     @Param('paymentId') paymentId: string,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.payments.getPayment(paymentId, {
-      userId: user.sub,
-      role: user.role as UserRole,
-    });
+    return toPaymentJson(
+      await this.payments.getPayment(paymentId, {
+        userId: user.sub,
+        role: user.role as UserRole,
+      }),
+    );
   }
 
   @Post('admin/payments/:paymentId/confirm')
@@ -321,10 +335,12 @@ export class PaymentsController {
     @Body() dto: ConfirmPaymentDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.payments.confirmBankTransfer(paymentId, dto.notes, {
-      userId: user.sub,
-      role: user.role as UserRole,
-    });
+    return toPaymentJson(
+      await this.payments.confirmBankTransfer(paymentId, dto.notes, {
+        userId: user.sub,
+        role: user.role as UserRole,
+      }),
+    );
   }
 
   @Post('admin/payments/:paymentId/reject')
@@ -335,10 +351,12 @@ export class PaymentsController {
     @Body() dto: RejectPaymentDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.payments.rejectBankTransfer(paymentId, dto.rejectionReason, {
-      userId: user.sub,
-      role: user.role as UserRole,
-    });
+    return toPaymentJson(
+      await this.payments.rejectBankTransfer(paymentId, dto.rejectionReason, {
+        userId: user.sub,
+        role: user.role as UserRole,
+      }),
+    );
   }
 
   @Post(
@@ -352,11 +370,22 @@ export class PaymentsController {
     @Body() dto: RecordCashPaymentDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.payments.recordCash({
-      installmentId,
-      receiptNumber: dto.receiptNumber,
-      notes: dto.notes,
-      caller: { userId: user.sub, role: user.role as UserRole },
-    });
+    return toPaymentJson(
+      await this.payments.recordCash({
+        installmentId,
+        receiptNumber: dto.receiptNumber,
+        notes: dto.notes,
+        method: dto.method,
+        applyWithholding: dto.applyWithholding,
+        caller: { userId: user.sub, role: user.role as UserRole },
+      }),
+    );
   }
+}
+
+/** A payment list page, each row with its retenue fields as numbers. */
+function toPaymentPage<
+  T extends { data: Parameters<typeof toPaymentJson>[0][] },
+>(page: T) {
+  return { ...page, data: page.data.map((row) => toPaymentJson(row)) };
 }

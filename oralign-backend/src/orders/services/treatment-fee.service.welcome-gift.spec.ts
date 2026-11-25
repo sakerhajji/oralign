@@ -48,7 +48,12 @@ function makeService(current: ReturnType<typeof order>) {
     Promise.resolve({ ...current, ...args.data }),
   );
   const tx = {
-    dentalOrder: { update },
+    $queryRaw: jest.fn().mockResolvedValue([]),
+    dentalOrder: {
+      update,
+      findUnique: jest.fn().mockResolvedValue({ treatmentFeePaidAt: null }),
+    },
+    payment: { findFirst: jest.fn().mockResolvedValue(null) },
     orderAuditLog: { create: jest.fn() },
   };
   const prisma = {
@@ -118,11 +123,14 @@ describe('TreatmentFeeService — welcome-gift orders have nothing to pay', () =
     await service.payTreatmentFee('o-1', PaymentMethod.cash, admin);
 
     expect(update).toHaveBeenCalledTimes(1);
-    expect(update.mock.calls[0][0].data).toMatchObject({
+    const data = update.mock.calls[0][0].data;
+    expect(data).toMatchObject({
       treatmentFeePaymentMethod: PaymentMethod.cash,
       treatmentFeePaymentStatus: PaymentRecordStatus.success,
-      treatmentFeeAmount: 350,
+      treatmentFeeWithholdingRate: null,
+      treatmentFeeWithholdingAmount: null,
     });
+    expect(String(data.treatmentFeeAmount)).toBe('350');
   });
 });
 

@@ -17,7 +17,9 @@ export class ClicToPayClient {
 
   static amountToMillimes(amount: Prisma.Decimal | string | number): number {
     const decimal = new Prisma.Decimal(amount);
-    if (!decimal.isPositive() || decimal.decimalPlaces() > 3) {
+    // gt(0), not isPositive(): Decimal.js counts 0 as positive, and a zero
+    // charge must never reach the gateway.
+    if (!decimal.gt(0) || decimal.decimalPlaces() > 3) {
       throw new ClicToPayError(
         'provider',
         'PAYMENT_AMOUNT_INVALID',

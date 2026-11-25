@@ -5,6 +5,11 @@ import Link from 'next/link';
 import { TreatmentFeeReceiptDialog } from '@/components/orders/treatment-fee-receipt-dialog';
 import { InvoiceNumberEditor } from '@/components/payments/invoice-number-editor';
 import { PaymentStatusBadge } from '@/components/payments/payment-status-badge';
+import {
+  AmountWithWithholding,
+  recordedSplit,
+  recordedSplitParts,
+} from '@/components/payments/withholding';
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -61,6 +66,19 @@ const receiptPath = (row: PaymentListItem) => `/dashboard/payments/${row.id}/inv
  * (sortBy=eventAt) and the period filters on it.
  */
 const eventDate = (row: PaymentListItem) => row.paidAt ?? row.createdAt;
+
+/**
+ * The payment's split (installment TTC, stamp added, retenue kept back),
+ * or null on an older row that carries neither.
+ */
+const splitOf = (row: PaymentListItem) =>
+  recordedSplit(
+    row.amount,
+    row.withholdingAmount,
+    row.withholdingRate,
+    row.stampAmount,
+    row.settledAmount,
+  );
 
 /**
  * The installments tab: quote installment payments, one row per attempt,
@@ -179,7 +197,12 @@ export function InstallmentsTable({
                     <PaymentStatusBadge status={row.status} />
                   </TableCell>
                   <TableCell className={cn('py-2.5 font-medium tabular-nums', COLS.amount)}>
-                    {formatPrice(row.amount, row.currency)}
+                    <AmountWithWithholding
+                      cash={row.amount}
+                      split={splitOf(row)}
+                      currency={row.currency}
+                      className="items-end"
+                    />
                   </TableCell>
                   <TableCell className={cn('py-2.5', isAdmin ? COLS.receiptAdmin : COLS.receipt)}>
                     {row.status === PaymentRecordStatus.SUCCESS ? (
@@ -205,7 +228,9 @@ export function InstallmentsTable({
       <ul className={PHONE_LIST}>
         {rows.map((row) => {
           const installment = row.installment?.installmentNumber;
-          // When, who paid (admins), how, then which order and installment.
+          const split = splitOf(row);
+          // When, who paid (admins), how, then which order and installment;
+          // with a stamp or a retenue, the installment, stamp and retenue last.
           const meta = [
             dateTimeLine(eventDate(row), lang, today),
             isAdmin ? row.order?.doctor?.fullName : null,
@@ -214,6 +239,7 @@ export function InstallmentsTable({
             installment !== undefined
               ? t('paymentsDesk.list.installmentInline', { n: installment })
               : null,
+            ...recordedSplitParts(split, row.currency, t),
           ]
             .filter(Boolean)
             .join(' · ');
@@ -241,6 +267,10 @@ export function InstallmentsTable({
           orderCode={proofRow.order?.orderCode ?? '—'}
           proofPath={proofRow.proofUrl ?? null}
           amount={Number(proofRow.amount)}
+          withholdingAmount={proofRow.withholdingAmount}
+          withholdingRate={proofRow.withholdingRate}
+          stampAmount={proofRow.stampAmount}
+          settledAmount={proofRow.settledAmount}
           currency={proofRow.currency}
           doctorName={proofRow.order?.doctor?.fullName ?? null}
           patientName={proofRow.order?.patient?.fullName ?? null}

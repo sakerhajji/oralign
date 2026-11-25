@@ -186,10 +186,13 @@ describe('PaymentsService.updateInvoiceNumber (receipt number override)', () => 
     await expect(
       service.updateInvoiceNumber('p1', 'FAC-000777', admin),
     ).rejects.toMatchObject(taken);
-    expect(prisma.invoice.findUnique).toHaveBeenCalledWith({
-      where: { invoiceNumber: 'FAC-000777' },
-      select: { id: true, paymentId: true },
-    });
+    // The select is the shared guard's (invoice-number.ts) to decide.
+    expect(prisma.invoice.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { invoiceNumber: 'FAC-000777' },
+        select: expect.objectContaining({ id: true, paymentId: true }),
+      }),
+    );
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 

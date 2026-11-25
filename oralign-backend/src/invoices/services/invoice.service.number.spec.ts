@@ -33,6 +33,7 @@ function makeService(documents: Documents = {}) {
   const tx = {
     invoice: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     payment: { update: jest.fn().mockResolvedValue({}) },
+    dentalOrder: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     invoiceLine: { deleteMany: jest.fn(), createMany: jest.fn() },
   };
   const prisma = {
@@ -122,6 +123,28 @@ describe('InvoiceService: the number an admin types follows the shared rules', (
     expect(tx.payment.update).toHaveBeenCalledWith({
       where: { id: 'p1' },
       data: { invoiceNumber: 'FAC-000777' },
+    });
+  });
+
+  it("renaming a fee facture renames the order's number only while the order prints it (a legacy TF- receipt stays)", async () => {
+    const { service, prisma, tx } = makeService();
+    prisma.invoice.findFirst.mockResolvedValue({
+      ...AUTOMATIC,
+      paymentId: null,
+      treatmentFeeOrderId: 'o-1',
+    });
+
+    await service.update('inv-1', { invoiceNumber: 'FAC-000777' }, admin);
+
+    expect(tx.dentalOrder.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'o-1',
+        OR: [
+          { treatmentFeeInvoiceNumber: 'FAC-000123' },
+          { treatmentFeeInvoiceNumber: null },
+        ],
+      },
+      data: { treatmentFeeInvoiceNumber: 'FAC-000777' },
     });
   });
 

@@ -59,6 +59,7 @@ const ACTION_ICONS: Record<string, typeof History> = {
   treatment_result_added: FileCheck2,
   quotation_created: FilePenLine,
   quotation_sent: Send,
+  quotation_updated: FilePenLine,
   quotation_approved: ShieldCheck,
   quotation_rejected: FileClock,
   payment_started: Clock3,

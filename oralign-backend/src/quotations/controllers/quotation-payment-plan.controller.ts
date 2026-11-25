@@ -44,8 +44,10 @@ export class QuotationPaymentPlanController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Attach a pack + arch to a draft quotation. Snapshots price + ' +
-      'limits onto the Quotation. Resets any previously-configured plan.',
+      'Attach a pack + arch to a quotation while no money was received and ' +
+      'none is in progress (409 QUOTE_PAYMENT_RECEIVED / QUOTE_PAYMENT_IN_FLIGHT). ' +
+      'Snapshots price (TTC, HT/TVA split at the company rate) + limits onto ' +
+      'the Quotation. Resets any previously-configured plan.',
   })
   async attachPack(
     @Param('id') id: string,
@@ -63,9 +65,12 @@ export class QuotationPaymentPlanController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Define the installment + step-batch plan. Service enforces ' +
-      'Σamounts == totalPrice, non-overlapping step ranges, and the ' +
-      'pack max-steps rule.',
+      'Define the installment + step-batch plan (draft, sent or approved). ' +
+      'Paid installments and their batches are kept: the body lists only the ' +
+      'new unpaid rows, which must sum to totalPrice − Σ paid installments and ' +
+      'not overlap the kept step ranges; numbering continues after the kept ' +
+      'rows. Also enforces the pack max-steps rule. 409 QUOTE_PAYMENT_IN_FLIGHT ' +
+      'while an unpaid installment has a payment in progress.',
   })
   async configurePaymentPlan(
     @Param('id') id: string,

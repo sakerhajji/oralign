@@ -23,6 +23,8 @@ export interface QuotationLabels {
   // Line items
   description: string;
   amount: string;
+  /** Column header when the line amounts include TVA (every current devis). */
+  amountTtc: string;
   treatmentFees: string;
   fabricationFees: string;
   deliveryFees: string;
@@ -33,6 +35,17 @@ export interface QuotationLabels {
   vatAmount: string;
   totalTtc: string;
   currencyLabel: string;
+  /** Printed under the totals of a TTC-priced devis. */
+  pricesIncludeTax: string;
+  /**
+   * Same note, about the fiscal stamp ADDED to each payment (owner
+   * decision 2026-11-20: one facture per payment, one stamp per facture).
+   */
+  stampPerPayment: (stamp: string) => string;
+  /** Totals row under Total TTC when the devis has a payment plan: "Droit de timbre (3 × 1,000)". */
+  stampRow: (count: number, stamp: string) => string;
+  /** Final totals row: the TTC plus every payment's stamp. */
+  totalWithStamps: string;
   // Status
   status: string;
   statusDraft: string;
@@ -65,6 +78,7 @@ const FR: QuotationLabels = {
   order: 'Commande',
   description: 'Description',
   amount: 'Montant',
+  amountTtc: 'Montant TTC',
   treatmentFees: 'Frais de traitement',
   fabricationFees: 'Frais de fabrication',
   deliveryFees: 'Frais de livraison',
@@ -74,6 +88,11 @@ const FR: QuotationLabels = {
   vatAmount: 'Montant TVA',
   totalTtc: 'Total TTC',
   currencyLabel: 'Devise',
+  pricesIncludeTax: 'Prix TTC (TVA incluse).',
+  stampPerPayment: (stamp) =>
+    `Droit de timbre (${stamp}) ajouté à chaque paiement : une facture par paiement.`,
+  stampRow: (count, stamp) => `Droit de timbre (${count} × ${stamp})`,
+  totalWithStamps: 'Total à payer',
   status: 'Statut',
   statusDraft: 'Brouillon',
   statusSent: 'Envoyé',
@@ -103,6 +122,7 @@ const EN: QuotationLabels = {
   order: 'Order',
   description: 'Description',
   amount: 'Amount',
+  amountTtc: 'Amount incl. TVA',
   treatmentFees: 'Treatment fees',
   fabricationFees: 'Fabrication fees',
   deliveryFees: 'Delivery fees',
@@ -117,6 +137,11 @@ const EN: QuotationLabels = {
   vatAmount: 'TVA amount',
   totalTtc: 'Total incl. TVA',
   currencyLabel: 'Currency',
+  pricesIncludeTax: 'Prices include TVA.',
+  stampPerPayment: (stamp) =>
+    `Stamp duty (${stamp}) added to each payment: one invoice per payment.`,
+  stampRow: (count, stamp) => `Stamp duty (${count} × ${stamp})`,
+  totalWithStamps: 'Total to pay',
   status: 'Status',
   statusDraft: 'Draft',
   statusSent: 'Sent',
@@ -146,6 +171,7 @@ const AR: QuotationLabels = {
   order: 'الطلب',
   description: 'الوصف',
   amount: 'المبلغ',
+  amountTtc: 'المبلغ شامل الضريبة',
   treatmentFees: 'رسوم العلاج',
   fabricationFees: 'رسوم التصنيع',
   deliveryFees: 'رسوم التوصيل',
@@ -155,6 +181,11 @@ const AR: QuotationLabels = {
   vatAmount: 'مبلغ الضريبة',
   totalTtc: 'المجموع شامل الضريبة',
   currencyLabel: 'العملة',
+  pricesIncludeTax: 'الأسعار شاملة للضريبة.',
+  stampPerPayment: (stamp) =>
+    `يُضاف معلوم الطابع الجبائي (${stamp}) إلى كل دفعة: فاتورة لكل دفعة.`,
+  stampRow: (count, stamp) => `معلوم الطابع الجبائي (${count} × ${stamp})`,
+  totalWithStamps: 'المبلغ الجملي للدفع',
   status: 'الحالة',
   statusDraft: 'مسودة',
   statusSent: 'مرسل',

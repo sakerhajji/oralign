@@ -8,6 +8,7 @@ import type { Locale } from 'date-fns';
 import {
   Banknote,
   CreditCard,
+  FilePen,
   FileText,
   Landmark,
   ReceiptText,
@@ -33,13 +34,27 @@ import {
 import { usePendingTreatmentFees } from '@/lib/hooks';
 import type { TreatmentFeeRow } from '@/lib/api/orders.service';
 import { PaymentMethod } from '@/lib/types';
-import {
-  DEFAULT_MERCHANT_CURRENCY,
-  formatPrice,
-} from '@/lib/utils/currency';
+import { DEFAULT_MERCHANT_CURRENCY } from '@/lib/utils/currency';
 import { TreatmentFeeReceiptDialog } from '@/components/orders/treatment-fee-receipt-dialog';
 import { PaymentStatusBadge } from '@/components/payments/payment-status-badge';
+import {
+  AmountWithWithholding,
+  recordedSplit,
+} from '@/components/payments/withholding';
 import { useT } from '@/lib/i18n/lang-context';
+
+/**
+ * A fee row may carry the retenue à la source the practitioner applied
+ * and the droit de timbre added with the payment (`amount` is then the
+ * cash: fee + stamp - retenue). Optional: older API rows have neither.
+ */
+type FeeRow = TreatmentFeeRow & {
+  withholdingAmount?: number | string | null;
+  withholdingRate?: number | string | null;
+};
+
+const feeSplit = (row: FeeRow) =>
+  recordedSplit(row.amount, row.withholdingAmount, row.withholdingRate, row.stampAmount);
 
 /**
  * Maps `PaymentMethod` → method icon + Tailwind color set. Labels come
@@ -61,6 +76,10 @@ const METHOD_META: Record<
   [PaymentMethod.CASH]: {
     Icon: Banknote,
     tone: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  },
+  [PaymentMethod.CHEQUE]: {
+    Icon: FilePen,
+    tone: 'bg-amber-50 text-amber-700 border-amber-200',
   },
 };
 
@@ -179,7 +198,17 @@ function TreatmentFeeTable({
               <PaymentStatusBadge status={row.status} />
             </TableCell>
             <TableCell className="text-right tabular-nums">
-              {row.amount !== null ? formatPrice(row.amount) : '—'}
+              {row.amount !== null ? (
+                <AmountWithWithholding
+                  cash={row.amount}
+                  split={feeSplit(row)}
+                  currency={DEFAULT_MERCHANT_CURRENCY}
+                  kind="fee"
+                  className="items-end"
+                />
+              ) : (
+                '—'
+              )}
             </TableCell>
             <TableCell className="text-xs text-muted-foreground">
               {row.paidAt
@@ -231,7 +260,7 @@ export function PendingTreatmentFeesSection() {
   // The currently-opened row drives the viewer modal. Holding the
   // full row lets us pass amount + doctor / patient context for the
   // dialog header without re-fetching.
-  const [active, setActive] = useState<TreatmentFeeRow | null>(null);
+  const [active, setActive] = useState<FeeRow | null>(null);
 
   if (!isLoading && rows.length === 0) return null;
 
@@ -295,6 +324,10 @@ export function PendingTreatmentFeesSection() {
           orderCode={active.orderCode}
           proofPath={active.proofPath}
           amount={active.amount}
+          withholdingAmount={active.withholdingAmount}
+          withholdingRate={active.withholdingRate}
+          stampAmount={active.stampAmount}
+          kind="fee"
           currency={DEFAULT_MERCHANT_CURRENCY}
           doctorName={active.doctor?.fullName ?? null}
           patientName={active.patient?.fullName ?? null}

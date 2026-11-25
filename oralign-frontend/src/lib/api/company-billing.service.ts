@@ -26,6 +26,12 @@ import type {
 export interface BillingPublicDefaults {
   defaultTreatmentFee: number;
   defaultCurrency: string;
+  /** Prices are TTC: this rate is shown inside them (HT + TVA). */
+  defaultTvaRate: number;
+  /** Droit de timbre ADDED to every payment (each payment has its own facture). */
+  stampDuty: number;
+  /** Retenue à la source (%) the practitioner may apply when paying; 0 = off. */
+  withholdingRate: number;
   /** CBCT paid supplement — drives the price note in the order wizard
    *  and the breakdown in the treatment-fee payment dialog. */
   cbctSupplementEnabled: boolean;

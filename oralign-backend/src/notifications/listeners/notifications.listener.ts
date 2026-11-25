@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { NotificationType } from '@prisma/client';
+import { NotificationType, PaymentMethod } from '@prisma/client';
 import { NotificationsService } from '../services/notifications.service';
 import { OrderNotificationService } from '../../mail/order-notification.service';
 import {
@@ -891,21 +891,27 @@ export class NotificationsListener {
       const installmentTailFr = payload.installmentNumber
         ? ` — échéance n°${payload.installmentNumber}`
         : '';
+      // The same event carries the cheques the admin records.
+      const cheque = payload.method === PaymentMethod.cheque;
+      const byEn = cheque ? 'by cheque' : 'cash';
+      const byFr = cheque ? 'par chèque' : 'en espèces';
       await Promise.all([
         this.notifications.broadcastToAdmins({
           type: NotificationType.cash_payment_recorded,
           title: {
-            en: 'Cash payment recorded',
-            fr: 'Paiement en espèces enregistré',
+            en: cheque ? 'Cheque payment recorded' : 'Cash payment recorded',
+            fr: cheque
+              ? 'Paiement par chèque enregistré'
+              : 'Paiement en espèces enregistré',
           },
           message: byline.en
             ? {
-                en: `${byline.en} — ${payload.amount} ${payload.currency} cash recorded${installmentTailEn}.`,
-                fr: `${byline.fr} — ${payload.amount} ${payload.currency} en espèces enregistrés${installmentTailFr}.`,
+                en: `${byline.en} — ${payload.amount} ${payload.currency} ${byEn} recorded${installmentTailEn}.`,
+                fr: `${byline.fr} — ${payload.amount} ${payload.currency} ${byFr} enregistrés${installmentTailFr}.`,
               }
             : {
-                en: `${payload.amount} ${payload.currency} cash recorded${installmentTailEn}.`,
-                fr: `${payload.amount} ${payload.currency} en espèces enregistrés${installmentTailFr}.`,
+                en: `${payload.amount} ${payload.currency} ${byEn} recorded${installmentTailEn}.`,
+                fr: `${payload.amount} ${payload.currency} ${byFr} enregistrés${installmentTailFr}.`,
               },
           link: `/dashboard/orders/${payload.orderId}?tab=quote`,
           metadata: {
@@ -922,12 +928,14 @@ export class NotificationsListener {
           recipientId: payload.doctorId,
           type: NotificationType.payment_confirmed,
           title: {
-            en: 'Cash payment confirmed',
-            fr: 'Paiement en espèces confirmé',
+            en: cheque ? 'Cheque payment confirmed' : 'Cash payment confirmed',
+            fr: cheque
+              ? 'Paiement par chèque confirmé'
+              : 'Paiement en espèces confirmé',
           },
           message: {
-            en: `${payload.amount} ${payload.currency} cash${subjectEn}${code} has been recorded by the team${installmentTailEn}.`,
-            fr: `${payload.amount} ${payload.currency} en espèces${subjectFr}${code} ont été enregistrés par l'équipe${installmentTailFr}.`,
+            en: `${payload.amount} ${payload.currency} ${byEn}${subjectEn}${code} has been recorded by the team${installmentTailEn}.`,
+            fr: `${payload.amount} ${payload.currency} ${byFr}${subjectFr}${code} ont été enregistrés par l'équipe${installmentTailFr}.`,
           },
           link: `/dashboard/orders/${payload.orderId}?tab=quote`,
           metadata: {
@@ -999,13 +1007,17 @@ export class NotificationsListener {
           ? 'card'
           : payload.method === 'cash'
             ? 'cash'
-            : 'bank transfer';
+            : payload.method === 'cheque'
+              ? 'cheque'
+              : 'bank transfer';
       const methodLabelFr =
         payload.method === 'card'
           ? 'par carte'
           : payload.method === 'cash'
             ? 'en espèces'
-            : 'par virement bancaire';
+            : payload.method === 'cheque'
+              ? 'par chèque'
+              : 'par virement bancaire';
       await this.notifications.broadcastToAdmins({
         type: NotificationType.treatment_fee_paid,
         title: {

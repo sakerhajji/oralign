@@ -70,10 +70,6 @@ export const commerceDomainDict = {
   // ─── Invoicing desk: list + manual invoice form ──────────────────
   // Complements the older `invoicesAdmin` block (labels, columns, status).
   invoiceDesk: {
-    subtitle: {
-      en: 'Issue, track and export the invoices of the practice.',
-      fr: 'Émettez, suivez et exportez les factures du cabinet.',
-    } as T,
     moreActions: { en: 'More actions', fr: 'Autres actions' } as T,
     selectAll: {
       en: 'Select every invoice on this page',
@@ -85,10 +81,6 @@ export const commerceDomainDict = {
     next: { en: 'Next', fr: 'Suivant' } as T,
     dueOn: { en: 'Due {date}', fr: 'Échéance {date}' } as T,
     overdue: { en: 'Overdue', fr: 'En retard' } as T,
-    period: { en: 'Period', fr: 'Période' } as T,
-    periodAll: { en: 'All time', fr: 'Toute la période' } as T,
-    period30: { en: 'Last 30 days', fr: '30 derniers jours' } as T,
-    periodCustom: { en: 'Custom range', fr: 'Période personnalisée' } as T,
     markIssued: { en: 'Mark as issued', fr: 'Marquer comme émise' } as T,
     markPaid: { en: 'Mark as paid', fr: 'Marquer comme payée' } as T,
     markCancelled: { en: 'Cancel the invoice', fr: 'Annuler la facture' } as T,
@@ -139,6 +131,212 @@ export const commerceDomainDict = {
       en: 'This invoice is archived. Restore it to edit it.',
       fr: 'Cette facture est archivée. Restaurez-la pour la modifier.',
     } as T,
+
+    // ── Accounting view: period bar, récapitulatif, exports ──
+    // components/invoices/accounting/*, invoices-content.tsx
+    accounting: {
+      subtitle: {
+        en: 'The invoices of the company and the figures of the period for the accounts: VAT, stamp duty, withholding tax, cash collected.',
+        fr: 'Les factures de la société et les chiffres de la période pour la comptabilité : TVA, timbres, retenues à la source, encaissements.',
+      } as T,
+      period: {
+        aria: { en: 'Accounting period', fr: 'Période comptable' } as T,
+        label: { en: 'Period', fr: 'Période' } as T,
+        thisMonth: { en: 'This month', fr: 'Ce mois' } as T,
+        lastMonth: { en: 'Last month', fr: 'Mois dernier' } as T,
+        thisQuarter: { en: 'This quarter', fr: 'Ce trimestre' } as T,
+        lastQuarter: { en: 'Last quarter', fr: 'Trimestre dernier' } as T,
+        thisYear: { en: 'This year', fr: 'Cette année' } as T,
+        all: { en: 'All time', fr: 'Tout' } as T,
+        custom: { en: 'Custom', fr: 'Personnalisé' } as T,
+        oneDay: { en: 'On {day}', fr: 'Le {day}' } as T,
+        span: { en: 'From {from} to {to}', fr: 'Du {from} au {to}' } as T,
+        since: { en: 'Since {day}', fr: 'Depuis le {day}' } as T,
+        until: { en: 'Up to {day}', fr: 'Jusqu’au {day}' } as T,
+        allDates: { en: 'All dates', fr: 'Toutes les dates' } as T,
+        errInvalid: { en: 'This date does not exist.', fr: 'Cette date n’existe pas.' } as T,
+        errTooEarly: {
+          en: 'Pick a date from 1 January 2020 on.',
+          fr: 'Choisissez une date à partir du 1er janvier 2020.',
+        } as T,
+        errOrder: {
+          en: 'The end date is before the start date.',
+          fr: 'La date de fin précède la date de début.',
+        } as T,
+      },
+      tabs: {
+        aria: { en: 'Views of the page', fr: 'Vues de la page' } as T,
+        recap: { en: 'Accounting summary', fr: 'Récapitulatif comptable' } as T,
+        list: { en: 'Invoices', fr: 'Factures' } as T,
+      },
+      loadError: {
+        en: 'Could not load the accounting summary.',
+        fr: 'Impossible de charger le récapitulatif comptable.',
+      } as T,
+      // Counted nouns: <base>One / <base>Other (French keeps the singular for 0).
+      invoicesOne: { en: '{count} invoice', fr: '{count} facture' } as T,
+      invoicesOther: { en: '{count} invoices', fr: '{count} factures' } as T,
+      stampsOne: { en: '{count} stamp', fr: '{count} timbre' } as T,
+      stampsOther: { en: '{count} stamps', fr: '{count} timbres' } as T,
+      paidInvoicesOne: { en: '{count} paid invoice', fr: '{count} facture payée' } as T,
+      paidInvoicesOther: { en: '{count} paid invoices', fr: '{count} factures payées' } as T,
+      doctorsOne: { en: '{count} doctor', fr: '{count} docteur' } as T,
+      doctorsOther: { en: '{count} doctors', fr: '{count} docteurs' } as T,
+      draftsOne: { en: '{count} draft', fr: '{count} brouillon' } as T,
+      draftsOther: { en: '{count} drafts', fr: '{count} brouillons' } as T,
+      cancelledInvoicesOne: { en: '{count} cancelled', fr: '{count} annulée' } as T,
+      cancelledInvoicesOther: { en: '{count} cancelled', fr: '{count} annulées' } as T,
+      pdfFilesOne: { en: '{count} PDF', fr: '{count} PDF' } as T,
+      pdfFilesOther: { en: '{count} PDFs', fr: '{count} PDF' } as T,
+      colInvoices: { en: 'Invoices', fr: 'Factures' } as T,
+      total: { en: 'Total', fr: 'Total' } as T,
+      kpi: {
+        revenue: { en: 'Revenue excl. VAT', fr: 'Chiffre d’affaires HT' } as T,
+        discount: { en: 'Discounts granted: {amount}', fr: 'Remises accordées : {amount}' } as T,
+        tva: { en: 'VAT collected', fr: 'TVA collectée' } as T,
+        tvaSub: { en: 'To declare', fr: 'À déclarer' } as T,
+        stamp: { en: 'Stamp duty', fr: 'Droit de timbre' } as T,
+        ttc: { en: 'Total billed incl. VAT', fr: 'Total TTC facturé' } as T,
+        ttcSub: { en: 'Net + VAT + stamp', fr: 'HT + TVA + timbre' } as T,
+        withholding: { en: 'Withholding tax', fr: 'Retenues à la source' } as T,
+        withholdingSub: {
+          en: '{invoices} · certificates to claim',
+          fr: '{invoices} · certificats à réclamer',
+        } as T,
+        withholdingNone: {
+          en: 'No withholding over the period',
+          fr: 'Aucune retenue sur la période',
+        } as T,
+        collected: { en: 'Collected (net)', fr: 'Encaissé (net)' } as T,
+        toCollect: {
+          en: 'Still to collect {amount} ({invoices})',
+          fr: 'Reste à encaisser {amount} ({invoices})',
+        } as T,
+        allCollected: { en: 'Everything is collected', fr: 'Tout est encaissé' } as T,
+      },
+      rates: {
+        title: { en: 'VAT collected by rate', fr: 'TVA collectée par taux' } as T,
+        hint: {
+          en: 'The figures of the monthly VAT return: net base (after discount) and VAT per rate.',
+          fr: 'Les chiffres de la déclaration mensuelle de TVA : base HT (après remise) et TVA par taux.',
+        } as T,
+        stampLine: {
+          en: 'Stamp duty, declared on its own line: {amount} ({stamps})',
+          fr: 'Droit de timbre, à déclarer sur sa propre ligne : {amount} ({stamps})',
+        } as T,
+        colRate: { en: 'Rate', fr: 'Taux' } as T,
+        colBase: { en: 'Net base', fr: 'Base HT' } as T,
+        colTva: { en: 'VAT', fr: 'TVA' } as T,
+      },
+      methods: {
+        title: { en: 'Cash collected by payment method', fr: 'Encaissements par mode de paiement' } as T,
+        hint: {
+          en: 'Paid invoices of the period, net collected after withholding tax.',
+          fr: 'Factures payées de la période, net encaissé après retenue à la source.',
+        } as T,
+        total: { en: 'Total collected', fr: 'Total encaissé' } as T,
+        toCollect: { en: 'Still to collect', fr: 'Reste à encaisser' } as T,
+        empty: { en: 'No paid invoice over the period.', fr: 'Aucune facture payée sur la période.' } as T,
+        card: { en: 'Card', fr: 'Carte bancaire' } as T,
+        bankTransfer: { en: 'Bank transfer', fr: 'Virement' } as T,
+        cash: { en: 'Cash', fr: 'Espèces' } as T,
+        cheque: { en: 'Cheque', fr: 'Chèque' } as T,
+        none: { en: 'Not specified', fr: 'Non précisé' } as T,
+      },
+      withholding: {
+        title: { en: 'Withholding tax by doctor', fr: 'Retenues à la source par docteur' } as T,
+        hint: {
+          en: 'Withheld on the total incl. VAT, stamp excluded. For the company, a tax credit.',
+          fr: 'Retenue sur le TTC hors timbre. Pour la société, c’est un crédit d’impôt.',
+        } as T,
+        note: {
+          en: 'Ask each doctor for their withholding tax certificate: it is what lets the company deduct the amount.',
+          fr: 'Réclamez à chaque docteur son certificat de retenue à la source : c’est lui qui permet à la société de déduire le montant.',
+        } as T,
+        empty: {
+          en: 'No withholding tax over the period.',
+          fr: 'Aucune retenue à la source sur la période.',
+        } as T,
+        colTaxId: { en: 'Tax ID', fr: 'Matricule fiscal' } as T,
+        colBase: { en: 'Base incl. VAT, excl. stamp', fr: 'Base TTC hors timbre' } as T,
+        colAmount: { en: 'Withheld', fr: 'Retenue' } as T,
+        openTitle: { en: 'See the invoices of {name}', fr: 'Voir les factures de {name}' } as T,
+      },
+      months: {
+        title: { en: 'Month by month', fr: 'Détail par mois' } as T,
+        hint: {
+          en: 'One row per month, by issue date (Tunis time).',
+          fr: 'Une ligne par mois, selon la date d’émission (heure de Tunis).',
+        } as T,
+        colMonth: { en: 'Month', fr: 'Mois' } as T,
+        colHt: { en: 'Excl. VAT', fr: 'HT' } as T,
+        colTva: { en: 'VAT', fr: 'TVA' } as T,
+        colStamp: { en: 'Stamp', fr: 'Timbre' } as T,
+        colTtc: { en: 'Incl. VAT', fr: 'TTC' } as T,
+        colWithholding: { en: 'Withheld', fr: 'Retenue' } as T,
+        colNet: { en: 'Net payable', fr: 'Net à payer' } as T,
+      },
+      notes: {
+        rule: {
+          en: 'Counted: issued or paid invoices whose issue date falls in the period (archived ones aside).',
+          fr: 'Comptées : les factures émises ou payées dont la date d’émission est dans la période (archivées à part).',
+        } as T,
+        excluded: { en: 'Not in the totals:', fr: 'Hors totaux :' } as T,
+        drafts: { en: '{invoices} ({amount} incl. VAT)', fr: '{invoices} ({amount} TTC)' } as T,
+        cancelled: { en: '{invoices} ({amount} incl. VAT)', fr: '{invoices} ({amount} TTC)' } as T,
+      },
+      empty: {
+        title: {
+          en: 'No invoice counted over this period',
+          fr: 'Aucune facture comptabilisée sur cette période',
+        } as T,
+        body: {
+          en: 'Only issued or paid invoices enter the summary. Pick another period, or issue the drafts.',
+          fr: 'Seules les factures émises ou payées entrent dans le récapitulatif. Changez de période, ou émettez les brouillons.',
+        } as T,
+        showList: { en: 'See the invoices of the period', fr: 'Voir les factures de la période' } as T,
+      },
+      export: {
+        button: { en: 'Export', fr: 'Exporter' } as T,
+        forPeriod: { en: 'Exported period', fr: 'Période exportée' } as T,
+        csv: { en: 'Sales journal (Excel)', fr: 'Journal des ventes (Excel)' } as T,
+        csvHint: {
+          en: 'Every invoice of the period, one row each, with the total.',
+          fr: 'Toutes les factures de la période, une ligne chacune, avec le total.',
+        } as T,
+        pdf: { en: 'Accounting summary (PDF)', fr: 'Récapitulatif comptable (PDF)' } as T,
+        pdfHint: {
+          en: 'VAT by rate, stamps, withholding by doctor, cash collected.',
+          fr: 'TVA par taux, timbres, retenues par docteur, encaissements.',
+        } as T,
+        zip: { en: 'Every invoice of the period (ZIP)', fr: 'Toutes les factures de la période (ZIP)' } as T,
+        zipHint: {
+          en: '{invoices}: issued, paid and cancelled.',
+          fr: '{invoices} : émises, payées et annulées.',
+        } as T,
+        zipHintLoading: {
+          en: 'Issued, paid and cancelled, as PDFs.',
+          fr: 'Émises, payées et annulées, en PDF.',
+        } as T,
+        zipEmpty: {
+          en: 'No issued invoice over the period.',
+          fr: 'Aucune facture émise sur la période.',
+        } as T,
+        zipTooBig: {
+          en: 'More than {max} invoices: narrow the period.',
+          fr: 'Plus de {max} factures : réduisez la période.',
+        } as T,
+      },
+      list: {
+        doctorChip: { en: 'Doctor: {name}', fr: 'Docteur : {name}' } as T,
+        clearDoctor: {
+          en: 'Remove the doctor filter ({name})',
+          fr: 'Retirer le filtre docteur ({name})',
+        } as T,
+        emptyPeriod: { en: 'No invoice over this period.', fr: 'Aucune facture sur cette période.' } as T,
+        allDates: { en: 'Show all dates', fr: 'Voir toutes les dates' } as T,
+      },
+    },
   },
 
   // ─── Admin quote editor layout (quote-review.tsx, quote-pack-panel.tsx)
@@ -154,8 +352,8 @@ export const commerceDomainDict = {
     } as T,
     change: { en: 'Change', fr: 'Modifier' } as T,
     changeWipesPlan: {
-      en: 'Changing the pack resets the payment plan.',
-      fr: 'Changer de pack réinitialise le plan de paiement.',
+      en: 'Changing the pack replaces the payment plan: you set it again afterwards.',
+      fr: 'Changer de pack remplace le plan de paiement : vous le redéfinirez ensuite.',
     } as T,
     needsPack: { en: 'Choose a pack first.', fr: 'Choisissez d’abord un pack.' } as T,
     adjustStep: { en: 'Adjustments', fr: 'Ajustements' } as T,
@@ -166,9 +364,13 @@ export const commerceDomainDict = {
     optional: { en: 'optional', fr: 'facultatif' } as T,
     deliveryFees: { en: 'Delivery fees', fr: 'Frais de livraison' } as T,
     discount: { en: 'Discount', fr: 'Remise' } as T,
-    adjustWipesPlan: {
-      en: 'Saving a new total resets the payment plan.',
-      fr: 'Enregistrer un nouveau total réinitialise le plan de paiement.',
+    adjustRebalances: {
+      en: 'When you save, the unpaid installments are adjusted to the new total. Paid installments stay as they are.',
+      fr: 'À l’enregistrement, les échéances non payées sont ajustées au nouveau total. Les échéances déjà payées ne changent pas.',
+    } as T,
+    totalBelowPaid: {
+      en: 'The total cannot be lower than the {paid} already paid.',
+      fr: 'Le total ne peut pas être inférieur aux {paid} déjà réglés.',
     } as T,
     saveBeforePlan: {
       en: 'Save before setting the payment plan.',
@@ -184,6 +386,15 @@ export const commerceDomainDict = {
       fr: 'Encaissez les échéances et livrez les aligneurs qu’elles débloquent. Les virements arrivent dans',
     } as T,
     pendingTransfers: { en: 'pending payments', fr: 'les paiements en attente' } as T,
+    editPlan: { en: 'Edit schedule', fr: 'Modifier l’échéancier' } as T,
+    planEditDesc: {
+      en: 'Paid and cancelled installments stay as they are. Spread the {remaining} left to pay over the installments below.',
+      fr: 'Les échéances payées ou annulées ne changent pas. Répartissez le reste à payer, {remaining}, sur les échéances ci-dessous.',
+    } as T,
+    planInFlight: {
+      en: 'A payment is in progress. The schedule can be edited again once it is confirmed or rejected.',
+      fr: 'Un paiement est en cours. L’échéancier redeviendra modifiable une fois ce paiement confirmé ou refusé.',
+    } as T,
     notesTitle: { en: 'Notes', fr: 'Notes' } as T,
     notesDesc: {
       en: 'Shown to the practitioner and printed on the PDF.',
@@ -207,13 +418,51 @@ export const commerceDomainDict = {
       en: 'Set the payment plan to send the quote.',
       fr: 'Définissez le plan de paiement pour envoyer le devis.',
     } as T,
-    cancelQuote: { en: 'Cancel quote', fr: 'Annuler le devis' } as T,
-    cancelTitle: { en: 'Cancel this quote?', fr: 'Annuler ce devis ?' } as T,
-    cancelDesc: {
-      en: 'The quote is closed and can no longer be paid. You can create a new one afterwards.',
-      fr: 'Le devis est clôturé et ne peut plus être payé. Vous pourrez en créer un nouveau ensuite.',
+    deleteQuote: { en: 'Delete quote', fr: 'Supprimer le devis' } as T,
+    deleteTitle: { en: 'Delete this quote?', fr: 'Supprimer ce devis ?' } as T,
+    deleteDesc: {
+      en: 'The quote and its payment schedule are deleted for good, and the practitioner can no longer pay it. You can then create a new quote for this order.',
+      fr: 'Le devis et son échéancier sont définitivement supprimés, et le praticien ne peut plus le payer. Vous pourrez ensuite créer un nouveau devis pour cette commande.',
     } as T,
     keepQuote: { en: 'Keep it', fr: 'Conserver' } as T,
+    deletedToast: {
+      en: 'Quote deleted. You can create a new one.',
+      fr: 'Devis supprimé. Vous pouvez en créer un nouveau.',
+    } as T,
+    // Summary — prices are TTC; HT and TVA are derived from the total.
+    totalHt: { en: 'Total excl. tax', fr: 'Total HT' } as T,
+    tvaLine: { en: 'VAT ({rate} %)', fr: 'TVA ({rate} %)' } as T,
+    stampLine: { en: 'Fiscal stamp', fr: 'Timbre fiscal' } as T,
+    totalTtc: { en: 'Total incl. tax', fr: 'Total TTC' } as T,
+    alreadyPaid: { en: 'Already paid', fr: 'Déjà réglé' } as T,
+    leftToPay: { en: 'Left to pay', fr: 'Reste à payer' } as T,
+    previewNote: {
+      en: 'Preview: save to apply.',
+      fr: 'Aperçu : enregistrez pour appliquer.',
+    } as T,
+    // Refusals of a save / re-plan, by the error code the API sends.
+    errors: {
+      QUOTE_TOTAL_BELOW_PAID: {
+        en: 'The new total is lower than what the practitioner has already paid. Raise the total or lower the discount.',
+        fr: 'Le nouveau total est inférieur à ce que le praticien a déjà réglé. Augmentez le total ou réduisez la remise.',
+      } as T,
+      QUOTE_PAYMENT_IN_FLIGHT: {
+        en: 'A payment is in progress on this quote (a card payment under way or a bank transfer awaiting confirmation). Wait until it is confirmed or rejected, then try again.',
+        fr: 'Un paiement est en cours sur ce devis (paiement par carte en cours ou virement en attente de confirmation). Attendez qu’il soit confirmé ou refusé, puis réessayez.',
+      } as T,
+      QUOTE_PLAN_REQUIRED: {
+        en: 'This change cannot be spread over the unpaid installments. Use “Edit schedule” in the Payment step to set the installments still to pay.',
+        fr: 'Ce changement ne peut pas être réparti sur les échéances non payées. Utilisez « Modifier l’échéancier » à l’étape Paiement pour définir les échéances restant à payer.',
+      } as T,
+      QUOTE_PAYMENT_RECEIVED: {
+        en: 'The practitioner has already paid part of this quote, so it can no longer be deleted, put back to draft or given another pack. You can still edit its amounts and schedule.',
+        fr: 'Le praticien a déjà réglé une partie de ce devis : il ne peut plus être supprimé, repassé en brouillon ni changer de pack. Vous pouvez encore modifier ses montants et son échéancier.',
+      } as T,
+      QUOTE_NOT_EDITABLE: {
+        en: 'This quote was declined, so it can no longer be edited.',
+        fr: 'Ce devis a été refusé : il ne peut plus être modifié.',
+      } as T,
+    },
   },
 
   // ─── Quote surface (quote-review.tsx + quote-pack-panel.tsx) ─────
@@ -317,6 +566,19 @@ export const commerceDomainDict = {
         fr: 'Le paiement fractionné nécessite au moins deux échéances.',
       } as T,
       saveBtn: { en: 'Save plan', fr: 'Enregistrer le plan' } as T,
+      // Editing a plan that already has paid installments.
+      // Paid and cancelled rows: a re-plan keeps both, batches included.
+      keptRowsTitle: {
+        en: 'Paid or cancelled installments (locked)',
+        fr: 'Échéances payées ou annulées (non modifiables)',
+      } as T,
+      restInOne: { en: 'Rest in one payment', fr: 'Reste en une fois' } as T,
+      restSplit: { en: 'Rest in tranches', fr: 'Reste en plusieurs échéances' } as T,
+      newTranchesTotal: { en: 'New tranches total', fr: 'Total des nouvelles échéances' } as T,
+      errPaidOverlap: {
+        en: 'Tranche {n}: its steps overlap those of a kept installment (paid or cancelled).',
+        fr: 'Échéance {n} : ses étapes chevauchent celles d’une échéance conservée (payée ou annulée).',
+      } as T,
     },
 
     // QuoteInstallment status → badge label
@@ -352,20 +614,41 @@ export const commerceDomainDict = {
       colAvailable: { en: 'Available', fr: 'Disponible' } as T,
       colDue: { en: 'Due', fr: 'Échéance' } as T,
       payByCard: { en: 'Pay by card', fr: 'Payer par carte' } as T,
-      recordCash: { en: 'Record cash', fr: 'Enregistrer espèces' } as T,
+      recordCash: { en: 'Cash or cheque', fr: 'Espèces ou chèque' } as T,
       markDelivered: { en: 'Mark delivered', fr: 'Marquer comme livré' } as T,
     },
 
-    // quote-pack-panel.tsx — record-cash dialog
+    // quote-pack-panel.tsx — record cash / cheque dialog
     recordCash: {
-      title: { en: 'Record cash payment', fr: 'Enregistrer un paiement en espèces' } as T,
+      title: { en: 'Record a payment received', fr: 'Enregistrer un paiement reçu' } as T,
       desc: {
-        en: 'Mark installment #{n} ({amount}) as paid in cash. The linked step batch will unlock immediately.',
-        fr: 'Marquer l’échéance n° {n} ({amount}) comme payée en espèces. Le lot d’étapes associé sera débloqué immédiatement.',
+        en: 'Installment #{n} ({amount} incl. tax). Its step batch unlocks as soon as you record it, and an invoice is issued with its stamp duty.',
+        fr: 'Échéance n° {n} ({amount} TTC). Son lot d’étapes est débloqué dès l’enregistrement, et une facture est établie avec son droit de timbre.',
       } as T,
+      methodLabel: { en: 'Paid by', fr: 'Payé par' } as T,
+      cash: { en: 'Cash', fr: 'Espèces' } as T,
+      cheque: { en: 'Cheque', fr: 'Chèque' } as T,
       receiptNumber: { en: 'Receipt number', fr: 'Numéro de reçu' } as T,
+      chequeNumber: { en: 'Cheque number', fr: 'Numéro du chèque' } as T,
       notes: { en: 'Notes', fr: 'Notes' } as T,
+      // {amount}: the cash collected (installment + stamp - retenue).
+      submit: { en: 'Record {amount}', fr: 'Enregistrer {amount}' } as T,
     },
+
+    // quote-pack-panel.tsx — admin card payment dialog
+    adminCard: {
+      title: { en: 'Card payment', fr: 'Paiement par carte' } as T,
+      desc: {
+        en: 'Installment #{n}. You will be taken to the secure ClicToPay payment page.',
+        fr: 'Échéance n° {n}. Vous allez être redirigé vers la page de paiement sécurisée ClicToPay.',
+      } as T,
+      // {amount}: what the card is charged (installment + stamp - retenue).
+      continue: { en: 'Pay {amount} by card', fr: 'Payer {amount} par carte' } as T,
+    },
+
+    // The retenue option, its breakdown and the "prix TTC" line live in
+    // withholdingUi (components/payments/withholding.tsx), shared with the
+    // treatment-fee dialog.
 
     // quote-pack-panel.tsx — doctor plan view
     doctor: {
@@ -376,6 +659,11 @@ export const commerceDomainDict = {
       payAllAfter: {
         en: 'in total. Pay them tranche by tranche, or in one go.',
         fr: 'au total. Réglez-les une par une, ou en une seule fois.',
+      } as T,
+      // Same, when every payment carries the droit de timbre.
+      payAllAfterStamps: {
+        en: 'in total, stamp duty included. Pay them tranche by tranche, or in one go.',
+        fr: 'au total, timbres compris. Réglez-les une par une, ou en une seule fois.',
       } as T,
       payAllBtn: { en: 'Pay all now', fr: 'Tout payer maintenant' } as T,
       timelineTitle: { en: 'Payment timeline', fr: 'Calendrier de paiement' } as T,
@@ -409,7 +697,8 @@ export const commerceDomainDict = {
         fr: 'Réglez l’échéance n° {n} de votre plan de traitement.',
       } as T,
       dueBadge: { en: 'Payment due', fr: 'Paiement à régler' } as T,
-      amountDue: { en: 'Amount due', fr: 'Montant dû' } as T,
+      // The cash: installment(s) + one stamp each - the retenue.
+      amountToPay: { en: 'Amount to pay', fr: 'Montant à payer' } as T,
       asideAll: {
         en: 'Complete all {count} remaining installments in this payment flow.',
         fr: 'Réglez l’ensemble des {count} échéances restantes dans cette opération de paiement.',
@@ -512,8 +801,21 @@ export const commerceDomainDict = {
         fr: 'Reçu de virement bancaire sélectionné',
       } as T,
       btNoteAll: {
-        en: 'The same reference and receipt will be attached to all {count} installment declarations.',
-        fr: 'La même référence et le même reçu seront joints aux {count} déclarations d’échéance.',
+        en: 'Make a single transfer of the amount above. The same reference and receipt will be attached to all {count} installment declarations.',
+        fr: 'Faites un seul virement du montant ci-dessus. La même référence et le même reçu seront joints aux {count} déclarations d’échéance.',
+      } as T,
+      btAmountLabel: { en: 'Amount to transfer', fr: 'Montant à virer' } as T,
+      btAmountWithholding: {
+        en: 'Withholding tax of {amount} already deducted',
+        fr: 'Retenue à la source de {amount} déjà déduite',
+      } as T,
+      btAmountStamp: {
+        en: 'Stamp duty of {stamp} included',
+        fr: 'Droit de timbre de {stamp} inclus',
+      } as T,
+      btAmountStampWithholding: {
+        en: 'Stamp duty of {stamp} included, withholding tax of {amount} deducted',
+        fr: 'Droit de timbre de {stamp} inclus, retenue à la source de {amount} déduite',
       } as T,
       btNoteSingle: {
         en: 'The clinic admin will review the receipt before confirming this installment.',
@@ -529,7 +831,7 @@ export const commerceDomainDict = {
         fr: 'Traitement de l’échéance {done}/{total}…',
       } as T,
       payTranches: { en: 'Pay {count} tranches', fr: 'Payer {count} échéances' } as T,
-      payByCard: { en: 'Pay by card', fr: 'Payer par carte' } as T,
+      payByCard: { en: 'Pay {amount} by card', fr: 'Payer {amount} par carte' } as T,
       submitDeclarations: {
         en: 'Submit {count} declarations',
         fr: 'Soumettre {count} déclarations',
@@ -599,15 +901,19 @@ export const commerceDomainDict = {
         fr: 'Les brouillons restent modifiables jusqu’à l’envoi au praticien.',
       } as T,
       footerSent: {
-        en: 'Sent — locked. Click "Recall to edit" to pull it back as a draft if anything is wrong.',
-        fr: 'Envoyé — verrouillé. Cliquez sur « Rappeler pour modifier » pour le repasser en brouillon en cas d’erreur.',
+        en: 'Sent to the practitioner. You can still edit it: paid installments do not change.',
+        fr: 'Envoyé au praticien. Vous pouvez encore le modifier : les échéances déjà payées ne changent pas.',
+      } as T,
+      footerApproved: {
+        en: 'Accepted by the practitioner. You can still edit it: paid installments do not change.',
+        fr: 'Accepté par le praticien. Vous pouvez encore le modifier : les échéances déjà payées ne changent pas.',
       } as T,
       footerLocked: {
-        en: 'This quotation is locked. Cancel it first to make changes.',
-        fr: 'Ce devis est verrouillé. Annulez-le d’abord pour le modifier.',
+        en: 'This quote was declined, so it can no longer be edited.',
+        fr: 'Ce devis a été refusé : il ne peut plus être modifié.',
       } as T,
       confirmRecall: { en: 'Click again to confirm', fr: 'Cliquez à nouveau pour confirmer' } as T,
-      recallToEdit: { en: 'Recall to edit', fr: 'Rappeler pour modifier' } as T,
+      recallToEdit: { en: 'Back to draft', fr: 'Repasser en brouillon' } as T,
       regeneratePdf: { en: 'Regenerate PDF', fr: 'Régénérer le PDF' } as T,
       generatePdf: { en: 'Generate PDF', fr: 'Générer le PDF' } as T,
       planFirstTitle: {
@@ -655,8 +961,8 @@ export const commerceDomainDict = {
       card: {
         label: { en: 'Card payment', fr: 'Paiement par carte' } as T,
         description: {
-          en: 'Pay online instantly. We currently use a mock collector — the order is marked paid immediately on success.',
-          fr: 'Payez en ligne instantanément. Un collecteur fictif est utilisé pour le moment — la commande est marquée payée dès la réussite du paiement.',
+          en: 'Pay online on the secure ClicToPay page. The fee is marked paid as soon as the payment succeeds, and your invoice is e-mailed to you.',
+          fr: 'Payez en ligne sur la page sécurisée ClicToPay. Les honoraires sont marqués payés dès la réussite du paiement, et votre facture vous est envoyée par e-mail.',
         } as T,
       },
       cash: {
@@ -666,16 +972,27 @@ export const commerceDomainDict = {
           fr: 'Enregistré au cabinet par un administrateur. Marque immédiatement les honoraires comme payés.',
         } as T,
       },
+      cheque: {
+        label: { en: 'Cheque (admin)', fr: 'Chèque (admin)' } as T,
+        description: {
+          en: 'A cheque received by the practice, recorded by an admin. Stamps the fee as paid right away.',
+          fr: 'Chèque reçu au cabinet, enregistré par un administrateur. Marque immédiatement les honoraires comme payés.',
+        } as T,
+      },
     },
 
     payDialog: {
       title: { en: 'Pay treatment fee', fr: 'Payer les honoraires de traitement' } as T,
       orderCode: { en: 'Order {code}', fr: 'Commande {code}' } as T,
-      amountDue: { en: 'Amount due', fr: 'Montant dû' } as T,
-      // Breakdown lines shown when the order carries a CBCT supplement.
-      breakdownBase: { en: 'Treatment fee', fr: 'Honoraires de traitement' } as T,
-      breakdownCbct: { en: 'CBCT supplement', fr: 'Supplément CBCT' } as T,
-      breakdownTotal: { en: 'Total', fr: 'Total' } as T,
+      // The headline: fee (+ CBCT) TTC + droit de timbre - retenue.
+      amountToPay: { en: 'Amount to pay', fr: 'Montant à payer' } as T,
+      // Breakdown lines shown when the order carries a CBCT supplement
+      // (then the stamp, the retenue and the amount to pay).
+      breakdownBase: {
+        en: 'Treatment fee (incl. tax)',
+        fr: 'Honoraires de traitement (TTC)',
+      } as T,
+      breakdownCbct: { en: 'CBCT supplement (incl. tax)', fr: 'Supplément CBCT (TTC)' } as T,
       feeIntro: {
         en: 'The professional fee must be settled before the treatment plan can be prepared.',
         fr: 'Les honoraires professionnels doivent être réglés avant la préparation du plan de traitement.',
@@ -736,6 +1053,15 @@ export const commerceDomainDict = {
         en: 'Record cash payment',
         fr: 'Enregistrer le paiement en espèces',
       } as T,
+      recordChequeBtn: {
+        en: 'Record cheque payment',
+        fr: 'Enregistrer le paiement par chèque',
+      } as T,
+      // Under the method tiles: every payment produces an invoice.
+      invoiceNote: {
+        en: 'Once paid, an invoice is issued and sent to you by e-mail.',
+        fr: 'Une fois le paiement reçu, une facture est émise et vous est envoyée par e-mail.',
+      } as T,
       payAmountBtn: { en: 'Pay {amount}', fr: 'Payer {amount}' } as T,
       changeBtn: { en: 'Change', fr: 'Changer' } as T,
     },
@@ -772,6 +1098,19 @@ export const commerceDomainDict = {
       rib: { en: 'RIB', fr: 'RIB' } as T,
       swift: { en: 'SWIFT / BIC', fr: 'SWIFT / BIC' } as T,
       amountToTransfer: { en: 'Amount to transfer', fr: 'Montant à virer' } as T,
+      // Under the amount to transfer: how it is made up.
+      amountNetNote: {
+        en: '{due} due minus {withheld} withholding tax',
+        fr: '{due} dus moins {withheld} de retenue à la source',
+      } as T,
+      amountStampNote: {
+        en: '{due} due plus {stamp} stamp duty',
+        fr: '{due} dus plus {stamp} de droit de timbre',
+      } as T,
+      amountStampNetNote: {
+        en: '{due} due plus {stamp} stamp duty, minus {withheld} withholding tax',
+        fr: '{due} dus plus {stamp} de droit de timbre, moins {withheld} de retenue à la source',
+      } as T,
       paymentReference: { en: 'Payment reference', fr: 'Référence de paiement' } as T,
       copiedToast: { en: '{label} copied', fr: '{label} copié' } as T,
       copyAria: { en: 'Copy {label}', fr: 'Copier {label}' } as T,
@@ -798,9 +1137,12 @@ export const commerceDomainDict = {
       paid: { en: 'Paid on', fr: 'Payé le' } as T,
       receipt: { en: 'File', fr: 'Fichier' } as T,
       confirmHint: {
-        en: 'Confirming will mark the treatment fee as paid and unblock the treatment plan. This action is logged with your admin user id.',
-        fr: 'La confirmation marquera les honoraires de traitement comme payés et débloquera le plan de traitement. Cette action est journalisée avec votre identifiant administrateur.',
+        en: 'Confirming will mark the treatment fee as paid, unblock the treatment plan and issue the invoice, e-mailed to the practitioner. This action is logged with your admin user id.',
+        fr: 'La confirmation marquera les honoraires de traitement comme payés, débloquera le plan de traitement et émettra la facture, envoyée au praticien par e-mail. Cette action est journalisée avec votre identifiant administrateur.',
       } as T,
+      withheld: { en: 'Withholding tax ({rate} %)', fr: 'Retenue à la source ({rate} %)' } as T,
+      withheldNoRate: { en: 'Withholding tax', fr: 'Retenue à la source' } as T,
+      amountPaid: { en: 'Amount paid', fr: 'Montant versé' } as T,
       confirmBtn: { en: 'Confirm payment', fr: 'Confirmer le paiement' } as T,
       lightboxAlt: {
         en: 'Bank transfer proof for {code}',

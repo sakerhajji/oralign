@@ -14,15 +14,34 @@ import {
 import { Button } from '@/components/ui/button';
 import { paymentsService } from '@/lib/api/payments.service';
 import { extractApiErrorMessage } from '@/lib/api/error';
+import { paymentSplitOf } from '@/lib/billing/tax-split';
 import { useT } from '@/lib/i18n/lang-context';
-import { PaymentRecordStatus, type HostedPaymentSession } from '@/lib/types';
+import {
+  PaymentPurpose,
+  PaymentRecordStatus,
+  type HostedPaymentSession,
+} from '@/lib/types';
+
+/**
+ * `amount` is what the card was charged: the installment (or the fee) +
+ * the droit de timbre - the retenue à la source when the practitioner
+ * applied one. The retenue is read when the session carries it (same
+ * name as on a Payment); `stampAmount` / `settledAmount` likewise.
+ */
+type SessionWithWithholding = HostedPaymentSession & {
+  withholdingAmount?: number | string | null;
+};
+
+/** Same display as the amount: 3 decimals, then the currency. */
+const formatAmount = (amount: number, currency: string): string =>
+  `${amount.toFixed(3)} ${currency}`;
 
 export function ClicToPayResult() {
   const searchParams = useSearchParams();
   const paymentId = searchParams.get('paymentId');
   const { lang } = useT();
   const fr = lang !== 'en';
-  const [session, setSession] = useState<HostedPaymentSession | null>(null);
+  const [session, setSession] = useState<SessionWithWithholding | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const automaticChecks = useRef(0);
@@ -67,6 +86,17 @@ export function ClicToPayResult() {
 
   const presentation = getPresentation(session?.status, fr);
   const Icon = presentation.icon;
+  // What the payment settles (the installment or the fee, TTC), the stamp
+  // added on top and the retenue kept back; derived when the session
+  // omits the settled amount.
+  const split = paymentSplitOf(
+    session?.amount,
+    session?.withholdingAmount,
+    session?.stampAmount,
+    session?.settledAmount,
+  );
+  const detailed = split.withholding > 0 || split.stamp > 0;
+  const isFee = session?.purpose === PaymentPurpose.TREATMENT_FEE;
 
   return (
     <main className="grid min-h-dvh place-items-center bg-muted/30 px-4 py-10">
@@ -109,9 +139,53 @@ export function ClicToPayResult() {
 
         {session ? (
           <dl className="mt-6 grid gap-3 rounded-lg border bg-muted/20 p-4 text-sm sm:grid-cols-2">
+            {detailed ? (
+              <>
+                <div>
+                  <dt className="text-xs text-muted-foreground">
+                    {isFee
+                      ? fr
+                        ? 'Honoraires (TTC)'
+                        : 'Treatment fee (incl. tax)'
+                      : fr
+                        ? 'Montant de l’échéance (TTC)'
+                        : 'Installment amount (incl. tax)'}
+                  </dt>
+                  <dd className="mt-1 tabular-nums">
+                    {formatAmount(split.settled, session.currency)}
+                  </dd>
+                </div>
+                {split.stamp > 0 ? (
+                  <div>
+                    <dt className="text-xs text-muted-foreground">
+                      {fr ? 'Droit de timbre' : 'Stamp duty'}
+                    </dt>
+                    <dd className="mt-1 tabular-nums">
+                      + {formatAmount(split.stamp, session.currency)}
+                    </dd>
+                  </div>
+                ) : null}
+                {split.withholding > 0 ? (
+                  <div>
+                    <dt className="text-xs text-muted-foreground">
+                      {fr ? 'Retenue à la source' : 'Withholding tax'}
+                    </dt>
+                    <dd className="mt-1 tabular-nums">
+                      − {formatAmount(split.withholding, session.currency)}
+                    </dd>
+                  </div>
+                ) : null}
+              </>
+            ) : null}
             <div>
               <dt className="text-xs text-muted-foreground">
-                {fr ? 'Montant' : 'Amount'}
+                {detailed
+                  ? fr
+                    ? 'Montant payé par carte'
+                    : 'Amount paid by card'
+                  : fr
+                    ? 'Montant'
+                    : 'Amount'}
               </dt>
               <dd className="mt-1 font-semibold tabular-nums">
                 {session.amount} {session.currency}
@@ -196,8 +270,8 @@ function getPresentation(status: PaymentRecordStatus | undefined, fr: boolean) {
         tone: 'success' as const,
         title: fr ? 'Paiement confirmé' : 'Payment confirmed',
         description: fr
-          ? 'Le paiement a été vérifié et enregistré avec succès.'
-          : 'The payment was verified and recorded successfully.',
+          ? 'Le paiement a été vérifié et enregistré avec succès. Sa facture vous est envoyée par e-mail.'
+          : 'The payment was verified and recorded successfully. Its invoice is sent to you by e-mail.',
       };
     case PaymentRecordStatus.EXPIRED:
       return {

@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   HttpStatus,
+  Logger,
   Param,
   Patch,
   Query,
@@ -18,7 +19,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
-import { UserRole } from '@prisma/client';
+import { PaymentRecordStatus, UserRole } from '@prisma/client';
 import { Response } from 'express';
 import {
   CurrentUser,
@@ -29,6 +30,8 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { OrderService } from '../orders/services/order.service';
 import { PaymentsService } from '../payments/services/payments.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { InvoiceAutoService } from './services/invoice-auto.service';
 import { InvoiceLanguage } from './services/invoice-i18n';
 import { InvoicePdfService } from './services/invoice-pdf.service';
 import { UpdateInvoiceNumberDto } from './dto/update-invoice-number.dto';
@@ -61,15 +64,26 @@ function parseInvoiceLanguage(value: string | undefined): InvoiceLanguage | unde
 }
 
 /**
- * Invoice / payment-receipt endpoints. Mounted under the Payments
- * resource (`GET /payments/:paymentId/invoice`) so the URL reads as
- * "this payment's invoice", but owned by its own module to keep the
- * Puppeteer renderer + i18n dictionary cleanly separated from the
- * payment lifecycle (CARD / BANK / CASH) in PaymentsService.
+ * The practitioner's invoice downloads. Mounted under the Payments and
+ * Orders resources (`GET /payments/:paymentId/invoice`,
+ * `GET /orders/:orderId/treatment-fee/invoice`) so the URLs read as "this
+ * payment's invoice", but owned by its own module to keep the Puppeteer
+ * renderer + i18n dictionary separated from the payment lifecycle.
  *
- * Authorisation reuses PaymentsService.getPayment which already runs
- * the admin-OR-owning-doctor check — no duplication of RBAC logic
- * here, the controller just streams the rendered buffer back.
+ * Both routes serve the STORED FACTURE (owner decision, 2026-11-19: every
+ * payment produces a facture, never a receipt). When the money is settled
+ * but the invoice is missing (a listener failed, or the payment predates
+ * automatic invoicing), it is generated on the spot — WITHOUT the e-mail:
+ * whoever opened the route is already looking at the document, and an
+ * admin browsing the payments desk must not mail a practitioner "votre
+ * facture" for a payment made months ago. Live payments are e-mailed by
+ * the event listeners; the invoice desk can re-send. The legacy on-the-fly
+ * renderers stay only as a last resort, so a practitioner is never left
+ * without a document.
+ *
+ * Authorisation reuses PaymentsService.getPayment / OrderService
+ * .getOrderById, which already run the admin-OR-owning-doctor check — no
+ * duplication of RBAC logic here.
  */
 @ApiTags('invoices')
 @ApiBearerAuth('access-token')
@@ -77,17 +91,71 @@ function parseInvoiceLanguage(value: string | undefined): InvoiceLanguage | unde
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.dentist, UserRole.admin, UserRole.super_admin)
 export class InvoicesController {
+  private readonly logger = new Logger(InvoicesController.name);
+
   constructor(
     private readonly payments: PaymentsService,
     private readonly invoicePdf: InvoicePdfService,
     private readonly orderService: OrderService,
+    private readonly prisma: PrismaService,
+    private readonly autoInvoices: InvoiceAutoService,
   ) {}
+
+  /**
+   * The stored invoice of a settled payment, generated when missing. Null
+   * when there is none to serve (unsettled payment, archived invoice, or a
+   * generation failure — logged), so the caller falls back.
+   */
+  private async invoiceForPayment(paymentId: string): Promise<string | null> {
+    const stored = await this.prisma.invoice.findUnique({
+      where: { paymentId },
+      select: { id: true, deletedAt: true },
+    });
+    if (stored) return stored.deletedAt ? null : stored.id;
+    const payment = await this.prisma.payment.findUnique({
+      where: { id: paymentId },
+      select: { status: true },
+    });
+    if (payment?.status !== PaymentRecordStatus.success) return null;
+    try {
+      const res = await this.autoInvoices.generateForPayment(paymentId, {
+        notify: false,
+      });
+      return res.invoiceId ?? null;
+    } catch (error) {
+      this.logger.error(
+        `On-demand invoice for payment ${paymentId} failed: ${(error as Error).message}`,
+      );
+      return null;
+    }
+  }
+
+  /** Same for an order's treatment fee (+ CBCT). */
+  private async invoiceForTreatmentFee(orderId: string): Promise<string | null> {
+    const stored = await this.prisma.invoice.findUnique({
+      where: { treatmentFeeOrderId: orderId },
+      select: { id: true, deletedAt: true },
+    });
+    if (stored) return stored.deletedAt ? null : stored.id;
+    try {
+      // A no-op ({ created: false }) while the fee is not settled.
+      const res = await this.autoInvoices.generateForTreatmentFee(orderId, {
+        notify: false,
+      });
+      return res.invoiceId ?? null;
+    } catch (error) {
+      this.logger.error(
+        `On-demand treatment-fee invoice for order ${orderId} failed: ${(error as Error).message}`,
+      );
+      return null;
+    }
+  }
 
   @Get('payments/:paymentId/invoice')
   @SkipThrottle()
   @ApiOperation({
     summary:
-      'Download the bilingual (FR/EN) payment receipt as a PDF. Admin sees every payment; the owning dentist sees only payments on their own orders. Defaults to the language already chosen on the related quote if `?lang=` is omitted.',
+      "Download the FACTURE of a payment as a bilingual (FR/EN) PDF, generated on demand when the payment is settled but its invoice is missing. Admin sees every payment; the owning dentist sees only payments on their own orders. Defaults to the invoice's own language if `?lang=` is omitted.",
   })
   @ApiParam({ name: 'paymentId', type: String })
   @ApiQuery({
@@ -95,7 +163,7 @@ export class InvoicesController {
     required: false,
     enum: ['fr', 'en'],
     description:
-      'Force a French or English render of the receipt. Falls back to the quote snapshot language and then French when omitted.',
+      "Force a French or English render. Falls back to the invoice's own language when omitted.",
   })
   @ApiResponse({
     status: HttpStatus.OK,
@@ -117,10 +185,12 @@ export class InvoicesController {
       role: user.role as UserRole,
     });
 
-    const { buffer, fileName, mimeType } = await this.invoicePdf.renderInvoiceBuffer({
-      paymentId,
-      language: parseInvoiceLanguage(lang),
-    });
+    const language = parseInvoiceLanguage(lang);
+    const invoiceId = await this.invoiceForPayment(paymentId);
+    const { buffer, fileName, mimeType } = invoiceId
+      ? await this.invoicePdf.renderInvoiceRecordBuffer({ invoiceId, language })
+      : // Last resort: the legacy document built from the payment itself.
+        await this.invoicePdf.renderInvoiceBuffer({ paymentId, language });
 
     res.setHeader('Content-Type', mimeType);
     res.setHeader('Content-Disposition', contentDispositionFileName(fileName));
@@ -132,7 +202,7 @@ export class InvoicesController {
   @SkipThrottle()
   @ApiOperation({
     summary:
-      "Download the order's treatment-fee invoice as a bilingual (FR/EN) PDF. Admin sees every order; the owning dentist sees only their own. A sequential TF-XXXXXX number is allocated on the first render of a paid fee.",
+      "Download the FACTURE of the order's treatment fee (+ CBCT) as a bilingual (FR/EN) PDF, generated on demand once the fee is settled. Admin sees every order; the owning dentist sees only their own.",
   })
   @ApiParam({ name: 'orderId', type: String })
   @ApiQuery({
@@ -161,11 +231,16 @@ export class InvoicesController {
       role: user.role as UserRole,
     });
 
-    const { buffer, fileName, mimeType } =
-      await this.invoicePdf.renderTreatmentFeeInvoiceBuffer({
-        orderId,
-        language: parseInvoiceLanguage(lang),
-      });
+    const language = parseInvoiceLanguage(lang);
+    const invoiceId = await this.invoiceForTreatmentFee(orderId);
+    const { buffer, fileName, mimeType } = invoiceId
+      ? await this.invoicePdf.renderInvoiceRecordBuffer({ invoiceId, language })
+      : // Last resort (unsettled fee, or generation failed): the legacy
+        // document built from the order's columns.
+        await this.invoicePdf.renderTreatmentFeeInvoiceBuffer({
+          orderId,
+          language,
+        });
 
     res.setHeader('Content-Type', mimeType);
     res.setHeader('Content-Disposition', contentDispositionFileName(fileName));

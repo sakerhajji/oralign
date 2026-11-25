@@ -12,11 +12,14 @@ import {
   renderNewUserPendingForAdminEmail,
   renderNewOrderForDoctorEmail,
   renderPasswordResetEmail,
+  renderProductionDeliveredForDoctorEmail,
+  renderProductionDeliveryCancelledForDoctorEmail,
   renderQuoteDecisionForAdminEmail,
   renderQuoteSentForDoctorEmail,
   renderTreatmentDecisionForAdminEmail,
   renderTreatmentReadyForDoctorEmail,
   renderVerificationEmail,
+  type ProductionDeliveryEmailArgs,
 } from './templates';
 import { env } from '../common/config/env';
 import { aligned, checkDomainAuth, domainOf, resolveDkim } from './mail-auth';
@@ -366,6 +369,35 @@ export class MailService {
         },
       ],
     });
+  }
+
+  // ─── Lab production emails ──────────────────────────────────────────────
+  //
+  // Sent by the production notice dispatcher (src/production/notifications),
+  // which keeps the outbox row honest: like sendInvoiceToDoctor they return
+  // whether SMTP accepted the message (false = mail disabled, nothing sent)
+  // and rethrow real SMTP failures so the row is retried.
+
+  /** Aligners delivered by the lab, after the grace delay. */
+  async sendProductionDeliveredToDoctor(
+    args: ProductionDeliveryEmailArgs & { to: string; lang: Lang },
+  ): Promise<boolean> {
+    const { html, subject } = renderProductionDeliveredForDoctorEmail(
+      args,
+      args.lang,
+    );
+    return this.send({ to: args.to, subject, html });
+  }
+
+  /** A delivery the practitioner was told about was cancelled (correction). */
+  async sendProductionDeliveryCancelledToDoctor(
+    args: ProductionDeliveryEmailArgs & { to: string; lang: Lang },
+  ): Promise<boolean> {
+    const { html, subject } = renderProductionDeliveryCancelledForDoctorEmail(
+      args,
+      args.lang,
+    );
+    return this.send({ to: args.to, subject, html });
   }
 
   // ─── Appointment emails ─────────────────────────────────────────────────

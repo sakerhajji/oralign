@@ -189,6 +189,17 @@ export const env = Object.freeze({
     },
   },
 
+  /** Lab production module (src/production). */
+  production: {
+    /**
+     * Grace delay before a delivery notice may reach the practitioner
+     * (owner decision D7): an entry cancelled within it is never sent.
+     * PRODUCTION_NOTICE_DELAY_MINUTES, 10 by default, 0 = send at the next
+     * sweep.
+     */
+    noticeDelayMinutes: int('PRODUCTION_NOTICE_DELAY_MINUTES', 10),
+  },
+
   /** Optional embedded Arabic font for PDFs (Puppeteer). */
   arabicFontPath: str('ORALIGN_ARABIC_FONT_PATH'),
 });

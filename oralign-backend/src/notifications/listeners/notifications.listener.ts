@@ -1122,6 +1122,10 @@ export class NotificationsListener {
     });
   }
 
+  // Since the lab production module (D2) this serves unlimited-step packs
+  // only: their "Marquer livré" flips a payment placeholder batch without
+  // a production declaration. Every other delivery tells the practitioner
+  // through the production notice outbox (production_delivered).
   @OnEvent(NotificationEvents.BatchDelivered, { async: true })
   async onBatchDelivered(payload: BatchEvent): Promise<void> {
     await this.safe('batch.delivered', async () => {

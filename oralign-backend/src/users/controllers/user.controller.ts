@@ -15,8 +15,10 @@ import {
   UploadedFile,
   BadRequestException,
   Inject,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { Throttle } from '@nestjs/throttler';
 import {
   ApiTags,
   ApiOperation,
@@ -29,6 +31,8 @@ import {
 import { UserService } from '../services/user.service';
 import {
   CreateUserDto,
+  CreateUserResponseDto,
+  TemporaryPasswordResponseDto,
   UpdateUserDto,
   UserResponseDto,
   UserListQueryDto,
@@ -47,11 +51,18 @@ import {
   JwtPayload,
 } from '../../common/decorators/current-user.decorator';
 import { UserRole } from '@prisma/client';
+import { type Caller } from '../../common/access/caller';
 import { ForbiddenException } from '../../common/exceptions/app.exception';
+import { AllowPendingPasswordChange } from '../../auth/guards/password-change.guard';
 import {
   STORAGE_SERVICE,
   StorageService,
 } from '../../storage/storage.interface';
+
+/** The service-side principal of a verified token (the hierarchy needs the role). */
+function callerOf(user: JwtPayload): Caller {
+  return { userId: user.sub, role: user.role };
+}
 
 @ApiTags('users')
 @ApiBearerAuth('access-token')
@@ -69,17 +80,46 @@ export class UserController {
   @ApiOperation({ summary: 'Create a new user (admin only)' })
   @ApiResponse({
     status: 201,
-    description: 'User created successfully',
-    type: UserResponseDto,
+    description:
+      'User created successfully. With generateTemporaryPassword, the response carries `temporaryPassword` once.',
+    type: CreateUserResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Both or neither of password / generateTemporaryPassword',
   })
   async createUser(
     @Body() createUserDto: CreateUserDto,
     @CurrentUser() user: JwtPayload,
-  ): Promise<UserResponseDto> {
+  ): Promise<CreateUserResponseDto> {
     return this.userService.createUser(createUserDto, {
       userId: user.sub,
       role: user.role,
     });
+  }
+
+  @Post(':id/temporary-password')
+  @Roles(UserRole.admin)
+  // Same ceiling as sign-in: each call revokes the account's sessions.
+  @Throttle({ long: { limit: 10, ttl: 15 * 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Issue a new temporary password to a technician account (admin only)',
+  })
+  @ApiParam({ name: 'id', type: String, description: 'User ID' })
+  @ApiResponse({ status: 200, type: TemporaryPasswordResponseDto })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  @ApiResponse({
+    status: 409,
+    description:
+      'TEMPORARY_PASSWORD_TECHNICIAN_ONLY: the account is not a live technician',
+  })
+  async issueTemporaryPassword(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<TemporaryPasswordResponseDto> {
+    return this.userService.issueTemporaryPassword(id, callerOf(user));
   }
 
   @Post(':id/restore')
@@ -92,8 +132,11 @@ export class UserController {
     description: 'User restored successfully',
     type: UserResponseDto,
   })
-  async restoreUser(@Param('id') id: string): Promise<UserResponseDto> {
-    return this.userService.restoreUser(id);
+  async restoreUser(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<UserResponseDto> {
+    return this.userService.restoreUser(id, callerOf(user));
   }
 
   @Post('bulk-restore')
@@ -103,8 +146,9 @@ export class UserController {
   @ApiResponse({ status: 200, description: 'Users restored successfully' })
   async bulkRestoreUsers(
     @Body() bulkActionDto: BulkActionDto,
-  ): Promise<{ message: string; count: number }> {
-    return this.userService.bulkRestoreUsers(bulkActionDto.ids);
+    @CurrentUser() user: JwtPayload,
+  ): Promise<{ message: string; count: number; skippedSuperAdmins: number }> {
+    return this.userService.bulkRestoreUsers(bulkActionDto.ids, callerOf(user));
   }
 
   @Delete(':id/permanent')
@@ -120,7 +164,7 @@ export class UserController {
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
   ): Promise<{ message: string }> {
-    return this.userService.permanentlyDeleteUser(id, user.sub);
+    return this.userService.permanentlyDeleteUser(id, callerOf(user));
   }
 
   @Delete('bulk-permanent')
@@ -137,7 +181,7 @@ export class UserController {
   ): Promise<{ message: string; count: number; blocked: number }> {
     return this.userService.bulkPermanentlyDeleteUsers(
       bulkActionDto.ids,
-      user.sub,
+      callerOf(user),
     );
   }
 
@@ -171,6 +215,8 @@ export class UserController {
   }
 
   @Get('me')
+  // The "choose your password" step reads the account it is changing.
+  @AllowPendingPasswordChange()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Get current logged-in user' })
   @ApiResponse({
@@ -243,7 +289,7 @@ export class UserController {
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
   ): Promise<{ message: string }> {
-    return this.userService.deleteUser(id, user.sub);
+    return this.userService.deleteUser(id, callerOf(user));
   }
 
   @Delete()
@@ -255,7 +301,7 @@ export class UserController {
     @Body() bulkActionDto: BulkActionDto,
     @CurrentUser() user: JwtPayload,
   ): Promise<{ message: string; count: number }> {
-    return this.userService.bulkDeleteUsers(bulkActionDto.ids, user.sub);
+    return this.userService.bulkDeleteUsers(bulkActionDto.ids, callerOf(user));
   }
 
   @Patch('bulk-status')
@@ -265,10 +311,12 @@ export class UserController {
   @ApiResponse({ status: 200, description: 'User status updated successfully' })
   async bulkUpdateStatus(
     @Body() bulkUpdateStatusDto: BulkUpdateStatusDto,
-  ): Promise<{ message: string; count: number }> {
+    @CurrentUser() user: JwtPayload,
+  ): Promise<{ message: string; count: number; skippedSuperAdmins: number }> {
     return this.userService.bulkUpdateStatus(
       bulkUpdateStatusDto.ids,
       bulkUpdateStatusDto.isActive,
+      callerOf(user),
     );
   }
 
@@ -310,8 +358,13 @@ export class UserController {
   async updateApproval(
     @Param('id') id: string,
     @Body() dto: UpdateApprovalDto,
+    @CurrentUser() user: JwtPayload,
   ): Promise<UserResponseDto> {
-    return this.userService.updateApproval(id, dto.verificationStatus);
+    return this.userService.updateApproval(
+      id,
+      dto.verificationStatus,
+      callerOf(user),
+    );
   }
 
   @Patch(':id/email-verification')
@@ -329,10 +382,12 @@ export class UserController {
   async updateEmailVerification(
     @Param('id') id: string,
     @Body() updateVerificationDto: UpdateEmailVerificationDto,
+    @CurrentUser() user: JwtPayload,
   ): Promise<UserResponseDto> {
     return this.userService.updateEmailVerification(
       id,
       updateVerificationDto.isEmailVerified,
+      callerOf(user),
     );
   }
 

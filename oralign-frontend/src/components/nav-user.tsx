@@ -25,6 +25,7 @@ import { EllipsisVerticalIcon, CircleUserRoundIcon, CreditCardIcon, BellIcon, Lo
 import { useLogout } from "@/lib/hooks/use-auth"
 import { useUnreadNotificationCount } from "@/lib/hooks/use-notifications"
 import { useT } from "@/lib/i18n/lang-context"
+import { useAuth } from "@/lib/providers/auth-provider"
 
 function getInitials(name: string): string {
   return name
@@ -49,8 +50,11 @@ export function NavUser({
   const { isMobile } = useSidebarActions()
   const handleLogout = useLogout()
   const { t } = useT()
+  // The lab technician keeps her account and the sign-out: no billing,
+  // and nothing is ever notified to her (no notifications page either).
+  const { isAuthenticated, isTechnician } = useAuth()
   const initials = getInitials(user.name)
-  const unreadQuery = useUnreadNotificationCount()
+  const unreadQuery = useUnreadNotificationCount(isAuthenticated && !isTechnician)
   const unread = unreadQuery.data ?? 0
 
   return (
@@ -143,23 +147,27 @@ export function NavUser({
                   {t('chrome.userMenu.account')}
                 </Link>
               </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link href="/account/billing">
-                  <CreditCardIcon />
-                  {t('chrome.userMenu.billing')}
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link href="/dashboard/notifications" className="gap-2">
-                  <BellIcon />
-                  {t('chrome.userMenu.notifications')}
-                  {unread > 0 ? (
-                    <span className="ml-auto grid min-h-5 min-w-5 place-items-center rounded-full bg-destructive px-1.5 text-[10px] font-bold leading-none text-white">
-                      {unread > 99 ? "99+" : unread}
-                    </span>
-                  ) : null}
-                </Link>
-              </DropdownMenuItem>
+              {!isTechnician && (
+                <>
+                  <DropdownMenuItem asChild>
+                    <Link href="/account/billing">
+                      <CreditCardIcon />
+                      {t('chrome.userMenu.billing')}
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/dashboard/notifications" className="gap-2">
+                      <BellIcon />
+                      {t('chrome.userMenu.notifications')}
+                      {unread > 0 ? (
+                        <span className="ml-auto grid min-h-5 min-w-5 place-items-center rounded-full bg-destructive px-1.5 text-[10px] font-bold leading-none text-white">
+                          {unread > 99 ? "99+" : unread}
+                        </span>
+                      ) : null}
+                    </Link>
+                  </DropdownMenuItem>
+                </>
+              )}
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={handleLogout}>

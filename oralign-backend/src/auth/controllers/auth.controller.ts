@@ -23,9 +23,11 @@ import {
 } from '../dto/auth.dto';
 import {
   AuthResponseDto,
+  ChangePasswordResponseDto,
   VerifyEmailResponseDto,
 } from '../dto/auth-response.dto';
 import { Public } from '../../common/decorators/public.decorator';
+import { AllowPendingPasswordChange } from '../guards/password-change.guard';
 
 @ApiTags('authentication')
 @Controller('auth')
@@ -130,15 +132,22 @@ export class AuthController {
   }
 
   @Post('change-password')
+  // THE way out of a temporary password: open while the change is pending.
+  @AllowPendingPasswordChange()
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Change password (requires current password)' })
-  @ApiResponse({ status: 200, description: 'Password changed successfully' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Password changed. Every session is revoked; the response carries a fresh token pair for this one.',
+    type: ChangePasswordResponseDto,
+  })
   @ApiResponse({ status: 401, description: 'Current password is incorrect' })
   async changePassword(
     @CurrentUser() currentUser: JwtPayload,
     @Body() dto: ChangePasswordDto,
-  ): Promise<{ message: string }> {
+  ): Promise<ChangePasswordResponseDto> {
     return this.authService.changePassword(currentUser.sub, dto);
   }
 }

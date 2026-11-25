@@ -1,5 +1,9 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
+import {
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
+import { OrderStatus, UserRole } from '@prisma/client';
 import { OrderAccessPolicy } from './order-access.policy';
 import type { PrismaService } from '../../prisma/prisma.service';
 import type { Caller } from './caller';
@@ -142,6 +146,131 @@ describe('OrderAccessPolicy', () => {
     it('403s when the order exists but the caller may not see it', async () => {
       const { policy } = makePolicy(jest.fn().mockResolvedValue(row));
       await expect(policy.requireReadable('o1', otherDoctor)).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+  });
+
+  describe('the lab technician (production rule, separate on purpose)', () => {
+    const technician: Caller = { userId: 'u-tech', role: UserRole.technician };
+    const inQueue = {
+      status: OrderStatus.fabrication,
+      deletedAt: null,
+      hasReleasedBatch: false,
+      hasDeclaredEvent: false,
+    };
+    /** A finished case whose only events are the go-live import (D5). */
+    const legacyOnly = {
+      status: OrderStatus.finished,
+      deletedAt: null,
+      hasReleasedBatch: true,
+      hasDeclaredEvent: false,
+    };
+    const history = { ...legacyOnly, hasDeclaredEvent: true };
+    const errorCodeOf = (run: () => void): unknown => {
+      try {
+        run();
+      } catch (error) {
+        return (error as { getResponse(): { error?: string } }).getResponse()
+          .error;
+      }
+      return undefined;
+    };
+
+    it('never reaches the order rule: scope() and assertCanRead() refuse her', () => {
+      const { policy } = makePolicy();
+      expect(() => policy.scope(technician)).toThrow(ForbiddenException);
+      expect(() => policy.assertCanRead(order, technician)).toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it('her production scope is the queue plus the cases declared through the module', () => {
+      const { policy } = makePolicy();
+      const scope = policy.productionReadScope(technician);
+      expect(scope).toMatchObject({ deletedAt: null });
+      expect(JSON.stringify(scope)).toContain('"origin":"declared"');
+      expect(policy.productionReadScope(admin)).toEqual({ deletedAt: null });
+      expect(() => policy.productionReadScope(doctor)).toThrow(
+        ForbiddenException,
+      );
+      expect(() => policy.productionReadScope(designer)).toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it('an order with only legacy_batch events is a 403 for her, readable by an admin', () => {
+      const { policy } = makePolicy();
+      expect(() =>
+        policy.assertCanReadForProduction(legacyOnly, technician),
+      ).toThrow(ForbiddenException);
+      expect(
+        errorCodeOf(() =>
+          policy.assertCanReadForProduction(legacyOnly, technician),
+        ),
+      ).toBe('ORDER_NOT_IN_PRODUCTION');
+      expect(() =>
+        policy.assertCanReadForProduction(legacyOnly, admin),
+      ).not.toThrow();
+      expect(() =>
+        policy.assertCanReadForProduction(legacyOnly, superAdmin),
+      ).not.toThrow();
+    });
+
+    it('reads the queue and her history, 404 on an archived order', () => {
+      const { policy } = makePolicy();
+      expect(() =>
+        policy.assertCanReadForProduction(inQueue, technician),
+      ).not.toThrow();
+      expect(() =>
+        policy.assertCanReadForProduction(history, technician),
+      ).not.toThrow();
+      expect(() =>
+        policy.assertCanReadForProduction(
+          { ...inQueue, deletedAt: new Date() },
+          admin,
+        ),
+      ).toThrow(NotFoundException);
+      expect(() => policy.assertCanReadForProduction(inQueue, doctor)).toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it('declares on the queue only (409 ORDER_NOT_IN_PRODUCTION on her history)', () => {
+      const { policy } = makePolicy();
+      expect(policy.canProduce(inQueue, technician)).toBe(true);
+      expect(policy.canProduce(history, technician)).toBe(false);
+      expect(
+        errorCodeOf(() => policy.assertCanProduce(history, technician)),
+      ).toBe('ORDER_NOT_IN_PRODUCTION');
+      expect(() => policy.assertCanProduce(history, technician)).toThrow(
+        ConflictException,
+      );
+      // An installment case still paying, with a released batch, is in the queue.
+      expect(
+        policy.canProduce(
+          {
+            status: OrderStatus.payment_pending,
+            deletedAt: null,
+            hasReleasedBatch: true,
+          },
+          technician,
+        ),
+      ).toBe(true);
+    });
+
+    it('nobody declares on a draft or cancelled case; admins on any other', () => {
+      const { policy } = makePolicy();
+      for (const status of [OrderStatus.draft, OrderStatus.canceled]) {
+        const facts = { status, deletedAt: null, hasReleasedBatch: true };
+        expect(policy.canProduce(facts, admin)).toBe(false);
+        expect(errorCodeOf(() => policy.assertCanProduce(facts, admin))).toBe(
+          'ORDER_NOT_IN_PRODUCTION',
+        );
+      }
+      expect(policy.canProduce(history, admin)).toBe(true);
+      expect(policy.canProduce(inQueue, doctor)).toBe(false);
+      expect(() => policy.assertCanProduce(inQueue, doctor)).toThrow(
         ForbiddenException,
       );
     });

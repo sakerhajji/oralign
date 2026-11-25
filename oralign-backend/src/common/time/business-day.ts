@@ -60,15 +60,32 @@ function businessOffsetMs(instant: number): number {
   return wallAsUtc - Math.floor(instant / 1000) * 1000;
 }
 
-/** UTC instant of 00:00 business time on `day`. */
-function businessMidnight({ year, month, day }: CalendarDay): Date {
-  const utcMidnight = Date.UTC(year, month - 1, day);
+/**
+ * UTC instant of the business wall clock `hour:minute` on `day`. A time a
+ * daylight-saving jump skips resolves to the same distance past the jump
+ * (02:30 on a 02:00 → 03:00 night is 03:30); a time a fall-back repeats
+ * resolves to its second occurrence.
+ */
+function businessWallInstant(
+  { year, month, day }: CalendarDay,
+  hour = 0,
+  minute = 0,
+): Date {
+  const wallAsUtc = Date.UTC(year, month - 1, day, hour, minute);
   // Read the offset again at the first guess: the two differ only when a
   // daylight-saving change falls between them (Tunisia observed DST in
   // 2005-2008 and could again).
-  const guess = utcMidnight - businessOffsetMs(utcMidnight);
-  return new Date(utcMidnight - businessOffsetMs(guess));
+  const guess = wallAsUtc - businessOffsetMs(wallAsUtc);
+  return new Date(wallAsUtc - businessOffsetMs(guess));
 }
+
+/** UTC instant of 00:00 business time on `day`. */
+function businessMidnight(day: CalendarDay): Date {
+  return businessWallInstant(day);
+}
+
+/** A strict 24 h 'HH:mm' (00:00-23:59). */
+const CLOCK_TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
 /** The day a strict 'YYYY-MM-DD' names, or null (malformed, or 2026-02-30). */
 function toCalendarDay(value: string): CalendarDay | null {
@@ -107,6 +124,50 @@ export function businessToday(now: Date = new Date()): string {
 /** A strict 'YYYY-MM-DD' naming a day that exists: 2026-02-30 is refused, not rolled over. */
 export function isCalendarDate(value: unknown): value is string {
   return typeof value === 'string' && toCalendarDay(value) !== null;
+}
+
+/** 'HH:mm' (24 h) of `instant` on the business wall clock: what a journal, a CSV or an e-mail prints. */
+export function businessTimeOf(instant: Date): string {
+  const { hour, minute } = wallClock(instant);
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+/**
+ * The calendar day `days` after (negative: before) `day`, 'YYYY-MM-DD'.
+ * Pure calendar arithmetic, no time zone involved: "yesterday" is
+ * shiftCalendarDay(businessToday(), -1). A malformed day is a 400
+ * INVALID_DATE.
+ */
+export function shiftCalendarDay(day: string, days: number): string {
+  const { year, month, day: date } = requireCalendarDay(day);
+  return new Date(Date.UTC(year, month - 1, date + days))
+    .toISOString()
+    .slice(0, 10);
+}
+
+/** A strict 24 h wall-clock time 'HH:mm': '07:05' yes, '7:05', '24:00' and '07:05:00' no. */
+export function isClockTime(value: unknown): value is string {
+  return typeof value === 'string' && CLOCK_TIME.test(value);
+}
+
+/**
+ * The UTC instant a Tunis wall clock names: `day` 'YYYY-MM-DD' at `time`
+ * 'HH:mm' (seconds 0). What a form's "date + heure" fields mean, whatever
+ * zone the server or the tablet runs in. Reads the offset from the time
+ * zone data at that very instant, so a daylight-saving period (Tunisia had
+ * one in 2005-2008) is honoured. A malformed or non-existent day is a 400
+ * INVALID_DATE, a malformed time a 400 INVALID_TIME.
+ */
+export function businessInstant(day: string, time: string): Date {
+  const calendarDay = requireCalendarDay(day);
+  const match = CLOCK_TIME.exec(time);
+  if (!match) {
+    throw new BadRequestException(
+      `"${time}" is not a time of day (expected HH:mm, 00:00-23:59).`,
+      'INVALID_TIME',
+    );
+  }
+  return businessWallInstant(calendarDay, Number(match[1]), Number(match[2]));
 }
 
 /**

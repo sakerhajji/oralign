@@ -35,6 +35,7 @@ import {
   CurrentUser,
   JwtPayload,
 } from '../../common/decorators/current-user.decorator';
+import { STORED_FILE_SECURITY_HEADERS } from '../../media/media.constants';
 
 const AUTHED: UserRole[] = [
   UserRole.dentist,
@@ -237,6 +238,10 @@ export class TreatmentMessageController {
         variant,
       );
     res.setHeader('Content-Type', mimeType);
+    // The stored type is the uploader's claim: no sniffing, no script.
+    for (const [name, value] of Object.entries(STORED_FILE_SECURITY_HEADERS)) {
+      res.setHeader(name, value);
+    }
     if (inline) {
       // Derived previews render in place and are safe to cache —
       // they're immutable per attachment id.

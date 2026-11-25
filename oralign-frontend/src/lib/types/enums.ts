@@ -10,6 +10,8 @@ export enum UserRole {
   DENTIST = 'dentist',
   DESIGNER = 'designer',
   SUPER_ADMIN = 'super_admin',
+  /** Lab technician: the production screens only, never money. */
+  TECHNICIAN = 'technician',
 }
 
 export enum VerificationStatus {

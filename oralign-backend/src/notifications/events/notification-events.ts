@@ -14,6 +14,13 @@
  * Naming convention: `<aggregate>.<past-tense-verb>` — matches the
  * @nestjs/event-emitter "shell glob" pattern so we can listen with
  * wildcards later (`payment.*`).
+ *
+ * Exception on purpose: the lab delivery notices
+ * (`production_delivered` / `production_delivery_cancelled`) skip this
+ * bus. An in-process event dies with its process, and those must survive
+ * a crash, wait out a grace delay and be retried: they go through the
+ * ProductionNotice outbox (src/production/notifications), whose
+ * dispatcher calls NotificationsService directly.
  */
 
 import type {

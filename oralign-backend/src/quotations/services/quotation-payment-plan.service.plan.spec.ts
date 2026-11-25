@@ -8,12 +8,13 @@ import {
   QuotationStatus,
   UserRole,
 } from '@prisma/client';
-import type { EventEmitter2 } from '@nestjs/event-emitter';
 import type { PrismaService } from '../../prisma/prisma.service';
 import type { OrderAccessPolicy } from '../../common/access/order-access.policy';
 import type { Caller } from '../../common/access/caller';
 import type { PackService } from '../../packs/services/pack.service';
 import type { LoyaltyService } from '../../loyalty/services/loyalty.service';
+import type { ProductionEventsService } from '../../production/production-events.service';
+import type { EventEmitter2 } from '@nestjs/event-emitter';
 import type { CompanyBillingSettingsService } from './company-billing-settings.service';
 import type { QuotationPdfService } from './quotation-pdf.service';
 import type { ConfigurePaymentPlanDto } from '../dto/quotation.dto';
@@ -169,6 +170,7 @@ function world(args: {
     {} as OrderAccessPolicy,
     packs as unknown as PackService,
     loyalty as unknown as LoyaltyService,
+    {} as ProductionEventsService,
     { emit: jest.fn() } as unknown as EventEmitter2,
     {
       getActive: jest.fn().mockResolvedValue({ defaultTvaRate: 19 }),

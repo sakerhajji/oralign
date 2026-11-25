@@ -90,7 +90,7 @@ export function ImageLightbox({
           {/* Top translucent caption bar. Skipped entirely when there
               is no caption to avoid an empty strip above the image. */}
           {(caption || subCaption) && (
-            <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-col items-center gap-1 bg-gradient-to-b from-black/70 to-transparent px-6 pb-12 pt-4 text-center text-white">
+            <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-col items-center gap-1 bg-gradient-to-b from-black/70 to-transparent px-6 pb-12 pt-4 text-center text-white pointer-coarse:px-16">
               {caption && (
                 <p className="text-sm font-semibold tracking-wide sm:text-base">
                   {caption}
@@ -103,9 +103,10 @@ export function ImageLightbox({
           )}
 
           {/* Close button. Pinned top-right with extra contrast so it's
-              always visible against any image. */}
+              always visible against any image. 48 px under a finger,
+              centred on the same spot (the caption makes room for it). */}
           <DialogPrimitive.Close
-            className="absolute right-3 top-3 z-20 rounded-full bg-white/10 p-2 text-white outline-none transition hover:bg-white/20 focus-visible:ring-2 focus-visible:ring-white/60"
+            className="absolute right-3 top-3 z-20 rounded-full bg-white/10 p-2 text-white outline-none transition hover:bg-white/20 focus-visible:ring-2 focus-visible:ring-white/60 pointer-coarse:right-1.5 pointer-coarse:top-1.5 pointer-coarse:p-3.5"
             aria-label={t('uiBits.closeImageViewer')}
           >
             <X className="h-5 w-5" />

@@ -1,7 +1,9 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { isAxiosError } from 'axios';
 import { format } from 'date-fns';
 import {
   Check,
@@ -33,13 +35,17 @@ import {
 // the compact reject-reason form uses the standard shadcn dialog.
 import { ImageLightbox } from '@/components/ui/image-lightbox';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { useT } from '@/lib/i18n/lang-context';
 import { authedFetch } from '@/lib/api/authed-fetch';
+import { inertBlob } from '@/lib/api/blob-download';
+import { extractApiErrorMessage } from '@/lib/api/error';
 import { ordersService } from '@/lib/api/orders.service';
 import { treatmentPlansService } from '@/lib/api/treatment-plans.service';
 import {
+  PLAN_TOTALS_REQUIRED,
   useApproveTreatmentPlan,
   useDeleteDentalTreatmentTableImage,
   useDeleteMovementTableImage,
@@ -48,21 +54,25 @@ import {
   useRemoveTreatmentPlanIpr,
   useTreatmentPlanReview,
   useUpdateResultViewUrl,
+  useUpdateTreatmentPlanTotals,
   useUploadDentalTreatmentTableImage,
   useUploadMovementTableImage,
   useUpsertTreatmentPlanIpr,
 } from '@/lib/hooks/use-treatment-plans';
-import { useUpdateToothInstructions } from '@/lib/hooks/use-orders';
+import { orderKeys, useUpdateToothInstructions } from '@/lib/hooks/use-orders';
 import { useAuth } from '@/lib/providers/auth-provider';
 import { dateLocaleOf, PatientLinkPanel } from './treatment-plan-patient-link';
 import { TreatmentConversation } from './treatment-conversation';
 import {
+  ArchTreatment,
   OrderFile,
   OrderFileCategory,
   ToothInstruction,
   ToothInstructionType,
   TreatmentPlanStatus,
   UserRole,
+  type DentalOrder,
+  type TreatmentPlan,
 } from '@/lib/types';
 
 // Defer the odontogram (its sprite payload is heavy) — same pattern as the
@@ -273,6 +283,62 @@ export function TreatmentPlanReview({
   );
 }
 
+// ─── Aligner totals (D4): required per treated arch before the send ─────────
+
+type PlanArch = 'upper' | 'lower';
+const PLAN_ARCHES: readonly PlanArch[] = ['upper', 'lower'];
+const TOTAL_KEY = {
+  upper: 'totalUpperAligners',
+  lower: 'totalLowerAligners',
+} as const satisfies Record<PlanArch, keyof TreatmentPlan>;
+const MAX_ALIGNERS_PER_ARCH = 200;
+
+/**
+ * The arches the case treats, as the server decides it at mark-ready
+ * (production kernel `treatedArches`): the order's archTreatment, else
+ * both with treatBothArch, else the arches the plan already sizes, else
+ * both. The server stays the judge (400 PLAN_TOTALS_REQUIRED).
+ */
+function treatedArchesOf(
+  order: Pick<DentalOrder, 'archTreatment' | 'treatBothArch'> | undefined,
+  plan: Pick<TreatmentPlan, 'totalUpperAligners' | 'totalLowerAligners'>,
+): PlanArch[] {
+  if (order?.archTreatment === ArchTreatment.UPPER) return ['upper'];
+  if (order?.archTreatment === ArchTreatment.LOWER) return ['lower'];
+  if (order?.archTreatment === ArchTreatment.BOTH || order?.treatBothArch) {
+    return ['upper', 'lower'];
+  }
+  const sized = PLAN_ARCHES.filter((arch) => plan[TOTAL_KEY[arch]] != null);
+  return sized.length > 0 ? sized : ['upper', 'lower'];
+}
+
+/** The arches a 400 PLAN_TOTALS_REQUIRED names, or null for any other error. */
+function missingTotalsOf(error: unknown): PlanArch[] | null {
+  if (!isAxiosError(error)) return null;
+  const body = error.response?.data as { errorCode?: string; missing?: unknown } | undefined;
+  if (body?.errorCode !== PLAN_TOTALS_REQUIRED) return null;
+  const missing = Array.isArray(body.missing)
+    ? PLAN_ARCHES.filter((arch) => (body.missing as unknown[]).includes(arch))
+    : [];
+  return missing.length > 0 ? missing : [...PLAN_ARCHES];
+}
+
+/** '' = not filled; NaN = not a whole number. */
+function parseTotal(raw: string): number | null {
+  const value = raw.trim();
+  if (!value) return null;
+  return /^\d{1,3}$/.test(value) ? Number(value) : Number.NaN;
+}
+
+type TotalsDraft = Record<PlanArch, string>;
+
+const draftOf = (
+  plan: Pick<TreatmentPlan, 'totalUpperAligners' | 'totalLowerAligners'>,
+): TotalsDraft => ({
+  upper: plan.totalUpperAligners?.toString() ?? '',
+  lower: plan.totalLowerAligners?.toString() ?? '',
+});
+
 function ReadyAction({
   review,
   onPlanCreated,
@@ -281,15 +347,135 @@ function ReadyAction({
   onPlanCreated?: (planId: string) => void;
 }) {
   const { t } = useT();
+  const ids = useId();
   const markReady = useMarkTreatmentPlanReady();
+  const saveTotals = useUpdateTreatmentPlanTotals();
   const isResend = review.status === TreatmentPlanStatus.REJECTED;
+
+  // The order page has this order in the cache already: read it, never
+  // fetch it again from here (enabled: false).
+  const { data: order } = useQuery({
+    queryKey: orderKeys.detail(review.orderId),
+    queryFn: () => ordersService.getOrderById(review.orderId),
+    enabled: false,
+  });
+
+  // Arches the server named as missing stay on screen even if the local
+  // rule disagrees (it is only a mirror of the server's).
+  const [serverMissing, setServerMissing] = useState<PlanArch[]>([]);
+  const treated = treatedArchesOf(order, review);
+  const arches = PLAN_ARCHES.filter(
+    (arch) => treated.includes(arch) || serverMissing.includes(arch),
+  );
+
+  const [draft, setDraft] = useState<TotalsDraft>(() => draftOf(review));
+  const [errors, setErrors] = useState<Partial<Record<PlanArch, string>>>({});
+  const [summary, setSummary] = useState<string | null>(null);
+  const inputRefs = useRef<Partial<Record<PlanArch, HTMLInputElement | null>>>({});
+
+  // Follow the server copy when it changes (a save, another tab).
+  const savedKey = `${review.totalUpperAligners ?? ''}|${review.totalLowerAligners ?? ''}`;
+  const [seenKey, setSeenKey] = useState(savedKey);
+  if (seenKey !== savedKey) {
+    setSeenKey(savedKey);
+    setDraft(draftOf(review));
+  }
+
+  const changed = arches.filter(
+    (arch) => parseTotal(draft[arch]) !== (review[TOTAL_KEY[arch]] ?? null),
+  );
+  const busy = markReady.isPending || saveTotals.isPending;
+
+  /** Field errors; `required` on the send of a pending plan. */
+  const check = (required: boolean) => {
+    const next: Partial<Record<PlanArch, string>> = {};
+    for (const arch of arches) {
+      const value = parseTotal(draft[arch]);
+      if (value === null) {
+        // A saved total cannot be emptied again, only corrected.
+        if (required || review[TOTAL_KEY[arch]] != null) {
+          next[arch] = t('treatmentReview.ready.totals.required');
+        }
+      } else if (!Number.isInteger(value) || value < 1 || value > MAX_ALIGNERS_PER_ARCH) {
+        next[arch] = t('treatmentReview.ready.totals.invalid');
+      }
+    }
+    return next;
+  };
+
+  const showErrors = (next: Partial<Record<PlanArch, string>>) => {
+    setErrors(next);
+    // PLAN_ARCHES, not `arches`: an arch the server just named may not be
+    // in this render's list yet (its input mounts on the next one).
+    const first = PLAN_ARCHES.find((arch) => next[arch]);
+    if (first) {
+      setSummary(t('treatmentReview.ready.totals.missing'));
+      inputRefs.current[first]?.focus();
+    }
+  };
+
+  /** Saves the edited totals; false when it failed (errors shown). */
+  const persistTotals = async (): Promise<boolean> => {
+    const payload: { totalUpperAligners?: number; totalLowerAligners?: number } = {};
+    for (const arch of changed) {
+      const value = parseTotal(draft[arch]);
+      if (value !== null) payload[TOTAL_KEY[arch]] = value;
+    }
+    if (Object.keys(payload).length === 0) return true;
+    try {
+      await saveTotals.mutateAsync({ id: review.id, ...payload });
+      return true;
+    } catch (error) {
+      setSummary(extractApiErrorMessage(error));
+      return false;
+    }
+  };
+
+  const onSave = async () => {
+    setSummary(null);
+    const next = check(false);
+    if (Object.keys(next).length > 0) return showErrors(next);
+    setErrors({});
+    if (await persistTotals()) toast.success(t('treatmentReview.ready.totals.saved'));
+  };
+
+  const onSend = async () => {
+    setSummary(null);
+    // The resend only opens a new draft (it inherits the totals): the
+    // totals are required when that draft is sent, not now.
+    const next = check(!isResend);
+    if (Object.keys(next).length > 0) return showErrors(next);
+    setErrors({});
+    if (!(await persistTotals())) return;
+    markReady.mutate(review.id, {
+      onSuccess: (plan) => {
+        setServerMissing([]);
+        if (plan.id !== review.id) onPlanCreated?.(plan.id);
+      },
+      onError: (error) => {
+        const missing = missingTotalsOf(error);
+        if (!missing) return;
+        setServerMissing(missing);
+        // The inputs of a newly shown arch mount on this render: focus
+        // after it.
+        window.setTimeout(() =>
+          showErrors(
+            Object.fromEntries(
+              missing.map((arch) => [arch, t('treatmentReview.ready.totals.required')]),
+            ),
+          ),
+        );
+      },
+    });
+  };
+
   return (
     <Card
       className={cn(
         isResend && 'border-2 border-orange-300 bg-orange-50/40',
       )}
     >
-      <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+      <CardContent className="space-y-4 p-4">
         <div>
           <p className="text-sm font-semibold">
             {isResend
@@ -304,27 +490,103 @@ function ReadyAction({
               : t('treatmentReview.ready.sendDesc')}
           </p>
         </div>
-        <Button
-          type="button"
-          onClick={() =>
-            markReady.mutate(review.id, {
-              onSuccess: (plan) => {
-                if (plan.id !== review.id) onPlanCreated?.(plan.id);
-              },
-            })
-          }
-          disabled={markReady.isPending}
-          className={cn('gap-2', isResend && 'bg-orange-600 hover:bg-orange-700')}
-        >
-          {markReady.isPending ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Check className="h-4 w-4" />
+
+        <fieldset className="space-y-3 rounded-lg border bg-background/60 p-3">
+          <legend className="px-1 text-sm font-medium">
+            {t('treatmentReview.ready.totals.title')}
+          </legend>
+          <p id={`${ids}-hint`} className="text-xs text-muted-foreground">
+            {t('treatmentReview.ready.totals.hint')}
+          </p>
+          <div className="flex flex-wrap gap-x-6 gap-y-3">
+            {arches.map((arch) => {
+              const id = `${ids}-${arch}`;
+              const error = errors[arch];
+              return (
+                <div key={arch} className="space-y-1.5">
+                  <Label htmlFor={id}>{t(`treatmentReview.ready.totals.${arch}`)}</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id={id}
+                      ref={(node) => {
+                        inputRefs.current[arch] = node;
+                      }}
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={3}
+                      autoComplete="off"
+                      value={draft[arch]}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setDraft((prev) => ({ ...prev, [arch]: value }));
+                        setErrors((prev) => ({ ...prev, [arch]: undefined }));
+                        setSummary(null);
+                      }}
+                      aria-invalid={!!error}
+                      aria-describedby={error ? `${id}-error` : `${ids}-hint`}
+                      disabled={busy}
+                      className="h-9 w-20 tabular-nums"
+                    />
+                    <span className="text-sm text-muted-foreground">
+                      {t('treatmentReview.ready.totals.unit')}
+                    </span>
+                  </div>
+                  {error && (
+                    <p id={`${id}-error`} className="text-xs text-destructive">
+                      {error}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {PLAN_ARCHES.filter((arch) => !arches.includes(arch)).map((arch) => (
+            <p key={arch} className="text-xs text-muted-foreground">
+              {t('treatmentReview.ready.totals.notTreated', {
+                arch: t(`treatmentReview.ready.totals.${arch}`),
+              })}{' '}
+              <span aria-hidden="true">—</span>
+            </p>
+          ))}
+        </fieldset>
+
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
+          {changed.length > 0 && (
+            <Button type="button" variant="outline" onClick={() => void onSave()} disabled={busy}>
+              {saveTotals.isPending && !markReady.isPending && (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              )}
+              {saveTotals.isPending
+                ? t('treatmentReview.ready.totals.saving')
+                : t('treatmentReview.ready.totals.save')}
+            </Button>
           )}
-          {isResend
-            ? t('treatmentReview.ready.createNewVersion')
-            : t('treatmentReview.ready.markReady')}
-        </Button>
+          <Button
+            type="button"
+            onClick={() => void onSend()}
+            disabled={busy}
+            className={cn('gap-2', isResend && 'bg-orange-600 hover:bg-orange-700')}
+          >
+            {markReady.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Check className="h-4 w-4" />
+            )}
+            {isResend
+              ? t('treatmentReview.ready.createNewVersion')
+              : t('treatmentReview.ready.markReady')}
+          </Button>
+          {/* Always mounted (a live region must exist before it speaks);
+              empty, it takes no room in the row. Last child: on top of the
+              buttons on a phone, at their left from sm. */}
+          <p
+            role="status"
+            aria-live="polite"
+            className="text-sm text-destructive sm:order-first sm:mr-auto"
+          >
+            {summary}
+          </p>
+        </div>
       </CardContent>
     </Card>
   );
@@ -756,7 +1018,9 @@ function useAuthenticatedObjectUrl(url?: string | null) {
       .then((blob) => {
         if (!active) return;
         if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
-        const objectUrl = URL.createObjectURL(blob);
+        // Pictures only keep their type: "Open image in new tab" on an SVG
+        // or HTML blob would run its script on the app's origin.
+        const objectUrl = URL.createObjectURL(inertBlob(blob));
         objectUrlRef.current = objectUrl;
         setState({ objectUrl, loading: false, error: null });
       })

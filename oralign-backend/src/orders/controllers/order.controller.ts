@@ -20,6 +20,7 @@ import {
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { join } from 'path';
+import { pipeline } from 'stream';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -68,6 +69,7 @@ import { OrderFilesService } from '../services/order-files.service';
 import { OrderExportService } from '../services/order-export.service';
 import { TreatmentFeeService } from '../services/treatment-fee.service';
 import { OrderAuditService } from '../services/order-audit.service';
+import { STORED_FILE_SECURITY_HEADERS } from '../../media/media.constants';
 
 @ApiTags('orders')
 @ApiBearerAuth('access-token')
@@ -870,6 +872,12 @@ export class OrderController {
       variant,
     );
 
+    // Defence in depth for a direct navigation to this URL: the stored
+    // type is the uploader's claim (see openOrderFileStream).
+    for (const [name, value] of Object.entries(STORED_FILE_SECURITY_HEADERS)) {
+      response.setHeader(name, value);
+    }
+
     if (dl.inline) {
       // Variants are immutable per file id (re-processing overwrites in
       // place, new uploads get new ids) — let the browser keep them for
@@ -880,10 +888,15 @@ export class OrderController {
         'Content-Disposition',
         `inline; filename="${dl.downloadName.replace(/"/g, '')}"`,
       );
-      dl.stream.getStream().pipe(response);
+      // pipeline, not pipe: a client that leaves mid-transfer (or a read
+      // error) destroys the file stream instead of leaving its descriptor
+      // open. The error itself is the client's leaving: nothing to report.
+      pipeline(dl.openStream().getStream(), response, () => undefined);
       return;
     }
 
+    // Sent by path: express opens the file itself and keeps its Range,
+    // ETag and Content-Length handling, so no stream is opened here.
     response.setHeader('Content-Type', 'application/octet-stream');
     response.download(dl.absolutePath, dl.downloadName);
   }

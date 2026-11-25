@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation"
 import {
   SidebarGroup,
   SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
@@ -23,10 +24,23 @@ import {
  */
 function NavMainImpl({
   items,
+  label,
 }: {
+  /**
+   * Optional group heading (e.g. the admin "Production" group). It keeps
+   * its 32px in the icon rail too, drawn as a short rule there: a label
+   * that collapsed to nothing would push every row under it down while
+   * the sidebar hover-expands, and the row under the cursor would change.
+   */
+  label?: string
   items: {
     title: string
     url: string
+    /**
+     * Sub-routes that have their own entry, so this one is not lit on
+     * them too (the production queue vs Ma journée / Pilotage).
+     */
+    excludePrefixes?: string[]
     icon?: React.ReactNode
     /**
      * Optional unread/notification counter rendered next to the
@@ -48,14 +62,28 @@ function NavMainImpl({
    * so visiting `/dashboard/orders/abc123` still highlights the "Orders"
    * sidebar entry.
    */
-  const isItemActive = (url: string): boolean => {
+  const isUnder = (prefix: string): boolean =>
+    pathname === prefix || pathname.startsWith(`${prefix}/`)
+
+  const isItemActive = (url: string, excludePrefixes?: string[]): boolean => {
     if (!url || url === "#") return false
     if (url === "/dashboard") return pathname === "/dashboard"
-    return pathname === url || pathname.startsWith(`${url}/`)
+    return isUnder(url) && !excludePrefixes?.some(isUnder)
   }
 
   return (
     <SidebarGroup>
+      {label ? (
+        <SidebarGroupLabel className="group-data-[collapsible=icon]:mt-0 group-data-[collapsible=icon]:opacity-100">
+          <span className="truncate group-data-[collapsible=icon]:sr-only">
+            {label}
+          </span>
+          <span
+            aria-hidden
+            className="mx-auto hidden h-px w-6 bg-sidebar-border group-data-[collapsible=icon]:block"
+          />
+        </SidebarGroupLabel>
+      ) : null}
       <SidebarGroupContent className="flex flex-col gap-2">
         <SidebarMenu>
           {items.map((item) => {
@@ -71,7 +99,7 @@ function NavMainImpl({
                   tooltip={
                     hasBadge ? `${item.title} (${badgeLabel} unread)` : item.title
                   }
-                  isActive={isItemActive(item.url)}
+                  isActive={isItemActive(item.url, item.excludePrefixes)}
                   className="group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:justify-center"
                 >
                   <Link href={item.url}>

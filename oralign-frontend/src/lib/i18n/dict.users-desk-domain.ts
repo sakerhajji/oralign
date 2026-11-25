@@ -18,6 +18,16 @@ export const usersDeskDomainDict = {
       en: 'Your own account was kept: you cannot delete it.',
       fr: 'Votre propre compte a été conservé : vous ne pouvez pas le supprimer.',
     } as T,
+    // Bulk delete / restore / status run by an admin: super admin accounts
+    // in the selection are left as they are (the API counts them).
+    toastSuperAdminsSparedOne: {
+      en: '{count} super admin account was left unchanged: only a super admin can change it.',
+      fr: '{count} compte super administrateur n’a pas été modifié : seul un super administrateur peut le faire.',
+    } as T,
+    toastSuperAdminsSparedMany: {
+      en: '{count} super admin accounts were left unchanged: only a super admin can change them.',
+      fr: '{count} comptes super administrateur n’ont pas été modifiés : seul un super administrateur peut le faire.',
+    } as T,
 
     tabs: {
       accounts: { en: 'Accounts', fr: 'Comptes' } as T,
@@ -32,6 +42,8 @@ export const usersDeskDomainDict = {
       dentistsMany: { en: '{count} practitioners', fr: '{count} praticiens' } as T,
       adminsOne: { en: '{count} admin', fr: '{count} admin' } as T,
       adminsMany: { en: '{count} admins', fr: '{count} admins' } as T,
+      techniciansOne: { en: '{count} technician', fr: '{count} technicienne' } as T,
+      techniciansMany: { en: '{count} technicians', fr: '{count} techniciennes' } as T,
       active: { en: 'Active accounts', fr: 'Comptes actifs' } as T,
       blockedOne: { en: '{count} blocked', fr: '{count} bloqué' } as T,
       blockedMany: { en: '{count} blocked', fr: '{count} bloqués' } as T,
@@ -89,6 +101,7 @@ export const usersDeskDomainDict = {
       colGift: { en: 'Oralign gift', fr: 'Cadeau Oralign' } as T,
       emailVerified: { en: 'Email verified', fr: 'E-mail vérifié' } as T,
       emailUnverified: { en: 'Email not verified', fr: 'E-mail non vérifié' } as T,
+      mustChangePassword: { en: 'Password to change', fr: 'Mot de passe à changer' } as T,
       lastLogin: { en: 'Last login: {date}', fr: 'Connexion : {date}' } as T,
       neverLoggedIn: { en: 'Never signed in', fr: 'Jamais connecté' } as T,
       created: { en: 'Created {date}', fr: 'Créé le {date}' } as T,
@@ -144,6 +157,87 @@ export const usersDeskDomainDict = {
       passwordHint: {
         en: 'At least 8 characters. Share it with the user securely.',
         fr: 'Au moins 8 caractères. Transmettez-le à l’utilisateur de façon sécurisée.',
+      } as T,
+      generateLabel: {
+        en: 'Generate a temporary password',
+        fr: 'Générer un mot de passe temporaire',
+      } as T,
+      generateHint: {
+        en: 'Oralign creates a strong password and shows it once. The account must choose its own at the first sign-in.',
+        fr: 'Oralign crée un mot de passe solide et l’affiche une seule fois. Le compte devra choisir le sien à la première connexion.',
+      } as T,
+      technicianNote: {
+        en: 'Lab account: the production screens only, never any financial data. The email is verified and the account approved at once; no email is sent to her.',
+        fr: 'Compte labo : les seuls écrans de production, sans aucune donnée financière. L’e-mail est validé et le compte approuvé d’office ; aucun e-mail ne lui est envoyé.',
+      } as T,
+      createdTitle: { en: 'Account created', fr: 'Compte créé' } as T,
+      createdDesc: {
+        en: '{name} signs in with {email} and this temporary password.',
+        fr: '{name} se connecte avec {email} et ce mot de passe temporaire.',
+      } as T,
+      done: { en: 'Done', fr: 'Terminé' } as T,
+    },
+
+    // The generated password, shown once (create dialog and user sheet)
+    tempPassword: {
+      label: { en: 'Temporary password', fr: 'Mot de passe temporaire' } as T,
+      copy: { en: 'Copy', fr: 'Copier' } as T,
+      copied: { en: 'Copied', fr: 'Copié' } as T,
+      copiedAnnounce: {
+        en: 'Temporary password copied.',
+        fr: 'Mot de passe temporaire copié.',
+      } as T,
+      copyFailed: {
+        en: 'Copy failed: select the password and copy it by hand.',
+        fr: 'Copie impossible : sélectionnez le mot de passe et copiez-le à la main.',
+      } as T,
+      onceTitle: {
+        en: 'It will not be shown again',
+        fr: 'Il ne sera plus affiché',
+      } as T,
+      onceNote: {
+        en: 'Give it to {name} in person, not by email. At the first sign-in {name} chooses a personal password.',
+        fr: 'Remettez-le à {name} en main propre, pas par e-mail. À la première connexion, {name} choisira un mot de passe personnel.',
+      } as T,
+    },
+
+    // User sheet: password handover and the "password to change" state
+    access: {
+      issueAction: {
+        en: 'New temporary password',
+        fr: 'Nouveau mot de passe temporaire',
+      } as T,
+      issueHint: {
+        en: 'Forgotten password or new tablet: generate a temporary password, shown once. Her old password stops working.',
+        fr: 'Mot de passe oublié ou nouvelle tablette : générez un mot de passe temporaire, affiché une seule fois. L’ancien ne fonctionnera plus.',
+      } as T,
+      confirmTitle: {
+        en: 'Generate a new temporary password?',
+        fr: 'Générer un nouveau mot de passe temporaire ?',
+      } as T,
+      confirmDesc: {
+        en: '{name}’s current password stops working and her open sessions are signed out. She will choose a new password at her next sign-in.',
+        fr: 'Le mot de passe actuel de {name} ne fonctionnera plus et ses sessions ouvertes seront fermées. Elle choisira un nouveau mot de passe à sa prochaine connexion.',
+      } as T,
+      confirm: { en: 'Generate', fr: 'Générer' } as T,
+      issuing: { en: 'Generating…', fr: 'Génération…' } as T,
+      issued: {
+        en: 'New temporary password generated.',
+        fr: 'Nouveau mot de passe temporaire généré.',
+      } as T,
+      technicianOnly: {
+        en: 'Only a technician account can receive a temporary password.',
+        fr: 'Seul un compte de technicienne peut recevoir un mot de passe temporaire.',
+      } as T,
+      ownPassword: {
+        en: 'Your own password is changed from your account, with your current password.',
+        fr: 'Votre propre mot de passe se change depuis votre compte, avec votre mot de passe actuel.',
+      } as T,
+      ownPasswordLink: { en: 'Open my account', fr: 'Ouvrir mon compte' } as T,
+      passwordLabel: { en: 'Password', fr: 'Mot de passe' } as T,
+      passwordTemporary: {
+        en: 'Temporary: to change at the next sign-in',
+        fr: 'Temporaire : à changer à la prochaine connexion',
       } as T,
     },
   },

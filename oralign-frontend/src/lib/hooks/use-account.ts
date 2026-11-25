@@ -17,9 +17,11 @@ export function useAccountData() {
   // so no sync-back into the provider is needed: one cache, one user.
   const userQuery = useCurrentUser();
   const profileId = userQuery.data?.dentistProfile?.id ?? '';
-  const workingHoursQuery = useWorkingHoursByProfile(profileId);
-
   const isDentist = userQuery.data?.role === UserRole.DENTIST;
+  // Working-hours reads are dentist/admin only: an account whose role changed
+  // away from dentist keeps its profile, and must not hit a 403 here.
+  const workingHoursQuery = useWorkingHoursByProfile(isDentist ? profileId : '');
+
   const isLoading = userQuery.isLoading || (isDentist && workingHoursQuery.isLoading);
   const error = userQuery.error ?? workingHoursQuery.error ?? null;
 

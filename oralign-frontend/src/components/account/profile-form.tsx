@@ -247,7 +247,7 @@ export function ProfileForm({ user, onboarding = false, onSaved }: ProfileFormPr
               <label className="text-sm font-medium" htmlFor="fullName">
                 {t('accountProfile.fullNameLabel')}
               </label>
-              <Input id="fullName" {...form.register('fullName')} />
+              <Input id="fullName" maxLength={120} {...form.register('fullName')} />
               {form.formState.errors.fullName && (
                 <p className="text-sm text-destructive">
                   {form.formState.errors.fullName.message}

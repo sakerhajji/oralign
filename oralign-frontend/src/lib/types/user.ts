@@ -2,6 +2,7 @@
 // Split out of the former 2,000-line lib/types/index.ts; import via '@/lib/types'.
 
 import { UserRole } from './enums';
+import type { User } from './entities';
 
 // ==========================================
 // USER DTOs
@@ -10,11 +11,27 @@ import { UserRole } from './enums';
 export interface CreateUserDto {
   email: string;
   fullName: string;
-  password: string;
+  /** Required unless `generateTemporaryPassword` is true. */
+  password?: string;
   phone?: string;
   country?: string;
   role?: UserRole;
   avatarUrl?: string;
+  /**
+   * The server generates the password and returns it ONCE in
+   * `CreateUserResponse.temporaryPassword` (never logged, never e-mailed).
+   */
+  generateTemporaryPassword?: boolean;
+}
+
+/** `POST /users` answer: the account, plus the generated password once. */
+export interface CreateUserResponse extends User {
+  temporaryPassword?: string;
+}
+
+/** `POST /users/:id/temporary-password` answer (technician accounts only). */
+export interface TemporaryPasswordResponse {
+  temporaryPassword: string;
 }
 
 /**
@@ -28,6 +45,7 @@ export interface UserStats {
   pending: number;
   dentists: number;
   admins: number;
+  technicians: number;
   giftAvailable: number;
   giftUsed: number;
 }

@@ -15,7 +15,11 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { OrderFileResponseDto } from '../dto/order.dto';
 import { MediaProcessingService } from '../../media/media-processing.service';
-import { classifyMedia } from '../../media/media.constants';
+import {
+  classifyMedia,
+  inlineSafeMimeType,
+  storedUploadMimeType,
+} from '../../media/media.constants';
 import {
   scanUploadContent,
   isDangerousUploadExtension,
@@ -202,7 +206,8 @@ export class OrderFilesService {
     caller: Caller,
     variant?: string,
   ): Promise<{
-    stream: StreamableFile;
+    /** Opens the file; see OrderFileStream.openStream. */
+    openStream: () => StreamableFile;
     file: OrderFile;
     absolutePath: string;
     /** Content-Type to serve with. */
@@ -214,60 +219,16 @@ export class OrderFilesService {
   }> {
     await this.orders.findAccessibleOrder(id, caller);
     const file = await this.findOrderFile(id, fileId);
-
-    // `?variant=thumb|md|lg|avif|model` — serve the derived artefact
-    // inline. Falls back to the original (still inline: the client
-    // asked for something to DISPLAY) when the variant isn't ready
-    // yet (processing) or never will be (failed/legacy) — so the
-    // frontend can request variants blindly without racing the queue.
-    if (variant) {
-      const variants = (file.variants ?? {}) as Record<
-        string,
-        Partial<MediaVariantInfo>
-      >;
-      const info = variants[variant];
-      if (info?.path) {
-        const variantAbs = resolveUploadPath(info.path);
-        if (fs.existsSync(variantAbs)) {
-          return {
-            stream: new StreamableFile(fs.createReadStream(variantAbs)),
-            file,
-            absolutePath: variantAbs,
-            contentType: variantContentType(info.format),
-            inline: true,
-            downloadName: path.basename(info.path),
-          };
-        }
-      }
-      const originalAbs = resolveUploadPath(file.relativePath);
-      if (!fs.existsSync(originalAbs)) {
-        throw new NotFoundException('Stored file not found');
-      }
-      return {
-        stream: new StreamableFile(fs.createReadStream(originalAbs)),
-        file,
-        absolutePath: originalAbs,
-        contentType: file.mimeType || 'application/octet-stream',
-        inline: true,
-        downloadName: file.generatedName ?? file.originalName,
-      };
-    }
-
-    const absolutePath = resolveUploadPath(file.relativePath);
-
-    if (!fs.existsSync(absolutePath)) {
-      throw new NotFoundException('Stored file not found');
-    }
-
+    const opened = openOrderFileStream(file, variant);
     return {
-      stream: new StreamableFile(fs.createReadStream(absolutePath)),
+      ...opened,
       file,
-      absolutePath,
-      contentType: 'application/octet-stream',
-      inline: false,
-      // Downloads land on disk with the clean generated name; legacy
-      // rows (no generatedName) keep the original client filename.
-      downloadName: file.generatedName ?? file.originalName,
+      // A served variant keeps its own name; an original lands on disk
+      // with the clean generated name, legacy rows (no generatedName)
+      // with the original client filename.
+      downloadName: opened.servedVariant
+        ? path.basename(opened.storedPath)
+        : (file.generatedName ?? file.originalName),
     };
   }
 
@@ -433,22 +394,22 @@ export class OrderFilesService {
       await fs.promises.writeFile(absolutePath, file.buffer!);
     }
 
+    // Both upload paths (multipart and chunked) store through here, so
+    // this is where an SVG / HTML / XML claim is neutralised.
+    const mimeType = storedUploadMimeType(file.mimetype);
     return {
       orderId,
       category,
       originalName: file.originalname,
       fileName,
       relativePath,
-      mimeType: file.mimetype || 'application/octet-stream',
+      mimeType,
       size: file.size,
       generatedName: fileName,
       orderIndex: naming.seq,
       // pending = the async pipeline applies (image/zip/3D scan); null =
       // nothing to derive (pdf, video, …) — readers serve the original.
-      processingStatus: classifyMedia(
-        file.mimetype ?? 'application/octet-stream',
-        fileName,
-      )
+      processingStatus: classifyMedia(mimeType, fileName)
         ? MediaProcessingStatus.pending
         : null,
     };
@@ -468,6 +429,78 @@ export class OrderFilesService {
 
     return file;
   }
+}
+
+/** An order file ready to stream, its name left to the route. */
+export interface OrderFileStream {
+  /**
+   * Opens the file. Call it only to send the bytes: a stream nobody reads
+   * holds its file descriptor (the attachment route sends by path).
+   */
+  openStream: () => StreamableFile;
+  absolutePath: string;
+  /** Content-Type to serve with. */
+  contentType: string;
+  /** true → render in place (variants); false → attachment download. */
+  inline: boolean;
+  /** Uploads-relative path actually served (lends its extension to a name). Never sent. */
+  storedPath: string;
+  /** The variant served; null when the original is (fallback included). */
+  servedVariant: string | null;
+}
+
+/**
+ * The STREAM part of a download, split from the access check so a route
+ * with its own rule (the lab production routes) serves files exactly as
+ * GET orders/:id/files/:fileId/download does, after checking access its
+ * way. `?variant=thumb|md|lg|avif|model` serves the derived artefact
+ * inline; it falls back to the original (still inline: the client asked
+ * for something to DISPLAY) while the variant is not ready (processing)
+ * or never will be (failed / legacy), so clients can request variants
+ * blindly without racing the queue. That inline fallback keeps the
+ * declared type only when it is inline-safe (raster); any other original
+ * leaves as an octet-stream attachment, so an uploaded SVG / HTML never
+ * renders as a document. 404 when the blob is gone. Nothing is opened
+ * here: the caller opens the file when it sends it (`openStream`).
+ */
+export function openOrderFileStream(
+  file: Pick<OrderFile, 'relativePath' | 'mimeType' | 'variants'>,
+  variant?: string,
+): OrderFileStream {
+  if (variant) {
+    const variants = (file.variants ?? {}) as Record<
+      string,
+      Partial<MediaVariantInfo>
+    >;
+    const info = variants[variant];
+    if (info?.path) {
+      const variantAbs = resolveUploadPath(info.path);
+      if (fs.existsSync(variantAbs)) {
+        return {
+          openStream: () => new StreamableFile(fs.createReadStream(variantAbs)),
+          absolutePath: variantAbs,
+          contentType: variantContentType(info.format),
+          inline: true,
+          storedPath: info.path,
+          servedVariant: variant,
+        };
+      }
+    }
+  }
+
+  const absolutePath = resolveUploadPath(file.relativePath);
+  if (!fs.existsSync(absolutePath)) {
+    throw new NotFoundException('Stored file not found');
+  }
+  const inlineType = variant ? inlineSafeMimeType(file.mimeType) : null;
+  return {
+    openStream: () => new StreamableFile(fs.createReadStream(absolutePath)),
+    absolutePath,
+    contentType: inlineType ?? 'application/octet-stream',
+    inline: inlineType !== null,
+    storedPath: file.relativePath,
+    servedVariant: null,
+  };
 }
 
 /** webp/avif/glb → the Content-Type the browser needs. */

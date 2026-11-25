@@ -15,6 +15,27 @@ interface ErrorResponse {
   message: string;
   errorCode?: string;
   timestamp: string;
+  [detail: string]: unknown;
+}
+
+/** Envelope keys an exception's `details` can never overwrite. */
+const ENVELOPE_KEYS = new Set([
+  'statusCode',
+  'message',
+  'errorCode',
+  'timestamp',
+]);
+
+/** An AppException's extra members, minus anything that would shadow the envelope. */
+function detailMembers(
+  details: AppException['details'],
+): Record<string, unknown> {
+  if (!details) return {};
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(details)) {
+    if (!ENVELOPE_KEYS.has(key)) out[key] = value;
+  }
+  return out;
 }
 
 /**
@@ -69,6 +90,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     if (exception instanceof AppException) {
       errorResponse = {
+        // Spread first: the envelope below always wins.
+        ...detailMembers(exception.details),
         statusCode: exception.statusCode,
         message: exception.message,
         errorCode: exception.errorCode,

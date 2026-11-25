@@ -49,6 +49,41 @@ describe('AllExceptionsFilter', () => {
     expect(run(new ConflictException('dupe')).status).toBe(409);
   });
 
+  it('sends the details of an AppException as extra body members (a 409 the client must confirm)', () => {
+    const { status, body } = run(
+      new ConflictException('Confirm first', 'PRODUCTION_CONFIRM_REQUIRED', {
+        warnings: ['already_declared', 'quantity_differs'],
+      }),
+    );
+    expect(status).toBe(409);
+    expect(body).toMatchObject({
+      statusCode: 409,
+      message: 'Confirm first',
+      errorCode: 'PRODUCTION_CONFIRM_REQUIRED',
+      warnings: ['already_declared', 'quantity_differs'],
+    });
+  });
+
+  it('never lets details overwrite the envelope', () => {
+    const { status, body } = run(
+      new ConflictException('Real message', 'REAL_CODE', {
+        statusCode: 200,
+        message: 'forged',
+        errorCode: 'FORGED',
+        timestamp: 'never',
+        extra: 1,
+      }),
+    );
+    expect(status).toBe(409);
+    expect(body).toMatchObject({
+      statusCode: 409,
+      message: 'Real message',
+      errorCode: 'REAL_CODE',
+      extra: 1,
+    });
+    expect(body.timestamp).not.toBe('never');
+  });
+
   it('unwraps Nest HttpException bodies', () => {
     const { status, body } = run(new HttpException({ message: 'nope' }, HttpStatus.I_AM_A_TEAPOT));
     expect(status).toBe(418);

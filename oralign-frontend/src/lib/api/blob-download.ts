@@ -32,6 +32,62 @@ export function fileNameFromHeaders(
   return name.replace(/[\\/:*?"<>|]/g, '_');
 }
 
+// ─── Blob URLs for display ──────────────────────────────────────────
+
+/**
+ * A blob URL lives on the app's origin, and the type the server sends with
+ * an uploaded file is the uploader's word (a file named `photo` can claim
+ * image/svg+xml or text/html). Opened in a tab ("Open image in new tab", a
+ * chat attachment), an SVG, HTML or XML blob would run its own script with
+ * the session in reach. So a blob shown or opened from a server response
+ * keeps its type only when that type cannot do that.
+ */
+const RASTER_IMAGE_TYPES: ReadonlySet<string> = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+  'image/avif',
+]);
+
+/**
+ * `image`: pictures only (an `<img>`, or a tab opened on a picture).
+ * `viewer`: the order file viewer, which also frames PDFs and plays videos;
+ * the browser's PDF viewer and a `<video>` never run the file's script on
+ * the app's origin.
+ */
+export type DisplayBlobKind = 'image' | 'viewer';
+
+/** A MIME type's essence: lower case, without parameters. */
+function mimeEssence(type: string | null | undefined): string {
+  return (type ?? '').split(';', 1)[0].trim().toLowerCase();
+}
+
+/** Whether a blob of this type may keep it for `kind`. */
+export function keepsDisplayType(
+  type: string | null | undefined,
+  kind: DisplayBlobKind = 'image',
+): boolean {
+  const essence = mimeEssence(type);
+  if (RASTER_IMAGE_TYPES.has(essence)) return true;
+  return (
+    kind === 'viewer' &&
+    (essence === 'application/pdf' || /^video\/[a-z0-9.+-]+$/.test(essence))
+  );
+}
+
+/**
+ * The blob to hand `URL.createObjectURL` for a server response that will be
+ * shown or opened: any type `kind` does not allow becomes an opaque
+ * octet-stream. An `<img>` or `<video>` still decodes it by sniffing the
+ * bytes; a tab only downloads it.
+ */
+export function inertBlob(blob: Blob, kind: DisplayBlobKind = 'image'): Blob {
+  return keepsDisplayType(blob.type, kind)
+    ? blob
+    : new Blob([blob], { type: 'application/octet-stream' });
+}
+
 /** Trigger the browser's download of `blob` under `fileName`. */
 export function saveBlobAs(blob: Blob, fileName: string): void {
   const url = window.URL.createObjectURL(blob);

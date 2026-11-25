@@ -12,7 +12,7 @@
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
-    "start:prod": "node dist/main",
+    "start:prod": "node dist/src/main",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "test": "jest",
     "test:watch": "jest --watch",
@@ -21,8 +21,14 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "db:migrate": "node ./node_modules/prisma/build/index.js migrate deploy",
     "db:generate": "node ./node_modules/prisma/build/index.js generate",
-    "create-super-admin": "node dist/scripts/create-super-admin",
-    "create-super-admin:dev": "ts-node -r tsconfig-paths/register src/scripts/create-super-admin.ts"
+    "create-super-admin": "node dist/src/scripts/create-super-admin",
+    "create-super-admin:dev": "ts-node -r tsconfig-paths/register src/scripts/create-super-admin.ts",
+    "create-demo-technician": "node dist/src/scripts/create-demo-technician",
+    "create-demo-technician:dev": "ts-node -r tsconfig-paths/register src/scripts/create-demo-technician.ts",
+    "production:rebuild-progress": "node dist/src/scripts/rebuild-production-progress",
+    "production:rebuild-progress:dev": "ts-node -r tsconfig-paths/register src/scripts/rebuild-production-progress.ts",
+    "production:import-history": "node dist/src/scripts/import-production-history",
+    "production:import-history:dev": "ts-node -r tsconfig-paths/register src/scripts/import-production-history.ts"
   },
   "dependencies": {
     "@keyv/redis": "^5.1.6",

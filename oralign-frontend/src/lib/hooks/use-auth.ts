@@ -12,7 +12,9 @@ import { useCallback } from 'react';
 import { toast } from '@/lib/toast';
 import { isAxiosError } from 'axios';
 import { authService, extractApiErrorMessage } from '@/lib/api';
+import { currentErrorLang } from '@/lib/api/error-copy';
 import { useAuth } from '@/lib/providers';
+import { translate } from '@/lib/i18n/dict';
 import { useT } from '@/lib/i18n/lang-context';
 import {
   SignUpDto,
@@ -21,11 +23,35 @@ import {
   ForgotPasswordDto,
   ResetPasswordDto,
   AuthResponseDto,
+  ChangePasswordResponseDto,
   MessageResponse,
+  User,
   VerifyEmailResponseDto,
   VerificationStatus,
-  UserRole,
 } from '@/lib/types';
+import { PASSWORD_CHANGE_PATH } from '@/lib/api/client';
+import { userKeys } from './use-users';
+import { landingPathFor } from './use-onboarding';
+
+// Auth codes worded in the dashboard language: the server's sentence is
+// English, and the sign-in, e-mail verification and onboarding screens
+// follow the user's language.
+const AUTH_ERROR_KEYS: ReadonlyMap<string, string> = new Map([
+  // One generic code for an unknown email and a wrong password
+  // (anti-enumeration, audit L-1); EMAIL_NOT_FOUND is a legacy code.
+  ['INVALID_CREDENTIALS', 'authPages.apiErrors.invalidCredentials'],
+  ['EMAIL_NOT_FOUND', 'authPages.apiErrors.invalidCredentials'],
+  ['ACCOUNT_INACTIVE', 'authPages.apiErrors.accountInactive'],
+  ['INVALID_CODE', 'authPages.apiErrors.invalidCode'],
+  ['CODE_EXPIRED', 'authPages.apiErrors.codeExpired'],
+  ['CODE_INVALIDATED', 'authPages.apiErrors.codeInvalidated'],
+  ['NO_VERIFICATION_CODE', 'authPages.apiErrors.noVerificationCode'],
+  ['ALREADY_VERIFIED', 'authPages.apiErrors.alreadyVerified'],
+]);
+
+function authErrorText(key: string): string {
+  return translate(key, currentErrorLang());
+}
 
 export function getApiErrorMessage(error: unknown, fallback: string): string {
   if (isAxiosError(error)) {
@@ -39,28 +65,25 @@ export function getApiErrorMessage(error: unknown, fallback: string): string {
     }
 
     const apiData = error.response?.data as
-      | { message?: string | string[]; errorCode?: string }
+      | { message?: string | string[]; errorCode?: string; retryAfterMinutes?: unknown }
       | undefined;
     const apiMessage = apiData?.message;
 
+    const authKey = apiData?.errorCode ? AUTH_ERROR_KEYS.get(apiData.errorCode) : undefined;
+    if (authKey) return authErrorText(authKey);
     switch (apiData?.errorCode) {
-      // The backend intentionally returns one generic code for both an
-      // unknown email and a wrong password (anti-enumeration, audit L-1).
-      case 'INVALID_CREDENTIALS':
-        return 'Invalid email or password.';
-      // Legacy codes — kept so older backends still render a message.
-      case 'EMAIL_NOT_FOUND':
-        return 'Invalid email or password.';
+      // A legacy code: it keeps the server's sentence when there is one.
       case 'INVALID_PASSWORD':
         return typeof apiMessage === 'string'
           ? apiMessage
-          : 'Invalid email or password.';
-      case 'ACCOUNT_LOCKED':
-        return typeof apiMessage === 'string'
-          ? apiMessage
-          : 'This account is temporarily locked after too many failed attempts.';
-      case 'ACCOUNT_INACTIVE':
-        return 'This account is deactivated. Please contact support.';
+          : authErrorText('authPages.apiErrors.invalidCredentials');
+      // The delay comes as a number next to the server's English sentence.
+      case 'ACCOUNT_LOCKED': {
+        const minutes = apiData?.retryAfterMinutes;
+        return typeof minutes === 'number' && Number.isInteger(minutes) && minutes > 0
+          ? translate('authPages.apiErrors.accountLockedFor', currentErrorLang(), { minutes })
+          : authErrorText('authPages.apiErrors.accountLocked');
+      }
     }
 
     if (Array.isArray(apiMessage) && apiMessage.length > 0) {
@@ -137,10 +160,13 @@ export function useSignUp() {
  * Post-login routing — every gate is double-checked by OnboardingGuard so
  * the dashboard layout itself stays defensive, but routing the user to the
  * right place from here avoids an extra redirect flash:
+ *   0. Temporary password in use           → /onboarding/password (the API
+ *                                            refuses everything else)
  *   1. Email not verified                  → /auth/verify-email
  *   2. Dentist profile/clinic missing      → /onboarding/profile (or /clinic)
  *   3. Dentist waiting for admin approval  → /onboarding/pending
- *   4. Everything good                     → /dashboard
+ *   4. Everything good                     → /dashboard, or the production
+ *                                            queue for a technician
  */
 export function useSignIn() {
   const router = useRouter();
@@ -164,10 +190,16 @@ export function useSignIn() {
         // this to localStorage so a FR user never flashes English.
         preferredLanguage: data.preferredLanguage,
         verificationStatus,
+        mustChangePassword: data.mustChangePassword === true,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       });
       toast.success(t('toasts.auth.loggedIn'));
+
+      if (data.mustChangePassword) {
+        router.push(PASSWORD_CHANGE_PATH);
+        return;
+      }
 
       if (!data.isEmailVerified) {
         // Just route them to the verify page — DON'T fire an automatic
@@ -182,8 +214,9 @@ export function useSignIn() {
       // For dentists, OnboardingGuard inside /dashboard will inspect the
       // freshly-fetched profile + working-hours + approval state and push
       // them deeper into the flow as needed. Sending them to /dashboard
-      // first keeps the routing logic in one place.
-      router.push('/dashboard');
+      // first keeps the routing logic in one place. A technician goes
+      // straight to her queue: /dashboard has nothing for her.
+      router.push(landingPathFor(data.role));
     },
     // No toast: LoginForm renders the same message as an inline alert next
     // to the fields. One failure, one notice.
@@ -289,17 +322,36 @@ export function useResetPassword() {
 
 /**
  * Hook for changing password (requires current password).
- * Calls the authenticated POST /auth/change-password endpoint.
+ * Calls the authenticated POST /auth/change-password endpoint; the service
+ * stores the fresh token pair it answers with (the change revokes every
+ * older session, this tab's included).
+ *
+ * `toastErrors: false` leaves the failure to the caller, for a form that
+ * shows it next to the field (the /onboarding/password step).
  */
-export function useChangePassword() {
+export function useChangePassword(options: { toastErrors?: boolean } = {}) {
   const { t } = useT();
+  const queryClient = useQueryClient();
+  const toastErrors = options.toastErrors ?? true;
 
-  return useMutation<MessageResponse, unknown, { currentPassword: string; newPassword: string }>({
+  return useMutation<
+    ChangePasswordResponseDto,
+    unknown,
+    { currentPassword: string; newPassword: string }
+  >({
     mutationFn: authService.changePassword,
     onSuccess: () => {
+      // The server cleared the flag: drop it from the cached account at
+      // once, or the dashboard guard would send the user straight back to
+      // the password step before /users/me refetches.
+      queryClient.setQueryData<User>(userKeys.currentUser(), (current) =>
+        current ? { ...current, mustChangePassword: false } : current,
+      );
+      void queryClient.invalidateQueries({ queryKey: userKeys.currentUser() });
       toast.success(t('toasts.auth.passwordChanged'));
     },
     onError: (error: unknown) => {
+      if (!toastErrors) return;
       toast.error(getApiErrorMessage(error, t('toasts.auth.changePasswordFailed')));
     },
   });

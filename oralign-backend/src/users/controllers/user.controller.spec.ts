@@ -2,6 +2,7 @@ import { RequestMethod } from '@nestjs/common';
 import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { UserRole } from '@prisma/client';
 import { ROLES_KEY } from '../../common/decorators/roles.decorator';
+import { ALLOW_PENDING_PASSWORD_CHANGE_KEY } from '../../auth/guards/password-change.guard';
 import type { JwtPayload } from '../../common/decorators/current-user.decorator';
 import type { StorageService } from '../../storage/storage.interface';
 import { UserListQueryDto } from '../dto/user.dto';
@@ -87,5 +88,38 @@ describe('UserController', () => {
       userId: 'u-admin',
       role: UserRole.admin,
     });
+  });
+
+  it('POST /users/:id/temporary-password is admin-only and passes the caller', async () => {
+    const method = Object.getOwnPropertyDescriptor(
+      UserController.prototype,
+      'issueTemporaryPassword',
+    )?.value as object;
+    expect(Reflect.getMetadata(ROLES_KEY, method)).toEqual([UserRole.admin]);
+    expect(Reflect.getMetadata(PATH_METADATA, method)).toBe(
+      ':id/temporary-password',
+    );
+
+    const issueTemporaryPassword = jest
+      .fn()
+      .mockResolvedValue({ temporaryPassword: 'x' });
+    await makeController({ issueTemporaryPassword }).issueTemporaryPassword(
+      '5b1f0c1e-8a7d-4b8e-9c3f-0d2e4a6b8c01',
+      { sub: 'u-admin', role: UserRole.admin } as JwtPayload,
+    );
+    expect(issueTemporaryPassword).toHaveBeenCalledWith(
+      '5b1f0c1e-8a7d-4b8e-9c3f-0d2e4a6b8c01',
+      { userId: 'u-admin', role: UserRole.admin },
+    );
+  });
+
+  it('GET /users/me stays open while a password change is pending', () => {
+    const method = Object.getOwnPropertyDescriptor(
+      UserController.prototype,
+      'getCurrentUser',
+    )?.value as object;
+    expect(Reflect.getMetadata(ALLOW_PENDING_PASSWORD_CHANGE_KEY, method)).toBe(
+      true,
+    );
   });
 });

@@ -38,7 +38,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
    *      password change / reset already performs finally applies to REST
    *      as well (it previously only bit on the WS handshake);
    *   3. role + e-mail come from the row, so a role change takes effect on
-   *      the very next request without forcing a re-login.
+   *      the very next request without forcing a re-login;
+   *   4. `mustChangePassword` comes from the row too (never from a claim),
+   *      so PasswordChangeGuard locks an account on a temporary password
+   *      without a query of its own, and lets it go the moment it changes.
    *
    * Cost is one primary-key lookup per request on an already-hot row —
    * the same lookup the socket handshake does.
@@ -59,6 +62,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         isActive: true,
         deletedAt: true,
         tokenVersion: true,
+        mustChangePassword: true,
       },
     });
 
@@ -69,6 +73,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('Session revoked. Please sign in again.');
     }
 
-    return { ...payload, email: user.email, role: user.role };
+    return {
+      ...payload,
+      email: user.email,
+      role: user.role,
+      mustChangePassword: user.mustChangePassword,
+    };
   }
 }

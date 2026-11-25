@@ -175,6 +175,48 @@ export const authDomainDict = {
       } as T,
     },
 
+    // Server error codes of the auth screens (getApiErrorMessage in
+    // lib/hooks/use-auth.ts): the server's own sentence is English.
+    apiErrors: {
+      invalidCredentials: {
+        en: 'Invalid email or password.',
+        fr: 'E-mail ou mot de passe incorrect.',
+      } as T,
+      accountInactive: {
+        en: 'This account is deactivated. Please contact support.',
+        fr: 'Ce compte est désactivé. Contactez le support.',
+      } as T,
+      accountLocked: {
+        en: 'This account is temporarily locked after too many failed attempts.',
+        fr: 'Ce compte est temporairement bloqué après trop de tentatives échouées.',
+      } as T,
+      // {minutes}: the server's retryAfterMinutes (≥ 1); "min" needs no plural.
+      accountLockedFor: {
+        en: 'This account is locked after too many failed attempts. Try again in {minutes} min.',
+        fr: 'Ce compte est bloqué après trop de tentatives échouées. Réessayez dans {minutes} min.',
+      } as T,
+      invalidCode: {
+        en: 'Invalid verification code.',
+        fr: 'Code de vérification incorrect.',
+      } as T,
+      codeExpired: {
+        en: 'This verification code has expired. Request a new one.',
+        fr: 'Ce code de vérification a expiré. Demandez-en un nouveau.',
+      } as T,
+      codeInvalidated: {
+        en: 'Too many incorrect attempts. Request a new verification code.',
+        fr: 'Trop de tentatives incorrectes. Demandez un nouveau code de vérification.',
+      } as T,
+      noVerificationCode: {
+        en: 'No verification code is pending. Request a new one.',
+        fr: 'Aucun code de vérification en attente. Demandez-en un nouveau.',
+      } as T,
+      alreadyVerified: {
+        en: 'This email address is already verified.',
+        fr: 'Cette adresse e-mail est déjà vérifiée.',
+      } as T,
+    },
+
     // Validation messages (zod factories) for auth forms
     validation: {
       emailInvalid: { en: 'Invalid email address', fr: 'Adresse e-mail invalide' } as T,
@@ -186,6 +228,10 @@ export const authDomainDict = {
       fullNameMin2: {
         en: 'Full name must be at least 2 characters',
         fr: 'Le nom complet doit comporter au moins 2 caractères',
+      } as T,
+      fullNameMax120: {
+        en: 'Full name must be at most 120 characters',
+        fr: 'Le nom complet doit comporter au plus 120 caractères',
       } as T,
       phoneRequired: { en: 'Phone number is required', fr: 'Le numéro de téléphone est obligatoire' } as T,
       phoneFormat: {
@@ -221,6 +267,63 @@ export const authDomainDict = {
       stepProfile: { en: 'Profile', fr: 'Profil' } as T,
       stepClinic: { en: 'Clinic', fr: 'Cabinet' } as T,
       stepApproval: { en: 'Approval', fr: 'Approbation' } as T,
+    },
+
+    // onboarding/password/page.tsx — first sign-in on a temporary password
+    password: {
+      title: { en: 'Choose your password', fr: 'Choisissez votre mot de passe' } as T,
+      desc: {
+        en: 'Your account was opened with a temporary password. Replace it with one of your own to continue.',
+        fr: 'Votre compte a été ouvert avec un mot de passe temporaire. Remplacez-le par un mot de passe personnel pour continuer.',
+      } as T,
+      account: { en: 'Account: {email}', fr: 'Compte : {email}' } as T,
+      loading: { en: 'Loading your account…', fr: 'Chargement de votre compte…' } as T,
+      loadError: {
+        en: 'Your account could not be loaded. Sign in again to continue.',
+        fr: 'Votre compte n’a pas pu être chargé. Reconnectez-vous pour continuer.',
+      } as T,
+      signInAgain: { en: 'Sign in again', fr: 'Se reconnecter' } as T,
+      showPasswords: { en: 'Show the passwords', fr: 'Afficher les mots de passe' } as T,
+      currentLabel: { en: 'Temporary password', fr: 'Mot de passe temporaire' } as T,
+      currentHint: {
+        en: 'The one your administrator gave you.',
+        fr: 'Celui que l’administrateur vous a remis.',
+      } as T,
+      newLabel: { en: 'New password', fr: 'Nouveau mot de passe' } as T,
+      newHint: {
+        en: 'At least 8 characters. Do not reuse a password from another site.',
+        fr: 'Au moins 8 caractères. Ne reprenez pas un mot de passe utilisé ailleurs.',
+      } as T,
+      confirmLabel: { en: 'Confirm the new password', fr: 'Confirmez le nouveau mot de passe' } as T,
+      submit: { en: 'Save and continue', fr: 'Enregistrer et continuer' } as T,
+      submitting: { en: 'Saving…', fr: 'Enregistrement…' } as T,
+      failedTitle: {
+        en: 'Your password was not changed',
+        fr: 'Le mot de passe n’a pas été changé',
+      } as T,
+      failedFallback: {
+        en: 'Something went wrong. Please try again.',
+        fr: 'Une erreur est survenue. Veuillez réessayer.',
+      } as T,
+      errors: {
+        currentRequired: {
+          en: 'Enter the temporary password.',
+          fr: 'Saisissez le mot de passe temporaire.',
+        } as T,
+        min8: { en: 'At least 8 characters.', fr: 'Au moins 8 caractères.' } as T,
+        mismatch: {
+          en: 'The two passwords do not match.',
+          fr: 'Les deux mots de passe ne correspondent pas.',
+        } as T,
+        sameAsCurrent: {
+          en: 'Choose a password different from the temporary one.',
+          fr: 'Choisissez un mot de passe différent du mot de passe temporaire.',
+        } as T,
+        wrongCurrent: {
+          en: 'This temporary password is not the right one.',
+          fr: 'Ce mot de passe temporaire n’est pas le bon.',
+        } as T,
+      },
     },
 
     // onboarding/profile/page.tsx

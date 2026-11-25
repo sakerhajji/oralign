@@ -1037,6 +1037,198 @@ export function renderQuoteDecisionForAdminEmail(
   };
 }
 
+// ─── Lab production renderers ───────────────────────────────────────────────
+
+/**
+ * The practitioner's copy of a lab delivery (ProductionNotice, e-mail
+ * channel). The variable facts arrive display-ready, in the e-mail's
+ * language, from the production notice renderer
+ * (src/production/notifications/production-notice.renderer.ts): it is the
+ * one place that words steps, quantities, the Tunis date and the per-arch
+ * progress for BOTH channels, so the bell and the e-mail never disagree.
+ * This file only lays them out. No amount, and never the cancel reason
+ * (owner decision D8).
+ */
+export interface ProductionDeliveryEmailArgs {
+  doctorName: string;
+  orderCode: string;
+  patientName: string;
+  /** e.g. "Supérieure et inférieure". */
+  archLabel: string;
+  /** e.g. "1 à 10". */
+  stepsLabel: string;
+  /** e.g. "10 aligneurs par arcade (20 au total)". */
+  quantityLabel: string;
+  /** e.g. "25/11/2026 à 14:30" (Africa/Tunis). */
+  performedAtLabel: string;
+  /** e.g. "Coursier (Ali)". */
+  recipientLabel: string;
+  /** One row per treated arch, e.g. "Arcade supérieure" → "Livraison partielle : 10 sur 24, reste 14". */
+  progress: Array<{ label: string; value: string }>;
+  dashboardUrl: string;
+}
+
+const PRODUCTION_DELIVERY_LABELS: Record<
+  Lang,
+  {
+    order: string;
+    patient: string;
+    arch: string;
+    steps: string;
+    quantity: string;
+    performedAt: string;
+    recipient: string;
+    progress: string;
+    button: string;
+  }
+> = {
+  en: {
+    order: `Order`,
+    patient: `Patient`,
+    arch: `Arch`,
+    steps: `Steps`,
+    quantity: `Quantity`,
+    performedAt: `Date`,
+    recipient: `Handed to`,
+    progress: `Treatment progress`,
+    button: `View the order`,
+  },
+  fr: {
+    order: `Commande`,
+    patient: `Patient`,
+    arch: `Arcade`,
+    steps: `Étapes`,
+    quantity: `Quantité`,
+    performedAt: `Date`,
+    recipient: `Remis à`,
+    progress: `Avancement du traitement`,
+    button: `Voir la commande`,
+  },
+};
+
+/** Small uppercase heading above a metaTable (same voice as its labels). */
+function sectionTitle(text: string): string {
+  return `<p style="margin:0 0 8px;font-size:11px;font-weight:700;letter-spacing:1.5px;
+            text-transform:uppercase;color:${MUTED_COLOR};">
+    ${escape(text)}
+  </p>`;
+}
+
+/** The two tables both production e-mails share: the delivery, then the progress. */
+function productionDeliveryTables(
+  args: ProductionDeliveryEmailArgs,
+  deliveryTitle: string,
+  lang: Lang,
+): string {
+  const l = PRODUCTION_DELIVERY_LABELS[lang];
+  const progress = args.progress.length
+    ? `${sectionTitle(l.progress)}${metaTable(args.progress)}`
+    : '';
+  return `
+    ${sectionTitle(deliveryTitle)}
+    ${metaTable([
+      { label: l.order, value: args.orderCode },
+      { label: l.patient, value: args.patientName },
+      { label: l.arch, value: args.archLabel },
+      { label: l.steps, value: args.stepsLabel },
+      { label: l.quantity, value: args.quantityLabel },
+      { label: l.performedAt, value: args.performedAtLabel },
+      { label: l.recipient, value: args.recipientLabel },
+    ])}
+    ${progress}
+  `;
+}
+
+/** Sent to the practitioner after the grace delay once the lab declared aligners delivered. */
+export function renderProductionDeliveredForDoctorEmail(
+  args: ProductionDeliveryEmailArgs,
+  lang: Lang,
+): { html: string; subject: string } {
+  const order = escape(args.orderCode);
+  const TEXTS = {
+    en: {
+      subject: `Aligners delivered — ${args.orderCode}`,
+      title: `Aligners delivered`,
+      preheader: `Steps ${escape(args.stepsLabel)} delivered for ${escape(args.patientName)}.`,
+      lead:
+        `The lab has delivered aligners for order <strong>${order}</strong>. ` +
+        `Here are the details of this delivery and where the treatment stands.`,
+      delivery: `Delivery`,
+    },
+    fr: {
+      subject: `Aligneurs livrés — ${args.orderCode}`,
+      title: `Aligneurs livrés`,
+      preheader: `Étapes ${escape(args.stepsLabel)} livrées pour ${escape(args.patientName)}.`,
+      lead:
+        `Le laboratoire a livré des aligneurs pour la commande <strong>${order}</strong>. ` +
+        `Voici le détail de cette livraison et l'avancement du traitement.`,
+      delivery: `Livraison`,
+    },
+  };
+  const t = TEXTS[lang];
+  return {
+    subject: t.subject,
+    html: shell({
+      lang,
+      title: t.title,
+      preheader: t.preheader,
+      body: `
+        ${greeting(escape(args.doctorName), lang)}
+        ${lead(t.lead)}
+        ${productionDeliveryTables(args, t.delivery, lang)}
+        ${button(args.dashboardUrl, PRODUCTION_DELIVERY_LABELS[lang].button)}
+      `,
+    }),
+  };
+}
+
+/**
+ * Sent when a delivery the practitioner was already told about is
+ * cancelled (a correction): which delivery no longer holds, and the
+ * progress recomputed without it. Never why (D8).
+ */
+export function renderProductionDeliveryCancelledForDoctorEmail(
+  args: ProductionDeliveryEmailArgs,
+  lang: Lang,
+): { html: string; subject: string } {
+  const order = escape(args.orderCode);
+  const TEXTS = {
+    en: {
+      subject: `Delivery cancelled — ${args.orderCode}`,
+      title: `Delivery cancelled`,
+      preheader: `The delivery of steps ${escape(args.stepsLabel)} for ${escape(args.patientName)} was cancelled.`,
+      lead:
+        `The lab has cancelled the delivery below for order <strong>${order}</strong>. ` +
+        `Please disregard our previous message about these steps; the progress shown here is up to date.`,
+      delivery: `Cancelled delivery`,
+    },
+    fr: {
+      subject: `Livraison annulée — ${args.orderCode}`,
+      title: `Livraison annulée`,
+      preheader: `La livraison des étapes ${escape(args.stepsLabel)} pour ${escape(args.patientName)} a été annulée.`,
+      lead:
+        `Le laboratoire a annulé la livraison ci-dessous pour la commande <strong>${order}</strong>. ` +
+        `Merci de ne pas tenir compte de notre précédent message pour ces étapes ; l'avancement indiqué ici est à jour.`,
+      delivery: `Livraison annulée`,
+    },
+  };
+  const t = TEXTS[lang];
+  return {
+    subject: t.subject,
+    html: shell({
+      lang,
+      title: t.title,
+      preheader: t.preheader,
+      body: `
+        ${greeting(escape(args.doctorName), lang)}
+        ${lead(t.lead)}
+        ${productionDeliveryTables(args, t.delivery, lang)}
+        ${button(args.dashboardUrl, PRODUCTION_DELIVERY_LABELS[lang].button)}
+      `,
+    }),
+  };
+}
+
 // ─── Appointment helpers ────────────────────────────────────────────────────
 
 // Accept / decline call-to-actions are the ONE place the transactional

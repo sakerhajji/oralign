@@ -7,6 +7,7 @@ import {
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
+import { withSerializedTransactions } from './serialized-transactions';
 
 @Injectable()
 export class PrismaService implements OnModuleInit, OnModuleDestroy {
@@ -119,6 +120,20 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     return this.prisma.alignerDelivery;
   }
 
+  // Lab production log, its practitioner-notice outbox and the per-order
+  // read model (see src/production).
+  get productionEvent() {
+    return this.prisma.productionEvent;
+  }
+
+  get productionNotice() {
+    return this.prisma.productionNotice;
+  }
+
+  get productionProgress() {
+    return this.prisma.productionProgress;
+  }
+
   get payment() {
     return this.prisma.payment;
   }
@@ -216,7 +231,10 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
       );
     });
 
-    const adapter = new PrismaPg(this.pool);
+    // Statements of one interactive transaction go out one at a time: Prisma
+    // sends a nested select's relations together, on the transaction's one
+    // connection (see withSerializedTransactions).
+    const adapter = withSerializedTransactions(new PrismaPg(this.pool));
     this.prisma = new PrismaClient({
       adapter,
       log: [

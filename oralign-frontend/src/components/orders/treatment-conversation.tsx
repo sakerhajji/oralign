@@ -583,9 +583,21 @@ function ChatAttachmentLink({
     if (loading) return;
     setLoading(true);
     try {
-      const { blobUrl } = await treatmentPlansService.fetchAttachmentBlobUrl(
-        attachment.id,
-      );
+      const { blobUrl, fileName, opensInline } =
+        await treatmentPlansService.fetchAttachmentBlobUrl(attachment.id);
+      // Only a picture opens in a tab; any other file is an inert
+      // octet-stream there, so it is saved under its own name instead.
+      if (!opensInline) {
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = attachment.fileName || fileName;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        // Revoked on the next tick: Safari reads the URL after click().
+        window.setTimeout(() => URL.revokeObjectURL(blobUrl), 0);
+        return;
+      }
       // open() can be popup-blocked when called from inside an async
       // continuation. We trade-off accepting that the click handler is
       // the actual user gesture (which most browsers honour) — and

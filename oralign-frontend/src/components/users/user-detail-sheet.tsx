@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
+import Link from 'next/link';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -30,8 +31,23 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { UserRole, DayOfWeek, UpdateUserDto } from '@/lib/types';
-import { useUser, useUpdateUser, userKeys } from '@/lib/hooks/use-users';
+import {
+  useIssueTemporaryPassword,
+  useUser,
+  useUpdateUser,
+  userKeys,
+} from '@/lib/hooks/use-users';
 import {
   useUpdateDentistProfile,
   useCreateDentistProfileForUser,
@@ -41,7 +57,7 @@ import {
   useCreateWorkingHours,
   useUpdateWorkingHours,
 } from '@/lib/hooks/use-working-hours';
-import { usersService, extractApiErrorMessage } from '@/lib/api';
+import { usersService, extractApiError, extractApiErrorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/providers/auth-provider';
 import { getAvatarUrl, cn } from '@/lib/utils';
 import { useT } from '@/lib/i18n/lang-context';
@@ -50,6 +66,7 @@ import { toast } from '@/lib/toast';
 import { format } from 'date-fns';
 import { fr as frLocale } from 'date-fns/locale';
 import { WelcomeGiftMarkSection } from './welcome-gift-mark-section';
+import { TemporaryPasswordPanel } from './temporary-password-panel';
 import {
   User as UserIcon,
   Shield,
@@ -59,6 +76,7 @@ import {
   Mail,
   Phone,
   Key,
+  KeyRound,
   Loader2,
   PlusCircle,
   AlertCircle,
@@ -73,7 +91,7 @@ type Translate = (path: string, vars?: Record<string, string | number>) => strin
 
 const makeProfileSchema = (t: Translate) =>
   z.object({
-    fullName: z.string().min(2, t('usersUi.validation.min2')),
+    fullName: z.string().trim().min(2, t('usersUi.validation.min2')).max(120, t('usersUi.validation.max120')),
     phone: optionalE164PhoneSchema,
     country: optionalCountrySchema,
     password: z
@@ -181,6 +199,17 @@ export function UserDetailSheet({
   const { mutateAsync: createProfileForUser, isPending: isCreatingProfile } = useCreateDentistProfileForUser();
   const { mutateAsync: createWorkingHours } = useCreateWorkingHours();
   const { mutateAsync: updateWorkingHours } = useUpdateWorkingHours();
+
+  // Temporary password hand-over (technician accounts). The password only
+  // ever lives in this state, and is dropped when the sheet closes.
+  const issueTemporaryPassword = useIssueTemporaryPassword();
+  const [issueConfirmOpen, setIssueConfirmOpen] = useState(false);
+  const [issuedPassword, setIssuedPassword] = useState<string | null>(null);
+  const [issueError, setIssueError] = useState<string | null>(null);
+  const issuedPasswordInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!open) setIssuedPassword(null);
+  }, [open]);
 
   const profileId = user?.dentistProfile?.id;
   const { data: workingHours } = useWorkingHoursByProfile(profileId ?? '');
@@ -412,6 +441,25 @@ export function UserDetailSheet({
     }
   };
 
+  const runIssueTemporaryPassword = async () => {
+    setIssueError(null);
+    try {
+      const { temporaryPassword } = await issueTemporaryPassword.mutateAsync(userId);
+      setIssuedPassword(temporaryPassword);
+      // This state is now the only copy: drop the mutation's answer from the MutationCache.
+      issueTemporaryPassword.reset();
+    } catch (err) {
+      const { errorCode, message } = extractApiError(err);
+      setIssueError(
+        errorCode === 'TEMPORARY_PASSWORD_TECHNICIAN_ONLY'
+          ? t('usersDesk.access.technicianOnly')
+          : message,
+      );
+    } finally {
+      setIssueConfirmOpen(false);
+    }
+  };
+
   const updateDay = (key: DayOfWeek, patch: Partial<DaySchedule>) =>
     setSchedule((prev) => prev.map((d) => (d.dayOfWeek === key ? { ...d, ...patch } : d)));
 
@@ -433,6 +481,12 @@ export function UserDetailSheet({
   const isSavingProfile = isUpdatingUser || isUploadingAvatar;
   const hasClinic        = !!user?.dentistProfile;
   const isDentist        = user?.role === UserRole.DENTIST;
+  // Saved role, not the unsaved select: the API checks the stored one.
+  const isTechnicianUser = user?.role === UserRole.TECHNICIAN;
+  // The API refuses a password on a self-edit: the account page's
+  // change-password form (with the current password) is the only way.
+  const isOwnAccount     = currentUser?.id === userId;
+  const mustChangePassword = user?.mustChangePassword === true;
   const profileCountry   = profileForm.watch('country');
   const isSavingClinic   = isUpdatingProfile || isCreatingProfile;
 
@@ -501,6 +555,11 @@ export function UserDetailSheet({
                   <Badge variant="outline" className="text-xs h-4 px-1.5 shrink-0">
                     {user?.role ? t(`usersUi.roles.${user.role}`) : null}
                   </Badge>
+                  {mustChangePassword && (
+                    <Badge className="h-4 shrink-0 border-amber-200 bg-amber-50 px-1.5 text-xs text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+                      {t('usersDesk.list.mustChangePassword')}
+                    </Badge>
+                  )}
                 </div>
                 <div className="mt-1 text-xs text-muted-foreground">
                   <CountryPhoneDisplay phone={user?.phone} country={user?.country} />
@@ -648,21 +707,68 @@ export function UserDetailSheet({
 
                 <Separator />
 
-                {/* Security */}
+                {/* Security. Three cases: the caller's own account (no
+                    password here, the API refuses it), a technician (a
+                    generated temporary password, shown once), anyone else
+                    (an admin force reset). */}
                 <section>
                   <SectionTitle>{t('usersUi.sheet.security')}</SectionTitle>
-                  <Field
-                    label={t('usersUi.newPassword')}
-                    icon={<Key className="h-3.5 w-3.5" />}
-                    hint={t('usersUi.keepPasswordHint')}
-                    error={profileForm.formState.errors.password?.message}
-                  >
-                    <Input
-                      {...profileForm.register('password')}
-                      type="password"
-                      placeholder="••••••••"
-                    />
-                  </Field>
+                  {isOwnAccount ? (
+                    <p className="text-sm text-muted-foreground">
+                      {t('usersDesk.access.ownPassword')}{' '}
+                      <Link
+                        href="/account/profile"
+                        className="font-medium text-foreground underline underline-offset-4 hover:text-primary"
+                      >
+                        {t('usersDesk.access.ownPasswordLink')}
+                      </Link>
+                    </p>
+                  ) : isTechnicianUser ? (
+                    <div className="space-y-3">
+                      <p className="text-xs text-muted-foreground">
+                        {t('usersDesk.access.issueHint')}
+                      </p>
+                      {issuedPassword ? (
+                        <TemporaryPasswordPanel
+                          password={issuedPassword}
+                          name={user?.fullName ?? ''}
+                          inputRef={issuedPasswordInputRef}
+                        />
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => {
+                            setIssueError(null);
+                            setIssueConfirmOpen(true);
+                          }}
+                          disabled={issueTemporaryPassword.isPending}
+                        >
+                          <KeyRound className="h-3.5 w-3.5" aria-hidden="true" />
+                          {t('usersDesk.access.issueAction')}
+                        </Button>
+                      )}
+                      {issueError && (
+                        <p role="alert" className="text-sm text-destructive">
+                          {issueError}
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <Field
+                      label={t('usersUi.newPassword')}
+                      icon={<Key className="h-3.5 w-3.5" />}
+                      hint={t('usersUi.keepPasswordHint')}
+                      error={profileForm.formState.errors.password?.message}
+                    >
+                      <Input
+                        {...profileForm.register('password')}
+                        type="password"
+                        autoComplete="new-password"
+                        placeholder="••••••••"
+                      />
+                    </Field>
+                  )}
                 </section>
 
                 {profileError && (
@@ -708,6 +814,9 @@ export function UserDetailSheet({
                             <SelectContent>
                               <SelectItem value={UserRole.DENTIST}>
                                 {t('usersUi.roles.dentist')}
+                              </SelectItem>
+                              <SelectItem value={UserRole.TECHNICIAN}>
+                                {t('usersUi.roles.technician')}
                               </SelectItem>
                               <SelectItem value={UserRole.ADMIN}>
                                 {t('usersUi.roles.admin')}
@@ -778,6 +887,16 @@ export function UserDetailSheet({
                         {value}
                       </div>
                     ))}
+                    {mustChangePassword && (
+                      <div className="space-y-1 rounded-lg bg-amber-50 px-3 py-2.5 sm:col-span-2 dark:bg-amber-950/30">
+                        <p className="text-xs text-muted-foreground">
+                          {t('usersDesk.access.passwordLabel')}
+                        </p>
+                        <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+                          {t('usersDesk.access.passwordTemporary')}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </section>
 
@@ -1167,6 +1286,54 @@ export function UserDetailSheet({
             </TabsContent>
           )}
         </Tabs>
+
+        {/* Confirm step before a new temporary password: it locks the
+            technician out of her current one at once. */}
+        <AlertDialog
+          open={issueConfirmOpen}
+          onOpenChange={(next) => {
+            if (!issueTemporaryPassword.isPending) setIssueConfirmOpen(next);
+          }}
+        >
+          <AlertDialogContent
+            onCloseAutoFocus={(event) => {
+              // The button that opened it gave way to the password panel:
+              // hand the focus to the password instead of losing it.
+              const input = issuedPasswordInputRef.current;
+              if (input) {
+                event.preventDefault();
+                input.focus();
+              }
+            }}
+          >
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t('usersDesk.access.confirmTitle')}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t('usersDesk.access.confirmDesc', { name: user?.fullName ?? '' })}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={issueTemporaryPassword.isPending}>
+                {t('common.cancel')}
+              </AlertDialogCancel>
+              <AlertDialogAction
+                disabled={issueTemporaryPassword.isPending}
+                onClick={(event) => {
+                  // Keep the dialog until the answer is in (Radix closes on click).
+                  event.preventDefault();
+                  void runIssueTemporaryPassword();
+                }}
+              >
+                {issueTemporaryPassword.isPending && (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                )}
+                {issueTemporaryPassword.isPending
+                  ? t('usersDesk.access.issuing')
+                  : t('usersDesk.access.confirm')}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </SheetContent>
     </Sheet>
   );

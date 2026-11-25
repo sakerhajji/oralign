@@ -4,7 +4,8 @@ import { keepPreviousData, useQuery, useMutation, useQueryClient, UseQueryResult
 import { toast } from '@/lib/toast';
 import { usersService, extractApiErrorMessage, toastMutationError } from '@/lib/api';
 import { useT } from '@/lib/i18n/lang-context';
-import { User, UserRole, CreateUserDto, UpdateUserDto, PaginatedResponse, UserFilterParams, MessageResponse, BulkActionDto, BulkUpdateStatusDto, UserStats } from '@/lib/types';
+import { User, UserRole, CreateUserDto, UpdateUserDto, PaginatedResponse, UserFilterParams, MessageResponse, BulkActionDto, BulkUpdateStatusDto, UserStats, CreateUserResponse, TemporaryPasswordResponse } from '@/lib/types';
+import type { Lang } from '@/lib/i18n/dict';
 
 // Query keys
 export const userKeys = {
@@ -120,14 +121,19 @@ export function useUser(id: string): UseQueryResult<User, Error> {
 }
 
 /**
- * Hook to create a new user (Admin only)
+ * Hook to create a new user (Admin only). With `generateTemporaryPassword`
+ * the answer carries `temporaryPassword` once: the dialog copies it into
+ * its own state and calls `reset()`. The mutation itself (its result, and
+ * a typed password in its variables) would otherwise stay readable in the
+ * MutationCache; `gcTime: 0` drops it as soon as nothing observes it.
  */
-export function useCreateUser(): UseMutationResult<User, Error, CreateUserDto> {
+export function useCreateUser(): UseMutationResult<CreateUserResponse, Error, CreateUserDto> {
   const queryClient = useQueryClient();
   const { t } = useT();
 
-  return useMutation<User, Error, CreateUserDto>({
+  return useMutation<CreateUserResponse, Error, CreateUserDto>({
     mutationFn: usersService.createUser,
+    gcTime: 0,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: userKeys.lists() });
       queryClient.invalidateQueries({ queryKey: userKeys.stats() });
@@ -135,6 +141,33 @@ export function useCreateUser(): UseMutationResult<User, Error, CreateUserDto> {
     },
     onError: (error: Error) => {
       toast.error(extractApiErrorMessage(error));
+    },
+  });
+}
+
+/**
+ * Admin: a new temporary password for a technician account. Her sessions
+ * are revoked and she must choose her own password at the next sign-in.
+ * The password is returned to the caller only: it copies it and calls
+ * `reset()`, and `gcTime: 0` then drops the mutation from the
+ * MutationCache at once (as useCreateUser). The detail and the lists
+ * refetch for the "password to change" mark.
+ */
+export function useIssueTemporaryPassword(): UseMutationResult<
+  TemporaryPasswordResponse,
+  Error,
+  string
+> {
+  const queryClient = useQueryClient();
+  const { t } = useT();
+
+  return useMutation<TemporaryPasswordResponse, Error, string>({
+    mutationFn: usersService.issueTemporaryPassword,
+    gcTime: 0,
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: userKeys.detail(id) });
+      queryClient.invalidateQueries({ queryKey: userKeys.lists() });
+      toast.success(t('usersDesk.access.issued'));
     },
   });
 }
@@ -206,14 +239,39 @@ export function useRestoreUser(): UseMutationResult<User, Error, string> {
  * as `skippedSelf`; say so instead of showing a plain success toast for a
  * count that is one lower than the selection.
  */
-type BulkDeleteResult = MessageResponse & {
+type BulkResult = MessageResponse & {
   count: number;
+  /** Super admin accounts an admin's bulk action left alone (API count). */
+  skippedSuperAdmins?: number;
+};
+
+type BulkDeleteResult = BulkResult & {
   skippedSelf?: boolean;
 };
 
+/**
+ * Below super admin, the bulk routes spare super admin accounts: say how
+ * many, or the admin reads "done" for rows that did not change.
+ */
+function warnSkippedSuperAdmins(
+  data: BulkResult,
+  t: ReturnType<typeof useT>['t'],
+  lang: Lang,
+): void {
+  const count = data.skippedSuperAdmins ?? 0;
+  if (count <= 0) return;
+  const one = lang === 'fr' ? count <= 1 : count === 1;
+  toast.warning(
+    t(one ? 'usersDesk.toastSuperAdminsSparedOne' : 'usersDesk.toastSuperAdminsSparedMany', {
+      count,
+    }),
+    { duration: 7000 },
+  );
+}
+
 export function useBulkDeleteUsers(): UseMutationResult<BulkDeleteResult, Error, BulkActionDto> {
   const queryClient = useQueryClient();
-  const { t } = useT();
+  const { t, lang } = useT();
 
   return useMutation<BulkDeleteResult, Error, BulkActionDto>({
     mutationFn: usersService.bulkDeleteUsers,
@@ -227,6 +285,7 @@ export function useBulkDeleteUsers(): UseMutationResult<BulkDeleteResult, Error,
           duration: 7000,
         });
       }
+      warnSkippedSuperAdmins(data, t, lang);
     },
     onError: (error: Error) => {
       toast.error(extractApiErrorMessage(error));
@@ -237,16 +296,18 @@ export function useBulkDeleteUsers(): UseMutationResult<BulkDeleteResult, Error,
 /**
  * Hook to bulk restore users (Admin only)
  */
-export function useBulkRestoreUsers(): UseMutationResult<MessageResponse & { count: number }, Error, BulkActionDto> {
+export function useBulkRestoreUsers(): UseMutationResult<BulkResult, Error, BulkActionDto> {
   const queryClient = useQueryClient();
+  const { t, lang } = useT();
 
-  return useMutation<MessageResponse & { count: number }, Error, BulkActionDto>({
+  return useMutation<BulkResult, Error, BulkActionDto>({
     mutationFn: usersService.bulkRestoreUsers,
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: userKeys.lists() });
       queryClient.invalidateQueries({ queryKey: userKeys.deletedLists() });
       queryClient.invalidateQueries({ queryKey: userKeys.stats() });
       toast.success(data.message);
+      warnSkippedSuperAdmins(data, t, lang);
     },
     onError: (error: Error) => {
       toast.error(extractApiErrorMessage(error));
@@ -257,16 +318,18 @@ export function useBulkRestoreUsers(): UseMutationResult<MessageResponse & { cou
 /**
  * Hook to bulk update user status (Admin only)
  */
-export function useBulkUpdateStatus(): UseMutationResult<MessageResponse & { count: number }, Error, BulkUpdateStatusDto> {
+export function useBulkUpdateStatus(): UseMutationResult<BulkResult, Error, BulkUpdateStatusDto> {
   const queryClient = useQueryClient();
+  const { t, lang } = useT();
 
-  return useMutation<MessageResponse & { count: number }, Error, BulkUpdateStatusDto>({
+  return useMutation<BulkResult, Error, BulkUpdateStatusDto>({
     mutationFn: usersService.bulkUpdateStatus,
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: userKeys.lists() });
       queryClient.invalidateQueries({ queryKey: userKeys.deletedLists() });
       queryClient.invalidateQueries({ queryKey: userKeys.stats() });
       toast.success(data.message);
+      warnSkippedSuperAdmins(data, t, lang);
     },
     onError: (error: Error) => {
       toast.error(extractApiErrorMessage(error));

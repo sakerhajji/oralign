@@ -78,7 +78,9 @@ function SheetContent({
           <SheetPrimitive.Close data-slot="sheet-close" asChild>
             <Button
               variant="ghost"
-              className="absolute top-3 right-3"
+              // 48 px under a finger, centred on the same spot, so the X
+              // does not move and no title has to make room for it.
+              className="absolute top-3 right-3 pointer-coarse:top-0.5 pointer-coarse:right-0.5 pointer-coarse:size-12"
               size="icon-sm"
             >
               <XIcon

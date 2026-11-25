@@ -34,3 +34,21 @@ export const ADMIN_ROLES: readonly UserRole[] = [
 export function isAdmin(caller: Pick<Caller, 'role'>): boolean {
   return ADMIN_ROLES.includes(caller.role);
 }
+
+/**
+ * `true` for the lab technician only. Never folded into isAdmin: she
+ * reaches the production routes and nothing that carries money.
+ */
+export function isTechnician(caller: Pick<Caller, 'role'>): boolean {
+  return caller.role === UserRole.technician;
+}
+
+/**
+ * Who may use the lab production screens: the technician plus the admins
+ * (`@Roles(...PRODUCTION_ROLES)`). A separate list on purpose, so adding
+ * the technician here never widens ADMIN_ROLES.
+ */
+export const PRODUCTION_ROLES: readonly UserRole[] = [
+  UserRole.technician,
+  ...ADMIN_ROLES,
+];

@@ -3,6 +3,11 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useT } from '@/lib/i18n/lang-context';
+import { cn } from '@/lib/utils';
+
+// `touch` (the lab's bench screens): 48 px buttons for a finger at every
+// width, the compact row only for a mouse from md up.
+const TOUCH_BUTTON = 'h-12 min-w-12 pointer-fine:md:h-7 pointer-fine:md:min-w-7';
 
 /**
  * Page numbers to show around `page`, with `'gap'` for an ellipsis:
@@ -41,15 +46,19 @@ export function ListPagination({
   total,
   pageSize,
   onPageChange,
+  size = 'default',
 }: {
   page: number;
   totalPages: number;
   total: number;
   pageSize: number;
   onPageChange: (page: number) => void;
+  /** `touch`: 48 px targets for a touch pointer. */
+  size?: 'default' | 'touch';
 }) {
   const { t } = useT();
   if (total === 0) return null;
+  const touch = size === 'touch' ? TOUCH_BUTTON : undefined;
 
   const from = (page - 1) * pageSize + 1;
   const to = Math.min(page * pageSize, total);
@@ -67,6 +76,7 @@ export function ListPagination({
           <Button
             variant="outline"
             size="sm"
+            className={touch}
             onClick={() => onPageChange(page - 1)}
             disabled={page <= 1}
             aria-label={t('listUi.pagination.previous')}
@@ -89,7 +99,7 @@ export function ListPagination({
                   <Button
                     variant={item === page ? 'secondary' : 'ghost'}
                     size="sm"
-                    className="min-w-7 px-2 tabular-nums"
+                    className={cn('min-w-7 px-2 tabular-nums', touch)}
                     aria-current={item === page ? 'page' : undefined}
                     aria-label={t('listUi.pagination.goTo', { page: item })}
                     onClick={() => onPageChange(item)}
@@ -106,6 +116,7 @@ export function ListPagination({
           <Button
             variant="outline"
             size="sm"
+            className={touch}
             onClick={() => onPageChange(page + 1)}
             disabled={page >= totalPages}
             aria-label={t('listUi.pagination.next')}

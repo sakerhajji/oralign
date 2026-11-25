@@ -25,6 +25,7 @@ type Row = {
   isActive: boolean;
   deletedAt: Date | null;
   tokenVersion: number;
+  mustChangePassword: boolean;
 };
 
 const row = (over: Partial<Row> = {}): Row => ({
@@ -33,6 +34,7 @@ const row = (over: Partial<Row> = {}): Row => ({
   isActive: true,
   deletedAt: null,
   tokenVersion: 3,
+  mustChangePassword: false,
   ...over,
 });
 
@@ -126,6 +128,44 @@ describe('JwtStrategy.validate', () => {
     await expect(
       strategy.validate({ ...noTv, role: UserRole.admin }),
     ).resolves.toMatchObject({ role: UserRole.admin });
+  });
+
+  // ── the temporary-password gate reads the row's flag ────────────────
+
+  it('copies mustChangePassword from the row (PasswordChangeGuard needs no query)', async () => {
+    const findUnique = jest
+      .fn()
+      .mockResolvedValue(
+        row({ role: UserRole.technician, mustChangePassword: true }),
+      );
+    const strategy = new JwtStrategy({
+      user: { findUnique },
+    } as unknown as PrismaService);
+    await expect(
+      strategy.validate({ ...base, role: UserRole.technician }),
+    ).resolves.toMatchObject({ mustChangePassword: true });
+    const [query] = (findUnique.mock.calls as unknown[][])[0] as [
+      { select: Record<string, boolean> },
+    ];
+    expect(query.select.mustChangePassword).toBe(true);
+  });
+
+  it('a token can never clear the flag: the row wins over any claim', async () => {
+    const { strategy } = makeStrategy(row({ mustChangePassword: true }));
+    await expect(
+      strategy.validate({
+        ...base,
+        role: UserRole.admin,
+        mustChangePassword: false,
+      }),
+    ).resolves.toMatchObject({ mustChangePassword: true });
+  });
+
+  it('lets the account through the moment the flag is cleared', async () => {
+    const { strategy } = makeStrategy(row({ mustChangePassword: false }));
+    await expect(
+      strategy.validate({ ...base, role: UserRole.admin }),
+    ).resolves.toMatchObject({ mustChangePassword: false });
   });
 
   it('looks the account up by the token subject', async () => {

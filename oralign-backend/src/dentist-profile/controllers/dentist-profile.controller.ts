@@ -28,6 +28,8 @@ import {
   PublicFinderQueryDto,
   PublicDentistProfileDto,
   PublicFinderResponseDto,
+  SearchByCityQueryDto,
+  NearbySearchQueryDto,
 } from '../dto/dentist-profile.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -133,53 +135,34 @@ export class DentistProfileController {
     );
   }
 
+  // Every clinic's phone, address and GPS, unlisted ones included: admin
+  // only, like GET /dentist-profile (the public finder serves the rest).
+  // No frontend screen calls the two searches or GET :id.
   @Get('search/by-city')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.admin, 'super_admin' as UserRole)
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Search dentist profiles by city' })
-  @ApiQuery({ name: 'city', type: String, description: 'City name' })
-  @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
-  @ApiQuery({ name: 'limit', required: false, type: Number, example: 10 })
-  async searchByCity(
-    @Query('city') city: string,
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-  ) {
+  @ApiOperation({ summary: 'Search dentist profiles by city (admin)' })
+  async searchByCity(@Query() query: SearchByCityQueryDto) {
     return this.profileService.searchByCity(
-      city,
-      page ? parseInt(page, 10) : 1,
-      limit ? parseInt(limit, 10) : 10,
+      query.city,
+      query.page,
+      query.limit,
     );
   }
 
   @Get('search/nearby')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.admin, 'super_admin' as UserRole)
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Find dentist profiles nearby (geo search)' })
-  @ApiQuery({ name: 'latitude', type: Number, description: 'Latitude' })
-  @ApiQuery({ name: 'longitude', type: Number, description: 'Longitude' })
-  @ApiQuery({
-    name: 'radiusKm',
-    required: false,
-    type: Number,
-    example: 5,
-    description: 'Search radius in kilometers',
-  })
-  @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
-  @ApiQuery({ name: 'limit', required: false, type: Number, example: 10 })
-  async findNearby(
-    @Query('latitude') latitude: string,
-    @Query('longitude') longitude: string,
-    @Query('radiusKm') radiusKm?: string,
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-  ) {
+  @ApiOperation({ summary: 'Find dentist profiles nearby (geo search, admin)' })
+  async findNearby(@Query() query: NearbySearchQueryDto) {
     return this.profileService.findNearby(
-      parseFloat(latitude),
-      parseFloat(longitude),
-      radiusKm ? parseInt(radiusKm, 10) : 5,
-      page ? parseInt(page, 10) : 1,
-      limit ? parseInt(limit, 10) : 10,
+      query.latitude,
+      query.longitude,
+      query.radiusKm,
+      query.page,
+      query.limit,
     );
   }
 
@@ -236,9 +219,10 @@ export class DentistProfileController {
   }
 
   @Get(':id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.admin, 'super_admin' as UserRole)
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Get dentist profile by ID' })
+  @ApiOperation({ summary: 'Get dentist profile by ID (admin)' })
   @ApiParam({ name: 'id', type: String, description: 'Profile ID' })
   @ApiResponse({
     status: 200,
@@ -257,8 +241,11 @@ export class DentistProfileController {
     });
   }
 
+  // The dentist's own clinic form and the admin user sheet. The service
+  // still checks ownership; the role list keeps every other role out.
   @Put(':id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.dentist, UserRole.admin, 'super_admin' as UserRole)
   @ApiBearerAuth('access-token')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Update dentist profile by ID (owner or admin)' })
@@ -280,7 +267,8 @@ export class DentistProfileController {
   }
 
   @Delete(':id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.dentist, UserRole.admin, 'super_admin' as UserRole)
   @ApiBearerAuth('access-token')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete dentist profile by ID (owner or admin)' })

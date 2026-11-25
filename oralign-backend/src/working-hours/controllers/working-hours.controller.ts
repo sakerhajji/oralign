@@ -24,18 +24,29 @@ import {
   WorkingHoursResponseDto,
 } from '../dto/working-hours.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
 import {
   CurrentUser,
   JwtPayload,
 } from '../../common/decorators/current-user.decorator';
+import { UserRole } from '@prisma/client';
 
+/**
+ * A clinic's weekly schedule. Its callers are the dentist's own account
+ * (schedule form, account data) and the admin user sheet, so every route
+ * is open to those roles only: the lab roles (designer, technician) have
+ * no use for another clinic's hours. Writes keep the service's ownership
+ * check on top.
+ */
 @ApiTags('working-hours')
 @Controller('working-hours')
 export class WorkingHoursController {
   constructor(private readonly workingHoursService: WorkingHoursService) {}
 
   @Post()
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.dentist, UserRole.admin, 'super_admin' as UserRole)
   @ApiBearerAuth('access-token')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create working hours for a dentist profile' })
@@ -59,6 +70,8 @@ export class WorkingHoursController {
   @Get(':id')
   // Deferred audit item L-8, now closed: the public directory embeds hours in
   // /dentist-profile/public/:id, so this route has no anonymous consumer.
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.dentist, UserRole.admin, 'super_admin' as UserRole)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Get working hours by ID' })
   @ApiParam({ name: 'id', type: String, description: 'Working hours ID' })
@@ -74,6 +87,8 @@ export class WorkingHoursController {
   }
 
   @Get('dentist-profile/:dentistProfileId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.dentist, UserRole.admin, 'super_admin' as UserRole)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Get all working hours for a dentist profile' })
   @ApiParam({
@@ -96,7 +111,8 @@ export class WorkingHoursController {
   }
 
   @Put(':id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.dentist, UserRole.admin, 'super_admin' as UserRole)
   @ApiBearerAuth('access-token')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Update working hours by ID (owner or admin)' })
@@ -119,7 +135,8 @@ export class WorkingHoursController {
   }
 
   @Delete(':id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.dentist, UserRole.admin, 'super_admin' as UserRole)
   @ApiBearerAuth('access-token')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete working hours by ID (owner or admin)' })

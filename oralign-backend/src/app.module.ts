@@ -36,6 +36,10 @@ import { ReportsModule } from './reports/reports.module';
 import { MediaModule } from './media/media.module';
 import { BlogModule } from './blog/blog.module';
 import { CommunityModule } from './community/community.module';
+import { ProductionModule } from './production/production.module';
+import { ProductionNotificationsModule } from './production/notifications/production-notifications.module';
+import { ProductionReportsModule } from './production/reports/production-reports.module';
+import { PasswordChangeGuard } from './auth/guards/password-change.guard';
 import { env } from './common/config/env';
 
 // ─── Redis URL builder ──────────────────────────────────────────────────────
@@ -135,6 +139,11 @@ function buildRedisUrl(): string {
     MediaModule,
     BlogModule,
     CommunityModule,
+    // Lab production: core, practitioner notices, admin desk (one-way
+    // graph, see production.module.ts).
+    ProductionModule,
+    ProductionNotificationsModule,
+    ProductionReportsModule,
   ],
   controllers: [AppController],
   providers: [
@@ -149,6 +158,10 @@ function buildRedisUrl(): string {
     // for exactly that reason. Per-route @UseGuards(JwtAuthGuard) is now
     // redundant but harmless; RolesGuard stays per route.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    // After JwtAuthGuard (global guards run in this order): an account on a
+    // temporary password reaches only the @AllowPendingPasswordChange
+    // routes until it chooses its own (403 PASSWORD_CHANGE_REQUIRED).
+    { provide: APP_GUARD, useClass: PasswordChangeGuard },
   ],
 })
 export class AppModule {}

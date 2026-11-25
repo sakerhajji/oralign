@@ -2,6 +2,13 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InvoiceStatus, PaymentMethod, Prisma } from '@prisma/client';
 import type { Archiver, ArchiverOptions } from 'archiver';
 import { dec, toAmount } from '../../common/billing/tax-split';
+import {
+  CSV_MIME_TYPE,
+  CSV_SEPARATOR,
+  csvCell,
+  csvDocument,
+  csvLine,
+} from '../../common/csv/csv';
 import { BadRequestException } from '../../common/exceptions/app.exception';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
@@ -89,17 +96,6 @@ export class InvoiceExportService {
     private readonly accounting: InvoiceAccountingService,
   ) {}
 
-  /** Excel-safe CSV cell: quote-escape, and neutralise formula injection. */
-  private cell(value: unknown): string {
-    if (value === null || value === undefined) return '';
-    let text = String(value);
-    // A cell starting with = + - @ is executed as a formula by Excel and
-    // LibreOffice. Prefix it so a client name like "=cmd" stays text.
-    if (/^[=+\-@]/.test(text)) text = `'${text}`;
-    if (/[";\n\r]/.test(text)) text = `"${text.replace(/"/g, '""')}"`;
-    return text;
-  }
-
   private money(value: unknown): string {
     // Comma decimal separator: the same Excel locale that wants `;`.
     return Number(value ?? 0).toFixed(3).replace('.', ',');
@@ -150,7 +146,7 @@ export class InvoiceExportService {
     ];
 
     const lines = rows.map((inv) =>
-      [
+      csvLine([
         inv.invoiceNumber,
         STATUS_LABELS[inv.status] ?? inv.status,
         this.date(inv.issueDate),
@@ -174,9 +170,7 @@ export class InvoiceExportService {
         this.money(inv.withholdingAmount),
         this.money(inv.netPayable),
         inv.notes,
-      ]
-        .map((v) => this.cell(v))
-        .join(';'),
+      ]),
     );
 
     // Trailing totals row — what the accountant reconciles against. Every
@@ -197,7 +191,7 @@ export class InvoiceExportService {
       );
     lines.push(
       [
-        this.cell(
+        csvCell(
           `TOTAL factures comptabilisées (émises + payées) : ${counted.length} sur ${rows.length}`,
         ),
         '', '', '', '', '', '', '', '', '',
@@ -212,17 +206,16 @@ export class InvoiceExportService {
         sum((r) => r.withholdingAmount),
         sum((r) => r.netPayable),
         '',
-      ].join(';'),
+      ].join(CSV_SEPARATOR),
     );
 
-    // ﻿ = BOM. Without it Excel reads the file as ANSI and every
-    // accented character in a client name turns to mojibake.
-    const content = `﻿${[header.map((h) => this.cell(h)).join(';'), ...lines].join('\r\n')}\r\n`;
+    // csvDocument() adds the BOM Excel needs to read the accents as UTF-8.
+    const content = csvDocument(header, lines);
 
     return {
       content,
       fileName: this.exportFileName(filters, 'csv'),
-      mimeType: 'text/csv; charset=utf-8',
+      mimeType: CSV_MIME_TYPE,
     };
   }
 

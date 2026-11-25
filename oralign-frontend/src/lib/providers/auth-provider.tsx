@@ -14,6 +14,8 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isAdmin: boolean;
   isDentist: boolean;
+  /** Lab technician: the production screens only, never money. */
+  isTechnician: boolean;
   login: (user: User) => void;
   logout: (redirect?: boolean) => void;
   hasRole: (role: UserRole) => boolean;
@@ -93,6 +95,8 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
 
   const isDentist = useMemo(() => user?.role === UserRole.DENTIST, [user]);
 
+  const isTechnician = useMemo(() => user?.role === UserRole.TECHNICIAN, [user]);
+
   /**
    * Start a session from an auth or profile response.
    *
@@ -143,11 +147,12 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
       isAuthenticated,
       isAdmin,
       isDentist,
+      isTechnician,
       login,
       logout,
       hasRole,
     }),
-    [user, isAuthenticated, isAdmin, isDentist, login, logout, hasRole]
+    [user, isAuthenticated, isAdmin, isDentist, isTechnician, login, logout, hasRole]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

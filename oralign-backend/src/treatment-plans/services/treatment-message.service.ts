@@ -17,7 +17,11 @@ import {
 } from '../../common/exceptions/app.exception';
 import { TreatmentChatGateway } from '../gateways/treatment-chat.gateway';
 import { MediaProcessingService } from '../../media/media-processing.service';
-import { classifyMedia } from '../../media/media.constants';
+import {
+  classifyMedia,
+  inlineSafeMimeType,
+  storedUploadMimeType,
+} from '../../media/media.constants';
 import { MediaVariantInfo } from '../../media/media.types';
 import { isAdmin, type Caller } from '../../common/access/caller';
 import { lookupActorName, withSenderFallback } from '../../common/access/actor-snapshot';
@@ -254,6 +258,11 @@ export class TreatmentMessageService {
           const absPath = path.join(absDir, safeName);
           const relPath = path.posix.join(relDir, safeName);
           await fs.promises.writeFile(absPath, file.buffer);
+          // An SVG / HTML / XML claim is stored as octet-stream, as for
+          // order files, so no reader ever serves it as a document.
+          const mimeType = file.mimetype
+            ? storedUploadMimeType(file.mimetype)
+            : null;
 
           await tx.treatmentMessageAttachment.create({
             data: {
@@ -261,12 +270,12 @@ export class TreatmentMessageService {
               uploadedById: caller.userId,
               fileName: file.originalname,
               filePath: relPath,
-              mimeType: file.mimetype || null,
+              mimeType,
               sizeBytes: file.size,
               category,
               // Async media pipeline: pending = variants will be
               // derived (image/zip/stl); null = nothing to derive.
-              processingStatus: classifyMedia(file.mimetype, safeName)
+              processingStatus: classifyMedia(mimeType, safeName)
                 ? MediaProcessingStatus.pending
                 : null,
             },
@@ -340,47 +349,7 @@ export class TreatmentMessageService {
       throw new NotFoundException('Attachment not found.');
     }
     await this.assertPlanReadable(att.message.treatmentPlanId, caller);
-
-    // `?variant=thumb|md|lg|avif|model` → serve the derived artefact
-    // inline; silently falls back to the original while processing is
-    // pending (or for legacy/failed rows), so chat bubbles can request
-    // thumbnails unconditionally.
-    if (variant && att.variants && typeof att.variants === 'object') {
-      const info = (
-        att.variants as Record<string, Partial<MediaVariantInfo>>
-      )[variant];
-      if (info?.path) {
-        try {
-          const variantAbs = this.resolveSafePath(info.path);
-          if (fs.existsSync(variantAbs)) {
-            const mime =
-              info.format === 'webp'
-                ? 'image/webp'
-                : info.format === 'avif'
-                  ? 'image/avif'
-                  : info.format === 'glb'
-                    ? 'model/gltf-binary'
-                    : 'application/octet-stream';
-            return {
-              stream: fs.createReadStream(variantAbs),
-              fileName: path.basename(info.path),
-              mimeType: mime,
-              inline: true,
-            };
-          }
-        } catch {
-          /* fall through to original */
-        }
-      }
-    }
-
-    const abs = this.resolveSafePath(att.filePath);
-    return {
-      stream: fs.createReadStream(abs),
-      fileName: att.fileName,
-      mimeType: att.mimeType ?? 'application/octet-stream',
-      inline: Boolean(variant),
-    };
+    return openAttachmentStream(att, variant);
   }
 
   async softDeleteAttachment(attachmentId: string, caller: Caller) {
@@ -461,14 +430,79 @@ export class TreatmentMessageService {
       return TreatmentAttachmentCategory.video;
     return TreatmentAttachmentCategory.other;
   }
+}
 
-  private resolveSafePath(relPath: string): string {
-    const abs = path.resolve(UPLOAD_ROOT, relPath);
-    const root = path.resolve(UPLOAD_ROOT) + path.sep;
-    if (!abs.startsWith(root))
-      throw new ForbiddenException('Invalid file path.');
-    if (!fs.existsSync(abs))
-      throw new NotFoundException('File no longer exists on disk.');
-    return abs;
+/** An uploads-relative attachment path, resolved inside the uploads root; 404 when the blob is gone. */
+function resolveAttachmentPath(relPath: string): string {
+  const abs = path.resolve(UPLOAD_ROOT, relPath);
+  const root = path.resolve(UPLOAD_ROOT) + path.sep;
+  if (!abs.startsWith(root)) throw new ForbiddenException('Invalid file path.');
+  if (!fs.existsSync(abs))
+    throw new NotFoundException('File no longer exists on disk.');
+  return abs;
+}
+
+/**
+ * The STREAM part of an attachment download, split from the plan access
+ * check so a route with its own rule (the lab production routes) streams
+ * exactly like GET treatment-message-attachments/:id/download.
+ * `?variant=thumb|md|lg|avif|model` serves the derived artefact inline and
+ * silently falls back to the original while processing is pending (or
+ * for legacy / failed rows), so chat bubbles can request thumbnails
+ * unconditionally.
+ */
+export function openAttachmentStream(
+  att: {
+    fileName: string;
+    filePath: string;
+    mimeType: string | null;
+    variants: unknown;
+  },
+  variant?: string,
+): {
+  stream: fs.ReadStream;
+  fileName: string;
+  mimeType: string;
+  inline: boolean;
+} {
+  if (variant && att.variants && typeof att.variants === 'object') {
+    const info = (att.variants as Record<string, Partial<MediaVariantInfo>>)[
+      variant
+    ];
+    if (info?.path) {
+      try {
+        const variantAbs = resolveAttachmentPath(info.path);
+        const mime =
+          info.format === 'webp'
+            ? 'image/webp'
+            : info.format === 'avif'
+              ? 'image/avif'
+              : info.format === 'glb'
+                ? 'model/gltf-binary'
+                : 'application/octet-stream';
+        return {
+          stream: fs.createReadStream(variantAbs),
+          fileName: path.basename(info.path),
+          mimeType: mime,
+          inline: true,
+        };
+      } catch {
+        /* fall through to original */
+      }
+    }
   }
+
+  const abs = resolveAttachmentPath(att.filePath);
+  // The inline fallback keeps the declared type only when it is raster
+  // (as openOrderFileStream does): any other original leaves as an
+  // octet-stream attachment, so an uploaded SVG / HTML never renders.
+  const inlineType = variant ? inlineSafeMimeType(att.mimeType) : null;
+  return {
+    stream: fs.createReadStream(abs),
+    fileName: att.fileName,
+    mimeType: variant
+      ? (inlineType ?? 'application/octet-stream')
+      : (att.mimeType ?? 'application/octet-stream'),
+    inline: inlineType !== null,
+  };
 }

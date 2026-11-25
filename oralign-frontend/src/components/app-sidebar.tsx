@@ -10,6 +10,7 @@ import {
   useSupportUnreadCount,
 } from "@/lib/hooks"
 import { UserRole } from "@/lib/types"
+import { landingPathFor } from "@/lib/hooks/use-onboarding"
 
 import { getAvatarUrl } from "@/lib/utils"
 import { useT } from "@/lib/i18n/lang-context"
@@ -29,12 +30,15 @@ import {
   useSidebarActions,
 } from "@/components/ui/sidebar"
 import {
+  CalendarCheckIcon,
   ClipboardListIcon,
   CircleHelpIcon,
   CreditCardIcon,
+  FactoryIcon,
   FileBarChartIcon,
   FileTextIcon,
   GalleryHorizontalIcon,
+  GaugeIcon,
   HeartIcon,
   LayoutDashboardIcon,
   MessageCircleIcon,
@@ -75,6 +79,8 @@ interface NavItemDef {
   icon: React.ReactNode
   /** If set, only users with one of these roles can see this item. */
   roles?: UserRole[]
+  /** Sub-routes with their own entry (see NavMain). */
+  excludePrefixes?: string[]
   /**
    * Live unread / notification count attached at render time (e.g. the
    * admin Support inbox badge). Not declared on the static NAV_MAIN
@@ -91,11 +97,20 @@ interface NavItemDef {
 // removed because clicking them broke the in-router navigation contract
 // (the URL would change to "#" and the page would do nothing).
 
+// Everyone but the lab technician: her entries are NAV_TECHNICIAN.
+const OFFICE_ROLES: UserRole[] = [
+  UserRole.DENTIST,
+  UserRole.DESIGNER,
+  UserRole.ADMIN,
+  UserRole.SUPER_ADMIN,
+]
+
 const NAV_MAIN: NavItemDef[] = [
   {
     titleKey: "chrome.nav.dashboard",
     url: "/dashboard",
     icon: <LayoutDashboardIcon />,
+    roles: OFFICE_ROLES,
   },
   {
     titleKey: "chrome.nav.users",
@@ -183,17 +198,50 @@ const NAV_MAIN: NavItemDef[] = [
   // the main nav.
 ]
 
+// ─── Lab production ──────────────────────────────────────────────────────────
+
+const PRODUCTION_QUEUE_URL = "/dashboard/production"
+const MY_DAY_URL = "/dashboard/production/ma-journee"
+const PILOTAGE_URL = "/dashboard/production/pilotage"
+// The queue also covers the case sheets and dossiers under it, not the
+// two screens that have their own entry.
+const QUEUE_EXCLUDES = [MY_DAY_URL, PILOTAGE_URL]
+
+// The technician's whole navigation: her queue and her day.
+const NAV_TECHNICIAN: NavItemDef[] = [
+  {
+    titleKey: "chrome.nav.production",
+    url: PRODUCTION_QUEUE_URL,
+    icon: <FactoryIcon />,
+    excludePrefixes: QUEUE_EXCLUDES,
+  },
+  { titleKey: "chrome.nav.myDay", url: MY_DAY_URL, icon: <CalendarCheckIcon /> },
+]
+
+// The admins' "Production" group, under their main navigation.
+const NAV_PRODUCTION_ADMIN: NavItemDef[] = [
+  {
+    titleKey: "chrome.nav.productionQueue",
+    url: PRODUCTION_QUEUE_URL,
+    icon: <FactoryIcon />,
+    excludePrefixes: QUEUE_EXCLUDES,
+  },
+  { titleKey: "chrome.nav.pilotage", url: PILOTAGE_URL, icon: <GaugeIcon /> },
+]
+
 // Footer secondary nav — settings + support + finance.
 // "Obtenir de l'aide" opens the help/compliance hub at /dashboard/help
-// (About / Refunds / Legal notice / Terms of sale as tabs).
+// (About / Refunds / Legal notice / Terms of sale as tabs). A technician
+// keeps her account settings only: no money, and the hub is a dashboard
+// route she cannot open.
 const NAV_SECONDARY: NavItemDef[] = [
   { titleKey: "chrome.nav.settings",       url: "/account/profile",            icon: <Settings2Icon />    },
   // Payment History lives at /dashboard/payments/history (was
   // /account/billing). The new URL is its own dedicated dashboard
   // page rather than nested under account-settings — same role-aware
   // logic (admin sees all, dentist sees their own).
-  { titleKey: "chrome.nav.paymentHistory", url: "/dashboard/payments/history", icon: <CreditCardIcon />   },
-  { titleKey: "chrome.nav.getHelp",        url: "/dashboard/help",             icon: <CircleHelpIcon />   },
+  { titleKey: "chrome.nav.paymentHistory", url: "/dashboard/payments/history", icon: <CreditCardIcon />, roles: OFFICE_ROLES },
+  { titleKey: "chrome.nav.getHelp",        url: "/dashboard/help",             icon: <CircleHelpIcon />, roles: OFFICE_ROLES },
 ]
 
 // Roles that can create new orders. Designers can VIEW orders (read-only
@@ -208,8 +256,9 @@ const NEW_ORDER_ROLES: UserRole[] = [
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
-  const { user, isAdmin } = useAuth()
+  const { user, isAdmin, isTechnician } = useAuth()
   const { t } = useT()
+  const role = user?.role
 
   // Admin-only unread-support counter. The hook polls every 20s and is
   // invalidated by the /support-chat socket on incoming messages, so the
@@ -271,9 +320,19 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     [user, isAdmin, supportUnread, newOrdersBadge, pendingApprovalsBadge, t],
   )
 
+  // The technician's queue + day, or the admins' production group. Built
+  // from role flags only, so the polling badges above never rebuild it.
+  const productionNav = React.useMemo(() => {
+    const items = isTechnician ? NAV_TECHNICIAN : isAdmin ? NAV_PRODUCTION_ADMIN : []
+    return items.map((item) => ({ ...item, title: t(item.titleKey) }))
+  }, [isTechnician, isAdmin, t])
+
   const secondaryNav = React.useMemo(
-    () => NAV_SECONDARY.map((item) => ({ ...item, title: t(item.titleKey) })),
-    [t],
+    () =>
+      NAV_SECONDARY.filter(
+        (item) => !item.roles || (role !== undefined && item.roles.includes(role)),
+      ).map((item) => ({ ...item, title: t(item.titleKey) })),
+    [role, t],
   )
 
   const canCreateOrder = React.useMemo(
@@ -411,7 +470,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   Both variants are wrapped in the same Link, so a tap
                   at any sidebar width takes you to /dashboard. */}
               <Link
-                href="/dashboard"
+                href={landingPathFor(role)}
                 className="flex w-full items-center justify-center gap-2"
                 aria-label={t('chrome.nav.dashboardHomeAria')}
               >
@@ -483,7 +542,15 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           </SidebarGroup>
         )}
 
-        <NavMain items={visibleNavMain} />
+        {visibleNavMain.length > 0 && <NavMain items={visibleNavMain} />}
+        {productionNav.length > 0 && (
+          <NavMain
+            items={productionNav}
+            // A heading only next to the office navigation: for the
+            // technician these two entries are the whole menu.
+            label={visibleNavMain.length > 0 ? t("chrome.nav.production") : undefined}
+          />
+        )}
         <NavSecondary items={secondaryNav} className="mt-auto" />
       </SidebarContent>
 

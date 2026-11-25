@@ -24,6 +24,7 @@ export function AccountOverviewCard({ user }: { user: User }) {
     super_admin: t('accountHome.roleSuperAdmin'),
     dentist: t('accountHome.roleDentist'),
     designer: t('accountHome.roleDesigner'),
+    technician: t('accountHome.roleTechnician'),
   };
 
   return (

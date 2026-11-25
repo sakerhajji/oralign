@@ -9,6 +9,8 @@ import {
   BulkActionDto,
   BulkUpdateStatusDto,
   UserStats,
+  CreateUserResponse,
+  TemporaryPasswordResponse,
 } from '@/lib/types';
 
 export const usersService = {
@@ -55,8 +57,21 @@ export const usersService = {
   /**
    * Create new user (Admin only)
    */
-  createUser: async (data: CreateUserDto): Promise<User> => {
-    const response = await apiClient.post<User>('/users', data);
+  createUser: async (data: CreateUserDto): Promise<CreateUserResponse> => {
+    const response = await apiClient.post<CreateUserResponse>('/users', data);
+    return response.data;
+  },
+
+  /**
+   * Admin: a new temporary password for a technician account (409
+   * TEMPORARY_PASSWORD_TECHNICIAN_ONLY otherwise). Shown once, never
+   * stored client-side; her sessions are revoked and she must choose her
+   * own password at the next sign-in.
+   */
+  issueTemporaryPassword: async (id: string): Promise<TemporaryPasswordResponse> => {
+    const response = await apiClient.post<TemporaryPasswordResponse>(
+      `/users/${id}/temporary-password`,
+    );
     return response.data;
   },
 
@@ -88,12 +103,15 @@ export const usersService = {
    * Bulk delete users (Admin only). `skippedSelf` is true when the
    * selection contained the caller's own account — the backend refuses to
    * archive it, so `count` is one lower than the number of rows selected.
+   * `skippedSuperAdmins`: super admin accounts an admin's bulk action spared.
    */
   bulkDeleteUsers: async (
     data: BulkActionDto,
-  ): Promise<MessageResponse & { count: number; skippedSelf?: boolean }> => {
+  ): Promise<
+    MessageResponse & { count: number; skippedSelf?: boolean; skippedSuperAdmins?: number }
+  > => {
     const response = await apiClient.delete<
-      MessageResponse & { count: number; skippedSelf?: boolean }
+      MessageResponse & { count: number; skippedSelf?: boolean; skippedSuperAdmins?: number }
     >('/users', { data });
     return response.data;
   },
@@ -101,16 +119,24 @@ export const usersService = {
   /**
    * Bulk restore users (Admin only)
    */
-  bulkRestoreUsers: async (data: BulkActionDto): Promise<MessageResponse & { count: number }> => {
-    const response = await apiClient.post<MessageResponse & { count: number }>('/users/bulk-restore', data);
+  bulkRestoreUsers: async (
+    data: BulkActionDto,
+  ): Promise<MessageResponse & { count: number; skippedSuperAdmins?: number }> => {
+    const response = await apiClient.post<
+      MessageResponse & { count: number; skippedSuperAdmins?: number }
+    >('/users/bulk-restore', data);
     return response.data;
   },
 
   /**
    * Bulk update user status (Admin only)
    */
-  bulkUpdateStatus: async (data: BulkUpdateStatusDto): Promise<MessageResponse & { count: number }> => {
-    const response = await apiClient.patch<MessageResponse & { count: number }>('/users/bulk-status', data);
+  bulkUpdateStatus: async (
+    data: BulkUpdateStatusDto,
+  ): Promise<MessageResponse & { count: number; skippedSuperAdmins?: number }> => {
+    const response = await apiClient.patch<
+      MessageResponse & { count: number; skippedSuperAdmins?: number }
+    >('/users/bulk-status', data);
     return response.data;
   },
 

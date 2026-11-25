@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { inertBlob } from '@/lib/api/blob-download';
 import apiClient from '@/lib/api/client';
 
 /**
@@ -68,7 +69,9 @@ function fetchBlobUrl(url: string): Promise<string> {
   const promise = apiClient
     .get<Blob>(url, { responseType: 'blob' })
     .then((res) => {
-      const objectUrl = URL.createObjectURL(res.data);
+      // Raster types only: "Open image in new tab" on an SVG or HTML blob
+      // would run its script on the app's origin (see inertBlob).
+      const objectUrl = URL.createObjectURL(inertBlob(res.data));
       const entry = blobCache.get(url);
       if (entry) entry.blobUrl = objectUrl;
       return objectUrl;

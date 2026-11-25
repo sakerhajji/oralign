@@ -10,6 +10,7 @@ import {
   Edit,
   Eye,
   Gift,
+  KeyRound,
   MoreHorizontal,
   RefreshCw,
   ShieldAlert,
@@ -166,6 +167,17 @@ export function GiftBadge({ user }: { user: User }) {
       <Link href={`/dashboard/orders/${order.id}`} title={label} aria-label={label}>
         {content}
       </Link>
+    </Badge>
+  );
+}
+
+/** Still on a temporary password an admin handed over. */
+function PasswordToChangeBadge() {
+  const { t } = useT();
+  return (
+    <Badge className={cn("max-w-full", AMBER_BADGE)}>
+      <KeyRound aria-hidden="true" />
+      <span className="truncate">{t("usersDesk.list.mustChangePassword")}</span>
     </Badge>
   );
 }
@@ -416,6 +428,7 @@ function UserCard(props: RowProps) {
         <RoleBadge role={user.role} />
         <ApprovalBadge user={user} />
         {!user.isActive && <BlockedBadge />}
+        {user.mustChangePassword && <PasswordToChangeBadge />}
         <GiftBadge user={user} />
         {!user.isEmailVerified && (
           <Badge variant="outline" className="max-w-full text-muted-foreground">
@@ -551,7 +564,10 @@ function UserTableRow(props: RowProps) {
         />
       </td>
       <td className="px-2 py-2.5 align-middle">
-        <RoleBadge role={user.role} />
+        <div className="flex min-w-0 flex-col items-start gap-1">
+          <RoleBadge role={user.role} />
+          {user.mustChangePassword && <PasswordToChangeBadge />}
+        </div>
       </td>
       <td className="px-2 py-2.5 align-middle">
         <ApprovalBadge user={user} />

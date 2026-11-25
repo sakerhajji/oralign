@@ -10,6 +10,7 @@ import { ClicToPayClient } from './clictopay/clictopay.client';
 import { ClicToPayPaymentsService } from './services/clictopay-payments.service';
 import { ClicToPayReconciliationService } from './services/clictopay-reconciliation.service';
 import { env } from '../common/config/env';
+import { ProductionModule } from '../production/production.module';
 import { QuotationModule } from '../quotations/quotation.module';
 
 /**
@@ -38,7 +39,10 @@ const controllers = [
 ];
 
 @Module({
-  imports: [QuotationModule],
+  // ProductionModule: a settled installment unlocks its batch, and the
+  // batch projection (D2) runs in that transaction (production-batch-
+  // projection.ts, a plain function; the import states the dependency).
+  imports: [QuotationModule, ProductionModule],
   controllers,
   providers: [
     PaymentsService,

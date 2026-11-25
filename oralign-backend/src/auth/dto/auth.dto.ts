@@ -3,10 +3,12 @@ import {
   IsEmail,
   IsString,
   MinLength,
+  MaxLength,
   IsOptional,
   Matches,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
+import { FULL_NAME_MAX_LENGTH } from '../../common/access/actor-snapshot';
 
 const E164_PHONE_REGEX = /^\+[1-9]\d{1,14}$/;
 const ISO_COUNTRY_REGEX = /^[A-Z]{2}$/;
@@ -40,9 +42,15 @@ export class SignUpDto {
   @ApiProperty({
     example: 'Test User',
     description: 'User full name',
+    maxLength: FULL_NAME_MAX_LENGTH,
   })
+  // Trimmed before the length checks, as in CreateUserDto / UpdateUserDto.
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
   @IsString()
   @MinLength(2)
+  @MaxLength(FULL_NAME_MAX_LENGTH)
   fullName!: string;
 
   @ApiProperty({

@@ -15,6 +15,10 @@ enum UserRole {
   admin
   designer
   super_admin
+  // Lab technician: declares production acts (src/production) and nothing
+  // else. Deliberately NOT in ADMIN_ROLES and never in OrderAccessPolicy
+  // .scope(): every order / quote / payment route stays a 403 for her.
+  technician
 }
 
 enum VerificationStatus {
@@ -450,6 +454,20 @@ model User {
   // token becomes invalid. The refresh path rejects a token whose `tv`
   // no longer matches, so a stolen/old session cannot be renewed.
   tokenVersion        Int                @default(0)
+  // Set when an admin hands over a temporary password (technician accounts,
+  // admin force reset). While true the API refuses everything but the
+  // change-password allowlist (403 PASSWORD_CHANGE_REQUIRED); the change
+  // clears it.
+  mustChangePassword  Boolean            @default(false)
+  // The LAST time an admin handed this account a password (generated at
+  // creation, POST users/:id/temporary-password, PUT force reset) and who
+  // did: the production journal attributes acts to the account, so the
+  // handovers must be checkable against it. Never the password itself;
+  // the change-password does not clear them. Each handover is also logged.
+  temporaryPasswordIssuedAt   DateTime?
+  temporaryPasswordIssuedById String?
+  temporaryPasswordIssuedBy   User?   @relation("TemporaryPasswordIssuedBy", fields: [temporaryPasswordIssuedById], references: [id], onDelete: SetNull)
+  issuedTemporaryPasswords    User[]  @relation("TemporaryPasswordIssuedBy")
 
   // Profile
   avatarUrl           String?            // validated path only, no raw URLs
@@ -482,6 +500,9 @@ model User {
   createdToothInstructions OrderToothInstruction[] @relation("ToothInstructionCreator")
   createdTreatmentPlanIprs TreatmentPlanIpr[] @relation("TreatmentPlanIprCreator")
   recordedAlignerDeliveries AlignerDelivery[] @relation("AlignerDeliveryCreatedBy")
+  // Lab production acts this account declared / cancelled (SetNull + snapshot).
+  createdProductionEvents   ProductionEvent[] @relation("ProductionEventCreatedBy")
+  cancelledProductionEvents ProductionEvent[] @relation("ProductionEventCancelledBy")
   sentTreatmentMessages TreatmentMessage[]
   uploadedTreatmentAttachments TreatmentMessageAttachment[]
   loyaltyQuarters      LoyaltyQuarterResult[]
@@ -760,6 +781,11 @@ model DentalOrder {
   warrantyConversion            SupplementalOrderRequest?  @relation("WarrantyConversion")
   toothInstructions             OrderToothInstruction[]
   alignerDeliveries             AlignerDelivery[]
+  // Lab production (src/production): the act log (Restrict), its notice
+  // outbox and its progress projection (both Cascade).
+  productionEvents              ProductionEvent[]
+  productionNotices             ProductionNotice[]
+  productionProgress            ProductionProgress?
   files                         OrderFile[]
   treatmentPlans                TreatmentPlan[]
   // One active quotation per order. Cancelled quotes stay in history but
@@ -1105,6 +1131,203 @@ model UploadSession {
 
   @@index([orderId])
   @@index([status, updatedAt])
+}
+
+// ─────────────────────────────────────────
+// LAB PRODUCTION
+// ─────────────────────────────────────────
+// What the lab made for a case, act by act: models printed, aligners
+// thermoformed, cut, delivered to the practitioner. Append-only like
+// AlignerDelivery: a row is never updated except, once, by its cancel
+// columns (soft cancel with a reason, DELETION-POLICY "rule zero"), plus
+// the notifiedAt summary.
+//
+// One row = ONE arch. A form submit on "both arches" writes two rows that
+// share a declarationId, so they notify once and cancel together.
+// Steps are keyed on the order + step numbers, never on QuoteStepBatch:
+// batch rows are deleted and recreated by re-planning and attachPack.
+//
+// aligner_delivered is THE lab → practitioner delivery record.
+// QuoteStepBatch.status = delivered is its projection (owner decision D2)
+// and AlignerDelivery stays the practitioner's clinic → patient log (D6).
+//
+// Invariants are enforced by src/production under a FOR UPDATE lock on the
+// order. SQL-only CHECKs (migration 20261125000001_production_module) back
+// the shape rules; they allow stepFrom = 0 so "étape 0" templates can come
+// later without a migration (the service refuses it today, D10).
+//
+// DELETION POLICY: the order is Restrict (clinical history, reported by
+// the purge guard); the actors are SetNull + name / role snapshots.
+enum ProductionEventType {
+  model_printed
+  aligner_thermoformed
+  aligner_cut
+  aligner_delivered
+}
+
+// A row always holds one arch; "both" is two rows (see declarationId).
+enum ProductionArch {
+  upper
+  lower
+}
+
+enum DeliveryRecipient {
+  practitioner
+  courier
+  patient
+}
+
+// legacy_batch = imported at go-live from batches already delivered (D5):
+// it never sends a notice and never counts as an anomaly.
+enum ProductionEventOrigin {
+  declared
+  legacy_batch
+}
+
+model ProductionEvent {
+  id              String                @id @default(uuid())
+  orderId         String
+  order           DentalOrder           @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  // Shared by the one or two rows (one per arch) of a single form submit.
+  declarationId   String
+  type            ProductionEventType
+  arch            ProductionArch
+  stepFrom        Int
+  stepTo          Int
+  // Per arch. Defaults to stepTo - stepFrom + 1 and may differ (warning
+  // quantity_differs). Consumption sums it; progress never does.
+  quantity        Int
+  // When the act happened: typed as a Tunis wall clock, stored as UTC.
+  performedAt     DateTime
+  // Server time of the declaration, never rewritten: the 24 h cancel
+  // window and "Ma journée" run on it.
+  createdAt       DateTime              @default(now())
+  createdById     String?
+  createdBy       User?                 @relation("ProductionEventCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdByName   String?               // actor snapshot (survives account deletion)
+  createdByRole   UserRole?             // technician vs admin, in the journal
+  deliveredTo     DeliveryRecipient?    // set iff type = aligner_delivered
+  deliveredToName String?               // optional courier / person name, deliveries only
+  note            String?
+  // Warning codes the author confirmed (PRODUCTION_WARNING in
+  // src/production/production.contract.ts); "Écarts" lists them.
+  warnings        String[]              @default([])
+  origin          ProductionEventOrigin @default(declared)
+  // The client's Idempotency-Key: a replay returns these rows, never new ones.
+  idempotencyKey  String?
+  // First time a channel reached the practitioner. A summary only: the
+  // ProductionNotice rows are the source of truth.
+  notifiedAt      DateTime?
+  cancelledAt     DateTime?
+  cancelledById   String?
+  cancelledBy     User?                 @relation("ProductionEventCancelledBy", fields: [cancelledById], references: [id], onDelete: SetNull)
+  cancelledByName String?
+  cancelReason    String?               // never shown to the practitioner (D8)
+
+  // NULLs are distinct in Postgres: rows without a key (legacy import)
+  // never collide. Also serves the replay lookup (createdById, key).
+  @@unique([createdById, idempotencyKey, arch])
+  // Case sheet, warnings and the progress recompute (orderId prefix).
+  @@index([orderId, type, arch])
+  // Journal / recap / anomalies / CSV: a range on performedAt, often with
+  // one act. Also serves plain performedAt ranges (leading column).
+  @@index([performedAt, type])
+  // "Ma journée": the caller's own rows by declaration time.
+  @@index([createdById, createdAt])
+  // The FK ON DELETE SET NULL of a purged user: without it, each purge
+  // scans the whole event log.
+  @@index([cancelledById])
+  // One row = ONE arch of a declaration (the legacy import writes one
+  // declaration per batch, so it complies). Also the sibling lookup on
+  // cancel and the rows of a declaration's notices (declarationId prefix).
+  @@unique([declarationId, arch])
+}
+
+enum ProductionNoticeKind {
+  delivered
+  correction
+}
+
+// E-mail + in-app only (WhatsApp dropped by the owner).
+enum ProductionNoticeChannel {
+  in_app
+  email
+}
+
+enum ProductionNoticeStatus {
+  pending
+  sending
+  sent
+  failed
+  skipped
+}
+
+// Outbox of the practitioner notices, one row per declaration (or
+// cancelled event) × channel. Written in the SAME transaction as the
+// delivery or its cancel, so a crash after the commit never loses one.
+// The dispatcher (src/production/notifications) claims due rows with a
+// conditional updateMany (pending / failed → sending), renders the content
+// at send time and stamps `sent` only on a real provider accept.
+// Cascade: technical rows of the order (the order itself can never be
+// purged while it has ProductionEvent rows).
+model ProductionNotice {
+  id               String                  @id @default(uuid())
+  orderId          String
+  order            DentalOrder             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  declarationId    String
+  // ProductionEvent ids the notice reports on (the 1-2 rows of the
+  // declaration; the cancelled ones for a correction). No FK: a Postgres
+  // array cannot carry one, and the events are never deleted anyway.
+  // Prisma makes a scalar list optional on create: the SQL CHECK
+  // ProductionNotice_eventIds_check refuses NULL and an empty array.
+  eventIds         String[]
+  kind             ProductionNoticeKind
+  channel          ProductionNoticeChannel
+  status           ProductionNoticeStatus  @default(pending)
+  // delivered:<declarationId>:<channel> | correction:<eventId>:<channel>,
+  // eventId = the lowest id among the rows ONE cancel request newly
+  // cancelled (an event is cancelled once, so the key never repeats).
+  dedupeKey        String                  @unique
+  skipReason       String?                 // not_configured | no_recipient | cancelled_before_send | original_not_sent
+  recipientAddress String?                 // snapshot at send time
+  attempts         Int                     @default(0)
+  lastError        String?
+  notBefore        DateTime                // grace delay (D7, 10 min by default)
+  sentAt           DateTime?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  @@index([status, notBefore])             // the dispatcher sweep
+  @@index([orderId])
+  @@index([declarationId])                 // cancel: skip or correct a declaration's notices
+  @@index([createdAt])                     // admin list, newest first
+}
+
+// Read model, one row per order that has production events: the number
+// of DISTINCT steps covered by the order's non-cancelled events, per act ×
+// arch, plus the performedAt span. RECOMPUTED from the events inside the
+// transaction of every declare and cancel, never incremented;
+// src/scripts/rebuild-production-progress.ts rebuilds it from scratch.
+// List screens read it and never aggregate events. Cascade: a projection
+// lives and dies with its order.
+model ProductionProgress {
+  orderId           String      @id
+  order             DentalOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  printedUpper      Int         @default(0)
+  printedLower      Int         @default(0)
+  thermoformedUpper Int         @default(0)
+  thermoformedLower Int         @default(0)
+  cutUpper          Int         @default(0)
+  cutLower          Int         @default(0)
+  deliveredUpper    Int         @default(0)
+  deliveredLower    Int         @default(0)
+  // min / max performedAt of the non-cancelled events; null once every
+  // event of the order is cancelled.
+  firstActionAt     DateTime?
+  lastActionAt      DateTime?
+  updatedAt         DateTime    @updatedAt
+
+  @@index([lastActionAt])
 }
 
 // ─────────────────────────────────────────
@@ -1882,6 +2105,10 @@ model QuoteStepBatch {
   deliveredAt    DateTime?
   deliveredById  String?
   deliveredBy    User?            @relation("BatchDeliveredBy", fields: [deliveredById], references: [id], onDelete: SetNull)
+  // True when the lab production module flipped this batch to delivered
+  // (its steps are covered by aligner_delivered events). A production
+  // cancel reverts ONLY such batches, never a legacy admin delivery.
+  deliveredByProduction Boolean   @default(false)
 
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
@@ -2060,6 +2287,8 @@ enum NotificationType {
   batch_unlocked           // a step batch moved from locked → unlocked
   batch_delivered          // admin marked a step batch as delivered
   installment_overdue      // an installment passed its due date unpaid
+  production_delivered            // the lab declared aligners delivered (ProductionNotice, in_app)
+  production_delivery_cancelled   // a delivery already notified was cancelled (correction)
   // ── Generic ──────────────────────────────────────────────────
   system_message
 }

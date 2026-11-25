@@ -83,6 +83,14 @@ const nextConfig: NextConfig = {
       // off), so /QR2 lands too; an upper-case /QR is folded in src/proxy.ts
       // (a rule for it here would also match /qr itself and loop).
       { source: "/qr2", destination: "/qr", permanent: false },
+      // Short address typed on the lab's tablet (and /production alone,
+      // `:path*` also matches no segment). Temporary on purpose: the lab
+      // screens may move inside the dashboard again.
+      {
+        source: "/production/:path*",
+        destination: "/dashboard/production/:path*",
+        permanent: false,
+      },
     ];
   },
   async headers() {

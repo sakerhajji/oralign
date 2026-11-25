@@ -40,9 +40,6 @@ export default function DashboardLayout({
         } as React.CSSProperties
       }
     >
-      {/* Silently redirects dentists who haven't finished onboarding */}
-      <OnboardingGuard />
-
       {/* Flush `sidebar` variant (not `inset`): the inset variant floats
           the rail with p-2 padding + gives the content an m-2 margin,
           which left a ~14px transparent `bg-sidebar` strip along the
@@ -52,7 +49,11 @@ export default function DashboardLayout({
       <AppSidebar variant="sidebar" />
       <SidebarInset>
         <SiteHeader />
-        <div className="flex flex-1 flex-col">{children}</div>
+        <div className="flex flex-1 flex-col">
+          {/* Sends unfinished onboardings to their step and a technician
+              back to the production screens; holds the page meanwhile. */}
+          <OnboardingGuard>{children}</OnboardingGuard>
+        </div>
       </SidebarInset>
       {/* Doctor-only floating support bubble. The component itself
           checks the caller's role + auth status; renders null for

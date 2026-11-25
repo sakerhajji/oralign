@@ -13,12 +13,19 @@ import {
   IsArray,
   IsBoolean,
   Matches,
+  ValidateIf,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { UserRole, VerificationStatus } from '@prisma/client';
+import { rawBoolean } from '../../common/dto/query-transforms';
+import { FULL_NAME_MAX_LENGTH } from '../../common/access/actor-snapshot';
 
 const E164_PHONE_REGEX = /^\+[1-9]\d{1,14}$/;
 const ISO_COUNTRY_REGEX = /^[A-Z]{2}$/;
+
+/** Trimmed before the length checks, so "  A  " is not a 2-letter name. */
+const trimString = ({ value }: { value: unknown }) =>
+  typeof value === 'string' ? value.trim() : value;
 
 const normalizeOptionalString = (value: unknown) => {
   if (typeof value !== 'string') return value;
@@ -98,18 +105,39 @@ export class CreateUserDto {
   @ApiProperty({
     example: 'New User',
     description: 'User full name',
+    maxLength: FULL_NAME_MAX_LENGTH,
   })
+  @Transform(trimString)
   @IsString()
   @MinLength(2)
+  @MaxLength(FULL_NAME_MAX_LENGTH)
   fullName!: string;
 
   @ApiProperty({
     example: 'P@ssword123',
-    description: 'User password (at least 8 characters)',
+    description:
+      'User password (at least 8 characters). Required unless generateTemporaryPassword is true; a blank value counts as absent.',
+    required: false,
   })
+  // A blank field is ABSENT; a real password is never trimmed.
+  @Transform(({ value }: { value: unknown }) =>
+    value === '' ? undefined : value,
+  )
+  @ValidateIf((dto: CreateUserDto) => dto.generateTemporaryPassword !== true)
   @IsString()
   @MinLength(8)
-  password!: string;
+  password?: string;
+
+  @ApiProperty({
+    example: false,
+    description:
+      'The server generates a temporary password and returns it ONCE in the response (never logged, never e-mailed); the account must choose its own at first sign-in. Exclusive with `password`.',
+    required: false,
+  })
+  @IsOptional()
+  @Transform(rawBoolean)
+  @IsBoolean()
+  generateTemporaryPassword?: boolean;
 
   @ApiProperty({
     example: '+1987654321',
@@ -162,10 +190,13 @@ export class UpdateUserDto {
     example: 'Updated Name',
     description: 'User full name',
     required: false,
+    maxLength: FULL_NAME_MAX_LENGTH,
   })
+  @Transform(trimString)
   @IsOptional()
   @IsString()
   @MinLength(2)
+  @MaxLength(FULL_NAME_MAX_LENGTH)
   fullName?: string;
 
   @ApiProperty({
@@ -313,6 +344,31 @@ export class UserResponseDto {
     orderCode: string;
     archived: boolean;
   } | null;
+
+  @ApiProperty({
+    description:
+      'The account runs on a temporary password: every route but GET /users/me and POST /auth/change-password answers 403 PASSWORD_CHANGE_REQUIRED until it chooses its own.',
+  })
+  mustChangePassword!: boolean;
+}
+
+/** `POST /users`: the account, plus the generated password ONCE when one was asked for. */
+export class CreateUserResponseDto extends UserResponseDto {
+  @ApiProperty({
+    required: false,
+    description:
+      'Only with generateTemporaryPassword: shown once, never stored in clear, never logged or e-mailed.',
+  })
+  temporaryPassword?: string;
+}
+
+/** `POST /users/:id/temporary-password` (technician accounts only). */
+export class TemporaryPasswordResponseDto {
+  @ApiProperty({
+    description:
+      'The new temporary password, shown once. Every session of the account is revoked and it must choose its own password at the next sign-in.',
+  })
+  temporaryPassword!: string;
 }
 
 /** Filters shared by the active (`GET /users`) and deleted users lists. */
@@ -429,6 +485,8 @@ export class UsersStatsDto {
   dentists!: number;
   @ApiProperty({ description: 'Admin and super admin accounts' })
   admins!: number;
+  @ApiProperty({ description: 'Lab technician accounts' })
+  technicians!: number;
   @ApiProperty({
     description: 'Dentists whose welcome gift is still available',
   })

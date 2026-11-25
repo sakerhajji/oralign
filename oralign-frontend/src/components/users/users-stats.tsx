@@ -33,6 +33,13 @@ export function UsersStats({
 }) {
   const { t } = useT();
   const countLabel = useCountLabel();
+  const roleBreakdown = stats
+    ? [
+        countLabel('usersDesk.stats.dentists', stats.dentists),
+        countLabel('usersDesk.stats.admins', stats.admins),
+        countLabel('usersDesk.stats.technicians', stats.technicians),
+      ].join(' · ')
+    : undefined;
 
   const items: {
     key: string;
@@ -45,9 +52,7 @@ export function UsersStats({
       key: 'total',
       label: t('usersDesk.stats.total'),
       value: stats?.total,
-      detail: stats
-        ? `${countLabel('usersDesk.stats.dentists', stats.dentists)} · ${countLabel('usersDesk.stats.admins', stats.admins)}`
-        : undefined,
+      detail: roleBreakdown,
     },
     {
       key: 'active',

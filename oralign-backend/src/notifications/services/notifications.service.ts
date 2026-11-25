@@ -10,7 +10,7 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '../../common/exceptions/app.exception';
-import { LangText, pickLang, tr } from '../../common/i18n/lang';
+import { Lang, LangText, pickLang, tr } from '../../common/i18n/lang';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { Caller } from '../../common/access/caller';
 
@@ -48,6 +48,10 @@ export class NotificationsService {
    * strings. Storing resolved text (rather than keys) keeps the read
    * path and the existing schema untouched: the bell just renders
    * what's in the row.
+   *
+   * `lang`: a caller that already loaded the recipient's preferredLanguage
+   * (the production notice dispatcher, per batch) passes it, and the
+   * lookup is skipped.
    */
   async create(args: {
     recipientId: string;
@@ -56,12 +60,18 @@ export class NotificationsService {
     message: LangText | string;
     link?: string | null;
     metadata?: Prisma.InputJsonValue;
+    lang?: Lang;
   }): Promise<Notification> {
-    const recipient = await this.prisma.user.findUnique({
-      where: { id: args.recipientId },
-      select: { preferredLanguage: true },
-    });
-    const lang = pickLang(recipient?.preferredLanguage);
+    const lang =
+      args.lang ??
+      pickLang(
+        (
+          await this.prisma.user.findUnique({
+            where: { id: args.recipientId },
+            select: { preferredLanguage: true },
+          })
+        )?.preferredLanguage,
+      );
     return this.prisma.notification.create({
       data: {
         recipientId: args.recipientId,

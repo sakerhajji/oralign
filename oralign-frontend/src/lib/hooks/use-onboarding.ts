@@ -8,8 +8,14 @@ import {
   WorkingHours,
   UserRole,
 } from '@/lib/types';
+import { PASSWORD_CHANGE_PATH } from '@/lib/api/client';
 
 export interface OnboardingStatus {
+  /**
+   * Still on the temporary password an admin handed over. First of all:
+   * the API refuses everything else (403 PASSWORD_CHANGE_REQUIRED).
+   */
+  mustChangePassword: boolean;
   /** Email verified — handled by the OTP flow. */
   emailVerified: boolean;
   /** User profile (phone, country) filled in. */
@@ -33,6 +39,7 @@ export function useOnboardingStatus(
 ): OnboardingStatus {
   return useMemo(() => {
     const isDentist = user?.role === UserRole.DENTIST;
+    const mustChangePassword = user?.mustChangePassword === true;
     const emailVerified = Boolean(user?.isEmailVerified);
 
     // Profile completeness is role-aware. Dentists need phone + country
@@ -76,6 +83,7 @@ export function useOnboardingStatus(
       : emailVerified && profileComplete && adminApproved;
 
     return {
+      mustChangePassword,
       emailVerified,
       profileComplete,
       clinicComplete,
@@ -89,10 +97,36 @@ export function useOnboardingStatus(
 
 /** Compute the URL where a user with the given onboarding state should go. */
 export function nextOnboardingPath(status: OnboardingStatus): string | null {
+  if (status.mustChangePassword) return PASSWORD_CHANGE_PATH;
   if (!status.emailVerified) return '/auth/verify-email';
   if (!status.profileComplete) return '/onboarding/profile';
   if (status.isDentist && (!status.clinicComplete || !status.scheduleComplete))
     return '/onboarding/clinic';
   if (!status.adminApproved) return '/onboarding/pending';
   return null;
+}
+
+// ─── Where each role lands ──────────────────────────────────────────────────
+
+/** The lab technician's home: the production queue. */
+export const TECHNICIAN_HOME = '/dashboard/production';
+
+/** The admin production desk: admins only (the API refuses her with a 403). */
+const PRODUCTION_PILOTAGE = '/dashboard/production/pilotage';
+
+/** First screen after sign-in or after the password step, by role. */
+export function landingPathFor(role: UserRole | undefined): string {
+  return role === UserRole.TECHNICIAN ? TECHNICIAN_HOME : '/dashboard';
+}
+
+/**
+ * The dashboard routes a technician may open: the production screens
+ * (queue, case sheet, dossier, Ma journée), not the admin pilotage. Any
+ * other dashboard route would only meet 403s, so the dashboard guard sends
+ * her back to the queue. Segment-boundary matching, like src/proxy.ts.
+ */
+export function isTechnicianRoute(pathname: string): boolean {
+  const under = (prefix: string) =>
+    pathname === prefix || pathname.startsWith(`${prefix}/`);
+  return under(TECHNICIAN_HOME) && !under(PRODUCTION_PILOTAGE);
 }

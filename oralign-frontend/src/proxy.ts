@@ -3,8 +3,12 @@ import type { NextRequest } from 'next/server';
 
 // ─── Route classifications ────────────────────────────────────────────────────
 
-/** Require a valid auth cookie to access */
-const PROTECTED_PREFIXES = ['/dashboard', '/account'];
+/**
+ * Require a valid auth cookie to access. /onboarding/password is the
+ * "choose your own password" step after a temporary one: it only makes
+ * sense signed in (it posts the current password with the session).
+ */
+const PROTECTED_PREFIXES = ['/dashboard', '/account', '/onboarding/password'];
 
 /** Redirect to /dashboard when already authenticated */
 const AUTH_ONLY_PATHS = ['/login', '/signup', '/forgot-password'];

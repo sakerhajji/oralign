@@ -29,6 +29,8 @@ import { TreatmentChatGateway } from '../gateways/treatment-chat.gateway';
 import { isAdmin, type Caller } from '../../common/access/caller';
 import { lookupActorName } from '../../common/access/actor-snapshot';
 import { PLAN_GATE_SELECT, planCreationGate } from '../treatment-plan-gate';
+import { missingPlanTotals } from '../plan-totals';
+import { PRODUCTION_ERROR } from '../../production/production.contract';
 
 const PLANNER_ROLES: UserRole[] = [
   UserRole.admin,
@@ -332,11 +334,25 @@ export class TreatmentPlanService {
             note: true,
           },
         },
+        // D4: which arches the totals are required for.
+        order: { select: { archTreatment: true, treatBothArch: true } },
       },
     });
     if (!plan) throw new NotFoundException('Treatment plan not found.');
 
     if (plan.status === TreatmentPlanStatus.pending) {
+      // Owner decision D4: the lab counts "X sur Y" per arch from these
+      // totals once the plan is approved, so the plan is only sent with a
+      // total for every arch it treats. Only on the send: the renewal
+      // below creates a draft, where the planner fixes them.
+      const missing = missingPlanTotals(plan);
+      if (missing.length > 0) {
+        throw new BadRequestException(
+          'Enter the number of aligners of each treated arch before sending the plan.',
+          PRODUCTION_ERROR.PLAN_TOTALS_REQUIRED,
+          { missing },
+        );
+      }
       // ── First send → in-place transition ───────────────────────────────
       const updated = await this.prisma.$transaction(async (tx) => {
         const u = await tx.treatmentPlan.update({

@@ -85,6 +85,7 @@ services:
       CLICTOPAY_RETURN_URL: ${CLICTOPAY_RETURN_URL:?CLICTOPAY_RETURN_URL not set}
       CLICTOPAY_FAIL_URL: ${CLICTOPAY_FAIL_URL:?CLICTOPAY_FAIL_URL not set}
       CLICTOPAY_TIMEOUT_MS: ${CLICTOPAY_TIMEOUT_MS:-15000}
+      PRODUCTION_NOTICE_DELAY_MINUTES: ${PRODUCTION_NOTICE_DELAY_MINUTES:-10}
 
     # !override REPLACES the base's "3000:3000" (which binds 0.0.0.0 and
     # would conflict with our 127.0.0.1 binding when merged).

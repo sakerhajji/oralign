@@ -9,6 +9,7 @@ import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/exceptions/exception.filter';
 import { env } from './common/config/env';
 import { checkOrigin } from './common/config/cors';
+import { privateUploadsGuard } from './common/http/private-uploads';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -64,7 +65,7 @@ async function bootstrap(): Promise<void> {
   //      which blocks the frontend at oralign.com.tn from loading
   //      images served by api.oralign.com.tn (different origin). We
   //      explicitly set CORP=cross-origin on /uploads responses so
-  //      avatar / clinic-logo / order-file image previews work in the
+  //      avatar / clinic-logo / blog / slider image previews work in the
   //      browser without disabling the protection on the API endpoints
   //      themselves.
   // The frontend embeds some uploads in an <iframe> (bank-transfer receipt
@@ -79,6 +80,12 @@ async function bootstrap(): Promise<void> {
     env.frontendUrl,
     ...(!isProd ? ['http://localhost:3001', 'http://127.0.0.1:3001'] : []),
   ].join(' ');
+
+  // Patient records (uploads/orders/**: photos, scans, plans, quotes) are
+  // served ONLY by the authenticated download routes. Their stored names
+  // can be rebuilt by anyone who has seen the order, so the static handler
+  // must never reach them: 404 first, whatever the spelling of the path.
+  app.use('/uploads', privateUploadsGuard);
 
   app.useStaticAssets(join(process.cwd(), 'uploads'), {
     prefix: '/uploads',

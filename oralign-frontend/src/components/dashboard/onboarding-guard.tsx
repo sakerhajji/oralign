@@ -1,35 +1,63 @@
 'use client';
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, type ReactNode } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
+import { Loader2 } from 'lucide-react';
 import {
+  TECHNICIAN_HOME,
+  isTechnicianRoute,
   nextOnboardingPath,
   useAccountData,
   useOnboardingStatus,
 } from '@/lib/hooks';
+import { UserRole } from '@/lib/types';
+import { useT } from '@/lib/i18n/lang-context';
 
 /**
- * Silently enforces the onboarding flow for users who reach the dashboard
- * before completing all setup steps. Renders nothing — it's a side-effect
- * component that lives inside the dashboard layout.
+ * The dashboard's routing guard, around every dashboard page.
  *
  * Flow:
+ *   0. Temporary password  → /onboarding/password
  *   1. Email not verified  → /auth/verify-email
  *   2. Profile incomplete  → /onboarding/profile
  *   3. (Dentists) clinic / schedule incomplete → /onboarding/clinic
  *   4. Admin not approved → /onboarding/pending
- *   5. Fully onboarded     → stay on dashboard
+ *   5. Technician outside the production screens → the production queue
+ *      (the API refuses her everything else with a 403)
+ *   6. Otherwise          → stay on the page
+ *
+ * While a redirect is pending the page is not mounted: it would only fire
+ * requests the API refuses and flash a screen the user is leaving.
  */
-export function OnboardingGuard() {
+export function OnboardingGuard({ children }: { children: ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const { t } = useT();
   const { user, dentistProfile, workingHours, isLoading } = useAccountData();
   const status = useOnboardingStatus(user, dentistProfile, workingHours);
 
-  useEffect(() => {
-    if (isLoading || !user) return;
-    const next = nextOnboardingPath(status);
-    if (next) router.replace(next);
-  }, [isLoading, user, status, router]);
+  const redirect =
+    isLoading || !user
+      ? null
+      : (nextOnboardingPath(status) ??
+        (user.role === UserRole.TECHNICIAN && !isTechnicianRoute(pathname)
+          ? TECHNICIAN_HOME
+          : null));
 
-  return null;
+  useEffect(() => {
+    if (redirect) router.replace(redirect);
+  }, [redirect, router]);
+
+  if (!redirect) return <>{children}</>;
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="flex flex-1 items-center justify-center gap-2 p-6 text-sm text-muted-foreground"
+    >
+      <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+      {t('common.loading')}
+    </div>
+  );
 }

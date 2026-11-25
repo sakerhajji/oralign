@@ -256,6 +256,28 @@ function isPreAuthRequest(config: InternalAxiosRequestConfig | undefined): boole
   return PRE_AUTH_PATHS.some((p) => config.url!.includes(p));
 }
 
+/**
+ * The account still runs on the temporary password an admin handed over:
+ * the API answers 403 PASSWORD_CHANGE_REQUIRED on everything but
+ * GET /users/me and POST /auth/change-password until it changes.
+ */
+export const PASSWORD_CHANGE_PATH = '/onboarding/password';
+const PASSWORD_CHANGE_REQUIRED = 'PASSWORD_CHANGE_REQUIRED';
+
+// A page fires several requests at once and each one meets the 403: only
+// the first navigates. Module state, so a full page load resets it.
+let passwordChangeRedirectPending = false;
+
+function sendToPasswordChange(): void {
+  if (typeof window === 'undefined' || passwordChangeRedirectPending) return;
+  // Already there: the page itself only calls the two allowed routes, so a
+  // 403 here must not reload it in a loop.
+  if (window.location.pathname === PASSWORD_CHANGE_PATH) return;
+  passwordChangeRedirectPending = true;
+  // replace: Back must not return to a page whose requests are refused.
+  window.location.replace(PASSWORD_CHANGE_PATH);
+}
+
 // Response interceptor - Handle token refresh
 apiClient.interceptors.response.use(
   (response) => {
@@ -296,6 +318,13 @@ apiClient.interceptors.response.use(
         }
         return Promise.reject(refreshError);
       }
+    }
+
+    if (
+      error.response?.status === 403 &&
+      error.response.data?.errorCode === PASSWORD_CHANGE_REQUIRED
+    ) {
+      sendToPasswordChange();
     }
 
     // For other errors, just reject

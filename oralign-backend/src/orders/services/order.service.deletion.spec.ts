@@ -118,6 +118,11 @@ describe('OrderService permanent delete — deletion policy', () => {
       { _count: { treatmentPlans: 1, payments: 0 } },
       '1 treatment plans',
     ],
+    [
+      'lab production events',
+      { _count: { treatmentPlans: 0, payments: 0, productionEvents: 3 } },
+      '3 production events',
+    ],
   ])(
     'is blocked with 409 DELETION_BLOCKED while %s exist(s)',
     async (_l, over, expectText) => {

@@ -77,8 +77,28 @@ export class AuthResponseDto {
   preferredLanguage?: string;
 
   @ApiProperty({
+    example: false,
+    description:
+      'The account runs on a temporary password: send the user to the "choose your password" step first. Until then every route but GET /users/me and POST /auth/change-password answers 403 PASSWORD_CHANGE_REQUIRED.',
+  })
+  mustChangePassword!: boolean;
+
+  @ApiProperty({
     description: 'Object containing access and refresh tokens',
   })
+  authToken!: AuthTokenDto;
+}
+
+/**
+ * `POST /auth/change-password`. The change revokes every session of the
+ * account (tokenVersion + 1), this one included, so the caller gets a
+ * fresh pair for the new version and stays signed in.
+ */
+export class ChangePasswordResponseDto {
+  @ApiProperty({ example: 'Password changed successfully' })
+  message!: string;
+
+  @ApiProperty({ type: AuthTokenDto })
   authToken!: AuthTokenDto;
 }
 

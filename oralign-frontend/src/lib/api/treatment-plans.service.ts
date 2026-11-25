@@ -1,3 +1,4 @@
+import { inertBlob, keepsDisplayType } from './blob-download';
 import apiClient from './client';
 import type {
   PublicTreatmentViewerPayload,
@@ -32,6 +33,16 @@ function parseContentDispositionFilename(
   const plain = /filename\s*=\s*"?([^";]+)"?/i.exec(header);
   if (plain?.[1]) return plain[1];
   return null;
+}
+
+/**
+ * `PUT /treatment-plans/:id` body for the per-arch aligner totals. They are
+ * required (≥ 1) for each treated arch before mark-ready: the lab tracks
+ * its production against them. An omitted key is left as it is.
+ */
+export interface UpdateTreatmentPlanTotalsDto {
+  totalUpperAligners?: number;
+  totalLowerAligners?: number;
 }
 
 export class PublicViewerFetchError extends Error {
@@ -86,6 +97,14 @@ export const treatmentPlansService = {
       `/treatment-plans/${id}/result-view-url`,
       { resultViewUrl },
     );
+    return res.data;
+  },
+
+  updateTotals: async (
+    id: string,
+    data: UpdateTreatmentPlanTotalsDto,
+  ): Promise<TreatmentPlan> => {
+    const res = await apiClient.put<TreatmentPlan>(`/treatment-plans/${id}`, data);
     return res.data;
   },
 
@@ -256,11 +275,18 @@ export const treatmentPlansService = {
    * The blob URL is created via `URL.createObjectURL`. Callers should
    * `URL.revokeObjectURL()` once they're done with it to free the blob
    * (we don't auto-revoke because the user may keep the tab open).
+   *
+   * Only a raster image keeps its type (`opensInline`): the type is the
+   * uploader's claim, and an SVG / HTML blob opened in a tab would run its
+   * script on the app's origin. Anything else is an inert octet-stream,
+   * which a tab would only download under a random name, so the caller
+   * saves it under `fileName` instead.
    */
   fetchAttachmentBlobUrl: async (attachmentId: string): Promise<{
     blobUrl: string;
     mimeType: string;
     fileName: string;
+    opensInline: boolean;
   }> => {
     const res = await apiClient.get<Blob>(
       `/treatment-message-attachments/${attachmentId}/download`,
@@ -273,8 +299,9 @@ export const treatmentPlansService = {
     const disposition =
       res.headers['content-disposition'] ?? res.headers['Content-Disposition'];
     const fileName = parseContentDispositionFilename(disposition) ?? 'attachment';
-    const blobUrl = URL.createObjectURL(res.data);
-    return { blobUrl, mimeType, fileName };
+    const blob = inertBlob(res.data);
+    const blobUrl = URL.createObjectURL(blob);
+    return { blobUrl, mimeType, fileName, opensInline: keepsDisplayType(blob.type) };
   },
 
   deleteAttachment: async (

@@ -8,8 +8,11 @@ import {
   type UseQueryResult,
 } from '@tanstack/react-query';
 import { toast } from '@/lib/toast';
-import { treatmentPlansService } from '@/lib/api/treatment-plans.service';
-import { extractApiErrorMessage } from '@/lib/api/error';
+import {
+  treatmentPlansService,
+  type UpdateTreatmentPlanTotalsDto,
+} from '@/lib/api/treatment-plans.service';
+import { extractApiError, extractApiErrorMessage } from '@/lib/api/error';
 import { useT } from '@/lib/i18n/lang-context';
 import { orderKeys } from './use-orders';
 import { supplementalErrorMessage } from './use-supplemental-orders';
@@ -118,6 +121,44 @@ export function useUpdateResultViewUrl(): UseMutationResult<
   });
 }
 
+/** 400 from mark-ready: a treated arch has no aligner total yet. */
+export const PLAN_TOTALS_REQUIRED = 'PLAN_TOTALS_REQUIRED';
+
+/**
+ * The per-arch aligner totals (`PUT /treatment-plans/:id`). The answer is
+ * the plan row: it is written into the cached review / list / detail
+ * instead of refetching the heavy review payload. Errors are left to the
+ * form, which shows them next to the fields.
+ */
+export function useUpdateTreatmentPlanTotals(): UseMutationResult<
+  TreatmentPlan,
+  Error,
+  { id: string } & UpdateTreatmentPlanTotalsDto
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...totals }) => treatmentPlansService.updateTotals(id, totals),
+    onSuccess: (plan) => {
+      const totals = {
+        totalUpperAligners: plan.totalUpperAligners,
+        totalLowerAligners: plan.totalLowerAligners,
+      };
+      queryClient.setQueryData<TreatmentPlanReview>(
+        treatmentPlanKeys.review(plan.id),
+        (review) => (review ? { ...review, ...totals } : review),
+      );
+      queryClient.setQueryData<TreatmentPlan>(
+        treatmentPlanKeys.detail(plan.id),
+        (detail) => (detail ? { ...detail, ...totals } : detail),
+      );
+      queryClient.setQueryData<TreatmentPlan[]>(
+        treatmentPlanKeys.byOrder(plan.orderId),
+        (plans) => plans?.map((p) => (p.id === plan.id ? { ...p, ...totals } : p)),
+      );
+    },
+  });
+}
+
 export function useMarkTreatmentPlanReady(): UseMutationResult<
   TreatmentPlan,
   Error,
@@ -144,7 +185,11 @@ export function useMarkTreatmentPlanReady(): UseMutationResult<
           : t('toasts.treatmentPlans.markedReady'),
       );
     },
-    onError: (err) => toast.error(extractApiErrorMessage(err)),
+    onError: (err) => {
+      // Missing aligner totals are shown on their fields by the form.
+      if (extractApiError(err).errorCode === PLAN_TOTALS_REQUIRED) return;
+      toast.error(extractApiErrorMessage(err));
+    },
   });
 }
 

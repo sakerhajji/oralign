@@ -47,6 +47,8 @@ import { patientDeskDomainDict } from './dict.patient-desk-domain';
 import { listUiDomainDict } from './dict.list-ui-domain';
 import { paymentsDeskDomainDict } from './dict.payments-desk-domain';
 import { supplementalOrdersDomainDict } from './dict.supplemental-orders-domain';
+import { productionDomainDict } from './dict.production-domain';
+import { productionAdminDomainDict } from './dict.production-admin-domain';
 
 export const dict = {
   ...chromeDomainDict,
@@ -60,6 +62,8 @@ export const dict = {
   ...listUiDomainDict,
   ...paymentsDeskDomainDict,
   ...supplementalOrdersDomainDict,
+  ...productionDomainDict,
+  ...productionAdminDomainDict,
 
   // ─── Generic / cross-cutting ────────────────────────────────────
   common: {
@@ -1018,6 +1022,7 @@ export const dict = {
         admin: { en: "Admin", fr: "Admin" } as T,
         super_admin: { en: "Super admin", fr: "Super admin" } as T,
         designer: { en: "Designer", fr: "Designer" } as T,
+        technician: { en: "Technician", fr: "Technicienne" } as T,
       },
       actions: {
         created: { en: "Order created", fr: "Commande créée" } as T,
@@ -2780,6 +2785,7 @@ export const dict = {
     roleSuperAdmin: { en: 'Super Admin', fr: 'Super administrateur' } as T,
     roleDentist: { en: 'Dentist', fr: 'Praticien' } as T,
     roleDesigner: { en: 'Designer', fr: 'Designer' } as T,
+    roleTechnician: { en: 'Technician', fr: 'Technicienne' } as T,
 
     // ClinicOverviewCard
     clinicTitle: { en: 'Clinic', fr: 'Cabinet' } as T,
@@ -4021,6 +4027,12 @@ export const dict = {
       settings: { en: 'Settings', fr: 'Paramètres' } as T,
       paymentHistory: { en: 'Payment History', fr: 'Historique des paiements' } as T,
       invoices: { en: 'Invoices', fr: 'Factures' } as T,
+      production: { en: 'Production', fr: 'Production' } as T,
+      // The admins' "Production" group: the queue, then the pilotage desk.
+      productionQueue: { en: 'Production queue', fr: 'File de production' } as T,
+      pilotage: { en: 'Production desk', fr: 'Pilotage' } as T,
+      // The technician's own declarations, today or yesterday.
+      myDay: { en: 'My day', fr: 'Ma journée' } as T,
       getHelp: { en: 'Get Help', fr: 'Obtenir de l’aide' } as T,
       newOrder: { en: 'New Order', fr: 'Nouvelle commande' } as T,
       newOrderAria: { en: 'Create a new order', fr: 'Créer une nouvelle commande' } as T,

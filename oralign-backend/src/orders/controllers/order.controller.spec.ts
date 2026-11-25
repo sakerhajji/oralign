@@ -1,10 +1,15 @@
 import {
   type ExecutionContext,
   type INestApplication,
+  StreamableFile,
   ValidationPipe,
 } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { UserRole } from '@prisma/client';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { Readable } from 'stream';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 import type { JwtPayload } from '../../common/decorators/current-user.decorator';
@@ -58,13 +63,14 @@ describe('OrderController treatment-fee lists over HTTP', () => {
   const listPendingTreatmentFees = jest.fn();
   const payTreatmentFee = jest.fn();
   const uploadTreatmentFeeProof = jest.fn();
+  const getDownloadFile = jest.fn();
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
       controllers: [OrderController],
       providers: [
         { provide: OrderService, useValue: {} },
-        { provide: OrderFilesService, useValue: {} },
+        { provide: OrderFilesService, useValue: { getDownloadFile } },
         { provide: OrderExportService, useValue: {} },
         { provide: ChunkedUploadService, useValue: {} },
         { provide: OrderAuditService, useValue: {} },
@@ -261,6 +267,100 @@ describe('OrderController treatment-fee lists over HTTP', () => {
       expect(res.body.message).not.toBe(
         'A bank-transfer receipt file is required.',
       );
+    });
+  });
+
+  describe('GET /api/orders/:id/files/:fileId/download (security headers)', () => {
+    const SECURITY_HEADERS = {
+      'x-content-type-options': 'nosniff',
+      'content-security-policy': "default-src 'none'; sandbox",
+    };
+
+    it('an inline variant is sent with nosniff and the sandbox CSP', async () => {
+      const openStream = jest.fn(
+        () => new StreamableFile(Readable.from(['variant-bytes'])),
+      );
+      getDownloadFile.mockReset().mockResolvedValue({
+        openStream,
+        contentType: 'image/webp',
+        inline: true,
+        downloadName: 'front-photo-001__md.webp',
+        absolutePath: '/nowhere',
+      });
+
+      const res = await get('/api/orders/o-1/files/f-1/download?variant=md');
+
+      expect(res.status).toBe(200);
+      expect(getDownloadFile).toHaveBeenCalledWith(
+        'o-1',
+        'f-1',
+        { userId: 'u-admin', role: UserRole.admin },
+        'md',
+      );
+      expect(res.headers).toMatchObject({
+        'content-type': 'image/webp',
+        ...SECURITY_HEADERS,
+      });
+      // The inline branch opens the file once and sends its bytes.
+      expect(openStream).toHaveBeenCalledTimes(1);
+      expect((res.body as Buffer).toString()).toBe('variant-bytes');
+    });
+
+    it('an original attachment carries them too', async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oralign-dl-'));
+      const stored = path.join(dir, 'photo');
+      fs.writeFileSync(stored, '<svg/>');
+      const openStream = jest.fn(
+        () => new StreamableFile(Readable.from(['x'])),
+      );
+      getDownloadFile.mockReset().mockResolvedValue({
+        openStream,
+        contentType: 'application/octet-stream',
+        inline: false,
+        downloadName: 'photo',
+        absolutePath: stored,
+      });
+
+      try {
+        const res = await get('/api/orders/o-1/files/f-1/download');
+        expect(res.status).toBe(200);
+        expect(res.headers).toMatchObject({
+          'content-type': 'application/octet-stream',
+          ...SECURITY_HEADERS,
+        });
+        expect(res.headers['content-disposition']).toMatch(/^attachment/);
+        // Sent by path: no stream is ever opened, so none is left holding
+        // a file descriptor (R2).
+        expect(openStream).not.toHaveBeenCalled();
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('an attachment keeps what express sends a file with: its length, ranges and RFC 5987 name', async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oralign-dl-'));
+      const stored = path.join(dir, 'blob');
+      fs.writeFileSync(stored, 'stl-bytes');
+      getDownloadFile.mockReset().mockResolvedValue({
+        openStream: jest.fn(),
+        contentType: 'application/octet-stream',
+        inline: false,
+        downloadName: 'Arcade-Œ.stl',
+        absolutePath: stored,
+      });
+
+      try {
+        const res = await get('/api/orders/o-1/files/f-1/download');
+        expect(res.status).toBe(200);
+        expect(res.headers['content-length']).toBe('9');
+        expect(res.headers['accept-ranges']).toBe('bytes');
+        // RFC 5987: an ASCII fallback and the UTF-8 name.
+        expect(res.headers['content-disposition']).toBe(
+          `attachment; filename="Arcade-?.stl"; filename*=UTF-8''Arcade-%C5%92.stl`,
+        );
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
     });
   });
 });

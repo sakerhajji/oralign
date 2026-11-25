@@ -9,7 +9,9 @@ import {
   Quotation,
   QuotationPaymentStatus,
   QuotationStatus,
+  type QuoteStepBatch,
 } from '@prisma/client';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   BadRequestException,
   ConflictException,
@@ -24,11 +26,16 @@ import {
   AttachPackToQuotationDto,
   ConfigurePaymentPlanDto,
 } from '../dto/quotation.dto';
-import { EventEmitter2 } from '@nestjs/event-emitter';
-import { NotificationEvents } from '../../notifications/events/notification-events';
 import { isAdmin, type Caller } from '../../common/access/caller';
+import {
+  NotificationEvents,
+  type BatchEvent,
+} from '../../notifications/events/notification-events';
+import { ProductionEventsService } from '../../production/production-events.service';
+import { lockProductionOrder } from '../../production/production-batch-projection';
 import { lookupActorName } from '../../common/access/actor-snapshot';
 import {
+  coverageWindowPatch,
   firstHandOverAt,
   startCoverageWindow,
 } from '../../orders/coverage-window';
@@ -92,6 +99,29 @@ export const COVERAGE_BACKFILL_CANDIDATES = {
 } satisfies Prisma.DentalOrderWhereInput;
 
 /**
+ * What "Marquer livré" on an unlimited-step pack reads under the order
+ * lock, in one call: the coverage columns, the batches for the finish and
+ * the names of the BatchDelivered notice. No money column.
+ */
+const PLACEHOLDER_DELIVERY_ORDER_SELECT = {
+  status: true,
+  deletedAt: true,
+  orderType: true,
+  coverageStartedAt: true,
+  coverageExpiresAt: true,
+  orderCode: true,
+  doctorId: true,
+  doctor: { select: { fullName: true } },
+  patient: { select: { fullName: true } },
+  quotation: {
+    select: {
+      treatmentValidityMonths: true,
+      stepBatches: { select: { id: true, status: true } },
+    },
+  },
+} satisfies Prisma.DentalOrderSelect;
+
+/**
  * Service dedicated to the pack-aware quotation lifecycle:
  *   • attachPack    — admin picks a pack + arch, snapshot is taken,
  *                     totalPrice is set from the active PackPrice.
@@ -115,6 +145,10 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
     private readonly orderAccess: OrderAccessPolicy,
     private readonly packs: PackService,
     private readonly loyalty: LoyaltyService,
+    // ProductionModule (no cycle: it imports Prisma only): the "Marquer
+    // livré" button delivers through the lab production path (D2).
+    private readonly production: ProductionEventsService,
+    // BatchDelivered, for "Marquer livré" on an unlimited-step pack only.
     private readonly events: EventEmitter2,
     // Same module, no cycle: the company TVA rate for pack quotes, and the
     // stored devis PDF re-rendered after a pack or plan change.
@@ -842,126 +876,181 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
   }
 
   /**
-   * Mark a step batch as delivered. Admin only. The batch MUST be
-   * `unlocked` — locked batches can never deliver, delivered batches
-   * are idempotently kept in that state.
+   * "Marquer livré" on a step batch (admin only), kept for the existing
+   * clients (owner decision D2, CONTRACT §3.4): ONE transaction under the
+   * order lock.
+   *   • locked    → 400, as before: steps_not_released is never
+   *                 auto-confirmed (D1 wants a person and a note);
+   *   • delivered → the row as is, no declaration and no notice (a
+   *                 double click never pings the doctor twice);
+   *   • unlocked, limited pack → the lab production delivery path, the
+   *                 ONE source of truth for "delivered": each treated
+   *                 arch's steps up to its approved total are declared,
+   *                 the batch projection flips the batch (coverage start,
+   *                 auto-finish) and the outbox writes the production
+   *                 notice, which replaces the old BatchDelivered one;
+   *   • unlocked, unlimited-step pack → its batches are payment
+   *                 placeholders ([1,1], [2,2]…), not aligner ranges
+   *                 (CONC-01): nothing is declared to the lab, the batch
+   *                 is flipped here as before the production module, and
+   *                 BatchDelivered tells the practitioner.
+   * A warning the button cannot vouch for (steps already delivered) is a
+   * 409 PRODUCTION_CONFIRM_REQUIRED: use the production form.
    */
-  async deliverBatch(batchId: string, caller: Caller) {
+  async deliverBatch(
+    quotationId: string,
+    batchId: string,
+    caller: Caller,
+  ): Promise<QuoteStepBatch> {
     if (!isAdmin(caller)) {
       throw new ForbiddenException(
         'Only admins can mark a batch as delivered.',
       );
     }
+    const actorName = await lookupActorName(this.prisma, caller.userId);
     const result = await this.prisma.$transaction(async (tx) => {
+      // The path's quotation names the order to lock, in one statement.
+      // The pack kind is safe to read before the lock: attachPack refuses
+      // once a payment was received, and an unlocked batch means one was.
+      const quote = await tx.quotation.findUnique({
+        where: { id: quotationId },
+        select: { orderId: true, deletedAt: true, isUnlimitedSteps: true },
+      });
+      if (!quote || quote.deletedAt) {
+        throw new NotFoundException('Batch not found');
+      }
+      const { orderId } = quote;
+      await lockProductionOrder(tx, orderId);
+      // Read under the lock: this is what absorbs a double click. A batch
+      // of another quotation than the path's is the same 404 as before.
       const batch = await tx.quoteStepBatch.findUnique({
         where: { id: batchId },
-        include: {
-          quotation: {
-            select: {
-              orderId: true,
-              // Pull the full doctor + patient + orderCode bundle so
-              // BatchDelivered can render the doctor's bell as
-              // "Steps X–Y for patient Z (ORD-…) have been
-              // delivered." Without these joins the listener would
-              // have to refetch the order — wasteful.
-              order: {
-                select: {
-                  doctorId: true,
-                  orderCode: true,
-                  doctor: { select: { fullName: true } },
-                  patient: { select: { fullName: true } },
-                },
-              },
-            },
-          },
-        },
       });
-      if (!batch) throw new NotFoundException('Batch not found');
+      if (!batch || batch.quotationId !== quotationId) {
+        throw new NotFoundException('Batch not found');
+      }
       if (batch.status === BatchStatus.locked) {
         throw new BadRequestException(
           'Locked batches cannot be delivered — wait for the linked installment to be paid.',
         );
       }
       if (batch.status === BatchStatus.delivered) {
-        // Idempotent — return the row as-is and skip the notification
-        // so re-clicking "Deliver" doesn't double-ping the doctor.
-        return { batch, justDelivered: false, orderJustFinished: false };
+        return { batch, delivered: null };
       }
-      const deliveredAt = new Date();
-      const updated = await tx.quoteStepBatch.update({
-        where: { id: batchId },
-        data: {
-          status: BatchStatus.delivered,
-          deliveredAt,
-          deliveredById: caller.userId,
-        },
-      });
-      // The first delivered batch hands the case's aligners over: it
-      // starts the coverage window (a no-op for later batches).
-      await startCoverageWindow(tx, batch.quotation.orderId, deliveredAt);
-
-      // ── Auto-finish the order when EVERY batch is delivered.
-      //
-      // Once the lab has shipped the last set of aligners and the
-      // admin has flipped its batch to `delivered`, the order is by
-      // definition complete — there's nothing else to manufacture or
-      // ship. Surface that by transitioning the order itself to
-      // `finished` (rendered as "Done" / "Terminée" in the UI) so
-      // the doctor's dashboard moves the row out of "In Fabrication"
-      // / "Shipped" and into the closed bucket without an admin
-      // having to chase a manual status change.
-      //
-      // We check inside the same transaction so the read-after-write
-      // sees the row we just updated. The count is scoped to the
-      // current quotation (one quote = one order, by schema).
-      const remainingUnDelivered = await tx.quoteStepBatch.count({
-        where: {
-          quotationId: batch.quotationId,
-          status: { not: BatchStatus.delivered },
-        },
-      });
-      let orderJustFinished = false;
-      if (remainingUnDelivered === 0) {
-        // Only nudge the status when it hasn't already landed here —
-        // saves a redundant write + a noisy update event when an
-        // admin re-marks an already-delivered batch.
-        const order = await tx.dentalOrder.findUnique({
-          where: { id: batch.quotation.orderId },
-          select: { status: true },
-        });
-        if (order && order.status !== OrderStatus.finished) {
-          await tx.dentalOrder.update({
-            where: { id: batch.quotation.orderId },
-            data: { status: OrderStatus.finished },
-          });
-          orderJustFinished = true;
-        }
+      if (quote.isUnlimitedSteps) {
+        return this.deliverPlaceholderBatch(tx, orderId, batch, caller);
       }
 
+      await this.production.declareBatchDelivery(
+        tx,
+        { orderId, batch },
+        caller,
+        { actorName, now: new Date() },
+      );
+      // The projection chose the flip's date and author: the stored row is
+      // the answer.
       return {
-        batch: { ...updated, quotation: batch.quotation },
-        justDelivered: true,
-        orderJustFinished,
+        batch: await tx.quoteStepBatch.findUniqueOrThrow({
+          where: { id: batchId },
+        }),
+        delivered: null,
       };
     });
+    // After the commit, as every notification event.
+    if (result.delivered) {
+      this.events.emit(NotificationEvents.BatchDelivered, result.delivered);
+    }
+    return result.batch;
+  }
 
-    if (result.justDelivered) {
-      // Tell the doctor their aligners are on the way.
-      const order = result.batch.quotation.order;
-      this.events.emit(NotificationEvents.BatchDelivered, {
-        batchId: result.batch.id,
-        quotationId: result.batch.quotationId,
-        orderId: result.batch.quotation.orderId,
-        orderCode: order.orderCode ?? null,
-        doctorId: order.doctorId,
-        doctorName: order.doctor?.fullName ?? null,
-        patientName: order.patient?.fullName ?? null,
-        fromStep: result.batch.fromStep,
-        toStep: result.batch.toStep,
-        batchNumber: result.batch.batchNumber,
+  /**
+   * The pre-production "Marquer livré", kept for unlimited-step packs only
+   * (CONC-01), in the caller's transaction under the order lock: flips the
+   * one batch (deliveredByProduction false: no production cancel ever
+   * reverts it), starts the coverage window with a compare-and-set on the
+   * state read here (a concurrent hand-over that started it first wins),
+   * and finishes the case once every batch is delivered. Returns the
+   * BatchDelivered payload, emitted by the caller after the commit.
+   *
+   * The case passes the same gate as a production delivery first
+   * (declareBatchDelivery): an archived order is a 404, a draft, cancelled
+   * or rejected one a 409 ORDER_NOT_IN_PRODUCTION, so a stale quote panel
+   * can never finish such a case nor notify its practitioner.
+   */
+  private async deliverPlaceholderBatch(
+    tx: Prisma.TransactionClient,
+    orderId: string,
+    batch: QuoteStepBatch,
+    caller: Caller,
+  ): Promise<{ batch: QuoteStepBatch; delivered: BatchEvent }> {
+    const order = await tx.dentalOrder.findUnique({
+      where: { id: orderId },
+      select: PLACEHOLDER_DELIVERY_ORDER_SELECT,
+    });
+    if (!order) throw new NotFoundException('Batch not found');
+    // The batch is unlocked: the case has a released batch.
+    this.orderAccess.assertCanProduce(
+      {
+        status: order.status,
+        deletedAt: order.deletedAt,
+        hasReleasedBatch: true,
+      },
+      caller,
+    );
+    const deliveredAt = new Date();
+    const updated = await tx.quoteStepBatch.update({
+      where: { id: batch.id, status: BatchStatus.unlocked },
+      data: {
+        status: BatchStatus.delivered,
+        deliveredAt,
+        deliveredById: caller.userId,
+        deliveredByProduction: false,
+      },
+    });
+    const coverage = coverageWindowPatch(
+      {
+        orderType: order.orderType,
+        coverageStartedAt: order.coverageStartedAt,
+        coverageExpiresAt: order.coverageExpiresAt,
+        treatmentValidityMonths:
+          order.quotation?.treatmentValidityMonths ?? null,
+      },
+      deliveredAt,
+    );
+    if (coverage) {
+      await tx.dentalOrder.updateMany({
+        where: {
+          id: orderId,
+          coverageStartedAt: order.coverageStartedAt,
+          coverageExpiresAt: order.coverageExpiresAt,
+        },
+        data: coverage,
       });
     }
-
-    return result.batch;
+    const everyDelivered = (order.quotation?.stepBatches ?? []).every(
+      (row) => row.id === batch.id || row.status === BatchStatus.delivered,
+    );
+    if (everyDelivered && order.status !== OrderStatus.finished) {
+      await tx.dentalOrder.update({
+        where: { id: orderId },
+        data: { status: OrderStatus.finished },
+        select: { id: true },
+      });
+    }
+    return {
+      batch: updated,
+      delivered: {
+        batchId: updated.id,
+        quotationId: updated.quotationId,
+        orderId,
+        orderCode: order.orderCode,
+        doctorId: order.doctorId,
+        doctorName: order.doctor.fullName,
+        patientName: order.patient.fullName,
+        fromStep: updated.fromStep,
+        toStep: updated.toStep,
+        batchNumber: updated.batchNumber,
+      },
+    };
   }
 }

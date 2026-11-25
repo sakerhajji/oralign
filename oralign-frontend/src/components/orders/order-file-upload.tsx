@@ -63,6 +63,7 @@ import {
 import { orderKeys } from '@/lib/hooks/use-orders';
 import { getAccessToken } from '@/lib/api';
 import { authedFetch, fetchAuthedBlob } from '@/lib/api/authed-fetch';
+import { inertBlob } from '@/lib/api/blob-download';
 import {
   CHUNKED_UPLOAD_THRESHOLD_BYTES,
   uploadFileChunked,
@@ -2802,7 +2803,10 @@ function fetchSecureBlobUrl(url: string): Promise<string> {
       return response.blob();
     })
     .then((blob) => {
-      const objectUrl = URL.createObjectURL(blob);
+      // The viewer shows pictures, frames PDFs and plays videos; any other
+      // declared type (an SVG or HTML claim) becomes an inert octet-stream,
+      // so the blob can never run its script on the app's origin.
+      const objectUrl = URL.createObjectURL(inertBlob(blob, 'viewer'));
       const entry = secureFileCache.get(url);
       if (entry) entry.blobUrl = objectUrl;
       return objectUrl;

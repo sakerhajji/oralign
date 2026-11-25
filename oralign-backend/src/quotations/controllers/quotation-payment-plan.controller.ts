@@ -127,14 +127,23 @@ export class QuotationPaymentPlanController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Mark an unlocked batch as delivered. Locked batches can never ' +
-      'be delivered — service enforces the invariant.',
+      'Mark an unlocked batch as delivered. On a limited pack, through ' +
+      'the lab production delivery path (an aligner_delivered declaration ' +
+      'of its steps, clipped per arch to the approved plan); on an ' +
+      'unlimited-step pack, whose batches are payment placeholders, the ' +
+      'batch is flipped directly and the practitioner notified. Locked ' +
+      'batches can never be delivered (400); a delivered one is returned ' +
+      'as is; 409 PRODUCTION_CONFIRM_REQUIRED when some steps already ' +
+      'have a live delivery (use the production form); 409 when the ' +
+      'batch covers no aligner of the approved plan and nothing was ' +
+      'delivered yet.',
   })
   async deliverBatch(
+    @Param('quotationId') quotationId: string,
     @Param('batchId') batchId: string,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.service.deliverBatch(batchId, {
+    return this.service.deliverBatch(quotationId, batchId, {
       userId: user.sub,
       role: user.role as UserRole,
     });

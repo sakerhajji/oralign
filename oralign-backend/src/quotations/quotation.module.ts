@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { PackModule } from '../packs/pack.module';
 import { LoyaltyModule } from '../loyalty/loyalty.module';
 import { PrismaModule } from '../prisma/prisma.module';
+import { ProductionModule } from '../production/production.module';
 import { StorageModule } from '../storage/storage.module';
 import {
   CompanyBillingSettingsController,
@@ -26,9 +27,19 @@ import { QuotationPdfService } from './services/quotation-pdf.service';
  * cheaply (e.g. approve() delegates pack quotes to it). Exporting
  * both keeps consumers from having to know which file owns the
  * behaviour they need.
+ *
+ * ProductionModule (Prisma only, so no cycle): the "Marquer livré"
+ * endpoint delivers through ProductionEventsService, and the total edit
+ * re-projects the batches it unlocks (owner decision D2).
  */
 @Module({
-  imports: [PrismaModule, StorageModule, PackModule, LoyaltyModule],
+  imports: [
+    PrismaModule,
+    StorageModule,
+    PackModule,
+    LoyaltyModule,
+    ProductionModule,
+  ],
   controllers: [
     CompanyBillingSettingsController,
     PublicBillingDefaultsController,

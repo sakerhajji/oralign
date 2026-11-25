@@ -68,7 +68,9 @@ export function LanguageSwitcher({
           variant={variant}
           size="sm"
           className={cn(
-            'h-8 gap-1.5 px-2.5 text-xs font-medium tracking-wide',
+            // As tall as the header (48 px) under a finger; a mouse keeps
+            // the compact pill.
+            'h-8 gap-1.5 px-2.5 text-xs font-medium tracking-wide pointer-coarse:h-12',
             className,
           )}
           aria-label={t('language.label')}

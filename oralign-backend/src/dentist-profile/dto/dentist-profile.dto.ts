@@ -1,7 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsString,
+  IsNotEmpty,
   IsOptional,
   IsNumber,
   IsInt,
@@ -298,6 +299,74 @@ export class PublicFinderQueryDto {
   @Min(-180)
   @Max(180)
   lng?: number;
+}
+
+/**
+ * The page of the two admin directory searches. Validated here: a raw
+ * `parseInt` let `?limit=abc` reach the query as NaN.
+ */
+class DirectorySearchPageQueryDto {
+  @ApiProperty({ required: false, example: 1, default: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page: number = 1;
+
+  @ApiProperty({ required: false, example: 10, default: 10, maximum: 100 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit: number = 10;
+}
+
+/**
+ * GET dentist-profile/search/by-city. The city is required: without it the
+ * cache key was built from undefined and the route answered 500.
+ */
+export class SearchByCityQueryDto extends DirectorySearchPageQueryDto {
+  @ApiProperty({ example: 'Tunis', description: 'City name', maxLength: 120 })
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  city!: string;
+}
+
+/** GET dentist-profile/search/nearby: a point on the globe and a bounded radius. */
+export class NearbySearchQueryDto extends DirectorySearchPageQueryDto {
+  @ApiProperty({ example: 36.8065, minimum: -90, maximum: 90 })
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  latitude!: number;
+
+  @ApiProperty({ example: 10.1815, minimum: -180, maximum: 180 })
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  longitude!: number;
+
+  @ApiProperty({
+    required: false,
+    example: 5,
+    default: 5,
+    minimum: 1,
+    maximum: 500,
+    description: 'Search radius in kilometres',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(500)
+  radiusKm: number = 5;
 }
 
 /** One working-hours row exposed on the public single-practitioner view. */

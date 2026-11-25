@@ -1098,7 +1098,7 @@ export class OrderService {
   /**
    * Bulk permanent delete — same rules as the single path, applied per
    * id. Blocked orders (live, or with quotation / payments / plans /
-   * deliveries / a welcome gift) are counted in `blocked` and left
+   * deliveries / production events / a welcome gift) are counted in `blocked` and left
    * untouched; unknown ids are `skipped`.
    */
   async bulkPermanentDeleteOrders(
@@ -1138,6 +1138,7 @@ export class OrderService {
             payments: true,
             alignerDeliveries: true,
             supplementalOrders: true,
+            productionEvents: true,
           },
         },
         quotation: { select: { id: true } },
@@ -1165,6 +1166,12 @@ export class OrderService {
         {
           label: 'supplemental orders',
           count: order._count.supplementalOrders,
+        },
+        // The lab's act log is clinical history (Restrict FK): reported
+        // here as a dependency instead of failing on the constraint.
+        {
+          label: 'production events',
+          count: order._count.productionEvents,
         },
         // The gift order is the record of the waived fees (amounts, audit)
         // and of the gift the doctor received: archived at most, never

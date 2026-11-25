@@ -36,6 +36,7 @@ import {
 } from '../../notifications/events/notification-events';
 import { env } from '../../common/config/env';
 import { QuotationService } from '../../quotations/services/quotation.service';
+import { projectBatches } from '../../production/production-batch-projection';
 import { isAdmin, type Caller } from '../../common/access/caller';
 import { lookupActorName } from '../../common/access/actor-snapshot';
 import {
@@ -746,6 +747,12 @@ export class PaymentsService {
       await tx.quoteStepBatch.update({
         where: { id: installment.stepBatch.id },
         data: { status: BatchStatus.unlocked, unlockedAt: now },
+      });
+      // An admin may have delivered these steps before the payment (D1):
+      // the batch becomes `delivered` now, in this transaction (D2).
+      await projectBatches(tx, {
+        orderId: installment.quotation.orderId,
+        actorId: null,
       });
     }
 

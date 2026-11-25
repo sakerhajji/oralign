@@ -10,6 +10,17 @@ import { cn } from '@/lib/utils';
 
 const SEARCH_DEBOUNCE_MS = 300;
 
+// `touch` (the lab's bench screens): a 48 px field and clear button for a
+// finger at every width, the compact box only for a mouse from md up.
+const SIZES = {
+  default: { input: 'h-9 pr-10', slot: 'size-7', clear: undefined },
+  touch: {
+    input: 'h-12 pr-14 pointer-fine:md:h-9 pointer-fine:md:pr-10',
+    slot: 'size-12 pointer-fine:md:size-7',
+    clear: 'size-12 pointer-fine:md:size-7',
+  },
+} as const;
+
 /**
  * The search box of a list screen.
  *
@@ -27,6 +38,7 @@ export function ListSearch({
   busy = false,
   maxLength,
   className,
+  size = 'default',
 }: {
   /** The committed (trimmed) search, never the raw input text. */
   value: string;
@@ -38,8 +50,11 @@ export function ListSearch({
   /** The longest search the API accepts. */
   maxLength?: number;
   className?: string;
+  /** `touch`: 48 px targets for a touch pointer. */
+  size?: keyof typeof SIZES;
 }) {
   const { t } = useT();
+  const sizing = SIZES[size];
   const [draft, setDraft] = useState(value);
 
   const commit = useDebouncedCallback((next: string) => {
@@ -85,9 +100,14 @@ export function ListSearch({
         autoComplete="off"
         spellCheck={false}
         enterKeyHint="search"
-        className="h-9 pr-10 pl-9 text-ellipsis"
+        className={cn(sizing.input, 'pl-9 text-ellipsis')}
       />
-      <div className="absolute top-1/2 right-1 flex size-7 -translate-y-1/2 items-center justify-center">
+      <div
+        className={cn(
+          'absolute top-1/2 right-1 flex -translate-y-1/2 items-center justify-center',
+          sizing.slot,
+        )}
+      >
         {working ? (
           <Loader2
             className="size-4 animate-spin text-muted-foreground"
@@ -98,6 +118,7 @@ export function ListSearch({
             type="button"
             variant="ghost"
             size="icon-sm"
+            className={sizing.clear}
             onClick={clear}
             aria-label={t('listUi.search.clear')}
           >

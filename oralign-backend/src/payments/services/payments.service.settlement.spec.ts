@@ -1,4 +1,5 @@
 import {
+  BatchStatus,
   InstallmentStatus,
   OrderStatus,
   PaymentMethod,
@@ -19,9 +20,19 @@ jest.mock('../../quotations/services/quotation.service', () => ({
   QuotationService: class QuotationService {},
 }));
 
+// The batch projection has its own spec; here only the D2 unlock hook's
+// wiring matters: when it runs, in which transaction, after which write.
+jest.mock('../../production/production-batch-projection', () => ({
+  projectBatches: jest.fn().mockResolvedValue(undefined),
+}));
+
 import type { QuotationService } from '../../quotations/services/quotation.service';
 import { NotificationEvents } from '../../notifications/events/notification-events';
+import { projectBatches } from '../../production/production-batch-projection';
 import { PaymentsService, settledTotal } from './payments.service';
+
+const project = jest.mocked(projectBatches);
+beforeEach(() => project.mockClear());
 
 const admin: Caller = { userId: 'u-admin', role: UserRole.admin };
 const doctor: Caller = { userId: 'u-doc', role: UserRole.dentist };
@@ -49,6 +60,8 @@ interface Setup {
   };
   /** The order's status before the payment (payment_pending by default). */
   orderStatus?: OrderStatus;
+  /** The installment's step batch (none by default). */
+  stepBatch?: { id: string; status: BatchStatus } | null;
 }
 
 function setup(options: Setup = {}) {
@@ -75,7 +88,7 @@ function setup(options: Setup = {}) {
         patient: { fullName: 'Ines' },
       },
     },
-    stepBatch: null,
+    stepBatch: options.stepBatch ?? null,
   };
   const order = {
     id: 'o-1',
@@ -787,5 +800,55 @@ describe('PaymentsService.declareBankTransfer', () => {
     expect(tx.payment.updateMany).not.toHaveBeenCalled();
     expect(tx.payment.create).not.toHaveBeenCalled();
     expect(events.emit).not.toHaveBeenCalled();
+  });
+});
+
+describe('the D2 unlock hook: a paid installment re-projects its batches', () => {
+  const settle = (stepBatch: { id: string; status: BatchStatus } | null) => {
+    const world = setup({ stepBatch });
+    return {
+      ...world,
+      run: () =>
+        world.service.recordCash({ installmentId: 'i-1', caller: admin }),
+    };
+  };
+
+  it('unlocks the locked batch, THEN projects the order in the same transaction, attributed to nobody', async () => {
+    const { tx, run } = settle({ id: 'b-1', status: BatchStatus.locked });
+
+    await run();
+
+    expect(tx.quoteStepBatch.update).toHaveBeenCalledWith({
+      where: { id: 'b-1' },
+      data: {
+        status: BatchStatus.unlocked,
+        unlockedAt: expect.any(Date) as unknown,
+      },
+    });
+    expect(project).toHaveBeenCalledTimes(1);
+    // The transaction client, never the root client; null = the author of
+    // the deliveries (the payer delivered nothing).
+    expect(project).toHaveBeenCalledWith(tx, { orderId: 'o-1', actorId: null });
+    // After the unlock: a projection before it would still see the batch locked.
+    expect(project.mock.invocationCallOrder[0]).toBeGreaterThan(
+      tx.quoteStepBatch.update.mock.invocationCallOrder[0],
+    );
+  });
+
+  it.each([BatchStatus.unlocked, BatchStatus.delivered])(
+    'a batch already %s is left alone: no unlock, no projection',
+    async (status) => {
+      const { tx, run } = settle({ id: 'b-1', status });
+      await run();
+      expect(tx.quoteStepBatch.update).not.toHaveBeenCalled();
+      expect(project).not.toHaveBeenCalled();
+    },
+  );
+
+  it('an installment without a step batch projects nothing', async () => {
+    const { tx, run } = settle(null);
+    await run();
+    expect(tx.quoteStepBatch.update).not.toHaveBeenCalled();
+    expect(project).not.toHaveBeenCalled();
   });
 });

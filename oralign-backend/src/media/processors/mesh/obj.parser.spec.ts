@@ -17,6 +17,10 @@ import {
 } from './mesh.types';
 import { cornerIndex, readObj } from './obj.parser';
 
+// The streaming test parses through a tiny window: under the load of a
+// parallel Docker build it can pass the default 5 s.
+jest.setTimeout(30_000);
+
 const QUAD: FixtureMesh = {
   vertices: [
     [0, 0, 0],

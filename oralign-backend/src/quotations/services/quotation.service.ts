@@ -33,6 +33,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { NotificationEvents } from '../../notifications/events/notification-events';
 import { isAdmin, type Caller } from '../../common/access/caller';
 import { lookupActorName } from '../../common/access/actor-snapshot';
+import { projectBatches } from '../../production/production-batch-projection';
 import {
   isQuotable,
   QUOTABLE_ORDER_SELECT,
@@ -673,10 +674,18 @@ export class QuotationService {
               where: { id: { in: ids } },
               data: { amount: 0, status: InstallmentStatus.cancelled },
             });
-            await tx.quoteStepBatch.updateMany({
+            const unlocked = await tx.quoteStepBatch.updateMany({
               where: { installmentId: { in: ids }, status: BatchStatus.locked },
               data: { status: BatchStatus.unlocked, unlockedAt: new Date() },
             });
+            // Steps delivered before they were released flip their batch
+            // to delivered now, in this transaction (D2).
+            if (unlocked.count > 0) {
+              await projectBatches(tx, {
+                orderId: fresh.orderId,
+                actorId: null,
+              });
+            }
           }
           if (plan.extra) {
             // Every row is paid and the total went up: bill the difference

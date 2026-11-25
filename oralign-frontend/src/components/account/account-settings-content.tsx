@@ -420,7 +420,7 @@ export function AccountSettingsContent() {
                           <label className="text-sm font-medium" htmlFor="fullName">
                             {t('accountSettings.fullNameLabel')}
                           </label>
-                          <Input id="fullName" {...profileForm.register('fullName')} />
+                          <Input id="fullName" maxLength={120} {...profileForm.register('fullName')} />
                           {profileForm.formState.errors.fullName && (
                             <p className="text-sm text-destructive">
                               {profileForm.formState.errors.fullName.message}

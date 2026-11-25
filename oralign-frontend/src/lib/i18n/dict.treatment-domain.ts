@@ -64,6 +64,37 @@ export const treatmentDomainDict = {
         en: 'Mark as ready for review',
         fr: 'Marquer comme prêt pour examen',
       } as T,
+      // Per-arch aligner totals, required before the send (the lab's
+      // production tracking counts against them).
+      totals: {
+        title: { en: 'Number of aligners', fr: 'Nombre d’aligneurs' } as T,
+        hint: {
+          en: 'Required for each treated arch before sending: the lab tracks its production against these totals.',
+          fr: 'Obligatoire pour chaque arcade traitée avant l’envoi : le laboratoire suit sa production sur ces totaux.',
+        } as T,
+        upper: { en: 'Upper arch', fr: 'Arcade supérieure' } as T,
+        lower: { en: 'Lower arch', fr: 'Arcade inférieure' } as T,
+        unit: { en: 'aligners', fr: 'aligneurs' } as T,
+        notTreated: { en: '{arch}: not treated', fr: '{arch} : non traitée' } as T,
+        required: {
+          en: 'Enter the number of aligners for this arch.',
+          fr: 'Indiquez le nombre d’aligneurs de cette arcade.',
+        } as T,
+        invalid: {
+          en: 'A whole number from 1 to 200.',
+          fr: 'Un nombre entier entre 1 et 200.',
+        } as T,
+        missing: {
+          en: 'Enter the number of aligners of each treated arch before sending the plan.',
+          fr: 'Renseignez le nombre d’aligneurs de chaque arcade traitée avant d’envoyer le plan.',
+        } as T,
+        save: { en: 'Save totals', fr: 'Enregistrer les totaux' } as T,
+        saving: { en: 'Saving…', fr: 'Enregistrement…' } as T,
+        saved: {
+          en: 'Aligner totals saved.',
+          fr: 'Nombre d’aligneurs enregistré.',
+        } as T,
+      },
     },
 
     // ─── Plan header (title + dates + public link) ───────────────────

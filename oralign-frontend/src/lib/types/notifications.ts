@@ -25,6 +25,9 @@ export enum NotificationType {
   BATCH_UNLOCKED = 'batch_unlocked',
   BATCH_DELIVERED = 'batch_delivered',
   INSTALLMENT_OVERDUE = 'installment_overdue',
+  // Lab production notices (ProductionNotice, in-app channel)
+  PRODUCTION_DELIVERED = 'production_delivered',
+  PRODUCTION_DELIVERY_CANCELLED = 'production_delivery_cancelled',
   // Generic
   SYSTEM_MESSAGE = 'system_message',
 }

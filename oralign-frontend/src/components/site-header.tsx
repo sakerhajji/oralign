@@ -1,7 +1,10 @@
+"use client"
+
 import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { NotificationBell } from "@/components/notifications/notification-bell"
 import { LanguageSwitcher } from "@/components/layout/language-switcher"
+import { useAuth } from "@/lib/providers/auth-provider"
 
 /**
  * Dashboard header strap. Houses the sidebar toggle on the left and
@@ -14,8 +17,12 @@ import { LanguageSwitcher } from "@/components/layout/language-switcher"
  * browser restyle the whole dashboard on every sidebar toggle (a `:has()`
  * on the wrapper, which holds every page). On the order wizard's
  * odontogram that froze each hover open/close for 300–700 ms.
+ *
+ * The lab technician gets no bell: nothing is ever notified to her, and
+ * the notifications page is not one of her screens.
  */
 export function SiteHeader() {
+  const { isTechnician } = useAuth()
   return (
     <header className="flex h-(--header-height) shrink-0 items-center gap-2 border-b">
       <div className="flex w-full items-center gap-1 px-4 lg:gap-2 lg:px-6">
@@ -25,8 +32,9 @@ export function SiteHeader() {
             re-clicked to close, and a second click on the same spot hit
             the header logo link underneath and navigated to /dashboard.
             On mobile the sidebar is a Sheet and this button is the only
-            way to open it, so it stays for < md. */}
-        <SidebarTrigger className="-ml-1 md:hidden" />
+            way to open it, so it stays for < md. A finger gets a 48 px
+            target; the negative margin keeps the icon where it was. */}
+        <SidebarTrigger className="-ml-1 md:hidden pointer-coarse:-ml-3.5 pointer-coarse:size-12" />
         <Separator
           orientation="vertical"
           className="mx-2 data-[orientation=vertical]:h-4 md:hidden"
@@ -41,7 +49,7 @@ export function SiteHeader() {
             anchor users expect to click. */}
         <div className="flex items-center gap-1">
           <LanguageSwitcher />
-          <NotificationBell />
+          {!isTechnician && <NotificationBell />}
         </div>
       </div>
     </header>

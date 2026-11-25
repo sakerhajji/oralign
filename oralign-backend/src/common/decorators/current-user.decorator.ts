@@ -12,6 +12,13 @@ export interface JwtPayload {
   role: UserRole;
   /** tokenVersion at issue time (session revocation). */
   tv?: number;
+  /**
+   * NOT a token claim: set by JwtStrategy.validate() from the user row it
+   * reloads on every request, so the password-change gate (auth
+   * PasswordChangeGuard) needs no extra query. True while the account runs
+   * on a temporary password.
+   */
+  mustChangePassword?: boolean;
   iat: number;
   exp: number;
 }

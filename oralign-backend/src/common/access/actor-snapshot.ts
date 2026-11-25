@@ -2,6 +2,13 @@ import type { UserRole } from '@prisma/client';
 import type { PrismaService } from '../../prisma/prisma.service';
 
 /**
+ * Upper bound of a person's full name. The account DTOs (create, update,
+ * sign-up) enforce it at the source; lookupActorName clamps to it, so a
+ * name saved before the bound existed never inflates a snapshot column.
+ */
+export const FULL_NAME_MAX_LENGTH = 120;
+
+/**
  * Display name of the acting user, captured at write time.
  *
  * Actor references (createdBy / sender / uploadedBy) are `onDelete: SetNull`
@@ -18,7 +25,20 @@ export async function lookupActorName(
     where: { id: userId },
     select: { fullName: true },
   });
-  return user?.fullName ?? null;
+  return typeof user?.fullName === 'string'
+    ? clampFullName(user.fullName)
+    : null;
+}
+
+/** Trimmed and cut to FULL_NAME_MAX_LENGTH, never through an emoji's surrogate pair. */
+export function clampFullName(name: string): string {
+  const trimmed = name.trim();
+  if (trimmed.length <= FULL_NAME_MAX_LENGTH) return trimmed;
+  const lastKept = trimmed.charCodeAt(FULL_NAME_MAX_LENGTH - 1);
+  const isHighSurrogate = lastKept >= 0xd800 && lastKept <= 0xdbff;
+  return trimmed
+    .slice(0, isHighSurrogate ? FULL_NAME_MAX_LENGTH - 1 : FULL_NAME_MAX_LENGTH)
+    .trimEnd();
 }
 
 /** The shape every message DTO exposes for its author. */

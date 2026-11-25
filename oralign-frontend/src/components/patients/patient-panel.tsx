@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useSyncExternalStore, type ComponentType, type ReactNode } from 'react';
+import { useState, type ComponentType, type ReactNode } from 'react';
 import Link from 'next/link';
 import {
   ArchiveRestore,
@@ -37,6 +37,7 @@ import { cn } from '@/lib/utils';
 // Days as Tunis business days, as the "date added" filter counts them.
 import { formatBusinessDay } from '@/lib/utils/business-day';
 import { formatPhone, phoneHref } from '@/lib/utils/phone';
+import { usePhoneLayout } from '@/hooks/use-phone-layout';
 import { PatientAvatar } from './patient-avatar';
 import { formatDateOfBirth, genderLabelKey, patientAge, patientFacts } from './patient-format';
 
@@ -58,27 +59,6 @@ export interface PatientPanelProps {
   onPermanentDelete: (patient: PanelPatient) => void;
   /** An action on this patient is running (buttons wait). */
   pending: boolean;
-}
-
-const PHONE_QUERY = '(max-width: 767px)';
-
-function subscribe(onChange: () => void) {
-  const query = window.matchMedia(PHONE_QUERY);
-  query.addEventListener('change', onChange);
-  return () => query.removeEventListener('change', onChange);
-}
-
-/**
- * Phone or wide layout, or null until known: the server can't tell, and
- * guessing would mount the side panel first and swap it for the bottom
- * sheet a frame later on a phone opened from a link.
- */
-function usePhoneLayout(): boolean | null {
-  return useSyncExternalStore(
-    subscribe,
-    () => window.matchMedia(PHONE_QUERY).matches,
-    () => null,
-  );
 }
 
 /**

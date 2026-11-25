@@ -32,6 +32,7 @@ export type UserStats = {
   pending: number;
   dentists: number;
   admins: number;
+  technicians: number;
   giftAvailable: number;
   giftUsed: number;
 };
@@ -50,8 +51,50 @@ export class UserRepository {
     country?: string;
     avatarUrl?: string;
     role?: UserRole;
+    isEmailVerified?: boolean;
+    verificationStatus?: VerificationStatus;
+    preferredLanguage?: string;
+    mustChangePassword?: boolean;
+    temporaryPasswordIssuedAt?: Date;
+    temporaryPasswordIssuedById?: string;
   }): Promise<UserWithProfile> {
     return this.prisma.user.create({ data, include: this.withProfile });
+  }
+
+  /**
+   * POST users/:id/temporary-password in ONE conditional write: only a live
+   * technician account matches, so a role change or an archive racing the
+   * request never hands a password to anything else. The new password is
+   * temporary, every session is revoked (tokenVersion) and the sign-in
+   * lock is lifted. false = nothing matched (see findAccountState).
+   */
+  async issueTechnicianPassword(
+    id: string,
+    data: { passwordHash: string; issuedAt: Date; issuedById: string },
+  ): Promise<boolean> {
+    const { count } = await this.prisma.user.updateMany({
+      where: { id, role: UserRole.technician, deletedAt: null },
+      data: {
+        passwordHash: data.passwordHash,
+        mustChangePassword: true,
+        tokenVersion: { increment: 1 },
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+        temporaryPasswordIssuedAt: data.issuedAt,
+        temporaryPasswordIssuedById: data.issuedById,
+      },
+    });
+    return count > 0;
+  }
+
+  /** Role and archive state only: tells a 404 from a 409 after a refused write. */
+  async findAccountState(
+    id: string,
+  ): Promise<{ role: UserRole; deletedAt: Date | null } | null> {
+    return this.prisma.user.findUnique({
+      where: { id },
+      select: { role: true, deletedAt: true },
+    });
   }
 
   async findById(id: string): Promise<UserWithProfile | null> {
@@ -112,7 +155,12 @@ export class UserRepository {
       phone?: string | null;
       country?: string | null;
       avatarUrl?: string;
+      preferredLanguage?: string;
       passwordHash?: string;
+      tokenVersion?: { increment: number };
+      mustChangePassword?: boolean;
+      temporaryPasswordIssuedAt?: Date;
+      temporaryPasswordIssuedById?: string;
       role?: UserRole;
       isEmailVerified?: boolean;
       isActive?: boolean;
@@ -150,29 +198,56 @@ export class UserRepository {
    */
   async countProtectedDependents(
     id: string,
-  ): Promise<{ patients: number; orders: number } | null> {
+  ): Promise<{ patients: number; orders: number; role: UserRole } | null> {
     const row = await this.prisma.user.findUnique({
       where: { id },
       select: {
         deletedAt: true,
+        role: true,
         _count: { select: { patients: true, doctorOrders: true } },
       },
     });
     if (!row) return null;
-    return { patients: row._count.patients, orders: row._count.doctorOrders };
+    return {
+      patients: row._count.patients,
+      orders: row._count.doctorOrders,
+      role: row.role,
+    };
   }
 
-  async bulkDelete(ids: string[]): Promise<number> {
+  /** Super admin accounts among `ids` in the live or archived scope: what a bulk action below super admin spares. */
+  async countSuperAdmins(
+    ids: string[],
+    scope: { deleted: boolean },
+  ): Promise<number> {
+    if (ids.length === 0) return 0;
+    return this.prisma.user.count({
+      where: {
+        id: { in: ids },
+        role: UserRole.super_admin,
+        deletedAt: scope.deleted ? { not: null } : null,
+      },
+    });
+  }
+
+  async bulkDelete(
+    ids: string[],
+    options: BulkWriteOptions = {},
+  ): Promise<number> {
     const result = await this.prisma.user.updateMany({
-      where: { id: { in: ids }, deletedAt: null },
+      where: { id: { in: ids }, deletedAt: null, ...spared(options) },
       data: { deletedAt: new Date() },
     });
     return result.count;
   }
 
-  async bulkUpdateStatus(ids: string[], isActive: boolean): Promise<number> {
+  async bulkUpdateStatus(
+    ids: string[],
+    isActive: boolean,
+    options: BulkWriteOptions = {},
+  ): Promise<number> {
     const result = await this.prisma.user.updateMany({
-      where: { id: { in: ids }, deletedAt: null },
+      where: { id: { in: ids }, deletedAt: null, ...spared(options) },
       data: { isActive, updatedAt: new Date() },
     });
     return result.count;
@@ -216,26 +291,36 @@ export class UserRepository {
       ...live,
       role: UserRole.dentist,
     };
-    const [total, active, pending, admins, giftAvailable, giftUsed] =
-      await Promise.all([
-        this.prisma.user.count({ where: live }),
-        this.prisma.user.count({ where: { ...live, isActive: true } }),
-        this.prisma.user.count({
-          where: { ...live, verificationStatus: VerificationStatus.pending },
-        }),
-        this.prisma.user.count({
-          where: {
-            ...live,
-            role: { in: [UserRole.admin, UserRole.super_admin] },
-          },
-        }),
-        this.prisma.user.count({
-          where: { ...dentist, welcomeGiftUsedAt: null },
-        }),
-        this.prisma.user.count({
-          where: { ...dentist, welcomeGiftUsedAt: { not: null } },
-        }),
-      ]);
+    const [
+      total,
+      active,
+      pending,
+      admins,
+      technicians,
+      giftAvailable,
+      giftUsed,
+    ] = await Promise.all([
+      this.prisma.user.count({ where: live }),
+      this.prisma.user.count({ where: { ...live, isActive: true } }),
+      this.prisma.user.count({
+        where: { ...live, verificationStatus: VerificationStatus.pending },
+      }),
+      this.prisma.user.count({
+        where: {
+          ...live,
+          role: { in: [UserRole.admin, UserRole.super_admin] },
+        },
+      }),
+      this.prisma.user.count({
+        where: { ...live, role: UserRole.technician },
+      }),
+      this.prisma.user.count({
+        where: { ...dentist, welcomeGiftUsedAt: null },
+      }),
+      this.prisma.user.count({
+        where: { ...dentist, welcomeGiftUsedAt: { not: null } },
+      }),
+    ]);
     return {
       total,
       active,
@@ -243,6 +328,7 @@ export class UserRepository {
       pending,
       dentists: giftAvailable + giftUsed,
       admins,
+      technicians,
       giftAvailable,
       giftUsed,
     };
@@ -311,9 +397,12 @@ export class UserRepository {
     });
   }
 
-  async bulkRestore(ids: string[]): Promise<number> {
+  async bulkRestore(
+    ids: string[],
+    options: BulkWriteOptions = {},
+  ): Promise<number> {
     const result = await this.prisma.user.updateMany({
-      where: { id: { in: ids }, deletedAt: { not: null } },
+      where: { id: { in: ids }, deletedAt: { not: null }, ...spared(options) },
       data: { deletedAt: null, updatedAt: new Date() },
     });
     return result.count;
@@ -324,10 +413,26 @@ export class UserRepository {
    * same rule as the single-row path) — a live account can never be
    * purged in bulk by accident.
    */
-  async bulkHardDelete(ids: string[]): Promise<number> {
+  async bulkHardDelete(
+    ids: string[],
+    options: BulkWriteOptions = {},
+  ): Promise<number> {
     const result = await this.prisma.user.deleteMany({
-      where: { id: { in: ids }, deletedAt: { not: null } },
+      where: { id: { in: ids }, deletedAt: { not: null }, ...spared(options) },
     });
     return result.count;
   }
+}
+
+/**
+ * `spareSuperAdmins`: the caller is below super admin, so the bulk write
+ * must not touch a super admin account (UserService hierarchy). In the
+ * `where` itself, so a row promoted meanwhile is still spared.
+ */
+export type BulkWriteOptions = { spareSuperAdmins?: boolean };
+
+function spared(options: BulkWriteOptions): Prisma.UserWhereInput {
+  return options.spareSuperAdmins
+    ? { role: { not: UserRole.super_admin } }
+    : {};
 }

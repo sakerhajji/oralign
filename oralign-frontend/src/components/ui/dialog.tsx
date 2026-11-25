@@ -76,7 +76,9 @@ function DialogContent({
           <DialogPrimitive.Close data-slot="dialog-close" asChild>
             <Button
               variant="ghost"
-              className="absolute top-2 right-2"
+              // 48 px under a finger, in the corner, so the X stays within
+              // 2 px of where it was and titles keep their room.
+              className="absolute top-2 right-2 pointer-coarse:top-0 pointer-coarse:right-0 pointer-coarse:size-12"
               size="icon-sm"
             >
               <XIcon

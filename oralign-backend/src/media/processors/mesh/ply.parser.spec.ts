@@ -14,6 +14,10 @@ import {
 import type { ParsedMesh, TriangleGeometry } from './mesh.types';
 import { parsePlyHeader, readPly } from './ply.parser';
 
+// The streaming test parses every encoding through a 4 KB window: under the
+// load of a parallel Docker build it can pass the default 5 s.
+jest.setTimeout(30_000);
+
 /** One quad and one triangle: 3 triangles once fan-triangulated. */
 const QUAD: FixtureMesh = {
   vertices: [

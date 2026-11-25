@@ -22,6 +22,12 @@ export interface User {
   avatarUrl?: string;
   /** Content language ('fr' | 'en') — UI, notifications and emails. */
   preferredLanguage?: string;
+  /**
+   * The account still runs on a temporary password the admin handed over:
+   * the API refuses everything but GET /users/me and POST
+   * /auth/change-password (403 PASSWORD_CHANGE_REQUIRED) until it changes.
+   */
+  mustChangePassword?: boolean;
   lastLoginAt?: string;
   createdAt: string;
   updatedAt: string;

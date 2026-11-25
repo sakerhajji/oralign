@@ -54,6 +54,18 @@ export interface AuthResponseDto {
   avatarUrl?: string;
   /** 'fr' | 'en' — seeds the i18n store right after sign-in. */
   preferredLanguage?: string;
+  /** Temporary password in use: send the user to /onboarding/password first. */
+  mustChangePassword?: boolean;
+  authToken: AuthTokenDto;
+}
+
+/**
+ * `POST /auth/change-password` answer: the change revokes every session
+ * (tokenVersion bump) and hands the caller a fresh pair, so the tab that
+ * changed the password stays signed in.
+ */
+export interface ChangePasswordResponseDto {
+  message: string;
   authToken: AuthTokenDto;
 }
 

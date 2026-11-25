@@ -1,5 +1,11 @@
 import { UserRole } from '@prisma/client';
-import { ADMIN_ROLES, isAdmin, isUserRole } from './caller';
+import {
+  ADMIN_ROLES,
+  PRODUCTION_ROLES,
+  isAdmin,
+  isTechnician,
+  isUserRole,
+} from './caller';
 
 describe('caller helpers', () => {
   describe('isAdmin', () => {
@@ -10,7 +16,7 @@ describe('caller helpers', () => {
       },
     );
 
-    it.each([UserRole.dentist, UserRole.designer])(
+    it.each([UserRole.dentist, UserRole.designer, UserRole.technician])(
       'is false for %s',
       (role) => {
         expect(isAdmin({ role })).toBe(false);
@@ -21,6 +27,31 @@ describe('caller helpers', () => {
       expect([...ADMIN_ROLES].sort()).toEqual(
         [UserRole.admin, UserRole.super_admin].sort(),
       );
+    });
+  });
+
+  describe('isTechnician', () => {
+    it('is true for the technician only', () => {
+      for (const role of Object.values(UserRole)) {
+        expect(isTechnician({ role })).toBe(role === UserRole.technician);
+      }
+    });
+  });
+
+  describe('PRODUCTION_ROLES', () => {
+    it('is exactly technician + the admin roles', () => {
+      expect([...PRODUCTION_ROLES].sort()).toEqual(
+        [UserRole.technician, UserRole.admin, UserRole.super_admin].sort(),
+      );
+    });
+
+    it('never lets dentists or designers in', () => {
+      expect(PRODUCTION_ROLES).not.toContain(UserRole.dentist);
+      expect(PRODUCTION_ROLES).not.toContain(UserRole.designer);
+    });
+
+    it('adding the technician did not widen ADMIN_ROLES', () => {
+      expect(ADMIN_ROLES).not.toContain(UserRole.technician);
     });
   });
 

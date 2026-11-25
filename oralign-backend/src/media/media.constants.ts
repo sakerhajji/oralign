@@ -46,6 +46,78 @@ export const ZIP_MIMES = new Set([
   'multipart/x-zip',
 ]);
 
+// ── Serving stored uploads ───────────────────────────────────────────
+// A stored mimeType is the UPLOADER's claim (multipart part header or
+// chunked-session field), never derived from the bytes. Served as is, an
+// SVG / HTML / XML claim renders as a script-running document.
+
+const OCTET_STREAM = 'application/octet-stream';
+
+/**
+ * Declared types an authenticated file route may serve INLINE under their
+ * own Content-Type: raster images, the only originals a preview asks for
+ * (videos and PDFs are always fetched as attachments).
+ */
+export const INLINE_SAFE_MIMES: ReadonlySet<string> = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+  'image/avif',
+]);
+
+/** A MIME type's essence: lower case, without parameters or spaces. */
+export function mimeEssence(mimeType: string | null | undefined): string {
+  return (mimeType ?? '').split(';', 1)[0].trim().toLowerCase();
+}
+
+/** The type to serve a stored original inline with, or null when it may not be. */
+export function inlineSafeMimeType(
+  mimeType: string | null | undefined,
+): string | null {
+  const essence = mimeEssence(mimeType);
+  return INLINE_SAFE_MIMES.has(essence) ? essence : null;
+}
+
+/** Types a browser renders as a document that runs script (any XML can carry XHTML). */
+function isActiveDocumentMime(essence: string): boolean {
+  return (
+    essence === 'text/html' ||
+    essence === 'application/xhtml+xml' ||
+    essence === 'text/xml' ||
+    essence === 'application/xml' ||
+    essence === 'text/xsl' ||
+    essence.endsWith('+xml')
+  );
+}
+
+/**
+ * The mimeType to STORE for an upload: the declared one, except an active
+ * document type (SVG, HTML, XML…), stored as application/octet-stream so
+ * no reader (download route, preview picked by mimeType) treats the bytes
+ * as one. The upload itself is still accepted: the extension denylist and
+ * the content scan are the refusal gates.
+ */
+export function storedUploadMimeType(
+  declared: string | null | undefined,
+): string {
+  if (!declared) return OCTET_STREAM;
+  const essence = mimeEssence(declared);
+  return essence && !isActiveDocumentMime(essence) ? declared : OCTET_STREAM;
+}
+
+/**
+ * Sent with every authenticated file stream (order and production download
+ * routes), as the /uploads static handler does: no type sniffing, and a
+ * response opened as a document runs no script and loads nothing. Neither
+ * affects an <img>, a <video> or a fetch() reading the bytes.
+ */
+export const STORED_FILE_SECURITY_HEADERS: Readonly<Record<string, string>> =
+  Object.freeze({
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Security-Policy': "default-src 'none'; sandbox",
+  });
+
 // ── ZIP safety caps ──────────────────────────────────────────────────
 // We only ever read the central directory (no extraction, nothing is
 // inflated), so a zip bomb cannot expand here — these caps just keep

@@ -142,6 +142,7 @@ describe('UserRepository reads', () => {
         },
         3,
       ],
+      [{ deletedAt: null, role: UserRole.technician }, 2],
       [
         { deletedAt: null, role: UserRole.dentist, welcomeGiftUsedAt: null },
         30,
@@ -171,9 +172,10 @@ describe('UserRepository reads', () => {
       pending: 4,
       dentists: 42,
       admins: 3,
+      technicians: 2,
       giftAvailable: 30,
       giftUsed: 12,
     });
-    expect(count).toHaveBeenCalledTimes(6);
+    expect(count).toHaveBeenCalledTimes(7);
   });
 });

@@ -29,6 +29,7 @@ import {
 import {
   AuthTokenDto,
   AuthResponseDto,
+  ChangePasswordResponseDto,
   VerifyEmailResponseDto,
 } from '../dto/auth-response.dto';
 import { UserRole } from '@prisma/client';
@@ -134,6 +135,7 @@ export class AuthService {
       // Seeds the frontend i18n store immediately after sign-in /
       // sign-up — before the first /users/me round-trip.
       preferredLanguage: user.preferredLanguage ?? undefined,
+      mustChangePassword: user.mustChangePassword,
       authToken,
     };
   }
@@ -170,9 +172,12 @@ export class AuthService {
       const minutesLeft = Math.ceil(
         (user.lockedUntil.getTime() - Date.now()) / 60_000,
       );
+      // The delay also goes as a number: the sentence is English, and the
+      // sign-in screen words it in the user's language.
       throw new UnauthorizedException(
         `Account locked. Try again in ${minutesLeft} minute${minutesLeft !== 1 ? 's' : ''}.`,
         'ACCOUNT_LOCKED',
+        { retryAfterMinutes: minutesLeft },
       );
     }
 
@@ -204,6 +209,9 @@ export class AuthService {
           ? 'Account locked due to too many failed attempts. Try again in 15 minutes.'
           : 'Invalid email or password.',
         shouldLock ? 'ACCOUNT_LOCKED' : 'INVALID_CREDENTIALS',
+        shouldLock
+          ? { retryAfterMinutes: LOCK_DURATION_MS / 60_000 }
+          : undefined,
       );
     }
 
@@ -234,6 +242,9 @@ export class AuthService {
       // Seeds the frontend i18n store immediately after sign-in /
       // sign-up — before the first /users/me round-trip.
       preferredLanguage: user.preferredLanguage ?? undefined,
+      // A temporary password (admin handover): the app opens on the
+      // "choose your password" step, every other route answers 403.
+      mustChangePassword: user.mustChangePassword,
       authToken,
     };
   }
@@ -485,12 +496,14 @@ export class AuthService {
     );
 
     // Bump tokenVersion (audit M-6 + L-2): invalidates every existing
-    // session AND this very reset link.
+    // session AND this very reset link. The password is now one the
+    // account chose itself, so a pending temporary one no longer is.
     await this.prisma.user.update({
       where: { id: user.id },
       data: {
         passwordHash: hashedPassword,
         tokenVersion: { increment: 1 },
+        mustChangePassword: false,
       },
     });
 
@@ -542,7 +555,7 @@ export class AuthService {
   async changePassword(
     userId: string,
     dto: ChangePasswordDto,
-  ): Promise<{ message: string }> {
+  ): Promise<ChangePasswordResponseDto> {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
 
     if (!user || user.deletedAt) {
@@ -568,17 +581,29 @@ export class AuthService {
     }
 
     const hashedPassword = await bcrypt.hash(dto.newPassword, BCRYPT_COST);
-    // Bump tokenVersion (audit M-6): changing your password logs out every
-    // other existing session.
-    await this.prisma.user.update({
+    // Bump tokenVersion (audit M-6): every existing session is revoked,
+    // this one included, so the caller gets a fresh pair for the new
+    // version. A pending temporary password is cleared: the account chose
+    // its own (the handover trace columns stay: they record the last one).
+    const updated = await this.prisma.user.update({
       where: { id: user.id },
       data: {
         passwordHash: hashedPassword,
         tokenVersion: { increment: 1 },
+        mustChangePassword: false,
       },
+      select: { id: true, email: true, role: true, tokenVersion: true },
     });
 
-    return { message: 'Password changed successfully' };
+    return {
+      message: 'Password changed successfully',
+      authToken: this.generateTokens(
+        updated.id,
+        updated.email,
+        updated.role,
+        updated.tokenVersion,
+      ),
+    };
   }
 
   // ─────────────────────────────────────────────────────────────────────────────

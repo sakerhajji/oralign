@@ -31,13 +31,20 @@ export function OnboardingShell({
   description,
   children,
   hideStepper,
+  narrow,
+  icon,
 }: {
-  current: OnboardingStepKey;
+  /** The dentist step to light; omit it with `hideStepper`. */
+  current?: OnboardingStepKey;
   title: string;
   description?: string;
   children: ReactNode;
   /** Skip the stepper UI (e.g. on the pending-approval screen). */
   hideStepper?: boolean;
+  /** A short form (the password step): a phone-width card. */
+  narrow?: boolean;
+  /** A mark above the title, for a step outside the dentist stepper. */
+  icon?: ReactNode;
 }) {
   const router = useRouter();
   const { t } = useT();
@@ -52,7 +59,9 @@ export function OnboardingShell({
         <button
           type="button"
           onClick={() => router.push('/')}
-          className="flex items-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-md"
+          // 48 px for a finger (the logo alone is 28 px tall); a mouse keeps
+          // the logo-sized box.
+          className="flex min-h-12 min-w-12 items-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-md pointer-fine:sm:min-h-0 pointer-fine:sm:min-w-0"
           aria-label={t('onboardingPages.shell.homeAria')}
         >
           <Image
@@ -70,20 +79,29 @@ export function OnboardingShell({
               {user.email}
             </span>
           )}
+          {/* Icon-only on a phone: the label names it there, and the
+              target keeps 48 px (the only way out of this flow) on any
+              touch screen; only a mouse gets the compact size. */}
           <Button
             type="button"
             variant="ghost"
             size="sm"
             onClick={() => logout()}
-            className="gap-2"
+            aria-label={t('onboardingPages.shell.signOut')}
+            className="h-12 min-w-12 gap-2 pointer-fine:sm:h-8 pointer-fine:sm:min-w-0"
           >
-            <LogOut className="h-4 w-4" />
+            <LogOut className="h-4 w-4" aria-hidden="true" />
             <span className="hidden sm:inline">{t('onboardingPages.shell.signOut')}</span>
           </Button>
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6 sm:py-12">
+      <main
+        className={cn(
+          'mx-auto w-full px-4 py-8 sm:px-6 sm:py-12',
+          narrow ? 'max-w-lg' : 'max-w-3xl',
+        )}
+      >
         {!hideStepper && (
           <ol
             className="mb-8 grid grid-cols-4 gap-2 sm:gap-3"
@@ -125,6 +143,11 @@ export function OnboardingShell({
 
         <div className="rounded-2xl border bg-card p-6 shadow-sm sm:p-8">
           <header className="mb-6">
+            {icon && (
+              <div className="mb-4 flex size-11 items-center justify-center rounded-full bg-primary/10 text-primary">
+                {icon}
+              </div>
+            )}
             <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
               {title}
             </h1>

@@ -616,6 +616,15 @@ export const commerceDomainDict = {
       payByCard: { en: 'Pay by card', fr: 'Payer par carte' } as T,
       recordCash: { en: 'Cash or cheque', fr: 'Espèces ou chèque' } as T,
       markDelivered: { en: 'Mark delivered', fr: 'Marquer comme livré' } as T,
+      // batch-delivery-button.tsx — an unlimited-step pack's batches are
+      // placeholders, so the batch is flipped without a lab declaration.
+      deliverUnlimited: {
+        title: { en: 'Mark batch {n} delivered?', fr: 'Marquer le lot {n} comme livré ?' } as T,
+        description: {
+          en: 'This pack has no step limit: its batches follow the payments, not the aligners. The batch is marked delivered directly, without a lab declaration, and the practitioner is notified. If it is the last batch, the case is closed.',
+          fr: 'Ce pack n’a pas de limite d’étapes : ses lots suivent les paiements, pas les aligneurs. Le lot est marqué livré directement, sans déclaration du laboratoire, et le praticien en est informé. S’il s’agit du dernier lot, le cas est clôturé.',
+        } as T,
+      },
     },
 
     // quote-pack-panel.tsx — record cash / cheque dialog
@@ -1292,6 +1301,7 @@ export const commerceDomainDict = {
       dentist: { en: 'Dentist', fr: 'Praticien' } as T,
       designer: { en: 'Designer', fr: 'Designer' } as T,
       super_admin: { en: 'Super Admin', fr: 'Super administrateur' } as T,
+      technician: { en: 'Technician', fr: 'Technicienne' } as T,
     },
     // VerificationStatus enum → display label
     verification: {
@@ -1432,6 +1442,8 @@ export const commerceDomainDict = {
     // Zod validation messages (user-detail-sheet.tsx schemas)
     validation: {
       min2: { en: 'At least 2 characters', fr: 'Au moins 2 caractères' } as T,
+      // The server caps fullName at 120 (it is snapshotted into production rows).
+      max120: { en: 'At most 120 characters', fr: '120 caractères au maximum' } as T,
       min8: { en: 'At least 8 characters', fr: 'Au moins 8 caractères' } as T,
       clinicNameRequired: {
         en: 'Clinic name is required',

@@ -51,6 +51,7 @@ export function SearchFilters({
           options={[
             { value: 'all', label: t('usersDesk.filters.roleAll') },
             { value: UserRole.DENTIST, label: t('usersUi.roles.dentist') },
+            { value: UserRole.TECHNICIAN, label: t('usersUi.roles.technician') },
             { value: UserRole.ADMIN, label: t('usersUi.roles.admin') },
             { value: UserRole.DESIGNER, label: t('usersUi.roles.designer') },
             { value: UserRole.SUPER_ADMIN, label: t('usersUi.roles.super_admin') },

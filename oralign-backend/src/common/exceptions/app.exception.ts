@@ -1,8 +1,18 @@
+/**
+ * Extra machine-readable members of an error body, sent next to
+ * statusCode / message / errorCode (e.g. `{ warnings: [...] }` on a 409 the
+ * client must confirm). Keys the envelope already uses are never
+ * overwritten (see AllExceptionsFilter). Never put secrets or internal
+ * state here: it reaches the client as is.
+ */
+export type ErrorDetails = Readonly<Record<string, unknown>>;
+
 export class AppException extends Error {
   constructor(
     public readonly statusCode: number,
     public readonly message: string,
     public readonly errorCode?: string,
+    public readonly details?: ErrorDetails,
   ) {
     super(message);
     this.name = 'AppException';
@@ -10,22 +20,30 @@ export class AppException extends Error {
 }
 
 export class BadRequestException extends AppException {
-  constructor(message: string, errorCode?: string) {
-    super(400, message, errorCode);
+  constructor(message: string, errorCode?: string, details?: ErrorDetails) {
+    super(400, message, errorCode, details);
     this.name = 'BadRequestException';
   }
 }
 
 export class UnauthorizedException extends AppException {
-  constructor(message: string = 'Unauthorized', errorCode?: string) {
-    super(401, message, errorCode);
+  constructor(
+    message: string = 'Unauthorized',
+    errorCode?: string,
+    details?: ErrorDetails,
+  ) {
+    super(401, message, errorCode, details);
     this.name = 'UnauthorizedException';
   }
 }
 
 export class ForbiddenException extends AppException {
-  constructor(message: string = 'Forbidden', errorCode?: string) {
-    super(403, message, errorCode);
+  constructor(
+    message: string = 'Forbidden',
+    errorCode?: string,
+    details?: ErrorDetails,
+  ) {
+    super(403, message, errorCode, details);
     this.name = 'ForbiddenException';
   }
 }
@@ -38,8 +56,8 @@ export class NotFoundException extends AppException {
 }
 
 export class ConflictException extends AppException {
-  constructor(message: string, errorCode?: string) {
-    super(409, message, errorCode);
+  constructor(message: string, errorCode?: string, details?: ErrorDetails) {
+    super(409, message, errorCode, details);
     this.name = 'ConflictException';
   }
 }

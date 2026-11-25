@@ -22,8 +22,17 @@ import { DEAD_PAYMENT_STATUSES, QUOTE_ERROR } from '../quote-money';
 jest.mock('./quotation-pdf.service', () => ({
   QuotationPdfService: class QuotationPdfService {},
 }));
+// The batch projection has its own spec; here only the D2 unlock hook's
+// wiring matters: when it runs, in which transaction, after which write.
+jest.mock('../../production/production-batch-projection', () => ({
+  projectBatches: jest.fn().mockResolvedValue(undefined),
+}));
 
+import { projectBatches } from '../../production/production-batch-projection';
 import { QuotationService } from './quotation.service';
+
+const project = jest.mocked(projectBatches);
+beforeEach(() => project.mockClear());
 
 const admin: Caller = { userId: 'u-admin', role: UserRole.admin };
 const D = (v: string | number) => new Prisma.Decimal(v);
@@ -306,6 +315,30 @@ describe('QuotationService.update — admin edits a quote already sent or approv
     });
     const audit = db.orderAuditLog.create.mock.calls[0][0];
     expect(audit.data.metadata).toMatchObject({ cancelledInstallments: [2, 3] });
+    // No batch was locked on those rows: nothing to re-project.
+    expect(project).not.toHaveBeenCalled();
+  });
+
+  it('re-projects the order once their locked batches are released, in the same transaction, after the release (D2)', async () => {
+    const { service, db } = world({
+      quote: packQuote(),
+      installments: [
+        installment(1, '600.000', InstallmentStatus.paid),
+        installment(2, '700.000'),
+        installment(3, '700.000'),
+      ],
+      payments: [group(PaymentRecordStatus.success, '600.000')],
+    });
+    db.quoteStepBatch.updateMany.mockResolvedValueOnce({ count: 1 });
+
+    await service.update('q-1', { discountAmount: 1780 }, admin);
+
+    expect(project).toHaveBeenCalledTimes(1);
+    // The transaction client (the world runs the transaction on db itself).
+    expect(project).toHaveBeenCalledWith(db, { orderId: 'o-1', actorId: null });
+    expect(project.mock.invocationCallOrder[0]).toBeGreaterThan(
+      db.quoteStepBatch.updateMany.mock.invocationCallOrder[0],
+    );
   });
 
   it('rebalances the unpaid installments, keeps the paid one and recomputes the money', async () => {

@@ -46,7 +46,9 @@ const makeSignUpSchema = (t: Translate) =>
     fullName: z
       .string()
       .min(2, t('authPages.validation.fullNameMin2'))
-      .transform((val) => normalizeDoctorName(val)),
+      .transform((val) => normalizeDoctorName(val))
+      // The bound applies to what is sent, "Dr. " prefix included (server max 120).
+      .pipe(z.string().max(120, t('authPages.validation.fullNameMax120'))),
     password: z.string().min(8, t('authPages.validation.passwordMin8')),
     phone: z.preprocess(
       (val) => (typeof val === 'string' ? val.trim() : val),

@@ -1,11 +1,35 @@
 import {
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, UserRole } from '@prisma/client';
+import { OrderStatus, Prisma, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { Caller, isAdmin } from './caller';
+import { PRODUCTION_ERROR } from '../../production/production.contract';
+import {
+  isDeclarableStatus,
+  isInProductionQueue,
+  isReadableByTechnician,
+  productionTechnicianReadWhere,
+} from '../../production/kernel';
+import { Caller, isAdmin, isTechnician } from './caller';
+
+/** What the production read rule needs to know about a loaded order. */
+export interface ProductionReadFacts {
+  status: OrderStatus;
+  deletedAt: Date | null;
+  /** The live quotation has an unlocked or delivered batch. */
+  hasReleasedBatch: boolean;
+  /** The order has a `declared` production event, live or cancelled. */
+  hasDeclaredEvent: boolean;
+}
+
+/** What the production write rule needs (the queue rule, D3). */
+export type ProductionWriteFacts = Omit<
+  ProductionReadFacts,
+  'hasDeclaredEvent'
+>;
 
 /**
  * THE authorization rule for anything hanging off a dental order (the
@@ -128,5 +152,59 @@ export class OrderAccessPolicy {
     }
     this.assertCanRead(order, caller);
     return order;
+  }
+
+  // ── Lab production (src/production) ─────────────────────────────────
+  // A SEPARATE rule on purpose: the technician reaches the production
+  // routes and their finance-free projections only. scope() and
+  // assertCanRead() keep refusing her, so quotations, payment plans,
+  // history, chat, patients and the order DTO (fees, contacts, paths)
+  // stay out of her reach.
+
+  /**
+   * Prisma `where` fragment of the orders the caller may open in the lab
+   * screens: admins every live order; the technician the queue (D3) plus
+   * the cases declared through the module (a `declared` event, so the
+   * legacy_batch import never opens the archive); anyone else 403.
+   */
+  productionReadScope(caller: Caller): Prisma.DentalOrderWhereInput {
+    if (isAdmin(caller)) return { deletedAt: null };
+    if (isTechnician(caller)) return productionTechnicianReadWhere();
+    throw new ForbiddenException('You cannot access production cases');
+  }
+
+  /** productionReadScope() on a loaded order: 404 when deleted, 403 ORDER_NOT_IN_PRODUCTION otherwise. */
+  assertCanReadForProduction(order: ProductionReadFacts, caller: Caller): void {
+    if (order.deletedAt) throw new NotFoundException('Order not found');
+    if (isAdmin(caller)) return;
+    if (isTechnician(caller) && isReadableByTechnician(order)) return;
+    throw new ForbiddenException(
+      'This case is not in production.',
+      PRODUCTION_ERROR.ORDER_NOT_IN_PRODUCTION,
+    );
+  }
+
+  /**
+   * Whether the caller may declare acts on the order: nobody on a draft,
+   * cancelled or rejected case; the technician only on the queue rule (a
+   * case of her history is readable, not declarable); admins on the rest.
+   */
+  canProduce(order: ProductionWriteFacts, caller: Caller): boolean {
+    if (order.deletedAt || !isDeclarableStatus(order.status)) return false;
+    if (isAdmin(caller)) return true;
+    return isTechnician(caller) && isInProductionQueue(order);
+  }
+
+  /** canProduce() as a guard: 404 when deleted, 409 ORDER_NOT_IN_PRODUCTION otherwise. */
+  assertCanProduce(order: ProductionWriteFacts, caller: Caller): void {
+    if (order.deletedAt) throw new NotFoundException('Order not found');
+    if (this.canProduce(order, caller)) return;
+    if (!isAdmin(caller) && !isTechnician(caller)) {
+      throw new ForbiddenException('You cannot access production cases');
+    }
+    throw new ConflictException(
+      'This case is not in production.',
+      PRODUCTION_ERROR.ORDER_NOT_IN_PRODUCTION,
+    );
   }
 }

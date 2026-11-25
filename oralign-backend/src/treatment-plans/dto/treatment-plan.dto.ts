@@ -27,18 +27,31 @@ export class CreateTreatmentPlanDto {
   @IsUrl({ require_protocol: true, require_tld: false })
   resultViewUrl?: string;
 
-  @ApiPropertyOptional()
+  // Planned aligners per arch (owner decision D4): required by mark-ready
+  // for each treated arch, so 0 is not a value; null clears it (an
+  // untreated arch, or a figure entered by mistake).
+  @ApiPropertyOptional({
+    minimum: 1,
+    maximum: 200,
+    nullable: true,
+    type: Number,
+  })
   @IsOptional()
   @IsInt()
-  @Min(0)
+  @Min(1)
   @Max(200)
-  totalUpperAligners?: number;
-  @ApiPropertyOptional()
+  totalUpperAligners?: number | null;
+  @ApiPropertyOptional({
+    minimum: 1,
+    maximum: 200,
+    nullable: true,
+    type: Number,
+  })
   @IsOptional()
   @IsInt()
-  @Min(0)
+  @Min(1)
   @Max(200)
-  totalLowerAligners?: number;
+  totalLowerAligners?: number | null;
 }
 
 export class UpdateTreatmentPlanDto extends PartialType(

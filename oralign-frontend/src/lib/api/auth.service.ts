@@ -10,6 +10,7 @@ import {
   AuthTokenDto,
   MessageResponse,
   VerifyEmailResponseDto,
+  ChangePasswordResponseDto,
 } from '@/lib/types';
 
 export const authService = {
@@ -115,8 +116,13 @@ export const authService = {
   /**
    * Change password — requires current password (authenticated endpoint)
    */
-  changePassword: async (data: { currentPassword: string; newPassword: string }): Promise<MessageResponse> => {
-    const response = await apiClient.post<MessageResponse>('/auth/change-password', data);
+  changePassword: async (data: { currentPassword: string; newPassword: string }): Promise<ChangePasswordResponseDto> => {
+    const response = await apiClient.post<ChangePasswordResponseDto>('/auth/change-password', data);
+    // The change revokes every session, this one included: keep the tab
+    // signed in with the fresh pair the server hands back.
+    if (response.data.authToken) {
+      setTokens(response.data.authToken.accessToken, response.data.authToken.refreshToken);
+    }
     return response.data;
   },
 

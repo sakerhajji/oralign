@@ -1,5 +1,6 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
 import {
+  BadRequestException,
   NotFoundException,
   ConflictException,
 } from '../../common/exceptions/app.exception';
@@ -9,11 +10,15 @@ import {
 } from '../repositories/user.repository';
 import {
   CreateUserDto,
+  CreateUserResponseDto,
+  TemporaryPasswordResponseDto,
   UpdateUserDto,
   UserResponseDto,
   UserListQueryDto,
   UsersStatsDto,
 } from '../dto/user.dto';
+import { generateTemporaryPassword } from '../temporary-password';
+import { PRODUCTION_ERROR } from '../../production/production.contract';
 import { UserRole, VerificationStatus } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PaginatedResponse } from '../../common/dto/response.dto';
@@ -22,6 +27,10 @@ import { Logger } from '@nestjs/common';
 import { env } from '../../common/config/env';
 import { assertNoDependents } from '../../common/deletion/deletion-blocked';
 import { type Caller } from '../../common/access/caller';
+import type { Lang } from '../../common/i18n/lang';
+
+/** preferredLanguage of an account an admin creates (POST /users). */
+const ADMIN_CREATED_ACCOUNT_LANGUAGE: Lang = 'fr';
 
 @Injectable()
 export class UserService {
@@ -36,17 +45,45 @@ export class UserService {
    * Admin creates an account with the requested role (dentist when
    * omitted). Only a super admin may create another super admin: the role
    * field must not become a way around the hierarchy.
+   *
+   * Password: typed by the admin, or generated (`generateTemporaryPassword`)
+   * and returned ONCE in the response. A generated password is always
+   * temporary, whatever the role, so the creating admin never keeps a
+   * working password of the account; a technician's is temporary in any
+   * case (`mustChangePassword`).
+   *
+   * A technician (lab account) is ready at once: e-mail verified, approved,
+   * and no e-mail of any kind (there is none on this path, and
+   * updateApproval skips her). Her first sign-in opens on the "choose your
+   * password" step, never on the e-mail verification screen.
+   *
+   * Every account made here speaks French: the DTO takes no language, the
+   * lab and the practitioners are francophone, and the schema's "en"
+   * default is the self-signup's (left as is). The user changes it in her
+   * account settings.
    */
   async createUser(
     createUserDto: CreateUserDto,
     caller: Caller,
-  ): Promise<UserResponseDto> {
+  ): Promise<CreateUserResponseDto> {
     if (
       createUserDto.role === UserRole.super_admin &&
       caller.role !== UserRole.super_admin
     ) {
       throw new ForbiddenException(
         'Only a super admin can create a super admin account.',
+      );
+    }
+
+    const generated = createUserDto.generateTemporaryPassword === true;
+    if (generated && createUserDto.password) {
+      throw new BadRequestException(
+        'Send either a password or generateTemporaryPassword, not both.',
+      );
+    }
+    if (!generated && !createUserDto.password) {
+      throw new BadRequestException(
+        'A password is required unless generateTemporaryPassword is true.',
       );
     }
 
@@ -64,7 +101,14 @@ export class UserService {
       throw new ConflictException('Phone number already exists');
     }
 
-    const hashedPassword = await bcrypt.hash(createUserDto.password, 12);
+    const temporaryPassword = generated
+      ? generateTemporaryPassword()
+      : undefined;
+    const hashedPassword = await bcrypt.hash(
+      temporaryPassword ?? createUserDto.password!,
+      12,
+    );
+    const isTechnician = createUserDto.role === UserRole.technician;
 
     const user = await this.userRepository.create({
       email: createUserDto.email,
@@ -74,9 +118,70 @@ export class UserService {
       country: createUserDto.country,
       avatarUrl: createUserDto.avatarUrl,
       role: createUserDto.role,
+      preferredLanguage: ADMIN_CREATED_ACCOUNT_LANGUAGE,
+      mustChangePassword: generated || isTechnician,
+      ...(isTechnician && {
+        isEmailVerified: true,
+        verificationStatus: VerificationStatus.approved,
+      }),
+      ...(generated && {
+        temporaryPasswordIssuedAt: new Date(),
+        temporaryPasswordIssuedById: caller.userId,
+      }),
     });
 
-    return this.mapToDto(user);
+    if (!temporaryPassword) return this.mapToDto(user);
+    this.logHandover(user, caller, 'create');
+    return { ...this.mapToDto(user), temporaryPassword };
+  }
+
+  /**
+   * POST users/:id/temporary-password: a technician who forgot her
+   * password gets a new temporary one from an admin (she has no usable
+   * mailbox for the forgot-password flow). Technician accounts only: an
+   * admin must never be able to sign in as a practitioner or a colleague
+   * this way (409 TEMPORARY_PASSWORD_TECHNICIAN_ONLY). One conditional
+   * write on success; the account lookup only runs to explain a refusal.
+   */
+  async issueTemporaryPassword(
+    id: string,
+    caller: Caller,
+  ): Promise<TemporaryPasswordResponseDto> {
+    const temporaryPassword = generateTemporaryPassword();
+    const issued = await this.userRepository.issueTechnicianPassword(id, {
+      passwordHash: await bcrypt.hash(temporaryPassword, 12),
+      issuedAt: new Date(),
+      issuedById: caller.userId,
+    });
+    if (!issued) {
+      const account = await this.userRepository.findAccountState(id);
+      if (!account) throw new NotFoundException('User not found');
+      throw new ConflictException(
+        'A temporary password can only be issued to a technician account.',
+        PRODUCTION_ERROR.TEMPORARY_PASSWORD_TECHNICIAN_ONLY,
+      );
+    }
+    this.logHandover(
+      { id, role: UserRole.technician },
+      caller,
+      'temporary-password',
+    );
+    return { temporaryPassword };
+  }
+
+  /**
+   * The audit line of every password handover (CONTRACT.md §2.4): the
+   * production journal attributes acts to the account, so who handed it a
+   * password, and when, must be checkable. Never the password itself.
+   */
+  private logHandover(
+    target: { id: string; role: UserRole },
+    caller: Caller,
+    via: 'create' | 'temporary-password' | 'force-reset',
+  ): void {
+    this.logger.warn(
+      `Password handed over for user ${target.id} (${target.role}) by ${caller.userId} via ${via}`,
+    );
   }
 
   async getUserById(id: string): Promise<UserResponseDto> {
@@ -132,6 +237,17 @@ export class UserService {
       throw new ForbiddenException('You can only edit your own profile');
     }
 
+    // Same hierarchy as updateUserRole, on THIS path too: the user sheet
+    // saves the role through PUT, so an admin could otherwise grant super
+    // admin, demote one, or force-reset a super admin's password and sign
+    // in as them. Checked before any write.
+    if (isAdmin) {
+      this.assertSuperAdminHierarchy(currentUser.role, targetUser.role, {
+        editsAccount: !isSelfEdit,
+        nextRole: updateUserDto.role,
+      });
+    }
+
     // Prepare update data object
     const updateData: {
       fullName?: string;
@@ -141,6 +257,9 @@ export class UserService {
       preferredLanguage?: string;
       passwordHash?: string;
       tokenVersion?: { increment: number };
+      mustChangePassword?: boolean;
+      temporaryPasswordIssuedAt?: Date;
+      temporaryPasswordIssuedById?: string;
       role?: UserRole;
       isEmailVerified?: boolean;
     } = {};
@@ -167,20 +286,29 @@ export class UserService {
     if (updateUserDto.preferredLanguage !== undefined)
       updateData.preferredLanguage = updateUserDto.preferredLanguage;
 
-    // Password via PUT /users/:id is ADMIN-ONLY (force reset). Self-service
-    // changes must go through POST /auth/change-password, which verifies the
-    // current password. Letting a self-edit set a password here turned any
-    // stolen 15-min access token into a permanent takeover (no current-
-    // password check, no session revocation). Force-resets also bump
+    // Password via PUT /users/:id is an ADMIN force reset of ANOTHER
+    // account. Every self-service change, admins and super admins
+    // included, goes through POST /auth/change-password, which verifies
+    // the current password: a self-edit here turned any stolen 15-min
+    // access token into a permanent takeover (no current-password check,
+    // and the real owner's sessions revoked). Force-resets also bump
     // tokenVersion so every existing session of that user is revoked.
     if (updateUserDto.password && updateUserDto.password.trim() !== '') {
-      if (!isAdmin) {
+      if (isSelfEdit || !isAdmin) {
         throw new ForbiddenException(
           'Use the change-password endpoint to update your own password.',
         );
       }
       updateData.passwordHash = await bcrypt.hash(updateUserDto.password, 12);
       updateData.tokenVersion = { increment: 1 };
+      // A handover like the other two (create, temporary-password): traced
+      // on the row, and temporary for a technician (as she will be after
+      // this write, if the same PUT changes the role).
+      updateData.temporaryPasswordIssuedAt = new Date();
+      updateData.temporaryPasswordIssuedById = currentUser.id;
+      if ((updateUserDto.role ?? targetUser.role) === UserRole.technician) {
+        updateData.mustChangePassword = true;
+      }
     }
 
     // Admin-only fields
@@ -192,6 +320,13 @@ export class UserService {
     }
 
     const updatedUser = await this.userRepository.update(id, updateData);
+    if (updateData.passwordHash) {
+      this.logHandover(
+        updatedUser,
+        { userId: currentUser.id, role: currentUser.role },
+        'force-reset',
+      );
+    }
     return this.mapToDto(updatedUser);
   }
 
@@ -200,11 +335,8 @@ export class UserService {
    * and can no longer sign in; everything it owns or authored stays put
    * and remains visible to admins. Restore is always possible.
    */
-  async deleteUser(
-    id: string,
-    callerUserId?: string,
-  ): Promise<{ message: string }> {
-    if (callerUserId && callerUserId === id) {
+  async deleteUser(id: string, caller: Caller): Promise<{ message: string }> {
+    if (caller.userId === id) {
       throw new ForbiddenException('You cannot delete your own account.');
     }
     const user = await this.userRepository.findById(id);
@@ -212,6 +344,9 @@ export class UserService {
     if (!user || user.deletedAt) {
       throw new NotFoundException('User not found');
     }
+    this.assertSuperAdminHierarchy(caller.role, user.role, {
+      editsAccount: true,
+    });
 
     await this.userRepository.delete(id);
 
@@ -221,33 +356,68 @@ export class UserService {
   /**
    * Bulk archive. The caller's own row is dropped from the target list —
    * an admin must not lock the platform out of its own account, the same
-   * rule `deleteUser` enforces with a 403.
+   * rule `deleteUser` enforces with a 403. Below super admin, super admin
+   * accounts are spared too (the hierarchy, in the repository `where`).
    *
-   * `skippedSelf` is REPORTED rather than silently swallowed: "select all
-   * → delete" used to answer "N users deleted" for N+1 selected rows,
-   * which reads as success for something that partly did not happen.
+   * `skippedSelf` / `skippedSuperAdmins` are REPORTED rather than silently
+   * swallowed: "select all → delete" used to answer "N users deleted" for
+   * N+1 selected rows, which reads as success for something that partly
+   * did not happen.
    */
   async bulkDeleteUsers(
     ids: string[],
-    callerUserId?: string,
-  ): Promise<{ message: string; count: number; skippedSelf: boolean }> {
-    const targets = callerUserId ? ids.filter((id) => id !== callerUserId) : ids;
+    caller: Caller,
+  ): Promise<{
+    message: string;
+    count: number;
+    skippedSelf: boolean;
+    skippedSuperAdmins: number;
+  }> {
+    const targets = ids.filter((id) => id !== caller.userId);
     const skippedSelf = targets.length !== ids.length;
-    const count = await this.userRepository.bulkDelete(targets);
+    const spare = this.sparesSuperAdmins(caller);
+    const skippedSuperAdmins = spare
+      ? await this.userRepository.countSuperAdmins(targets, { deleted: false })
+      : 0;
+    const count = await this.userRepository.bulkDelete(targets, {
+      spareSuperAdmins: spare,
+    });
     return {
       message: `${count} users deleted successfully`,
       count,
       skippedSelf,
+      skippedSuperAdmins,
     };
   }
 
+  /**
+   * Bulk block / unblock. Below super admin, super admin accounts are
+   * spared: an admin blocking them would lock their own superiors out
+   * (sign-in answers ACCOUNT_INACTIVE and every session is refused).
+   */
   async bulkUpdateStatus(
     ids: string[],
     isActive: boolean,
-  ): Promise<{ message: string; count: number }> {
-    const count = await this.userRepository.bulkUpdateStatus(ids, isActive);
+    caller: Caller,
+  ): Promise<{ message: string; count: number; skippedSuperAdmins: number }> {
+    const spare = this.sparesSuperAdmins(caller);
+    const skippedSuperAdmins = spare
+      ? await this.userRepository.countSuperAdmins(ids, { deleted: false })
+      : 0;
+    const count = await this.userRepository.bulkUpdateStatus(ids, isActive, {
+      spareSuperAdmins: spare,
+    });
     const action = isActive ? 'activated' : 'blocked';
-    return { message: `${count} users ${action} successfully`, count };
+    return {
+      message: `${count} users ${action} successfully`,
+      count,
+      skippedSuperAdmins,
+    };
+  }
+
+  /** The bulk form of the hierarchy: below super admin, never touch one. */
+  private sparesSuperAdmins(caller: Caller): boolean {
+    return caller.role !== UserRole.super_admin;
   }
 
   /**
@@ -265,28 +435,61 @@ export class UserService {
       throw new NotFoundException('User not found');
     }
 
-    if (
-      caller.role !== UserRole.super_admin &&
-      (role === UserRole.super_admin || user.role === UserRole.super_admin)
-    ) {
-      throw new ForbiddenException(
-        'Only a super admin can grant or change a super admin role.',
-      );
-    }
+    this.assertSuperAdminHierarchy(caller.role, user.role, {
+      editsAccount: true,
+      nextRole: role,
+    });
 
     const updatedUser = await this.userRepository.update(id, { role });
     return this.mapToDto(updatedUser);
   }
 
+  /**
+   * THE super admin hierarchy, shared by every admin route that writes an
+   * account (role, PUT, e-mail verification, approval, archive, restore,
+   * permanent delete; the bulk routes spare super admins in their
+   * `where`): below super admin, nobody grants the role, changes the
+   * role of a super admin, or (`editsAccount`) edits a super admin's
+   * account at all (password reset, e-mail verification, profile). A
+   * super admin passes.
+   */
+  private assertSuperAdminHierarchy(
+    callerRole: UserRole,
+    targetRole: UserRole,
+    change: { editsAccount: boolean; nextRole?: UserRole },
+  ): void {
+    if (callerRole === UserRole.super_admin) return;
+    const touchesRole =
+      change.nextRole !== undefined && change.nextRole !== targetRole;
+    if (
+      touchesRole &&
+      (change.nextRole === UserRole.super_admin ||
+        targetRole === UserRole.super_admin)
+    ) {
+      throw new ForbiddenException(
+        'Only a super admin can grant or change a super admin role.',
+      );
+    }
+    if (change.editsAccount && targetRole === UserRole.super_admin) {
+      throw new ForbiddenException(
+        'Only a super admin can edit a super admin account.',
+      );
+    }
+  }
+
   async updateEmailVerification(
     id: string,
     isEmailVerified: boolean,
+    caller: Caller,
   ): Promise<UserResponseDto> {
     const user = await this.userRepository.findById(id);
 
     if (!user || user.deletedAt) {
       throw new NotFoundException('User not found');
     }
+    this.assertSuperAdminHierarchy(caller.role, user.role, {
+      editsAccount: true,
+    });
 
     const updatedUser = await this.userRepository.update(id, {
       isEmailVerified,
@@ -303,11 +506,15 @@ export class UserService {
   async updateApproval(
     id: string,
     verificationStatus: VerificationStatus,
+    caller: Caller,
   ): Promise<UserResponseDto> {
     const user = await this.userRepository.findById(id);
     if (!user || user.deletedAt) {
       throw new NotFoundException('User not found');
     }
+    this.assertSuperAdminHierarchy(caller.role, user.role, {
+      editsAccount: true,
+    });
 
     const wasNotApproved =
       user.verificationStatus !== VerificationStatus.approved;
@@ -315,7 +522,13 @@ export class UserService {
       verificationStatus,
     });
 
-    if (wasNotApproved && verificationStatus === VerificationStatus.approved) {
+    // The welcome mail is worded for practitioners; a lab account gets no
+    // e-mail of any kind.
+    if (
+      wasNotApproved &&
+      verificationStatus === VerificationStatus.approved &&
+      updatedUser.role !== UserRole.technician
+    ) {
       const frontendUrl = env.frontendUrl;
       void this.mailService
         .sendApprovalGrantedEmail(
@@ -346,12 +559,15 @@ export class UserService {
     return this.toPage(users, total, page, limit);
   }
 
-  async restoreUser(id: string): Promise<UserResponseDto> {
+  async restoreUser(id: string, caller: Caller): Promise<UserResponseDto> {
     const user = await this.userRepository.findById(id);
 
     if (!user || !user.deletedAt) {
       throw new NotFoundException('Deleted user not found');
     }
+    this.assertSuperAdminHierarchy(caller.role, user.role, {
+      editsAccount: true,
+    });
 
     const restoredUser = await this.userRepository.restore(id);
     return this.mapToDto(restoredUser);
@@ -359,9 +575,20 @@ export class UserService {
 
   async bulkRestoreUsers(
     ids: string[],
-  ): Promise<{ message: string; count: number }> {
-    const count = await this.userRepository.bulkRestore(ids);
-    return { message: `${count} users restored successfully`, count };
+    caller: Caller,
+  ): Promise<{ message: string; count: number; skippedSuperAdmins: number }> {
+    const spare = this.sparesSuperAdmins(caller);
+    const skippedSuperAdmins = spare
+      ? await this.userRepository.countSuperAdmins(ids, { deleted: true })
+      : 0;
+    const count = await this.userRepository.bulkRestore(ids, {
+      spareSuperAdmins: spare,
+    });
+    return {
+      message: `${count} users restored successfully`,
+      count,
+      skippedSuperAdmins,
+    };
   }
 
   /**
@@ -373,9 +600,9 @@ export class UserService {
    */
   async permanentlyDeleteUser(
     id: string,
-    callerUserId?: string,
+    caller: Caller,
   ): Promise<{ message: string }> {
-    if (callerUserId && callerUserId === id) {
+    if (caller.userId === id) {
       throw new ForbiddenException('You cannot delete your own account.');
     }
     const user = await this.userRepository.findById(id);
@@ -383,43 +610,54 @@ export class UserService {
     if (!user || !user.deletedAt) {
       throw new NotFoundException('Deleted user not found');
     }
+    this.assertSuperAdminHierarchy(caller.role, user.role, {
+      editsAccount: true,
+    });
 
     await this.assertUserPurgeable(id);
     await this.userRepository.hardDelete(id);
-    this.logger.warn(`User ${id} PERMANENTLY deleted by ${callerUserId ?? 'system'}`);
+    this.logger.warn(`User ${id} PERMANENTLY deleted by ${caller.userId}`);
     return { message: 'User permanently deleted' };
   }
 
   /**
    * Bulk permanent delete. Each id is checked independently; blocked
    * ones are skipped and counted so the admin sees "3 deleted, 2 kept
-   * (have history)" instead of an all-or-nothing failure.
+   * (have history)" instead of an all-or-nothing failure. Below super
+   * admin, a super admin account is blocked like the caller's own.
    */
   async bulkPermanentlyDeleteUsers(
     ids: string[],
-    callerUserId?: string,
+    caller: Caller,
   ): Promise<{ message: string; count: number; blocked: number }> {
+    const spare = this.sparesSuperAdmins(caller);
     const purgeable: string[] = [];
     let blocked = 0;
     for (const id of ids) {
-      if (callerUserId && id === callerUserId) {
+      if (id === caller.userId) {
         blocked += 1;
         continue;
       }
       const deps = await this.userRepository.countProtectedDependents(id);
       if (!deps) continue; // unknown id → nothing to do
-      if (deps.patients > 0 || deps.orders > 0) {
+      if (
+        deps.patients > 0 ||
+        deps.orders > 0 ||
+        (spare && deps.role === UserRole.super_admin)
+      ) {
         blocked += 1;
         continue;
       }
       purgeable.push(id);
     }
     const count = purgeable.length
-      ? await this.userRepository.bulkHardDelete(purgeable)
+      ? await this.userRepository.bulkHardDelete(purgeable, {
+          spareSuperAdmins: spare,
+        })
       : 0;
     if (count > 0) {
       this.logger.warn(
-        `${count} user(s) PERMANENTLY deleted by ${callerUserId ?? 'system'}: ${purgeable.join(', ')}`,
+        `${count} user(s) PERMANENTLY deleted by ${caller.userId}: ${purgeable.join(', ')}`,
       );
     }
     return {
@@ -489,6 +727,8 @@ export class UserService {
             archived: giftOrder.deletedAt !== null,
           }
         : null,
+      // The handover trace (temporaryPasswordIssued*) stays server-side.
+      mustChangePassword: user.mustChangePassword === true,
     };
   }
 }

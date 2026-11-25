@@ -38,7 +38,6 @@ import {
   useConfigurePaymentPlan,
   useInstallments,
   useStepBatches,
-  useDeliverBatch,
   usePayByCard,
   useDeclareBankTransfer,
   useRecordCash,
@@ -64,6 +63,8 @@ import {
 } from '@/components/billing/pack-choice';
 import { archLabel, packFacts, packName } from '@/components/billing/pack-picker';
 import { QuoteStep } from '@/components/orders/quote-step';
+// "Marquer livré" goes through the production delivery declaration (D2).
+import { BatchDeliveryButton } from '@/components/production/batch-delivery-button';
 import {
   isWithholdingChoiceConflict,
   PriceIncludesTaxNote,
@@ -1242,7 +1243,6 @@ function AdminPlanView({
   batches: QuoteStepBatch[];
 }) {
   const { t, lang } = useT();
-  const deliver = useDeliverBatch();
   const [cashTarget, setCashTarget] = useState<QuoteInstallment | null>(null);
   const [cardTarget, setCardTarget] = useState<QuoteInstallment | null>(null);
   const [editingPlan, setEditingPlan] = useState(false);
@@ -1389,20 +1389,11 @@ function AdminPlanView({
                           />
                         ) : null}
                         {batch?.status === BatchStatus.UNLOCKED ? (
-                          <Button
-                            size="sm"
-                            onClick={() =>
-                              deliver.mutate({
-                                quotationId: quote.id,
-                                orderId: quote.orderId,
-                                batchId: batch.id,
-                              })
-                            }
-                            disabled={deliver.isPending}
-                          >
-                            <Truck className="mr-1 h-3 w-3" />
-                            {t('quoteUi.adminPlan.markDelivered')}
-                          </Button>
+                          <BatchDeliveryButton
+                            quote={quote}
+                            batch={batch}
+                            label={t('quoteUi.adminPlan.markDelivered')}
+                          />
                         ) : null}
                       </div>
                     </TableCell>
@@ -1471,21 +1462,12 @@ function AdminPlanView({
                         />
                       ) : null}
                       {batch?.status === BatchStatus.UNLOCKED ? (
-                        <Button
-                          size="sm"
+                        <BatchDeliveryButton
+                          quote={quote}
+                          batch={batch}
+                          label={t('quoteUi.adminPlan.markDelivered')}
                           className="h-10 w-full justify-center"
-                          onClick={() =>
-                            deliver.mutate({
-                              quotationId: quote.id,
-                              orderId: quote.orderId,
-                              batchId: batch.id,
-                            })
-                          }
-                          disabled={deliver.isPending}
-                        >
-                          <Truck className="mr-2 h-4 w-4" />
-                          {t('quoteUi.adminPlan.markDelivered')}
-                        </Button>
+                        />
                       ) : null}
                     </div>
                   )}

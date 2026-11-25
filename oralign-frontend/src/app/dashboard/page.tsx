@@ -1,9 +1,11 @@
 'use client';
 
-import { Suspense } from 'react';
+import { Suspense, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/providers/auth-provider';
 import { useT } from '@/lib/i18n/lang-context';
 import { UserRole } from '@/lib/types';
+import { TECHNICIAN_HOME } from '@/lib/hooks/use-onboarding';
 import { AdminDashboard } from '@/components/dashboard/admin-dashboard';
 import { DoctorDashboard } from '@/components/dashboard/doctor-dashboard';
 
@@ -12,6 +14,8 @@ import { DoctorDashboard } from '@/components/dashboard/doctor-dashboard';
  *
  * Admin / super_admin → platform-wide KPIs + analytics blocks.
  * Dentist            → personal KPIs + slider + available packs.
+ * Technician         → the production queue (she has no dashboard; the
+ *                      dashboard guard sends her there too).
  * Designer / unknown → fallback panel; designers live in /orders
  *                      and don't have a dedicated dashboard yet.
  *
@@ -20,7 +24,12 @@ import { DoctorDashboard } from '@/components/dashboard/doctor-dashboard';
  */
 export default function DashboardPage() {
   const { t } = useT();
-  const { user, isAdmin } = useAuth();
+  const router = useRouter();
+  const { user, isAdmin, isTechnician } = useAuth();
+
+  useEffect(() => {
+    if (isTechnician) router.replace(TECHNICIAN_HOME);
+  }, [isTechnician, router]);
 
   return (
     <div className="@container/main flex flex-1 flex-col">
@@ -31,7 +40,7 @@ export default function DashboardPage() {
           </div>
         }
       >
-        {!user ? (
+        {!user || isTechnician ? (
           <div className="p-6 text-sm text-muted-foreground">
             {t('adminDashboard.pageLoading')}
           </div>

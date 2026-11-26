@@ -392,6 +392,144 @@ export const treatmentDomainDict = {
       },
     },
 
+    // ─── Analyses: CBCT + cephalometric PDFs (treatment-plan-documents.tsx)
+    analyses: {
+      cardTitle: { en: 'Analyses', fr: 'Analyses' } as T,
+      cardSubtitle: {
+        en: '(CBCT · Cephalometric)',
+        fr: '(CBCT · Céphalométrie)',
+      } as T,
+      descPlanner: {
+        en: 'Add the CBCT and cephalometric analysis reports of this plan as PDF files: drop each one on its slot or choose it. The doctor reads them here.',
+        fr: 'Ajoutez les rapports d’analyse CBCT et céphalométrique de ce plan en PDF : déposez chacun sur son emplacement ou choisissez-le. Le praticien les consulte ici.',
+      } as T,
+      descReader: {
+        en: 'The CBCT and cephalometric analysis reports of this plan.',
+        fr: 'Les rapports d’analyse CBCT et céphalométrique de ce plan.',
+      } as T,
+      kinds: {
+        cbct_analysis: {
+          title: { en: 'CBCT analysis', fr: 'Analyse CBCT' } as T,
+          removeTitle: {
+            en: 'Remove the CBCT analysis?',
+            fr: 'Supprimer l’analyse CBCT ?',
+          } as T,
+        },
+        cephalometric_analysis: {
+          title: {
+            en: 'Cephalometric analysis',
+            fr: 'Analyse céphalométrique',
+          } as T,
+          removeTitle: {
+            en: 'Remove the cephalometric analysis?',
+            fr: 'Supprimer l’analyse céphalométrique ?',
+          } as T,
+        },
+      },
+      empty: { en: 'No PDF yet', fr: 'Aucun PDF pour le moment' } as T,
+      dropHint: {
+        en: 'Drag and drop the PDF here, or',
+        fr: 'Glissez-déposez le PDF ici, ou',
+      } as T,
+      choose: { en: 'Choose a PDF', fr: 'Choisir un PDF' } as T,
+      limits: { en: 'PDF · 25 MB max', fr: 'PDF · 25 Mo max.' } as T,
+      dropzoneAria: {
+        en: '{title}: choose a PDF, or drop one here',
+        fr: '{title} : choisir un PDF, ou en déposer un ici',
+      } as T,
+      dropToUpload: { en: 'Drop to add it', fr: 'Déposez pour l’ajouter' } as T,
+      dropToReplace: { en: 'Drop to replace', fr: 'Déposer pour remplacer' } as T,
+      uploading: {
+        en: 'Uploading… {percent} %',
+        fr: 'Envoi… {percent} %',
+      } as T,
+      checking: { en: 'Checking the file…', fr: 'Vérification du fichier…' } as T,
+      progressAria: { en: 'Upload progress', fr: 'Progression de l’envoi' } as T,
+      readonlyEmpty: {
+        en: 'Not available yet. It will appear here once the lab adds it.',
+        fr: 'Pas encore disponible. Elle apparaîtra ici dès que le laboratoire l’aura ajoutée.',
+      } as T,
+      loadingPreview: { en: 'Loading the PDF…', fr: 'Chargement du PDF…' } as T,
+      loadFailed: {
+        en: 'The PDF could not be loaded.',
+        fr: 'Le PDF n’a pas pu être chargé.',
+      } as T,
+      retry: { en: 'Try again', fr: 'Réessayer' } as T,
+      previewFailed: {
+        en: 'No preview: the file looks damaged. You can still download it.',
+        fr: 'Pas d’aperçu : le fichier semble endommagé. Vous pouvez quand même le télécharger.',
+      } as T,
+      previewProtected: {
+        en: 'This PDF is password-protected: download it to open it.',
+        fr: 'Ce PDF est protégé par un mot de passe : téléchargez-le pour l’ouvrir.',
+      } as T,
+      pageFailed: {
+        en: 'This page could not be displayed.',
+        fr: 'Cette page n’a pas pu être affichée.',
+      } as T,
+      openAria: {
+        en: 'Open the {title} in full view',
+        fr: 'Ouvrir « {title} » en plein écran',
+      } as T,
+      openFull: { en: 'Open full view', fr: 'Ouvrir en plein écran' } as T,
+      open: { en: 'Open', fr: 'Ouvrir' } as T,
+      download: { en: 'Download', fr: 'Télécharger' } as T,
+      replace: { en: 'Replace', fr: 'Remplacer' } as T,
+      remove: { en: 'Remove', fr: 'Supprimer' } as T,
+      removeDesc: {
+        en: 'The PDF “{name}” will be removed from this treatment plan.',
+        fr: 'Le PDF « {name} » sera retiré de ce plan de traitement.',
+      } as T,
+      pagesOne: { en: '1 page', fr: '1 page' } as T,
+      pagesMany: { en: '{count} pages', fr: '{count} pages' } as T,
+      pageOf: { en: 'Page {page} of {count}', fr: 'Page {page} sur {count}' } as T,
+      pageAria: { en: 'Page {page}', fr: 'Page {page}' } as T,
+      addedOn: { en: 'Added on {date}', fr: 'Ajouté le {date}' } as T,
+      addedOnBy: {
+        en: 'Added on {date} by {name}',
+        fr: 'Ajouté le {date} par {name}',
+      } as T,
+      toasts: {
+        uploaded: { en: '{title} uploaded.', fr: '{title} ajoutée.' } as T,
+        removed: { en: '{title} removed.', fr: '{title} supprimée.' } as T,
+      },
+      errors: {
+        notPdf: {
+          en: 'Only PDF files are accepted.',
+          fr: 'Seuls les fichiers PDF sont acceptés.',
+        } as T,
+        tooLarge: {
+          en: 'The PDF must be 25 MB or smaller.',
+          fr: 'Le PDF ne doit pas dépasser 25 Mo.',
+        } as T,
+        empty: { en: 'This file is empty.', fr: 'Ce fichier est vide.' } as T,
+        fileRequired: {
+          en: 'No file was received. Choose the PDF again.',
+          fr: 'Aucun fichier reçu. Choisissez à nouveau le PDF.',
+        } as T,
+        activeContent: {
+          en: 'This PDF contains active content (JavaScript). Save it again with Print → PDF, then retry.',
+          fr: 'Ce PDF contient du contenu actif (JavaScript). Réenregistrez-le avec Imprimer → PDF, puis réessayez.',
+        } as T,
+        unsafe: {
+          en: 'This file was refused by the security check.',
+          fr: 'Ce fichier a été refusé par le contrôle de sécurité.',
+        } as T,
+        oneFile: {
+          en: 'Drop one PDF at a time.',
+          fr: 'Déposez un seul PDF à la fois.',
+        } as T,
+        busy: {
+          en: 'Wait until the current upload finishes.',
+          fr: 'Attendez la fin de l’envoi en cours.',
+        } as T,
+        downloadFailed: {
+          en: 'The download failed.',
+          fr: 'Le téléchargement a échoué.',
+        } as T,
+      },
+    },
+
     // ─── Treatment conversation card wrapper ─────────────────────────
     conversationCardTitle: {
       en: 'Treatment Conversation',

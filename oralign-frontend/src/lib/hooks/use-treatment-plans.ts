@@ -17,10 +17,13 @@ import { useT } from '@/lib/i18n/lang-context';
 import { orderKeys } from './use-orders';
 import { supplementalErrorMessage } from './use-supplemental-orders';
 import {
+  TREATMENT_PLAN_DOCUMENT_KINDS,
   TreatmentPlanStatus,
   type TreatmentAttachmentCategory,
   type TreatmentMessage,
   type TreatmentPlan,
+  type TreatmentPlanDocument,
+  type TreatmentPlanDocumentKind,
   type TreatmentPlanIpr,
   type TreatmentPlanReview,
   type UpsertTreatmentPlanIprDto,
@@ -33,6 +36,9 @@ export const treatmentPlanKeys = {
   detail: (id: string) => [...treatmentPlanKeys.all, 'detail', id] as const,
   review: (id: string) => [...treatmentPlanKeys.all, 'review', id] as const,
   messages: (id: string) => [...treatmentPlanKeys.all, 'messages', id] as const,
+  /** The PDF bytes of one analysis; `version` is its `updatedAt`. */
+  document: (id: string, kind: TreatmentPlanDocumentKind, version: string) =>
+    [...treatmentPlanKeys.all, 'document', id, kind, version] as const,
 };
 
 const PLAN_LIST_STALE_TIME = 15_000;
@@ -464,5 +470,132 @@ export function useRemoveTreatmentPlanIpr(
       patchReviewIprEntries(queryClient, planId, fromTooth, toTooth, null);
     },
     onError: (err) => toast.error(extractApiErrorMessage(err)),
+  });
+}
+
+// ─── Analyses (PDF slots: CBCT, cephalometric) ───────────────────────────
+// The review payload lists the documents; a write answers with the
+// document (or nothing for a delete), which is patched into the cached
+// review instead of refetching the heavy payload. Other open tabs follow
+// through the `plan:changed` broadcast.
+
+/** The server's upload limit, mirrored for an instant refusal. */
+export const TREATMENT_PLAN_DOCUMENT_MAX_BYTES = 25 * 1024 * 1024;
+
+/** errorCodes of the document routes → keys under treatmentReview.analyses.errors. */
+const DOCUMENT_ERROR_KEYS: Record<string, string> = {
+  DOCUMENT_FILE_REQUIRED: 'fileRequired',
+  DOCUMENT_NOT_PDF: 'notPdf',
+  DOCUMENT_TOO_LARGE: 'tooLarge',
+  DOCUMENT_ACTIVE_CONTENT: 'activeContent',
+  DOCUMENT_UNSAFE: 'unsafe',
+};
+
+/** The translated reason a document write failed. */
+export function documentErrorMessage(
+  error: unknown,
+  t: (path: string, vars?: Record<string, string | number>) => string,
+): string {
+  const { status, errorCode, message } = extractApiError(error);
+  // 413 comes from the upload limit (multer) or from nginx, without a code.
+  if (status === 413) return t('treatmentReview.analyses.errors.tooLarge');
+  const key = errorCode ? DOCUMENT_ERROR_KEYS[errorCode] : undefined;
+  return key ? t(`treatmentReview.analyses.errors.${key}`) : message;
+}
+
+function patchReviewDocument(
+  queryClient: ReturnType<typeof useQueryClient>,
+  planId: string,
+  kind: TreatmentPlanDocumentKind,
+  document: TreatmentPlanDocument | null,
+) {
+  queryClient.setQueryData<TreatmentPlanReview>(
+    treatmentPlanKeys.review(planId),
+    (cached) => {
+      if (!cached) return cached;
+      const others = (cached.documents ?? []).filter((d) => d.kind !== kind);
+      const documents = document ? [...others, document] : others;
+      documents.sort(
+        (a, b) =>
+          TREATMENT_PLAN_DOCUMENT_KINDS.indexOf(a.kind) -
+          TREATMENT_PLAN_DOCUMENT_KINDS.indexOf(b.kind),
+      );
+      return { ...cached, documents };
+    },
+  );
+}
+
+/**
+ * The PDF bytes of a document. Keyed by its `updatedAt`, so a replace is
+ * a new entry and an unchanged document is never fetched twice while the
+ * page is open.
+ */
+export function useTreatmentPlanDocumentBlob(
+  planId: string,
+  document: TreatmentPlanDocument | null,
+): UseQueryResult<Blob, Error> {
+  return useQuery({
+    queryKey: treatmentPlanKeys.document(
+      planId,
+      document?.kind ?? ('' as TreatmentPlanDocumentKind),
+      document?.updatedAt ?? '',
+    ),
+    queryFn: () => {
+      if (!document) throw new Error('No document.');
+      return treatmentPlansService.fetchDocumentBlob(planId, document.kind);
+    },
+    enabled: !!planId && !!document,
+    staleTime: Infinity,
+    gcTime: 1000 * 60 * 5,
+    refetchOnWindowFocus: false,
+    retry: 1,
+  });
+}
+
+export function useUploadTreatmentPlanDocument(): UseMutationResult<
+  TreatmentPlanDocument,
+  Error,
+  {
+    id: string;
+    kind: TreatmentPlanDocumentKind;
+    file: File;
+    onProgress?: (percent: number) => void;
+  }
+> {
+  const queryClient = useQueryClient();
+  const { t } = useT();
+  return useMutation({
+    mutationFn: ({ id, kind, file, onProgress }) =>
+      treatmentPlansService.uploadDocument(id, kind, file, onProgress),
+    onSuccess: (document, { id }) => {
+      patchReviewDocument(queryClient, id, document.kind, document);
+      toast.success(
+        t('treatmentReview.analyses.toasts.uploaded', {
+          title: t(`treatmentReview.analyses.kinds.${document.kind}.title`),
+        }),
+      );
+    },
+    onError: (err) => toast.error(documentErrorMessage(err, t)),
+  });
+}
+
+export function useDeleteTreatmentPlanDocument(): UseMutationResult<
+  void,
+  Error,
+  { id: string; kind: TreatmentPlanDocumentKind }
+> {
+  const queryClient = useQueryClient();
+  const { t } = useT();
+  return useMutation({
+    mutationFn: ({ id, kind }) => treatmentPlansService.deleteDocument(id, kind),
+    onSuccess: (_res, { id, kind }) => {
+      patchReviewDocument(queryClient, id, kind, null);
+      toast.success(
+        t('treatmentReview.analyses.toasts.removed', {
+          title: t(`treatmentReview.analyses.kinds.${kind}.title`),
+        }),
+      );
+    },
+    onError: (err) => toast.error(documentErrorMessage(err, t)),
   });
 }

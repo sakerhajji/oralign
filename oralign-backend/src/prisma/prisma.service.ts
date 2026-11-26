@@ -86,6 +86,11 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     return this.prisma.treatmentPlanIpr;
   }
 
+  /** Analysis PDFs of a plan version (CBCT, cephalometric), one per kind. */
+  get treatmentPlanDocument() {
+    return this.prisma.treatmentPlanDocument;
+  }
+
   // ─── Quotation / Devis models ────────────────────────────────────────────
 
   get quotation() {

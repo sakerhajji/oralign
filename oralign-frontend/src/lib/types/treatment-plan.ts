@@ -128,12 +128,43 @@ export interface UpsertTreatmentPlanIprDto {
   note?: string | null;
 }
 
+// ─── Analyses (PDF documents of a plan version) ─────────────────────────────
+
+/** The PDF slots of a treatment plan: one document per kind and version. */
+export enum TreatmentPlanDocumentKind {
+  CBCT_ANALYSIS = 'cbct_analysis',
+  CEPHALOMETRIC_ANALYSIS = 'cephalometric_analysis',
+}
+
+/** The slots in the order the page shows them. */
+export const TREATMENT_PLAN_DOCUMENT_KINDS: readonly TreatmentPlanDocumentKind[] = [
+  TreatmentPlanDocumentKind.CBCT_ANALYSIS,
+  TreatmentPlanDocumentKind.CEPHALOMETRIC_ANALYSIS,
+];
+
+/**
+ * A PDF in one slot. The bytes come from
+ * `GET /treatment-plans/:id/documents/:kind`; `updatedAt` changes on every
+ * replace, so it keys the cached bytes.
+ */
+export interface TreatmentPlanDocument {
+  kind: TreatmentPlanDocumentKind;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  uploadedByName: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface TreatmentPlanReview extends TreatmentPlan {
   odontogram: Array<{ toothNumber: number; entries: OdontogramEntry[] }>;
   messages: TreatmentMessage[];
   clinicalImages: OrderFile[];
   /** IPR / stripping entries owned by THIS treatment plan version. */
   iprEntries: TreatmentPlanIpr[];
+  /** The analyses (0–2). Absent from a backend older than the feature. */
+  documents?: TreatmentPlanDocument[];
 }
 
 export interface PublicTreatmentViewerPayload {

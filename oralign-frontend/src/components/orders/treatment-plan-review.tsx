@@ -63,6 +63,7 @@ import { orderKeys, useUpdateToothInstructions } from '@/lib/hooks/use-orders';
 import { useAuth } from '@/lib/providers/auth-provider';
 import { dateLocaleOf, PatientLinkPanel } from './treatment-plan-patient-link';
 import { TreatmentConversation } from './treatment-conversation';
+import { TreatmentPlanDocumentsSection } from './treatment-plan-documents';
 import {
   ArchTreatment,
   OrderFile,
@@ -158,8 +159,9 @@ interface Props {
  *
  * Layout (spec):
  *   1. Treatment Viewer
- *   2. Movement Table / Odontogram
- *   3. Conversation / Chat
+ *   2. Movement Table / Odontogram, Dental treatment table
+ *   3. Analyses (CBCT, cephalometric PDFs)
+ *   4. Conversation / Chat
  */
 export function TreatmentPlanReview({
   treatmentPlanId,
@@ -238,6 +240,14 @@ export function TreatmentPlanReview({
           clinical image gallery — per the clinical team's layout
           request. */}
       <DentalTreatmentTableSection
+        review={review}
+        canEdit={isPlanner}
+        treatmentPlanId={treatmentPlanId}
+      />
+
+      {/* The analyses (CBCT, cephalometric) as PDFs, after the two tables
+          and before the clinical photos. */}
+      <TreatmentPlanDocumentsSection
         review={review}
         canEdit={isPlanner}
         treatmentPlanId={treatmentPlanId}

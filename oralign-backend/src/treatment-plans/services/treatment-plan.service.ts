@@ -31,6 +31,8 @@ import { lookupActorName } from '../../common/access/actor-snapshot';
 import { PLAN_GATE_SELECT, planCreationGate } from '../treatment-plan-gate';
 import { missingPlanTotals } from '../plan-totals';
 import { PRODUCTION_ERROR } from '../../production/production.contract';
+import { PLAN_DOCUMENT_PUBLIC_SELECT } from '../dto/treatment-plan-document.dto';
+import { releasePlanFile } from '../documents/plan-file-store';
 
 const PLANNER_ROLES: UserRole[] = [
   UserRole.admin,
@@ -403,6 +405,23 @@ export class TreatmentPlanService {
       const nextName = `Treatment Plan ${nextVersion}`;
 
       const created = await this.prisma.$transaction(async (tx) => {
+        // The analysis PDFs are read under the plan row lock that their
+        // writes take (TreatmentPlanDocumentService), so a replace or a
+        // delete racing this renewal can never remove a file the copies
+        // below still point at.
+        await tx.$queryRaw`SELECT id FROM "TreatmentPlan" WHERE id = ${id} FOR UPDATE`;
+        const documents = await tx.treatmentPlanDocument.findMany({
+          where: { treatmentPlanId: id },
+          select: {
+            kind: true,
+            storagePath: true,
+            fileName: true,
+            mimeType: true,
+            sizeBytes: true,
+            uploadedById: true,
+            uploadedByName: true,
+          },
+        });
         const c = await tx.treatmentPlan.create({
           data: {
             orderId: plan.orderId,
@@ -437,6 +456,17 @@ export class TreatmentPlanService {
               value: entry.value,
               note: entry.note,
               createdById: caller.userId,
+            })),
+          });
+        }
+        // Same files, new rows: the new version starts with the analyses
+        // the doctor already saw; replacing one there leaves this
+        // (rejected) version's copy untouched.
+        if (documents.length > 0) {
+          await tx.treatmentPlanDocument.createMany({
+            data: documents.map((document) => ({
+              ...document,
+              treatmentPlanId: c.id,
             })),
           });
         }
@@ -760,18 +790,11 @@ export class TreatmentPlanService {
 
     await fs.promises.writeFile(absPath, file.buffer);
 
-    // Best-effort cleanup of any previous image.
     const existing = await this.prisma.treatmentPlan.findUnique({
       where: { id },
       select: { movementTableImagePath: true },
     });
-    if (existing?.movementTableImagePath) {
-      void this.safeUnlink(existing.movementTableImagePath).catch((err) =>
-        this.logger.warn(`Failed to remove old movement table: ${err}`),
-      );
-    }
-
-    return this.prisma.treatmentPlan.update({
+    const updated = await this.prisma.treatmentPlan.update({
       where: { id },
       data: {
         movementTableImagePath: relPath,
@@ -780,6 +803,12 @@ export class TreatmentPlanService {
         movementTableImageSizeBytes: file.size,
       },
     });
+    // After the update, and only once unreferenced: a renewal shares the
+    // previous image with the version it was copied from.
+    if (existing?.movementTableImagePath) {
+      await this.releaseFile(existing.movementTableImagePath);
+    }
+    return updated;
   }
 
   async deleteMovementTableImage(id: string, caller: Caller) {
@@ -800,7 +829,7 @@ export class TreatmentPlanService {
       },
     });
     if (plan?.movementTableImagePath) {
-      void this.safeUnlink(plan.movementTableImagePath).catch(() => {});
+      await this.releaseFile(plan.movementTableImagePath);
     }
     return updated;
   }
@@ -875,23 +904,13 @@ export class TreatmentPlanService {
 
     await fs.promises.writeFile(absPath, file.buffer);
 
-    // Best-effort cleanup of any previous dental-table image — same
-    // pattern as the movement-table method. Loose-await so a slow
-    // unlink doesn't block the upload's response.
+    // Same order as the movement-table method: update first, then
+    // release the previous image if no version refers to it any more.
     const existing = await this.prisma.treatmentPlan.findUnique({
       where: { id },
       select: { dentalTreatmentTableImagePath: true },
     });
-    if (existing?.dentalTreatmentTableImagePath) {
-      void this.safeUnlink(existing.dentalTreatmentTableImagePath).catch(
-        (err) =>
-          this.logger.warn(
-            `Failed to remove old dental treatment table: ${err}`,
-          ),
-      );
-    }
-
-    return this.prisma.treatmentPlan.update({
+    const updated = await this.prisma.treatmentPlan.update({
       where: { id },
       data: {
         dentalTreatmentTableImagePath: relPath,
@@ -900,6 +919,10 @@ export class TreatmentPlanService {
         dentalTreatmentTableImageSizeBytes: file.size,
       },
     });
+    if (existing?.dentalTreatmentTableImagePath) {
+      await this.releaseFile(existing.dentalTreatmentTableImagePath);
+    }
+    return updated;
   }
 
   async deleteDentalTreatmentTableImage(id: string, caller: Caller) {
@@ -918,7 +941,7 @@ export class TreatmentPlanService {
       },
     });
     if (plan?.dentalTreatmentTableImagePath) {
-      void this.safeUnlink(plan.dentalTreatmentTableImagePath).catch(() => {});
+      await this.releaseFile(plan.dentalTreatmentTableImagePath);
     }
     return updated;
   }
@@ -992,7 +1015,7 @@ export class TreatmentPlanService {
   async getReview(id: string, caller: Caller) {
     const plan = await this.getOne(id, caller);
 
-    const [toothInstructions, messages, clinicalImages, iprEntries] =
+    const [toothInstructions, messages, clinicalImages, iprEntries, documents] =
       await Promise.all([
         this.prisma.orderToothInstruction.findMany({
           where: { orderId: plan.orderId },
@@ -1044,6 +1067,13 @@ export class TreatmentPlanService {
           where: { treatmentPlanId: id },
           orderBy: [{ fromTooth: 'asc' }, { toTooth: 'asc' }],
         }),
+        // Analysis PDFs (CBCT, cephalometric) of THIS version: metadata
+        // only, the bytes come from GET /treatment-plans/:id/documents/:kind.
+        this.prisma.treatmentPlanDocument.findMany({
+          where: { treatmentPlanId: id },
+          orderBy: { kind: 'asc' },
+          select: PLAN_DOCUMENT_PUBLIC_SELECT,
+        }),
       ]);
 
     // Group odontogram entries by tooth number so the UI can render per-tooth.
@@ -1072,7 +1102,14 @@ export class TreatmentPlanService {
       .sort(([a], [b]) => a - b)
       .map(([toothNumber, entries]) => ({ toothNumber, entries }));
 
-    return { ...plan, odontogram, messages, clinicalImages, iprEntries };
+    return {
+      ...plan,
+      odontogram,
+      messages,
+      clinicalImages,
+      iprEntries,
+      documents,
+    };
   }
 
   // ─── File-path helpers ────────────────────────────────────────────────────
@@ -1090,14 +1127,14 @@ export class TreatmentPlanService {
     return abs;
   }
 
-  private async safeUnlink(relPath: string): Promise<void> {
-    try {
-      const abs = path.resolve(UPLOAD_ROOT, relPath);
-      const normalisedRoot = path.resolve(UPLOAD_ROOT) + path.sep;
-      if (!abs.startsWith(normalisedRoot)) return;
-      if (fs.existsSync(abs)) await fs.promises.unlink(abs);
-    } catch {
-      /* ignore */
-    }
+  /**
+   * Remove a superseded plan file once no row refers to it: a renewal
+   * copies the image paths to the new version without copying the bytes,
+   * so the rejected version may still show the same file.
+   */
+  private releaseFile(relPath: string): Promise<void> {
+    return releasePlanFile(this.prisma, relPath, (err) =>
+      this.logger.warn(`Failed to release ${relPath}: ${String(err)}`),
+    );
   }
 }

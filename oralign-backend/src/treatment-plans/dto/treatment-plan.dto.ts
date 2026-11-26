@@ -15,6 +15,7 @@ import {
   TreatmentMessageType,
   TreatmentAttachmentCategory,
 } from '@prisma/client';
+import { TreatmentPlanDocumentDto } from './treatment-plan-document.dto';
 
 export class CreateTreatmentPlanDto {
   @ApiPropertyOptional({ example: 'Treatment Plan v1 — initial setup' })
@@ -209,4 +210,11 @@ export class TreatmentPlanReviewDto extends TreatmentPlanResponseDto {
 
   @ApiProperty({ type: [TreatmentReviewClinicalImageDto] })
   clinicalImages!: TreatmentReviewClinicalImageDto[];
+
+  @ApiProperty({
+    type: [TreatmentPlanDocumentDto],
+    description:
+      'The analysis PDFs of this version (CBCT, cephalometric), ordered by kind.',
+  })
+  documents!: TreatmentPlanDocumentDto[];
 }

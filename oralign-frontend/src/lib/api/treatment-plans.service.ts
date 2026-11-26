@@ -1,9 +1,11 @@
-import { inertBlob, keepsDisplayType } from './blob-download';
+import { blobError, inertBlob, keepsDisplayType } from './blob-download';
 import apiClient from './client';
 import type {
   PublicTreatmentViewerPayload,
   TreatmentMessage,
   TreatmentPlan,
+  TreatmentPlanDocument,
+  TreatmentPlanDocumentKind,
   TreatmentPlanIpr,
   TreatmentPlanReview,
   TreatmentAttachmentCategory,
@@ -210,6 +212,60 @@ export const treatmentPlansService = {
     const base =
       process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
     return `${base}/treatment-plans/${id}/dental-treatment-table-image`;
+  },
+
+  // ─── Analyses (PDF slots: CBCT, cephalometric) ───────────────────────────
+  // One document per kind and plan version. PUT replaces, DELETE is
+  // idempotent; the bytes sit behind the JWT, so they are read as a blob.
+  // `timeout: 0`: a 25 MB PDF on a slow clinic line outlives the global
+  // 30 s timeout (nginx still bounds the request).
+
+  uploadDocument: async (
+    id: string,
+    kind: TreatmentPlanDocumentKind,
+    file: File,
+    onProgress?: (percent: number) => void,
+  ): Promise<TreatmentPlanDocument> => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await apiClient.put<TreatmentPlanDocument>(
+      `/treatment-plans/${id}/documents/${kind}`,
+      form,
+      {
+        timeout: 0,
+        onUploadProgress: onProgress
+          ? (event) => {
+              if (event.total && event.total > 0) {
+                onProgress(Math.round((event.loaded * 100) / event.total));
+              }
+            }
+          : undefined,
+      },
+    );
+    return res.data;
+  },
+
+  deleteDocument: async (
+    id: string,
+    kind: TreatmentPlanDocumentKind,
+  ): Promise<void> => {
+    await apiClient.delete(`/treatment-plans/${id}/documents/${kind}`);
+  },
+
+  /** The PDF bytes, typed application/pdf whatever the response says. */
+  fetchDocumentBlob: async (
+    id: string,
+    kind: TreatmentPlanDocumentKind,
+  ): Promise<Blob> => {
+    try {
+      const res = await apiClient.get<Blob>(
+        `/treatment-plans/${id}/documents/${kind}`,
+        { responseType: 'blob', timeout: 0 },
+      );
+      return new Blob([res.data], { type: 'application/pdf' });
+    } catch (error) {
+      throw await blobError(error, 'Unable to load the document.');
+    }
   },
 
   // ─── Messages & attachments ──────────────────────────────────────────────

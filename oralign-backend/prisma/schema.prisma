@@ -233,6 +233,13 @@ enum TreatmentPlanStatus {
   rejected
 }
 
+/// The analysis PDFs a planner attaches to a treatment plan version
+/// (one slot each, see TreatmentPlanDocument).
+enum TreatmentPlanDocumentKind {
+  cbct_analysis
+  cephalometric_analysis
+}
+
 enum TreatmentMessageType {
   message
   system
@@ -499,6 +506,7 @@ model User {
   createdTreatmentPlans TreatmentPlan[]  @relation("TreatmentPlanCreator")
   createdToothInstructions OrderToothInstruction[] @relation("ToothInstructionCreator")
   createdTreatmentPlanIprs TreatmentPlanIpr[] @relation("TreatmentPlanIprCreator")
+  uploadedTreatmentPlanDocuments TreatmentPlanDocument[] @relation("TreatmentPlanDocumentUploader")
   recordedAlignerDeliveries AlignerDelivery[] @relation("AlignerDeliveryCreatedBy")
   // Lab production acts this account declared / cancelled (SetNull + snapshot).
   createdProductionEvents   ProductionEvent[] @relation("ProductionEventCreatedBy")
@@ -1398,6 +1406,9 @@ model TreatmentPlan {
   // single tooth, IPR is between two). See the TreatmentPlanIpr model
   // below for the contract.
   iprEntries                  TreatmentPlanIpr[]
+  // Analysis PDFs (CBCT, cephalometric): one row per kind, copied to the
+  // next version on a renewal.
+  documents                   TreatmentPlanDocument[]
   // Transfer-template requests built from this plan (SetNull on their side).
   supplementalSourceRequests  SupplementalOrderRequest[]  @relation("SupplementalSourcePlan")
 
@@ -1406,6 +1417,34 @@ model TreatmentPlan {
   @@index([status])
   @@index([publicToken])
   @@index([deletedAt])
+}
+
+/// An analysis PDF of a treatment plan version: the CBCT analysis or the
+/// cephalometric analysis, one row per kind (the slot). A renewal after a
+/// rejection copies the rows to the new version, and the copies point at
+/// the SAME file: a file is only removed from disk once no row (of this
+/// table, or a plan's movement / dental table image) refers to it.
+/// `storagePath` is relative to uploads/ and never leaves the server.
+model TreatmentPlanDocument {
+  id              String                    @id @default(uuid())
+  treatmentPlanId String
+  kind            TreatmentPlanDocumentKind
+  storagePath     String
+  fileName        String
+  mimeType        String
+  sizeBytes       Int
+  // Actor snapshot: survives the account being purged (SetNull below).
+  uploadedById    String?
+  uploadedByName  String?
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+
+  // DELETION POLICY: owned by its plan version (Restrict-protected upstream).
+  treatmentPlan   TreatmentPlan             @relation(fields: [treatmentPlanId], references: [id], onDelete: Cascade)
+  uploadedBy      User?                     @relation("TreatmentPlanDocumentUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@unique([treatmentPlanId, kind])
+  @@index([storagePath])
 }
 
 /**

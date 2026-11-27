@@ -33,7 +33,7 @@ Exception : `/qui-sommes-nous` et `/contact` n'existent qu'en **fr + en**
   invisible, appareil dentaire invisible, aligneur dentaire Tunisie,
   **prix aligneurs Tunisie**, **alternative Invisalign Tunisie**,
   **meilleur aligneur dentaire Tunisie**, **prix gouttière dentaire Tunisie**
-- EN : clear aligners, dental aligners, transparent aligners, invisible braces,
+- EN : clear aligners, dental aligners, transparent aligners (the owner wants "transparent aligner", never "invisible braces"),
   invisible orthodontics, teeth aligners, clear aligner treatment
 - AR : تقويم شفاف، تقويم الأسنان الشفاف، **تقويم الأسنان بدون حديد**، تقويم غير مرئي، مصففات الأسنان،
   مصففات شفافة، تقويم الأسنان بدون أسلاك، تقويم الأسنان في تونس،

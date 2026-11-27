@@ -100,7 +100,7 @@ export const MARKETING_PAGES: Record<MarketingPageKey, Record<Lang, PageSeo>> = 
       path: "/",
       title: "Aligneurs transparents en Tunisie | ORALIGN®",
       description:
-        "Aligneurs transparents ORALIGN® : orthodontie invisible supervisée par un praticien certifié en Tunisie, pour adultes, ados et enfants. Trouvez un praticien.",
+        "Aligneurs transparents ORALIGN® fabriqués en Tunisie, suivis par un dentiste ou un orthodontiste certifié. Adultes, ados, enfants : trouvez un praticien.",
       keywords: [
         "aligneur dentaire",
         "aligneurs transparents",
@@ -116,14 +116,14 @@ export const MARKETING_PAGES: Record<MarketingPageKey, Record<Lang, PageSeo>> = 
     },
     en: {
       path: "/en",
-      title: "Clear Aligners in Tunisia — Invisible Braces | ORALIGN®",
+      title: "Clear Aligners in Tunisia — Transparent Aligners | ORALIGN®",
       description:
-        "ORALIGN® clear aligners: dentist-supervised invisible orthodontics made in Tunisia, for adults, teens and kids. Find a certified practitioner near you.",
+        "ORALIGN® transparent aligners made in Tunisia, supervised by a certified dentist or orthodontist, for adults, teens and kids. Find a practitioner near you.",
       keywords: [
         "clear aligners",
         "dental aligners",
         "transparent aligners",
-        "invisible braces",
+        "transparent aligner Tunisia",
         "invisible orthodontics",
         "teeth aligners",
         "clear aligner treatment",
@@ -306,7 +306,7 @@ export const MARKETING_PAGES: Record<MarketingPageKey, Record<Lang, PageSeo>> = 
       keywords: [
         "clear aligner reviews",
         "aligner patient stories",
-        "invisible braces experience",
+        "transparent aligner experience",
       ],
       breadcrumb: "Community",
     },
@@ -404,7 +404,7 @@ export const MARKETING_PAGES: Record<MarketingPageKey, Record<Lang, PageSeo>> = 
         "clear aligner price Tunisia",
         "aligner cost",
         "how much do clear aligners cost",
-        "invisible braces price",
+        "transparent aligner price",
         "orthodontic treatment cost Tunisia",
         "ORALIGN price",
       ],
@@ -488,7 +488,7 @@ export const MARKETING_PAGES: Record<MarketingPageKey, Record<Lang, PageSeo>> = 
       keywords: [
         "clear aligners for teens",
         "teen orthodontics Tunisia",
-        "invisible braces teenager",
+        "transparent aligners for teens",
         "aligners for teenagers",
       ],
       breadcrumb: "Teenagers",

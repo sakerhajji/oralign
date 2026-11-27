@@ -45,7 +45,7 @@ jobs:
     outputs:
       sha: ${{ steps.resolve.outputs.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0
@@ -104,7 +104,7 @@ jobs:
           esac
 
       - name: Backup, then deploy ${{ needs.gate.outputs.sha }}
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@v1.2.5
         env:
           DEPLOY_SHA: ${{ needs.gate.outputs.sha }}
           SKIP_BACKUP: ${{ inputs.skip_backup }}

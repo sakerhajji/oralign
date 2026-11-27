@@ -31,6 +31,14 @@ import {
   UpdateInvoiceDto,
 } from '../dto/invoice.dto';
 import { issueDateFilter } from './invoice-period';
+import {
+  buildDoctorBillingSnapshot,
+  DOCTOR_BILLING_SELECT,
+  invoiceClientSnapshotColumns,
+  manualInvoiceClient,
+  type DoctorBillingRow,
+} from '../../common/doctor/doctor-billing-snapshot';
+import { assertWithholdingAllowed } from '../../payments/services/payment-rules';
 
 /**
  * TND carries 3 decimals — the same rounding QuotationService uses, so a
@@ -46,10 +54,17 @@ const round = (n: number): number =>
 const billedWithoutStamp = (inv: {
   totalTtc: Prisma.Decimal | number;
   stampDuty: Prisma.Decimal | number;
-}): Prisma.Decimal => Prisma.Decimal.max(0, dec(inv.totalTtc).minus(dec(inv.stampDuty)));
+}): Prisma.Decimal =>
+  Prisma.Decimal.max(0, dec(inv.totalTtc).minus(dec(inv.stampDuty)));
 
 const num = (v: Prisma.Decimal | number | null | undefined): number =>
   v === null || v === undefined ? 0 : Number(v);
+
+/** Two names equal once trimmed (a missing one reads as empty). */
+const sameTrimmed = (
+  a: string | null | undefined,
+  b: string | null | undefined,
+): boolean => (a ?? '').trim() === (b ?? '').trim();
 
 export interface InvoiceTotals {
   subTotalHt: number;
@@ -197,10 +212,7 @@ export class InvoiceService {
 
     let tvaAmount = 0;
     lines.forEach((line, i) => {
-      const rate = Math.max(
-        0,
-        Math.min(100, line.tvaRate ?? safeInvoiceRate),
-      );
+      const rate = Math.max(0, Math.min(100, line.tvaRate ?? safeInvoiceRate));
       tvaAmount += (lineHt[i] * ratio * rate) / 100;
     });
     tvaAmount = round(tvaAmount);
@@ -507,7 +519,9 @@ export class InvoiceService {
           // Cash collected, and the fee due (TTC, stamp excluded): cash +
           // what was withheld - the stamp charged on top with the payment.
           treatmentFeeAmount:
-            o.treatmentFeeAmount === null ? null : toAmount(o.treatmentFeeAmount),
+            o.treatmentFeeAmount === null
+              ? null
+              : toAmount(o.treatmentFeeAmount),
           treatmentFeeDue:
             o.treatmentFeeAmount === null
               ? null
@@ -607,7 +621,14 @@ export class InvoiceService {
     }
 
     const settings = await this.billingSettings.requireActive();
-    await this.assertLinksExist(dto);
+    const { doctor } = await this.assertLinksExist(dto);
+    // The form sends the practitioner and the fields the admin changed:
+    // the rest of the client block, the practice name and the "billed to
+    // the practitioner" decision are snapshotted here, once (spec §6).
+    const client = manualInvoiceClient(
+      dto,
+      doctor ? buildDoctorBillingSnapshot(doctor) : null,
+    );
 
     const tvaRate = dto.tvaRate ?? Number(settings.defaultTvaRate ?? 19);
     // Snapshot, not a live read: changing the company stamp duty later
@@ -626,6 +647,14 @@ export class InvoiceService {
       stampDuty,
       withholdingRate: dto.withholdingRate ?? null,
     });
+    // A retenue only where the rule lets it apply (spec §4): switched on,
+    // and the invoice base (TTC, stamp excluded) at or above the threshold
+    // in force, which the invoice snapshots below.
+    InvoiceService.assertManualWithholding(money, {
+      withholdingEnabled: settings.withholdingEnabled,
+      withholdingRate: money.withholdingRate,
+      withholdingThreshold: settings.withholdingThreshold,
+    });
 
     const invoiceNumber = dto.invoiceNumber?.trim()
       ? await this.assertNumberFree(dto.invoiceNumber.trim())
@@ -637,60 +666,57 @@ export class InvoiceService {
     let created;
     try {
       created = await this.prisma.invoice.create({
-      data: {
-        invoiceNumber,
-        status,
-        orderId: dto.orderId ?? null,
-        patientId: dto.patientId ?? null,
-        doctorId: dto.doctorId ?? null,
-        clientName: dto.clientName,
-        clientEmail: dto.clientEmail ?? null,
-        clientPhone: dto.clientPhone ?? null,
-        clientAddress: dto.clientAddress ?? null,
-        clientCity: dto.clientCity ?? null,
-        clientCountry: dto.clientCountry ?? null,
-        clientTaxId: dto.clientTaxId ?? null,
-        issueDate: dto.issueDate ? new Date(dto.issueDate) : now,
-        dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
-        currency: settings.defaultCurrency || 'TND',
-        language: dto.language ?? 'fr',
-        tvaRate,
-        discountAmount: money.discountApplied,
-        discountPercent,
-        stampDuty: money.stampApplied,
-        subTotalHt: money.subTotalHt,
-        tvaAmount: money.tvaAmount,
-        totalTtc: money.totalTtc,
-        pricesIncludeTax,
-        paymentMethod: dto.paymentMethod ?? null,
-        paymentReference: dto.paymentReference?.trim() || null,
-        withholdingRate: money.withholdingRate,
-        withholdingAmount: money.withholdingAmount,
-        netPayable: money.netPayable,
-        notes: dto.notes ?? null,
-        companySnapshot: this.buildCompanySnapshot(settings),
-        createdById: caller.userId,
-        createdByName: await lookupActorName(this.prisma, caller.userId),
-        // Only an invoice that actually reaches issued/paid was issued;
-        // creating one straight as "cancelled" stamps nothing, so it
-        // stays purgeable like any never-issued draft.
-        issuedAt:
-          status === InvoiceStatus.issued || status === InvoiceStatus.paid
-            ? now
-            : null,
-        paidAt: status === InvoiceStatus.paid ? now : null,
-        lines: {
-          create: lines.map((line, i) => ({
-            position: i,
-            description: line.description,
-            quantity: line.quantity ?? 1,
-            unitPrice: money.unitPrice[i],
-            unitPriceTtc: money.unitPriceTtc[i],
-            tvaRate: line.tvaRate ?? null,
-            lineHt: money.lineHt[i],
-          })),
+        data: {
+          invoiceNumber,
+          status,
+          orderId: dto.orderId ?? null,
+          patientId: dto.patientId ?? null,
+          doctorId: dto.doctorId ?? null,
+          ...client,
+          issueDate: dto.issueDate ? new Date(dto.issueDate) : now,
+          dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+          currency: settings.defaultCurrency || 'TND',
+          language: dto.language ?? 'fr',
+          tvaRate,
+          discountAmount: money.discountApplied,
+          discountPercent,
+          stampDuty: money.stampApplied,
+          subTotalHt: money.subTotalHt,
+          tvaAmount: money.tvaAmount,
+          totalTtc: money.totalTtc,
+          pricesIncludeTax,
+          paymentMethod: dto.paymentMethod ?? null,
+          paymentReference: dto.paymentReference?.trim() || null,
+          withholdingRate: money.withholdingRate,
+          withholdingAmount: money.withholdingAmount,
+          netPayable: money.netPayable,
+          // The retenue threshold in force at issue (snapshot, spec §4). A
+          // manual invoice records no devis balance (quoteRemainingAfter).
+          withholdingThreshold: settings.withholdingThreshold,
+          notes: dto.notes ?? null,
+          companySnapshot: this.buildCompanySnapshot(settings),
+          createdById: caller.userId,
+          createdByName: await lookupActorName(this.prisma, caller.userId),
+          // Only an invoice that actually reaches issued/paid was issued;
+          // creating one straight as "cancelled" stamps nothing, so it
+          // stays purgeable like any never-issued draft.
+          issuedAt:
+            status === InvoiceStatus.issued || status === InvoiceStatus.paid
+              ? now
+              : null,
+          paidAt: status === InvoiceStatus.paid ? now : null,
+          lines: {
+            create: lines.map((line, i) => ({
+              position: i,
+              description: line.description,
+              quantity: line.quantity ?? 1,
+              unitPrice: money.unitPrice[i],
+              unitPriceTtc: money.unitPriceTtc[i],
+              tvaRate: line.tvaRate ?? null,
+              lineHt: money.lineHt[i],
+            })),
+          },
         },
-      },
         include: INVOICE_INCLUDE,
       });
     } catch (error) {
@@ -706,7 +732,9 @@ export class InvoiceService {
       throw error;
     }
 
-    this.logger.log(`Invoice ${created.invoiceNumber} created by ${caller.userId}`);
+    this.logger.log(
+      `Invoice ${created.invoiceNumber} created by ${caller.userId}`,
+    );
     return toInvoiceJson(created);
   }
 
@@ -730,7 +758,7 @@ export class InvoiceService {
         'INVOICE_ARCHIVED',
       );
     }
-    await this.assertLinksExist(dto);
+    const { doctor: linkedDoctor } = await this.assertLinksExist(dto);
 
     // Money is only RECOMPUTED when a money field was actually touched.
     // Editing notes or the client block must not move a millime — that
@@ -813,6 +841,19 @@ export class InvoiceService {
       // time unless the admin changes the rate on purpose. Like any
       // retenue it is taken on the TTC without the stamp, so it is capped
       // there; the net still pays the stamp.
+      // A retenue the admin sets now must be one the rule allows, against
+      // the threshold the invoice snapshotted (none on invoices issued
+      // before the threshold existed). An unchanged rate was accepted when
+      // it was set and is left as it is.
+      if (rateChanged && money.withholdingAmount > 0) {
+        const settings = await this.billingSettings.getActive();
+        InvoiceService.assertManualWithholding(money, {
+          withholdingEnabled: settings?.withholdingEnabled ?? false,
+          withholdingRate: money.withholdingRate,
+          withholdingThreshold: before.withholdingThreshold,
+        });
+      }
+
       const automatic = Boolean(before.paymentId || before.treatmentFeeOrderId);
       if (automatic && !rateChanged) {
         const base = Math.max(0, round(money.totalTtc - money.stampApplied));
@@ -914,6 +955,10 @@ export class InvoiceService {
     if (dto.orderId !== undefined) data.orderId = dto.orderId || null;
     if (dto.patientId !== undefined) data.patientId = dto.patientId || null;
     if (dto.doctorId !== undefined) data.doctorId = dto.doctorId || null;
+    Object.assign(
+      data,
+      await this.reviseClientSnapshot(before, dto, linkedDoctor),
+    );
 
     try {
       await this.prisma.$transaction(async (tx) => {
@@ -993,13 +1038,7 @@ export class InvoiceService {
       LOCKED_STATUSES.includes(before.status) ||
       LOCKED_STATUSES.includes(updated.status)
     ) {
-      await this.writeAuditLog(
-        id,
-        caller,
-        before,
-        updated,
-        Boolean(dto.lines),
-      );
+      await this.writeAuditLog(id, caller, before, updated, Boolean(dto.lines));
     }
 
     return updated;
@@ -1012,7 +1051,9 @@ export class InvoiceService {
       where: { id: row.id },
       data: { deletedAt: new Date() },
     });
-    this.logger.log(`Invoice ${row.invoiceNumber} archived by ${caller.userId}`);
+    this.logger.log(
+      `Invoice ${row.invoiceNumber} archived by ${caller.userId}`,
+    );
     return { id: row.id };
   }
 
@@ -1076,7 +1117,7 @@ export class InvoiceService {
    */
   private async assertLinksExist(
     dto: Pick<CreateInvoiceDto, 'orderId' | 'patientId' | 'doctorId'>,
-  ): Promise<void> {
+  ): Promise<{ doctor: DoctorBillingRow | null }> {
     if (dto.orderId) {
       const order = await this.prisma.dentalOrder.findFirst({
         where: { id: dto.orderId, deletedAt: null },
@@ -1092,12 +1133,73 @@ export class InvoiceService {
       if (!patient) throw new NotFoundException('Patient not found');
     }
     if (dto.doctorId) {
+      // Read once, with what the client snapshot needs.
       const doctor = await this.prisma.user.findFirst({
         where: { id: dto.doctorId, deletedAt: null },
-        select: { id: true },
+        select: DOCTOR_BILLING_SELECT,
       });
       if (!doctor) throw new NotFoundException('Doctor not found');
+      return { doctor };
     }
+    return { doctor: null };
+  }
+
+  /**
+   * A manual retenue must be one the rule lets apply (spec §4, P-D1's
+   * eligibility rule): 400 WITHHOLDING_DISABLED when the retenue is
+   * switched off, 400 WITHHOLDING_BELOW_THRESHOLD when the invoice base
+   * (Total TTC, stamp excluded) is under the threshold. No retenue,
+   * nothing to check.
+   */
+  static assertManualWithholding(
+    money: Pick<
+      InvoiceMoney,
+      'totalTtc' | 'stampApplied' | 'withholdingAmount'
+    >,
+    rule: {
+      withholdingEnabled: boolean | null | undefined;
+      withholdingRate: number | null;
+      withholdingThreshold: Prisma.Decimal | number | string | null | undefined;
+    },
+  ): void {
+    if (!(money.withholdingAmount > 0)) return;
+    assertWithholdingAllowed(
+      dec(money.totalTtc).minus(dec(money.stampApplied)),
+      rule,
+    );
+  }
+
+  /**
+   * The snapshot columns of an edited invoice (clientIsPractitioner,
+   * clientClinicName, clientRegistrationNumber) are decided again only
+   * when its practitioner or its client name changes: re-saving the form
+   * as it is keeps what the invoice froze at issue (or what the
+   * 2026-11-27 backfill recorded). Nothing to write otherwise.
+   */
+  private async reviseClientSnapshot(
+    before: { doctorId: string | null; clientName: string },
+    dto: Pick<UpdateInvoiceDto, 'doctorId' | 'clientName'>,
+    linkedDoctor: DoctorBillingRow | null,
+  ): Promise<Partial<Prisma.InvoiceUncheckedUpdateInput>> {
+    const doctorId =
+      dto.doctorId === undefined ? before.doctorId : dto.doctorId || null;
+    const doctorChanged = doctorId !== before.doctorId;
+    const nameChanged =
+      dto.clientName !== undefined &&
+      !sameTrimmed(dto.clientName, before.clientName);
+    if (!doctorChanged && !nameChanged) return {};
+    const clientName = dto.clientName ?? before.clientName;
+    const doctor = !doctorId
+      ? null
+      : (linkedDoctor ??
+        (await this.prisma.user.findFirst({
+          where: { id: doctorId },
+          select: DOCTOR_BILLING_SELECT,
+        })));
+    return invoiceClientSnapshotColumns(
+      clientName,
+      doctor ? buildDoctorBillingSnapshot(doctor) : null,
+    );
   }
 
   /** Company header frozen on the row, same idea as Quotation.companySnapshot. */
@@ -1151,6 +1253,10 @@ export class InvoiceService {
       'clientCity',
       'clientCountry',
       'clientTaxId',
+      // The snapshot columns (spec §6), labelled in the history like the
+      // 2026-11-27 backfill that first wrote them.
+      'clientClinicName',
+      'clientIsPractitioner',
       'issueDate',
       'dueDate',
       'tvaRate',
@@ -1197,9 +1303,9 @@ export class InvoiceService {
     if (value === null || value === undefined) return null;
     if (value instanceof Date) return value.toISOString();
     if (typeof value === 'number') return String(value);
-    if (typeof value === 'object' && 'toString' in (value as object)) {
-      return String(value);
-    }
+    if (Prisma.Decimal.isDecimal(value)) return value.toString();
+    // Any other object compares by its content, never "[object Object]".
+    if (typeof value === 'object') return JSON.stringify(value);
     return value;
   }
 }

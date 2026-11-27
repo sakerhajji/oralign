@@ -2,8 +2,8 @@
 
 import type { ReactNode } from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useT } from '@/lib/i18n/lang-context';
 import type { UserStats } from '@/lib/types';
+import { useT } from '@/lib/i18n/lang-context';
 import { cn } from '@/lib/utils';
 
 /**
@@ -21,15 +21,20 @@ export function useCountLabel() {
 /**
  * Overview of the whole user base from `GET /users/stats` — never the
  * current page. One surface with hairline dividers (2 × 2 on phones and
- * tablets, one row from lg).
+ * tablets, one row from lg). With the doctor inactivity counter
+ * (`dormant`, spec §5) a fifth tile spans the last row below lg; with
+ * `onShowDormant` it is a button that narrows the list to them.
  */
 export function UsersStats({
   stats,
   unavailable = false,
+  onShowDormant,
 }: {
   stats: UserStats | undefined;
   /** The counts could not be loaded: show dashes, not endless skeletons. */
   unavailable?: boolean;
+  /** Filter the list to dormant practitioners (activity=inactive). */
+  onShowDormant?: () => void;
 }) {
   const { t } = useT();
   const countLabel = useCountLabel();
@@ -41,12 +46,15 @@ export function UsersStats({
       ].join(' · ')
     : undefined;
 
+  const dormant = stats?.dormant;
+
   const items: {
     key: string;
     label: string;
     value: number | undefined;
-    detail: string | undefined;
+    detail: ReactNode | undefined;
     tone?: string;
+    className?: string;
   }[] = [
     {
       key: 'total',
@@ -74,6 +82,26 @@ export function UsersStats({
       detail: stats ? countLabel('usersDesk.stats.giftUsed', stats.giftUsed) : undefined,
       tone: stats && stats.giftAvailable > 0 ? 'text-emerald-700 dark:text-emerald-400' : undefined,
     },
+    {
+      // Doctor inactivity (spec §5): dormant dentists, NOT the blocked ones.
+      key: 'dormant',
+      label: t('accountActivity.stats.dormant'),
+      value: dormant,
+      detail:
+        dormant === undefined ? undefined : dormant > 0 && onShowDormant ? (
+          <button
+            type="button"
+            onClick={onShowDormant}
+            className="-mx-1 -my-0.5 rounded px-1 py-0.5 text-left underline underline-offset-4 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none pointer-coarse:min-h-12"
+          >
+            {t('accountActivity.stats.show')}
+          </button>
+        ) : (
+          t('accountActivity.stats.dormantDetail')
+        ),
+      tone: dormant && dormant > 0 ? 'text-slate-700 dark:text-slate-200' : undefined,
+      className: 'col-span-2 lg:col-span-1',
+    },
   ];
 
   const placeholder = (shape: string): ReactNode =>
@@ -82,10 +110,10 @@ export function UsersStats({
   return (
     <dl
       aria-label={t('usersDesk.stats.aria')}
-      className="grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-foreground/10 ring-1 ring-foreground/10 lg:grid-cols-4"
+      className="grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-foreground/10 ring-1 ring-foreground/10 lg:grid-cols-5"
     >
       {items.map((item) => (
-        <div key={item.key} className="min-w-0 bg-card px-4 py-3">
+        <div key={item.key} className={cn('min-w-0 bg-card px-4 py-3', item.className)}>
           <dt className="text-xs leading-4 text-muted-foreground">{item.label}</dt>
           <dd
             className={cn(

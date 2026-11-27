@@ -1,22 +1,20 @@
 'use client';
 
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   AlertTriangle,
   Banknote,
   Calendar,
   CheckCircle2,
   CreditCard,
-  Download,
-  ExternalLink,
   FilePen,
   FileText,
   Landmark,
   Loader2,
-  Maximize2,
   Stethoscope,
   User,
 } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -25,11 +23,20 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { ImageLightbox } from '@/components/ui/image-lightbox';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { PaymentStatusBadge } from '@/components/payments/payment-status-badge';
+import {
+  REASON_MAX,
+  REASON_MIN,
+  confirmProblem,
+  isAlreadyProcessed,
+} from '@/components/payments/pending/queue-format';
+import { ReceiptViewer } from '@/components/payments/pending/receipt-viewer';
 import { formatRate, recordedSplit } from '@/components/payments/withholding';
-import { useConfirmTreatmentFeePayment } from '@/lib/hooks';
-import { resolveUploadUrl } from '@/lib/api/company-billing.service';
+import { extractApiError } from '@/lib/api/error';
+import type { TransferRef } from '@/lib/api/transfer-queue.service';
+import { useConfirmTransfer, useOpenTransferReview } from '@/lib/hooks/use-transfer-queue';
 import { cn } from '@/lib/utils';
 import { formatBusinessDay } from '@/lib/utils/business-day';
 import { formatPrice } from '@/lib/utils/currency';
@@ -38,50 +45,56 @@ import { PaymentMethod, PaymentRecordStatus } from '@/lib/types';
 
 /**
  * The dentist's bank-transfer proof (justificatif), with the admin's
- * confirmation when the caller allows it. The payments desk opens it
- * read-only for installments and fees alike.
- *
- * Desktop-first design:
+ * confirmation when the caller allows it: the order page's fee banner
+ * opens it for an admin. (The payments history desk and the pending desk
+ * have their own viewers: ReceiptViewerDialog, TransferReviewDialog.)
  *
  *   ┌─────────────────────────────────────────────────────┐
  *   │ Bank transfer proof     [To be confirmed]        X │
  *   │ Order ORD-1234                                       │
  *   ├──────────────────────────┬──────────────────────────┤
- *   │                          │  Patient                  │
- *   │    [Proof photo]         │  Ahlem r9i9              │
- *   │    object-contain on     │                           │
- *   │    a soft backdrop —     │  Doctor                   │
- *   │    click → lightbox      │  Dr. Hajji Saker         │
- *   │                          │                           │
- *   │                          │  Amount      350 TND     │
- *   │                          │  Method      Bank transfer│
- *   │                          │  Submitted   7 juin 2026 │
+ *   │    [Proof]               │  Patient · Doctor         │
+ *   │    image / PDF           │  Amount · Method · Date   │
  *   ├──────────────────────────┴──────────────────────────┤
  *   │                       [Cancel]  [✓ Confirm payment] │
  *   └─────────────────────────────────────────────────────┘
  *
- *   Read-only (no Confirm): the footer's button reads Close, and the
- *   caller may add one `footerAction` beside it.
+ * Receipts are private (DECISIONS §1): the bytes come from the
+ * authenticated proof stream (GET orders/:id/treatment-fee/proof, or GET
+ * payments/:paymentId/proof for an installment) as a blob shown from a
+ * local URL, never from a public /uploads path. The owning dentist and
+ * admins may read it; anyone else gets « Reçu introuvable ».
  *
- *   Below md: the two columns stack — proof on top, details below,
- *   footer still sticky. The image scales down with the viewport so
- *   the dialog always fits without scrolling on phones.
- *
- * The image is rendered with `object-contain` on a light-muted
- * backdrop so the full proof is visible without distortion. Clicking
- * the image opens the global ImageLightbox for true edge-to-edge
- * inspection. No CORS fetch — the URL is passed straight to <img>
- * which works cross-origin thanks to the backend's CORP header.
+ * An admin who opens an awaiting fee to confirm it stamps its review
+ * (« À vérifier » for the doctor) and reads his own notification of it.
+ * A fee declared without a receipt is confirmed only with a
+ * justification note.
  */
 export interface TreatmentFeeReceiptDialogProps {
   open: boolean;
   onOpenChange: (next: boolean) => void;
-  /** Required for the confirm mutation. */
+  /** The order the fee (or the installment) belongs to. */
   orderId: string;
   /** Shown in the header so the admin knows which order they're looking at. */
   orderCode: string;
-  /** Backend-stored relative path (e.g. "/uploads/treatment-fee-proofs/abc.pdf"). */
-  proofPath: string | null | undefined;
+  /**
+   * The installment's Payment, when `kind` is 'installment': its receipt
+   * is read from GET payments/:paymentId/proof.
+   */
+  paymentId?: string | null;
+  /**
+   * Whether a receipt is attached (the API's hasProof / treatmentFeeHasProof).
+   * The file itself always comes through the authenticated stream; without
+   * one, confirming needs a justification note.
+   */
+  hasProof: boolean;
+  /**
+   * The declaration's instant (treatmentFeeDeclaredAt), when known: a
+   * re-uploaded receipt is fetched afresh, and Confirm sends it so a
+   * receipt replaced meanwhile is refused (409) instead of confirmed
+   * unseen. The cache falls back to `submittedAt`; Confirm sends nothing.
+   */
+  declaredAt?: string | null;
   /**
    * Amount the doctor declared: the cash (due + stamp - any retenue) —
    * surfaced in the details column.
@@ -111,8 +124,7 @@ export interface TreatmentFeeReceiptDialogProps {
   submittedAt?: string | null;
   /**
    * What `submittedAt` is: the day the transfer was declared (default),
-   * or the day it was paid — a treatment fee keeps no declaration date,
-   * so the payments desk passes its payment date.
+   * or the day it was paid.
    */
   dateLabel?: 'submitted' | 'paid';
   /**
@@ -135,12 +147,20 @@ export interface TreatmentFeeReceiptDialogProps {
   footerAction?: ReactNode;
 }
 
+/** Epoch ms of an ISO instant, or 0: the cache identity of a fee receipt. */
+function epochOf(iso: string | null | undefined): number {
+  const ms = iso ? new Date(iso).getTime() : Number.NaN;
+  return Number.isFinite(ms) && ms >= 0 ? Math.trunc(ms) : 0;
+}
+
 export function TreatmentFeeReceiptDialog({
   open,
   onOpenChange,
   orderId,
   orderCode,
-  proofPath,
+  paymentId,
+  hasProof,
+  declaredAt,
   amount,
   withholdingAmount,
   withholdingRate,
@@ -159,226 +179,281 @@ export function TreatmentFeeReceiptDialog({
   footerAction,
 }: TreatmentFeeReceiptDialogProps) {
   const { t, lang } = useT();
-  const fileUrl = useMemo(() => resolveUploadUrl(proofPath), [proofPath]);
-  const fileName = extractFilename(proofPath) ?? `receipt-${orderCode}`;
-  const proofKind = classifyProof(proofPath);
-
-  const confirm = useConfirmTreatmentFeePayment();
-  const split = recordedSplit(
-    amount,
-    withholdingAmount,
-    withholdingRate,
-    stampAmount,
-    settledAmount,
+  const withProof = hasProof;
+  // The receipt's address and cache identity (the subject key shape).
+  const transfer = useMemo<TransferRef | null>(
+    () =>
+      kind === 'fee'
+        ? { kind: 'treatment_fee', orderId, paymentId: null }
+        : paymentId
+          ? { kind: 'installment', orderId, paymentId }
+          : null,
+    [kind, orderId, paymentId],
   );
+  const cacheKey = transfer
+    ? transfer.kind === 'installment'
+      ? `installment:${transfer.paymentId}`
+      : `treatment_fee:${orderId}:${epochOf(declaredAt ?? submittedAt)}`
+    : null;
+  // Confirming needs a route: an installment without its payment id has none.
+  const confirmable = canConfirm && transfer !== null;
+  const awaiting = status === PaymentRecordStatus.AWAITING_CONFIRMATION;
 
-  // Click-to-zoom lightbox — same component the clinical photos use,
-  // so the admin gets a familiar full-screen viewer when they need to
-  // inspect a receipt at high resolution. Lives outside the modal so
-  // closing the lightbox returns to the review surface.
-  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const confirm = useConfirmTransfer();
+  const openReview = useOpenTransferReview();
+  const [overrideNote, setOverrideNote] = useState('');
+  const [touched, setTouched] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+  const overrideId = useId();
+  const split = recordedSplit(amount, withholdingAmount, withholdingRate, stampAmount, settledAmount);
+
+  // An admin opening an awaiting transfer to decide on it stamps the review
+  // once per opening (idempotent server-side).
+  const stamped = useRef(false);
+  const { mutate: stampReview } = openReview;
+  useEffect(() => {
+    if (!open) {
+      stamped.current = false;
+      return;
+    }
+    if (!confirmable || !awaiting || !transfer || stamped.current) return;
+    stamped.current = true;
+    stampReview({ ref: transfer });
+  }, [open, confirmable, awaiting, transfer, stampReview]);
+
+  const problem = confirmProblem({ hasProof: withProof, overrideNote, notes: '' });
+  const overrideError =
+    touched && problem === 'override' ? t('pendingDesk.review.tooShort', { min: REASON_MIN }) : null;
+
+  const sendConfirm = () => {
+    if (!transfer) return;
+    setTouched(true);
+    if (problem) return;
+    setFailure(null);
+    confirm.mutate(
+      {
+        ref: transfer,
+        body: {
+          overrideNote: withProof ? undefined : overrideNote.trim(),
+          // Only the real declaration instant: a receipt replaced since is
+          // refused (409) instead of confirmed unseen.
+          declaredAt: kind === 'fee' ? (declaredAt ?? undefined) : undefined,
+        },
+      },
+      {
+        onSuccess: () => {
+          onConfirmed?.();
+          onOpenChange(false);
+        },
+        onError: (error) => {
+          const info = extractApiError(error);
+          setFailure(
+            isAlreadyProcessed(info) ? t('pendingDesk.review.alreadyBody') : info.message,
+          );
+        },
+      },
+    );
+  };
 
   return (
-    <>
-      <Dialog
-        open={open}
-        onOpenChange={(next) => {
-          if (confirm.isPending) return;
-          onOpenChange(next);
-        }}
-      >
-        {/*
-          Desktop comfort: an explicit ~920 px / 82vh shell gives the
-          two-column split real room. The shared DialogContent caps
-          width at `sm:max-w-sm`, so we override the sm/lg max-width
-          here — otherwise the modal renders as a ~384 px card on
-          desktop. Below lg the columns stack and the body scrolls
-          internally while the header / footer stay pinned.
-         */}
-        <DialogContent className="flex h-auto max-h-[90vh] w-full flex-col gap-0 overflow-hidden rounded-2xl border-0 p-0 shadow-2xl sm:max-w-[600px] lg:h-[82vh] lg:max-w-[920px]">
-          {/* ─── Header ─────────────────────────────────────────── */}
-          <DialogHeader className="space-y-1 border-b bg-card px-6 py-5 text-left sm:px-8">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="min-w-0">
-                <DialogTitle className="text-lg font-semibold sm:text-xl">
-                  {t('feeUi.receiptDialog.title')}
-                </DialogTitle>
-                <DialogDescription className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
-                  {t('feeUi.receiptDialog.orderCode', { code: orderCode })}
-                </DialogDescription>
-              </div>
-              <PaymentStatusBadge status={status} className="shrink-0" />
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (confirm.isPending) return;
+        onOpenChange(next);
+      }}
+    >
+      {/*
+        Desktop comfort: an explicit ~920 px / 82vh shell gives the
+        two-column split real room. The shared DialogContent caps width at
+        `sm:max-w-sm`, so the sm/lg max-width is overridden here. Below lg
+        the columns stack and the body scrolls while header / footer stay.
+       */}
+      <DialogContent className="flex h-auto max-h-[90vh] w-full flex-col gap-0 overflow-hidden rounded-2xl border-0 p-0 shadow-2xl sm:max-w-[600px] lg:h-[82vh] lg:max-w-[920px]">
+        {/* ─── Header ─────────────────────────────────────────── */}
+        <DialogHeader className="space-y-1 border-b bg-card px-6 py-5 pe-14 text-left sm:px-8">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <DialogTitle className="text-lg font-semibold sm:text-xl">
+                {t('feeUi.receiptDialog.title')}
+              </DialogTitle>
+              <DialogDescription className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
+                {t('feeUi.receiptDialog.orderCode', { code: orderCode })}
+              </DialogDescription>
             </div>
-          </DialogHeader>
+            <PaymentStatusBadge status={status} className="shrink-0" />
+          </div>
+        </DialogHeader>
 
-          {/*
-            ─── Body: two-column on desktop (lg+), stacked below ───
-            The min-h-0 + flex-1 combo lets the body claim the
-            leftover vertical space and lets the columns scroll
-            independently when content overflows.
-           */}
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
-            {/* Receipt column — grows to ~58% on desktop, full-width below lg */}
-            <div className="relative flex min-h-[300px] items-center justify-center overflow-hidden border-b bg-muted/40 p-4 lg:min-h-0 lg:flex-1 lg:border-b-0 lg:border-r lg:p-8">
-              <ReceiptViewport
-                fileUrl={fileUrl}
-                kind={proofKind}
-                fileName={fileName}
-                onImageClick={() => setLightboxOpen(true)}
+        {/* ─── Body: receipt | summary (side by side from lg) ──── */}
+        <div className="min-h-0 flex-1 overflow-y-auto lg:grid lg:grid-cols-[minmax(0,1fr)_42%] lg:overflow-hidden">
+          {/* A column, centred only while it fits (`-safe`): a receipt
+              taller than the panel must never overflow above the scroll
+              top, where it cannot be reached. Tall enough below lg for a
+              PDF's actions, frame and phone hint; clipped below that. */}
+          <div className="flex h-[46dvh] min-h-[360px] flex-col items-stretch justify-center-safe overflow-hidden border-b bg-muted/40 p-4 lg:h-auto lg:min-h-0 lg:border-e lg:border-b-0 lg:p-8">
+            {transfer && cacheKey ? (
+              <ReceiptViewer
+                transfer={transfer}
+                subjectKey={cacheKey}
+                hasProof={withProof}
+                orderCode={orderCode}
+                installmentNumber={null}
               />
-            </div>
+            ) : (
+              <p className="text-center text-sm text-muted-foreground">{t('pendingDesk.viewer.notFoundBody')}</p>
+            )}
+          </div>
 
-            {/* Summary column — fixed 42% on desktop */}
-            <div className="flex min-h-0 flex-col overflow-y-auto bg-card p-6 lg:w-[42%] lg:flex-shrink-0 lg:p-7">
-              <h3 className="mb-4 text-sm font-medium">
-                {t('feeUi.receiptDialog.summary')}
-              </h3>
-              <dl className="space-y-4">
-                <DetailRow
-                  icon={<User className="h-3.5 w-3.5" />}
-                  label={t('feeUi.receiptDialog.patient')}
-                  value={patientName ?? '—'}
-                />
-                <DetailRow
-                  icon={<Stethoscope className="h-3.5 w-3.5" />}
-                  label={t('feeUi.receiptDialog.doctor')}
-                  value={doctorName ? `Dr. ${doctorName}` : '—'}
-                />
-                <Divider />
-                {split ? (
-                  <>
-                    {/* With a stamp or a retenue: what was due (TTC), the
-                        stamp added, what the practitioner kept back, and
-                        what reached the account. */}
-                    <DetailRow
-                      icon={<Banknote className="h-3.5 w-3.5" />}
-                      label={t(
-                        kind === 'fee' ? 'withholdingUi.dueFee' : 'withholdingUi.dueInstallment',
-                      )}
-                      value={<span className="tabular-nums">{formatPrice(split.due, currency)}</span>}
-                    />
-                    {split.stamp > 0 ? (
-                      <DetailRow
-                        icon={<Banknote className="h-3.5 w-3.5" />}
-                        label={t('withholdingUi.stamp')}
-                        value={
-                          <span className="tabular-nums">+ {formatPrice(split.stamp, currency)}</span>
-                        }
-                      />
-                    ) : null}
-                    {split.withheld > 0 ? (
-                      <DetailRow
-                        icon={<Banknote className="h-3.5 w-3.5" />}
-                        label={
-                          split.rate !== null
-                            ? t('feeUi.receiptDialog.withheld', { rate: formatRate(split.rate, lang) })
-                            : t('feeUi.receiptDialog.withheldNoRate')
-                        }
-                        value={
-                          <span className="tabular-nums">− {formatPrice(split.withheld, currency)}</span>
-                        }
-                      />
-                    ) : null}
-                    <DetailRow
-                      icon={<Banknote className="h-3.5 w-3.5" />}
-                      label={t('feeUi.receiptDialog.amountPaid')}
-                      value={
-                        <span className="text-lg font-bold tabular-nums">
-                          {formatPrice(split.cash, currency)}
-                        </span>
-                      }
-                      highlight
-                    />
-                  </>
-                ) : (
+          <div className="flex flex-col bg-card p-6 lg:min-h-0 lg:overflow-y-auto lg:p-7">
+            <h3 className="mb-4 text-sm font-medium">{t('feeUi.receiptDialog.summary')}</h3>
+            <div className="space-y-4">
+              <DetailRow
+                icon={<User className="h-3.5 w-3.5" />}
+                label={t('feeUi.receiptDialog.patient')}
+                value={patientName ?? '—'}
+              />
+              <DetailRow
+                icon={<Stethoscope className="h-3.5 w-3.5" />}
+                label={t('feeUi.receiptDialog.doctor')}
+                value={doctorName ? `Dr. ${doctorName}` : '—'}
+              />
+              <Divider />
+              {split ? (
+                <>
+                  {/* With a stamp or a retenue: what was due (TTC), the
+                      stamp added, what the practitioner kept back, and
+                      what reached the account. */}
                   <DetailRow
                     icon={<Banknote className="h-3.5 w-3.5" />}
-                    label={t('feeUi.receiptDialog.amount')}
+                    label={t(kind === 'fee' ? 'withholdingUi.dueFee' : 'withholdingUi.dueInstallment')}
+                    value={<span className="tabular-nums">{formatPrice(split.due, currency)}</span>}
+                  />
+                  {split.stamp > 0 ? (
+                    <DetailRow
+                      icon={<Banknote className="h-3.5 w-3.5" />}
+                      label={t('withholdingUi.stamp')}
+                      value={<span className="tabular-nums">+ {formatPrice(split.stamp, currency)}</span>}
+                    />
+                  ) : null}
+                  {split.withheld > 0 ? (
+                    <DetailRow
+                      icon={<Banknote className="h-3.5 w-3.5" />}
+                      label={
+                        split.rate !== null
+                          ? t('feeUi.receiptDialog.withheld', { rate: formatRate(split.rate, lang) })
+                          : t('feeUi.receiptDialog.withheldNoRate')
+                      }
+                      value={<span className="tabular-nums">− {formatPrice(split.withheld, currency)}</span>}
+                    />
+                  ) : null}
+                  <DetailRow
+                    icon={<Banknote className="h-3.5 w-3.5" />}
+                    label={t('feeUi.receiptDialog.amountPaid')}
                     value={
                       <span className="text-lg font-bold tabular-nums">
-                        {formatPrice(amount ?? 0, currency)}
+                        {formatPrice(split.cash, currency)}
                       </span>
                     }
                     highlight
                   />
-                )}
+                </>
+              ) : (
                 <DetailRow
-                  icon={<MethodIcon method={method} />}
-                  label={t('feeUi.receiptDialog.method')}
-                  value={t(
-                    `paymentsCommon.method.${method ?? PaymentMethod.BANK_TRANSFER}`,
-                  )}
-                />
-                {submittedAt && (
-                  <DetailRow
-                    icon={<Calendar className="h-3.5 w-3.5" />}
-                    label={t(
-                      dateLabel === 'paid'
-                        ? 'feeUi.receiptDialog.paid'
-                        : 'feeUi.receiptDialog.submitted',
-                    )}
-                    // The dashboard's day format, in Tunis time (the days
-                    // the payments desk lists and counts by).
-                    value={formatBusinessDay(submittedAt, lang)}
-                  />
-                )}
-                <DetailRow
-                  icon={<FileText className="h-3.5 w-3.5" />}
-                  label={t('feeUi.receiptDialog.receipt')}
+                  icon={<Banknote className="h-3.5 w-3.5" />}
+                  label={t('feeUi.receiptDialog.amount')}
                   value={
-                    <span
-                      className="block truncate font-mono text-[11px] text-muted-foreground"
-                      title={fileName}
-                    >
-                      {fileName}
+                    <span className="text-lg font-bold tabular-nums">
+                      {formatPrice(amount ?? 0, currency)}
                     </span>
                   }
+                  highlight
                 />
-              </dl>
-
-              {/*
-                Verification hint — explains what Confirm will do in
-                plain language so the admin understands they're moving
-                the order forward, not just closing the dialog.
-               */}
-              {canConfirm && (
-                <div className="mt-auto pt-6">
-                  <p className="rounded-lg border border-blue-100 bg-blue-50/60 p-4 text-xs leading-relaxed text-blue-900/80">
-                    {t('feeUi.receiptDialog.confirmHint')}
-                  </p>
-                </div>
               )}
+              <DetailRow
+                icon={<MethodIcon method={method} />}
+                label={t('feeUi.receiptDialog.method')}
+                value={t(`paymentsCommon.method.${method ?? PaymentMethod.BANK_TRANSFER}`)}
+              />
+              {submittedAt && (
+                <DetailRow
+                  icon={<Calendar className="h-3.5 w-3.5" />}
+                  label={t(
+                    dateLabel === 'paid' ? 'feeUi.receiptDialog.paid' : 'feeUi.receiptDialog.submitted',
+                  )}
+                  // The dashboard's day format, in Tunis time (the days the
+                  // payments desk lists and counts by).
+                  value={formatBusinessDay(submittedAt, lang)}
+                />
+              )}
+              <DetailRow
+                icon={<FileText className="h-3.5 w-3.5" />}
+                label={t('feeUi.receiptDialog.receipt')}
+                value={t(withProof ? 'pendingDesk.receipt.attached' : 'pendingDesk.receipt.none')}
+              />
             </div>
-          </div>
 
-          {/* ─── Footer ─────────────────────────────────────────── */}
-          <div className="flex flex-row flex-wrap items-center justify-end gap-2.5 border-t bg-card px-6 py-4 sm:px-8">
+            {confirmable && (
+              <div className="mt-auto space-y-3 pt-6">
+                {!withProof && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor={overrideId}>{t('pendingDesk.review.overrideLabel')}</Label>
+                    <Textarea
+                      id={overrideId}
+                      rows={2}
+                      value={overrideNote}
+                      maxLength={REASON_MAX + 20}
+                      onChange={(event) => setOverrideNote(event.target.value)}
+                      placeholder={t('pendingDesk.review.overridePh')}
+                      aria-invalid={overrideError ? true : undefined}
+                      aria-describedby={`${overrideId}-help`}
+                      disabled={confirm.isPending}
+                    />
+                    <p
+                      id={`${overrideId}-help`}
+                      aria-live="polite"
+                      className={cn('text-xs', overrideError ? 'text-destructive' : 'text-muted-foreground')}
+                    >
+                      {overrideError ??
+                        t('pendingDesk.review.overrideHelp', { min: REASON_MIN, max: REASON_MAX })}
+                    </p>
+                  </div>
+                )}
+                {/* What Confirm will do, in plain words. */}
+                <p className="rounded-lg border border-blue-100 bg-blue-50/60 p-4 text-xs leading-relaxed text-blue-900/80 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-100">
+                  {t('feeUi.receiptDialog.confirmHint')}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ─── Footer ─────────────────────────────────────────── */}
+        <div className="space-y-3 border-t bg-card px-6 py-4 sm:px-8">
+          {failure && (
+            <Alert variant="destructive" role="alert">
+              <AlertTriangle aria-hidden="true" />
+              <AlertDescription>{failure}</AlertDescription>
+            </Alert>
+          )}
+          <div className="flex flex-row flex-wrap items-center justify-end gap-2.5">
             <Button
               type="button"
               variant="ghost"
+              className="pointer-coarse:h-12"
               disabled={confirm.isPending}
               onClick={() => onOpenChange(false)}
             >
               {/* Cancel only means something next to Confirm. */}
-              {canConfirm ? t('common.cancel') : t('common.close')}
+              {confirmable ? t('common.cancel') : t('common.close')}
             </Button>
             {footerAction}
-            {canConfirm && (
+            {confirmable && (
               <Button
                 type="button"
-                className={cn(
-                  'gap-1.5 bg-emerald-600 font-medium text-white shadow-sm hover:bg-emerald-700',
-                  'min-w-[180px]',
-                )}
+                className="min-w-[180px] gap-1.5 bg-emerald-600 font-medium text-white shadow-sm hover:bg-emerald-700 pointer-coarse:h-12"
                 disabled={confirm.isPending}
-                onClick={() => {
-                  confirm.mutate(orderId, {
-                    onSuccess: () => {
-                      onConfirmed?.();
-                      onOpenChange(false);
-                    },
-                  });
-                }}
+                onClick={sendConfirm}
               >
                 {confirm.isPending ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -389,27 +464,9 @@ export function TreatmentFeeReceiptDialog({
               </Button>
             )}
           </div>
-        </DialogContent>
-      </Dialog>
-
-      {/*
-        Click-to-zoom lightbox — only mounted for image proofs. PDFs
-        already render full-bleed in the iframe so opening them in the
-        image-lightbox would be wrong.
-       */}
-      {proofKind === 'image' && (
-        <ImageLightbox
-          open={lightboxOpen}
-          onOpenChange={setLightboxOpen}
-          src={fileUrl}
-          alt={t('feeUi.receiptDialog.lightboxAlt', { code: orderCode })}
-          caption={t('feeUi.receiptDialog.lightboxCaption', {
-            code: orderCode,
-          })}
-          subCaption={fileName}
-        />
-      )}
-    </>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -423,35 +480,35 @@ function DetailRow({
   value,
   highlight,
 }: {
-  icon: React.ReactNode;
+  icon: ReactNode;
   label: string;
-  value: React.ReactNode;
+  value: ReactNode;
   highlight?: boolean;
 }) {
   return (
     <div
       className={cn(
         'grid grid-cols-[16px_1fr] items-start gap-x-2.5 gap-y-0.5',
-        highlight && 'rounded-md bg-emerald-50/60 p-2 -mx-2',
+        highlight && '-mx-2 rounded-md bg-emerald-50/60 p-2 dark:bg-emerald-950/30',
       )}
     >
       <div
-        className={cn(
-          'mt-0.5 text-muted-foreground',
-          highlight && 'text-emerald-700',
-        )}
+        aria-hidden="true"
+        className={cn('mt-0.5 text-muted-foreground', highlight && 'text-emerald-700 dark:text-emerald-300')}
       >
         {icon}
       </div>
       <div className="min-w-0">
-        <p className={cn('text-xs text-muted-foreground', highlight && 'text-emerald-700')}>
+        <p
+          className={cn(
+            'text-xs text-muted-foreground',
+            highlight && 'text-emerald-700 dark:text-emerald-300',
+          )}
+        >
           {label}
         </p>
         <div
-          className={cn(
-            'text-sm text-foreground',
-            highlight && 'text-emerald-900',
-          )}
+          className={cn('text-sm text-foreground', highlight && 'text-emerald-900 dark:text-emerald-100')}
         >
           {value}
         </div>
@@ -465,216 +522,8 @@ function Divider() {
 }
 
 function MethodIcon({ method }: { method?: PaymentMethod | null }) {
-  if (method === PaymentMethod.CARD)
-    return <CreditCard className="h-3.5 w-3.5" />;
-  if (method === PaymentMethod.CASH)
-    return <Banknote className="h-3.5 w-3.5" />;
-  if (method === PaymentMethod.CHEQUE)
-    return <FilePen className="h-3.5 w-3.5" />;
+  if (method === PaymentMethod.CARD) return <CreditCard className="h-3.5 w-3.5" />;
+  if (method === PaymentMethod.CASH) return <Banknote className="h-3.5 w-3.5" />;
+  if (method === PaymentMethod.CHEQUE) return <FilePen className="h-3.5 w-3.5" />;
   return <Landmark className="h-3.5 w-3.5" />;
-}
-
-// Method display labels come from `paymentsCommon.method.*` via t()
-// at the call site (the previous module-level `methodLabel` helper
-// couldn't access the translation hook).
-
-// ─────────────────────────────────────────────────────────────────────
-// Receipt viewport
-// ─────────────────────────────────────────────────────────────────────
-
-type ProofKind = 'pdf' | 'image' | 'other' | 'missing';
-
-function classifyProof(path: string | null | undefined): ProofKind {
-  if (!path) return 'missing';
-  if (/\.pdf($|\?)/i.test(path)) return 'pdf';
-  if (/\.(png|jpe?g|gif|webp|bmp|svg)($|\?)/i.test(path)) return 'image';
-  return 'other';
-}
-
-function extractFilename(path: string | null | undefined): string | null {
-  if (!path) return null;
-  const tail = path.split(/[\\/]/).pop();
-  return tail && tail.length > 0 ? tail : null;
-}
-
-/**
- * Renders the receipt directly from the public URL — no blob fetch,
- * no auth dance. Falls through to a friendly download tile when the
- * proof is missing, fails to load, or is a non-previewable format.
- */
-function ReceiptViewport({
-  fileUrl,
-  kind,
-  fileName,
-  onImageClick,
-}: {
-  fileUrl: string | null;
-  kind: ProofKind;
-  fileName: string;
-  onImageClick: () => void;
-}) {
-  const { t } = useT();
-  const [imgError, setImgError] = useState(false);
-
-  if (kind === 'missing' || !fileUrl) {
-    return (
-      <EmptyState
-        icon={<AlertTriangle className="h-7 w-7 text-amber-500" />}
-        title={t('feeUi.receiptDialog.noReceiptTitle')}
-        message={t('feeUi.receiptDialog.noReceiptDesc')}
-      />
-    );
-  }
-
-  // Always-visible actions above the preview. Two reasons beyond
-  // convenience: (1) mobile browsers are unreliable at framing PDFs
-  // (Android Chrome renders nothing inside an <iframe>, iOS Safari shows
-  // only page 1), so "open in new tab" is the dependable path there;
-  // (2) an admin often wants the original file for their records.
-  const actions = (
-    <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-      {kind === 'image' && !imgError && (
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="gap-1.5"
-          onClick={onImageClick}
-        >
-          <Maximize2 className="h-3.5 w-3.5" />
-          {t('feeUi.receiptDialog.zoomIn')}
-        </Button>
-      )}
-      <Button asChild size="sm" variant="outline" className="gap-1.5">
-        <a href={fileUrl} target="_blank" rel="noopener noreferrer">
-          <ExternalLink className="h-3.5 w-3.5" />
-          {t('feeUi.receiptDialog.openInNewTab')}
-        </a>
-      </Button>
-      <Button asChild size="sm" variant="outline" className="gap-1.5">
-        <a href={fileUrl} download={fileName}>
-          <Download className="h-3.5 w-3.5" />
-          {t('feeUi.receiptDialog.downloadReceipt')}
-        </a>
-      </Button>
-    </div>
-  );
-
-  if (kind === 'pdf') {
-    return (
-      <div className="flex h-full min-h-[420px] w-full flex-col gap-3">
-        {actions}
-        {/* `#view=FitH` asks Chrome/Firefox's viewer to fit the page
-            width so a phone-scanned receipt is legible without zooming;
-            the toolbar is left ON so multi-page statements stay
-            navigable. The frame's origin is the API host — the backend
-            allows this exact frontend via CSP frame-ancestors on
-            /uploads (see main.ts), which is what makes it render at all
-            cross-origin. */}
-        <iframe
-          title={t('feeUi.receiptDialog.iframeTitle', { name: fileName })}
-          src={`${fileUrl}#view=FitH`}
-          className="min-h-0 w-full flex-1 rounded-lg border bg-white shadow-sm"
-        />
-        <p className="text-center text-[11px] leading-snug text-muted-foreground lg:hidden">
-          {t('feeUi.receiptDialog.pdfMobileHint')}
-        </p>
-      </div>
-    );
-  }
-
-  if (kind === 'image' && !imgError) {
-    return (
-      <div className="flex h-full w-full flex-col gap-3">
-        {actions}
-        <button
-          type="button"
-          onClick={onImageClick}
-          // Light backdrop + cursor-zoom-in + maximize affordance
-          // advertises that clicking expands to the full lightbox.
-          // The image preserves its aspect ratio inside the container.
-          className="group relative flex min-h-0 w-full flex-1 cursor-zoom-in items-center justify-center"
-          aria-label={t('feeUi.receiptDialog.openFullAria')}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={fileUrl}
-            alt={t('feeUi.receiptDialog.receiptImgAlt', { name: fileName })}
-            loading="eager"
-            decoding="async"
-            onError={() => setImgError(true)}
-            className="max-h-full max-w-full select-none rounded-lg border bg-white object-contain shadow-sm transition-transform group-hover:scale-[1.01]"
-            draggable={false}
-          />
-          {/* Subtle "tap to zoom" affordance — only on hover so it
-              doesn't add visual noise to the default view. */}
-          <span className="pointer-events-none absolute right-3 top-3 grid h-7 w-7 place-items-center rounded-full bg-black/60 text-white opacity-0 backdrop-blur transition-opacity group-hover:opacity-100">
-            <Maximize2 className="h-3.5 w-3.5" />
-          </span>
-        </button>
-      </div>
-    );
-  }
-
-  // Image failed to load or unknown format — offer a download.
-  return (
-    <EmptyState
-      icon={
-        imgError ? (
-          <AlertTriangle className="h-7 w-7 text-red-500" />
-        ) : (
-          <FileText className="h-7 w-7 text-muted-foreground" />
-        )
-      }
-      title={
-        imgError
-          ? t('feeUi.receiptDialog.loadErrorTitle')
-          : t('feeUi.receiptDialog.noPreviewTitle')
-      }
-      message={
-        imgError
-          ? t('feeUi.receiptDialog.loadErrorDesc')
-          : t('feeUi.receiptDialog.noPreviewDesc')
-      }
-      action={
-        <div className="flex flex-wrap items-center justify-center gap-2">
-          <Button asChild size="sm" variant="outline" className="gap-1.5">
-            <a href={fileUrl} target="_blank" rel="noopener noreferrer">
-              <ExternalLink className="h-3.5 w-3.5" />
-              {t('feeUi.receiptDialog.openInNewTab')}
-            </a>
-          </Button>
-          <Button asChild size="sm" variant="outline" className="gap-1.5">
-            <a href={fileUrl} download={fileName}>
-              <Download className="h-3.5 w-3.5" />
-              {t('feeUi.receiptDialog.downloadReceipt')}
-            </a>
-          </Button>
-        </div>
-      }
-    />
-  );
-}
-
-function EmptyState({
-  icon,
-  title,
-  message,
-  action,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  message: string;
-  action?: React.ReactNode;
-}) {
-  return (
-    <div className="flex h-full w-full flex-col items-center justify-center gap-3 p-8 text-center">
-      {icon}
-      <div className="space-y-1">
-        <p className="text-sm font-semibold">{title}</p>
-        <p className="max-w-md text-xs text-muted-foreground">{message}</p>
-      </div>
-      {action}
-    </div>
-  );
 }

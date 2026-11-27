@@ -46,6 +46,19 @@ export interface QuotationLabels {
   stampRow: (count: number, stamp: string) => string;
   /** Final totals row: the TTC plus every payment's stamp. */
   totalWithStamps: string;
+  /**
+   * Estimated retenue à la source (spec §4), under the totals: the
+   * practitioner applies it himself at each payment, so it reads "si
+   * appliquée". The rate is already formatted for the language.
+   */
+  withholdingIfApplied: (rate: string) => string;
+  /** What remains to pay once that retenue is kept back. */
+  netIfWithholding: string;
+  /** Note under the estimate; the threshold already formatted, or null. */
+  withholdingEstimateNote: (threshold: string | null) => string;
+  /** Settled so far on the devis, then what it still asks for. */
+  alreadyPaid: string;
+  remainingToPay: string;
   // Status
   status: string;
   statusDraft: string;
@@ -93,6 +106,15 @@ const FR: QuotationLabels = {
     `Droit de timbre (${stamp}) ajouté à chaque paiement : une facture par paiement.`,
   stampRow: (count, stamp) => `Droit de timbre (${count} × ${stamp})`,
   totalWithStamps: 'Total à payer',
+  withholdingIfApplied: (rate) =>
+    `Retenue à la source si appliquée (${rate} %)`,
+  netIfWithholding: 'Net à payer si retenue appliquée',
+  withholdingEstimateNote: (threshold) =>
+    threshold
+      ? `Estimation : la retenue à la source est appliquée par le praticien au moment du paiement, sur chaque paiement d’au moins ${threshold}.`
+      : 'Estimation : la retenue à la source est appliquée par le praticien au moment du paiement.',
+  alreadyPaid: 'Déjà réglé',
+  remainingToPay: 'Reste à payer',
   status: 'Statut',
   statusDraft: 'Brouillon',
   statusSent: 'Envoyé',
@@ -142,6 +164,14 @@ const EN: QuotationLabels = {
     `Stamp duty (${stamp}) added to each payment: one invoice per payment.`,
   stampRow: (count, stamp) => `Stamp duty (${count} × ${stamp})`,
   totalWithStamps: 'Total to pay',
+  withholdingIfApplied: (rate) => `Withholding tax if applied (${rate} %)`,
+  netIfWithholding: 'Net to pay if withholding is applied',
+  withholdingEstimateNote: (threshold) =>
+    threshold
+      ? `Estimate: the practitioner applies the withholding tax when paying, on each payment of at least ${threshold}.`
+      : 'Estimate: the practitioner applies the withholding tax when paying.',
+  alreadyPaid: 'Already paid',
+  remainingToPay: 'Remaining to pay',
   status: 'Status',
   statusDraft: 'Draft',
   statusSent: 'Sent',
@@ -186,6 +216,14 @@ const AR: QuotationLabels = {
     `يُضاف معلوم الطابع الجبائي (${stamp}) إلى كل دفعة: فاتورة لكل دفعة.`,
   stampRow: (count, stamp) => `معلوم الطابع الجبائي (${count} × ${stamp})`,
   totalWithStamps: 'المبلغ الجملي للدفع',
+  withholdingIfApplied: (rate) => `الخصم من المورد عند تطبيقه (${rate} %)`,
+  netIfWithholding: 'الصافي للدفع عند تطبيق الخصم من المورد',
+  withholdingEstimateNote: (threshold) =>
+    threshold
+      ? `تقدير: يطبّق الطبيب الخصم من المورد عند الدفع، على كل دفعة لا تقل عن ${threshold}.`
+      : 'تقدير: يطبّق الطبيب الخصم من المورد عند الدفع.',
+  alreadyPaid: 'المبلغ المدفوع',
+  remainingToPay: 'المبلغ المتبقي للدفع',
   status: 'الحالة',
   statusDraft: 'مسودة',
   statusSent: 'مرسل',

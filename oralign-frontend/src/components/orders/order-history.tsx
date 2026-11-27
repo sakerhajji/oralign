@@ -6,19 +6,23 @@ import {
   CircleDollarSign,
   ClipboardPlus,
   Clock3,
+  Eye,
   FileCheck2,
   FileClock,
   FilePenLine,
   Gift,
   History,
+  Landmark,
   MessageSquareText,
   PackageCheck,
   RefreshCw,
   Send,
   ShieldCheck,
   Trash2,
+  Undo2,
   Upload,
   UserRound,
+  XCircle,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { enUS, fr } from 'date-fns/locale';
@@ -29,7 +33,16 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useOrderHistory } from '@/lib/hooks/use-orders';
 import { useT } from '@/lib/i18n/lang-context';
 import { cn } from '@/lib/utils';
+import { DEFAULT_MERCHANT_CURRENCY, formatPrice } from '@/lib/utils/currency';
 import type { OrderHistoryEntry, UserRole } from '@/lib/types';
+import {
+  NOTE_REASON_ACTIONS,
+  actionKeyOf,
+  amountOf,
+  displaySource,
+  distinctCash,
+  textOf,
+} from './order-history-rules';
 
 type Translate = (
   key: string,
@@ -49,7 +62,11 @@ const ACTION_ICONS: Record<string, typeof History> = {
   treatment_fee_declared: FileClock,
   treatment_fee_paid: CircleDollarSign,
   treatment_fee_proof_uploaded: Upload,
+  treatment_fee_proof_replaced: Upload,
+  treatment_fee_proof_removed: Undo2,
+  treatment_fee_review_opened: Eye,
   treatment_fee_confirmed: ShieldCheck,
+  treatment_fee_rejected: XCircle,
   treatment_plan_created: FilePenLine,
   treatment_plan_updated: RefreshCw,
   treatment_plan_approved: ShieldCheck,
@@ -65,8 +82,14 @@ const ACTION_ICONS: Record<string, typeof History> = {
   payment_started: Clock3,
   payment_succeeded: CircleDollarSign,
   payment_failed: FileClock,
-  payment_rejected: FileClock,
+  payment_rejected: XCircle,
   payment_cancelled: Archive,
+  // Bank-transfer transitions journaled since 2026-11-27 (CONTRACT §5).
+  payment_transfer_declared: Landmark,
+  payment_proof_replaced: Upload,
+  payment_transfer_withdrawn: Undo2,
+  payment_review_opened: Eye,
+  payment_confirmed: ShieldCheck,
   batch_unlocked: PackageCheck,
   batch_delivered: PackageCheck,
   welcome_gift_applied: Gift,
@@ -101,6 +124,7 @@ const POSITIVE_ACTIONS = new Set([
   'treatment_plan_approved',
   'quotation_approved',
   'payment_succeeded',
+  'payment_confirmed',
   'batch_delivered',
   'welcome_gift_applied',
 ]);
@@ -111,6 +135,7 @@ const WARNING_ACTIONS = new Set([
   'payment_failed',
   'payment_rejected',
   'payment_cancelled',
+  'treatment_fee_rejected',
   'archived',
   'file_deleted',
   'supplemental_draft_archived',
@@ -210,11 +235,15 @@ function HistoryRow({
   const metadata = entry.metadata ?? {};
   const changes = Object.entries(entry.changes ?? {});
   const message = typeof metadata.message === 'string' ? metadata.message : null;
-  const reason = typeof metadata.reason === 'string' ? metadata.reason : null;
+  const reason = textOf(metadata.reason);
+  const reasonIsNote = NOTE_REASON_ACTIONS.has(entry.action);
+  // An admin's override note (confirming without a receipt…): the server
+  // sends it to staff only.
+  const overrideNote = textOf(metadata.overrideNote);
   const fileNames = Array.isArray(metadata.fileNames)
     ? metadata.fileNames.filter((item): item is string => typeof item === 'string')
     : [];
-  const details = metadataDetails(metadata, t);
+  const details = metadataDetails(metadata, t, lang);
 
   return (
     <li className="relative flex gap-3 p-4 sm:gap-4 sm:p-5">
@@ -234,7 +263,7 @@ function HistoryRow({
         <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
           <div className="min-w-0">
             <p className="font-semibold text-foreground">
-              {actionLabel(entry.action, t)}
+              {actionLabel(actionKeyOf(entry), entry.action, t)}
             </p>
             <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
               <span className="font-medium text-foreground/80">
@@ -250,14 +279,30 @@ function HistoryRow({
             </div>
           </div>
           <Badge variant="secondary" className="w-fit shrink-0 text-[10px]">
-            {t(`orderDetail.history.sources.${entry.source}`)}
+            {t(`orderDetail.history.sources.${displaySource(entry)}`)}
           </Badge>
         </div>
 
-        {reason ? (
-          <p className="mt-3 rounded-md border-l-2 border-red-300 bg-red-50/60 px-3 py-2 text-sm text-red-950">
+        {reason && reasonIsNote ? (
+          <p className="mt-3 rounded-md border-l-2 border-border bg-muted/60 px-3 py-2 text-sm text-foreground/85">
+            <span className="font-medium">
+              {entry.action === 'batch_unlocked'
+                ? t('orderDetail.history.reason')
+                : t('orderDetail.history.note')}
+              :
+            </span>{' '}
+            {reason}
+          </p>
+        ) : reason ? (
+          <p className="mt-3 rounded-md border-l-2 border-red-300 bg-red-50/60 px-3 py-2 text-sm text-red-950 dark:bg-red-950/30 dark:text-red-100">
             <span className="font-medium">{t('orderDetail.history.reason')}:</span>{' '}
             {reason}
+          </p>
+        ) : null}
+        {overrideNote ? (
+          <p className="mt-3 rounded-md border-l-2 border-amber-300 bg-amber-50/70 px-3 py-2 text-sm text-amber-950 dark:bg-amber-950/30 dark:text-amber-100">
+            <span className="font-medium">{t('orderDetail.history.overrideNote')}:</span>{' '}
+            {overrideNote}
           </p>
         ) : null}
         {message ? (
@@ -336,10 +381,20 @@ function isSupplementalAction(action: string): boolean {
   return action.startsWith(SUPPLEMENTAL_ACTION_PREFIX);
 }
 
-function actionLabel(action: string, t: Translate) {
-  const key = `orderDetail.history.actions.${action}`;
-  const translated = t(key);
-  if (translated !== key) return translated;
+/**
+ * The label of `key` (an action, or a refinement of it such as
+ * `batch_unlocked_manual`), else of the bare `action`, else a readable
+ * form of the raw key.
+ */
+function actionLabel(key: string, action: string, t: Translate) {
+  if (key !== action) {
+    const refined = `orderDetail.history.actions.${key}`;
+    const translatedRefined = t(refined);
+    if (translatedRefined !== refined) return translatedRefined;
+  }
+  const dictKey = `orderDetail.history.actions.${action}`;
+  const translated = t(dictKey);
+  if (translated !== dictKey) return translated;
   if (isSupplementalAction(action)) {
     return t(`orderDetail.history.actions.${SUPPLEMENTAL_FALLBACK_ACTION}`);
   }
@@ -389,6 +444,7 @@ function formatFieldValue(field: string, value: unknown, t: Translate): string {
 function metadataDetails(
   metadata: Record<string, unknown>,
   t: Translate,
+  lang: 'en' | 'fr',
 ): Array<{ label: string; value: string }> {
   const details: Array<{ label: string; value: string }> = [];
   const add = (key: string, value: unknown) => {
@@ -398,19 +454,52 @@ function metadataDetails(
       value: formatValue(value, t),
     });
   };
+  // Journaled rows carry no currency (the merchant's); derived ones do.
+  const currency =
+    typeof metadata.currency === 'string' && metadata.currency.trim() !== ''
+      ? metadata.currency
+      : DEFAULT_MERCHANT_CURRENCY;
+  const money = (value: unknown): string | null => {
+    const amount = amountOf(value);
+    return amount === null ? null : formatPrice(amount, currency);
+  };
 
   add('planVersion', metadata.version);
   add('quotationNumber', metadata.number);
   if (metadata.amount !== null && metadata.amount !== undefined) {
-    add(
-      'amount',
-      [metadata.amount, metadata.currency].filter(Boolean).join(' '),
-    );
+    add('amount', money(metadata.amount) ?? metadata.amount);
   } else if (typeof metadata.total === 'number') {
     // welcome_gift_applied carries { treatmentFee, cbctFee, total, currency }.
-    add('amount', [metadata.total, metadata.currency].filter(Boolean).join(' '));
+    add('amount', money(metadata.total));
   }
-  add('paymentMethod', metadata.method);
+  // A transfer's cash (stamp added, retenue kept back), when it differs.
+  const cash = distinctCash(metadata);
+  if (cash !== null) add('cashAmount', money(cash));
+  const stamp = amountOf(metadata.stampAmount);
+  if (stamp !== null && stamp > 0) {
+    details.push({ label: t('withholdingUi.stamp'), value: money(stamp) ?? '—' });
+  }
+  const withheld = amountOf(metadata.withholdingAmount);
+  if (withheld !== null && withheld > 0) {
+    const rate = amountOf(metadata.withholdingRate);
+    details.push({
+      label:
+        rate !== null && rate > 0
+          ? t('withholdingUi.withheld', {
+              rate: rate.toLocaleString(lang === 'fr' ? 'fr-FR' : 'en-US', {
+                maximumFractionDigits: 2,
+              }),
+            })
+          : t('withholdingUi.withheldNoRate'),
+      value: money(withheld) ?? '—',
+    });
+  }
+  add(
+    'paymentMethod',
+    labelOf('paymentsDesk.method', metadata.method, t) ?? metadata.method,
+  );
+  // Whether the transfer came with its receipt (never the file itself).
+  if (typeof metadata.hasProof === 'boolean') add('receiptAttached', metadata.hasProof);
   add('installment', metadata.installmentNumber);
   add('batch', metadata.batchNumber);
   if (metadata.fromStep !== undefined || metadata.toStep !== undefined) {

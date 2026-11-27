@@ -20,7 +20,7 @@ import {
 import { IsCalendarDate } from '../../common/decorators/is-calendar-date.decorator';
 import { toOptionalTrimmed } from '../../common/dto/query-transforms';
 
-const trim =({ value }: { value: unknown }): unknown =>
+const trim = ({ value }: { value: unknown }): unknown =>
   typeof value === 'string' ? value.trim() : value;
 
 const toBool = ({ value }: { value: unknown }): unknown => {
@@ -34,10 +34,17 @@ const toBool = ({ value }: { value: unknown }): unknown => {
  * enableImplicitConversion, which turns the string "false" into `true`
  * before any @Transform sees `value`; `obj[key]` is still the original.
  */
-const rawBool = ({ obj, key }: { obj: Record<string, unknown>; key: string }): unknown => {
+const rawBool = ({
+  obj,
+  key,
+}: {
+  obj: Record<string, unknown>;
+  key: string;
+}): unknown => {
   const raw = obj?.[key];
   if (raw === true || raw === 'true' || raw === '1' || raw === 1) return true;
-  if (raw === false || raw === 'false' || raw === '0' || raw === 0) return false;
+  if (raw === false || raw === 'false' || raw === '0' || raw === 0)
+    return false;
   return raw;
 };
 
@@ -60,12 +67,30 @@ const rawNullableNumber = ({
 };
 
 /** Nullable string: null and blank both clear the field. */
-const trimOrNull = ({ obj, key }: { obj: Record<string, unknown>; key: string }): unknown => {
+const trimOrNull = ({
+  obj,
+  key,
+}: {
+  obj: Record<string, unknown>;
+  key: string;
+}): unknown => {
   const raw = obj?.[key];
   if (raw === null) return null;
   if (typeof raw === 'string') return raw.trim() === '' ? null : raw.trim();
   return raw;
 };
+
+/**
+ * Swagger wording of the client-block fallback (InvoiceService.create via
+ * manualInvoiceClient, spec §6). On UPDATE a field left out keeps the
+ * stored value and a sent one replaces it.
+ */
+const CLIENT_FIELD_FALLBACK =
+  'Creation: a value typed here always wins and an empty string clears ' +
+  'the field; left out (or null), it is filled from the linked ' +
+  "practitioner's snapshot (practice contact first, account as fallback) " +
+  'when the invoice is billed to him in his own name (clientName = his ' +
+  'name), otherwise it stays empty. Update: left out = unchanged.';
 
 /** `"a,b"` or repeated params -> string[]. Mirrors PaymentFilterDto. */
 const toEnumArray = ({ value }: { value: unknown }): unknown => {
@@ -92,7 +117,10 @@ export class InvoiceLineInputDto {
   @MaxLength(500)
   description!: string;
 
-  @ApiPropertyOptional({ default: 1, description: 'Quantite (3 decimales max).' })
+  @ApiPropertyOptional({
+    default: 1,
+    description: 'Quantite (3 decimales max).',
+  })
   @IsOptional()
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 3 })
@@ -126,13 +154,17 @@ export class InvoiceLineInputDto {
 
 export class CreateInvoiceDto {
   // ── Rattachement optionnel a l'existant ───────────────────────────
-  @ApiPropertyOptional({ description: 'Commande liee (facture rattachee a une commande).' })
+  @ApiPropertyOptional({
+    description: 'Commande liee (facture rattachee a une commande).',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(64)
   orderId?: string;
 
-  @ApiPropertyOptional({ description: 'Patient existant — prerempli le bloc client.' })
+  @ApiPropertyOptional({
+    description: 'Patient existant — prerempli le bloc client.',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(64)
@@ -145,48 +177,56 @@ export class CreateInvoiceDto {
   doctorId?: string;
 
   // ── Bloc client (obligatoire, saisi ou prerempli) ─────────────────
-  @ApiProperty()
+  @ApiProperty({
+    description:
+      "Billed name. Creation: blank = the linked practitioner's name; the " +
+      'invoice is billed to the practitioner in his own name (practice ' +
+      'name snapshotted, client fields filled) when it equals his name.',
+  })
   @Transform(trim)
   @IsString()
   @MaxLength(200)
   clientName!: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ nullable: true, description: CLIENT_FIELD_FALLBACK })
   @IsOptional()
   @Transform(trim)
   @IsString()
   @MaxLength(254)
   clientEmail?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ nullable: true, description: CLIENT_FIELD_FALLBACK })
   @IsOptional()
   @Transform(trim)
   @IsString()
   @MaxLength(40)
   clientPhone?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ nullable: true, description: CLIENT_FIELD_FALLBACK })
   @IsOptional()
   @Transform(trim)
   @IsString()
   @MaxLength(500)
   clientAddress?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ nullable: true, description: CLIENT_FIELD_FALLBACK })
   @IsOptional()
   @Transform(trim)
   @IsString()
   @MaxLength(120)
   clientCity?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ nullable: true, description: CLIENT_FIELD_FALLBACK })
   @IsOptional()
   @Transform(trim)
   @IsString()
   @MaxLength(120)
   clientCountry?: string;
 
-  @ApiPropertyOptional({ description: 'Matricule fiscal du client.' })
+  @ApiPropertyOptional({
+    nullable: true,
+    description: `Matricule fiscal du client. ${CLIENT_FIELD_FALLBACK}`,
+  })
   @IsOptional()
   @Transform(trim)
   @IsString()
@@ -194,7 +234,9 @@ export class CreateInvoiceDto {
   clientTaxId?: string;
 
   // ── En-tete ───────────────────────────────────────────────────────
-  @ApiPropertyOptional({ description: "Date d'emission (ISO). Defaut: maintenant." })
+  @ApiPropertyOptional({
+    description: "Date d'emission (ISO). Defaut: maintenant.",
+  })
   @IsOptional()
   @IsDateString()
   issueDate?: string;
@@ -214,7 +256,9 @@ export class CreateInvoiceDto {
   @IsIn(['fr', 'en'])
   language?: 'fr' | 'en';
 
-  @ApiPropertyOptional({ description: 'Taux de TVA par defaut de la facture, en %.' })
+  @ApiPropertyOptional({
+    description: 'Taux de TVA par defaut de la facture, en %.',
+  })
   @IsOptional()
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 3 })
@@ -276,7 +320,8 @@ export class CreateInvoiceDto {
 
   @ApiPropertyOptional({
     nullable: true,
-    description: 'Reference du reglement (numero de cheque, de virement, de transaction).',
+    description:
+      'Reference du reglement (numero de cheque, de virement, de transaction).',
   })
   @IsOptional()
   @Transform(trimOrNull)
@@ -411,12 +456,18 @@ export class InvoiceFilterDto {
   @IsBoolean()
   includeDeleted?: boolean;
 
-  @ApiPropertyOptional({ enum: InvoiceSortBy, default: InvoiceSortBy.issueDate })
+  @ApiPropertyOptional({
+    enum: InvoiceSortBy,
+    default: InvoiceSortBy.issueDate,
+  })
   @IsOptional()
   @IsEnum(InvoiceSortBy)
   sortBy?: InvoiceSortBy;
 
-  @ApiPropertyOptional({ enum: InvoiceSortOrder, default: InvoiceSortOrder.desc })
+  @ApiPropertyOptional({
+    enum: InvoiceSortOrder,
+    default: InvoiceSortOrder.desc,
+  })
   @IsOptional()
   @IsEnum(InvoiceSortOrder)
   sortOrder?: InvoiceSortOrder;
@@ -450,7 +501,8 @@ export class InvoiceZipExportDto {
 
   @ApiPropertyOptional({
     example: '2026-11-01',
-    description: 'Premier jour inclus (YYYY-MM-DD, jours de Tunis). Utilise quand ids est absent.',
+    description:
+      'Premier jour inclus (YYYY-MM-DD, jours de Tunis). Utilise quand ids est absent.',
   })
   @Transform(({ value }) => toOptionalTrimmed(value))
   @IsOptional()
@@ -459,7 +511,8 @@ export class InvoiceZipExportDto {
 
   @ApiPropertyOptional({
     example: '2026-11-30',
-    description: 'Dernier jour inclus (YYYY-MM-DD, jours de Tunis). Utilise quand ids est absent.',
+    description:
+      'Dernier jour inclus (YYYY-MM-DD, jours de Tunis). Utilise quand ids est absent.',
   })
   @Transform(({ value }) => toOptionalTrimmed(value))
   @IsOptional()

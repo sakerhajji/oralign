@@ -10,13 +10,29 @@ import {
   UserRole,
   VerificationStatus,
 } from '@prisma/client';
+import type { Caller } from '../../common/access/caller';
 import { INITIAL_ORDERS_ONLY, isInitialOrder } from '../../orders/order-kind';
 import {
   paymentSettled,
   treatmentFeeSettled,
 } from '../../payments/services/payment-rules';
+import { countNewTransfers } from '../../payments/services/transfer-queue.query';
 import { PrismaService } from '../../prisma/prisma.service';
-import { DashboardRangeDto, AdminAnalyticsLimitDto } from '../dto/dashboard.dto';
+import { DORMANT_DOCTOR_WHERE } from '../../users/activity/doctor-activity.contract';
+import {
+  DashboardRangeDto,
+  AdminAnalyticsLimitDto,
+} from '../dto/dashboard.dto';
+
+/** GET admin/dashboard/sidebar-badges (mirrored in frontend AdminSidebarBadges). */
+export interface AdminSidebarBadges {
+  newOrders: number;
+  pendingApprovals: number;
+  /** My "Nouveau" transfer subjects (the pending desk's Nouveau tab). */
+  newTransfers: number;
+  /** Dormant dentists (User.inactiveSince set), apart from inactiveDoctors. */
+  dormantDoctors: number;
+}
 
 const CACHE_TTL_MS = 60_000; // 60 s — KPIs are heavy reads; this is the right amortisation
 
@@ -55,7 +71,9 @@ const LIVE_CASES = {
   ...INITIAL_ORDERS_ONLY,
 } satisfies Prisma.DentalOrderWhereInput;
 
-const toNumber = (value: Prisma.Decimal | number | null | undefined): number => {
+const toNumber = (
+  value: Prisma.Decimal | number | null | undefined,
+): number => {
   if (value == null) return 0;
   if (typeof value === 'number') return value;
   return Number(value.toString());
@@ -100,31 +118,43 @@ export class AdminDashboardService {
    *                        not yet started triaging (status = submitted).
    *   • pendingApprovals — dentists who signed up and are awaiting admin
    *                        approval (verificationStatus = pending).
+   *   • newTransfers     — MY "Nouveau" bank transfers: still awaiting
+   *                        confirmation, my subject row unread, archived
+   *                        orders excluded; DISTINCT subjects (one transfer
+   *                        counts once). Exactly the pending desk's Nouveau
+   *                        tab (countNewTransfers, transfer-queue.query.ts).
+   *   • dormantDoctors   — dentists turned dormant by the inactivity rule
+   *                        (DORMANT_DOCTOR_WHERE). Not "inactiveDoctors"
+   *                        (blocked or not approved): another meaning.
+   *
+   * Per admin (the caller): never cached, a few indexed COUNTs.
    */
-  async getSidebarBadges(): Promise<{
-    newOrders: number;
-    pendingApprovals: number;
-  }> {
-    const [newOrders, pendingApprovals] = await this.prisma.$transaction([
-      this.prisma.dentalOrder.count({
-        // NEW = submitted by a doctor AND not yet opened by an admin.
-        // `adminSeenAt` is stamped the first time an admin views the
-        // order, so the badge clears once it has been checked.
-        where: {
-          deletedAt: null,
-          status: OrderStatus.submitted,
-          adminSeenAt: null,
-        },
-      }),
-      this.prisma.user.count({
-        where: {
-          role: UserRole.dentist,
-          deletedAt: null,
-          verificationStatus: VerificationStatus.pending,
-        },
-      }),
-    ]);
-    return { newOrders, pendingApprovals };
+  async getSidebarBadges(caller: Caller): Promise<AdminSidebarBadges> {
+    const [[newOrders, pendingApprovals, dormantDoctors], newTransfers] =
+      await Promise.all([
+        this.prisma.$transaction([
+          this.prisma.dentalOrder.count({
+            // NEW = submitted by a doctor AND not yet opened by an admin.
+            // `adminSeenAt` is stamped the first time an admin views the
+            // order, so the badge clears once it has been checked.
+            where: {
+              deletedAt: null,
+              status: OrderStatus.submitted,
+              adminSeenAt: null,
+            },
+          }),
+          this.prisma.user.count({
+            where: {
+              role: UserRole.dentist,
+              deletedAt: null,
+              verificationStatus: VerificationStatus.pending,
+            },
+          }),
+          this.prisma.user.count({ where: DORMANT_DOCTOR_WHERE }),
+        ]),
+        countNewTransfers(this.prisma, caller.userId),
+      ]);
+    return { newOrders, pendingApprovals, newTransfers, dormantDoctors };
   }
 
   /**
@@ -184,7 +214,10 @@ export class AdminDashboardService {
         where: {
           role: UserRole.dentist,
           deletedAt: null,
-          OR: [{ isActive: false }, { verificationStatus: { not: VerificationStatus.approved } }],
+          OR: [
+            { isActive: false },
+            { verificationStatus: { not: VerificationStatus.approved } },
+          ],
         },
       }),
       this.prisma.user.count({
@@ -240,65 +273,87 @@ export class AdminDashboardService {
       packId: { not: null },
       status: QuotationStatus.approved,
     } as const;
-    const [paidQuoteAgg, unpaidQuoteAgg, allQuoteAgg, monthQuoteAgg, prevMonthQuoteAgg, todayQuoteAgg] =
-      await this.prisma.$transaction([
-        this.prisma.quotation.aggregate({
-          _count: { _all: true },
-          _sum: { totalPrice: true, paidAmount: true },
-          where: {
-            ...QUALIFYING_QUOTE,
-            paymentStatus: QuotationPaymentStatus.paid,
-            sentAt: { gte: range.from, lte: range.to },
+    const [
+      paidQuoteAgg,
+      unpaidQuoteAgg,
+      allQuoteAgg,
+      monthQuoteAgg,
+      prevMonthQuoteAgg,
+      todayQuoteAgg,
+    ] = await this.prisma.$transaction([
+      this.prisma.quotation.aggregate({
+        _count: { _all: true },
+        _sum: { totalPrice: true, paidAmount: true },
+        where: {
+          ...QUALIFYING_QUOTE,
+          paymentStatus: QuotationPaymentStatus.paid,
+          sentAt: { gte: range.from, lte: range.to },
+        },
+      }),
+      this.prisma.quotation.aggregate({
+        _count: { _all: true },
+        _sum: { totalPrice: true, paidAmount: true },
+        where: {
+          ...QUALIFYING_QUOTE,
+          paymentStatus: {
+            in: [
+              QuotationPaymentStatus.pending,
+              QuotationPaymentStatus.partially_paid,
+            ],
           },
-        }),
-        this.prisma.quotation.aggregate({
-          _count: { _all: true },
-          _sum: { totalPrice: true, paidAmount: true },
-          where: {
-            ...QUALIFYING_QUOTE,
-            paymentStatus: {
-              in: [
-                QuotationPaymentStatus.pending,
-                QuotationPaymentStatus.partially_paid,
-              ],
-            },
-            sentAt: { gte: range.from, lte: range.to },
-          },
-        }),
-        this.prisma.quotation.aggregate({
-          _count: { _all: true },
-          _sum: { totalPrice: true, paidAmount: true },
-          where: { ...QUALIFYING_QUOTE, sentAt: { gte: range.from, lte: range.to } },
-        }),
-        this.prisma.quotation.aggregate({
-          _sum: { paidAmount: true },
-          where: { ...QUALIFYING_QUOTE, sentAt: { gte: monthStart } },
-        }),
-        this.prisma.quotation.aggregate({
-          _sum: { paidAmount: true },
-          where: {
-            ...QUALIFYING_QUOTE,
-            sentAt: { gte: prevMonthStart, lt: monthStart },
-          },
-        }),
-        this.prisma.quotation.aggregate({
-          _sum: { paidAmount: true },
-          where: { ...QUALIFYING_QUOTE, sentAt: { gte: dayStart } },
-        }),
-      ]);
+          sentAt: { gte: range.from, lte: range.to },
+        },
+      }),
+      this.prisma.quotation.aggregate({
+        _count: { _all: true },
+        _sum: { totalPrice: true, paidAmount: true },
+        where: {
+          ...QUALIFYING_QUOTE,
+          sentAt: { gte: range.from, lte: range.to },
+        },
+      }),
+      this.prisma.quotation.aggregate({
+        _sum: { paidAmount: true },
+        where: { ...QUALIFYING_QUOTE, sentAt: { gte: monthStart } },
+      }),
+      this.prisma.quotation.aggregate({
+        _sum: { paidAmount: true },
+        where: {
+          ...QUALIFYING_QUOTE,
+          sentAt: { gte: prevMonthStart, lt: monthStart },
+        },
+      }),
+      this.prisma.quotation.aggregate({
+        _sum: { paidAmount: true },
+        where: { ...QUALIFYING_QUOTE, sentAt: { gte: dayStart } },
+      }),
+    ]);
 
     // Payment record status counts — these are the "did the payment go
     // through" stats independent of the quotation lifecycle.
-    const [paymentsPending, paymentsAwaitingConfirmation, paymentsSuccess, paymentsFailed, paymentsRejected] =
-      await this.prisma.$transaction([
-        this.prisma.payment.count({ where: { status: PaymentRecordStatus.pending } }),
-        this.prisma.payment.count({
-          where: { status: PaymentRecordStatus.awaiting_confirmation },
-        }),
-        this.prisma.payment.count({ where: { status: PaymentRecordStatus.success } }),
-        this.prisma.payment.count({ where: { status: PaymentRecordStatus.failed } }),
-        this.prisma.payment.count({ where: { status: PaymentRecordStatus.rejected } }),
-      ]);
+    const [
+      paymentsPending,
+      paymentsAwaitingConfirmation,
+      paymentsSuccess,
+      paymentsFailed,
+      paymentsRejected,
+    ] = await this.prisma.$transaction([
+      this.prisma.payment.count({
+        where: { status: PaymentRecordStatus.pending },
+      }),
+      this.prisma.payment.count({
+        where: { status: PaymentRecordStatus.awaiting_confirmation },
+      }),
+      this.prisma.payment.count({
+        where: { status: PaymentRecordStatus.success },
+      }),
+      this.prisma.payment.count({
+        where: { status: PaymentRecordStatus.failed },
+      }),
+      this.prisma.payment.count({
+        where: { status: PaymentRecordStatus.rejected },
+      }),
+    ]);
 
     // Treatment fees are billed INLINE on the order (separate from the
     // quotation / installment flow), so the quote aggregates above never
@@ -367,17 +422,26 @@ export class AdminDashboardService {
     // quote value") isn't skewed by the flat treatment fee.
     const quoteTotalRevenue = toNumber(paidQuoteAgg._sum.totalPrice);
     const totalRevenue = quoteTotalRevenue + treatmentFeeRange;
-    const collectedAmount = toNumber(paidQuoteAgg._sum.paidAmount) +
+    const collectedAmount =
+      toNumber(paidQuoteAgg._sum.paidAmount) +
       toNumber(unpaidQuoteAgg._sum.paidAmount) +
       treatmentFeeRange;
-    const unpaidAmount =
-      Math.max(0, toNumber(unpaidQuoteAgg._sum.totalPrice) - toNumber(unpaidQuoteAgg._sum.paidAmount));
-    const revenueThisMonth = toNumber(monthQuoteAgg._sum.paidAmount) + treatmentFeeMonth;
-    const revenuePrevMonth = toNumber(prevMonthQuoteAgg._sum.paidAmount) + treatmentFeePrevMonth;
-    const revenueToday = toNumber(todayQuoteAgg._sum.paidAmount) + treatmentFeeToday;
+    const unpaidAmount = Math.max(
+      0,
+      toNumber(unpaidQuoteAgg._sum.totalPrice) -
+        toNumber(unpaidQuoteAgg._sum.paidAmount),
+    );
+    const revenueThisMonth =
+      toNumber(monthQuoteAgg._sum.paidAmount) + treatmentFeeMonth;
+    const revenuePrevMonth =
+      toNumber(prevMonthQuoteAgg._sum.paidAmount) + treatmentFeePrevMonth;
+    const revenueToday =
+      toNumber(todayQuoteAgg._sum.paidAmount) + treatmentFeeToday;
     const monthlyGrowthPct =
       revenuePrevMonth === 0
-        ? revenueThisMonth > 0 ? 100 : 0
+        ? revenueThisMonth > 0
+          ? 100
+          : 0
         : ((revenueThisMonth - revenuePrevMonth) / revenuePrevMonth) * 100;
 
     const totalQuotationsInRange = allQuoteAgg._count._all;
@@ -409,7 +473,7 @@ export class AdminDashboardService {
     });
     const bestPackDetails = bestPack[0]?.packId
       ? await this.prisma.pack.findUnique({
-          where: { id: bestPack[0].packId! },
+          where: { id: bestPack[0].packId },
           select: { id: true, name: true },
         })
       : null;
@@ -514,7 +578,12 @@ export class AdminDashboardService {
 
     const byDoctor = new Map<
       string,
-      { orders: number; paidOrders: number; revenue: number; outstanding: number }
+      {
+        orders: number;
+        paidOrders: number;
+        revenue: number;
+        outstanding: number;
+      }
     >();
     for (const o of ordersInRange) {
       const cur = byDoctor.get(o.doctorId) ?? {
@@ -594,26 +663,28 @@ export class AdminDashboardService {
           ...stats,
         };
       })
-      .filter(Boolean) as Array<NonNullable<unknown>>;
+      .filter((row): row is NonNullable<typeof row> => row !== null);
 
     // Three ranked lists in one payload: by total orders, by paid
     // orders, by outstanding balance. Cheaper than three queries +
     // gives the admin all three views at once.
     const byOrders = [...rows]
-      .sort(
-        (a: any, b: any) =>
-          b.orders - a.orders || b.revenue - a.revenue,
-      )
+      .sort((a, b) => b.orders - a.orders || b.revenue - a.revenue)
       .slice(0, limit);
     const byPaidOrders = [...rows]
-      .sort((a: any, b: any) => b.paidOrders - a.paidOrders || b.revenue - a.revenue)
+      .sort((a, b) => b.paidOrders - a.paidOrders || b.revenue - a.revenue)
       .slice(0, limit);
     const byOutstanding = [...rows]
-      .sort((a: any, b: any) => b.outstanding - a.outstanding)
-      .filter((r: any) => r.outstanding > 0)
+      .sort((a, b) => b.outstanding - a.outstanding)
+      .filter((r) => r.outstanding > 0)
       .slice(0, limit);
 
-    const out = { byOrders, byPaidOrders, byOutstanding, _meta: { groupedRecords: grouped.length } };
+    const out = {
+      byOrders,
+      byPaidOrders,
+      byOutstanding,
+      _meta: { groupedRecords: grouped.length },
+    };
     await this.setCache(key, out);
     return out;
   }
@@ -658,8 +729,8 @@ export class AdminDashboardService {
     const byId = new Map(packs.map((p) => [p.id, p]));
     const rows = grouped.map((g) => {
       const p = byId.get(g.packId!);
-      const activePrice = p?.prices.find((x) => x.archType === 'two_arches')
-        ?? p?.prices[0];
+      const activePrice =
+        p?.prices.find((x) => x.archType === 'two_arches') ?? p?.prices[0];
       return {
         packId: g.packId,
         name: p?.name ?? '(deleted pack)',
@@ -707,42 +778,43 @@ export class AdminDashboardService {
     // Pull all relevant rows in three queries, then bucket in memory.
     // For 100k+ records we'd switch to raw SQL date_trunc — left as a
     // TODO when this becomes the bottleneck.
-    const [payments, orders, doctors, patients] = await this.prisma.$transaction([
-      this.prisma.payment.findMany({
-        where: {
-          status: PaymentRecordStatus.success,
-          paidAt: { gte: range.from, lte: range.to },
-        },
-        select: {
-          paidAt: true,
-          amount: true,
-          withholdingAmount: true,
-          stampAmount: true,
-        },
-      }),
-      this.prisma.dentalOrder.findMany({
-        where: {
-          ...LIVE_CASES,
-          createdAt: { gte: range.from, lte: range.to },
-        },
-        select: { createdAt: true },
-      }),
-      this.prisma.user.findMany({
-        where: {
-          role: UserRole.dentist,
-          deletedAt: null,
-          createdAt: { gte: range.from, lte: range.to },
-        },
-        select: { createdAt: true },
-      }),
-      this.prisma.patient.findMany({
-        where: {
-          deletedAt: null,
-          createdAt: { gte: range.from, lte: range.to },
-        },
-        select: { createdAt: true },
-      }),
-    ]);
+    const [payments, orders, doctors, patients] =
+      await this.prisma.$transaction([
+        this.prisma.payment.findMany({
+          where: {
+            status: PaymentRecordStatus.success,
+            paidAt: { gte: range.from, lte: range.to },
+          },
+          select: {
+            paidAt: true,
+            amount: true,
+            withholdingAmount: true,
+            stampAmount: true,
+          },
+        }),
+        this.prisma.dentalOrder.findMany({
+          where: {
+            ...LIVE_CASES,
+            createdAt: { gte: range.from, lte: range.to },
+          },
+          select: { createdAt: true },
+        }),
+        this.prisma.user.findMany({
+          where: {
+            role: UserRole.dentist,
+            deletedAt: null,
+            createdAt: { gte: range.from, lte: range.to },
+          },
+          select: { createdAt: true },
+        }),
+        this.prisma.patient.findMany({
+          where: {
+            deletedAt: null,
+            createdAt: { gte: range.from, lte: range.to },
+          },
+          select: { createdAt: true },
+        }),
+      ]);
 
     const keyForDate = (d: Date | null): string | null => {
       if (!d) return null;
@@ -751,7 +823,15 @@ export class AdminDashboardService {
       return x.toISOString().slice(0, 10);
     };
 
-    const buckets: Record<string, { revenue: number; orders: number; newDoctors: number; newPatients: number }> = {};
+    const buckets: Record<
+      string,
+      {
+        revenue: number;
+        orders: number;
+        newDoctors: number;
+        newPatients: number;
+      }
+    > = {};
 
     for (let i = 0; i < totalDays; i++) {
       const day = new Date(range.from.getTime() + i * dayMs);

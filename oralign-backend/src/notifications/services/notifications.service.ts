@@ -7,12 +7,18 @@ import {
 } from '@prisma/client';
 import { PaginatedResponse } from '../../common/dto/response.dto';
 import {
+  BadRequestException,
   ForbiddenException,
   NotFoundException,
 } from '../../common/exceptions/app.exception';
+import { TRANSFER_ERROR } from '../../common/exceptions/domain-error-codes';
 import { Lang, LangText, pickLang, tr } from '../../common/i18n/lang';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { Caller } from '../../common/access/caller';
+import {
+  isTransferSubjectKey,
+  TREATMENT_FEE_SUBJECT_PREFIX,
+} from '../notification-subject';
 
 /**
  * Owner of the Notification table lifecycle.
@@ -23,7 +29,10 @@ import type { Caller } from '../../common/access/caller';
  *              directly; they emit a domain event and trust the listener.
  *   • READ   — recipient-scoped. Even an admin who fetches `/notifications`
  *              only sees rows where `recipientId === their userId`.
- *   • UPDATE — limited to the `readAt` field, again recipient-scoped.
+ *   • UPDATE — limited to the `readAt` field, again recipient-scoped, except
+ *              `resolveSubject`: when a transfer is processed (or the
+ *              doctor replaces / withdraws it) every admin's row of that
+ *              subject is resolved, since there is nothing left to see.
  *
  * The `Caller` parameter on every read/write path enforces this: the
  * service refuses to expose another user's inbox no matter the role.
@@ -52,6 +61,9 @@ export class NotificationsService {
    * `lang`: a caller that already loaded the recipient's preferredLanguage
    * (the production notice dispatcher, per batch) passes it, and the
    * lookup is skipped.
+   *
+   * `subjectKey`: the business subject (notification-subject.ts), only on
+   * rows about something actionable.
    */
   async create(args: {
     recipientId: string;
@@ -61,6 +73,7 @@ export class NotificationsService {
     link?: string | null;
     metadata?: Prisma.InputJsonValue;
     lang?: Lang;
+    subjectKey?: string | null;
   }): Promise<Notification> {
     const lang =
       args.lang ??
@@ -80,13 +93,19 @@ export class NotificationsService {
         message: tr(args.message, lang),
         link: args.link ?? null,
         metadata: args.metadata ?? Prisma.JsonNull,
+        subjectKey: args.subjectKey ?? null,
       },
     });
   }
 
   /**
    * Fan-out helper for events that target every admin (e.g. "a doctor
-   * just submitted an order"). One Notification row per admin user.
+   * just submitted an order"). One Notification row per admin user:
+   * every active, undeleted admin and super_admin ("admin autorisé",
+   * DECISIONS §2).
+   *
+   * `subjectKey` rides on every row, so each admin has his own
+   * "Nouveau / Consulté" (readAt) for the subject.
    *
    * `createMany` skips returning rows for perf — we don't need them.
    */
@@ -96,6 +115,7 @@ export class NotificationsService {
     message: LangText | string;
     link?: string | null;
     metadata?: Prisma.InputJsonValue;
+    subjectKey?: string | null;
   }): Promise<number> {
     const admins = await this.prisma.user.findMany({
       where: {
@@ -119,12 +139,78 @@ export class NotificationsService {
           message: tr(args.message, lang),
           link: args.link ?? null,
           metadata: args.metadata ?? Prisma.JsonNull,
+          subjectKey: args.subjectKey ?? null,
         };
       }),
     });
-    this.logger.debug(
-      `Broadcast ${args.type} to ${result.count} admin(s)`,
-    );
+    this.logger.debug(`Broadcast ${args.type} to ${result.count} admin(s)`);
+    return result.count;
+  }
+
+  // ─── Subjects (transfer "Nouveau / Consulté") ──────────────────────
+
+  /**
+   * The caller opened the subject (POST notifications/subject/:key/read,
+   * or the receipt review): HIS unread rows of it become read. Idempotent;
+   * never touches another recipient's rows. 400 NOTIFICATION_SUBJECT_INVALID
+   * on a key notification-subject.ts cannot parse.
+   */
+  async markSubjectRead(
+    caller: Caller,
+    subjectKey: string,
+  ): Promise<{ updated: number }> {
+    if (!isTransferSubjectKey(subjectKey)) {
+      throw new BadRequestException(
+        'Sujet de notification invalide.',
+        TRANSFER_ERROR.SUBJECT_KEY_INVALID,
+      );
+    }
+    const result = await this.prisma.notification.updateMany({
+      where: { recipientId: caller.userId, subjectKey, readAt: null },
+      data: { readAt: new Date() },
+    });
+    return { updated: result.count };
+  }
+
+  /**
+   * The subject is closed (processed by an admin, replaced or withdrawn by
+   * the doctor): every recipient's unread row of it is resolved, so no
+   * badge keeps counting it. Returns the rows resolved; a malformed key
+   * resolves nothing (listener input, logged).
+   */
+  async resolveSubject(subjectKey: string): Promise<number> {
+    if (!isTransferSubjectKey(subjectKey)) {
+      // The key itself is not logged: listener input, never trusted text.
+      this.logger.warn('resolveSubject: ignored a malformed subject key');
+      return 0;
+    }
+    const result = await this.prisma.notification.updateMany({
+      where: { subjectKey, readAt: null },
+      data: { readAt: new Date() },
+    });
+    return result.count;
+  }
+
+  /**
+   * Fallback of resolveSubject for a treatment-fee event that carries no
+   * declaration instant (legacy emitter): every open treatment-fee subject
+   * of the order. A fee settled or refused leaves no declaration of it to
+   * review, so all of them are done.
+   */
+  async resolveTreatmentFeeSubjects(orderId: string): Promise<number> {
+    // A uuid in practice. No '_' or '%' (LIKE wildcards) may reach the
+    // prefix match, so anything else resolves nothing.
+    if (!/^[A-Za-z0-9-]{1,64}$/.test(orderId)) return 0;
+    const result = await this.prisma.notification.updateMany({
+      where: {
+        type: NotificationType.treatment_fee_declared,
+        subjectKey: {
+          startsWith: `${TREATMENT_FEE_SUBJECT_PREFIX}:${orderId}:`,
+        },
+        readAt: null,
+      },
+      data: { readAt: new Date() },
+    });
     return result.count;
   }
 

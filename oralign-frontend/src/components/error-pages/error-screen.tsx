@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useSyncExternalStore, type CSSProperties } from 'react';
 import {
   ERROR_ACTIONS,
   ERROR_COPY,
@@ -36,6 +36,20 @@ type Action = {
   variant: 'primary' | 'ghost';
 };
 
+/** Nothing to subscribe to: the language is read once per render. */
+const subscribeNothing = () => () => {};
+
+/** The language the visitor reads, from the stored choice or the URL. */
+function clientErrorLang(langSource: LangSource): ErrorLang {
+  let stored: string | null = null;
+  try {
+    stored = window.localStorage.getItem(LANG_SOURCES[langSource].storageKey);
+  } catch {
+    /* private mode — fall back to the URL */
+  }
+  return errorLangFor(window.location.pathname, stored, langSource);
+}
+
 export function ErrorScreen({
   kind,
   digest,
@@ -67,17 +81,14 @@ export function ErrorScreen({
   /** Which language store to read — see LANG_SOURCES. */
   langSource?: LangSource;
 }) {
-  const [lang, setLang] = useState<ErrorLang>(LANG_SOURCES[langSource].fallback);
-
-  useEffect(() => {
-    let stored: string | null = null;
-    try {
-      stored = window.localStorage.getItem(LANG_SOURCES[langSource].storageKey);
-    } catch {
-      /* private mode — fall back to the URL */
-    }
-    setLang(errorLangFor(window.location.pathname, stored, langSource));
-  }, [langSource]);
+  // The server renders the fallback; the browser then reads the stored
+  // language and the URL. useSyncExternalStore does that swap after
+  // hydration without a setState-in-effect render cascade.
+  const lang = useSyncExternalStore<ErrorLang>(
+    subscribeNothing,
+    () => clientErrorLang(langSource),
+    () => LANG_SOURCES[langSource].fallback,
+  );
 
   const copy = ERROR_COPY[kind];
   const rtl = lang === 'ar';

@@ -51,7 +51,6 @@ import {
   useAdminDashboardKpis,
   useAdminTopDoctors,
   useAdminTrends,
-  useDashboardSocket,
 } from '@/lib/hooks';
 import { getAvatarUrl } from '@/lib/utils';
 import { useT } from '@/lib/i18n/lang-context';
@@ -86,16 +85,16 @@ function defaultRange(): DashboardRange {
  * Admin dashboard — the landing experience for admin / super_admin
  * users. KPI grid → trends chart → top doctors → best packs.
  *
- * The whole page is reactive to a single date-range filter; the WS
- * hook keeps every block in lockstep with backend writes (payment
- * confirmed, order created, etc.) by invalidating the React-Query
- * cache. The cards self-render skeletons while the first fetch
- * resolves so the page never flashes empty.
+ * The whole page is reactive to a single date-range filter; the
+ * dashboard socket (mounted once for the whole admin session by
+ * AppSidebar) keeps every block in lockstep with backend writes
+ * (payment confirmed, order created, etc.) by invalidating the
+ * React-Query cache. The cards self-render skeletons while the first
+ * fetch resolves so the page never flashes empty.
  */
 export function AdminDashboard() {
   const { t, lang } = useT();
   const [range, setRange] = useState<DashboardRange>(defaultRange);
-  useDashboardSocket();
   // Chart axis/tooltip dates follow the app language, not the browser.
   const dateLocale = lang === 'fr' ? 'fr-FR' : 'en-US';
 

@@ -4,6 +4,7 @@ import {
   METHOD_ORDER,
   addMethodTallies,
   emptyMethodTallies,
+  grossOf,
   sumTallies,
   type MethodTallies,
   type Tally,
@@ -440,12 +441,20 @@ function renderSummary(
   if (!consolidated) {
     const collected = model.sections[0]?.collected ?? emptyMethodTallies();
     const total = sumTallies(collected);
+    // Brut, retenue, then the net: the amount collected, last and widest.
+    const split = (tally: Tally) =>
+      `<td class="num">${escapeHtml(formatMoney(grossOf(tally), currency))}</td>
+            <td class="num">${escapeHtml(formatMoney(tally.withholding, currency))}</td>
+            <td class="num">${money(tally)}</td>`;
     table = `<table class="summary">
+        <colgroup><col style="width:24%" /><col style="width:10%" /><col style="width:22%" /><col style="width:20%" /><col style="width:24%" /></colgroup>
         <thead>
           <tr>
             <th>${escapeHtml(labels.paymentMethod)}</th>
             <th class="num">${escapeHtml(labels.count)}</th>
-            <th class="num">${escapeHtml(labels.collectedAmount)}</th>
+            <th class="num">${escapeHtml(labels.gross)}</th>
+            <th class="num">${escapeHtml(labels.withholding)}</th>
+            <th class="num">${escapeHtml(labels.net)}</th>
           </tr>
         </thead>
         <tbody>
@@ -453,13 +462,13 @@ function renderSummary(
             (method) => `<tr>
             <td>${escapeHtml(labels.methods[method])}</td>
             <td class="num">${collected[method].count}</td>
-            <td class="num">${money(collected[method])}</td>
+            ${split(collected[method])}
           </tr>`,
           ).join('')}
           <tr class="total">
             <td>${escapeHtml(labels.totalCollected.toUpperCase())}</td>
             <td class="num">${total.count}</td>
-            <td class="num">${money(total)}</td>
+            ${split(total)}
           </tr>
         </tbody>
       </table>`;
@@ -520,7 +529,8 @@ function renderSummary(
             ${cells(sumTallies(both))}
           </tr>
         </tbody>
-      </table>`;
+      </table>
+      ${renderSplitTable(model, labels, both)}`;
   }
 
   const statusLines = model.sections
@@ -541,8 +551,53 @@ function renderSummary(
       <h2 class="section-title">${escapeHtml(labels.summaryTitle)}</h2>
       ${table}
       <p class="note">${escapeHtml(labels.summaryNote)}</p>
+      <p class="note">${escapeHtml(labels.splitNote)}</p>
       ${statusLines}
     </section>`;
+}
+
+/**
+ * The consolidated report's brut / retenue / net, one row per kind then
+ * both added (spec §4): the method table above keeps the counts and the
+ * net, which would not fit four money columns per kind on A4.
+ */
+function renderSplitTable(
+  model: PaymentsReportModel,
+  labels: PaymentsReportLabels,
+  both: MethodTallies,
+): string {
+  const { currency } = model;
+  const cells = (tally: Tally) =>
+    `<td class="num">${tally.count}</td>
+            <td class="num">${escapeHtml(formatMoney(grossOf(tally), currency))}</td>
+            <td class="num">${escapeHtml(formatMoney(tally.withholding, currency))}</td>
+            <td class="num">${escapeHtml(formatMoney(tally.amount, currency))}</td>`;
+  return `<table class="summary split">
+        <colgroup><col style="width:28%" /><col style="width:9%" /><col style="width:21%" /><col style="width:20%" /><col style="width:22%" /></colgroup>
+        <thead>
+          <tr>
+            <th>${escapeHtml(labels.splitTitle)}</th>
+            <th class="num">${escapeHtml(labels.countShort)}</th>
+            <th class="num">${escapeHtml(labels.gross)}</th>
+            <th class="num">${escapeHtml(labels.withholding)}</th>
+            <th class="num">${escapeHtml(labels.net)}</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${model.sections
+            .map(
+              (section) => `<tr>
+            <td>${escapeHtml(labels.kinds[section.kind])}</td>
+            ${cells(sumTallies(section.collected))}
+          </tr>`,
+            )
+            .join('')}
+          <tr class="total">
+            <td>${escapeHtml(labels.totalCollected.toUpperCase())}</td>
+            ${cells(sumTallies(both))}
+          </tr>
+        </tbody>
+      </table>`;
 }
 
 /** How many rows of each status the details hold, in reading order. */
@@ -559,9 +614,13 @@ function statusCounts(rows: ReportRow[]): [PaymentRecordStatus, number][] {
 
 // ─── Details ────────────────────────────────────────────────────────
 
-/** Column widths (%), sized for DejaVu Sans, the Docker image's font. */
-const COLUMNS_WITH_PRACTITIONER = [11, 15, 13, 13, 9, 13, 14, 12];
-const COLUMNS_OWN = [12, 17, 18, 10, 14, 15, 14];
+/**
+ * Column widths (%), sized for DejaVu Sans, the Docker image's font. The
+ * three money columns (brut, retenue, net) print no currency in their
+ * cells: their headings carry it, so "123 456,789" fits on A4.
+ */
+export const COLUMNS_WITH_PRACTITIONER = [8, 12, 11, 11, 8, 9, 11, 10, 9, 11];
+export const COLUMNS_OWN = [9, 14, 14, 9, 10, 12, 10, 10, 12];
 
 function renderSection(
   model: PaymentsReportModel,
@@ -591,9 +650,20 @@ function renderSection(
     labels.columns.method,
     labels.columns.status,
     labels.columns.transaction,
-    labels.columns.amount,
+    labels.inCurrency(labels.columns.gross, model.currency),
+    labels.inCurrency(labels.columns.withholding, model.currency),
+    labels.inCurrency(labels.columns.net, model.currency),
   ];
+  const moneyColumns = 3;
   const collected = sumTallies(section.collected);
+  const split = collected.withholding.isZero()
+    ? ''
+    : `<span class="muted">${escapeHtml(
+        labels.subtotalSplit(
+          formatMoney(grossOf(collected), model.currency),
+          formatMoney(collected.withholding, model.currency),
+        ),
+      )}</span> `;
   return `<section class="section details">
       ${head}
       <table class="lines">
@@ -602,7 +672,7 @@ function renderSection(
           <tr>${headers
             .map(
               (header, index) =>
-                `<th${index === headers.length - 1 ? ' class="num"' : ''}>${escapeHtml(header)}</th>`,
+                `<th${index >= headers.length - moneyColumns ? ' class="num"' : ''}>${escapeHtml(header)}</th>`,
             )
             .join('')}</tr>
         </thead>
@@ -612,7 +682,7 @@ function renderSection(
       </table>
       <div class="subtotal">
         <span>${escapeHtml(labels.subtotalCollected)} — ${escapeHtml(labels.kinds[section.kind])}</span>
-        <span><strong>${escapeHtml(formatMoney(collected.amount, model.currency))}</strong> (${collected.count})</span>
+        <span>${split}<strong>${escapeHtml(formatMoney(collected.amount, model.currency))}</strong> (${collected.count})</span>
       </div>
     </section>`;
 }
@@ -657,8 +727,21 @@ function renderRow(
     [row.method ? escapeHtml(labels.methods[row.method]) : dash, 'words'],
     [status, 'words'],
     [reference || dash],
+    // Brut, retenue, net (spec §4); the net is the cash, as summed above.
     [
-      row.amount ? escapeHtml(formatMoney(row.amount, model.currency)) : dash,
+      row.amount
+        ? escapeHtml(formatMoneyValue(row.amount.plus(row.withholding ?? 0)))
+        : dash,
+      'num',
+    ],
+    [
+      row.withholding && !row.withholding.isZero()
+        ? escapeHtml(formatMoneyValue(row.withholding))
+        : dash,
+      'num',
+    ],
+    [
+      row.amount ? escapeHtml(formatMoneyValue(row.amount)) : dash,
       'num amount',
     ],
   ];
@@ -896,6 +979,8 @@ const STYLES = `
   .summary tbody tr:first-child td { border-top: 0; }
   .summary.consolidated td, .summary.consolidated th { padding-left: 7px; padding-right: 7px; }
   .summary.consolidated td { font-size: 8.8px; }
+  .summary.split { margin-top: 8px; }
+  .summary.split td { font-size: 8.8px; }
   .num { text-align: right !important; }
   td.num { white-space: nowrap; }
   /* A status or a method breaks between its words, never inside one. */

@@ -31,6 +31,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { UserAvatar } from "@/components/users/user-avatar";
+import { ActivityBadge } from "@/components/users/activity-badge";
+import { formatActivityDay } from "@/lib/account-activity/account-activity";
 import { useT } from "@/lib/i18n/lang-context";
 import type { Lang } from "@/lib/i18n/dict";
 import type { User } from "@/lib/types";
@@ -428,6 +430,7 @@ function UserCard(props: RowProps) {
         <RoleBadge role={user.role} />
         <ApprovalBadge user={user} />
         {!user.isActive && <BlockedBadge />}
+        <ActivityBadge user={user} />
         {user.mustChangePassword && <PasswordToChangeBadge />}
         <GiftBadge user={user} />
         {!user.isEmailVerified && (
@@ -566,6 +569,7 @@ function UserTableRow(props: RowProps) {
       <td className="px-2 py-2.5 align-middle">
         <div className="flex min-w-0 flex-col items-start gap-1">
           <RoleBadge role={user.role} />
+          <ActivityBadge user={user} />
           {user.mustChangePassword && <PasswordToChangeBadge />}
         </div>
       </td>
@@ -606,10 +610,22 @@ function UserTableRow(props: RowProps) {
         <p className="truncate text-sm">
           {lastLogin ?? t("usersAdmin.never")}
         </p>
-        {created && (
+        {/* Dentists: the last submitted order (doctor inactivity) says
+            more than the creation day; other roles keep the latter. */}
+        {isDentist && user.activity ? (
           <p className="truncate text-xs text-muted-foreground">
-            {t("usersDesk.list.created", { date: created })}
+            {user.activity.lastSubmittedOrderAt
+              ? t("accountActivity.list.lastOrder", {
+                  date: formatActivityDay(user.activity.lastSubmittedOrderAt, lang),
+                })
+              : t("accountActivity.list.noOrder")}
           </p>
+        ) : (
+          created && (
+            <p className="truncate text-xs text-muted-foreground">
+              {t("usersDesk.list.created", { date: created })}
+            </p>
+          )
         )}
       </td>
       <td className="px-2 py-2.5 pr-3 align-middle">

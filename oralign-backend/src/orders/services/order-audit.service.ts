@@ -6,9 +6,140 @@ import {
   TreatmentPlanStatus,
   UserRole,
 } from '@prisma/client';
-import { type Caller } from '../../common/access/caller';
+import { isAdmin, type Caller } from '../../common/access/caller';
 import { OrderAccessPolicy } from '../../common/access/order-access.policy';
+import {
+  type CallerAuditEntry,
+  orderAuditEntry,
+} from '../../common/audit/order-audit-entry';
+import { ORDER_AUDIT_ACTION } from '../../common/audit/order-audit-actions';
 import { PrismaService } from '../../prisma/prisma.service';
+
+/** What the history reads of a persisted OrderAuditLog row. */
+const HISTORY_LOG_SELECT = {
+  id: true,
+  actorId: true,
+  actorName: true,
+  actorRole: true,
+  action: true,
+  changes: true,
+  metadata: true,
+  paymentId: true,
+  createdAt: true,
+} satisfies Prisma.OrderAuditLogSelect;
+
+/** The persisted rows that stand for the derived "payment started" entry. */
+const PERSISTED_PAYMENT_START: ReadonlySet<string> = new Set([
+  ORDER_AUDIT_ACTION.PAYMENT_TRANSFER_DECLARED,
+  ORDER_AUDIT_ACTION.PAYMENT_PROOF_REPLACED,
+]);
+
+/** The persisted row that stands for each derived terminal entry. */
+const PERSISTED_PAYMENT_END: Readonly<Record<string, string>> = {
+  payment_succeeded: ORDER_AUDIT_ACTION.PAYMENT_CONFIRMED,
+  payment_rejected: ORDER_AUDIT_ACTION.PAYMENT_REJECTED,
+  payment_cancelled: ORDER_AUDIT_ACTION.PAYMENT_TRANSFER_WITHDRAWN,
+};
+
+/**
+ * Which derived payment entries a persisted transfer row already tells
+ * (CONTRACT §2.5, carried for P-A): since 2026-11-27 every transfer
+ * transition writes its own OrderAuditLog row with `paymentId`, so the
+ * entries OrderAuditService.list() derives from the Payment columns would
+ * show each transition twice. Pure:
+ *   • started   ← payment_transfer_declared / payment_proof_replaced;
+ *   • succeeded ← payment_confirmed; rejected ← payment_rejected;
+ *   • cancelled ← payment_transfer_withdrawn, or the payment_proof_replaced
+ *     row whose metadata.replacedPaymentId names it (a superseded one).
+ * payment_failed (card) has no persisted counterpart and always shows.
+ */
+export function paymentHistoryCoverage(
+  logs: readonly {
+    action: string;
+    paymentId: string | null;
+    metadata: Prisma.JsonValue | null;
+  }[],
+): {
+  started: ReadonlySet<string>;
+  ended: ReadonlyMap<string, ReadonlySet<string>>;
+} {
+  const started = new Set<string>();
+  const ended = new Map<string, Set<string>>();
+  const end = (paymentId: string, action: string) => {
+    const set = ended.get(paymentId) ?? new Set<string>();
+    set.add(action);
+    ended.set(paymentId, set);
+  };
+  for (const log of logs) {
+    if (log.paymentId && PERSISTED_PAYMENT_START.has(log.action)) {
+      started.add(log.paymentId);
+    }
+    if (log.paymentId) end(log.paymentId, log.action);
+    if (log.action === ORDER_AUDIT_ACTION.PAYMENT_PROOF_REPLACED) {
+      const meta = log.metadata;
+      const replaced =
+        meta && typeof meta === 'object' && !Array.isArray(meta)
+          ? meta.replacedPaymentId
+          : undefined;
+      if (typeof replaced === 'string') {
+        end(replaced, ORDER_AUDIT_ACTION.PAYMENT_TRANSFER_WITHDRAWN);
+      }
+    }
+  }
+  return { started, ended };
+}
+
+/** The derived terminal entry is already told by a persisted row. */
+function terminalCovered(
+  coverage: ReturnType<typeof paymentHistoryCoverage>,
+  paymentId: string,
+  derivedAction: string,
+): boolean {
+  const persisted = PERSISTED_PAYMENT_END[derivedAction];
+  return (
+    persisted !== undefined &&
+    (coverage.ended.get(paymentId)?.has(persisted) ?? false)
+  );
+}
+
+/** The persisted pack-transfer rows (P-A), told under the « Paiement » source. */
+const PERSISTED_PAYMENT_ACTIONS: ReadonlySet<string> = new Set([
+  ORDER_AUDIT_ACTION.PAYMENT_TRANSFER_DECLARED,
+  ORDER_AUDIT_ACTION.PAYMENT_PROOF_REPLACED,
+  ORDER_AUDIT_ACTION.PAYMENT_TRANSFER_WITHDRAWN,
+  ORDER_AUDIT_ACTION.PAYMENT_REVIEW_OPENED,
+  ORDER_AUDIT_ACTION.PAYMENT_CONFIRMED,
+  ORDER_AUDIT_ACTION.PAYMENT_REJECTED,
+]);
+
+/**
+ * The source a persisted row is shown under. A journaled transfer or
+ * unlock replaces a derived entry (source payment / delivery): it keeps
+ * that source, so the dedupe never moves an event to another heading.
+ * Everything else stays an order row, as before.
+ */
+export function historySourceOf(action: string): OrderHistoryEntry['source'] {
+  if (action === ORDER_AUDIT_ACTION.BATCH_UNLOCKED) return 'delivery';
+  if (PERSISTED_PAYMENT_ACTIONS.has(action)) return 'payment';
+  return 'order';
+}
+
+/**
+ * Metadata keys only staff read: an admin's override note, and the reason
+ * of a MANUAL batch unlock (an internal note; DECISIONS §3 keeps the
+ * doctor out of it). A refusal reason is NOT one: the doctor must read it.
+ */
+export function metadataForReader(
+  action: string,
+  metadata: Record<string, unknown> | null,
+  staff: boolean,
+): Record<string, unknown> | null {
+  if (staff || !metadata) return metadata;
+  const kept = { ...metadata };
+  delete kept.overrideNote;
+  if (action === ORDER_AUDIT_ACTION.BATCH_UNLOCKED) delete kept.reason;
+  return kept;
+}
 
 export interface OrderHistoryEntry {
   id: string;
@@ -24,14 +155,7 @@ export interface OrderHistoryEntry {
   createdAt: Date;
 }
 
-type AuditPayload = {
-  actorId: string;
-  actorName: string | null;
-  actorRole: UserRole;
-  action: string;
-  changes?: Prisma.InputJsonValue;
-  metadata?: Prisma.InputJsonValue;
-};
+type AuditPayload = CallerAuditEntry;
 
 @Injectable()
 export class OrderAuditService {
@@ -40,29 +164,19 @@ export class OrderAuditService {
     private readonly orderAccess: OrderAccessPolicy,
   ) {}
 
+  /**
+   * The row of an action by `caller`. Delegates to the plain builder
+   * (common/audit/order-audit-entry.ts) that the payments and production
+   * code use without this module: one shape, one actor snapshot, no file
+   * path in the payload.
+   */
   async entry(
     caller: Caller,
     action: string,
     changes?: Record<string, { from: unknown; to: unknown }> | null,
     metadata?: Record<string, unknown> | null,
   ): Promise<AuditPayload> {
-    const actor = await this.prisma.user.findUnique({
-      where: { id: caller.userId },
-      select: { fullName: true },
-    });
-
-    return {
-      actorId: caller.userId,
-      actorName: actor?.fullName ?? null,
-      actorRole: caller.role,
-      action,
-      ...(changes && Object.keys(changes).length > 0
-        ? { changes: changes as Prisma.InputJsonValue }
-        : {}),
-      ...(metadata && Object.keys(metadata).length > 0
-        ? { metadata: metadata as Prisma.InputJsonValue }
-        : {}),
-    };
+    return orderAuditEntry(this.prisma, caller, { action, changes, metadata });
   }
 
   async record(
@@ -95,10 +209,12 @@ export class OrderAuditService {
   async list(orderId: string, caller: Caller): Promise<OrderHistoryEntry[]> {
     await this.orderAccess.requireReadable(orderId, caller);
 
+    const staff = isAdmin(caller);
     const [logs, plans, quotation, payments] = await Promise.all([
       this.prisma.orderAuditLog.findMany({
         where: { orderId },
         orderBy: { createdAt: 'desc' },
+        select: HISTORY_LOG_SELECT,
       }),
       this.prisma.treatmentPlan.findMany({
         where: { orderId, deletedAt: null },
@@ -151,14 +267,16 @@ export class OrderAuditService {
           approvedBy: { select: { fullName: true, role: true } },
           rejectedById: true,
           rejectedBy: { select: { fullName: true, role: true } },
+          // Every batch: an unlocked, not yet delivered one has its
+          // (derived or journaled) unlock entry too.
           stepBatches: {
-            where: { deliveredAt: { not: null } },
             select: {
               id: true,
               batchNumber: true,
               fromStep: true,
               toStep: true,
               unlockedAt: true,
+              unlockSource: true,
               deliveredAt: true,
               deliveredById: true,
               deliveredBy: { select: { fullName: true, role: true } },
@@ -194,11 +312,11 @@ export class OrderAuditService {
 
     const entries: OrderHistoryEntry[] = logs.map((log) => ({
       id: log.id,
-      source: 'order',
+      source: historySourceOf(log.action),
       action: log.action,
       actor: this.actor(log.actorId, log.actorName, log.actorRole),
       changes: this.object(log.changes) as OrderHistoryEntry['changes'],
-      metadata: this.object(log.metadata),
+      metadata: metadataForReader(log.action, this.object(log.metadata), staff),
       createdAt: log.createdAt,
     }));
 
@@ -342,8 +460,16 @@ export class OrderAuditService {
         });
       }
 
+      // Unlocks journaled since 2026-11-27 (production/batch-unlock.ts) are
+      // persisted rows already: derive only the older ones.
+      const journaledUnlocks = new Set(
+        logs
+          .filter((log) => log.action === ORDER_AUDIT_ACTION.BATCH_UNLOCKED)
+          .map((log) => this.object(log.metadata)?.batchId)
+          .filter((id): id is string => typeof id === 'string'),
+      );
       for (const batch of quotation.stepBatches) {
-        if (batch.unlockedAt) {
+        if (batch.unlockedAt && !journaledUnlocks.has(batch.id)) {
           entries.push({
             id: `batch-unlocked-${batch.id}`,
             source: 'delivery',
@@ -354,6 +480,9 @@ export class OrderAuditService {
               batchNumber: batch.batchNumber,
               fromStep: batch.fromStep,
               toStep: batch.toStep,
+              // Backfilled on the older unlocks (payment /
+              // installment_cancelled): the label reads it like a row's.
+              ...(batch.unlockSource ? { source: batch.unlockSource } : {}),
             },
             createdAt: batch.unlockedAt,
           });
@@ -380,6 +509,9 @@ export class OrderAuditService {
       }
     }
 
+    // Transfer transitions journaled since 2026-11-27 are persisted rows
+    // already: derive only what no row tells.
+    const coverage = paymentHistoryCoverage(logs);
     for (const payment of payments) {
       const paymentMeta = {
         paymentId: payment.id,
@@ -394,18 +526,23 @@ export class OrderAuditService {
         payment.initiatedBy?.fullName,
         payment.initiatedBy?.role ?? null,
       );
-      entries.push({
-        id: `payment-started-${payment.id}`,
-        source: 'payment',
-        action: 'payment_started',
-        actor: initiator,
-        changes: null,
-        metadata: paymentMeta,
-        createdAt: payment.createdAt,
-      });
+      if (!coverage.started.has(payment.id)) {
+        entries.push({
+          id: `payment-started-${payment.id}`,
+          source: 'payment',
+          action: 'payment_started',
+          actor: initiator,
+          changes: null,
+          metadata: paymentMeta,
+          createdAt: payment.createdAt,
+        });
+      }
 
       const terminalAction = this.paymentAction(payment.status);
-      if (terminalAction) {
+      if (
+        terminalAction &&
+        !terminalCovered(coverage, payment.id, terminalAction)
+      ) {
         const isRejected = payment.status === PaymentRecordStatus.rejected;
         entries.push({
           id: `payment-terminal-${payment.id}`,

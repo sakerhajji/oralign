@@ -77,6 +77,7 @@ interface SectionScope {
 const INSTALLMENT_ROW_SELECT = {
   id: true,
   amount: true,
+  withholdingAmount: true,
   status: true,
   paymentMethod: true,
   transactionId: true,
@@ -101,6 +102,7 @@ const FEE_ROW_SELECT = {
   id: true,
   orderCode: true,
   treatmentFeeAmount: true,
+  treatmentFeeWithholdingAmount: true,
   treatmentFeePaymentMethod: true,
   treatmentFeePaymentStatus: true,
   treatmentFeePaidAt: true,
@@ -505,6 +507,7 @@ function installmentRow(payment: InstallmentRow): ReportRow {
     method: payment.paymentMethod,
     status: payment.status,
     amount: payment.amount,
+    withholding: payment.withholdingAmount,
     transactionRef:
       payment.transactionId ?? payment.merchantOrderNumber ?? null,
     receiptNumber:
@@ -531,6 +534,7 @@ function feeRow(order: FeeRow, invoiceNumber?: string): ReportRow {
     method: order.treatmentFeePaymentMethod,
     status: order.treatmentFeePaymentStatus,
     amount: order.treatmentFeeAmount,
+    withholding: order.treatmentFeeWithholdingAmount,
     transactionRef:
       attempt?.transactionId ?? attempt?.merchantOrderNumber ?? null,
     // The fee's facture; before the facture existed, its TF- receipt.

@@ -1,0 +1,242 @@
+# ─────────────────────────────────────────────────────────────────
+# CI — every pull request and every push to main.
+#
+#   backend   Prisma schema + migrations on a real Postgres 17 (drift
+#             check), TypeScript, ESLint ratchet, Jest, Nest build
+#   frontend  TypeScript, ESLint, node:test units, Next build
+#   stack     docker compose up --build of the whole app on an empty
+#             database: migrations at boot, health of API and site
+#   security  secret scan of the pushed commits, npm audit (critical)
+#
+# CI never deploys. Production is the separate, manual
+# "Deploy to production" workflow, which refuses a commit whose CI is
+# not green (see docs/ci-cd.md).
+# ─────────────────────────────────────────────────────────────────
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run per branch / PR: a new push cancels the PR run it replaces;
+# runs on main always finish (the deploy gate reads their result).
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # >= 22.18: node --test strips TypeScript types (frontend unit tests).
+  NODE_VERSION: '22'
+  NEXT_TELEMETRY_DISABLED: '1'
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: oralign
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: oralign_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U oralign -d oralign_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      DATABASE_URL: postgresql://oralign:ci-only-password@localhost:5432/oralign_ci
+    defaults:
+      run:
+        working-directory: oralign-backend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the lint ratchet diffs against the base
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: oralign-backend/package-lock.json
+
+      - name: Install
+        run: npm ci --legacy-peer-deps
+
+      - name: Prisma — validate schema and generate client
+        run: |
+          npx prisma validate
+          npx prisma generate
+
+      - name: Prisma — apply every migration to an empty database
+        run: node scripts/migrate.mjs
+
+      - name: Prisma — schema and migrations agree (no drift)
+        run: |
+          npx prisma migrate diff \
+            --from-config-datasource \
+            --to-schema prisma/schema.prisma \
+            --exit-code \
+          || { echo "::error::schema.prisma and the migrations differ: add a migration (prisma migrate diff)"; exit 1; }
+
+      - name: TypeScript
+        run: npx tsc --noEmit -p tsconfig.json
+
+      - name: ESLint — changed files must be clean
+        working-directory: .
+        env:
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+        run: bash scripts/ci/lint-changed.sh backend
+
+      - name: Unit tests
+        run: npx jest --ci --coverage --maxWorkers=50%
+
+      - name: Build
+        run: npm run build
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: oralign-backend/coverage/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: oralign-frontend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: oralign-frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: TypeScript
+        run: npx tsc --noEmit -p tsconfig.json
+
+      # The frontend has no lint debt: the whole tree must stay free of
+      # errors (warnings are reported, not fatal).
+      - name: ESLint
+        run: npx eslint
+
+      - name: Unit tests (node:test)
+        run: |
+          mapfile -t tests < <(git ls-files 'src/**/*.test.mjs')
+          if [ ${#tests[@]} -gt 0 ]; then node --test "${tests[@]}"; fi
+
+      - name: Restore Next build cache
+        uses: actions/cache@v4
+        with:
+          path: oralign-frontend/.next/cache
+          key: next-${{ runner.os }}-${{ hashFiles('oralign-frontend/package-lock.json') }}-${{ hashFiles('oralign-frontend/src/**') }}
+          restore-keys: |
+            next-${{ runner.os }}-${{ hashFiles('oralign-frontend/package-lock.json') }}-
+
+      - name: Build
+        env:
+          NEXT_PUBLIC_API_URL: https://api.oralign.com.tn/api
+          NEXT_PUBLIC_APP_NAME: Oralign
+          NEXT_PUBLIC_APP_URL: https://oralign.com.tn
+        run: npm run build
+
+  stack:
+    name: Docker stack (compose up --build)
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Local env file (example values only)
+        run: cp .env.docker.example .env
+
+      - name: Build and start the stack on an empty database
+        run: docker compose up -d --build --wait --wait-timeout 300
+
+      # Counted in the database rather than grepped from Prisma's log text:
+      # every migration folder must be recorded as finished, none failed.
+      - name: Migrations applied at boot
+        run: |
+          expected=$(find oralign-backend/prisma/migrations -mindepth 1 -maxdepth 1 -type d | wc -l)
+          sql='SELECT count(*) FILTER (WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL) || $$ $$ || count(*) FILTER (WHERE finished_at IS NULL AND rolled_back_at IS NULL) FROM "_prisma_migrations"'
+          read -r applied failed < <(docker compose exec -T postgres psql -U oralign -d oralign_db -tAc "$sql")
+          echo "migrations: ${applied} applied, ${failed} unfinished, ${expected} in the repo"
+          [ "$failed" = "0" ] && [ "$applied" = "$expected" ]
+
+      - name: API and site answer
+        run: |
+          curl -fsS http://127.0.0.1:3000/api/health
+          curl -fsS -o /dev/null -w "frontend %{http_code}\n" http://127.0.0.1:3001/
+
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail=300
+
+      - name: Stop
+        if: always()
+        run: docker compose down -v
+
+  security:
+    name: Security
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Scans the commits of this push / PR for committed secrets.
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # Production dependencies only. REPORTED, not yet fatal: on
+      # 2026-11-27 both apps carry known high / critical advisories
+      # (next, proxy-addr, multer…) that need planned upgrades. Turn
+      # `continue-on-error` off once `npm audit --omit=dev
+      # --audit-level=high` is clean in both apps.
+      - name: npm audit (backend)
+        working-directory: oralign-backend
+        continue-on-error: true
+        run: |
+          status=0
+          npm audit --omit=dev --audit-level=high > audit.txt || status=$?
+          cat audit.txt
+          { echo "### Backend npm audit"; echo '```'; tail -n 40 audit.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      - name: npm audit (frontend)
+        working-directory: oralign-frontend
+        continue-on-error: true
+        run: |
+          status=0
+          npm audit --omit=dev --audit-level=high > audit.txt || status=$?
+          cat audit.txt
+          { echo "### Frontend npm audit"; echo '```'; tail -n 40 audit.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"

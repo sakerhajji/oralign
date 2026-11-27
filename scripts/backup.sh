@@ -42,10 +42,20 @@ UP_FILE="${BACKUPS_HOST_DIR}/uploads_${TS}.tar.gz"
 
 # ── Postgres ─────────────────────────────────────────────────────
 step "Postgres dump → ${DB_FILE}"
-docker exec -e PGPASSWORD="${DB_PASSWORD}" \
-  "${COMPOSE_PROJECT_NAME}-postgres-1" \
+# Through compose, not a guessed container name: the base file pins
+# `container_name: oralign-postgres`, so "<project>-postgres-1" does
+# not exist in production.
+COMPOSE=(docker compose
+  --env-file "${ENV_FILE}"
+  -f docker-compose.yml
+  -f docker-compose.production.yml
+  -p "${COMPOSE_PROJECT_NAME}")
+"${COMPOSE[@]}" exec -T -e PGPASSWORD="${DB_PASSWORD}" postgres \
   pg_dump -U "${DB_USER}" -d "${DB_NAME}" --no-owner --clean --if-exists \
   | gzip > "${DB_FILE}"
+# An empty or truncated dump must stop a deploy, not let it go on.
+gzip -t "${DB_FILE}" || fail "Dump ${DB_FILE} is corrupt"
+[[ $(gzip -cd "${DB_FILE}" | head -c 4096 | wc -c) -gt 0 ]] || fail "Dump ${DB_FILE} is empty"
 ok "$(du -h "${DB_FILE}" | cut -f1) written"
 
 # ── Uploads ──────────────────────────────────────────────────────

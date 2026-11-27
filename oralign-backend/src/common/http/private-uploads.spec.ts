@@ -18,6 +18,17 @@ describe('private uploads (patient records never served by /uploads)', () => {
     '\\orders\\a.jpg',
     '/%5Corders%5Ca.jpg',
     '/%E0%A4%A', // malformed escape: refused
+    // Bank-transfer receipts, legacy folders (spec §1: private).
+    '/payments/0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0.pdf',
+    '/payments',
+    '/PAYMENTS/a.jpg',
+    '/%70ayments/a.jpg',
+    '/avatars/../payments/a.jpg',
+    '/treatment-fee-proofs/1764235800000-recu.pdf',
+    '/Treatment-Fee-Proofs/a.png',
+    '//treatment-fee-proofs/a.png',
+    // ...and the new home under the order.
+    '/orders/o-1/payment-proofs/0f1e2d3c.jpg',
   ])('%s is private', (path) => {
     expect(isPrivateUploadPath(path)).toBe(true);
   });
@@ -30,6 +41,8 @@ describe('private uploads (patient records never served by /uploads)', () => {
     '/patient-photos/p.jpg',
     '/orders-archive/a.jpg',
     '/avatars/orders/a.jpg',
+    '/payments-old/a.jpg',
+    '/blog/payments/a.jpg',
     '/',
     '',
   ])('%s is public as before', (path) => {

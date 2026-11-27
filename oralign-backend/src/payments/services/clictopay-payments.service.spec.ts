@@ -49,12 +49,64 @@ const payment = (overrides: Record<string, unknown> = {}) =>
     ...overrides,
   }) as never;
 
+/** The PrismaService members the service reads outside its transactions. */
+const makePrisma = () => ({
+  payment: {
+    findUnique: jest.fn(),
+    findFirst: jest.fn(),
+    update: jest.fn(),
+    updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+  },
+  // What a live attempt is compared with before it is handed back: a
+  // 10 TND installment, or a 10 TND fee without CBCT, no stamp.
+  quoteInstallment: {
+    findUnique: jest
+      .fn()
+      .mockResolvedValue({ amount: new Prisma.Decimal('10.000') }),
+  },
+  dentalOrder: {
+    findUnique: jest
+      .fn()
+      .mockResolvedValue({ doctorId: 'doctor-1', cbctFeeAmount: null }),
+  },
+  companyBillingSettings: {
+    findFirst: jest.fn().mockResolvedValue({
+      defaultTreatmentFee: new Prisma.Decimal('10.000'),
+      defaultCurrency: 'TND',
+      withholdingRate: new Prisma.Decimal('1'),
+      withholdingEnabled: true,
+      stampDuty: new Prisma.Decimal('0'),
+    }),
+  },
+  $transaction: jest.fn(),
+});
+
+/** A `data` argument (create / update). */
+type DataArg = { data: Record<string, unknown> };
+
+/** The first argument of a mock's first call, typed by the reader. */
+const firstArg = <T>(mock: jest.Mock): T =>
+  (mock.mock.calls as unknown[][])[0]?.[0] as T;
+
+/** The service's private helpers some tests call directly. */
+type ServiceInternals = {
+  mapProviderStatus(status: number): unknown;
+  validateProviderIdentity(row: unknown, status: unknown): unknown;
+};
+const internals = (service: ClicToPayPaymentsService) =>
+  service as unknown as ServiceInternals;
+
+/** findUnique: the idempotency lookup finds nothing, the id lookup `row`. */
+const byIdOnly =
+  (row: unknown) => (args: { where?: { idempotencyKey?: string } }) =>
+    Promise.resolve(args.where?.idempotencyKey ? null : row);
+
 describe('ClicToPayPaymentsService', () => {
-  let prisma: any;
-  let client: any;
-  let payments: any;
-  let quotations: any;
-  let events: any;
+  let prisma: ReturnType<typeof makePrisma>;
+  let client: { register: jest.Mock; getStatus: jest.Mock };
+  let payments: { handleSuccess: jest.Mock };
+  let quotations: { approveOnFirstPayment: jest.Mock };
+  let events: { emit: jest.Mock };
   let service: ClicToPayPaymentsService;
   const admin = { userId: 'admin-1', role: UserRole.admin };
 
@@ -67,45 +119,17 @@ describe('ClicToPayPaymentsService', () => {
       returnUrl: 'https://app.example/payment/return',
       failUrl: 'https://app.example/payment/fail',
     });
-    prisma = {
-      payment: {
-        findUnique: jest.fn(),
-        findFirst: jest.fn(),
-        update: jest.fn(),
-        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-      },
-      // What a live attempt is compared with before it is handed back: a
-      // 10 TND installment, or a 10 TND fee without CBCT, no stamp.
-      quoteInstallment: {
-        findUnique: jest
-          .fn()
-          .mockResolvedValue({ amount: new Prisma.Decimal('10.000') }),
-      },
-      dentalOrder: {
-        findUnique: jest
-          .fn()
-          .mockResolvedValue({ doctorId: 'doctor-1', cbctFeeAmount: null }),
-      },
-      companyBillingSettings: {
-        findFirst: jest.fn().mockResolvedValue({
-          defaultTreatmentFee: new Prisma.Decimal('10.000'),
-          defaultCurrency: 'TND',
-          withholdingRate: new Prisma.Decimal('1'),
-          stampDuty: new Prisma.Decimal('0'),
-        }),
-      },
-      $transaction: jest.fn(),
-    };
+    prisma = makePrisma();
     client = { register: jest.fn(), getStatus: jest.fn() };
     payments = { handleSuccess: jest.fn() };
     quotations = { approveOnFirstPayment: jest.fn() };
     events = { emit: jest.fn() };
     service = new ClicToPayPaymentsService(
-      prisma,
-      client,
-      payments,
-      quotations,
-      events,
+      prisma as never,
+      client as never,
+      payments as never,
+      quotations as never,
+      events as never,
     );
   });
 
@@ -119,10 +143,12 @@ describe('ClicToPayPaymentsService', () => {
 
   /** Make the attempt transaction hand back a freshly created attempt. */
   const stubFreshAttempt = (fresh: unknown) => {
-    prisma.$transaction.mockImplementation(async () => ({
-      payment: fresh,
-      created: true,
-    }));
+    prisma.$transaction.mockImplementation(() =>
+      Promise.resolve({
+        payment: fresh,
+        created: true,
+      }),
+    );
   };
 
   const minutes = (n: number) => new Date(Date.now() + n * 60_000);
@@ -147,9 +173,7 @@ describe('ClicToPayPaymentsService', () => {
       paymentUrl: null,
       expiresAt: null,
     });
-    prisma.payment.findUnique.mockImplementation(async (args: any) =>
-      args.where?.idempotencyKey ? null : stale,
-    );
+    prisma.payment.findUnique.mockImplementation(byIdOnly(stale));
     prisma.payment.findFirst.mockResolvedValue(stale);
     // The gateway is asked before anything is retired: registered, never paid.
     client.getStatus.mockResolvedValue({
@@ -170,11 +194,15 @@ describe('ClicToPayPaymentsService', () => {
     // The dead attempt was retired and a brand-new registration was opened.
     expect(prisma.payment.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ status: PaymentRecordStatus.expired }),
+        data: expect.objectContaining({
+          status: PaymentRecordStatus.expired,
+        }) as unknown,
       }),
     );
     expect(client.register).toHaveBeenCalledTimes(1);
-    expect(client.register.mock.calls[0][0].orderNumber).toBe('ORA-TEST-2');
+    expect(firstArg<{ orderNumber: string }>(client.register).orderNumber).toBe(
+      'ORA-TEST-2',
+    );
   });
 
   it('settles a payment made in the final seconds instead of expiring it', async () => {
@@ -183,9 +211,7 @@ describe('ClicToPayPaymentsService', () => {
       installmentId: null,
       expiresAt: minutes(-1),
     });
-    prisma.payment.findUnique.mockImplementation(async (args: any) =>
-      args.where?.idempotencyKey ? null : stale,
-    );
+    prisma.payment.findUnique.mockImplementation(byIdOnly(stale));
     prisma.payment.findFirst.mockResolvedValue(stale);
     client.getStatus.mockResolvedValue({
       orderStatus: 2,
@@ -194,11 +220,19 @@ describe('ClicToPayPaymentsService', () => {
       currency: '788',
     });
     prisma.payment.update.mockResolvedValue(stale);
-    prisma.$transaction.mockImplementation(async () => ({
-      payment: payment({ status: PaymentRecordStatus.success }),
-      order: { id: 'order-1', orderCode: 'ORD-1', doctorId: 'd1', doctor: null, patient: null },
-      notify: false,
-    }));
+    prisma.$transaction.mockImplementation(() =>
+      Promise.resolve({
+        payment: payment({ status: PaymentRecordStatus.success }),
+        order: {
+          id: 'order-1',
+          orderCode: 'ORD-1',
+          doctorId: 'd1',
+          doctor: null,
+          patient: null,
+        },
+        notify: false,
+      }),
+    );
 
     await createTreatmentFeeSession();
 
@@ -214,12 +248,14 @@ describe('ClicToPayPaymentsService', () => {
       paymentUrl: null,
       expiresAt: null,
     });
-    prisma.payment.findUnique.mockImplementation(async (args: any) =>
-      args.where?.idempotencyKey ? null : ambiguous,
-    );
+    prisma.payment.findUnique.mockImplementation(byIdOnly(ambiguous));
     prisma.payment.findFirst.mockResolvedValue(ambiguous);
     client.getStatus.mockRejectedValue(
-      new ClicToPayError('ambiguous', 'PAYMENT_PROVIDER_UNREACHABLE', 'unreachable'),
+      new ClicToPayError(
+        'ambiguous',
+        'PAYMENT_PROVIDER_UNREACHABLE',
+        'unreachable',
+      ),
     );
     prisma.payment.update.mockResolvedValue(ambiguous);
 
@@ -230,7 +266,11 @@ describe('ClicToPayPaymentsService', () => {
   });
 
   it('records a deadline on every hosted session it registers', async () => {
-    const fresh = payment({ providerOrderId: null, paymentUrl: null, expiresAt: null });
+    const fresh = payment({
+      providerOrderId: null,
+      paymentUrl: null,
+      expiresAt: null,
+    });
     prisma.payment.findUnique.mockResolvedValue(null);
     prisma.payment.findFirst.mockResolvedValue(null);
     stubFreshAttempt(fresh);
@@ -242,9 +282,9 @@ describe('ClicToPayPaymentsService', () => {
 
     await createTreatmentFeeSession();
 
-    const data = prisma.payment.update.mock.calls[0][0].data;
+    const data = firstArg<DataArg>(prisma.payment.update).data;
     expect(data.expiresAt).toBeInstanceOf(Date);
-    expect(data.expiresAt.getTime()).toBeGreaterThan(Date.now());
+    expect((data.expiresAt as Date).getTime()).toBeGreaterThan(Date.now());
   });
 
   it('surfaces an expired session to the return page', async () => {
@@ -270,7 +310,11 @@ describe('ClicToPayPaymentsService', () => {
   it('does not treat a browser return as payment success without provider status 2', async () => {
     const pending = payment();
     prisma.payment.findUnique.mockResolvedValue(pending);
-    client.getStatus.mockResolvedValue({ orderStatus: 0, amount: 10000, currency: '788' });
+    client.getStatus.mockResolvedValue({
+      orderStatus: 0,
+      amount: 10000,
+      currency: '788',
+    });
     prisma.payment.update
       .mockResolvedValueOnce(pending)
       .mockResolvedValueOnce(pending);
@@ -298,10 +342,19 @@ describe('ClicToPayPaymentsService', () => {
 
   it('maps a provider refusal to failed without business side effects', async () => {
     const pending = payment();
-    const failed = payment({ status: PaymentRecordStatus.failed, providerStatus: 6 });
+    const failed = payment({
+      status: PaymentRecordStatus.failed,
+      providerStatus: 6,
+    });
     prisma.payment.findUnique.mockResolvedValue(pending);
-    client.getStatus.mockResolvedValue({ orderStatus: 6, amount: 10000, currency: '788' });
-    prisma.payment.update.mockResolvedValueOnce(pending).mockResolvedValueOnce(failed);
+    client.getStatus.mockResolvedValue({
+      orderStatus: 6,
+      amount: 10000,
+      currency: '788',
+    });
+    prisma.payment.update
+      .mockResolvedValueOnce(pending)
+      .mockResolvedValueOnce(failed);
     await expect(service.verify('payment-1', admin)).resolves.toMatchObject({
       status: PaymentRecordStatus.failed,
     });
@@ -309,8 +362,12 @@ describe('ClicToPayPaymentsService', () => {
   });
 
   it('maps provider cancellation and refund states to cancelled', () => {
-    expect((service as any).mapProviderStatus(3)).toBe(PaymentRecordStatus.cancelled);
-    expect((service as any).mapProviderStatus(4)).toBe(PaymentRecordStatus.cancelled);
+    expect(internals(service).mapProviderStatus(3)).toBe(
+      PaymentRecordStatus.cancelled,
+    );
+    expect(internals(service).mapProviderStatus(4)).toBe(
+      PaymentRecordStatus.cancelled,
+    );
   });
 
   it('keeps technical verification failures recoverable as unknown', async () => {
@@ -318,7 +375,11 @@ describe('ClicToPayPaymentsService', () => {
     const unknown = payment({ status: PaymentRecordStatus.unknown });
     prisma.payment.findUnique.mockResolvedValue(pending);
     client.getStatus.mockRejectedValue(
-      new ClicToPayError('ambiguous', 'PAYMENT_PROVIDER_UNREACHABLE', 'Unavailable'),
+      new ClicToPayError(
+        'ambiguous',
+        'PAYMENT_PROVIDER_UNREACHABLE',
+        'Unavailable',
+      ),
     );
     prisma.payment.update.mockResolvedValue(unknown);
     await expect(service.verify('payment-1', admin)).resolves.toMatchObject({
@@ -330,7 +391,11 @@ describe('ClicToPayPaymentsService', () => {
     const pending = payment();
     const unknown = payment({ status: PaymentRecordStatus.unknown });
     prisma.payment.findUnique.mockResolvedValue(pending);
-    client.getStatus.mockResolvedValue({ orderStatus: 2, amount: 9999, currency: '788' });
+    client.getStatus.mockResolvedValue({
+      orderStatus: 2,
+      amount: 9999,
+      currency: '788',
+    });
     prisma.payment.update.mockResolvedValue(unknown);
     const result = await service.verify('payment-1', admin);
     expect(result.status).toBe(PaymentRecordStatus.unknown);
@@ -340,14 +405,14 @@ describe('ClicToPayPaymentsService', () => {
   it('rejects currency and merchant-reference mismatches', () => {
     const row = payment();
     expect(
-      (service as any).validateProviderIdentity(row, {
+      internals(service).validateProviderIdentity(row, {
         orderStatus: 2,
         amount: 10000,
         currency: '840',
       }),
     ).toContain('currency');
     expect(
-      (service as any).validateProviderIdentity(row, {
+      internals(service).validateProviderIdentity(row, {
         orderStatus: 2,
         orderNumber: 'OTHER',
         amount: 10000,
@@ -368,9 +433,14 @@ describe('ClicToPayPaymentsService', () => {
 
   it('blocks a doctor from reading another doctor payment', async () => {
     prisma.payment.findUnique.mockResolvedValue(payment());
-    prisma.dentalOrder.findUnique.mockResolvedValue({ doctorId: 'doctor-owner' });
+    prisma.dentalOrder.findUnique.mockResolvedValue({
+      doctorId: 'doctor-owner',
+    });
     await expect(
-      service.verify('payment-1', { userId: 'doctor-other', role: UserRole.dentist }),
+      service.verify('payment-1', {
+        userId: 'doctor-other',
+        role: UserRole.dentist,
+      }),
     ).rejects.toMatchObject({ statusCode: 403 });
     expect(client.getStatus).not.toHaveBeenCalled();
   });
@@ -457,16 +527,98 @@ describe('ClicToPayPaymentsService', () => {
     expect(tx.payment.create).not.toHaveBeenCalled();
     expect(client.register).not.toHaveBeenCalled();
   });
+
+  it('refuses a fee card session while a fee bank transfer awaits confirmation (409), under the lock', async () => {
+    const tx = runAttemptAgainst({
+      treatmentFeePaymentMethod: PaymentMethod.bank_transfer,
+      treatmentFeePaymentStatus: PaymentRecordStatus.awaiting_confirmation,
+      treatmentFeeDeclaredAt: new Date('2026-11-27T09:00:00.000Z'),
+    });
+
+    await expect(createTreatmentFeeSession()).rejects.toMatchObject({
+      statusCode: 409,
+      errorCode: 'PAYMENT_ATTEMPT_IN_PROGRESS',
+      message: expect.stringContaining(
+        'Un virement a déjà été déclaré',
+      ) as unknown,
+    });
+    // Read under the row lock the declaration takes too; nothing charged.
+    expect(tx.$queryRaw).toHaveBeenCalled();
+    expect(tx.payment.findFirst).not.toHaveBeenCalled();
+    expect(tx.payment.create).not.toHaveBeenCalled();
+    expect(client.register).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['refused', PaymentRecordStatus.rejected],
+    ['withdrawn', null],
+  ])(
+    'a fee whose transfer was %s may be paid by card',
+    async (_label, status) => {
+      const tx = runAttemptAgainst({
+        treatmentFeePaymentStatus: status,
+        treatmentFeeRejectedAt:
+          status === PaymentRecordStatus.rejected
+            ? new Date('2026-11-27T10:00:00.000Z')
+            : null,
+      });
+      tx.companyBillingSettings.findFirst.mockResolvedValue({
+        defaultTreatmentFee: new Prisma.Decimal('300.000'),
+        defaultCurrency: 'TND',
+        withholdingRate: new Prisma.Decimal('1'),
+        withholdingEnabled: true,
+        stampDuty: new Prisma.Decimal('1.000'),
+      });
+      tx.payment.findFirst.mockResolvedValue(null);
+      tx.payment.count.mockResolvedValue(0);
+      tx.payment.create.mockImplementation(
+        ({ data }: { data: Record<string, unknown> }) =>
+          Promise.resolve(
+            payment({ ...data, paymentUrl: null, providerOrderId: null }),
+          ),
+      );
+      client.register.mockResolvedValue({
+        orderId: 'p',
+        formUrl: 'https://pay.example/f',
+      });
+      prisma.payment.update.mockImplementation(
+        ({ data }: { data: Record<string, unknown> }) =>
+          Promise.resolve(
+            payment({ ...firstArg<DataArg>(tx.payment.create).data, ...data }),
+          ),
+      );
+
+      await expect(createTreatmentFeeSession()).resolves.toMatchObject({
+        paymentUrl: 'https://pay.example/f',
+      });
+      expect(tx.payment.create).toHaveBeenCalledTimes(1);
+    },
+  );
   // ─── Retenue à la source and "one payment at a time" ────────────
 
   /** The installment attempt transaction, run for real. */
-  const runInstallmentAttempt = (options: {
-    inFlight?: { paymentMethod: PaymentMethod } | null;
-    live?: unknown;
-    withholdingRate?: string;
-    /** settings.stampDuty: the 1 TND droit de timbre by default. */
-    stampDuty?: string;
-  } = {}) => {
+  const runInstallmentAttempt = (
+    options: {
+      inFlight?: { paymentMethod: PaymentMethod } | null;
+      live?: unknown;
+      withholdingRate?: string;
+      /** settings.stampDuty: the 1 TND droit de timbre by default. */
+      stampDuty?: string;
+      /** settings.withholdingEnabled: switched on by default. */
+      withholdingEnabled?: boolean;
+      /** settings.withholdingThreshold: none by default. */
+      withholdingThreshold?: string;
+    } = {},
+  ) => {
+    const settingsRow = {
+      withholdingRate: new Prisma.Decimal(options.withholdingRate ?? '1'),
+      stampDuty: new Prisma.Decimal(options.stampDuty ?? '1'),
+      withholdingEnabled: options.withholdingEnabled ?? true,
+      withholdingThreshold:
+        options.withholdingThreshold === undefined
+          ? null
+          : new Prisma.Decimal(options.withholdingThreshold),
+    };
     const tx = {
       $queryRaw: jest.fn().mockResolvedValue([]),
       quoteInstallment: {
@@ -489,21 +641,25 @@ describe('ClicToPayPaymentsService', () => {
         // The guard asks by method; the live-attempt lookup by provider.
         findFirst: jest.fn((args: { where: { provider?: unknown } }) =>
           Promise.resolve(
-            args.where.provider ? (options.live ?? null) : (options.inFlight ?? null),
+            args.where.provider
+              ? (options.live ?? null)
+              : (options.inFlight ?? null),
           ),
         ),
         count: jest.fn().mockResolvedValue(0),
         create: jest.fn(({ data }: { data: Record<string, unknown> }) =>
           Promise.resolve(
-            payment({ ...data, id: 'payment-new', paymentUrl: null, providerOrderId: null }),
+            payment({
+              ...data,
+              id: 'payment-new',
+              paymentUrl: null,
+              providerOrderId: null,
+            }),
           ),
         ),
       },
       companyBillingSettings: {
-        findFirst: jest.fn().mockResolvedValue({
-          withholdingRate: new Prisma.Decimal(options.withholdingRate ?? '1'),
-          stampDuty: new Prisma.Decimal(options.stampDuty ?? '1'),
-        }),
+        findFirst: jest.fn().mockResolvedValue(settingsRow),
       },
     };
     prisma.$transaction.mockImplementation(
@@ -513,17 +669,19 @@ describe('ClicToPayPaymentsService', () => {
     prisma.quoteInstallment.findUnique.mockResolvedValue({
       amount: new Prisma.Decimal('1000.000'),
     });
-    prisma.companyBillingSettings.findFirst.mockResolvedValue({
-      withholdingRate: new Prisma.Decimal(options.withholdingRate ?? '1'),
-      stampDuty: new Prisma.Decimal(options.stampDuty ?? '1'),
-    });
+    prisma.companyBillingSettings.findFirst.mockResolvedValue(settingsRow);
     client.register.mockResolvedValue({
       orderId: 'provider-new',
       formUrl: 'https://pay.example/new',
     });
     prisma.payment.update.mockImplementation(
       ({ data }: { data: Record<string, unknown> }) =>
-        Promise.resolve(payment({ ...tx.payment.create.mock.calls[0]?.[0].data, ...data })),
+        Promise.resolve(
+          payment({
+            ...firstArg<DataArg | undefined>(tx.payment.create)?.data,
+            ...data,
+          }),
+        ),
     );
     return tx;
   };
@@ -547,11 +705,13 @@ describe('ClicToPayPaymentsService', () => {
 
     const session = await installmentSession(true);
 
-    const data = tx.payment.create.mock.calls[0][0].data;
+    const data = firstArg<DataArg>(tx.payment.create).data;
     expect((data.amount as Prisma.Decimal).toFixed(3)).toBe('991.000');
-    expect((data.withholdingAmount as Prisma.Decimal).toFixed(3)).toBe('10.000');
+    expect((data.withholdingAmount as Prisma.Decimal).toFixed(3)).toBe(
+      '10.000',
+    );
     expect((data.stampAmount as Prisma.Decimal).toFixed(3)).toBe('1.000');
-    expect(client.register.mock.calls[0][0].amount).toBe(991000);
+    expect(firstArg<{ amount: number }>(client.register).amount).toBe(991000);
     expect(session).toMatchObject({
       amount: '991',
       withholdingRate: 1,
@@ -569,11 +729,11 @@ describe('ClicToPayPaymentsService', () => {
 
     const session = await installmentSession(false);
 
-    const data = tx.payment.create.mock.calls[0][0].data;
+    const data = firstArg<DataArg>(tx.payment.create).data;
     expect((data.amount as Prisma.Decimal).toFixed(3)).toBe('1001.000');
     expect((data.stampAmount as Prisma.Decimal).toFixed(3)).toBe('1.000');
     expect(data.withholdingRate).toBeNull();
-    expect(client.register.mock.calls[0][0].amount).toBe(1001000);
+    expect(firstArg<{ amount: number }>(client.register).amount).toBe(1001000);
     expect(session).toMatchObject({
       amount: '1001',
       stampAmount: 1,
@@ -593,6 +753,68 @@ describe('ClicToPayPaymentsService', () => {
     });
     expect(tx.payment.create).not.toHaveBeenCalled();
     expect(client.register).not.toHaveBeenCalled();
+  });
+
+  it('refuses the retenue while it is switched off, whatever the rate (400 WITHHOLDING_DISABLED), before any charge', async () => {
+    prisma.payment.findUnique.mockResolvedValue(null);
+    prisma.payment.findFirst.mockResolvedValue(null);
+    const tx = runInstallmentAttempt({
+      withholdingRate: '1',
+      withholdingEnabled: false,
+    });
+
+    await expect(installmentSession(true)).rejects.toMatchObject({
+      statusCode: 400,
+      errorCode: 'WITHHOLDING_DISABLED',
+    });
+    expect(tx.payment.create).not.toHaveBeenCalled();
+    expect(client.register).not.toHaveBeenCalled();
+  });
+
+  it('refuses the retenue on an installment below the threshold (400 WITHHOLDING_BELOW_THRESHOLD), before any charge', async () => {
+    prisma.payment.findUnique.mockResolvedValue(null);
+    prisma.payment.findFirst.mockResolvedValue(null);
+    const tx = runInstallmentAttempt({ withholdingThreshold: '1000.001' });
+
+    await expect(installmentSession(true)).rejects.toMatchObject({
+      statusCode: 400,
+      errorCode: 'WITHHOLDING_BELOW_THRESHOLD',
+      details: { withholdingThreshold: 1000.001 },
+    });
+    expect(tx.payment.create).not.toHaveBeenCalled();
+    expect(client.register).not.toHaveBeenCalled();
+  });
+
+  it('applies the retenue at the threshold and snapshots the threshold on the attempt', async () => {
+    prisma.payment.findUnique.mockResolvedValue(null);
+    prisma.payment.findFirst.mockResolvedValue(null);
+    const tx = runInstallmentAttempt({ withholdingThreshold: '1000' });
+
+    await installmentSession(true);
+
+    const data = firstArg<DataArg>(tx.payment.create).data;
+    expect((data.withholdingAmount as Prisma.Decimal).toFixed(3)).toBe(
+      '10.000',
+    );
+    expect((data.withholdingThreshold as Prisma.Decimal).toFixed(3)).toBe(
+      '1000.000',
+    );
+    expect(firstArg<{ amount: number }>(client.register).amount).toBe(991000);
+  });
+
+  it('a payment without the retenue goes through below the threshold and while switched off', async () => {
+    prisma.payment.findUnique.mockResolvedValue(null);
+    prisma.payment.findFirst.mockResolvedValue(null);
+    const tx = runInstallmentAttempt({
+      withholdingEnabled: false,
+      withholdingThreshold: '5000',
+    });
+
+    await installmentSession(false);
+
+    const data = firstArg<DataArg>(tx.payment.create).data;
+    expect((data.amount as Prisma.Decimal).toFixed(3)).toBe('1001.000');
+    expect(data.withholdingRate).toBeNull();
   });
 
   it('refuses a card attempt while a transfer awaits confirmation (409), under the lock', async () => {
@@ -619,7 +841,7 @@ describe('ClicToPayPaymentsService', () => {
     errorCode: 'WITHHOLDING_CHOICE_CONFLICT',
     message: expect.stringContaining(
       'déjà ouvert pour ce montant avec un autre choix de retenue',
-    ),
+    ) as unknown,
   };
 
   it('never hands back a live session opened with the other retenue choice (409 WITHHOLDING_CHOICE_CONFLICT)', async () => {
@@ -713,6 +935,7 @@ describe('ClicToPayPaymentsService', () => {
     });
     prisma.companyBillingSettings.findFirst.mockResolvedValue({
       withholdingRate: new Prisma.Decimal('1'),
+      withholdingEnabled: true,
       stampDuty: new Prisma.Decimal(stampDuty),
     });
   };
@@ -746,7 +969,9 @@ describe('ClicToPayPaymentsService', () => {
   const chargeChanged = {
     statusCode: 409,
     errorCode: 'PAYMENT_CHARGE_CHANGED',
-    message: expect.stringContaining('à un tarif qui a changé depuis'),
+    message: expect.stringContaining(
+      'à un tarif qui a changé depuis',
+    ) as unknown,
   };
 
   it('never hands back a live session opened before the stamp was added (409 PAYMENT_CHARGE_CHANGED)', async () => {
@@ -779,7 +1004,9 @@ describe('ClicToPayPaymentsService', () => {
     prisma.payment.findFirst.mockResolvedValue(live);
     priceInstallmentAt('2');
 
-    await expect(installmentSession(false)).rejects.toMatchObject(chargeChanged);
+    await expect(installmentSession(false)).rejects.toMatchObject(
+      chargeChanged,
+    );
     expect(client.register).not.toHaveBeenCalled();
   });
 
@@ -796,11 +1023,16 @@ describe('ClicToPayPaymentsService', () => {
     prisma.payment.findFirst.mockResolvedValue(undecided);
     client.getStatus.mockRejectedValue(new Error('socket hang up'));
     prisma.payment.update.mockResolvedValue(
-      payment({ ...(undecided as object), status: PaymentRecordStatus.unknown }),
+      payment({
+        ...(undecided as object),
+        status: PaymentRecordStatus.unknown,
+      }),
     );
     priceInstallmentAt('1');
 
-    await expect(installmentSession(false)).rejects.toMatchObject(chargeChanged);
+    await expect(installmentSession(false)).rejects.toMatchObject(
+      chargeChanged,
+    );
     expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(client.register).not.toHaveBeenCalled();
   });
@@ -820,7 +1052,9 @@ describe('ClicToPayPaymentsService', () => {
       }),
     });
 
-    await expect(installmentSession(false)).rejects.toMatchObject(chargeChanged);
+    await expect(installmentSession(false)).rejects.toMatchObject(
+      chargeChanged,
+    );
     expect(tx.payment.create).not.toHaveBeenCalled();
     expect(client.register).not.toHaveBeenCalled();
   });
@@ -847,9 +1081,7 @@ describe('ClicToPayPaymentsService', () => {
 
   it('retires an attempt the gateway proves dead, then opens one with the new choice', async () => {
     const stale = payment({ expiresAt: minutes(-5), withholdingRate: null });
-    prisma.payment.findUnique.mockImplementation(async (args: any) =>
-      args.where?.idempotencyKey ? null : stale,
-    );
+    prisma.payment.findUnique.mockImplementation(byIdOnly(stale));
     prisma.payment.findFirst.mockResolvedValue(stale);
     client.getStatus.mockResolvedValue({
       orderStatus: 0,
@@ -858,16 +1090,20 @@ describe('ClicToPayPaymentsService', () => {
       currency: '788',
     });
     const tx = runInstallmentAttempt({ withholdingRate: '1' });
-    prisma.payment.update.mockResolvedValueOnce(stale).mockResolvedValueOnce(stale);
+    prisma.payment.update
+      .mockResolvedValueOnce(stale)
+      .mockResolvedValueOnce(stale);
 
     await installmentSession(true);
 
     expect(prisma.payment.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ status: PaymentRecordStatus.expired }),
+        data: expect.objectContaining({
+          status: PaymentRecordStatus.expired,
+        }) as unknown,
       }),
     );
-    const data = tx.payment.create.mock.calls[0][0].data;
+    const data = firstArg<DataArg>(tx.payment.create).data;
     expect((data.amount as Prisma.Decimal).toFixed(3)).toBe('991.000');
     expect(client.register).toHaveBeenCalledTimes(1);
   });
@@ -887,7 +1123,8 @@ describe('ClicToPayPaymentsService', () => {
       orderStatus: 2,
       orderNumber: 'ORA-TEST-1',
       amount: Math.round(
-        Number((attempt as unknown as { amount: Prisma.Decimal }).amount) * 1000,
+        Number((attempt as unknown as { amount: Prisma.Decimal }).amount) *
+          1000,
       ),
       currency: '788',
     });
@@ -936,7 +1173,7 @@ describe('ClicToPayPaymentsService', () => {
 
     await service.verify('payment-1', admin);
 
-    expect(tx.dentalOrder.update.mock.calls[0][0].data).toMatchObject({
+    expect(firstArg<DataArg>(tx.dentalOrder.update).data).toMatchObject({
       treatmentFeeAmount: new Prisma.Decimal('347.500'),
       treatmentFeeWithholdingRate: new Prisma.Decimal('1'),
       treatmentFeeWithholdingAmount: new Prisma.Decimal('3.500'),
@@ -967,7 +1204,7 @@ describe('ClicToPayPaymentsService', () => {
 
     await service.verify('payment-1', admin);
 
-    const data = tx.dentalOrder.update.mock.calls[0][0].data;
+    const data = firstArg<DataArg>(tx.dentalOrder.update).data;
     expect((data.treatmentFeeAmount as Prisma.Decimal).toFixed(3)).toBe(
       '350.000',
     );
@@ -977,11 +1214,62 @@ describe('ClicToPayPaymentsService', () => {
     expect(data.treatmentFeeWithholdingAmount).toBeNull();
   });
 
+  it('a card payment after a refused transfer clears the stale declaration, review, refusal and receipt pointer', async () => {
+    const tx = settleFeeAttempt(
+      payment({
+        purpose: PaymentPurpose.treatment_fee,
+        installmentId: null,
+        quotationId: null,
+        amount: new Prisma.Decimal('351.000'),
+        stampAmount: new Prisma.Decimal('1.000'),
+      }),
+    );
+    tx.dentalOrder.findUnique.mockResolvedValue({
+      id: 'order-1',
+      orderCode: 'ORD-1',
+      doctorId: 'doctor-1',
+      treatmentFeePaidAt: null,
+      treatmentFeePaymentMethod: PaymentMethod.bank_transfer,
+      treatmentFeePaymentStatus: PaymentRecordStatus.rejected,
+      treatmentFeeProofPath: 'orders/order-1/payment-proofs/refused.jpg',
+      treatmentFeeDeclaredAt: new Date('2026-11-26T09:00:00.000Z'),
+      treatmentFeeReviewOpenedAt: new Date('2026-11-26T10:00:00.000Z'),
+      treatmentFeeRejectedAt: new Date('2026-11-26T11:00:00.000Z'),
+      treatmentFeeRejectedById: 'admin-1',
+      treatmentFeeRejectedByName: 'Admin',
+      treatmentFeeRejectionReason: 'Montant illisible',
+      doctor: { fullName: 'Dr Salma' },
+      patient: { fullName: 'Ines' },
+    });
+
+    await service.verify('payment-1', admin);
+
+    expect(firstArg<DataArg>(tx.dentalOrder.update).data).toMatchObject({
+      treatmentFeePaymentMethod: PaymentMethod.card,
+      treatmentFeePaymentStatus: PaymentRecordStatus.success,
+      treatmentFeeProofPath: null,
+      treatmentFeeDeclaredAt: null,
+      treatmentFeeReviewOpenedAt: null,
+      treatmentFeeRejectedAt: null,
+      treatmentFeeRejectedById: null,
+      treatmentFeeRejectedByName: null,
+      treatmentFeeRejectionReason: null,
+    });
+    expect(
+      firstArg<DataArg>(tx.dentalOrder.update).data.treatmentFeePaidAt,
+    ).toBeInstanceOf(Date);
+    expect(events.emit).toHaveBeenCalledWith(
+      NotificationEvents.TreatmentFeePaid,
+      expect.objectContaining({ method: PaymentMethod.card }),
+    );
+  });
+
   /** The fee settings: 300 TND fee, 1 % retenue, 1 TND stamp. */
   const FEE_SETTINGS = {
     defaultTreatmentFee: new Prisma.Decimal('300.000'),
     defaultCurrency: 'TND',
     withholdingRate: new Prisma.Decimal('1'),
+    withholdingEnabled: true,
     stampDuty: new Prisma.Decimal('1.000'),
   };
 
@@ -997,34 +1285,118 @@ describe('ClicToPayPaymentsService', () => {
       tx.companyBillingSettings.findFirst.mockResolvedValue(FEE_SETTINGS);
       tx.payment.findFirst.mockResolvedValue(null);
       tx.payment.count.mockResolvedValue(0);
-      tx.payment.create.mockImplementation(({ data }: { data: Record<string, unknown> }) =>
-        Promise.resolve(payment({ ...data, paymentUrl: null, providerOrderId: null })),
+      tx.payment.create.mockImplementation(
+        ({ data }: { data: Record<string, unknown> }) =>
+          Promise.resolve(
+            payment({ ...data, paymentUrl: null, providerOrderId: null }),
+          ),
       );
-      client.register.mockResolvedValue({ orderId: 'p', formUrl: 'https://pay.example/f' });
-      prisma.payment.update.mockImplementation(({ data }: { data: Record<string, unknown> }) =>
-        Promise.resolve(payment({ ...tx.payment.create.mock.calls[0][0].data, ...data })),
+      client.register.mockResolvedValue({
+        orderId: 'p',
+        formUrl: 'https://pay.example/f',
+      });
+      prisma.payment.update.mockImplementation(
+        ({ data }: { data: Record<string, unknown> }) =>
+          Promise.resolve(
+            payment({ ...firstArg<DataArg>(tx.payment.create).data, ...data }),
+          ),
       );
 
       const session = await service.createSession(
-        { orderId: 'order-1', purpose: PaymentPurpose.treatment_fee, applyWithholding },
+        {
+          orderId: 'order-1',
+          purpose: PaymentPurpose.treatment_fee,
+          applyWithholding,
+        },
         admin,
         'fee-key',
       );
 
-      const data = tx.payment.create.mock.calls[0][0].data;
+      const data = firstArg<DataArg>(tx.payment.create).data;
       expect((data.amount as Prisma.Decimal).toFixed(3)).toBe(cash);
-      expect((data.withholdingAmount as Prisma.Decimal).toFixed(3)).toBe(withheld);
+      expect((data.withholdingAmount as Prisma.Decimal).toFixed(3)).toBe(
+        withheld,
+      );
       expect((data.stampAmount as Prisma.Decimal).toFixed(3)).toBe('1.000');
-      expect(client.register.mock.calls[0][0].amount).toBe(millimes);
+      expect(firstArg<{ amount: number }>(client.register).amount).toBe(
+        millimes,
+      );
       expect(tx.companyBillingSettings.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
-          select: expect.objectContaining({ stampDuty: true }),
+          select: expect.objectContaining({ stampDuty: true }) as unknown,
         }),
       );
       // What it settles is always the fee due.
       expect(session.settledAmount).toBe(350);
     },
   );
+
+  it('refuses the retenue on a treatment fee below the threshold (400), before any charge', async () => {
+    const tx = runAttemptAgainst({});
+    tx.companyBillingSettings.findFirst.mockResolvedValue({
+      ...FEE_SETTINGS,
+      // The fee due is 300 + 50 CBCT = 350.
+      withholdingThreshold: new Prisma.Decimal('1000'),
+    });
+    tx.payment.findFirst.mockResolvedValue(null);
+    tx.payment.count.mockResolvedValue(0);
+
+    await expect(
+      service.createSession(
+        {
+          orderId: 'order-1',
+          purpose: PaymentPurpose.treatment_fee,
+          applyWithholding: true,
+        },
+        admin,
+        'fee-key',
+      ),
+    ).rejects.toMatchObject({
+      statusCode: 400,
+      errorCode: 'WITHHOLDING_BELOW_THRESHOLD',
+    });
+    expect(tx.payment.create).not.toHaveBeenCalled();
+    expect(client.register).not.toHaveBeenCalled();
+  });
+
+  it('never hands back a live fee session carrying a retenue that no longer applies (409 PAYMENT_CHARGE_CHANGED)', async () => {
+    const live = payment({
+      purpose: PaymentPurpose.treatment_fee,
+      installmentId: null,
+      quotationId: null,
+      expiresAt: minutes(5),
+      amount: new Prisma.Decimal('347.500'),
+      withholdingRate: new Prisma.Decimal('1'),
+      withholdingAmount: new Prisma.Decimal('3.500'),
+      stampAmount: new Prisma.Decimal('1.000'),
+    });
+    prisma.payment.findUnique.mockResolvedValue(null);
+    prisma.payment.findFirst.mockResolvedValue(live);
+    prisma.dentalOrder.findUnique.mockResolvedValue({
+      cbctFeeAmount: new Prisma.Decimal('50.000'),
+    });
+    // The retenue was switched off after the attempt was opened.
+    prisma.companyBillingSettings.findFirst.mockResolvedValue({
+      ...FEE_SETTINGS,
+      withholdingEnabled: false,
+    });
+
+    await expect(
+      service.createSession(
+        {
+          orderId: 'order-1',
+          purpose: PaymentPurpose.treatment_fee,
+          applyWithholding: true,
+        },
+        admin,
+        'fee-key',
+      ),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      errorCode: 'PAYMENT_CHARGE_CHANGED',
+    });
+    expect(client.register).not.toHaveBeenCalled();
+  });
 
   it('never hands back a live fee session opened before the stamp was added (409 PAYMENT_CHARGE_CHANGED)', async () => {
     const live = payment({
@@ -1047,7 +1419,11 @@ describe('ClicToPayPaymentsService', () => {
 
     await expect(
       service.createSession(
-        { orderId: 'order-1', purpose: PaymentPurpose.treatment_fee, applyWithholding: true },
+        {
+          orderId: 'order-1',
+          purpose: PaymentPurpose.treatment_fee,
+          applyWithholding: true,
+        },
         admin,
         'fee-key',
       ),
@@ -1083,7 +1459,11 @@ describe('ClicToPayPaymentsService', () => {
 
     await expect(
       service.createSession(
-        { orderId: 'order-1', purpose: PaymentPurpose.treatment_fee, applyWithholding: true },
+        {
+          orderId: 'order-1',
+          purpose: PaymentPurpose.treatment_fee,
+          applyWithholding: true,
+        },
         admin,
         'fee-key',
       ),

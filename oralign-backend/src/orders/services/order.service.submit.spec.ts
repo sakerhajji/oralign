@@ -38,6 +38,8 @@ function makeService(gifted: boolean) {
   const updated = { ...draft, status: OrderStatus.submitted, tag: 'updated' };
   const reread = { ...updated, tag: 'reread' };
   const tx = {
+    // The doctor's row, locked by the dormant-account check: not dormant.
+    $queryRaw: jest.fn().mockResolvedValue([{ inactiveSince: null }]),
     dentalOrder: {
       update: jest.fn().mockResolvedValue(updated),
       findUniqueOrThrow: jest.fn().mockResolvedValue(reread),

@@ -1,11 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { CompanyBillingSettings, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import type { Caller } from '../../common/access/caller';
+import { dec, round3, toAmount } from '../../common/billing/tax-split';
 import {
   BadRequestException,
   NotFoundException,
 } from '../../common/exceptions/app.exception';
 import {
+  BillingSettingsHistoryPageDto,
   CompanyBillingSettingsResponseDto,
   UpsertCompanyBillingSettingsDto,
 } from '../dto/company-billing-settings.dto';
@@ -13,6 +16,34 @@ import {
   formatDateStamp,
   slugifyForCode,
 } from '../../common/utils/code-naming.util';
+import {
+  diffBillingSettings,
+  toBillingSettingsAuditEntryJson,
+  writeBillingSettingsAudit,
+} from './billing-settings-audit';
+
+/** Defaults of the retenue and inactivity rules (schema defaults, spec §4-§5). */
+const DEFAULT_WITHHOLDING_THRESHOLD = 1000;
+const DEFAULT_INACTIVITY_MONTHS = 6;
+
+/** Page size of the settings history (the admin form shows the latest). */
+export const BILLING_SETTINGS_HISTORY_DEFAULT_LIMIT = 20;
+export const BILLING_SETTINGS_HISTORY_MAX_LIMIT = 100;
+
+/**
+ * The retenue cannot be switched on without a rate: a 0 % rule would show
+ * "activée" while no payment can ever apply it.
+ */
+function assertCoherentWithholding(row: {
+  withholdingEnabled: boolean;
+  withholdingRate: Prisma.Decimal | number;
+}): void {
+  if (row.withholdingEnabled && !dec(row.withholdingRate).gt(0)) {
+    throw new BadRequestException(
+      'Saisissez un taux de retenue à la source supérieur à 0 avant de l’activer.',
+    );
+  }
+}
 
 /**
  * Registered legal identity of the merchant — Aura Aligners SARL — taken
@@ -114,7 +145,9 @@ export class CompanyBillingSettingsService {
     // before any real company name is saved) as unset so the registered
     // raison sociale shows through.
     const storedName =
-      s?.companyName && s.companyName.trim() && s.companyName.trim() !== 'Oralign'
+      s?.companyName &&
+      s.companyName.trim() &&
+      s.companyName.trim() !== 'Oralign'
         ? s.companyName
         : null;
     return {
@@ -123,7 +156,8 @@ export class CompanyBillingSettingsService {
       legalForm: s?.legalForm ?? d.legalForm,
       // No admin-editable column for capital yet — always the registered value.
       capitalSocial: d.capitalSocial,
-      taxRegistrationNumber: s?.taxRegistrationNumber ?? d.taxRegistrationNumber,
+      taxRegistrationNumber:
+        s?.taxRegistrationNumber ?? d.taxRegistrationNumber,
       registreDeCommerce: s?.registreDeCommerce ?? d.registreDeCommerce,
       address: s?.companyAddress ?? d.address,
       city: s?.companyCity ?? d.city,
@@ -155,11 +189,42 @@ export class CompanyBillingSettingsService {
   /**
    * Upsert the active row. The first save also satisfies the
    * companyName-required guard. Subsequent saves are pure updates.
+   *
+   * One transaction: the active row is locked (FOR UPDATE), updated, and
+   * every fiscal / rollout field that moved gets its BillingSettingsAuditLog
+   * row (billing-settings-audit.ts), so two admins saving at once never
+   * write a trail whose "before" is not what the other one left. The
+   * first save also records the initial values (before = null).
+   * `actor` is the admin saving (null only for a system write).
    */
   async upsert(
     dto: UpsertCompanyBillingSettingsDto,
+    actor: Pick<Caller, 'userId'> | null = null,
   ): Promise<CompanyBillingSettings> {
-    const current = await this.getActive();
+    return this.prisma.$transaction((tx) => this.upsertWithin(tx, dto, actor));
+  }
+
+  /** The active row, locked for the rest of the transaction; null when none. */
+  private async lockActive(
+    tx: Prisma.TransactionClient,
+  ): Promise<CompanyBillingSettings | null> {
+    const head = await tx.companyBillingSettings.findFirst({
+      where: { isActive: true },
+      orderBy: { updatedAt: 'desc' },
+      select: { id: true },
+    });
+    if (!head) return null;
+    await tx.$queryRaw`SELECT id FROM "CompanyBillingSettings" WHERE id = ${head.id} FOR UPDATE`;
+    // Re-read under the lock: what another save committed meanwhile.
+    return tx.companyBillingSettings.findUnique({ where: { id: head.id } });
+  }
+
+  private async upsertWithin(
+    tx: Prisma.TransactionClient,
+    dto: UpsertCompanyBillingSettingsDto,
+    actor: Pick<Caller, 'userId'> | null,
+  ): Promise<CompanyBillingSettings> {
+    const current = await this.lockActive(tx);
 
     if (!current) {
       if (!dto.companyName || !dto.companyName.trim()) {
@@ -167,7 +232,11 @@ export class CompanyBillingSettingsService {
           'Company name is required when creating billing settings for the first time.',
         );
       }
-      return this.prisma.companyBillingSettings.create({
+      assertCoherentWithholding({
+        withholdingEnabled: dto.withholdingEnabled ?? false,
+        withholdingRate: dto.withholdingRate ?? 1,
+      });
+      const created = await tx.companyBillingSettings.create({
         data: {
           companyName: dto.companyName.trim(),
           companyAddress: dto.companyAddress ?? null,
@@ -186,6 +255,15 @@ export class CompanyBillingSettingsService {
           defaultTreatmentFee: dto.defaultTreatmentFee ?? 0,
           stampDuty: dto.stampDuty ?? 1,
           withholdingRate: dto.withholdingRate ?? 1,
+          // Off until the accountant validates the rule (DECISIONS §4).
+          withholdingEnabled: dto.withholdingEnabled ?? false,
+          withholdingThreshold: round3(
+            dto.withholdingThreshold ?? DEFAULT_WITHHOLDING_THRESHOLD,
+          ),
+          inactivityRuleEnabled: dto.inactivityRuleEnabled ?? false,
+          inactivityRuleEnabledAt:
+            dto.inactivityRuleEnabled === true ? new Date() : null,
+          inactivityMonths: dto.inactivityMonths ?? DEFAULT_INACTIVITY_MONTHS,
           cbctSupplementEnabled: dto.cbctSupplementEnabled ?? false,
           cbctSupplementFee: dto.cbctSupplementFee ?? 0,
           refinementTwoArchesFee: dto.refinementTwoArchesFee ?? 0,
@@ -208,6 +286,12 @@ export class CompanyBillingSettingsService {
           isActive: dto.isActive ?? true,
         },
       });
+      await writeBillingSettingsAudit(
+        tx,
+        actor,
+        diffBillingSettings(null, created),
+      );
+      return created;
     }
 
     // The company name is required (PDF headers): it can be changed, never
@@ -215,6 +299,10 @@ export class CompanyBillingSettingsService {
     if (dto.companyName !== undefined && !dto.companyName.trim()) {
       throw new BadRequestException('Company name cannot be empty.');
     }
+    assertCoherentWithholding({
+      withholdingEnabled: dto.withholdingEnabled ?? current.withholdingEnabled,
+      withholdingRate: dto.withholdingRate ?? current.withholdingRate,
+    });
 
     // Update path — preserve fields the form didn't touch. Optional text
     // fields can also be CLEARED: the DTO turns "" into null, so
@@ -222,7 +310,7 @@ export class CompanyBillingSettingsService {
     // switches keep `??` (absent = unchanged).
     const clearable = <T>(next: T | null | undefined, stored: T | null) =>
       next === undefined ? stored : next;
-    return this.prisma.companyBillingSettings.update({
+    const updated = await tx.companyBillingSettings.update({
       where: { id: current.id },
       data: {
         companyName: dto.companyName ?? current.companyName,
@@ -255,10 +343,24 @@ export class CompanyBillingSettingsService {
           dto.defaultTreatmentFee ?? current.defaultTreatmentFee,
         stampDuty: dto.stampDuty ?? current.stampDuty,
         withholdingRate: dto.withholdingRate ?? current.withholdingRate,
+        withholdingEnabled:
+          dto.withholdingEnabled ?? current.withholdingEnabled,
+        withholdingThreshold:
+          dto.withholdingThreshold !== undefined
+            ? round3(dto.withholdingThreshold)
+            : current.withholdingThreshold,
+        inactivityRuleEnabled:
+          dto.inactivityRuleEnabled ?? current.inactivityRuleEnabled,
+        // Off → on opens a fresh warning cycle for every doctor
+        // (doctor-activity.rules.ts cycleKeyOf): a warning sent before
+        // the switch-off never counts again. Any other save keeps it.
+        ...(dto.inactivityRuleEnabled === true && !current.inactivityRuleEnabled
+          ? { inactivityRuleEnabledAt: new Date() }
+          : {}),
+        inactivityMonths: dto.inactivityMonths ?? current.inactivityMonths,
         cbctSupplementEnabled:
           dto.cbctSupplementEnabled ?? current.cbctSupplementEnabled,
-        cbctSupplementFee:
-          dto.cbctSupplementFee ?? current.cbctSupplementFee,
+        cbctSupplementFee: dto.cbctSupplementFee ?? current.cbctSupplementFee,
         refinementTwoArchesFee:
           dto.refinementTwoArchesFee ?? current.refinementTwoArchesFee,
         refinementSingleArchFee:
@@ -287,6 +389,51 @@ export class CompanyBillingSettingsService {
         isActive: dto.isActive ?? current.isActive,
       },
     });
+    await writeBillingSettingsAudit(
+      tx,
+      actor,
+      diffBillingSettings(current, updated),
+    );
+    return updated;
+  }
+
+  /**
+   * The trail of the fiscal and rollout settings, newest first: one row
+   * per field that moved (see billing-settings-audit.ts). Paginated; the
+   * createdAt index serves the sort.
+   */
+  async listHistory(
+    page = 1,
+    limit = BILLING_SETTINGS_HISTORY_DEFAULT_LIMIT,
+  ): Promise<BillingSettingsHistoryPageDto> {
+    const safeLimit = Math.min(
+      Math.max(1, Math.floor(limit)),
+      BILLING_SETTINGS_HISTORY_MAX_LIMIT,
+    );
+    const safePage = Math.max(1, Math.floor(page));
+    const [rows, total] = await Promise.all([
+      this.prisma.billingSettingsAuditLog.findMany({
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip: (safePage - 1) * safeLimit,
+        take: safeLimit,
+        select: {
+          id: true,
+          field: true,
+          before: true,
+          after: true,
+          actorName: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.billingSettingsAuditLog.count(),
+    ]);
+    return {
+      data: rows.map(toBillingSettingsAuditEntryJson),
+      total,
+      page: safePage,
+      limit: safeLimit,
+      totalPages: Math.ceil(total / safeLimit),
+    };
   }
 
   /**
@@ -432,7 +579,10 @@ export class CompanyBillingSettingsService {
     const bumped = await this.prisma.companyBillingSettings.update({
       where: { id: settings.id },
       data: { treatmentFeeInvoiceNextNumber: { increment: 1 } },
-      select: { treatmentFeeInvoicePrefix: true, treatmentFeeInvoiceNextNumber: true },
+      select: {
+        treatmentFeeInvoicePrefix: true,
+        treatmentFeeInvoiceNextNumber: true,
+      },
     });
     const next = bumped.treatmentFeeInvoiceNextNumber - 1;
     return `${bumped.treatmentFeeInvoicePrefix || 'TF'}-${String(next).padStart(6, '0')}`;
@@ -477,6 +627,11 @@ export class CompanyBillingSettingsService {
       // is pure Number arithmetic.
       stampDuty: Number(settings.stampDuty),
       withholdingRate: Number(settings.withholdingRate),
+      withholdingEnabled: settings.withholdingEnabled,
+      // Decimal(12,3) → a 3-decimal number at the API boundary.
+      withholdingThreshold: toAmount(settings.withholdingThreshold),
+      inactivityRuleEnabled: settings.inactivityRuleEnabled,
+      inactivityMonths: settings.inactivityMonths,
       cbctSupplementEnabled: settings.cbctSupplementEnabled,
       // Decimal → Number at the API boundary, same as defaultTreatmentFee.
       cbctSupplementFee: Number(settings.cbctSupplementFee),

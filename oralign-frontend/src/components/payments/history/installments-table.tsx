@@ -2,9 +2,8 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { TreatmentFeeReceiptDialog } from '@/components/orders/treatment-fee-receipt-dialog';
 import { InvoiceNumberEditor } from '@/components/payments/invoice-number-editor';
-import { PaymentStatusBadge } from '@/components/payments/payment-status-badge';
+import { ReceiptSummary, ReceiptViewerDialog } from '@/components/payments/receipt-viewer';
 import {
   AmountWithWithholding,
   recordedSplit,
@@ -20,6 +19,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { useT } from '@/lib/i18n/lang-context';
+import { transferStateOf } from '@/lib/payments/transfer-state';
 import { PaymentRecordStatus, type PaymentListItem } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { formatPrice } from '@/lib/utils/currency';
@@ -32,8 +32,11 @@ import {
   PHONE_LIST,
   PhoneRow,
   TABLE_FRAME,
+  TransferStatusCell,
   dateTimeLine,
   orderHref,
+  refusalPart,
+  transferStatusBadge,
   useMethodLabel,
   withReturnTo,
   type PhoneRowAction,
@@ -48,8 +51,9 @@ const COLS = {
   dentist: 'hidden w-36 2xl:table-cell',
   installment: 'hidden w-20 2xl:table-cell',
   method: 'w-32',
-  // "Vérification requise" / "Verification required" on one line.
-  status: 'w-40',
+  // « En cours de vérification » / "Verification required" on one line,
+  // a refusal's reason under it.
+  status: 'w-48',
   amount: 'w-32 text-right',
   // Room for the admin's inline number editor.
   receiptAdmin: 'w-48 pr-4 text-right',
@@ -81,6 +85,12 @@ const splitOf = (row: PaymentListItem) =>
   );
 
 /**
+ * Whether a transfer receipt is attached: `hasProof` (every reader, P-A),
+ * else the stored path the owner and admins still receive.
+ */
+const hasProof = (row: PaymentListItem) => row.hasProof ?? !!row.proofUrl;
+
+/**
  * The installments tab: quote installment payments, one row per attempt,
  * dated by `eventDate`. Only a paid row has a receipt, and only there can
  * an admin renumber it.
@@ -106,13 +116,13 @@ export function InstallmentsTable({
   const [proofRow, setProofRow] = useState<PaymentListItem | null>(null);
 
   const viewProof = (row: PaymentListItem) =>
-    row.proofUrl ? () => setProofRow(row) : undefined;
+    hasProof(row) ? () => setProofRow(row) : undefined;
 
   const phoneAction = (row: PaymentListItem): PhoneRowAction => {
     if (row.status === PaymentRecordStatus.SUCCESS) {
       return { kind: 'receipt', href: withReturnTo(receiptPath(row), returnTo) };
     }
-    if (row.proofUrl) return { kind: 'proof', onOpen: () => setProofRow(row) };
+    if (hasProof(row)) return { kind: 'proof', onOpen: () => setProofRow(row) };
     return { kind: 'order', href: orderHref(row.orderId, returnTo, 'quote') };
   };
 
@@ -194,7 +204,13 @@ export function InstallmentsTable({
                     <MethodCell method={row.paymentMethod} onViewProof={viewProof(row)} />
                   </TableCell>
                   <TableCell className={cn('py-2.5', COLS.status)}>
-                    <PaymentStatusBadge status={row.status} />
+                    <TransferStatusCell
+                      status={row.status}
+                      method={row.paymentMethod}
+                      reviewOpenedAt={row.reviewOpenedAt}
+                      rejectionReason={row.rejectionReason}
+                      audience={isAdmin ? 'admin' : 'doctor'}
+                    />
                   </TableCell>
                   <TableCell className={cn('py-2.5 font-medium tabular-nums', COLS.amount)}>
                     <AmountWithWithholding
@@ -232,6 +248,8 @@ export function InstallmentsTable({
           // When, who paid (admins), how, then which order and installment;
           // with a stamp or a retenue, the installment, stamp and retenue last.
           const meta = [
+            // A refusal says why first: it is what the doctor acts on.
+            refusalPart(row.status, row.rejectionReason, t),
             dateTimeLine(eventDate(row), lang, today),
             isAdmin ? row.order?.doctor?.fullName : null,
             methodLabel(row.paymentMethod),
@@ -248,7 +266,12 @@ export function InstallmentsTable({
               <PhoneRow
                 title={row.order?.patient?.fullName ?? row.order?.orderCode ?? '—'}
                 amount={formatPrice(row.amount, row.currency)}
-                status={<PaymentStatusBadge status={row.status} />}
+                status={transferStatusBadge(
+                  row.status,
+                  row.paymentMethod,
+                  row.reviewOpenedAt,
+                  isAdmin ? 'admin' : 'doctor',
+                )}
                 meta={meta}
                 action={phoneAction(row)}
               />
@@ -258,32 +281,51 @@ export function InstallmentsTable({
       </ul>
 
       {proofRow && (
-        <TreatmentFeeReceiptDialog
+        <ReceiptViewerDialog
           open
           onOpenChange={(open) => {
             if (!open) setProofRow(null);
           }}
-          orderId={proofRow.orderId}
-          orderCode={proofRow.order?.orderCode ?? '—'}
-          proofPath={proofRow.proofUrl ?? null}
-          amount={Number(proofRow.amount)}
-          withholdingAmount={proofRow.withholdingAmount}
-          withholdingRate={proofRow.withholdingRate}
-          stampAmount={proofRow.stampAmount}
-          settledAmount={proofRow.settledAmount}
-          currency={proofRow.currency}
-          doctorName={proofRow.order?.doctor?.fullName ?? null}
-          patientName={proofRow.order?.patient?.fullName ?? null}
-          method={proofRow.paymentMethod}
-          submittedAt={proofRow.declaredAt ?? proofRow.createdAt}
-          status={proofRow.status}
-          // An installment transfer is confirmed from the confirmation
-          // queue, with its notes; this viewer shows the proof and, to an
-          // admin, the way there.
-          canConfirm={false}
+          source={{ kind: 'installment', paymentId: proofRow.id }}
+          version={proofRow.declaredAt ?? proofRow.createdAt}
+          description={
+            proofRow.installment?.installmentNumber !== undefined
+              ? t('transfers.viewer.descInstallment', {
+                  n: proofRow.installment.installmentNumber,
+                  code: proofRow.order?.orderCode ?? '—',
+                })
+              : t('transfers.viewer.descInstallmentPlain', {
+                  code: proofRow.order?.orderCode ?? '—',
+                })
+          }
+          fileBaseName={[
+            proofRow.order?.orderCode ?? proofRow.orderId,
+            proofRow.installment?.installmentNumber,
+          ]
+            .filter((part) => part !== undefined && part !== null)
+            .join('-')}
+          details={
+            <ReceiptSummary
+              state={transferStateOf({
+                status: proofRow.status,
+                reviewOpenedAt: proofRow.reviewOpenedAt,
+              })}
+              status={proofRow.status}
+              audience={isAdmin ? 'admin' : 'doctor'}
+              cash={proofRow.amount}
+              split={splitOf(proofRow)}
+              currency={proofRow.currency}
+              sentAt={proofRow.declaredAt ?? proofRow.createdAt}
+              rejectionReason={proofRow.rejectionReason}
+              patientName={proofRow.order?.patient?.fullName ?? null}
+            />
+          }
+          // An installment transfer is confirmed or refused in the pending
+          // desk, where the lab's review is recorded; this viewer shows the
+          // receipt and, to an admin, the way there.
           footerAction={
             isAdmin && proofRow.status === PaymentRecordStatus.AWAITING_CONFIRMATION ? (
-              <Button asChild variant="outline">
+              <Button asChild variant="outline" className="h-11 sm:h-9 pointer-coarse:h-12">
                 <Link href={PENDING_QUEUE}>{t('paymentsDesk.list.confirmInQueue')}</Link>
               </Button>
             ) : undefined

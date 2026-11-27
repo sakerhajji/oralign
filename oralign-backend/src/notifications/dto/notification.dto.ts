@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { IsBoolean, IsInt, IsOptional, Max, Min } from 'class-validator';
+import { rawBoolean } from '../../common/dto/query-transforms';
 
 /**
  * Query params accepted by `GET /notifications`. Matches the
@@ -25,9 +26,12 @@ export class NotificationFilterDto {
   @Max(50)
   limit?: number;
 
-  @ApiPropertyOptional({ default: false })
+  // Read from the RAW query value: with the global pipe's implicit
+  // conversion, `?unreadOnly=false` used to arrive as Boolean('false'),
+  // i.e. true, and listed the unread rows only.
+  @ApiPropertyOptional({ default: false, type: Boolean })
   @IsOptional()
-  @Type(() => Boolean)
+  @Transform(rawBoolean)
   @IsBoolean()
   unreadOnly?: boolean;
 }
@@ -35,4 +39,14 @@ export class NotificationFilterDto {
 export class UnreadCountResponseDto {
   @ApiProperty({ example: 3 })
   count!: number;
+}
+
+/** POST notifications/subject/:subjectKey/read answer. */
+export class SubjectReadResponseDto {
+  @ApiProperty({
+    example: 1,
+    description:
+      "The caller's rows of the subject that turned read (0 on a repeat).",
+  })
+  updated!: number;
 }

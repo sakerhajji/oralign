@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ChevronLeft, ChevronRight, Loader2, Save, Send, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Loader2, Moon, Save, Send, X } from 'lucide-react';
 import {
   WizardFooter,
   WizardPanel,
@@ -11,6 +12,7 @@ import {
 } from '@/components/orders/wizard';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { useCanOrder } from '@/lib/hooks/use-can-order';
 import { useOrder, useOrderFiles } from '@/lib/hooks/use-orders';
 import { useSubmitSupplementalOrder } from '@/lib/hooks/use-supplemental-orders';
 import { useT } from '@/lib/i18n/lang-context';
@@ -41,6 +43,7 @@ const NO_ERRORS: FieldErrors = {};
 const NO_FILES: OrderFile[] = [];
 const WIZARD_TOP_ID = 'supplemental-wizard-top';
 const CONFIRM_ID = 'supplemental-confirm';
+const DORMANT_NOTICE_ID = 'supplemental-dormant-notice';
 
 /** Runs after React has committed the state set in the same handler. */
 function afterRender(callback: () => void): void {
@@ -77,6 +80,12 @@ export function SupplementalWizardForm({
   const files = useOrderFiles(view.order.id).data ?? NO_FILES;
   const parentOrder = useOrder(view.parentOrder.id).data;
   const submit = useSubmitSupplementalOrder();
+  // Doctor inactivity (spec §5): a dormant dentist keeps editing and
+  // saving the draft, but submitting waits for the reactivation (403
+  // ACCOUNT_DORMANT otherwise). An admin acting for him gets the
+  // server's (translated) refusal: the view does not carry his status.
+  const { canOrder } = useCanOrder();
+  const submitClosed = !canOrder;
 
   const caseOpenedOn = parentOrder ? businessDayOf(new Date(parentOrder.createdAt)) : null;
   const validation: ValidationContext = {
@@ -123,7 +132,7 @@ export function SupplementalWizardForm({
   };
 
   const handleSubmit = async () => {
-    if (submitting) return;
+    if (submitting || submitClosed) return;
     const invalid = firstInvalidStep(stepKeys, answers, validation);
     if (invalid) {
       showErrors(invalid.index, invalid.errors, stepKeys);
@@ -204,6 +213,27 @@ export function SupplementalWizardForm({
         onRetry={() => void flush()}
       />
 
+      {submitClosed && view.permissions.canSubmit && (
+        <div
+          id={DORMANT_NOTICE_ID}
+          role="status"
+          className="flex flex-col gap-3 rounded-md border border-slate-300 bg-slate-50 p-3 text-sm sm:flex-row sm:items-start sm:justify-between dark:border-slate-700 dark:bg-slate-900/50"
+        >
+          <p className="flex min-w-0 items-start gap-2.5 text-slate-800 dark:text-slate-200">
+            <Moon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+            <span>{t('accountActivity.supplemental.submitBlocked')}</span>
+          </p>
+          <Button
+            asChild
+            variant="outline"
+            size="sm"
+            className="shrink-0 self-start bg-background pointer-coarse:h-12"
+          >
+            <Link href="/dashboard/support">{t('accountActivity.banner.contact')}</Link>
+          </Button>
+        </div>
+      )}
+
       <WizardFooter>
         <div className="flex flex-col gap-2 sm:flex-row">
           <Button
@@ -244,7 +274,8 @@ export function SupplementalWizardForm({
               <Button
                 type="button"
                 className="h-11"
-                disabled={!confirmed || submitting}
+                disabled={!confirmed || submitting || submitClosed}
+                aria-describedby={submitClosed ? DORMANT_NOTICE_ID : undefined}
                 onClick={() => void handleSubmit()}
               >
                 {submitting ? (

@@ -11,14 +11,18 @@ import {
   Camera,
   ClipboardCheck,
   Edit,
+  Eye,
   FileArchive,
   History,
   ListChecks,
   Loader2,
+  Moon,
   ScanLine,
   ShieldCheck,
   Target,
   Trash2,
+  Undo2,
+  Upload,
   UserRound,
 } from 'lucide-react';
 import { toast } from '@/lib/toast';
@@ -57,14 +61,29 @@ import {
   useOrder,
   useOrderFiles,
   usePatient,
+  useWithdrawTreatmentFeeProof,
 } from '@/lib/hooks';
 import { useQueryClient } from '@tanstack/react-query';
 import { useQuotationForOrder } from '@/lib/hooks/use-quotations';
 import { ordersService } from '@/lib/api/orders.service';
 import { extractApiErrorMessage } from '@/lib/api/error';
-import { TreatmentFeePaymentDialog } from '@/components/orders/treatment-fee-payment-dialog';
+import {
+  TreatmentFeePaymentDialog,
+  type FeeDialogMode,
+  type MethodKey,
+} from '@/components/orders/treatment-fee-payment-dialog';
 import { TreatmentFeeReceiptDialog } from '@/components/orders/treatment-fee-receipt-dialog';
 import { OrderHistory } from '@/components/orders/order-history';
+import { ReceiptSummary, ReceiptViewerDialog } from '@/components/payments/receipt-viewer';
+import { TransferStateBadge } from '@/components/payments/transfer-state-badge';
+import { WithdrawTransferDialog } from '@/components/payments/withdraw-transfer-dialog';
+import { recordedSplit } from '@/components/payments/withholding';
+import {
+  isTransferInFlight,
+  refusalReasonOf,
+  treatmentFeeTransferState,
+} from '@/lib/payments/transfer-state';
+import { formatBusinessDay, formatBusinessTime } from '@/lib/utils/business-day';
 import {
   RequestPhotos,
   requestPhotoSections,
@@ -80,6 +99,7 @@ import { WelcomeGiftDetailCard } from '@/components/welcome-gift/welcome-gift-de
 import { FreeBadge } from '@/components/welcome-gift/welcome-gift-note';
 import { StruckAmount } from '@/components/welcome-gift/struck-price';
 import { useAuth } from '@/lib/providers/auth-provider';
+import { useCanOrder } from '@/lib/hooks/use-can-order';
 import { useT } from '@/lib/i18n/lang-context';
 import {
   Gender,
@@ -182,6 +202,10 @@ export default function OrderDetailPage() {
   const deleteOrder = useDeleteOrder();
   const deleteSupplemental = useDeleteSupplementalOrder();
   const { isAdmin, isDentist, user } = useAuth();
+  // A dormant practitioner (spec §5) keeps his drafts but cannot submit
+  // them; an admin's own account is always open (the wizard checks the
+  // doctor it orders for, the server answers 403 ACCOUNT_DORMANT).
+  const ordering = useCanOrder();
   const { t, lang } = useT();
   const requestedTab = parseOrderDetailTab(searchParams.get('tab'));
   const explicitReturnHref = safeDashboardReturnTo(searchParams.get('returnTo'));
@@ -447,6 +471,8 @@ export default function OrderDetailPage() {
   // longer edit or delete the order — mirrors the backend guard. Admins
   // keep full control.
   const paidLocked = !!order.treatmentFeePaidAt && !isAdmin;
+  // The practitioner's own draft while his account is dormant.
+  const dormantDraft = order.status === OrderStatus.DRAFT && !ordering.canOrder;
   const { canEdit: canEditOrder, canDelete: canDeleteOrder } = headerActions({
     isChild,
     permissions: requestView?.permissions,
@@ -599,6 +625,9 @@ export default function OrderDetailPage() {
               <Link
                 href={buildOrderEditHref(order)}
                 className="h-10 w-full justify-center sm:w-auto"
+                // The draft stays editable; the notice below says why it
+                // cannot be submitted yet.
+                aria-describedby={dormantDraft ? DORMANT_DRAFT_NOTE_ID : undefined}
               >
                 <Edit className="mr-2 h-4 w-4" />
                 {t('common.edit')}
@@ -628,6 +657,8 @@ export default function OrderDetailPage() {
               trash view (admin), never on a live order's page. */}
         </div>
       </header>
+
+      {dormantDraft ? <DormantDraftNotice /> : null}
 
       {/* A case lists its supplemental requests (and offers a new one);
           a child shows its own request in the details tab instead. */}
@@ -1174,6 +1205,39 @@ function needsQuoteAttention(args: {
  * something to look at here". Pulses primary so it pops without being
  * shouty like a destructive red would.
  */
+const DORMANT_DRAFT_NOTE_ID = 'order-dormant-draft-note';
+
+/**
+ * A dormant practitioner's draft (spec §5, doctor inactivity): kept, and
+ * still editable in the wizard, but it cannot be submitted until the
+ * Oralign team reactivates the account (the server answers 403
+ * ACCOUNT_DORMANT; the wizard disables its submit button with the same
+ * words).
+ */
+function DormantDraftNotice() {
+  const { t } = useT();
+  return (
+    <div
+      id={DORMANT_DRAFT_NOTE_ID}
+      role="note"
+      className="flex items-start gap-3 rounded-xl border border-slate-300 bg-slate-50 p-4 text-sm dark:border-slate-700 dark:bg-slate-900/50"
+    >
+      <Moon
+        aria-hidden="true"
+        className="mt-0.5 size-4 shrink-0 text-slate-600 dark:text-slate-300"
+      />
+      <div className="min-w-0 space-y-1">
+        <p className="font-medium text-slate-900 dark:text-slate-100">
+          {t('accountActivity.wizard.blockedTitle')}
+        </p>
+        <p className="max-w-[68ch] leading-6 text-slate-700 dark:text-slate-300">
+          {t('accountActivity.wizard.blockedSelf')}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function AttentionDot() {
   const { t } = useT();
   return (
@@ -1534,15 +1598,16 @@ function OrderDeleteAction({
  *  • If `treatmentFeePaidAt` is set → green "paid" confirmation card.
  *  • If `defaultTreatmentFee` from CompanyBillingSettings is 0 → render
  *    nothing (legacy / fee-free tenants keep the previous flow).
- *  • Otherwise → amber "fee pending" card with an action button.
+ *  • A transfer waiting on the lab (« Reçu envoyé » / « En cours de
+ *    vérification ») → blue card: the doctor views, replaces or withdraws
+ *    the receipt; an admin reviews and confirms it.
+ *  • A refused transfer → red card with the lab's reason (« Motif : … »):
+ *    the doctor sends a new receipt or pays another way.
+ *  • Otherwise → amber "fee pending" card with the pay action.
  *
- * Action affordance:
- *  • Doctor sees "Pay treatment fee" — currently records as paid; a
- *    full doctor-self-pay flow can be wired to the Payments service in
- *    a follow-up. For now the action does the same DB write the admin
- *    would do, so the gate clears either way.
- *  • Admin sees "Mark as paid" — for cash / bank-transfer collection
- *    recorded out-of-band.
+ * The doctor's receipt is read through the authenticated stream
+ * (ReceiptViewerDialog); the order refetches every 30 s while the
+ * transfer waits (useOrder), so the lab's decision shows without a reload.
  */
 function TreatmentFeeGateBanner({
   order,
@@ -1563,11 +1628,22 @@ function TreatmentFeeGateBanner({
   // to TreatmentFeePaymentDialog — the banner is the second consumer
   // of the same setting and needed the same treatment.
   const { data: defaults } = useBillingPublicDefaults();
-  const [payOpen, setPayOpen] = useState(false);
-  // The receipt-viewer modal — opened from the awaiting-confirmation
-  // banner. Replaces the previous "click Confirm and hope" flow with
-  // "view the proof → click Confirm in the same modal".
+  // The pay dialog, remounted per opening (`seq`) so its mode and its
+  // first method seed fresh state: a first payment, a new receipt for a
+  // transfer still waiting (replace), or a payment after a refusal.
+  const [payDialog, setPayDialog] = useState<{
+    mode: FeeDialogMode;
+    method?: MethodKey;
+    seq: number;
+  } | null>(null);
+  const openPay = (mode: FeeDialogMode, method?: MethodKey) =>
+    setPayDialog((current) => ({ mode, method, seq: (current?.seq ?? 0) + 1 }));
+  // The admin's receipt-review modal (view the proof → Confirm in it).
   const [receiptOpen, setReceiptOpen] = useState(false);
+  // The doctor's read-only receipt viewer and the withdraw confirmation.
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const withdraw = useWithdrawTreatmentFeeProof();
   const { t, lang } = useT();
 
   const fee = defaults?.defaultTreatmentFee ?? 0;
@@ -1585,13 +1661,58 @@ function TreatmentFeeGateBanner({
   if (!isSubmitted || fee <= 0) return null;
 
   const isPaid = !!order.treatmentFeePaidAt;
-  // The three intermediate states we care about:
-  //   • awaiting_confirmation → bank-transfer proof uploaded, admin
-  //     hasn't confirmed yet. Show a different banner that lets the
-  //     admin confirm one tap (or surfaces "waiting for admin" to
-  //     the doctor).
-  const awaitingConfirm =
-    !isPaid && order.treatmentFeePaymentStatus === 'awaiting_confirmation';
+  // The derived transfer state (CONTRACT §7): receipt_sent / to_verify
+  // wait on the lab (the doctor may still replace or withdraw), refused
+  // carries the lab's reason, awaiting_receipt is payable.
+  const transferState = treatmentFeeTransferState(order);
+  const hasProof = order.treatmentFeeHasProof ?? !!order.treatmentFeeProofPath;
+  const declaredAt = order.treatmentFeeDeclaredAt ?? null;
+  const amountLabel = formatPrice(order.treatmentFeeAmount ?? fee, currency);
+  const sentLine = declaredAt
+    ? t('transfers.sentOn', {
+        date: `${formatBusinessDay(declaredAt, lang)} · ${formatBusinessTime(declaredAt, lang)}`,
+      })
+    : null;
+  const payDialogElement = payDialog ? (
+    <TreatmentFeePaymentDialog
+      key={payDialog.seq}
+      open
+      onOpenChange={(next) => {
+        if (!next) setPayDialog(null);
+      }}
+      order={order}
+      isAdmin={canActAsAdmin}
+      mode={payDialog.mode}
+      initialMethod={payDialog.method}
+    />
+  ) : null;
+  const viewerElement =
+    hasProof && canActAsDoctor ? (
+      <ReceiptViewerDialog
+        open={viewerOpen}
+        onOpenChange={setViewerOpen}
+        source={{ kind: 'treatment_fee', orderId: order.id }}
+        version={declaredAt}
+        description={t('transfers.viewer.descFee', { code: order.orderCode })}
+        fileBaseName={order.orderCode}
+        details={
+          <ReceiptSummary
+            state={transferState}
+            cash={order.treatmentFeeAmount}
+            split={recordedSplit(
+              order.treatmentFeeAmount,
+              order.treatmentFeeWithholdingAmount,
+              order.treatmentFeeWithholdingRate,
+              order.treatmentFeeStampAmount,
+            )}
+            currency={currency}
+            kind="fee"
+            sentAt={declaredAt}
+            rejectionReason={order.treatmentFeeRejectionReason}
+          />
+        }
+      />
+    ) : null;
 
   if (isPaid) {
     return (
@@ -1615,86 +1736,236 @@ function TreatmentFeeGateBanner({
     );
   }
 
-  if (awaitingConfirm) {
+  // Phone-sized targets (48 px under a finger), compact from sm up.
+  const bannerButton = 'h-11 w-full justify-center sm:h-8 sm:w-auto pointer-coarse:h-12';
+
+  if (isTransferInFlight(transferState)) {
+    const underReview = transferState === 'to_verify';
     return (
       <>
-        <Card className="border-blue-200 bg-blue-50">
-          <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-sm font-semibold text-blue-900">
-                {t('orderDetail.feeBanner.pendingTitle', {
-                  amount: String(order.treatmentFeeAmount ?? fee),
-                  currency,
-                })}
-              </p>
-              <p className="text-xs text-blue-800/80">
+        <Card
+          className={
+            underReview
+              ? 'border-sky-200 bg-sky-50 dark:border-sky-900/60 dark:bg-sky-950/30'
+              : 'border-blue-200 bg-blue-50 dark:border-blue-900/60 dark:bg-blue-950/30'
+          }
+        >
+          <CardContent className="flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0 space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-sm font-semibold text-blue-950 dark:text-blue-100">
+                  {underReview
+                    ? t('transfers.fee.reviewTitle', { amount: amountLabel })
+                    : t('transfers.fee.sentTitle', { amount: amountLabel })}
+                </p>
+                <TransferStateBadge
+                  state={transferState}
+                  audience={canActAsAdmin ? 'admin' : 'doctor'}
+                />
+              </div>
+              <p className="text-xs leading-relaxed text-blue-900/80 dark:text-blue-200/80">
                 {canActAsAdmin
                   ? t('orderDetail.fee.adminPendingHint')
-                  : t('orderDetail.fee.doctorPendingHint')}
+                  : t(
+                      underReview
+                        ? 'transfers.state.hint.to_verify'
+                        : 'transfers.state.hint.receipt_sent',
+                    )}
               </p>
+              {sentLine ? (
+                <p className="text-xs text-blue-900/70 tabular-nums dark:text-blue-200/70">
+                  {sentLine}
+                </p>
+              ) : null}
             </div>
-            {/*
-              Two-button strip — admins get "View receipt & confirm"
-              which opens the proof in a modal with the Confirm action
-              embedded; doctors get a read-only "View receipt" so they
-              can verify what they uploaded.
-             */}
-            <div className="flex flex-wrap items-center gap-2">
-              {order.treatmentFeeProofPath && (
+            {canActAsAdmin ? (
+              // Admins review the proof and confirm it in one modal.
+              <div className="grid gap-2 sm:flex sm:flex-wrap sm:items-center">
+                {hasProof ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className={`${bannerButton} border-blue-300 bg-white text-blue-900 hover:bg-blue-100`}
+                    onClick={() => setReceiptOpen(true)}
+                  >
+                    {t('orderDetail.fee.viewReceipt')}
+                  </Button>
+                ) : null}
                 <Button
                   type="button"
                   size="sm"
-                  variant={canActAsAdmin ? 'outline' : 'default'}
-                  className={
-                    canActAsAdmin
-                      ? 'border-blue-300 bg-white text-blue-900 hover:bg-blue-100'
-                      : 'bg-blue-600 hover:bg-blue-700'
-                  }
-                  onClick={() => setReceiptOpen(true)}
-                >
-                  {t('orderDetail.fee.viewReceipt')}
-                </Button>
-              )}
-              {canActAsAdmin && (
-                <Button
-                  type="button"
-                  size="sm"
-                  className="bg-blue-600 hover:bg-blue-700"
+                  className={`${bannerButton} bg-blue-600 hover:bg-blue-700`}
                   onClick={() => setReceiptOpen(true)}
                 >
                   {t('orderDetail.fee.adminConfirm')}
                 </Button>
-              )}
-            </div>
+              </div>
+            ) : canActAsDoctor ? (
+              // The doctor checks what was sent, replaces it, or withdraws
+              // it, as long as the lab has not decided.
+              <div className="grid gap-2 sm:flex sm:flex-wrap sm:items-center">
+                {hasProof ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className={`${bannerButton} bg-white`}
+                    onClick={() => setViewerOpen(true)}
+                  >
+                    <Eye aria-hidden="true" />
+                    {t('transfers.actions.viewReceipt')}
+                  </Button>
+                ) : null}
+                <Button
+                  type="button"
+                  size="sm"
+                  className={`${bannerButton} bg-blue-600 hover:bg-blue-700`}
+                  onClick={() => openPay('replace', 'bank_transfer')}
+                >
+                  <Upload aria-hidden="true" />
+                  {t('transfers.actions.replaceReceipt')}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className={`${bannerButton} text-blue-950 hover:bg-blue-100 dark:text-blue-100`}
+                  onClick={() => setWithdrawOpen(true)}
+                >
+                  <Undo2 aria-hidden="true" />
+                  {t('transfers.actions.withdrawLong')}
+                </Button>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
-        <TreatmentFeeReceiptDialog
-          open={receiptOpen}
-          onOpenChange={setReceiptOpen}
-          orderId={order.id}
-          orderCode={order.orderCode}
-          proofPath={order.treatmentFeeProofPath ?? null}
-          amount={Number(order.treatmentFeeAmount ?? fee)}
-          withholdingAmount={order.treatmentFeeWithholdingAmount}
-          withholdingRate={order.treatmentFeeWithholdingRate}
-          stampAmount={order.treatmentFeeStampAmount}
-          kind="fee"
-          currency={currency}
-          doctorName={order.doctor?.fullName ?? null}
-          patientName={order.patient?.fullName ?? null}
-          method={order.treatmentFeePaymentMethod ?? null}
-          // The order doesn't carry a dedicated "treatment fee submitted at"
-          // timestamp — but updatedAt is the most recent edit (the receipt
-          // upload is the latest write in awaiting-confirmation state), so
-          // it's the right approximation. Falls back gracefully if missing.
-          submittedAt={order.updatedAt ?? null}
-          canConfirm={canActAsAdmin}
+        {canActAsAdmin ? (
+          <TreatmentFeeReceiptDialog
+            open={receiptOpen}
+            onOpenChange={setReceiptOpen}
+            orderId={order.id}
+            orderCode={order.orderCode}
+            // The receipt is read through GET orders/:id/treatment-fee/proof;
+            // the real declaration instant keys its cache and makes Confirm
+            // refuse (409) a receipt replaced since it was opened.
+            hasProof={hasProof}
+            declaredAt={declaredAt}
+            amount={Number(order.treatmentFeeAmount ?? fee)}
+            withholdingAmount={order.treatmentFeeWithholdingAmount}
+            withholdingRate={order.treatmentFeeWithholdingRate}
+            stampAmount={order.treatmentFeeStampAmount}
+            kind="fee"
+            currency={currency}
+            doctorName={order.doctor?.fullName ?? null}
+            patientName={order.patient?.fullName ?? null}
+            method={order.treatmentFeePaymentMethod ?? null}
+            // The declaration instant (P0 column); updatedAt only on rows
+            // older than it.
+            submittedAt={declaredAt ?? order.updatedAt ?? null}
+            canConfirm={canActAsAdmin}
+          />
+        ) : null}
+        {viewerElement}
+        <WithdrawTransferDialog
+          open={withdrawOpen}
+          onOpenChange={setWithdrawOpen}
+          description={t('transfers.withdrawDialog.descFee')}
+          pending={withdraw.isPending}
+          onConfirm={() =>
+            withdraw.mutate(order.id, { onSettled: () => setWithdrawOpen(false) })
+          }
         />
+        {payDialogElement}
       </>
     );
   }
 
   const canAct = canActAsAdmin || canActAsDoctor;
+
+  if (transferState === 'refused') {
+    const reason = refusalReasonOf(order.treatmentFeeRejectionReason);
+    const rejectedAt = order.treatmentFeeRejectedAt ?? null;
+    return (
+      <>
+        <Card className="border-red-200 bg-red-50 dark:border-red-900/60 dark:bg-red-950/30">
+          <CardContent className="flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0 space-y-1.5" role="status">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-sm font-semibold text-red-950 dark:text-red-100">
+                  {t('transfers.fee.refusedTitle')}
+                </p>
+                <TransferStateBadge state="refused" />
+              </div>
+              <p className="rounded-md border-l-2 border-red-300 bg-white/70 px-3 py-2 text-sm text-red-950 dark:bg-red-950/40 dark:text-red-100">
+                <span className="font-medium">{t('transfers.refused.reasonLabel')} :</span>{' '}
+                {reason ?? t('transfers.refused.noReason')}
+              </p>
+              <p className="text-xs leading-relaxed text-red-900/80 dark:text-red-200/80">
+                {canActAsAdmin
+                  ? t('transfers.fee.adminRefusedHint')
+                  : t('transfers.state.hint.refused')}
+                {rejectedAt
+                  ? ` · ${t('transfers.refused.on', { date: formatBusinessDay(rejectedAt, lang) })}`
+                  : ''}
+              </p>
+            </div>
+            {canAct ? (
+              <div className="grid gap-2 sm:flex sm:flex-wrap sm:items-center">
+                {canActAsDoctor && hasProof ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className={`${bannerButton} text-red-950 hover:bg-red-100 dark:text-red-100`}
+                    onClick={() => setViewerOpen(true)}
+                  >
+                    <Eye aria-hidden="true" />
+                    {t('transfers.actions.viewReceipt')}
+                  </Button>
+                ) : null}
+                {canActAsDoctor ? (
+                  <>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className={`${bannerButton} bg-white`}
+                      onClick={() => openPay('resubmit')}
+                    >
+                      {t('transfers.fee.payOtherwise')}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      className={`${bannerButton} bg-red-700 text-white hover:bg-red-800`}
+                      onClick={() => openPay('resubmit', 'bank_transfer')}
+                    >
+                      <Upload aria-hidden="true" />
+                      {t('transfers.actions.resubmit')}
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className={`${bannerButton} bg-white`}
+                    onClick={() => openPay('resubmit')}
+                  >
+                    {t('transfers.fee.recordPayment')}
+                  </Button>
+                )}
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+        {viewerElement}
+        {payDialogElement}
+      </>
+    );
+  }
+
   return (
     <>
       <Card className="border-amber-300 bg-amber-50">
@@ -1711,20 +1982,15 @@ function TreatmentFeeGateBanner({
             <Button
               type="button"
               size="sm"
-              className="bg-amber-600 hover:bg-amber-700"
-              onClick={() => setPayOpen(true)}
+              className={`${bannerButton} bg-amber-600 hover:bg-amber-700`}
+              onClick={() => openPay('pay')}
             >
               {t('orderDetail.fee.doctorPay')}
             </Button>
           )}
         </CardContent>
       </Card>
-      <TreatmentFeePaymentDialog
-        open={payOpen}
-        onOpenChange={setPayOpen}
-        order={order}
-        isAdmin={canActAsAdmin}
-      />
+      {payDialogElement}
     </>
   );
 }

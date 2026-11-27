@@ -22,16 +22,38 @@ const installments = (
   method: PaymentMethod,
   amount: string,
   count: number,
+  withholding: string | null = '0',
 ) => ({
   paymentMethod: method,
-  _sum: { amount: new Prisma.Decimal(amount) },
+  _sum: {
+    amount: new Prisma.Decimal(amount),
+    withholdingAmount:
+      withholding === null ? null : new Prisma.Decimal(withholding),
+  },
   _count: { _all: count },
 });
 
-const fees = (method: PaymentMethod | null, amount: string, count: number) => ({
+const fees = (
+  method: PaymentMethod | null,
+  amount: string,
+  count: number,
+  withholding: string | null = '0',
+) => ({
   treatmentFeePaymentMethod: method,
-  _sum: { treatmentFeeAmount: new Prisma.Decimal(amount) },
+  _sum: {
+    treatmentFeeAmount: new Prisma.Decimal(amount),
+    treatmentFeeWithholdingAmount:
+      withholding === null ? null : new Prisma.Decimal(withholding),
+  },
   _count: { _all: count },
+});
+
+/** A bucket as the API answers it: net (amount), count, brut, retenue. */
+const bucket = (amount: string, count: number, withholding = '0.000') => ({
+  amount,
+  count,
+  gross: new Prisma.Decimal(amount).plus(withholding).toFixed(3),
+  withholding,
 });
 
 function makeService(
@@ -55,8 +77,13 @@ type GroupByCall = { where: Record<string, unknown> };
 const whereOf = (groupBy: jest.Mock) =>
   (groupBy.mock.calls as GroupByCall[][])[0][0].where;
 
-const zero = { amount: '0.000', count: 0 };
-const zeroMethods = { cash: zero, card: zero, bank_transfer: zero, cheque: zero };
+const zero = bucket('0.000', 0);
+const zeroMethods = {
+  cash: zero,
+  card: zero,
+  bank_transfer: zero,
+  cheque: zero,
+};
 
 describe('PaymentsSummaryService.summarise (takings)', () => {
   describe('queries', () => {
@@ -74,7 +101,7 @@ describe('PaymentsSummaryService.summarise (takings)', () => {
           amount: { gt: 0 },
           order: { deletedAt: null, doctorId: doctor.userId },
         },
-        _sum: { amount: true },
+        _sum: { amount: true, withholdingAmount: true },
         _count: { _all: true },
       });
       expect(orderGroupBy).toHaveBeenCalledTimes(1);
@@ -87,7 +114,7 @@ describe('PaymentsSummaryService.summarise (takings)', () => {
           treatmentFeePaidAt: NOV_6,
           treatmentFeeAmount: { gt: 0 },
         },
-        _sum: { treatmentFeeAmount: true },
+        _sum: { treatmentFeeAmount: true, treatmentFeeWithholdingAmount: true },
         _count: { _all: true },
       });
     });
@@ -204,31 +231,29 @@ describe('PaymentsSummaryService.summarise (takings)', () => {
         to: '2026-11-06',
         timeZone: 'Africa/Tunis',
         currency: 'TND',
-        total: { amount: '4000.750', count: 7 },
+        total: bucket('4000.750', 7),
         methods: {
-          cash: { amount: '1850.000', count: 3 },
-          card: { amount: '1250.500', count: 1 },
-          bank_transfer: { amount: '700.250', count: 2 },
-          cheque: { amount: '200.000', count: 1 },
+          cash: bucket('1850.000', 3),
+          card: bucket('1250.500', 1),
+          bank_transfer: bucket('700.250', 2),
+          cheque: bucket('200.000', 1),
         },
         purposes: {
           installment: {
-            amount: '2950.500',
-            count: 4,
+            ...bucket('2950.500', 4),
             methods: {
-              cash: { amount: '1500.000', count: 2 },
-              card: { amount: '1250.500', count: 1 },
+              cash: bucket('1500.000', 2),
+              card: bucket('1250.500', 1),
               bank_transfer: zero,
-              cheque: { amount: '200.000', count: 1 },
+              cheque: bucket('200.000', 1),
             },
           },
           treatment_fee: {
-            amount: '1050.250',
-            count: 3,
+            ...bucket('1050.250', 3),
             methods: {
-              cash: { amount: '350.000', count: 1 },
+              cash: bucket('350.000', 1),
               card: zero,
-              bank_transfer: { amount: '700.250', count: 2 },
+              bank_transfer: bucket('700.250', 2),
               cheque: zero,
             },
           },
@@ -242,8 +267,35 @@ describe('PaymentsSummaryService.summarise (takings)', () => {
         [fees(PaymentMethod.card, '0.2', 1)],
       );
       const summary = await service.summarise({}, admin);
-      expect(summary.methods.card).toEqual({ amount: '0.300', count: 2 });
-      expect(summary.total).toEqual({ amount: '0.300', count: 2 });
+      expect(summary.methods.card).toEqual(bucket('0.300', 2));
+      expect(summary.total).toEqual(bucket('0.300', 2));
+    });
+
+    it('brut / retenue / net (spec §4): net stays the cash, brut = net + the retenue kept back', async () => {
+      const { service } = makeService(
+        // 1000 + stamp 1, retenue 1 %: the cash is 991, 10 kept back.
+        [installments(PaymentMethod.bank_transfer, '991', 1, '10')],
+        [
+          fees(PaymentMethod.cash, '199', 1, '2'),
+          // A group whose payments kept nothing back sums to null.
+          fees(PaymentMethod.card, '351', 1, null),
+        ],
+      );
+      const summary = await service.summarise({}, admin);
+      expect(summary.purposes.installment.methods.bank_transfer).toEqual(
+        bucket('991.000', 1, '10.000'),
+      );
+      expect(summary.purposes.installment).toMatchObject({
+        amount: '991.000',
+        gross: '1001.000',
+        withholding: '10.000',
+      });
+      expect(summary.purposes.treatment_fee).toMatchObject({
+        amount: '550.000',
+        gross: '552.000',
+        withholding: '2.000',
+      });
+      expect(summary.total).toEqual(bucket('1541.000', 3, '12.000'));
     });
 
     it('nothing received: every bucket present, at "0.000" and 0', async () => {

@@ -18,17 +18,22 @@ import {
   buildScheduleFromHours,
   type DaySchedule,
 } from '@/components/account/working-hours';
+import { RegistrationNumberField } from '@/components/account/registration-number-field';
 import { dentistProfileService, extractApiErrorMessage } from '@/lib/api';
-import { userKeys } from '@/lib/hooks/use-users';
+import type { SetupClinicBody } from '@/lib/api/dentist-profile.service';
 import { workingHoursKeys } from '@/lib/hooks/use-working-hours';
+import { invalidateDoctorIdentityQueries } from '@/lib/hooks/use-dentist-profiles';
 import { type OnboardingClinicFormData } from '@/lib/schemas';
 import { DayOfWeek } from '@/lib/types';
 import { useT } from '@/lib/i18n/lang-context';
-import type {
-  DentistProfile,
-  SetupClinicDto,
-  WorkingHours,
-} from '@/lib/types';
+import type { DentistProfile, WorkingHours } from '@/lib/types';
+import {
+  REGISTRATION_NUMBER_MAX_LENGTH,
+  registrationNumberInput,
+  registrationNumberPayload,
+} from '@/lib/doctor/registration-number';
+import { registrationNumberField } from '@/lib/doctor/registration-number-schema';
+import { optionalTextPayload } from '@/lib/doctor/clinic-payload';
 
 const HHMM = /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/;
 
@@ -59,6 +64,10 @@ const makeOnboardingClinicSchema = (t: Translate) =>
         .refine((v) => v !== 0, t('onboardingPages.clinicForm.vPickLocation')),
       description: z.string().optional(),
       taxId: z.string().max(60, t('onboardingPages.clinicForm.vTaxIdMax')).optional(),
+      // Optional and private (spec §6): never on the directory, not printed.
+      registrationNumber: registrationNumberField(
+        t('doctorIdentity.registrationNumber.tooLong', { max: REGISTRATION_NUMBER_MAX_LENGTH }),
+      ),
       workingHours: z
         .array(
           z.object({
@@ -82,6 +91,9 @@ const makeOnboardingClinicSchema = (t: Translate) =>
         path: ['workingHours'],
       },
     );
+
+/** The onboarding clinic step plus the private registration number. */
+type OnboardingClinicValues = OnboardingClinicFormData & { registrationNumber?: string };
 
 interface Props {
   profile: DentistProfile | null;
@@ -109,7 +121,7 @@ export function OnboardingClinicForm({ profile, workingHours, onSaved }: Props) 
     [t],
   );
 
-  const form = useForm<OnboardingClinicFormData>({
+  const form = useForm<OnboardingClinicValues>({
     resolver: zodResolver(onboardingClinicSchema),
     mode: 'onBlur',
     defaultValues: {
@@ -122,6 +134,7 @@ export function OnboardingClinicForm({ profile, workingHours, onSaved }: Props) 
       longitude: 0,
       description: '',
       taxId: '',
+      registrationNumber: '',
       workingHours: defaultSchedule,
     },
   });
@@ -138,16 +151,19 @@ export function OnboardingClinicForm({ profile, workingHours, onSaved }: Props) 
       longitude: profile?.longitude ?? 0,
       description: profile?.description ?? '',
       taxId: profile?.taxId ?? '',
+      registrationNumber: registrationNumberInput(profile?.registrationNumber),
       workingHours: defaultSchedule,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile, defaultSchedule]);
 
-  const mutation = useMutation<DentistProfile, Error, SetupClinicDto>({
+  const mutation = useMutation<DentistProfile, Error, SetupClinicBody>({
     mutationFn: dentistProfileService.setupClinic,
     onSuccess: () => {
       // The two query trees that drive `clinicComplete` / `scheduleComplete`:
-      void queryClient.invalidateQueries({ queryKey: userKeys.currentUser() });
+      // the current user (one of the doctor-identity roots, refreshed with
+      // every screen that shows the clinic, spec §6) and the hours.
+      void invalidateDoctorIdentityQueries(queryClient);
       void queryClient.invalidateQueries({ queryKey: workingHoursKeys.all });
       toast.success(t('onboardingPages.clinicForm.savedToast'));
       onSaved();
@@ -158,7 +174,7 @@ export function OnboardingClinicForm({ profile, workingHours, onSaved }: Props) 
   });
 
   const onSubmit = form.handleSubmit((values) => {
-    const payload: SetupClinicDto = {
+    const payload: SetupClinicBody = {
       clinicName: values.clinicName.trim(),
       clinicAddress: values.clinicAddress.trim(),
       clinicPhone: values.clinicPhone.trim(),
@@ -166,8 +182,11 @@ export function OnboardingClinicForm({ profile, workingHours, onSaved }: Props) 
       country: values.country.trim(),
       latitude: values.latitude,
       longitude: values.longitude,
-      description: values.description?.trim() || undefined,
-      taxId: values.taxId?.trim() || undefined,
+      // The two optional fields: emptied = null (the server clears it),
+      // blank with nothing stored = left out (lib/doctor/clinic-payload).
+      description: optionalTextPayload(values.description, profile?.description),
+      taxId: optionalTextPayload(values.taxId, profile?.taxId),
+      registrationNumber: registrationNumberPayload(values.registrationNumber),
       workingHours: values.workingHours.map((d) => ({
         dayOfWeek: d.dayOfWeek,
         openTime: d.openTime,
@@ -288,9 +307,13 @@ export function OnboardingClinicForm({ profile, workingHours, onSaved }: Props) 
                 />
               )}
             />
-            {errors.clinicPhone && (
+            {errors.clinicPhone ? (
               <p className="text-sm text-destructive">
                 {errors.clinicPhone.message}
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                {t('doctorIdentity.contact.clinicPhoneHint')}
               </p>
             )}
           </div>
@@ -357,6 +380,12 @@ export function OnboardingClinicForm({ profile, workingHours, onSaved }: Props) 
               </p>
             )}
           </div>
+
+          <RegistrationNumberField
+            className="space-y-1 md:col-span-2"
+            registration={form.register('registrationNumber')}
+            error={errors.registrationNumber?.message}
+          />
 
           <div className="space-y-1 md:col-span-2">
             <label className="text-sm font-medium" htmlFor="description">

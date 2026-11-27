@@ -13,7 +13,7 @@ import {
 import {
   nextStepFromOf,
   toEventView,
-  toOrderSummary,
+  toOrderSummaryWith,
   toReleasedRanges,
 } from './production.mapper';
 import { declareWindowOf, isRestricted } from './production.rules';
@@ -21,11 +21,12 @@ import { EVENT_VIEW_SELECT, SHEET_ORDER_SELECT } from './production.selects';
 
 /**
  * GET production/orders/:orderId, the case sheet: counters, planned
- * totals, the released step ranges (never an amount, an installment or a
- * batch id), the next steps per act, the declare window and the whole
- * history. Two calls (the order with its nested whitelist, 9 statements;
- * its events, 1), run in parallel; access is decided in memory from them,
- * so a refused technician costs nothing more.
+ * totals, the release block and the released step ranges (never an
+ * amount, an installment or a batch id), the next RELEASED steps per act,
+ * the declare window and the whole history. Two calls (the order with its
+ * nested whitelist, 9 statements; its events, 1), run in parallel; access
+ * is decided in memory from them, so a refused technician costs nothing
+ * more. The release reads the same facts a declaration is checked against.
  */
 @Injectable()
 export class ProductionSheetService {
@@ -70,7 +71,7 @@ export class ProductionSheetService {
       caller,
     );
 
-    const summary = toOrderSummary(order);
+    const summary = toOrderSummaryWith(order, facts);
     const canDeclare = this.access.canProduce(
       {
         status: order.status,
@@ -84,8 +85,11 @@ export class ProductionSheetService {
       clinicName: order.doctor.dentistProfile?.clinicName ?? null,
       firstActionAt:
         order.productionProgress?.firstActionAt?.toISOString() ?? null,
-      releasedRanges: toReleasedRanges(facts.quote ? facts.batches : null),
-      nextStepFrom: nextStepFromOf(events, summary.planned),
+      releasedRanges: toReleasedRanges(
+        facts.quote ? facts.batches : null,
+        facts,
+      ),
+      nextStepFrom: nextStepFromOf(events, summary.planned, facts.released),
       canDeclare,
       cannotDeclareReason: canDeclare
         ? null

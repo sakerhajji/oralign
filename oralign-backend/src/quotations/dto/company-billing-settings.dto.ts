@@ -13,6 +13,13 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+import { rawBoolean } from '../../common/dto/query-transforms';
+
+/** Bounds of the doctor inactivity period, in calendar months (spec §5). */
+export const INACTIVITY_MONTHS_MIN = 1;
+export const INACTIVITY_MONTHS_MAX = 24;
+/** Upper bound of a Decimal(12,3) amount. */
+const MAX_DECIMAL_12_3 = 999999999.999;
 
 /**
  * Optional text fields of the settings form: "" (or blanks) means "clear
@@ -245,6 +252,61 @@ export class UpsertCompanyBillingSettingsDto {
   @Max(99.99)
   withholdingRate?: number;
 
+  // Master switch of the retenue (spec §4). Off until the accountant
+  // validates the rule: off, the option is never offered and a payment
+  // asking for it is a 400 WITHHOLDING_DISABLED. Audited.
+  @ApiPropertyOptional({
+    default: false,
+    description:
+      'Master switch of the retenue à la source. Off: never offered, 400 WITHHOLDING_DISABLED when asked for. Switching it on needs a rate above 0. Every change is written to the settings history.',
+  })
+  @IsOptional()
+  // Read raw: implicit conversion would turn the string "false" into true.
+  @Transform(rawBoolean)
+  @IsBoolean()
+  withholdingEnabled?: boolean;
+
+  // Payment base (TTC, stamp excluded) from which the retenue may apply,
+  // « initialement 1 000 DT ». Decimal(12,3) in the DB. Audited.
+  @ApiPropertyOptional({
+    minimum: 0,
+    maximum: MAX_DECIMAL_12_3,
+    default: 1000,
+    description:
+      'Retenue threshold: a payment whose base (installment amount or treatment fee due, TTC, stamp excluded) is below it cannot carry the retenue (400 WITHHOLDING_BELOW_THRESHOLD); at or above it the practitioner may apply it. 0 = every payment. Up to 3 decimals.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 3, allowNaN: false, allowInfinity: false })
+  @Min(0)
+  @Max(MAX_DECIMAL_12_3)
+  withholdingThreshold?: number;
+
+  // ── Doctor inactivity rule (spec §5) ────────────────────────────
+  @ApiPropertyOptional({
+    default: false,
+    description:
+      'Rollout switch of the daily inactivity sweep (warnings at 30 and 7 days, then deactivation of new orders). Audited.',
+  })
+  @IsOptional()
+  @Transform(rawBoolean)
+  @IsBoolean()
+  inactivityRuleEnabled?: boolean;
+
+  @ApiPropertyOptional({
+    minimum: INACTIVITY_MONTHS_MIN,
+    maximum: INACTIVITY_MONTHS_MAX,
+    default: 6,
+    description:
+      'Calendar months without a submitted order before a practitioner is deactivated. Audited.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(INACTIVITY_MONTHS_MIN)
+  @Max(INACTIVITY_MONTHS_MAX)
+  inactivityMonths?: number;
+
   // CBCT paid supplement — when enabled with a fee > 0, requesting
   // CBCT on a new order adds this supplement to the professional fee.
   // The amount is snapshotted onto the order at request time, so
@@ -421,13 +483,25 @@ export class CompanyBillingSettingsResponseDto {
   @ApiProperty() defaultTvaRate!: number;
   @ApiProperty() defaultTreatmentFee!: number;
   @ApiProperty({
-    description: 'Droit de timbre added on top of every payment (one facture per payment).',
+    description:
+      'Droit de timbre added on top of every payment (one facture per payment).',
   })
   stampDuty!: number;
   @ApiProperty({
-    description: 'Retenue a la source (%), on the TTC due without the stamp. 0 = off.',
+    description: 'Retenue a la source (%), on the TTC due without the stamp.',
   })
   withholdingRate!: number;
+  @ApiProperty({ description: 'Master switch of the retenue (spec §4).' })
+  withholdingEnabled!: boolean;
+  @ApiProperty({
+    description:
+      'Retenue threshold (TTC, stamp excluded), 3 decimals: payments below it cannot carry the retenue.',
+  })
+  withholdingThreshold!: number;
+  @ApiProperty({ description: 'Doctor inactivity rule switch (spec §5).' })
+  inactivityRuleEnabled!: boolean;
+  @ApiProperty({ description: 'Inactivity period in calendar months.' })
+  inactivityMonths!: number;
   @ApiProperty() cbctSupplementEnabled!: boolean;
   @ApiProperty() cbctSupplementFee!: number;
   @ApiProperty() refinementTwoArchesFee!: number;
@@ -456,6 +530,68 @@ export class CompanyBillingSettingsResponseDto {
   @ApiProperty() isActive!: boolean;
   @ApiProperty() createdAt!: Date;
   @ApiProperty() updatedAt!: Date;
+}
+
+/** GET admin/company-billing-settings/history: page + limit. */
+export class BillingSettingsHistoryQueryDto {
+  @ApiPropertyOptional({ default: 1, minimum: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @ApiPropertyOptional({ default: 20, minimum: 1, maximum: 100 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number;
+}
+
+/**
+ * One change of a fiscal or rollout setting. `before` / `after` are JSON
+ * scalars: booleans for switches, an integer for the inactivity period,
+ * decimal strings for rates and amounts ("1000.000", "1.00"); `before` is
+ * null for the initial value.
+ */
+export class BillingSettingsAuditEntryDto {
+  @ApiProperty() id!: string;
+  @ApiProperty({
+    enum: [
+      'withholdingEnabled',
+      'withholdingRate',
+      'withholdingThreshold',
+      'stampDuty',
+      'defaultTvaRate',
+      'inactivityRuleEnabled',
+      'inactivityMonths',
+    ],
+  })
+  field!: string;
+  @ApiPropertyOptional({ nullable: true }) before!:
+    | string
+    | number
+    | boolean
+    | null;
+  @ApiPropertyOptional({ nullable: true }) after!:
+    | string
+    | number
+    | boolean
+    | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  actorName!: string | null;
+  @ApiProperty() createdAt!: Date;
+}
+
+export class BillingSettingsHistoryPageDto {
+  @ApiProperty({ type: [BillingSettingsAuditEntryDto] })
+  data!: BillingSettingsAuditEntryDto[];
+  @ApiProperty() total!: number;
+  @ApiProperty() page!: number;
+  @ApiProperty() limit!: number;
+  @ApiProperty() totalPages!: number;
 }
 
 /**

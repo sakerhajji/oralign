@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  keepPreviousData,
   useMutation,
   useQuery,
   useQueryClient,
@@ -13,8 +14,12 @@ import {
   type BillingPublicDefaults,
 } from '@/lib/api/company-billing.service';
 import { extractApiErrorMessage } from '@/lib/api/error';
+import { inactivityRuleChanged } from '@/lib/billing/billing-settings-rules';
 import { useT } from '@/lib/i18n/lang-context';
+import { dashboardKeys } from './use-dashboard';
+import { userKeys } from './use-users';
 import type {
+  BillingSettingsHistoryPage,
   CompanyBillingSettings,
   LegalInfo,
   UpsertCompanyBillingSettingsDto,
@@ -25,7 +30,30 @@ export const companyBillingKeys = {
   active: () => [...companyBillingKeys.all, 'active'] as const,
   publicDefaults: () => [...companyBillingKeys.all, 'public-defaults'] as const,
   legalInfo: () => [...companyBillingKeys.all, 'legal-info'] as const,
+  history: () => [...companyBillingKeys.all, 'history'] as const,
+  historyPage: (page: number, limit: number) =>
+    [...companyBillingKeys.history(), page, limit] as const,
 };
+
+/**
+ * The journal of the fiscal and rollout settings (admin only), one page.
+ * The previous page stays on screen while the next one loads; a settings
+ * save refreshes it.
+ */
+export function useBillingSettingsHistory(
+  page = 1,
+  limit = 20,
+  enabled = true,
+): UseQueryResult<BillingSettingsHistoryPage, Error> {
+  return useQuery({
+    queryKey: companyBillingKeys.historyPage(page, limit),
+    queryFn: () => companyBillingService.getHistory(page, limit),
+    enabled,
+    placeholderData: keepPreviousData,
+    staleTime: 1000 * 60,
+    refetchOnWindowFocus: false,
+  });
+}
 
 /** Read the singleton settings row (or null if not configured yet). */
 export function useCompanyBilling(
@@ -97,7 +125,20 @@ export function useUpsertCompanyBilling(): UseMutationResult<
   return useMutation({
     mutationFn: (dto) => companyBillingService.upsert(dto),
     onSuccess: (saved) => {
+      const previous = queryClient.getQueryData<CompanyBillingSettings>(
+        companyBillingKeys.active(),
+      );
       queryClient.setQueryData(companyBillingKeys.active(), saved);
+      // The inactivity rule (switch or months) changed: every practitioner's
+      // activity on the users desk (status, deadline, « Règle désactivée »,
+      // the « Avertis » filter) was computed under the old one.
+      if (inactivityRuleChanged(previous, saved)) {
+        void queryClient.invalidateQueries({ queryKey: userKeys.lists() });
+        void queryClient.invalidateQueries({ queryKey: userKeys.deletedLists() });
+        void queryClient.invalidateQueries({ queryKey: userKeys.details() });
+        void queryClient.invalidateQueries({ queryKey: userKeys.stats() });
+        void queryClient.invalidateQueries({ queryKey: dashboardKeys.adminSidebarBadges() });
+      }
       // Bust the doctor-facing public-defaults cache so the next
       // payment dialog opens with the fresh fee instead of the
       // stale one we cached for 5 min.
@@ -108,6 +149,10 @@ export function useUpsertCompanyBilling(): UseMutationResult<
       // compliance pages + dashboard help page.
       queryClient.invalidateQueries({
         queryKey: companyBillingKeys.legalInfo(),
+      });
+      // A rules change (retenue, stamp, TVA, inactivity) adds history rows.
+      queryClient.invalidateQueries({
+        queryKey: companyBillingKeys.history(),
       });
       toast.success(t('toasts.companyBilling.settingsSaved'));
     },

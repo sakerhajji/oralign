@@ -27,6 +27,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { rawBoolean } from '../../common/dto/query-transforms';
+import type { DoctorSummary } from '../../common/doctor/doctor-identity';
 
 const normalizeOptionalString = (value: unknown) => {
   if (typeof value !== 'string') return value;
@@ -437,7 +438,9 @@ export class OrderFilterDto {
   @Transform(({ value }) => {
     if (value === undefined || value === null || value === '') return undefined;
     if (Array.isArray(value)) {
-      const cleaned = value.filter((v) => v !== undefined && v !== null && v !== '');
+      const cleaned = (value as unknown[]).filter(
+        (v) => v !== undefined && v !== null && v !== '',
+      );
       return cleaned.length > 0 ? cleaned : undefined;
     }
     if (typeof value === 'object') {
@@ -448,7 +451,7 @@ export class OrderFilterDto {
       );
       return values.length > 0 ? values : undefined;
     }
-    return [value];
+    return [value as unknown];
   })
   @IsEnum(OrderStatus, { each: true })
   statuses?: OrderStatus[];
@@ -462,7 +465,11 @@ export class OrderFilterDto {
   // Whitelist of sort fields keeps the SQL generator safe — Prisma
   // throws if `orderBy` contains an unknown field, but stronger to
   // reject at the DTO boundary with a clear validation error.
-  @ApiProperty({ enum: OrderSortField, required: false, default: OrderSortField.createdAt })
+  @ApiProperty({
+    enum: OrderSortField,
+    required: false,
+    default: OrderSortField.createdAt,
+  })
   @IsOptional()
   @IsEnum(OrderSortField)
   sortBy?: OrderSortField;
@@ -593,7 +600,10 @@ export class BulkRestoreOrdersDto {
  * already forces a confirm dialog before this fires.
  */
 export class BulkPermanentDeleteOrdersDto {
-  @ApiProperty({ type: [String], description: 'Order IDs to permanently delete' })
+  @ApiProperty({
+    type: [String],
+    description: 'Order IDs to permanently delete',
+  })
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(100)
@@ -698,6 +708,18 @@ export class OrderWelcomeGiftDto {
   firstCase!: boolean;
 }
 
+/**
+ * The order's doctor (order.mapper orderDoctorOf): the shared DoctorSummary
+ * (DECISIONS §6) for admins and the owning dentist, plus `clinicName`;
+ * every other reader (an assigned designer, the lab exports) gets id,
+ * fullName, email and clinicName only, so the summary fields are optional.
+ */
+export type OrderDoctorDto = Pick<DoctorSummary, 'id' | 'fullName' | 'email'> &
+  Partial<Omit<DoctorSummary, 'id' | 'fullName' | 'email'>> & {
+    /** The live practice name (absent without a practice profile). */
+    clinicName?: string;
+  };
+
 export class OrderResponseDto {
   @ApiProperty()
   id!: string;
@@ -763,13 +785,13 @@ export class OrderResponseDto {
   toothInstructions!: ToothInstructionDto[];
   @ApiProperty({ type: [OrderFileResponseDto] })
   files!: OrderFileResponseDto[];
-  @ApiProperty({ required: false })
-  doctor?: {
-    id: string;
-    fullName: string;
-    email: string;
-    clinicName?: string;
-  };
+  @ApiProperty({
+    required: false,
+    type: Object,
+    description:
+      'The doctor, read live (DoctorSummary, DECISIONS §6). Admins and the owning dentist: id, fullName, email (login), phone (account), avatarUrl, isActive, deletedAt, clinic, contactPhone / contactEmail (practice first, account as fallback) and clinicName. Other readers (an assigned designer): id, fullName, email and clinicName only.',
+  })
+  doctor?: OrderDoctorDto;
   @ApiProperty({ required: false })
   patient?: {
     id: string;
@@ -790,25 +812,69 @@ export class OrderResponseDto {
   coverageStartedAt?: Date;
   @ApiProperty({ required: false })
   coverageExpiresAt?: Date;
-  @ApiProperty({ required: false, description: 'When the treatment fee was marked paid; gates treatment-plan creation.' })
+  @ApiProperty({
+    required: false,
+    description:
+      'When the treatment fee was marked paid; gates treatment-plan creation.',
+  })
   treatmentFeePaidAt?: Date;
-  @ApiProperty({ required: false, description: 'Cash collected for the treatment fee (fee due + droit de timbre - retenue), snapshotted at payment time. Fee due = this + treatmentFeeWithholdingAmount - treatmentFeeStampAmount.' })
+  @ApiProperty({
+    required: false,
+    description:
+      'Cash collected for the treatment fee (fee due + droit de timbre - retenue), snapshotted at payment time. Fee due = this + treatmentFeeWithholdingAmount - treatmentFeeStampAmount.',
+  })
   treatmentFeeAmount?: number;
-  @ApiProperty({ required: false, nullable: true, type: Number, description: 'Retenue à la source rate (%) applied on the treatment fee; null when none.' })
+  @ApiProperty({
+    required: false,
+    nullable: true,
+    type: Number,
+    description:
+      'Retenue à la source rate (%) applied on the treatment fee; null when none.',
+  })
   treatmentFeeWithholdingRate?: number | null;
-  @ApiProperty({ required: false, nullable: true, type: Number, description: 'Retenue à la source amount kept back on the treatment fee (computed on the fee due, stamp excluded); null when none.' })
+  @ApiProperty({
+    required: false,
+    nullable: true,
+    type: Number,
+    description:
+      'Retenue à la source amount kept back on the treatment fee (computed on the fee due, stamp excluded); null when none.',
+  })
   treatmentFeeWithholdingAmount?: number | null;
-  @ApiProperty({ required: false, nullable: true, type: Number, description: 'Droit de timbre charged on top of the treatment fee with its payment; null when nothing was paid or declared, or on fees paid before 2026-11-20 (no stamp then).' })
+  @ApiProperty({
+    required: false,
+    nullable: true,
+    type: Number,
+    description:
+      'Droit de timbre charged on top of the treatment fee with its payment; null when nothing was paid or declared, or on fees paid before 2026-11-20 (no stamp then).',
+  })
   treatmentFeeStampAmount?: number | null;
-  @ApiProperty({ required: false, description: 'CBCT supplement price snapshotted server-side when CBCT was requested on the draft order. Absent when CBCT is not requested or the paid supplement is disabled.' })
+  @ApiProperty({
+    required: false,
+    description:
+      'CBCT supplement price snapshotted server-side when CBCT was requested on the draft order. Absent when CBCT is not requested or the paid supplement is disabled.',
+  })
   cbctFeeAmount?: number;
-  @ApiProperty({ required: false, description: 'Currency of the CBCT supplement snapshot.' })
+  @ApiProperty({
+    required: false,
+    description: 'Currency of the CBCT supplement snapshot.',
+  })
   cbctFeeCurrency?: string;
-  @ApiProperty({ required: false, description: 'Treatment fee payment method (reuses installment Payment enum).' })
+  @ApiProperty({
+    required: false,
+    description:
+      'Treatment fee payment method (reuses installment Payment enum).',
+  })
   treatmentFeePaymentMethod?: string;
-  @ApiProperty({ required: false, description: 'Treatment fee payment lifecycle status.' })
+  @ApiProperty({
+    required: false,
+    description: 'Treatment fee payment lifecycle status.',
+  })
   treatmentFeePaymentStatus?: string;
-  @ApiProperty({ required: false, description: 'Relative path to bank-transfer receipt for the treatment fee.' })
+  @ApiProperty({
+    required: false,
+    description:
+      'Relative path to bank-transfer receipt for the treatment fee.',
+  })
   treatmentFeeProofPath?: string;
   @ApiProperty({
     type: OrderWelcomeGiftDto,

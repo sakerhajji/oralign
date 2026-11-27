@@ -44,6 +44,18 @@ export interface User {
    * as the used gift but its page no longer opens (never link to it).
    */
   welcomeGiftOrder?: { id: string; orderCode: string; archived: boolean } | null;
+  /**
+   * Doctor inactivity (spec §5): set when the account turned DORMANT (no
+   * order for inactivityMonths). Not the same as isActive ("Bloqué"): a
+   * dormant doctor keeps login, payments and chat but cannot order.
+   */
+  inactiveSince?: string | null;
+  /** Last admin reactivation (part of the inactivity anchor). */
+  activityResetAt?: string | null;
+  /** When an admin approved the account (null before 2026-11-27). */
+  approvedAt?: string | null;
+  /** Admin users list / detail only: the derived activity block. */
+  activity?: DoctorActivitySummary | null;
 }
 
 export interface DentistProfile {
@@ -66,10 +78,18 @@ export interface DentistProfile {
    * in the invoice "Billed to" (doctor/clinic) block when present.
    */
   taxId?: string;
+  /**
+   * Professional-order registration number. Optional and private like
+   * taxId (never on the public directory), not printed for now.
+   */
+  registrationNumber?: string | null;
   /** Specialty shown in the public directory ("Trouver un praticien"). */
   specialty?: string;
   /** Whether the clinic appears in the public directory (opt-out, default on). */
   isListedPublicly?: boolean;
+  /** The owner's name and photo, read live (cached server-side ≤ 5 min, dropped on edit). */
+  userFullName?: string;
+  userAvatarUrl?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -142,11 +162,8 @@ export interface Patient {
    * UI is hidden unless "Other" is selected.
    */
   clinicalConditionsOther?: string;
-  doctor?: {
-    id: string;
-    fullName: string;
-    email: string;
-  };
+  /** THE live doctor summary (spec §6): person + practice + printed contact. */
+  doctor?: DoctorSummary;
   createdAt: string;
   updatedAt: string;
 }
@@ -277,12 +294,17 @@ export interface DentalOrder {
   materials: string[];
   toothInstructions: ToothInstruction[];
   files: OrderFile[];
-  doctor?: {
-    id: string;
-    fullName: string;
-    email: string;
-    clinicName?: string;
-  };
+  /**
+   * The doctor, from the shared summary (spec §6, DOCTOR_SUMMARY_SELECT)
+   * plus the clinic name for the existing readers. Only id, name and
+   * account e-mail are certain: a designer gets a reduced view (no phone,
+   * no contact fields) and an older response none of the summary. Show
+   * the contact with lib/doctor/doctor-contact.ts.
+   */
+  doctor?: Pick<DoctorSummary, 'id' | 'fullName' | 'email'> &
+    Partial<Omit<DoctorSummary, 'id' | 'fullName' | 'email'>> & {
+      clinicName?: string;
+    };
   patient?: {
     id: string;
     fullName: string;
@@ -317,7 +339,23 @@ export interface DentalOrder {
   treatmentFeeStampAmount?: number | null;
   treatmentFeePaymentMethod?: PaymentMethod;
   treatmentFeePaymentStatus?: PaymentRecordStatus;
+  /**
+   * Owner and admins only: P-A strips it for every other reader and sends
+   * `treatmentFeeHasProof`. Never use it as a URL: the receipt is read
+   * through GET orders/:id/treatment-fee/proof.
+   */
   treatmentFeeProofPath?: string;
+  /** Whether a fee receipt is attached (every reader). */
+  treatmentFeeHasProof?: boolean;
+  /** The fee transfer declaration's identity (its subject), ISO. */
+  treatmentFeeDeclaredAt?: string | null;
+  /** First time an admin opened the fee receipt ("À vérifier"). */
+  treatmentFeeReviewOpenedAt?: string | null;
+  /** Refused fee transfer (status rejected): when and why. */
+  treatmentFeeRejectedAt?: string | null;
+  treatmentFeeRejectionReason?: string | null;
+  /** Retenue threshold in force when the fee was charged (snapshot). */
+  treatmentFeeWithholdingThreshold?: number | null;
   // CBCT supplement snapshot — set server-side when the doctor requests
   // CBCT on a draft order and the paid supplement is enabled; frozen
   // after submission so config changes never reprice existing orders.
@@ -356,4 +394,102 @@ export interface OrderHistoryEntry {
   changes: Record<string, { from: unknown; to: unknown }> | null;
   metadata: Record<string, unknown> | null;
   createdAt: string;
+}
+
+// ─── Programme contract (P0, CONTRACT.md): inactivity, doctor identity ────
+
+/**
+ * Doctor inactivity (backend users/activity/doctor-activity.contract.ts).
+ * active: deadline more than 30 days away; warned: within 30 days;
+ * inactive: dormant (User.inactiveSince set).
+ */
+export type DoctorActivityStatus = 'active' | 'warned' | 'inactive';
+
+export type AccountActivityEventKind =
+  | 'warning_30d'
+  | 'warning_7d'
+  | 'deactivated'
+  | 'reactivated'
+  | 'blocked'
+  | 'unblocked';
+
+export interface DoctorActivitySummary {
+  status: DoctorActivityStatus;
+  lastSubmittedOrderAt: string | null;
+  anchorAt: string;
+  /** null while the rule is switched off. */
+  deadlineAt: string | null;
+  inactiveSince: string | null;
+  activityResetAt: string | null;
+  ruleEnabled: boolean;
+}
+
+/** One row of GET users/:id/activity-events. */
+export interface AccountActivityEvent {
+  id: string;
+  kind: AccountActivityEventKind;
+  anchorAt: string;
+  deadlineAt: string;
+  /** null = the system (the daily sweep). */
+  actor: { id: string | null; name: string; role: UserRole | null } | null;
+  reason: string | null;
+  createdAt: string;
+}
+
+/** POST users/:id/reactivate body (reason: 3-500 characters once trimmed). */
+export interface ReactivateDoctorBody {
+  reason: string;
+}
+
+/** POST admin/doctor-activity/sweep response (super_admin, e2e / support). */
+export interface DoctorActivitySweepResult {
+  ruleEnabled: boolean;
+  scanned: number;
+  warned30: number;
+  warned7: number;
+  deactivated: number;
+}
+
+/** Inactivity errorCode values (backend domain-error-codes.ts). */
+export const ACCOUNT_ACTIVITY_ERROR = {
+  /** 403: order create / submit on a dormant account. */
+  ACCOUNT_DORMANT: 'ACCOUNT_DORMANT',
+  /** 400: reactivation without a 3-500 character reason. */
+  REACTIVATION_REASON_REQUIRED: 'REACTIVATION_REASON_REQUIRED',
+  /** 400: reactivation of an account that is not a dentist. */
+  NOT_A_DOCTOR: 'ACCOUNT_ACTIVITY_NOT_A_DOCTOR',
+} as const;
+export type AccountActivityErrorCode =
+  (typeof ACCOUNT_ACTIVITY_ERROR)[keyof typeof ACCOUNT_ACTIVITY_ERROR];
+
+/**
+ * THE doctor identity of the owner / admin screens (backend
+ * common/doctor/doctor-identity.ts DOCTOR_SUMMARY_SELECT, P-F): User +
+ * DentistProfile joined live. Production screens never get it (name only,
+ * leak guard). contactPhone / contactEmail apply the printed-contact rule
+ * (practice first, account fallback) so screens never re-derive it.
+ */
+export interface DoctorSummary {
+  id: string;
+  fullName: string;
+  email: string;
+  phone: string | null;
+  avatarUrl: string | null;
+  isActive: boolean;
+  deletedAt: string | null;
+  clinic: {
+    clinicName: string;
+    clinicAddress: string | null;
+    city: string | null;
+    country: string | null;
+    clinicPhone: string | null;
+    clinicEmail: string | null;
+    logoUrl: string | null;
+    specialty: string | null;
+    /** Owner and admins only. */
+    taxId?: string | null;
+    registrationNumber?: string | null;
+  } | null;
+  contactPhone: string | null;
+  contactEmail: string | null;
 }

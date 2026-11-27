@@ -1,7 +1,7 @@
+import type { AxiosProgressEvent } from 'axios';
 import apiClient from './client';
 import { asBlob, blobError, fileNameFromHeaders } from './blob-download';
 import type {
-  ConfirmPaymentDto,
   HostedPaymentSession,
   PaginatedResponse,
   Payment,
@@ -13,13 +13,41 @@ import type {
   PaymentsSummary,
   PaymentsSummaryParams,
   RecordCashPaymentDto,
-  RejectPaymentDto,
 } from '@/lib/types';
 
 /** The PDF of the payments report, named as the server named it. */
 export interface PaymentsReportFile {
   blob: Blob;
   fileName: string;
+}
+
+/**
+ * Receipt uploads and reads: two minutes, not the client's 30 s (a 10 MB
+ * PDF from a phone on a weak link). The server stops a body at 10 MB.
+ */
+export const RECEIPT_UPLOAD_TIMEOUT_MS = 120_000;
+
+/** axios `onUploadProgress` reporting a 0..1 fraction, or nothing when no callback. */
+export function uploadProgress(
+  onProgress: ((fraction: number) => void) | undefined,
+): ((event: AxiosProgressEvent) => void) | undefined {
+  if (!onProgress) return undefined;
+  return (event) => {
+    if (event.total && event.total > 0) {
+      onProgress(Math.min(1, Math.max(0, event.loaded / event.total)));
+    }
+  };
+}
+
+/** A failed receipt read: the server's errorCode (PROOF_NOT_FOUND) and the HTTP status kept. */
+export type ProofReadError = Error & { status?: number; errorCode?: string };
+
+/** Unwrap a `responseType: 'blob'` error, keeping its HTTP status. */
+export async function proofError(error: unknown): Promise<ProofReadError> {
+  const status = (error as { response?: { status?: number } } | null)?.response?.status;
+  const unwrapped: ProofReadError = await blobError(error, 'Could not load the receipt.');
+  if (status !== undefined) unwrapped.status = status;
+  return unwrapped;
 }
 
 /**
@@ -92,9 +120,12 @@ export const paymentsService = {
   },
 
   // ─── Doctor — BANK_TRANSFER ───────────────────────────────────────
-  // Multipart upload: bankReference (text) + proofFile (PNG/JPG/WebP/
-  // HEIC or PDF, ≤5 MB). Backend stores the file under
-  // /uploads/payments and validates MIME + size again server-side.
+  // Multipart upload: bankReference (text) + proofFile (JPEG / PNG / WebP
+  // or PDF, ≤ 10 MB, prepared by lib/payments/compress-receipt.ts). The
+  // server checks the bytes again, writes the file only after its checks
+  // and answers RECEIPT_TYPE / RECEIPT_TOO_LARGE otherwise. A declaration
+  // still awaiting confirmation on the installment is REPLACED by this one
+  // (the old row is cancelled, its file kept).
 
   declareBankTransfer: async (args: {
     quotationId: string;
@@ -102,6 +133,13 @@ export const paymentsService = {
     bankReference?: string;
     proofFile?: File | Blob | null;
     applyWithholding?: boolean;
+    /**
+     * One key per declaration intent, reused by its retries: a replay with
+     * the same key answers the row the first attempt created (CONTRACT §0).
+     */
+    idempotencyKey?: string;
+    /** Upload progress, 0..1 (absent when the browser cannot tell). */
+    onUploadProgress?: (fraction: number) => void;
   }): Promise<Payment> => {
     const form = new FormData();
     if (args.bankReference) form.append('bankReference', args.bankReference);
@@ -112,12 +150,46 @@ export const paymentsService = {
       `/quotations/${args.quotationId}/installments/${args.installmentId}/declare-bank-transfer`,
       form,
       {
-        // Let the browser/axios pick the multipart boundary — explicit
-        // Content-Type without boundary would break the upload.
-        headers: { 'Content-Type': 'multipart/form-data' },
+        // No Content-Type here: axios lets the browser write
+        // `multipart/form-data; boundary=…` for a FormData body.
+        headers: args.idempotencyKey ? { 'Idempotency-Key': args.idempotencyKey } : undefined,
+        // A 10 MB PDF over a weak phone link outlasts the 30 s default.
+        timeout: RECEIPT_UPLOAD_TIMEOUT_MS,
+        onUploadProgress: uploadProgress(args.onUploadProgress),
       },
     );
     return res.data;
+  },
+
+  /**
+   * Withdraw a transfer declaration still awaiting confirmation (the
+   * owning dentist, or an admin): the row turns `cancelled`, its receipt
+   * stays archived. A repeat on a withdrawn row answers it again; a row
+   * the lab already processed answers 409 TRANSFER_NOT_WITHDRAWABLE.
+   */
+  withdrawBankTransfer: async (paymentId: string, note?: string): Promise<Payment> => {
+    const res = await apiClient.post<Payment>(
+      `/payments/${encodeURIComponent(paymentId)}/withdraw`,
+      note && note.trim() ? { note: note.trim() } : {},
+    );
+    return res.data;
+  },
+
+  /**
+   * The receipt of a pack-installment transfer, through the authenticated
+   * stream (the uploads folder is private): the owning dentist and admins;
+   * anyone else gets 404 PROOF_NOT_FOUND, carried on the thrown Error.
+   */
+  getPaymentProof: async (paymentId: string): Promise<Blob> => {
+    try {
+      const res = await apiClient.get<Blob>(
+        `/payments/${encodeURIComponent(paymentId)}/proof`,
+        { responseType: 'blob', timeout: RECEIPT_UPLOAD_TIMEOUT_MS },
+      );
+      return asBlob(res.data, 'application/octet-stream');
+    } catch (error) {
+      throw await proofError(error);
+    }
   },
 
   // ─── Doctor reads their own payment ───────────────────────────────
@@ -132,17 +204,9 @@ export const paymentsService = {
     return res.data;
   },
 
-  // ─── Admin queue + actions ────────────────────────────────────────
-
-  listPendingConfirmations: async (
-    filters: PaymentFilterDto = {},
-  ): Promise<PaginatedResponse<PaymentListItem>> => {
-    const res = await apiClient.get<PaginatedResponse<PaymentListItem>>(
-      '/admin/payments/pending-confirmations',
-      { params: serialisePaymentFilters(filters) },
-    );
-    return res.data;
-  },
+  // ─── Admin lists + actions ────────────────────────────────────────
+  // (Bank transfers are confirmed / refused from the pending desk:
+  // transfer-queue.service.ts.)
 
   /** Admin: full payment history across every order in the system. */
   listAllPayments: async (
@@ -222,28 +286,6 @@ export const paymentsService = {
 
   adminGetPayment: async (paymentId: string): Promise<Payment> => {
     const res = await apiClient.get<Payment>(`/admin/payments/${paymentId}`);
-    return res.data;
-  },
-
-  confirmBankTransfer: async (
-    paymentId: string,
-    dto: ConfirmPaymentDto,
-  ): Promise<Payment> => {
-    const res = await apiClient.post<Payment>(
-      `/admin/payments/${paymentId}/confirm`,
-      dto,
-    );
-    return res.data;
-  },
-
-  rejectBankTransfer: async (
-    paymentId: string,
-    dto: RejectPaymentDto,
-  ): Promise<Payment> => {
-    const res = await apiClient.post<Payment>(
-      `/admin/payments/${paymentId}/reject`,
-      dto,
-    );
     return res.data;
   },
 

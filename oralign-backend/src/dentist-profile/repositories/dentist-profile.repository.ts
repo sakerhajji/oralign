@@ -1,11 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import {
-  DentistProfile,
-  DayOfWeek,
-  Prisma,
-  VerificationStatus,
-} from '@prisma/client';
+import { DentistProfile, DayOfWeek, Prisma } from '@prisma/client';
+import { PUBLIC_PRACTITIONER_PROFILE_WHERE } from '../../users/activity/doctor-ordering.policy';
 
 /** A public directory row: profile scalars + the safe user projection. */
 export type PublicProfileRow = DentistProfile & {
@@ -22,27 +18,54 @@ export type PublicProfileWithHours = PublicProfileRow & {
   }[];
 };
 
+/**
+ * The clinic columns a write may set. Optional fields: undefined = left
+ * alone, null = cleared (the DTOs turn an emptied field into null).
+ */
+export interface ClinicProfileWrite {
+  clinicName: string;
+  clinicAddress?: string | null;
+  city?: string | null;
+  country?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  clinicPhone?: string | null;
+  clinicEmail?: string | null;
+  taxId?: string | null;
+  registrationNumber?: string | null;
+  description?: string | null;
+  logoUrl?: string | null;
+  specialty?: string | null;
+  isListedPublicly?: boolean;
+}
+
 @Injectable()
 export class DentistProfileRepository {
   constructor(private prisma: PrismaService) {}
 
-  async create(data: {
-    userId: string;
-    clinicName: string;
-    clinicAddress?: string;
-    city?: string;
-    country?: string;
-    latitude?: number;
-    longitude?: number;
-    clinicPhone?: string;
-    clinicEmail?: string;
-    taxId?: string;
-    description?: string;
-    logoUrl?: string;
-    specialty?: string;
-    isListedPublicly?: boolean;
-  }): Promise<DentistProfile> {
+  async create(
+    data: ClinicProfileWrite & { userId: string },
+  ): Promise<DentistProfile> {
     return this.prisma.dentistProfile.create({ data });
+  }
+
+  /**
+   * Bring a soft-deleted clinic back with the fields of a new create (the
+   * row is unique per user, so a second create cannot insert): what
+   * setupClinic does on onboarding. Fields the write leaves out keep their
+   * stored value. Guarded on deletedAt, so a live clinic is never touched;
+   * null when there was no deleted clinic to restore.
+   */
+  async restoreDeleted(
+    userId: string,
+    data: ClinicProfileWrite,
+  ): Promise<DentistProfile | null> {
+    const restored = await this.prisma.dentistProfile.updateMany({
+      where: { userId, deletedAt: { not: null } },
+      data: { ...data, deletedAt: null, updatedAt: new Date() },
+    });
+    if (restored.count === 0) return null;
+    return this.findByUserId(userId);
   }
 
   async findById(id: string): Promise<DentistProfile | null> {
@@ -206,7 +229,10 @@ export class DentistProfileRepository {
   // STRICT public filter applied to every read here — the same predicate the
   // list and single-profile endpoints share: the row must be undeleted, the
   // clinic must have opted in (isListedPublicly), and the owning user must be
-  // an approved AND active account. Anything failing this is invisible.
+  // an approved, active, undeleted and NOT dormant account (doctor
+  // inactivity §5). Anything failing this is invisible. One shared
+  // predicate (PUBLIC_PRACTITIONER_PROFILE_WHERE), also used by the
+  // appointment checks.
 
   private publicWhere(query?: {
     city?: string;
@@ -214,15 +240,7 @@ export class DentistProfileRepository {
     search?: string;
   }): Prisma.DentistProfileWhereInput {
     const where: Prisma.DentistProfileWhereInput = {
-      deletedAt: null,
-      isListedPublicly: true,
-      user: {
-        verificationStatus: VerificationStatus.approved,
-        isActive: true,
-        // A soft-deleted dentist must vanish from the public directory
-        // even though their profile row (config) is left untouched.
-        deletedAt: null,
-      },
+      ...PUBLIC_PRACTITIONER_PROFILE_WHERE,
     };
 
     if (query?.city) {
@@ -298,21 +316,7 @@ export class DentistProfileRepository {
 
   async update(
     id: string,
-    data: Partial<{
-      clinicName: string;
-      clinicAddress?: string;
-      city?: string;
-      country?: string;
-      latitude?: number;
-      longitude?: number;
-      clinicPhone?: string;
-      clinicEmail?: string;
-      taxId?: string;
-      description?: string;
-      logoUrl?: string;
-      specialty?: string;
-      isListedPublicly?: boolean;
-    }>,
+    data: Partial<ClinicProfileWrite>,
   ): Promise<DentistProfile> {
     return this.prisma.dentistProfile.update({
       where: { id },

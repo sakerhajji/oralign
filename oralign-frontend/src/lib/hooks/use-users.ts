@@ -1,10 +1,12 @@
 'use client';
 
-import { keepPreviousData, useQuery, useMutation, useQueryClient, UseQueryResult, UseMutationResult } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useMutation, useQueryClient, UseQueryResult, UseMutationResult, type QueryClient } from '@tanstack/react-query';
 import { toast } from '@/lib/toast';
 import { usersService, extractApiErrorMessage, toastMutationError } from '@/lib/api';
 import { useT } from '@/lib/i18n/lang-context';
-import { User, UserRole, CreateUserDto, UpdateUserDto, PaginatedResponse, UserFilterParams, MessageResponse, BulkActionDto, BulkUpdateStatusDto, UserStats, CreateUserResponse, TemporaryPasswordResponse } from '@/lib/types';
+import { User, UserRole, CreateUserDto, UpdateUserDto, PaginatedResponse, UserFilterParams, UserStats, MessageResponse, BulkActionDto, BulkUpdateStatusDto, CreateUserResponse, TemporaryPasswordResponse, type AccountActivityEvent } from '@/lib/types';
+import type { ActivityEventsParams } from '@/lib/api/users.service';
+import { dashboardKeys } from '@/lib/hooks/use-dashboard';
 import type { Lang } from '@/lib/i18n/dict';
 
 // Query keys
@@ -18,6 +20,9 @@ export const userKeys = {
   details: () => [...userKeys.all, 'detail'] as const,
   detail: (id: string) => [...userKeys.details(), id] as const,
   currentUser: () => [...userKeys.all, 'current'] as const,
+  /** An account's activity journal (doctor inactivity), per page. */
+  activityEvents: (id: string, params?: ActivityEventsParams) =>
+    [...userKeys.all, 'activity-events', id, params ?? {}] as const,
 };
 
 /**
@@ -110,6 +115,55 @@ export function useUserStats(
 }
 
 /**
+ * Admin: one page of an account's activity journal (doctor inactivity:
+ * warnings, deactivation, reactivation, block / unblock), newest first.
+ * The previous page stays on screen while the next one loads.
+ */
+export function useAccountActivityEvents(
+  userId: string,
+  params: ActivityEventsParams = {},
+  options: { enabled?: boolean } = {},
+): UseQueryResult<PaginatedResponse<AccountActivityEvent>, Error> {
+  return useQuery<PaginatedResponse<AccountActivityEvent>, Error>({
+    queryKey: userKeys.activityEvents(userId, params),
+    queryFn: () => usersService.getActivityEvents(userId, params),
+    enabled: (options.enabled ?? true) && !!userId,
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+  });
+}
+
+/**
+ * Admin: reactivate a dormant practitioner with a reason. The account's
+ * detail, the lists, the counters, its journal and the sidebar badges
+ * refetch. A failure is NOT toasted here: the dialog shows it inline
+ * (the reason stays typed). The route is idempotent, so an account
+ * another admin reactivated meanwhile also lands here as reactivated.
+ */
+export function useReactivateDoctor(): UseMutationResult<
+  User,
+  Error,
+  { id: string; reason: string }
+> {
+  const queryClient = useQueryClient();
+  const { t } = useT();
+  return useMutation<User, Error, { id: string; reason: string }>({
+    mutationFn: ({ id, reason }) => usersService.reactivateDoctor(id, { reason }),
+    onSuccess: (user, variables) => {
+      queryClient.setQueryData(userKeys.detail(variables.id), user);
+      queryClient.invalidateQueries({ queryKey: userKeys.detail(variables.id) });
+      queryClient.invalidateQueries({ queryKey: userKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: userKeys.stats() });
+      queryClient.invalidateQueries({
+        queryKey: [...userKeys.all, 'activity-events', variables.id],
+      });
+      queryClient.invalidateQueries({ queryKey: dashboardKeys.adminSidebarBadges() });
+      toast.success(t('accountActivity.reactivate.success', { name: user.fullName }));
+    },
+  });
+}
+
+/**
  * Hook to get user by ID (Admin only)
  */
 export function useUser(id: string): UseQueryResult<User, Error> {
@@ -173,18 +227,36 @@ export function useIssueTemporaryPassword(): UseMutationResult<
 }
 
 /**
- * Hook to update a user
+ * After an admin edits an account (name, phone, photo, role): every screen
+ * that shows the doctor's live identity refetches (spec §6), the users
+ * desk included (its keys are one of the identity roots).
+ *
+ * use-dentist-profiles builds its list of identity roots from `userKeys`
+ * when it loads, so a static import of it here would be an import cycle
+ * that reads `userKeys` before this module defines it. It is loaded on
+ * demand instead (already in the bundle of the users sheet); should that
+ * fail, the users queries alone are refreshed.
+ */
+async function refreshAfterUserUpdate(queryClient: QueryClient): Promise<void> {
+  try {
+    const { invalidateDoctorIdentityQueries } = await import('./use-dentist-profiles');
+    await invalidateDoctorIdentityQueries(queryClient);
+  } catch {
+    await queryClient.invalidateQueries({ queryKey: userKeys.all });
+  }
+}
+
+/**
+ * Hook to update a user (admin users sheet).
  */
 export function useUpdateUser(): UseMutationResult<User, Error, { id: string; data: UpdateUserDto }> {
   const queryClient = useQueryClient();
 
   return useMutation<User, Error, { id: string; data: UpdateUserDto }>({
     mutationFn: ({ id, data }) => usersService.updateUser(id, data),
-    onSuccess: (data, variables) => {
-      queryClient.invalidateQueries({ queryKey: userKeys.detail(variables.id) });
-      queryClient.invalidateQueries({ queryKey: userKeys.lists() });
-      queryClient.invalidateQueries({ queryKey: userKeys.stats() });
-      queryClient.invalidateQueries({ queryKey: userKeys.currentUser() });
+    onSuccess: () => {
+      // Not returned: the save resolves without waiting for the refetches.
+      void refreshAfterUserUpdate(queryClient);
     },
   });
 }
@@ -328,6 +400,9 @@ export function useBulkUpdateStatus(): UseMutationResult<BulkResult, Error, Bulk
       queryClient.invalidateQueries({ queryKey: userKeys.lists() });
       queryClient.invalidateQueries({ queryKey: userKeys.deletedLists() });
       queryClient.invalidateQueries({ queryKey: userKeys.stats() });
+      // Block / unblock is journaled in each account's activity history.
+      queryClient.invalidateQueries({ queryKey: [...userKeys.all, 'activity-events'] });
+      queryClient.invalidateQueries({ queryKey: userKeys.details() });
       toast.success(data.message);
       warnSkippedSuperAdmins(data, t, lang);
     },

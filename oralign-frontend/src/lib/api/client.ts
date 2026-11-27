@@ -1,5 +1,8 @@
 import axios, { AxiosError, AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 import { ApiErrorResponse } from '@/lib/types';
+import { isAccountDormantCode } from '@/lib/account-activity/account-activity';
+import { ACCOUNT_DORMANT_ERROR_COPY } from '@/lib/i18n/dict.account-activity-domain';
+import { currentErrorLang } from './error-copy';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
 
@@ -278,6 +281,38 @@ function sendToPasswordChange(): void {
   window.location.replace(PASSWORD_CHANGE_PATH);
 }
 
+/**
+ * Doctor inactivity (spec §5): order create / submit answer 403
+ * ACCOUNT_DORMANT once the doctor is dormant, also when an admin acts for
+ * him. The screens decide from /users/me (`inactiveSince`, cached 10 min),
+ * so a refusal means the account turned dormant since it was read: the
+ * listeners (useAccountDormantRefresh, mounted once by the dashboard
+ * chrome) refresh it, and every useCanOrder gate closes at once.
+ */
+type AccountDormantListener = () => void;
+const accountDormantListeners = new Set<AccountDormantListener>();
+
+/** Called on every 403 ACCOUNT_DORMANT answer; returns the unsubscribe. */
+export function onAccountDormant(listener: AccountDormantListener): () => void {
+  accountDormantListeners.add(listener);
+  return () => {
+    accountDormantListeners.delete(listener);
+  };
+}
+
+function handleAccountDormant(data: ApiErrorResponse): void {
+  // The server's text is French only: the refusal reads in the dashboard
+  // language wherever it is shown (toasts, inline errors).
+  data.message = ACCOUNT_DORMANT_ERROR_COPY[currentErrorLang()];
+  accountDormantListeners.forEach((listener) => {
+    try {
+      listener();
+    } catch {
+      // A failing listener must not change the error the caller receives.
+    }
+  });
+}
+
 // Response interceptor - Handle token refresh
 apiClient.interceptors.response.use(
   (response) => {
@@ -325,6 +360,16 @@ apiClient.interceptors.response.use(
       error.response.data?.errorCode === PASSWORD_CHANGE_REQUIRED
     ) {
       sendToPasswordChange();
+    }
+
+    const refusal = error.response?.data;
+    if (
+      error.response?.status === 403 &&
+      refusal !== null &&
+      typeof refusal === 'object' &&
+      isAccountDormantCode(refusal.errorCode)
+    ) {
+      handleAccountDormant(refusal);
     }
 
     // For other errors, just reject

@@ -18,7 +18,6 @@ import {
   Max,
   MaxLength,
   Min,
-  MinLength,
   ValidateIf,
 } from 'class-validator';
 import { IsCalendarDate } from '../../common/decorators/is-calendar-date.decorator';
@@ -30,7 +29,9 @@ import {
 import { BUSINESS_TIME_ZONE } from '../../common/time/business-day';
 
 export class CreateClicToPaySessionDto {
-  @ApiProperty({ description: 'Order being paid. Amount is resolved server-side.' })
+  @ApiProperty({
+    description: 'Order being paid. Amount is resolved server-side.',
+  })
   @IsString()
   @MaxLength(64)
   orderId!: string;
@@ -42,8 +43,9 @@ export class CreateClicToPaySessionDto {
   @ApiPropertyOptional({
     description: 'Required when purpose is installment.',
   })
-  @ValidateIf((dto: CreateClicToPaySessionDto) =>
-    dto.purpose === PaymentPurpose.installment,
+  @ValidateIf(
+    (dto: CreateClicToPaySessionDto) =>
+      dto.purpose === PaymentPurpose.installment,
   )
   @IsString()
   @MaxLength(64)
@@ -86,10 +88,19 @@ export enum PaymentSortOrder {
 }
 
 /**
+ * Upper bounds of the free-text inputs. The trimmed 3-500 rule itself is
+ * the service's (validReason), so a short or long reason answers the
+ * contract's stable code rather than a generic validation 400.
+ */
+const REASON_MAX_INPUT = 2000;
+const OVERRIDE_NOTE_MAX_INPUT = 2000;
+
+/**
  * Declare a bank transfer. The doctor sends this AFTER initiating
  * the wire from their bank; the optional `bankReference` is the
  * doctor's note to the admin. `proofFile` rides on multipart and is
- * NOT modelled here — multer attaches it.
+ * NOT modelled here — multer attaches it (JPEG / PNG / WebP / PDF,
+ * 10 MB, required for a dentist).
  */
 export class DeclareBankTransferDto {
   @ApiPropertyOptional({ example: 'TRF-2026-05-24-12345' })
@@ -110,6 +121,16 @@ export class DeclareBankTransferDto {
   @Transform(rawBoolean)
   @IsBoolean()
   applyWithholding?: boolean;
+
+  @ApiPropertyOptional({
+    maxLength: OVERRIDE_NOTE_MAX_INPUT,
+    description:
+      'Admin declaring for the doctor WITHOUT a receipt only: why (trimmed, 3-500 characters, else 400 PROOF_OVERRIDE_NOTE_REQUIRED). Ignored when a receipt is attached. A dentist always attaches the receipt (400 PROOF_REQUIRED).',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(OVERRIDE_NOTE_MAX_INPUT)
+  overrideNote?: string;
 }
 
 /**
@@ -123,18 +144,70 @@ export class ConfirmPaymentDto {
   @IsString()
   @MaxLength(1000)
   notes?: string;
+
+  @ApiPropertyOptional({
+    maxLength: OVERRIDE_NOTE_MAX_INPUT,
+    description:
+      'Required to confirm a transfer that has NO receipt: why (trimmed, 3-500 characters, else 400 PROOF_OVERRIDE_NOTE_REQUIRED). Journaled on payment_confirmed.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(OVERRIDE_NOTE_MAX_INPUT)
+  overrideNote?: string;
 }
 
 /**
  * Admin rejects a manual payment. Reason is REQUIRED so the doctor
- * sees why their declaration was refused.
+ * sees why their declaration was refused: trimmed, 3-500 characters
+ * (400 REJECTION_REASON_INVALID otherwise; the service owns the rule so
+ * the client gets the stable code, the DTO only bounds the input).
  */
 export class RejectPaymentDto {
-  @ApiProperty({ description: 'Why the manual payment is rejected.' })
+  @ApiProperty({
+    minLength: 3,
+    maxLength: 500,
+    description:
+      'Why the transfer is refused, shown to the doctor as « Motif : … ». Trimmed, 3-500 characters.',
+  })
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
   @IsString()
-  @MinLength(1)
-  @MaxLength(1000)
+  @MaxLength(REASON_MAX_INPUT)
   rejectionReason!: string;
+}
+
+/**
+ * The doctor (or an admin for him) withdraws a transfer still awaiting
+ * confirmation (POST payments/:paymentId/withdraw). The optional note is
+ * journaled on payment_transfer_withdrawn.
+ */
+export class WithdrawPaymentDto {
+  @ApiPropertyOptional({
+    maxLength: 500,
+    description: 'Optional note, trimmed, at most 500 characters.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  note?: string;
+}
+
+/** POST admin/payments/:paymentId/review-opened. */
+export class TransferReviewOpenedDto {
+  @ApiProperty()
+  paymentId!: string;
+
+  @ApiProperty({
+    type: Date,
+    nullable: true,
+    description:
+      'The FIRST opening by an admin (global; "Reçu envoyé" → "À vérifier"). Null on a transfer processed before anyone opened it.',
+  })
+  reviewOpenedAt!: Date | null;
+
+  @ApiProperty({ description: 'True when this call stamped reviewOpenedAt.' })
+  firstOpen!: boolean;
 }
 
 /** The in-person methods an admin records on an installment. */
@@ -278,7 +351,8 @@ export class PaymentFilterDto {
   search?: string;
 
   @ApiPropertyOptional({
-    description: 'Filter by owning doctor (admin only — dentists are scoped to themselves).',
+    description:
+      'Filter by owning doctor (admin only — dentists are scoped to themselves).',
   })
   @IsOptional()
   @IsString()
@@ -451,6 +525,20 @@ export class PaymentBucketDto {
       'Cash received in TND, always written with 3 decimals: stamps included, retenues kept back by the practitioner excluded.',
   })
   amount!: string;
+
+  @ApiProperty({
+    example: '1263.130',
+    description:
+      'Brut in TND, 3 decimals: the total TTC of the factures of these payments, i.e. amount + withholding (spec §4 brut / retenue / net).',
+  })
+  gross!: string;
+
+  @ApiProperty({
+    example: '12.630',
+    description:
+      'Retenue à la source kept back by the practitioner on these payments, in TND with 3 decimals; "0.000" when none.',
+  })
+  withholding!: string;
 
   @ApiProperty({ example: 3, description: 'Number of payments summed.' })
   count!: number;

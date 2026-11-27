@@ -4,7 +4,20 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { formatDistanceToNowStrict } from 'date-fns';
 import { fr as frLocale } from 'date-fns/locale';
-import { ArrowRight, Bell, CheckCheck, ChevronRight, Inbox } from 'lucide-react';
+import {
+  ArrowRight,
+  Bell,
+  CheckCheck,
+  CheckCircle2,
+  ChevronRight,
+  Inbox,
+  Landmark,
+  LockOpen,
+  UserCheck,
+  UserX,
+  XCircle,
+  type LucideIcon,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -20,9 +33,34 @@ import {
   useNotifications,
   useUnreadNotificationCount,
 } from '@/lib/hooks';
+import { useAccountNoticeRefresh } from '@/lib/hooks/use-can-order';
 import { useAuth } from '@/lib/providers/auth-provider';
 import { useT } from '@/lib/i18n/lang-context';
-import type { Notification } from '@/lib/types';
+import { NotificationType, type Notification } from '@/lib/types';
+
+/**
+ * What a row is about, at a glance: a bank transfer to check, a payment
+ * confirmed or refused, steps released, an account change. The title
+ * says it in words; the icon only helps the eye sweep the list.
+ */
+const TYPE_ICON: Partial<Record<NotificationType, LucideIcon>> = {
+  [NotificationType.PAYMENT_DECLARED]: Landmark,
+  [NotificationType.TREATMENT_FEE_DECLARED]: Landmark,
+  [NotificationType.PAYMENT_CONFIRMED]: CheckCircle2,
+  [NotificationType.PAYMENT_REJECTED]: XCircle,
+  [NotificationType.TREATMENT_FEE_REJECTED]: XCircle,
+  [NotificationType.BATCH_UNLOCKED]: LockOpen,
+  [NotificationType.ACCOUNT_INACTIVITY_WARNING]: UserX,
+  [NotificationType.ACCOUNT_DEACTIVATED]: UserX,
+  [NotificationType.DOCTOR_DEACTIVATED_INACTIVITY]: UserX,
+  [NotificationType.ACCOUNT_REACTIVATED]: UserCheck,
+};
+
+/** Refusals carry « Motif : … » at the end: give them room to show it. */
+const REFUSAL_TYPES: ReadonlySet<string> = new Set([
+  NotificationType.PAYMENT_REJECTED,
+  NotificationType.TREATMENT_FEE_REJECTED,
+]);
 
 /**
  * Header bell — unread badge + dropdown that lists the **20** most-
@@ -51,6 +89,10 @@ export function NotificationBell() {
   const listQuery = useNotifications({ limit: 20 }, isAuthenticated && open);
   const markRead = useMarkNotificationRead();
   const markAll = useMarkAllNotificationsRead();
+  // A doctor's account notice (« compte réactivé », « compte désactivé »)
+  // re-reads /users/me when it is listed or opened, so the ordering gates
+  // follow at once.
+  const onAccountNotice = useAccountNoticeRefresh(listQuery.data?.data);
 
   if (!isAuthenticated) return null;
 
@@ -92,7 +134,9 @@ export function NotificationBell() {
         sideOffset={10}
         className="w-[min(calc(100vw-1.5rem),420px)] overflow-hidden rounded-2xl border bg-popover p-0 shadow-2xl shadow-foreground/10"
       >
-        <header className="flex items-start justify-between gap-3 border-b bg-muted/30 px-4 py-3">
+        {/* flex-wrap: on a phone « Tout marquer comme lu » drops under the
+            title instead of covering it. */}
+        <header className="flex flex-wrap items-start justify-between gap-3 border-b bg-muted/30 px-4 py-3">
           <div className="flex min-w-0 items-center gap-3">
             <span className="grid size-10 shrink-0 place-items-center rounded-full bg-primary/10 text-primary ring-1 ring-primary/15">
               <Bell className="size-5" />
@@ -172,6 +216,7 @@ export function NotificationBell() {
                     notification={n}
                     onActivate={() => {
                       if (!n.readAt) markRead.mutate(n.id);
+                      onAccountNotice(n.type);
                       setOpen(false);
                     }}
                   />
@@ -230,6 +275,8 @@ function NotificationRow({
   const { t, lang } = useT();
   const isUnread = !notification.readAt;
   const createdAt = new Date(notification.createdAt);
+  const Icon = TYPE_ICON[notification.type] ?? Bell;
+  const refusal = REFUSAL_TYPES.has(notification.type);
   // When the backend provided a deep link we render the whole row as a
   // Next.js <Link>; otherwise it's just a clickable mark-read button.
   // Either way `onActivate` fires.
@@ -251,7 +298,7 @@ function NotificationRow({
             : 'bg-muted text-muted-foreground ring-border',
         )}
       >
-        <Bell className="size-4" />
+        <Icon className="size-4" />
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-start gap-2">
@@ -269,7 +316,12 @@ function NotificationRow({
             </span>
           ) : null}
         </div>
-        <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+        <p
+          className={cn(
+            'mt-1 text-xs leading-relaxed text-muted-foreground',
+            refusal ? 'line-clamp-4' : 'line-clamp-2',
+          )}
+        >
           {notification.message}
         </p>
         <p className="mt-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">

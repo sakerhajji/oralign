@@ -77,7 +77,6 @@ import {
 import {
   useActivateSliderMedia,
   useCreateSliderMedia,
-  useDashboardSocket,
   useDeactivateSliderMedia,
   useDeleteSliderMedia,
   useReorderSliderMedia,
@@ -97,14 +96,14 @@ import { useEffect } from 'react';
  * title, and per-row actions activate / deactivate / edit / reorder
  * / soft-delete / restore.
  *
- * Real-time updates via `useDashboardSocket()` so another admin's
- * edit shows up here without a refresh.
+ * Real-time updates via the dashboard socket AppSidebar keeps open for
+ * the whole admin session (`slider:changed`), so another admin's edit
+ * shows up here without a refresh.
  */
 export function AdminMediaContent() {
   const { t } = useT();
   const { isAdmin, user } = useAuth();
   const router = useRouter();
-  useDashboardSocket({ enabled: isAdmin });
 
   // RBAC guard — redirect non-admins out so the page can't be reached
   // by hand-typed URL. We wait until auth has resolved (`user` is set)

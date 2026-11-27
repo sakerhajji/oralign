@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useCallback, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Building2,
   Check,
@@ -13,15 +13,33 @@ import {
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { CountryCityPicker, DEFAULT_COUNTRY } from '@/components/ui/country-city-picker';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+import { BillingRulesConfirmDialog } from '@/components/billing/billing-rules-confirm-dialog';
+import {
+  BILLING_HISTORY_PAGE_SIZE,
+  BillingSettingsHistory,
+} from '@/components/billing/billing-settings-history';
 import { CompanyBillingSettingsSkeleton } from '@/components/billing/company-billing-settings-skeleton';
+import { InactivityRuleCard } from '@/components/billing/inactivity-rule-card';
+import { SettingsField as Field } from '@/components/billing/settings-field';
 import { WelcomeGiftSettingsCard } from '@/components/billing/welcome-gift-settings-card';
+import { WithholdingSettingsCard } from '@/components/billing/withholding-settings-card';
 import { companyBillingService } from '@/lib/api/company-billing.service';
 import {
+  billingRuleChanges,
+  parseAmount,
+  parseInactivityMonths,
+  parseNextNumber,
+  parseRate,
+  parseWithholdingRate,
+  type BillingRuleChange,
+  type BillingRuleValues,
+} from '@/lib/billing/billing-settings-rules';
+import {
+  useBillingSettingsHistory,
   useCompanyBilling,
   useDeleteCompanyLogo,
   useUploadCompanyLogo,
@@ -33,9 +51,10 @@ import {
   type BankDetails,
   type CompanyBillingSettings,
   type TranslatedTexts,
+  type UpsertCompanyBillingSettingsDto,
 } from '@/lib/types';
 import { useT } from '@/lib/i18n/lang-context';
-import { cn } from '@/lib/utils';
+import { formatBusinessDay, formatBusinessTime } from '@/lib/utils/business-day';
 
 // ─── Draft model ─────────────────────────────────────────────────────────
 
@@ -61,6 +80,7 @@ type TextKey =
 type AmountKey =
   | 'defaultTreatmentFee'
   | 'stampDuty'
+  | 'withholdingThreshold'
   | 'cbctSupplementFee'
   | 'refinementTwoArchesFee'
   | 'refinementSingleArchFee'
@@ -71,9 +91,18 @@ type AmountKey =
  * Number inputs keep the string being typed — emptying one no longer
  * snaps it back to "0" / "1" — and are parsed and validated on save.
  */
-type NumberKey = AmountKey | 'defaultTvaRate' | 'withholdingRate' | 'devisNextNumber';
+type NumberKey =
+  | AmountKey
+  | 'defaultTvaRate'
+  | 'withholdingRate'
+  | 'inactivityMonths'
+  | 'devisNextNumber';
 
-type ToggleKey = 'cbctSupplementEnabled' | 'loyaltyEnabled';
+type ToggleKey =
+  | 'cbctSupplementEnabled'
+  | 'loyaltyEnabled'
+  | 'withholdingEnabled'
+  | 'inactivityRuleEnabled';
 
 type FormFields = Record<TextKey | NumberKey, string> & Record<ToggleKey, boolean>;
 
@@ -130,8 +159,15 @@ function draftFromSettings(settings: CompanyBillingSettings | null): Draft {
       // "Droit de timbre" — Tunisian fiscal stamp, ADDED to every payment
       // (each payment has its own facture). Backend column defaults to 1.000 TND.
       stampDuty: String(s?.stampDuty ?? 1),
-      // Retenue à la source offered to practitioners when they pay; 0 = off.
-      withholdingRate: String(s?.withholdingRate ?? 0),
+      // Retenue à la source (spec §4): the master switch (off until the
+      // accountant validates; an older API without it reads as off), the
+      // rate and the threshold. Defaults = the backend's (1 %, 1 000).
+      withholdingEnabled: s?.withholdingEnabled ?? false,
+      withholdingRate: String(s?.withholdingRate ?? 1),
+      withholdingThreshold: String(s?.withholdingThreshold ?? 1000),
+      // Doctor inactivity rule (spec §5): rollout switch, period in months.
+      inactivityRuleEnabled: s?.inactivityRuleEnabled ?? false,
+      inactivityMonths: String(s?.inactivityMonths ?? 6),
       // CBCT paid supplement — off by default; enabling it prices CBCT
       // requests on NEW orders only (existing orders keep their snapshot).
       cbctSupplementEnabled: s?.cbctSupplementEnabled ?? false,
@@ -157,44 +193,12 @@ function draftFromSettings(settings: CompanyBillingSettings | null): Draft {
   };
 }
 
-// ─── Number parsing (mirrors the backend DTO limits) ─────────────────────
-
-const AMOUNT_RE = /^\d+(?:\.\d{1,3})?$/;
-const MAX_AMOUNT = 999_999_999.999;
-
-function parseAmount(raw: string): number | null {
-  const text = raw.trim().replace(',', '.');
-  if (!AMOUNT_RE.test(text)) return null;
-  const value = Number(text);
-  return value <= MAX_AMOUNT ? value : null;
-}
-
-function parseRate(raw: string): number | null {
-  const value = parseAmount(raw);
-  return value !== null && value <= 100 ? value : null;
-}
-
-/** Retenue à la source: 2 decimals, strictly below 100 (DTO: 0 to 99.99). */
-const PERCENT_RE = /^\d+(?:\.\d{1,2})?$/;
-const MAX_WITHHOLDING = 99.99;
-
-function parseWithholdingRate(raw: string): number | null {
-  const text = raw.trim().replace(',', '.');
-  if (!PERCENT_RE.test(text)) return null;
-  const value = Number(text);
-  return value <= MAX_WITHHOLDING ? value : null;
-}
-
-function parseNextNumber(raw: string): number | null {
-  const text = raw.trim();
-  if (!/^\d+$/.test(text)) return null;
-  const value = Number(text);
-  return Number.isSafeInteger(value) && value >= 1 ? value : null;
-}
+// ─── Number parsing (lib/billing/billing-settings-rules: the DTO limits) ──
 
 const AMOUNT_KEYS: readonly AmountKey[] = [
   'defaultTreatmentFee',
   'stampDuty',
+  'withholdingThreshold',
   'cbctSupplementFee',
   'refinementTwoArchesFee',
   'refinementSingleArchFee',
@@ -202,12 +206,15 @@ const AMOUNT_KEYS: readonly AmountKey[] = [
   'retainersFee',
 ];
 
-type NumberError = 'amount' | 'rate' | 'percent' | 'nextNumber';
+type NumberError = 'amount' | 'rate' | 'percent' | 'rateRequired' | 'months' | 'nextNumber';
 
 const NUMBER_ERROR_KEYS: Record<NumberError, string> = {
   amount: 'settingsDesk.billing.invalidAmount',
   rate: 'settingsDesk.billing.invalidRate',
   percent: 'settingsDesk.billing.invalidWithholdingRate',
+  // The server refuses to switch the retenue on at 0 % (400).
+  rateRequired: 'withholdingRules.settings.rateRequired',
+  months: 'settingsDesk.billing.invalidMonths',
   nextNumber: 'settingsDesk.billing.invalidNextNumber',
 };
 
@@ -225,12 +232,44 @@ function parseNumbers(fields: FormFields) {
   if (rate !== null) values.defaultTvaRate = rate;
   else errors.defaultTvaRate = 'rate';
   const withholding = parseWithholdingRate(fields.withholdingRate);
-  if (withholding !== null) values.withholdingRate = withholding;
-  else errors.withholdingRate = 'percent';
+  if (withholding === null) errors.withholdingRate = 'percent';
+  else if (fields.withholdingEnabled && withholding === 0) errors.withholdingRate = 'rateRequired';
+  else values.withholdingRate = withholding;
+  const months = parseInactivityMonths(fields.inactivityMonths);
+  if (months !== null) values.inactivityMonths = months;
+  else errors.inactivityMonths = 'months';
   const next = parseNextNumber(fields.devisNextNumber);
   if (next !== null) values.devisNextNumber = next;
   else errors.devisNextNumber = 'nextNumber';
   return { values, errors, valid: Object.keys(errors).length === 0 };
+}
+
+/**
+ * The journaled fiscal / rollout values of the saved row (null before the
+ * first save: nothing to confirm then). A field an older API omits reads
+ * as null, so the confirmation lists it as set.
+ */
+function savedRuleValues(
+  settings: CompanyBillingSettings | null,
+): Partial<Record<keyof BillingRuleValues, number | boolean | null>> | null {
+  if (!settings) return null;
+  return {
+    withholdingEnabled: settings.withholdingEnabled ?? null,
+    withholdingRate: settings.withholdingRate,
+    withholdingThreshold: settings.withholdingThreshold ?? null,
+    stampDuty: settings.stampDuty,
+    defaultTvaRate: settings.defaultTvaRate,
+    inactivityRuleEnabled: settings.inactivityRuleEnabled ?? null,
+    inactivityMonths: settings.inactivityMonths ?? null,
+  };
+}
+
+/** A save waiting on the rules confirmation. */
+interface PendingSave {
+  changes: BillingRuleChange[];
+  dto: UpsertCompanyBillingSettingsDto;
+  /** The edits the dto was built from (dropped once saved, unless retyped). */
+  submitted: Edits;
 }
 
 // ─── Page ────────────────────────────────────────────────────────────────
@@ -241,8 +280,11 @@ function parseNumbers(fields: FormFields) {
  * Sections:
  *   • Oralign gift (its own instant switch — WelcomeGiftSettingsCard)
  *   • Company info (name + address + contact + tax id + logo)
- *   • Legal identity, quote defaults, translations, bank details — saved
- *     together by the Save bar
+ *   • Legal identity, quote defaults, the rules (retenue à la source,
+ *     practitioner inactivity), translations, bank details — saved
+ *     together by the Save bar; a save that moves a fiscal or rollout
+ *     setting is confirmed first, change by change
+ *   • The journal of those rules (read only)
  *
  * When no settings row exists yet the admin fills in companyName and saves
  * to create it.
@@ -313,12 +355,16 @@ function BillingSettingsEditor({
   settings: CompanyBillingSettings | null;
   header: ReactNode;
 }) {
-  const { t } = useT();
+  const { t, lang } = useT();
   const upsert = useUpsertCompanyBilling();
   const upload = useUploadCompanyLogo();
   const removeLogo = useDeleteCompanyLogo();
+  // Page 1 of the rules journal: the same query (and cache entry) as the
+  // history card below, read here for the retenue's "last changed" line.
+  const history = useBillingSettingsHistory(1, BILLING_HISTORY_PAGE_SIZE, settings !== null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const idPrefix = useId();
+  const [pendingSave, setPendingSave] = useState<PendingSave | null>(null);
 
   const base = useMemo(() => draftFromSettings(settings), [settings]);
   const [edits, setEdits] = useState<Edits>(NO_EDITS);
@@ -361,6 +407,27 @@ function BillingSettingsEditor({
   const hasEdits = edits !== NO_EDITS;
   const canSave = !upsert.isPending && form.companyName.trim() !== '' && numbers.valid;
 
+  // "Dernière modification le … par …" under the retenue: its latest
+  // journaled change (switch, rate or threshold), Tunis time.
+  const lastWithholdingChange = useMemo(() => {
+    const entry = history.data?.data.find((row) => row.field.startsWith('withholding'));
+    if (!entry) return null;
+    return {
+      date: `${formatBusinessDay(entry.createdAt, lang)} ${formatBusinessTime(entry.createdAt, lang)}`,
+      actor: entry.actorName ?? t('withholdingRules.history.system'),
+    };
+  }, [history.data, lang, t]);
+
+  const submit = (dto: UpsertCompanyBillingSettingsDto, submitted: Edits) => {
+    upsert.mutate(dto, {
+      // The cache now holds the saved row: drop the overlay so the form
+      // shows it — unless the admin kept typing while it was saving.
+      onSuccess: () => setEdits((current) => (current === submitted ? NO_EDITS : current)),
+      // Saved or refused (the toast says why), the confirmation is done.
+      onSettled: () => setPendingSave(null),
+    });
+  };
+
   const handleSave = () => {
     if (!canSave) return;
     const n = numbers.values;
@@ -368,49 +435,61 @@ function BillingSettingsEditor({
     // stores '' as "cleared" (undefined would keep the old value).
     const text = (key: TextKey) => form[key].trim();
     const submitted = edits;
-    upsert.mutate(
-      {
-        companyName: text('companyName'),
-        companyAddress: text('companyAddress'),
-        companyCity: text('companyCity'),
-        companyCountry: text('companyCountry'),
-        companyPhone: text('companyPhone'),
-        companyEmail: text('companyEmail'),
-        taxRegistrationNumber: text('taxRegistrationNumber'),
-        tradeName: text('tradeName'),
-        legalForm: text('legalForm'),
-        registreDeCommerce: text('registreDeCommerce'),
-        hostingProvider: text('hostingProvider'),
-        hostingProviderUrl: text('hostingProviderUrl'),
-        websiteDomain: text('websiteDomain'),
-        defaultTvaRate: n.defaultTvaRate,
-        defaultTreatmentFee: n.defaultTreatmentFee,
-        stampDuty: n.stampDuty,
-        withholdingRate: n.withholdingRate,
-        cbctSupplementEnabled: form.cbctSupplementEnabled,
-        // Undefined (= unchanged) only when the supplement is off and its
-        // draft is not a number.
-        cbctSupplementFee: n.cbctSupplementFee,
-        refinementTwoArchesFee: n.refinementTwoArchesFee,
-        refinementSingleArchFee: n.refinementSingleArchFee,
-        replacementAlignerFee: n.replacementAlignerFee,
-        retainersFee: n.retainersFee,
-        loyaltyEnabled: form.loyaltyEnabled,
-        // welcomeGiftEnabled is NOT sent: the gift card saves it on its own,
-        // and a stale draft value must never overwrite that switch.
-        defaultCurrency: currency,
-        devisPrefix: text('devisPrefix') || 'DEV',
-        devisNextNumber: n.devisNextNumber,
-        legalTextTranslations: legal,
-        footerTextTranslations: footer,
-        bankDetails: bank,
-      },
-      {
-        // The cache now holds the saved row: drop the overlay so the form
-        // shows it — unless the admin kept typing while it was saving.
-        onSuccess: () => setEdits((current) => (current === submitted ? NO_EDITS : current)),
-      },
-    );
+    const dto: UpsertCompanyBillingSettingsDto = {
+      companyName: text('companyName'),
+      companyAddress: text('companyAddress'),
+      companyCity: text('companyCity'),
+      companyCountry: text('companyCountry'),
+      companyPhone: text('companyPhone'),
+      companyEmail: text('companyEmail'),
+      taxRegistrationNumber: text('taxRegistrationNumber'),
+      tradeName: text('tradeName'),
+      legalForm: text('legalForm'),
+      registreDeCommerce: text('registreDeCommerce'),
+      hostingProvider: text('hostingProvider'),
+      hostingProviderUrl: text('hostingProviderUrl'),
+      websiteDomain: text('websiteDomain'),
+      defaultTvaRate: n.defaultTvaRate,
+      defaultTreatmentFee: n.defaultTreatmentFee,
+      stampDuty: n.stampDuty,
+      withholdingRate: n.withholdingRate,
+      withholdingEnabled: form.withholdingEnabled,
+      withholdingThreshold: n.withholdingThreshold,
+      inactivityRuleEnabled: form.inactivityRuleEnabled,
+      inactivityMonths: n.inactivityMonths,
+      cbctSupplementEnabled: form.cbctSupplementEnabled,
+      // Undefined (= unchanged) only when the supplement is off and its
+      // draft is not a number.
+      cbctSupplementFee: n.cbctSupplementFee,
+      refinementTwoArchesFee: n.refinementTwoArchesFee,
+      refinementSingleArchFee: n.refinementSingleArchFee,
+      replacementAlignerFee: n.replacementAlignerFee,
+      retainersFee: n.retainersFee,
+      loyaltyEnabled: form.loyaltyEnabled,
+      // welcomeGiftEnabled is NOT sent: the gift card saves it on its own,
+      // and a stale draft value must never overwrite that switch.
+      defaultCurrency: currency,
+      devisPrefix: text('devisPrefix') || 'DEV',
+      devisNextNumber: n.devisNextNumber,
+      legalTextTranslations: legal,
+      footerTextTranslations: footer,
+      bankDetails: bank,
+    };
+    // A save that moves a fiscal or rollout setting (journaled by the
+    // server) is confirmed first, change by change; any other goes at once.
+    // numbers.valid guarantees every rules value below is parsed.
+    const next: BillingRuleValues = {
+      withholdingEnabled: form.withholdingEnabled,
+      withholdingRate: n.withholdingRate ?? 0,
+      withholdingThreshold: n.withholdingThreshold ?? 0,
+      stampDuty: n.stampDuty ?? 0,
+      defaultTvaRate: n.defaultTvaRate ?? 0,
+      inactivityRuleEnabled: form.inactivityRuleEnabled,
+      inactivityMonths: n.inactivityMonths ?? 0,
+    };
+    const changes = billingRuleChanges(savedRuleValues(settings), next);
+    if (changes.length > 0) setPendingSave({ changes, dto, submitted });
+    else submit(dto, submitted);
   };
 
   return (
@@ -713,29 +792,8 @@ function BillingSettingsEditor({
               error={numberError('cbctSupplementFee')}
             />
           </div>
-          {/* ── Retenue à la source ──────────────────────────────────
-              The practitioner may keep this % of the amount due back when
-              paying (he remits it to the tax office). 0 = never offered.
-              Snapshotted on each payment, so changing it never rewrites
-              past invoices. Full width: the help sits beside the rate. */}
-          <div className="grid gap-3 rounded-lg border p-4 sm:col-span-2 sm:grid-cols-2 sm:items-start">
-            <div className="space-y-0.5">
-              <p className="font-medium">{t('accountBillingSettings.withholdingTitle')}</p>
-              <p className="text-xs text-muted-foreground">
-                {t('accountBillingSettings.withholdingHelp')}
-              </p>
-            </div>
-            <Field
-              name="withholdingRate"
-              label={t('accountBillingSettings.withholdingRateLabel')}
-              value={form.withholdingRate}
-              inputMode="decimal"
-              onValueChange={setText}
-              placeholder="1"
-              helper={t('accountBillingSettings.withholdingRateHelp')}
-              error={numberError('withholdingRate')}
-            />
-          </div>
+          {/* The retenue à la source has its own card below (switch, rate,
+              threshold), next to the inactivity rule. */}
           {/* ── Beyond-the-pack tariffs (grille 2026) ────────────────
               Informational price list shown on the packs page and in
               doctor-facing surfaces. 0 = not configured → hidden. Full
@@ -833,6 +891,34 @@ function BillingSettingsEditor({
           />
         </CardContent>
       </Card>
+
+      {/* ─── Rules: retenue à la source (spec §4), inactivity (spec §5) ──── */}
+      {/* Saved with the form; a change of any of them is confirmed first
+          (BillingRulesConfirmDialog) and journaled by the server. */}
+      <WithholdingSettingsCard
+        savedEnabled={settings?.withholdingEnabled === true}
+        enabled={form.withholdingEnabled}
+        onEnabledChange={(checked) => setToggle('withholdingEnabled', checked)}
+        rate={form.withholdingRate}
+        threshold={form.withholdingThreshold}
+        onValueChange={setText}
+        rateError={numberError('withholdingRate')}
+        thresholdError={numberError('withholdingThreshold')}
+        parsedRate={numbers.values.withholdingRate ?? null}
+        parsedThreshold={numbers.values.withholdingThreshold ?? null}
+        stampDuty={numbers.values.stampDuty ?? null}
+        currency={currency}
+        lastChange={lastWithholdingChange}
+      />
+
+      <InactivityRuleCard
+        savedEnabled={settings?.inactivityRuleEnabled === true}
+        enabled={form.inactivityRuleEnabled}
+        onEnabledChange={(checked) => setToggle('inactivityRuleEnabled', checked)}
+        months={form.inactivityMonths}
+        onMonthsChange={setText}
+        monthsError={numberError('inactivityMonths')}
+      />
 
       {/* ─── Translations ────────────────────────────────────────────────── */}
       <Card>
@@ -980,86 +1066,19 @@ function BillingSettingsEditor({
           {t('accountBillingSettings.saveSettings')}
         </Button>
       </div>
-    </div>
-  );
-}
 
-// ─── Field ───────────────────────────────────────────────────────────────
+      {/* Read-only journal of the rules; nothing to show before the first save. */}
+      {settings ? <BillingSettingsHistory currency={currency} /> : null}
 
-interface FieldProps<N extends string> {
-  name: N;
-  label: string;
-  value: string;
-  onValueChange: (name: N, value: string) => void;
-  placeholder?: string;
-  type?: 'text' | 'email' | 'tel' | 'url';
-  inputMode?: 'decimal' | 'numeric';
-  autoComplete?: string;
-  required?: boolean;
-  wide?: boolean;
-  helper?: string;
-  error?: string;
-  disabled?: boolean;
-  /** Upper-case what is typed (currency, quote prefix). */
-  uppercase?: boolean;
-}
-
-function FieldImpl<N extends string>({
-  name,
-  label,
-  value,
-  onValueChange,
-  placeholder,
-  type = 'text',
-  inputMode,
-  autoComplete = 'off',
-  required,
-  wide,
-  helper,
-  error,
-  disabled,
-  uppercase,
-}: FieldProps<N>) {
-  const id = useId();
-  const messageId = `${id}-message`;
-  const message = error ?? helper;
-  return (
-    <div className={wide ? 'sm:col-span-2' : undefined}>
-      <Label htmlFor={id} className="mb-1.5 inline-flex items-center gap-1">
-        {label}
-        {required && (
-          <span aria-hidden className="text-red-500">
-            *
-          </span>
-        )}
-      </Label>
-      <Input
-        id={id}
-        name={name}
-        type={type}
-        inputMode={inputMode}
-        autoComplete={autoComplete}
-        value={value}
-        onChange={(e) =>
-          onValueChange(name, uppercase ? e.target.value.toUpperCase() : e.target.value)
-        }
-        placeholder={placeholder}
-        required={required}
-        disabled={disabled}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={message ? messageId : undefined}
+      <BillingRulesConfirmDialog
+        changes={pendingSave?.changes ?? []}
+        currency={currency}
+        pending={upsert.isPending}
+        onConfirm={() => {
+          if (pendingSave && !upsert.isPending) submit(pendingSave.dto, pendingSave.submitted);
+        }}
+        onCancel={() => setPendingSave(null)}
       />
-      {message && (
-        <p
-          id={messageId}
-          className={cn('mt-1 text-xs', error ? 'text-destructive' : 'text-muted-foreground')}
-        >
-          {message}
-        </p>
-      )}
     </div>
   );
 }
-
-/** Memoised: with the stable setters above, typing re-renders one field. */
-const Field = memo(FieldImpl) as typeof FieldImpl;

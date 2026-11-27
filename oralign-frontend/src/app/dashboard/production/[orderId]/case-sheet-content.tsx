@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ChevronRight, FolderOpen, History, Info, RefreshCw } from 'lucide-react';
+import { ChevronRight, FolderOpen, History, Info, Lock, RefreshCw } from 'lucide-react';
 import {
   ActButtons,
   CaseSheetHeader,
@@ -14,9 +14,11 @@ import { ProductionDeclareSheet } from '@/components/production/declare-form';
 import {
   groupDeclarations,
   isProductionRole,
+  isAdminRole,
   productionErrorText,
   type DeclarationGroup,
 } from '@/components/production/production-format';
+import { nothingReleased } from '@/components/production/release-format';
 import {
   BackLink,
   ProductionFrame,
@@ -96,6 +98,7 @@ function SheetError({ error, onRetry }: { error: unknown; onRetry: () => void })
 
 function CaseSheetBody({ sheet }: { sheet: ProductionCaseSheet }) {
   const { t } = useT();
+  const { user } = useAuth();
   const [form, setForm] = useState<{ act: ProductionEventType; open: boolean }>({
     act: 'model_printed',
     open: false,
@@ -109,6 +112,9 @@ function CaseSheetBody({ sheet }: { sheet: ProductionCaseSheet }) {
     <>
       <CaseSheetHeader
         sheet={sheet}
+        // The manual unlock (spec §3) is the admins' act; technicians see the
+        // chips only (and nothing is fetched for them while the user loads).
+        canUnlock={isAdminRole(user?.role)}
         actions={
           // From md up the dossier sits by the case's name; phones keep the
           // big card under the history, where the thumb already is.
@@ -128,6 +134,16 @@ function CaseSheetBody({ sheet }: { sheet: ProductionCaseSheet }) {
         >
           <Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
           {t(`production.sheet.cannotDeclare.${sheet.cannotDeclareReason}`)}
+        </p>
+      )}
+
+      {!sheet.cannotDeclareReason && nothingReleased(sheet.release) && (
+        <p
+          role="status"
+          className="flex items-start gap-2 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-950 ring-1 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-100 dark:ring-amber-900"
+        >
+          <Lock className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+          {t(isAdminRole(user?.role) ? 'production.sheet.noneBannerAdmin' : 'production.sheet.noneBanner')}
         </p>
       )}
 

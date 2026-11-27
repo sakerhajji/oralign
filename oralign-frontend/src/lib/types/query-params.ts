@@ -2,6 +2,7 @@
 // Split out of the former 2,000-line lib/types/index.ts; import via '@/lib/types'.
 
 import { Gender, OrderStatus, UserRole, VerificationStatus } from './enums';
+import type { DoctorActivityStatus } from './entities';
 
 // ==========================================
 // QUERY PARAMS
@@ -21,6 +22,11 @@ export interface UserFilterParams extends PaginationParams {
   verificationStatus?: VerificationStatus;
   /** Oralign gift mark — narrows the list to dentists. */
   welcomeGift?: 'used' | 'available';
+  /**
+   * Doctor inactivity (spec §5): active, warned (deadline within 30
+   * days) or inactive (dormant). Narrows the list to dentists.
+   */
+  activity?: DoctorActivityStatus;
 }
 
 /**

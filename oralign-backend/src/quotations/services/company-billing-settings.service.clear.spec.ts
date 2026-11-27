@@ -44,11 +44,21 @@ function makeService() {
   const update = jest.fn(({ data }: { data: Record<string, unknown> }) =>
     Promise.resolve({ ...stored, ...data }),
   );
-  const prisma = {
+  const tx = {
+    $queryRaw: jest.fn().mockResolvedValue([]),
     companyBillingSettings: {
-      findFirst: jest.fn().mockResolvedValue(stored),
+      findFirst: jest.fn().mockResolvedValue({ id: stored.id }),
+      findUnique: jest.fn().mockResolvedValue(stored),
       update,
     },
+    billingSettingsAuditLog: {
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+    user: { findUnique: jest.fn().mockResolvedValue(null) },
+  };
+  // upsert runs in one transaction (row lock + settings history).
+  const prisma = {
+    $transaction: jest.fn((run: (client: typeof tx) => unknown) => run(tx)),
   } as unknown as PrismaService;
   return { service: new CompanyBillingSettingsService(prisma), update };
 }

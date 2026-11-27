@@ -4,12 +4,16 @@ import {
   paymentCharge,
   round3,
   toAmount,
+  withholdingIneligibility,
   type PaymentCharge,
+  type WithholdingIneligibility,
+  type WithholdingRule,
 } from '../../common/billing/tax-split';
 import {
   BadRequestException,
   ConflictException,
 } from '../../common/exceptions/app.exception';
+import { WITHHOLDING_ERROR } from '../../common/exceptions/domain-error-codes';
 
 /**
  * Money rules every payment entry point shares (installments and the
@@ -73,68 +77,209 @@ export function isAdminRecordedMethod(method: PaymentMethod): boolean {
 
 /** The settings a payment's charge reads (the active billing settings). */
 export interface ChargeSettings {
-  /** Retenue à la source rate (%); 0 = the feature is off. */
+  /** Retenue à la source rate (%); 0 = the retenue cannot apply. */
   withholdingRate?: NumLike;
   /** Droit de timbre added on top of every payment. */
   stampDuty?: NumLike;
+  /**
+   * Master switch of the retenue (CompanyBillingSettings.withholdingEnabled,
+   * spec §4). Anything but true is off: the retenue is never applied and
+   * asking for it is a 400 WITHHOLDING_DISABLED.
+   */
+  withholdingEnabled?: boolean | null;
+  /**
+   * Base (TTC, stamp excluded) from which the retenue may apply: a payment
+   * below it is a 400 WITHHOLDING_BELOW_THRESHOLD. null / undefined = no
+   * threshold. Also snapshotted on the charge (PaymentCharge
+   * .withholdingThreshold).
+   */
+  withholdingThreshold?: NumLike;
+}
+
+/** The retenue rule the charge settings describe. */
+export function withholdingRuleOf(settings: ChargeSettings): WithholdingRule {
+  return {
+    enabled: settings.withholdingEnabled,
+    rate: settings.withholdingRate,
+    threshold: settings.withholdingThreshold,
+  };
+}
+
+/**
+ * Why the retenue cannot apply to a payment of `due` under `settings`
+ * (null when it can): switched off / rate 0, or `due` (the installment, or
+ * the fee + CBCT: TTC, stamp excluded) below the threshold.
+ */
+export function chargeWithholdingIneligibility(
+  due: NumLike,
+  settings: ChargeSettings,
+): WithholdingIneligibility | null {
+  return withholdingIneligibility(due, withholdingRuleOf(settings));
+}
+
+const thresholdFormat = new Intl.NumberFormat('fr-FR', {
+  minimumFractionDigits: 3,
+  maximumFractionDigits: 3,
+});
+
+/**
+ * Refuse the retenue on a payment it cannot apply to: 400
+ * WITHHOLDING_DISABLED (switched off or rate 0), 400
+ * WITHHOLDING_BELOW_THRESHOLD (with `withholdingThreshold`, a 3-decimal
+ * number, in the error body). Called only when the practitioner asked for
+ * it: a payment without the retenue is always allowed.
+ */
+export function assertWithholdingAllowed(
+  due: NumLike,
+  settings: ChargeSettings,
+): void {
+  const why = chargeWithholdingIneligibility(due, settings);
+  if (why === 'disabled') {
+    throw new BadRequestException(
+      "La retenue à la source n'est pas activée : le montant dû doit être payé en entier.",
+      WITHHOLDING_ERROR.WITHHOLDING_DISABLED,
+    );
+  }
+  if (why === 'below_threshold') {
+    const threshold = round3(settings.withholdingThreshold);
+    throw new BadRequestException(
+      `La retenue à la source ne s'applique qu'aux paiements d'au moins ${thresholdFormat.format(
+        threshold.toNumber(),
+      )} TND (TTC, hors droit de timbre) : ce montant doit être payé en entier.`,
+      WITHHOLDING_ERROR.WITHHOLDING_BELOW_THRESHOLD,
+      { withholdingThreshold: toAmount(threshold) },
+    );
+  }
 }
 
 /**
  * What a payment of `due` (TTC) charges as the settings stand: their stamp
  * added on top, their retenue (on the due, stamp excluded) taken off when
- * the practitioner applies it. Never throws: a rate of 0 applies none.
- * This is what a new attempt would charge, so it is also what a live one
- * is compared with before it is handed back.
+ * the practitioner applies it AND the rule lets it apply (switched on,
+ * rate above 0, `due` at or above the threshold). Never throws: an
+ * ineligible retenue is simply not applied. This is what a new attempt
+ * would charge, so it is also what a live one is compared with before it
+ * is handed back (a live attempt with a retenue that no longer applies
+ * fails that comparison). The settings' threshold rides along as the
+ * charge's snapshot.
  */
 export function expectedCharge(
   apply: boolean | null | undefined,
   due: NumLike,
   settings: ChargeSettings,
 ): PaymentCharge {
+  const applied =
+    apply === true && chargeWithholdingIneligibility(due, settings) === null;
   return paymentCharge(
     due,
     settings.stampDuty,
-    apply ? settings.withholdingRate : null,
+    applied ? settings.withholdingRate : null,
+    settings.withholdingThreshold,
   );
 }
 
 /**
- * The charge a new payment of `due` is created with. The practitioner only
- * says yes or no to the retenue: the rate and the stamp are the company
- * settings at payment time and the due is read server-side, never from
- * the client. A rate of 0 means the retenue is off, so asking for it then
- * is a 400 rather than a silent "not applied" he would not notice.
+ * The charge a new payment of `due` is created with: the ONE rule of the
+ * five payment entry points (card and transfer of an installment, cash /
+ * cheque of an installment, card of the treatment fee, the treatment
+ * fee's cash / cheque / transfer). The practitioner only says yes or no to
+ * the retenue: the rate, the switch, the threshold and the stamp are the
+ * company settings at payment time and the due is read server-side, never
+ * from the client. Asking for a retenue that cannot apply is a 400
+ * (assertWithholdingAllowed) rather than a silent "not applied" he would
+ * not notice.
  *
  *   1 000 due, stamp 1, retenue 1 %  ->  total 1 001, retenue 10, cash 991
  *   1 000 due, stamp 1, no retenue   ->  total 1 001, cash 1 001
+ *     999 due, threshold 1 000, retenue asked -> 400 BELOW_THRESHOLD
  */
 export function resolvePaymentCharge(
   apply: boolean | null | undefined,
   due: NumLike,
   settings: ChargeSettings,
 ): PaymentCharge {
-  // gt(0), not isPositive(): Decimal.js counts 0 as positive.
-  if (apply && !dec(settings.withholdingRate).gt(0)) {
-    throw new BadRequestException(
-      "La retenue à la source n'est pas activée : le montant dû doit être payé en entier.",
-      'WITHHOLDING_DISABLED',
-    );
-  }
+  if (apply === true) assertWithholdingAllowed(due, settings);
   return expectedCharge(apply, due, settings);
 }
 
-/** The active billing settings' retenue rate and stamp (0 when none). */
+/** The charge settings as read: Decimals, 0 / false / null when unset. */
+export interface ResolvedChargeSettings {
+  withholdingRate: Prisma.Decimal;
+  stampDuty: Prisma.Decimal;
+  withholdingEnabled: boolean;
+  /** null when there is no active settings row (nothing to snapshot). */
+  withholdingThreshold: Prisma.Decimal | null;
+}
+
+/** The settings columns every payment's charge reads, in ONE place. */
+export const CHARGE_SETTINGS_SELECT = {
+  withholdingRate: true,
+  stampDuty: true,
+  withholdingEnabled: true,
+  withholdingThreshold: true,
+} satisfies Prisma.CompanyBillingSettingsSelect;
+
+type ChargeSettingsRow = {
+  withholdingRate?: NumLike;
+  stampDuty?: NumLike;
+  withholdingEnabled?: boolean | null;
+  withholdingThreshold?: NumLike;
+} | null;
+
+function resolveChargeSettings(row: ChargeSettingsRow): ResolvedChargeSettings {
+  return {
+    withholdingRate: dec(row?.withholdingRate),
+    stampDuty: dec(row?.stampDuty),
+    withholdingEnabled: row?.withholdingEnabled === true,
+    withholdingThreshold:
+      row?.withholdingThreshold === null ||
+      row?.withholdingThreshold === undefined
+        ? null
+        : round3(row.withholdingThreshold),
+  };
+}
+
+/**
+ * The active billing settings' retenue (rate, switch, threshold) and stamp:
+ * the ONE read of the charge settings (0 / off / null when none).
+ */
 export async function readChargeSettings(
   db: Pick<Prisma.TransactionClient, 'companyBillingSettings'>,
-): Promise<{ withholdingRate: Prisma.Decimal; stampDuty: Prisma.Decimal }> {
+): Promise<ResolvedChargeSettings> {
   const settings = await db.companyBillingSettings.findFirst({
     where: { isActive: true },
     orderBy: { updatedAt: 'desc' },
-    select: { withholdingRate: true, stampDuty: true },
+    select: CHARGE_SETTINGS_SELECT,
+  });
+  return resolveChargeSettings(settings);
+}
+
+/**
+ * The treatment fee's settings: the charge settings plus the configured
+ * fee, in the same single read (the treatment-fee service and the card
+ * checkout price the fee the same way).
+ */
+export async function readTreatmentFeeSettings(
+  db: Pick<Prisma.TransactionClient, 'companyBillingSettings'>,
+): Promise<
+  ResolvedChargeSettings & {
+    defaultTreatmentFee: Prisma.Decimal;
+    defaultCurrency: string | null;
+  }
+> {
+  const settings = await db.companyBillingSettings.findFirst({
+    where: { isActive: true },
+    orderBy: { updatedAt: 'desc' },
+    select: {
+      ...CHARGE_SETTINGS_SELECT,
+      defaultTreatmentFee: true,
+      defaultCurrency: true,
+    },
   });
   return {
-    withholdingRate: dec(settings?.withholdingRate),
-    stampDuty: dec(settings?.stampDuty),
+    ...resolveChargeSettings(settings),
+    defaultTreatmentFee: dec(settings?.defaultTreatmentFee),
+    defaultCurrency: settings?.defaultCurrency ?? null,
   };
 }
 
@@ -145,6 +290,7 @@ export function paymentChargeData(charge: PaymentCharge) {
     withholdingRate: charge.withholdingRate,
     withholdingAmount: charge.withholding,
     stampAmount: charge.stamp,
+    withholdingThreshold: charge.withholdingThreshold,
   };
 }
 
@@ -245,9 +391,27 @@ export function toRate(value: NumLike): number | null {
   return Number(dec(value).toDecimalPlaces(2).toFixed(2));
 }
 
+/**
+ * A retenue threshold snapshot (Decimal(12,3)) as a JSON number with 3
+ * decimals; null stays null (a payment taken before the threshold
+ * existed, 2026-11-27). The one conversion for every payment response.
+ */
+export function toThreshold(value: NumLike): number | null {
+  if (value === null || value === undefined) return null;
+  return toAmount(value);
+}
+
+/** `withholdingThreshold` as a number, only on rows that selected it. */
+type ThresholdJson<T> = 'withholdingThreshold' extends keyof T
+  ? { withholdingThreshold: number | null }
+  : unknown;
+
 export type PaymentJson<T> = Omit<
   T,
-  'withholdingRate' | 'withholdingAmount' | 'stampAmount'
+  | 'withholdingRate'
+  | 'withholdingAmount'
+  | 'stampAmount'
+  | 'withholdingThreshold'
 > & {
   withholdingRate: number | null;
   withholdingAmount: number;
@@ -257,12 +421,14 @@ export type PaymentJson<T> = Omit<
   grossAmount: number;
   /** amount + withholdingAmount - stampAmount: what it settles (the installment). */
   settledAmount: number;
-};
+} & ThresholdJson<T>;
 
 /**
  * A payment as the API returns it. `amount` keeps its historic shape (the
  * Decimal string, the cash); the retenue and stamp fields are numbers, and
- * grossAmount / settledAmount spare every screen the arithmetic.
+ * grossAmount / settledAmount spare every screen the arithmetic. The
+ * retenue threshold snapshot, when the row carries it, is a 3-decimal
+ * number (toThreshold), null kept.
  */
 export function toPaymentJson<
   T extends {
@@ -272,14 +438,24 @@ export function toPaymentJson<
     stampAmount?: NumLike;
   },
 >(payment: T): PaymentJson<T> {
+  const threshold =
+    'withholdingThreshold' in payment
+      ? {
+          withholdingThreshold: toThreshold(
+            (payment as { withholdingThreshold?: NumLike })
+              .withholdingThreshold,
+          ),
+        }
+      : {};
   return {
     ...payment,
+    ...threshold,
     withholdingRate: toRate(payment.withholdingRate),
     withholdingAmount: toAmount(payment.withholdingAmount),
     stampAmount: toAmount(payment.stampAmount),
     grossAmount: toAmount(paymentGross(payment)),
     settledAmount: toAmount(paymentSettled(payment)),
-  };
+  } as PaymentJson<T>;
 }
 
 // ─── One payment at a time ──────────────────────────────────────────

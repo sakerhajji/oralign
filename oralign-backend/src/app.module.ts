@@ -13,6 +13,7 @@ import { CommonModule } from './common/common.module';
 import { AccessModule } from './common/access/access.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
+import { DoctorActivityModule } from './users/activity/doctor-activity.module';
 import { DentistProfileModule } from './dentist-profile/dentist-profile.module';
 import { WorkingHoursModule } from './working-hours/working-hours.module';
 import { AppointmentsModule } from './appointments/appointments.module';
@@ -67,7 +68,7 @@ function buildRedisUrl(): string {
     // We don't need cross-process delivery — a single Nest instance owns
     // the bus and the writes are committed before any listener runs.
     EventEmitterModule.forRoot({
-      wildcard: true,         // allow listener globs like `payment.*` later
+      wildcard: true, // allow listener globs like `payment.*` later
       delimiter: '.',
       maxListeners: 50,
       verboseMemoryLeak: false,
@@ -117,6 +118,8 @@ function buildRedisUrl(): string {
     MailModule,
     AuthModule,
     UsersModule,
+    // Doctor inactivity: sweep, ordering policy, reactivation (spec §5).
+    DoctorActivityModule,
     DentistProfileModule,
     WorkingHoursModule,
     AppointmentsModule,

@@ -64,8 +64,20 @@ export interface CompanyBillingSettings {
   // (owner decision 2026-11-20). Decimal on the backend, serialised as a
   // number like `defaultTreatmentFee`.
   stampDuty: number;
-  // Retenue à la source (%) a practitioner may apply when paying; 0 = off.
+  // Retenue à la source (%) a practitioner may apply when paying (once
+  // withholdingEnabled is on); 0 = the retenue can never apply.
   withholdingRate: number;
+  // Master switch of the retenue (spec §4), off until the accountant
+  // validates. Optional only so an older API never breaks the form
+  // (absent reads as off, like the backend default).
+  withholdingEnabled?: boolean;
+  // Payment base (TTC, stamp excluded) from which the retenue may apply,
+  // 3 decimals; a payment below it cannot carry it. Default 1 000.
+  withholdingThreshold?: number;
+  // Doctor inactivity rule (spec §5): rollout switch (default off) and
+  // period in calendar months (1-24, default 6).
+  inactivityRuleEnabled?: boolean;
+  inactivityMonths?: number;
   // CBCT paid supplement — when enabled with a fee > 0, requesting CBCT
   // on a NEW order snapshots this amount onto the order. Currency
   // follows defaultCurrency.
@@ -120,8 +132,15 @@ export interface UpsertCompanyBillingSettingsDto {
   defaultTreatmentFee?: number;
   /** "Droit de timbre" — fiscal stamp added to every payment. */
   stampDuty?: number;
-  /** Retenue à la source (%); 0 turns the option off. */
+  /** Retenue à la source (%), 0 to 99.99, 2 decimals. */
   withholdingRate?: number;
+  /** Retenue master switch (spec §4); on needs a rate above 0 (else 400). */
+  withholdingEnabled?: boolean;
+  /** Retenue threshold, ≥ 0, 3 decimals (spec §4). */
+  withholdingThreshold?: number;
+  /** Doctor inactivity rule switch and period, whole months 1-24 (spec §5). */
+  inactivityRuleEnabled?: boolean;
+  inactivityMonths?: number;
   /** CBCT paid supplement toggle + fee (currency = defaultCurrency). */
   cbctSupplementEnabled?: boolean;
   cbctSupplementFee?: number;
@@ -144,6 +163,45 @@ export interface UpsertCompanyBillingSettingsDto {
   footerTextTranslations?: TranslatedTexts;
   bankDetails?: BankDetails;
   isActive?: boolean;
+}
+
+/**
+ * A fiscal or rollout setting journaled on every change
+ * (BillingSettingsAuditLog.field, backend billing-settings-audit.ts).
+ */
+export type BillingSettingsAuditField =
+  | 'withholdingEnabled'
+  | 'withholdingRate'
+  | 'withholdingThreshold'
+  | 'stampDuty'
+  | 'defaultTvaRate'
+  | 'inactivityRuleEnabled'
+  | 'inactivityMonths';
+
+/**
+ * One change of a fiscal or rollout setting, from
+ * GET /admin/company-billing-settings/history (newest first). `before` /
+ * `after` are JSON scalars: booleans for switches, an integer for the
+ * months, decimal strings for rates and amounts ("1000.000", "1.00");
+ * `before` is null for the initial value.
+ */
+export interface BillingSettingsAuditEntry {
+  id: string;
+  field: BillingSettingsAuditField | string;
+  before: string | number | boolean | null;
+  after: string | number | boolean | null;
+  /** The admin's name at the time; null for a system write. */
+  actorName: string | null;
+  /** ISO 8601 (UTC); shown in Africa/Tunis. */
+  createdAt: string;
+}
+
+export interface BillingSettingsHistoryPage {
+  data: BillingSettingsAuditEntry[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
 }
 
 /**
@@ -186,20 +244,49 @@ export interface QuotationCompanySnapshot {
   legalText: string;
   footerText: string;
   bankDetails?: BankDetails | null;
+  /**
+   * Droit de timbre added to each payment, frozen at send time (TND, 3
+   * dp). Absent from snapshots made before 2026-11-20: readers fall back
+   * to the live settings.
+   */
+  stampDuty?: number | null;
+  /**
+   * The retenue à la source rule as the devis was sent (spec §4). Absent
+   * from snapshots made before 2026-11-27: readers fall back to the live
+   * settings (quote-retenue-estimate.ts).
+   */
+  withholdingEnabled?: boolean;
+  /** Rate in %; 0 = the retenue cannot apply. */
+  withholdingRate?: number | null;
+  /** Base (TTC, stamp excluded) from which it applies; 0 = every payment. */
+  withholdingThreshold?: number | null;
   generatedAt: string;
 }
 
-/** Snapshot of the doctor's DentistProfile at quotation-issue time. */
+/**
+ * Snapshot of the doctor (account + DentistProfile) at quotation-issue
+ * time, rebuilt on every draft → sent. The registration number is never
+ * copied (a devis does not print it).
+ */
 export interface QuotationClinicSnapshot {
   doctorId: string;
   doctorFullName: string;
   doctorEmail: string;
+  /** The account phone (since 2026-11-27). */
+  doctorPhone?: string | null;
+  /** The patient, so the PDF header needs no live join (since 2026-11-27). */
+  patientFullName?: string | null;
   clinicName?: string | null;
   clinicAddress?: string | null;
   city?: string | null;
   country?: string | null;
   clinicPhone?: string | null;
   clinicEmail?: string | null;
+  /** THE contact a devis prints: practice first, account as fallback (since 2026-11-27). */
+  contactPhone?: string | null;
+  contactEmail?: string | null;
+  /** The practitioner's matricule fiscal. */
+  taxId?: string | null;
   logoUrl?: string | null;
   generatedAt: string;
 }

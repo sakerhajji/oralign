@@ -127,6 +127,42 @@ export const commerceDomainDict = {
       fr: 'Le serveur recalcule tous les totaux à partir des lignes.',
     } as T,
     notFound: { en: 'This invoice no longer exists.', fr: 'Cette facture n’existe plus.' } as T,
+    // Client snapshot (spec §6): what the facture freezes about the
+    // practitioner it bills.
+    snapshotPractitioner: {
+      en: 'Billed to the practitioner: his practice name, contact and tax number are recorded on the invoice when it is created.',
+      fr: 'Facturée au praticien : le nom de son cabinet, ses coordonnées et son matricule fiscal sont enregistrés sur la facture à sa création.',
+    } as T,
+    snapshotOtherName: {
+      en: 'Billed under another name than the practitioner’s: printed as typed, without “Doctor”.',
+      fr: 'Facturée sous un autre nom que celui du praticien : imprimée telle que saisie, sans « Docteur ».',
+    } as T,
+    snapshotFrozen: {
+      en: 'Recorded on the invoice: {clinic}',
+      fr: 'Enregistré sur la facture : {clinic}',
+    } as T,
+    snapshotFrozenNone: {
+      en: 'Billed under its own name: no practitioner lead.',
+      fr: 'Facturée sous son propre nom : sans mention « Docteur ».',
+    } as T,
+    // Retenue à la source on a manual invoice (spec §4).
+    withholdingDisabled: {
+      en: 'The withholding tax is switched off in the billing settings: no retenue can be recorded.',
+      fr: 'La retenue à la source est désactivée dans les réglages de facturation : aucune retenue ne peut être enregistrée.',
+    } as T,
+    withholdingBelowThreshold: {
+      en: 'The withholding tax only applies from {threshold} (incl. tax, stamp duty excluded): this invoice is under it.',
+      fr: 'La retenue à la source ne s’applique qu’à partir de {threshold} (TTC, hors droit de timbre) : cette facture est en dessous.',
+    } as T,
+    withholdingThresholdNote: {
+      en: 'Applies from {threshold} (incl. tax, stamp duty excluded).',
+      fr: 'S’applique à partir de {threshold} (TTC, hors droit de timbre).',
+    } as T,
+    quoteRemainingAfter: { en: 'Left on the quote', fr: 'Reste sur le devis' } as T,
+    quoteRemainingAfterHint: {
+      en: 'Right after this payment, frozen when the invoice was issued.',
+      fr: 'Juste après ce paiement, figé à l’émission de la facture.',
+    } as T,
     archivedNotice: {
       en: 'This invoice is archived. Restore it to edit it.',
       fr: 'Cette facture est archivée. Restaurez-la pour la modifier.',
@@ -436,6 +472,25 @@ export const commerceDomainDict = {
     totalTtc: { en: 'Total incl. tax', fr: 'Total TTC' } as T,
     alreadyPaid: { en: 'Already paid', fr: 'Déjà réglé' } as T,
     leftToPay: { en: 'Left to pay', fr: 'Reste à payer' } as T,
+    // « Retenue si appliquée » (spec §4): an estimate, the practitioner
+    // applies it himself at each payment.
+    withholdingIfApplied: {
+      en: 'Withholding if applied ({rate} %)',
+      fr: 'Retenue si appliquée ({rate} %)',
+    } as T,
+    netIfWithholding: { en: 'Net if applied', fr: 'Net si appliquée' } as T,
+    withholdingEstimateNote: {
+      en: 'Estimate: the practitioner applies it when paying, on each payment of at least {threshold}.',
+      fr: 'Estimation : le praticien l’applique au paiement, sur chaque paiement d’au moins {threshold}.',
+    } as T,
+    withholdingEstimateNoteAll: {
+      en: 'Estimate: the practitioner applies it when paying.',
+      fr: 'Estimation : le praticien l’applique au paiement.',
+    } as T,
+    withholdingEstimatePartial: {
+      en: '{count} of {total} payments reach the threshold.',
+      fr: '{count} paiements sur {total} atteignent le seuil.',
+    } as T,
     previewNote: {
       en: 'Preview: save to apply.',
       fr: 'Aperçu : enregistrez pour appliquer.',
@@ -461,6 +516,11 @@ export const commerceDomainDict = {
       QUOTE_NOT_EDITABLE: {
         en: 'This quote was declined, so it can no longer be edited.',
         fr: 'Ce devis a été refusé : il ne peut plus être modifié.',
+      } as T,
+      // Both the pack change and the re-plan (Modifier l’échéancier).
+      QUOTE_PLAN_BATCH_RELEASED: {
+        en: 'A tranche of this quote was unlocked by hand: settle the installment concerned before changing the pack or editing the schedule.',
+        fr: 'Une tranche de ce devis a été débloquée manuellement : réglez l’échéance concernée avant de changer de forfait ou de modifier l’échéancier.',
       } as T,
     },
   },
@@ -686,6 +746,17 @@ export const commerceDomainDict = {
       } as T,
       lockedUntil: { en: 'locked until then', fr: 'verrouillée jusqu’à cette date' } as T,
       payNow: { en: 'Pay now', fr: 'Payer maintenant' } as T,
+      // Under the plan's « Retenue si appliquée » / « Net si appliquée »
+      // (quoteEditor.withholdingIfApplied / netIfWithholding), spec §4: an
+      // estimate, the practitioner ticks the retenue at each payment.
+      retenueNote: {
+        en: 'Estimate: you may apply it when paying, on each payment of at least {threshold} (incl. tax, stamp duty excluded).',
+        fr: 'Estimation : vous pouvez l’appliquer en payant, sur chaque paiement d’au moins {threshold} (TTC, hors timbre).',
+      } as T,
+      retenueNoteAll: {
+        en: 'Estimate: you may apply it when paying each installment.',
+        fr: 'Estimation : vous pouvez l’appliquer en payant chaque échéance.',
+      } as T,
     },
 
     // quote-pack-panel.tsx — doctor payment dialog

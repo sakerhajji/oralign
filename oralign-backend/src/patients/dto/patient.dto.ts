@@ -21,6 +21,7 @@ import {
 import { PaginatedResponse } from '../../common/dto/response.dto';
 import { toOptionalTrimmed } from '../../common/dto/query-transforms';
 import { IsCalendarDate } from '../../common/decorators/is-calendar-date.decorator';
+import type { DoctorSummary } from '../../common/doctor/doctor-identity';
 
 const E164_PHONE_REGEX = /^\+[1-9]\d{1,14}$/;
 
@@ -264,12 +265,16 @@ export class PatientResponseDto {
   clinicalConditions!: string[];
   @ApiProperty({ required: false })
   clinicalConditionsOther?: string;
-  @ApiProperty({ required: false })
-  doctor?: {
-    id: string;
-    fullName: string;
-    email: string;
-  };
+  @ApiProperty({
+    required: false,
+    type: Object,
+    description:
+      'The owning doctor, read live (DoctorSummary): identity, practice ' +
+      '(null when none or deleted) and the contact to show, practice ' +
+      'first with the account as fallback. Never the private ids ' +
+      '(taxId, registrationNumber).',
+  })
+  doctor?: DoctorSummary;
   @ApiProperty()
   createdAt!: Date;
   @ApiProperty()

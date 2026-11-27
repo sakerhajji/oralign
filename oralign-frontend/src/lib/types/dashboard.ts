@@ -1,6 +1,8 @@
 // Dashboards (admin + doctor)
 // Split out of the former 2,000-line lib/types/index.ts; import via '@/lib/types'.
 
+import type { Localized } from './blog';
+
 // ==========================================
 // DASHBOARD (Admin + Doctor)
 // ==========================================
@@ -147,18 +149,32 @@ export interface DoctorDashboardKpis {
   } | null;
 }
 
+/**
+ * One pack of the practitioner catalogue (GET doctor/dashboard/available-packs).
+ * Read-only: the pack of a case is the one attached to its quote.
+ */
 export interface AvailablePack {
   id: string;
+  /** French / legacy plain columns; the `*I18n` bags win when set. */
   name: string;
   description: string | null;
+  nameI18n?: Partial<Localized<string>> | null;
+  descriptionI18n?: Partial<Localized<string>> | null;
+  /** Display text of the validity ("2 ans"). Never parsed. */
+  treatmentExpirationLabel?: Partial<Localized<string>> | null;
+  finishingIncludedLabel?: Partial<Localized<string>> | null;
+  /** Coverage window in months: the validity shown when no label is set. */
+  treatmentValidityMonths?: number | null;
   maxStepsPerArch: number | null;
   includedCorrections: number | null;
   isUnlimitedSteps: boolean;
   isUnlimitedCorrections: boolean;
+  /** Retired flag, always false on current packs: not displayed. */
   isForOrthodontists: boolean;
-  /** null when the pack does not offer this arch. */
+  /** TTC; null when the pack does not offer this arch. */
   priceTwoArches: number | null;
   priceSingleArch: number | null;
   currency: string;
+  /** The pack of the doctor's latest paid quote. */
   isCurrent: boolean;
 }

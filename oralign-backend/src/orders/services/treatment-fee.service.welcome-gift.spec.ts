@@ -22,6 +22,23 @@ jest.mock('./order.mapper', () => ({
   orderInclude: {},
   mapOrderToDto: (order: unknown) => order,
 }));
+// The receipt checks and storage have their own spec (receipt-file.spec):
+// here a receipt is accepted and "written" without touching the disk.
+jest.mock('../../payments/receipt-file', () => ({
+  assertReceiptFile: jest
+    .fn()
+    .mockResolvedValue({ kind: 'pdf', ext: 'pdf', mime: 'application/pdf' }),
+  writeReceiptFile: jest
+    .fn()
+    .mockResolvedValue('/uploads/orders/o-1/payment-proofs/r.pdf'),
+  removeReceiptFile: jest.fn().mockResolvedValue(undefined),
+  openReceipt: jest.fn(),
+}));
+
+/** A receipt as multer hands it over (its checks are mocked above). */
+const receipt = { buffer: Buffer.from('%PDF-1.4 receipt'), size: 16 };
+/** An admin declaring for the doctor without a receipt gives a note. */
+const NOTE = 'Virement reçu, confirmé par la banque';
 
 const admin: Caller = { userId: 'u-admin', role: UserRole.admin };
 const doctor: Caller = { userId: 'u-doc', role: UserRole.dentist };
@@ -63,6 +80,9 @@ function makeService(current: ReturnType<typeof order>) {
         bankDetails: { rib: '123', bankName: 'Bank' },
       }),
     },
+    user: {
+      findUnique: jest.fn().mockResolvedValue({ fullName: 'Admin One' }),
+    },
     $transaction: jest.fn((run: (client: typeof tx) => unknown) => run(tx)),
   };
   const orders = {
@@ -86,9 +106,9 @@ describe('TreatmentFeeService — welcome-gift orders have nothing to pay', () =
   it.each([
     ['cash recorded by an admin', PaymentMethod.cash, admin],
     [
-      'a bank transfer declared by the doctor',
+      'a bank transfer an admin declares for the doctor',
       PaymentMethod.bank_transfer,
-      doctor,
+      admin,
     ],
   ])(
     'refuses %s (400 WELCOME_GIFT_NOTHING_DUE)',
@@ -96,7 +116,7 @@ describe('TreatmentFeeService — welcome-gift orders have nothing to pay', () =
       const { service, prisma } = makeService(gifted());
 
       await expect(
-        service.payTreatmentFee('o-1', method, caller),
+        service.payTreatmentFee('o-1', method, caller, undefined, NOTE),
       ).rejects.toMatchObject(nothingDue);
       // Refused before any amount is computed or anything is written.
       expect(prisma.companyBillingSettings.findFirst).not.toHaveBeenCalled();
@@ -108,11 +128,7 @@ describe('TreatmentFeeService — welcome-gift orders have nothing to pay', () =
     const { service, prisma } = makeService(gifted());
 
     await expect(
-      service.uploadTreatmentFeeProof(
-        'o-1',
-        '/uploads/treatment-fee-proofs/x.pdf',
-        doctor,
-      ),
+      service.uploadTreatmentFeeProof('o-1', receipt, doctor),
     ).rejects.toMatchObject(nothingDue);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
@@ -144,15 +160,15 @@ describe('TreatmentFeeService — supplemental requests carry no treatment fee',
   it.each([
     ['cash recorded by an admin', PaymentMethod.cash, admin],
     [
-      'a bank transfer declared by the doctor',
+      'a bank transfer an admin declares for the doctor',
       PaymentMethod.bank_transfer,
-      doctor,
+      admin,
     ],
   ])('refuses %s', async (_l, method, caller) => {
     const { service, prisma } = makeService(child());
 
     await expect(
-      service.payTreatmentFee('o-1', method, caller),
+      service.payTreatmentFee('o-1', method, caller, undefined, NOTE),
     ).rejects.toMatchObject(initialOnly);
     expect(prisma.companyBillingSettings.findFirst).not.toHaveBeenCalled();
     expect(prisma.$transaction).not.toHaveBeenCalled();
@@ -162,11 +178,7 @@ describe('TreatmentFeeService — supplemental requests carry no treatment fee',
     const { service, prisma } = makeService(child());
 
     await expect(
-      service.uploadTreatmentFeeProof(
-        'o-1',
-        '/uploads/treatment-fee-proofs/x.pdf',
-        doctor,
-      ),
+      service.uploadTreatmentFeeProof('o-1', receipt, doctor),
     ).rejects.toMatchObject(initialOnly);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });

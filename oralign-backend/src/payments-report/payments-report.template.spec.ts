@@ -10,6 +10,8 @@ import type {
   ReportSection,
 } from './payments-report.model';
 import {
+  COLUMNS_OWN,
+  COLUMNS_WITH_PRACTITIONER,
   escapeHtml,
   formatCalendarDayLong,
   formatMoney,
@@ -24,14 +26,17 @@ const NBSP = String.fromCharCode(0xa0);
 const d = (value: string) => new Prisma.Decimal(value);
 
 function tallies(
-  parts: Partial<Record<PaymentMethod, [string, number]>>,
+  parts: Partial<Record<PaymentMethod, [string, number, string?]>>,
 ): MethodTallies {
   const out = emptyMethodTallies();
-  for (const [method, [amount, count]] of Object.entries(parts) as [
-    PaymentMethod,
-    [string, number],
-  ][]) {
-    out[method] = { amount: d(amount), count };
+  for (const [method, [amount, count, withholding]] of Object.entries(
+    parts,
+  ) as [PaymentMethod, [string, number, string?]][]) {
+    out[method] = {
+      amount: d(amount),
+      count,
+      withholding: d(withholding ?? '0'),
+    };
   }
   return out;
 }
@@ -46,6 +51,7 @@ function row(overrides: Partial<ReportRow> = {}): ReportRow {
     method: PaymentMethod.cash,
     status: PaymentRecordStatus.success,
     amount: d('1200'),
+    withholding: null,
     transactionRef: 'CSH-77',
     receiptNumber: 'FAC-000042',
     installment: null,
@@ -243,10 +249,42 @@ describe('payments report template', () => {
           }),
         ),
       );
-      expect(html).toContain(`Espèces 2 1${NBSP}350,000${NBSP}TND`);
+      // Count, brut, retenue, net.
+      expect(html).toContain(
+        'Mode de paiement Nombre Brut Retenue Net encaissé',
+      );
+      expect(html).toContain(
+        `Espèces 2 1${NBSP}350,000${NBSP}TND 0,000${NBSP}TND 1${NBSP}350,000${NBSP}TND`,
+      );
       expect(html).toContain(`Carte bancaire 2 1${NBSP}000,500${NBSP}TND`);
       expect(html).toContain(`Virement bancaire 0 0,000${NBSP}TND`);
       expect(html).toContain(`TOTAL ENCAISSÉ 4 2${NBSP}350,500${NBSP}TND`);
+      expect(html).toContain(
+        'Net : montant réellement encaissé (brut − retenue).',
+      );
+    });
+
+    it('brut = net + retenue in the summary, the net staying what was collected', () => {
+      const html = text(
+        renderPaymentsReportHtml(
+          model({
+            sections: [
+              section({
+                collected: tallies({
+                  bank_transfer: ['991', 1, '10'],
+                  cash: ['199', 1, '2'],
+                }),
+              }),
+            ],
+          }),
+        ),
+      );
+      expect(html).toContain(
+        `Virement bancaire 1 1${NBSP}001,000${NBSP}TND 10,000${NBSP}TND 991,000${NBSP}TND`,
+      );
+      expect(html).toContain(
+        `TOTAL ENCAISSÉ 2 1${NBSP}202,000${NBSP}TND 12,000${NBSP}TND 1${NBSP}190,000${NBSP}TND`,
+      );
     });
 
     it('consolidated: each kind, then both added, nothing counted twice', () => {
@@ -269,6 +307,16 @@ describe('payments report template', () => {
       );
       expect(html).toContain(
         `TOTAL ENCAISSÉ 2 300,000${NBSP}TND 2 2${NBSP}050,500${NBSP}TND 4 2${NBSP}350,500${NBSP}TND`,
+      );
+      // Then brut / retenue / net per kind, and both added.
+      expect(html).toContain(
+        'Brut, retenue et net Nb Brut Retenue Net encaissé',
+      );
+      expect(html).toContain(
+        `Honoraires de traitement 2 300,000${NBSP}TND 0,000${NBSP}TND 300,000${NBSP}TND`,
+      );
+      expect(html).toContain(
+        `TOTAL ENCAISSÉ 4 2${NBSP}350,500${NBSP}TND 0,000${NBSP}TND 2${NBSP}350,500${NBSP}TND`,
       );
     });
 
@@ -304,13 +352,44 @@ describe('payments report template', () => {
     it('one row per payment, the amount right-aligned, the header repeated on each page', () => {
       const html = renderPaymentsReportHtml(model());
       expect(html).toContain('.lines thead { display: table-header-group; }');
+      // Brut, retenue (none: a dash), net; the currency is in the headings.
       expect(html).toContain(
-        '<td class="num amount">1&nbsp;200,000&nbsp;TND</td>'.replace(
-          /&nbsp;/g,
-          NBSP,
-        ),
+        `<td class="num">1${NBSP}200,000</td><td class="num"><span class="muted">—</span></td><td class="num amount">1${NBSP}200,000</td>`,
       );
+      expect(text(html)).toContain('Brut (TND) Retenue (TND) Net (TND)');
       expect(text(html)).toContain('CSH-77 Facture FAC-000042');
+    });
+
+    it('brut / retenue / net per row: brut = the cash + the retenue kept back (spec 4)', () => {
+      const html = renderPaymentsReportHtml(
+        model({
+          sections: [
+            section({
+              rows: [row({ amount: d('991'), withholding: d('10') })],
+              collected: tallies({ cash: ['991', 1, '10'] }),
+            }),
+          ],
+        }),
+      );
+      expect(html).toContain(
+        `<td class="num">1${NBSP}001,000</td><td class="num">10,000</td><td class="num amount">991,000</td>`,
+      );
+      // The subtotal states the split when a retenue was kept back.
+      expect(text(html)).toContain(
+        `Brut 1${NBSP}001,000${NBSP}TND · retenue 10,000${NBSP}TND · net 991,000${NBSP}TND (1)`,
+      );
+    });
+
+    it('the columns fill the A4 width exactly, with or without the practitioner', () => {
+      const sum = (widths: number[]) => widths.reduce((a, b) => a + b, 0);
+      expect(sum(COLUMNS_WITH_PRACTITIONER)).toBe(100);
+      expect(COLUMNS_WITH_PRACTITIONER).toHaveLength(10);
+      expect(sum(COLUMNS_OWN)).toBe(100);
+      expect(COLUMNS_OWN).toHaveLength(9);
+      const own = renderPaymentsReportHtml(model({ showPractitioner: false }));
+      const lines = own.slice(own.indexOf('<table class="lines">'));
+      const colgroup = lines.slice(0, lines.indexOf('</colgroup>'));
+      expect(colgroup.match(/<col /g)).toHaveLength(9);
     });
 
     it('a fee still to confirm has no date yet', () => {

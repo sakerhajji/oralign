@@ -4,7 +4,10 @@ import type { Caller } from '../../common/access/caller';
 import { OrderAccessPolicy } from '../../common/access/order-access.policy';
 import type { PrismaService } from '../../prisma/prisma.service';
 import { ALIGNER_DELIVERY_ERROR } from '../aligner-delivery.rules';
-import { AlignerDeliveryService } from './aligner-delivery.service';
+import {
+  AlignerDeliveryService,
+  buildSummary,
+} from './aligner-delivery.service';
 
 const owner: Caller = { userId: 'u-doc', role: UserRole.dentist };
 const otherDentist: Caller = { userId: 'u-other', role: UserRole.dentist };
@@ -551,6 +554,39 @@ describe('AlignerDeliveryService', () => {
         errorCode: ALIGNER_DELIVERY_ERROR.TOTAL_BELOW_DELIVERED,
       });
       expect(updateOrder).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('recorder name (spec §6: live first, snapshot fallback)', () => {
+    const summaryOf = (createdBy: { id: string; fullName: string } | null) =>
+      buildSummary({
+        orderId: 'o1',
+        totalAligners: 20,
+        earliestDeliveryDate: null,
+        rows: [
+          {
+            id: 'd1',
+            fromAligner: 1,
+            toAligner: 3,
+            quantity: 3,
+            deliveredAt: new Date('2026-09-07T00:00:00.000Z'),
+            createdByName: 'Dr Hajji',
+            createdBy,
+            createdAt: NOW,
+          },
+        ],
+        acceptsDeliveries: true,
+        canRecord: true,
+      }).deliveries[0].createdByName;
+
+    it('shows the current name of a renamed recorder', () => {
+      expect(summaryOf({ id: owner.userId, fullName: 'Dr Hajji Saker' })).toBe(
+        'Dr Hajji Saker',
+      );
+    });
+
+    it('keeps the snapshot once the account is gone', () => {
+      expect(summaryOf(null)).toBe('Dr Hajji');
     });
   });
 });

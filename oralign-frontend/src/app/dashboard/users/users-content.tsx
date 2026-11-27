@@ -22,7 +22,9 @@ import {
   useUsers,
   useUserStats,
 } from '@/lib/hooks/use-users';
-import { VerificationStatus, type User } from '@/lib/types';
+import { UserRole, VerificationStatus, type User } from '@/lib/types';
+import { activityParamOf, type ActivityFilter } from '@/lib/account-activity/account-activity';
+import { useUsersActivityFilter } from '@/components/users/use-activity-filter';
 import { useT } from '@/lib/i18n/lang-context';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -106,13 +108,29 @@ export function UsersPageContent() {
 
   // ── View state. The URL is read once (deep links, reload) and then only
   // written, with history.replaceState: no navigation, no RSC request,
-  // and nothing ever flows back into the search box while typing.
+  // and nothing ever flows back into the search box while typing. The one
+  // exception is a link followed while the desk is open (below).
   const [initial] = useState(() => readUsersUrlState(searchParams));
   const [view, setView] = useState<UsersView>(initial.view);
   const [filters, setFilters] = useState<UsersFilters>(initial.filters);
   const [page, setPage] = useState(initial.page);
   const [searchBoxKey, setSearchBoxKey] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  // Doctor inactivity filter (?activity=), read on mount like the others.
+  // The admin bell's dormant-practitioners link (role=dentist&
+  // activity=inactive) followed while the desk is open is adopted too:
+  // its role filter applies with it, on page 1 of the live users.
+  const { activity, setActivity } = useUsersActivityFilter(searchParams, () => {
+    const linkedRole = readUsersUrlState(searchParams).filters.role;
+    setView('active');
+    if (linkedRole !== 'all') {
+      setFilters((current) =>
+        current.role === linkedRole ? current : { ...current, role: linkedRole },
+      );
+    }
+    setPage(1);
+    setSelected(new Set());
+  });
 
   // ── Dialogs
   const [createMounted, setCreateMounted] = useState(false);
@@ -153,7 +171,10 @@ export function UsersPageContent() {
   }, []);
 
   // ── Data
-  const apiParams = useMemo(() => toUserFilterParams(filters, page), [filters, page]);
+  const apiParams = useMemo(
+    () => ({ ...toUserFilterParams(filters, page), activity: activityParamOf(activity) }),
+    [filters, page, activity],
+  );
   const activeQuery = useUsers(apiParams, { enabled: view === 'active' });
   const deletedQuery = useDeletedUsers(apiParams, { enabled: view === 'deleted' });
   const list = view === 'deleted' ? deletedQuery : activeQuery;
@@ -170,7 +191,7 @@ export function UsersPageContent() {
   const totalPages = list.data?.totalPages ?? 1;
   // Previous rows stay on screen while the next search/filter/page loads.
   const refreshing = list.isPlaceholderData;
-  const filtered = hasActiveFilters(filters);
+  const filtered = hasActiveFilters(filters) || activity !== 'all';
   const pendingCount = stats.data?.pending ?? 0;
 
   // A page past the end (stale link, last row of a page deleted): settle on
@@ -192,9 +213,26 @@ export function UsersPageContent() {
 
   const clearFilters = () => {
     setFilters(EMPTY_USERS_FILTERS);
+    setActivity('all');
     setPage(1);
     setSelected(new Set());
     setSearchBoxKey((key) => key + 1);
+  };
+
+  const changeActivity = (next: ActivityFilter) => {
+    if (next === activity) return;
+    setActivity(next);
+    setPage(1);
+    setSelected(new Set());
+  };
+
+  // The "Praticiens inactifs" counter: the live dentists that are dormant.
+  const showDormant = () => {
+    setView('active');
+    setFilters((current) => ({ ...current, role: UserRole.DENTIST }));
+    setActivity('inactive');
+    setPage(1);
+    setSelected(new Set());
   };
 
   const changeView = (next: UsersView) => {
@@ -313,7 +351,7 @@ export function UsersPageContent() {
         </div>
       )}
 
-      <UsersStats stats={stats.data} unavailable={stats.isError} />
+      <UsersStats stats={stats.data} unavailable={stats.isError} onShowDormant={showDormant} />
 
       <Tabs value={view} onValueChange={(value) => changeView(value as UsersView)}>
         <TabsList variant="line">
@@ -330,6 +368,8 @@ export function UsersPageContent() {
         key={searchBoxKey}
         filters={filters}
         onChange={changeFilters}
+        activity={activity}
+        onActivityChange={changeActivity}
         busy={refreshing}
         placeholder={
           view === 'deleted'
@@ -611,8 +651,8 @@ export function UsersPageSkeleton() {
       </div>
       <div className="flex flex-col gap-2 xl:flex-row xl:items-center" aria-hidden="true">
         <Skeleton className="h-9 w-full xl:flex-1" />
-        <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:flex xl:shrink-0">
-          {[0, 1, 2, 3].map((i) => (
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-5 xl:flex xl:shrink-0">
+          {[0, 1, 2, 3, 4].map((i) => (
             <Skeleton key={i} className="h-9 w-full xl:w-40" />
           ))}
         </div>

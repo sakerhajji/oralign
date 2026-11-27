@@ -275,6 +275,13 @@ describe('TreatmentFeeService.listTreatmentFees (treatment-fee history)', () => 
         status: PaymentRecordStatus.success,
         paidAt,
         proofPath: null,
+        // The transfer fields (spec §1): a cash fee has none of them.
+        hasProof: false,
+        state: 'paid',
+        declaredAt: null,
+        reviewOpenedAt: null,
+        rejectedAt: null,
+        rejectionReason: null,
         submittedAt: null,
         updatedAt,
         invoiceNumber: 'TF-000042',
@@ -366,6 +373,11 @@ describe('TreatmentFeeService.listPendingTreatmentFees (confirmation queue)', ()
     ).resolves.toMatchObject({ total: 45, page: 1, limit: 20, totalPages: 3 });
     expect(findManyArgs(findMany)).toMatchObject({
       where: AWAITING,
+      // Newest declaration first (index status + declaredAt).
+      orderBy: [
+        { treatmentFeeDeclaredAt: { sort: 'desc', nulls: 'last' } },
+        { id: 'desc' },
+      ],
       skip: 0,
       take: 20,
     });

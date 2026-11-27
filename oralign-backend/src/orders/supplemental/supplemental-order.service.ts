@@ -65,6 +65,10 @@ import {
   type SupplementalTx,
 } from './supplemental-order.repository';
 import { assertCanAuthor } from './supplemental-permissions';
+import {
+  assertDoctorCanOrder,
+  assertDoctorCanOrderLocked,
+} from '../../users/activity/doctor-ordering.policy';
 import type {
   SupplementalEligibility,
   SupplementalOrderView,
@@ -156,6 +160,8 @@ export class SupplementalOrderService {
           caller,
         );
         assertCanAuthor(parent, caller);
+        // A dormant doctor (spec §5) gets no new request, whoever asks.
+        await assertDoctorCanOrder(tx, parent.doctorId);
         const replayed = await claimIdempotencyKey(
           tx,
           caller.userId,
@@ -287,6 +293,9 @@ export class SupplementalOrderService {
     const now = this.clock.now();
     const event = await this.prisma.$transaction(async (tx) => {
       const child = await this.lockedDraft(tx, childOrderId, caller);
+      // Doctor inactivity (spec §5): locked like OrderService.submitOrder,
+      // so the sweep and this submission of the same doctor serialise.
+      await assertDoctorCanOrderLocked(tx, child.doctorId);
       const parent = await loadParentSnapshot(tx, child.parentOrder.id, {
         includeArchived: true,
       });

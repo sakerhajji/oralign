@@ -23,10 +23,24 @@ import {
 import { PaginatedResponse } from '../../common/dto/response.dto';
 import { UserRole, VerificationStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { EventEmitter2 } from '@nestjs/event-emitter';
-import { NotificationEvents } from '../../notifications/events/notification-events';
+import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
+import {
+  NotificationEvents,
+  type UserProfileChangedEvent,
+} from '../../notifications/events/notification-events';
 import { TTL, dpKey, whKey } from '../../common/cache/cache-keys';
 import { isAdmin, type Caller } from '../../common/access/caller';
+
+/**
+ * The profile fields a write really sent (undefined = left alone), sorted:
+ * the `fields` of the user.profileChanged event, for logs only.
+ */
+export function writtenProfileFields(dto: object): string[] {
+  return Object.entries(dto)
+    .filter(([, value]) => value !== undefined)
+    .map(([key]) => key)
+    .sort();
+}
 
 type ProfileWithUser = {
   id: string;
@@ -40,6 +54,7 @@ type ProfileWithUser = {
   clinicPhone: string | null;
   clinicEmail: string | null;
   taxId: string | null;
+  registrationNumber: string | null;
   description: string | null;
   logoUrl: string | null;
   specialty: string | null;
@@ -138,6 +153,12 @@ export class DentistProfileService {
       this.invalidateProfile({ id: result.id, userId }),
       this.safeDel(whKey.byProfile(result.id)),
     ]);
+    this.announceProfileChanged({
+      userId,
+      dentistProfileId: result.id,
+      fields: writtenProfileFields(profileFields),
+      actorId: userId,
+    });
 
     // First-time clinic setup == onboarding complete. Announce so admins
     // get the "review & approve" bell + email. Fire-and-forget; a
@@ -186,9 +207,20 @@ export class DentistProfileService {
     });
   }
 
+  /**
+   * Create the clinic of `userId`. `actorId` is who asked (an admin on the
+   * admin route), for the user.profileChanged log only; it defaults to
+   * the owner.
+   *
+   * A clinic deleted earlier (soft delete) is restored with these fields,
+   * as setupClinic does: DentistProfile.userId is unique, so inserting a
+   * second row would fail (it used to end in a 500). 409 PROFILE_EXISTS
+   * while a live clinic exists.
+   */
   async createProfile(
     userId: string,
     createProfileDto: CreateDentistProfileDto,
+    actorId: string = userId,
   ): Promise<DentistProfileResponseDto> {
     const existing = await this.profileRepository.findByUserId(userId);
     if (existing && !existing.deletedAt) {
@@ -198,33 +230,60 @@ export class DentistProfileService {
       );
     }
 
-    const profile = await this.profileRepository.create({
-      userId,
-      ...createProfileDto,
-    });
+    const restored = existing
+      ? await this.profileRepository.restoreDeleted(userId, createProfileDto)
+      : null;
+    if (existing && !restored) {
+      // Restored by a concurrent request meanwhile: it is live now.
+      throw new ConflictException(
+        'A clinic profile already exists for this account.',
+        'PROFILE_EXISTS',
+      );
+    }
+    const profile =
+      restored ??
+      (await this.profileRepository.create({
+        userId,
+        ...createProfileDto,
+      }));
 
-    // Invalidate the user-keyed cache so the next read picks up the new row.
-    await this.invalidateProfile({ userId });
+    // Invalidate the user-keyed cache so the next read picks up the new row
+    // (and, for a restored clinic, its weekly schedule).
+    await Promise.all([
+      this.invalidateProfile({ id: profile.id, userId }),
+      ...(restored ? [this.safeDel(whKey.byProfile(profile.id))] : []),
+    ]);
+    this.announceProfileChanged({
+      userId,
+      dentistProfileId: profile.id,
+      fields: writtenProfileFields(createProfileDto),
+      actorId,
+    });
 
     return this.mapToDto(profile as ProfileWithUser);
   }
 
   /**
-   * SECURITY (audit M-2): taxId (matricule fiscal) and clinicEmail are
-   * private business data. Only the profile's owner or an admin may see
-   * them; every other authenticated caller gets them stripped. The full
-   * DTO is still what we CACHE (server-side) — redaction is applied to
-   * the per-request copy so the cache stays caller-agnostic.
+   * SECURITY (audit M-2): taxId (matricule fiscal), registrationNumber
+   * (professional-order number) and clinicEmail are private business
+   * data. Only the profile's owner or an admin may see them; every other
+   * authenticated caller gets them stripped. The full DTO is still what we
+   * CACHE (server-side) — redaction is applied to the per-request copy so
+   * the cache stays caller-agnostic.
    */
   private redactPrivateFields(
     dto: DentistProfileResponseDto,
     caller?: Caller,
   ): DentistProfileResponseDto {
     const privileged =
-      !!caller &&
-      (isAdmin(caller) || dto.userId === caller.userId);
+      !!caller && (isAdmin(caller) || dto.userId === caller.userId);
     if (privileged) return dto;
-    return { ...dto, taxId: undefined, clinicEmail: undefined };
+    return {
+      ...dto,
+      taxId: undefined,
+      registrationNumber: undefined,
+      clinicEmail: undefined,
+    };
   }
 
   async getProfileById(
@@ -363,10 +422,7 @@ export class DentistProfileService {
       throw new NotFoundException('Dentist profile not found');
     }
 
-    if (
-      !isAdmin(caller) &&
-      profile.userId !== caller.userId
-    ) {
+    if (!isAdmin(caller) && profile.userId !== caller.userId) {
       throw new ForbiddenException(
         'You can only update your own clinic profile',
       );
@@ -378,6 +434,12 @@ export class DentistProfileService {
     );
 
     await this.invalidateProfile({ id, userId: profile.userId });
+    this.announceProfileChanged({
+      userId: profile.userId,
+      dentistProfileId: id,
+      fields: writtenProfileFields(updateProfileDto),
+      actorId: caller.userId,
+    });
 
     return this.mapToDto(updatedProfile as ProfileWithUser);
   }
@@ -392,10 +454,7 @@ export class DentistProfileService {
       throw new NotFoundException('Dentist profile not found');
     }
 
-    if (
-      !isAdmin(caller) &&
-      profile.userId !== caller.userId
-    ) {
+    if (!isAdmin(caller) && profile.userId !== caller.userId) {
       throw new ForbiddenException(
         'You can only delete your own clinic profile',
       );
@@ -403,8 +462,63 @@ export class DentistProfileService {
 
     await this.profileRepository.delete(id);
     await this.invalidateProfile({ id, userId: profile.userId });
+    this.announceProfileChanged({
+      userId: profile.userId,
+      dentistProfileId: id,
+      fields: ['deletedAt'],
+      actorId: caller.userId,
+    });
 
     return { message: 'Dentist profile deleted successfully' };
+  }
+
+  /**
+   * A user's identity or clinic changed (UserService.update, the avatar
+   * upload, the clinic writes of this service): drop the cached profile
+   * DTO, which embeds the user's name and photo (TTL.warm otherwise kept
+   * them stale for 5 minutes). Search / nearby pages self-expire (admin
+   * only, short TTL). `dentistProfileId` null = the emitter knows there is
+   * no profile; only an absent id costs a lookup. A listener failure is
+   * logged and swallowed: the write that emitted the event already
+   * committed.
+   */
+  @OnEvent(NotificationEvents.UserProfileChanged)
+  async onUserProfileChanged(event: UserProfileChangedEvent): Promise<void> {
+    try {
+      const id =
+        event.dentistProfileId !== undefined
+          ? event.dentistProfileId
+          : (
+              await this.prisma.dentistProfile.findUnique({
+                where: { userId: event.userId },
+                select: { id: true },
+              })
+            )?.id;
+      await this.invalidateProfile({
+        id: id ?? undefined,
+        userId: event.userId,
+      });
+    } catch (err) {
+      this.logger.warn(
+        `profile cache invalidation for user ${event.userId} failed: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  /**
+   * Emit user.profileChanged after a committed clinic write, so every
+   * other cache holding this doctor's identity drops it (the patient's
+   * plan link caches the practice name). Fire-and-forget: a listener
+   * error must never fail the write.
+   */
+  private announceProfileChanged(event: UserProfileChangedEvent): void {
+    try {
+      this.events.emit(NotificationEvents.UserProfileChanged, event);
+    } catch (err) {
+      this.logger.warn(
+        `user.profileChanged emit failed: ${(err as Error).message}`,
+      );
+    }
   }
 
   /**
@@ -468,6 +582,7 @@ export class DentistProfileService {
       clinicPhone: profile.clinicPhone ?? undefined,
       clinicEmail: profile.clinicEmail ?? undefined,
       taxId: profile.taxId ?? undefined,
+      registrationNumber: profile.registrationNumber ?? undefined,
       description: profile.description ?? undefined,
       logoUrl: profile.logoUrl ?? undefined,
       specialty: profile.specialty ?? undefined,

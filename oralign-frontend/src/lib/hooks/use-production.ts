@@ -70,6 +70,11 @@ export function useProductionQueue(
   });
 }
 
+/**
+ * The case sheet. It polls like the queue (spec §3): a tranche unlocked
+ * while the sheet is open (a payment confirmed, an admin's manual unlock)
+ * reaches the bench within 30 s, not on the next focus only.
+ */
 export function useProductionSheet(
   orderId: string,
   { enabled = true }: { enabled?: boolean } = {},
@@ -79,6 +84,8 @@ export function useProductionSheet(
     queryFn: () => productionService.getCaseSheet(orderId),
     enabled: enabled && !!orderId,
     staleTime: SHEET_STALE_MS,
+    refetchInterval: QUEUE_POLL_MS,
+    refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
   });
 }

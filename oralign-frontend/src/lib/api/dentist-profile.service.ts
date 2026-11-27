@@ -11,6 +11,15 @@ import {
   SetupClinicDto,
 } from '@/lib/types';
 
+/**
+ * The clinic write bodies. The DTOs carry the private identity field
+ * (registrationNumber, spec §6) themselves, which the server redacts like
+ * taxId for anyone but the doctor and the admins.
+ */
+export type CreateClinicProfileBody = CreateDentistProfileDto;
+export type UpdateClinicProfileBody = UpdateDentistProfileDto;
+export type SetupClinicBody = SetupClinicDto;
+
 export const dentistProfileService = {
   /**
    * Atomic onboarding endpoint — saves the dentist profile AND the entire
@@ -18,7 +27,7 @@ export const dentistProfileService = {
    * wizard so the UI never has to await two separate mutations to keep
    * `clinicComplete` and `scheduleComplete` in sync.
    */
-  setupClinic: async (data: SetupClinicDto): Promise<DentistProfile> => {
+  setupClinic: async (data: SetupClinicBody): Promise<DentistProfile> => {
     const response = await apiClient.post<DentistProfile>('/dentist-profile/setup', data);
     return response.data;
   },
@@ -26,7 +35,7 @@ export const dentistProfileService = {
   /**
    * Create dentist profile (for current user)
    */
-  createProfile: async (data: CreateDentistProfileDto): Promise<DentistProfile> => {
+  createProfile: async (data: CreateClinicProfileBody): Promise<DentistProfile> => {
     const response = await apiClient.post<DentistProfile>('/dentist-profile', data);
     return response.data;
   },
@@ -34,7 +43,7 @@ export const dentistProfileService = {
   /**
    * Admin: create dentist profile for a specific user
    */
-  createProfileForUser: async (userId: string, data: CreateDentistProfileDto): Promise<DentistProfile> => {
+  createProfileForUser: async (userId: string, data: CreateClinicProfileBody): Promise<DentistProfile> => {
     const response = await apiClient.post<DentistProfile>(`/dentist-profile/admin/user/${userId}`, data);
     return response.data;
   },
@@ -80,7 +89,7 @@ export const dentistProfileService = {
   /**
    * Update dentist profile
    */
-  updateProfile: async (id: string, data: UpdateDentistProfileDto): Promise<DentistProfile> => {
+  updateProfile: async (id: string, data: UpdateClinicProfileBody): Promise<DentistProfile> => {
     const response = await apiClient.put<DentistProfile>(`/dentist-profile/${id}`, data);
     return response.data;
   },

@@ -21,10 +21,19 @@ import type {
   PaymentsSummaryDto,
 } from '../dto/payment.dto';
 
-/** A sum of payments: the exact amount and how many were summed. */
+/**
+ * A sum of payments: the exact amount and how many were summed.
+ *
+ * `amount` is the NET, the cash that came in (stamps included, the
+ * retenue kept back by the practitioner excluded): the one definition of
+ * "collected". `withholding` is the retenue à la source those payments
+ * kept back, so brut (the factures' Total TTC) = amount + withholding
+ * (spec §4: brut / retenue / net, see grossOf).
+ */
 export interface Tally {
   amount: Prisma.Decimal;
   count: number;
+  withholding: Prisma.Decimal;
 }
 
 export type MethodTallies = Record<PaymentMethod, Tally>;
@@ -33,7 +42,40 @@ export type MethodTallies = Record<PaymentMethod, Tally>;
 interface MethodGroup {
   method: PaymentMethod | null;
   amount: Prisma.Decimal | null;
+  withholding: Prisma.Decimal | null;
   count: number;
+}
+
+/**
+ * A summary bucket: the net cash and its count (the historic contract),
+ * plus the brut / retenue split (spec §4). All three are TND strings with
+ * 3 decimals, brut = net + retenue.
+ */
+export interface SummaryBucket extends PaymentBucketDto {
+  /** Brut: what the factures totalled (TTC, stamps included). */
+  gross: string;
+  /** Retenue à la source kept back by the practitioners. */
+  withholding: string;
+}
+
+export interface SummaryMethodBuckets extends PaymentMethodBucketsDto {
+  cash: SummaryBucket;
+  cheque: SummaryBucket;
+  card: SummaryBucket;
+  bank_transfer: SummaryBucket;
+}
+
+export interface SummaryPurpose extends PaymentPurposeSummaryDto {
+  gross: string;
+  withholding: string;
+  methods: SummaryMethodBuckets;
+}
+
+/** PaymentsSummaryDto with every bucket split brut / retenue / net. */
+export interface PaymentsSummary extends PaymentsSummaryDto {
+  total: SummaryBucket;
+  methods: SummaryMethodBuckets;
+  purposes: { installment: SummaryPurpose; treatment_fee: SummaryPurpose };
 }
 
 /** Inclusive business days; null leaves that side open. */
@@ -42,7 +84,11 @@ export interface TakingsPeriod {
   to: string | null;
 }
 
-const ZERO: Tally = { amount: new Prisma.Decimal(0), count: 0 };
+const ZERO: Tally = {
+  amount: new Prisma.Decimal(0),
+  count: 0,
+  withholding: new Prisma.Decimal(0),
+};
 
 /** The payment methods, in the order every summary and report lists them. */
 export const METHOD_ORDER: readonly PaymentMethod[] = [
@@ -64,6 +110,8 @@ export const METHOD_ORDER: readonly PaymentMethod[] = [
  *     fee twice, so they never are.
  * Archived orders are left out, as the lists leave them out, so the
  * totals reconcile with the rows. A waived fee (amount 0) is not money.
+ * Each sum also carries the retenue those payments kept back (brut =
+ * cash + retenue, spec §4), from the same groupBy.
  * The sums are CASH, the money that actually came in: Payment.amount and
  * DentalOrder.treatmentFeeAmount are both net of the retenue à la source
  * the practitioner kept back, and both INCLUDE the droit de timbre charged
@@ -84,7 +132,7 @@ export class PaymentsSummaryService {
   async summarise(
     query: PaymentSummaryQueryDto,
     caller: Caller,
-  ): Promise<PaymentsSummaryDto> {
+  ): Promise<PaymentsSummary> {
     const period = resolveTakingsPeriod(query.from, query.to);
     const received = businessDayRange(period.from, period.to);
     const orders = ordersInScope(query.doctorId, caller);
@@ -115,13 +163,14 @@ export class PaymentsSummaryService {
         order: orders,
         ...(extra ? { AND: [extra] } : {}),
       },
-      _sum: { amount: true },
+      _sum: { amount: true, withholdingAmount: true },
       _count: { _all: true },
     });
     return tallyByMethod(
       groups.map((group) => ({
         method: group.paymentMethod,
         amount: group._sum.amount,
+        withholding: group._sum.withholdingAmount,
         count: group._count._all,
       })),
     );
@@ -146,13 +195,14 @@ export class PaymentsSummaryService {
         treatmentFeeAmount: { gt: 0 },
         ...(extra ? { AND: [extra] } : {}),
       },
-      _sum: { treatmentFeeAmount: true },
+      _sum: { treatmentFeeAmount: true, treatmentFeeWithholdingAmount: true },
       _count: { _all: true },
     });
     return tallyByMethod(
       groups.map((group) => ({
         method: group.treatmentFeePaymentMethod,
         amount: group._sum.treatmentFeeAmount,
+        withholding: group._sum.treatmentFeeWithholdingAmount,
         count: group._count._all,
       })),
     );
@@ -195,7 +245,16 @@ function eachMethod(tally: (method: PaymentMethod) => Tally): MethodTallies {
 }
 
 export function addTallies(a: Tally, b: Tally): Tally {
-  return { amount: a.amount.plus(b.amount), count: a.count + b.count };
+  return {
+    amount: a.amount.plus(b.amount),
+    count: a.count + b.count,
+    withholding: a.withholding.plus(b.withholding),
+  };
+}
+
+/** Brut of a tally: the cash plus the retenue kept back (Total TTC). */
+export function grossOf(tally: Tally): Prisma.Decimal {
+  return tally.amount.plus(tally.withholding);
 }
 
 /** Every method of `tallies` summed. */
@@ -219,21 +278,27 @@ export function emptyMethodTallies(): MethodTallies {
 /** Every method present, zero when nothing was received that way. */
 function tallyByMethod(groups: MethodGroup[]): MethodTallies {
   const tallies = emptyMethodTallies();
-  for (const { method, amount, count } of groups) {
+  for (const { method, amount, withholding, count } of groups) {
     if (!method) continue;
     tallies[method] = addTallies(tallies[method], {
       amount: amount ?? ZERO.amount,
       count,
+      withholding: withholding ?? ZERO.withholding,
     });
   }
   return tallies;
 }
 
-function toBucket({ amount, count }: Tally): PaymentBucketDto {
-  return { amount: amount.toFixed(3), count };
+function toBucket(tally: Tally): SummaryBucket {
+  return {
+    amount: tally.amount.toFixed(3),
+    count: tally.count,
+    gross: grossOf(tally).toFixed(3),
+    withholding: tally.withholding.toFixed(3),
+  };
 }
 
-function toMethodBuckets(tallies: MethodTallies): PaymentMethodBucketsDto {
+function toMethodBuckets(tallies: MethodTallies): SummaryMethodBuckets {
   return {
     cash: toBucket(tallies.cash),
     cheque: toBucket(tallies.cheque),
@@ -242,7 +307,7 @@ function toMethodBuckets(tallies: MethodTallies): PaymentMethodBucketsDto {
   };
 }
 
-function toPurposeSummary(tallies: MethodTallies): PaymentPurposeSummaryDto {
+function toPurposeSummary(tallies: MethodTallies): SummaryPurpose {
   return {
     ...toBucket(sumTallies(tallies)),
     methods: toMethodBuckets(tallies),
@@ -253,7 +318,7 @@ function toSummary(
   period: TakingsPeriod,
   installments: MethodTallies,
   treatmentFees: MethodTallies,
-): PaymentsSummaryDto {
+): PaymentsSummary {
   const both = addMethodTallies(installments, treatmentFees);
   return {
     from: period.from,

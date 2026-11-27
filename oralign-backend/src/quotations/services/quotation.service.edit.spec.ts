@@ -150,6 +150,20 @@ function world(args: {
       updateMany: jest.fn().mockResolvedValue({ count: 0 }),
       // The kept batches the response's freeStepsForReplan is read from.
       findMany: jest.fn().mockResolvedValue(args.keptBatches ?? []),
+      // A released batch as production/batch-unlock.ts reads it.
+      findUnique: jest.fn(({ where }: { where: { id: string } }) =>
+        Promise.resolve({
+          id: where.id,
+          quotationId: 'q-1',
+          installmentId: `i-${where.id.slice(2)}`,
+          batchNumber: Number(where.id.slice(2)),
+          fromStep: 1,
+          toStep: 2,
+          status: 'locked',
+          quotation: { orderId: 'o-1' },
+          installment: { installmentNumber: Number(where.id.slice(2)) },
+        }),
+      ),
     },
     payment: {
       groupBy: jest.fn().mockResolvedValue(args.payments ?? []),
@@ -183,7 +197,9 @@ function world(args: {
   const service = new QuotationService(
     db as unknown as PrismaService,
     {
-      requireReadable: jest.fn().mockResolvedValue({ id: 'o-1', doctorId: 'u-doc' }),
+      requireReadable: jest
+        .fn()
+        .mockResolvedValue({ id: 'o-1', doctorId: 'u-doc' }),
     } as unknown as OrderAccessPolicy,
     {
       getActive: jest.fn().mockResolvedValue({ defaultTvaRate: 19 }),
@@ -275,7 +291,9 @@ describe('QuotationService.update — admin edits a quote already sent or approv
     await service.update('q-1', { discountAmount: 0 }, admin);
 
     expect(db.quoteInstallment.update).not.toHaveBeenCalled();
-    const created = db.quoteInstallment.create.mock.calls[0][0] as {
+    const created = (
+      db.quoteInstallment.create.mock.calls as unknown[][]
+    )[0][0] as {
       data: { installmentNumber: number; amount: Prisma.Decimal };
     };
     expect(created.data.installmentNumber).toBe(2);
@@ -306,16 +324,21 @@ describe('QuotationService.update — admin edits a quote already sent or approv
       where: { id: { in: ['i-2', 'i-3'] } },
       data: { amount: 0, status: InstallmentStatus.cancelled },
     });
-    expect(db.quoteStepBatch.updateMany.mock.calls[0][0]).toMatchObject({
+    // Their locked batches are looked up to be released one by one.
+    expect(db.quoteStepBatch.findMany).toHaveBeenCalledWith({
       where: { installmentId: { in: ['i-2', 'i-3'] }, status: 'locked' },
-      data: { status: 'unlocked' },
+      select: { id: true },
+      orderBy: { batchNumber: 'asc' },
     });
     expect(updateData(db)).toMatchObject({
       paymentStatus: QuotationPaymentStatus.paid,
     });
     const audit = db.orderAuditLog.create.mock.calls[0][0];
-    expect(audit.data.metadata).toMatchObject({ cancelledInstallments: [2, 3] });
-    // No batch was locked on those rows: nothing to re-project.
+    expect(audit.data.metadata).toMatchObject({
+      cancelledInstallments: [2, 3],
+    });
+    // No batch was locked on those rows: nothing to release or re-project.
+    expect(db.quoteStepBatch.updateMany).not.toHaveBeenCalled();
     expect(project).not.toHaveBeenCalled();
   });
 
@@ -329,16 +352,53 @@ describe('QuotationService.update — admin edits a quote already sent or approv
       ],
       payments: [group(PaymentRecordStatus.success, '600.000')],
     });
-    db.quoteStepBatch.updateMany.mockResolvedValueOnce({ count: 1 });
+    db.quoteStepBatch.findMany.mockResolvedValueOnce([
+      { id: 'b-2' },
+      { id: 'b-3' },
+    ]);
+    db.quoteStepBatch.updateMany.mockResolvedValue({ count: 1 });
 
     await service.update('q-1', { discountAmount: 1780 }, admin);
 
+    // One guarded release per batch (production/batch-unlock.ts), each
+    // journaled with its source and the editing admin.
+    expect(db.quoteStepBatch.updateMany).toHaveBeenCalledTimes(2);
+    expect(
+      (db.quoteStepBatch.updateMany.mock.calls as unknown[][])[0][0],
+    ).toMatchObject({
+      where: { id: 'b-2', status: 'locked' },
+      data: {
+        status: 'unlocked',
+        unlockSource: 'installment_cancelled',
+        unlockedById: 'u-admin',
+        unlockReason: null,
+      },
+    });
+    // ONE projection on the whole released set, as before the helper: the
+    // coverage start and the finish are decided with every batch released.
     expect(project).toHaveBeenCalledTimes(1);
     // The transaction client (the world runs the transaction on db itself).
     expect(project).toHaveBeenCalledWith(db, { orderId: 'o-1', actorId: null });
     expect(project.mock.invocationCallOrder[0]).toBeGreaterThan(
-      db.quoteStepBatch.updateMany.mock.invocationCallOrder[0],
+      db.quoteStepBatch.updateMany.mock.invocationCallOrder[1],
     );
+    const unlockRows = db.orderAuditLog.create.mock.calls
+      .map((call) => call[0].data)
+      .filter((row) => row.action === 'batch_unlocked');
+    expect(unlockRows).toHaveLength(2);
+    // The journal rows come after the projection (order row locked first).
+    const firstUnlockRow = db.orderAuditLog.create.mock.calls.findIndex(
+      (call) => call[0].data.action === 'batch_unlocked',
+    );
+    expect(
+      db.orderAuditLog.create.mock.invocationCallOrder[firstUnlockRow],
+    ).toBeGreaterThan(project.mock.invocationCallOrder[0]);
+    expect(unlockRows[0]).toMatchObject({
+      orderId: 'o-1',
+      actorId: 'u-admin',
+      metadata: { batchId: 'b-2', source: 'installment_cancelled' },
+    });
+    expect(unlockRows[0]).not.toHaveProperty('paymentId');
   });
 
   it('rebalances the unpaid installments, keeps the paid one and recomputes the money', async () => {
@@ -360,7 +420,9 @@ describe('QuotationService.update — admin edits a quote already sent or approv
     const result = await service.update('q-1', { discountAmount: 0 }, admin);
 
     expect(db.$queryRaw).toHaveBeenCalledTimes(2); // installments, then quote
-    expect(db.quoteInstallment.update.mock.calls.map(([a]) => a as unknown)).toEqual([
+    expect(
+      db.quoteInstallment.update.mock.calls.map(([a]) => a as unknown),
+    ).toEqual([
       { where: { id: 'i-2' }, data: { amount: D('890.000') } },
       { where: { id: 'i-3' }, data: { amount: D('890.000') } },
     ]);
@@ -542,7 +604,11 @@ describe('QuotationService.update — admin edits a quote already sent or approv
       ],
     });
 
-    const result = await service.update('q-1', { notes: 'Livraison en 2 fois' }, admin);
+    const result = await service.update(
+      'q-1',
+      { notes: 'Livraison en 2 fois' },
+      admin,
+    );
 
     expect(updateData(db)).toMatchObject({ notes: 'Livraison en 2 fois' });
     expect(result.hasPaymentInFlight).toBe(true);
@@ -553,7 +619,9 @@ describe('QuotationService.update — admin edits a quote already sent or approv
       quote: packQuote({ status: QuotationStatus.rejected }),
     });
 
-    await expect(service.update('q-1', { notes: 'x' }, admin)).rejects.toMatchObject({
+    await expect(
+      service.update('q-1', { notes: 'x' }, admin),
+    ).rejects.toMatchObject({
       statusCode: 400,
       errorCode: QUOTE_ERROR.NOT_EDITABLE,
     });

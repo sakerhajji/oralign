@@ -52,6 +52,12 @@ function NavMainImpl({
      * Set to 0 / undefined to hide the badge entirely.
      */
     badge?: number
+    /**
+     * What the badge counts, in words ("3 nouveaux virements"): the
+     * tooltip, and the text screen readers hear after the title (the
+     * pills themselves are aria-hidden).
+     */
+    badgeLabel?: string
   }[]
 }) {
   const pathname = usePathname()
@@ -92,13 +98,12 @@ function NavMainImpl({
             // Pretty-printed count: cap at 99+ so the pill never
             // grows wider than the icon-rail badge in collapsed mode.
             const badgeLabel = badgeCount > 99 ? "99+" : String(badgeCount)
+            const badgeWords = hasBadge ? (item.badgeLabel ?? badgeLabel) : null
             return (
               <SidebarMenuItem key={item.title} className="relative">
                 <SidebarMenuButton
                   asChild
-                  tooltip={
-                    hasBadge ? `${item.title} (${badgeLabel} unread)` : item.title
-                  }
+                  tooltip={badgeWords ? `${item.title} (${badgeWords})` : item.title}
                   isActive={isItemActive(item.url, item.excludePrefixes)}
                   className="group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:justify-center"
                 >
@@ -117,6 +122,7 @@ function NavMainImpl({
                     <span className="truncate group-data-[collapsible=icon]:sr-only">
                       {item.title}
                     </span>
+                    {badgeWords ? <span className="sr-only">, {badgeWords}</span> : null}
                     {/* Inline pill — only visible while the sidebar
                         is expanded. `ml-auto` shoves it to the right
                         edge of the row. */}

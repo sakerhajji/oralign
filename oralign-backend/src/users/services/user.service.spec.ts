@@ -7,6 +7,8 @@ import type {
   UserWithProfile,
 } from '../repositories/user.repository';
 import { UserService } from './user.service';
+import type { EventEmitter2 } from '@nestjs/event-emitter';
+import type { DoctorActivityService } from '../activity/doctor-activity.service';
 
 const admin: Caller = { userId: 'u-admin', role: UserRole.admin };
 const superAdmin: Caller = { userId: 'u-root', role: UserRole.super_admin };
@@ -36,9 +38,17 @@ const row = (over: Partial<UserWithProfile> = {}): UserWithProfile =>
   }) as unknown as UserWithProfile;
 
 function makeService(repo: Partial<Record<keyof UserRepository, jest.Mock>>) {
+  // The activity rules have their own specs (users/activity): no block here.
+  const activity = {
+    summaries: jest.fn().mockResolvedValue(new Map()),
+    listFilterWhere: jest.fn(),
+    journalStatusChange: jest.fn(),
+  };
   const service = new UserService(
     repo as unknown as UserRepository,
     {} as MailService,
+    activity as unknown as DoctorActivityService,
+    { emit: jest.fn() } as unknown as EventEmitter2,
   );
   return service;
 }
@@ -407,6 +417,7 @@ describe('UserService — the super admin hierarchy on every admin account route
       ['a', 'b', 'root'],
       false,
       { spareSuperAdmins: true },
+      expect.any(Function),
     );
     expect(repo.countSuperAdmins).toHaveBeenLastCalledWith(['a', 'b', 'root'], {
       deleted: false,
@@ -442,6 +453,7 @@ describe('UserService — the super admin hierarchy on every admin account route
       ['a', 'b', 'root'],
       false,
       { spareSuperAdmins: false },
+      expect.any(Function),
     );
     expect(repo.countSuperAdmins).not.toHaveBeenCalled();
   });
@@ -499,7 +511,7 @@ describe('UserService lists', () => {
 
     const res = await service.getAllUsers(query);
 
-    expect(findAll).toHaveBeenCalledWith(20, 10, query);
+    expect(findAll).toHaveBeenCalledWith(20, 10, query, undefined);
     expect(res).toMatchObject({ total: 31, page: 3, limit: 10, totalPages: 4 });
     expect(res.data).toHaveLength(1);
   });
@@ -511,7 +523,7 @@ describe('UserService lists', () => {
 
     const res = await service.getDeletedUsers(query);
 
-    expect(findAllDeleted).toHaveBeenCalledWith(0, 25, query);
+    expect(findAllDeleted).toHaveBeenCalledWith(0, 25, query, undefined);
     expect(res).toMatchObject({ total: 0, totalPages: 0, data: [] });
   });
 

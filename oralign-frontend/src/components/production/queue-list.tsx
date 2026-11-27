@@ -15,6 +15,7 @@ import { businessToday, formatBusinessDayShort } from '@/lib/utils/business-day'
 import { ActCell, ActProgressTable, ProvisionalLegend, hasProvisional } from './act-progress';
 import { productionStatusOf } from './production-format';
 import { ProductionKindBadge, ProductionStatusBadge } from './production-ui';
+import { ReleaseSummary } from './release-summary';
 
 export function productionCaseHref(orderId: string): string {
   return `/dashboard/production/${encodeURIComponent(orderId)}`;
@@ -111,6 +112,8 @@ function QueueTable({ rows }: { rows: ProductionQueueItem[] }) {
                     {row.parentOrderCode &&
                       ` · ${t('production.queue.supplementalOf', { code: row.parentOrderCode })}`}
                   </p>
+                  {/* What the lab may work on, read before the counters (spec §3). */}
+                  <ReleaseSummary release={row.release} className="mt-1" />
                   {hasProvisional(row) && <ProvisionalLegend className="mt-0.5" />}
                 </td>
                 <td className="hidden truncate px-2 py-2.5 xl:table-cell">{row.practitionerName}</td>
@@ -151,9 +154,12 @@ function QueueCards({ rows }: { rows: ProductionQueueItem[] }) {
         >
           <div className="flex items-start justify-between gap-2">
             <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+              {/* A patient-name code (« Mohamed_Ben_Salah_20261127 ») has no
+                  break opportunity: without overflow-wrap it pushes the card
+                  past a 375 px screen. */}
               <Link
                 href={productionCaseHref(row.orderId)}
-                className="text-[15px] font-semibold tabular-nums outline-none after:absolute after:inset-0 after:rounded-xl focus-visible:after:ring-3 focus-visible:after:ring-ring/50"
+                className="text-[15px] font-semibold tabular-nums outline-none [overflow-wrap:anywhere] after:absolute after:inset-0 after:rounded-xl focus-visible:after:ring-3 focus-visible:after:ring-ring/50"
               >
                 {row.orderCode}
               </Link>
@@ -167,6 +173,7 @@ function QueueCards({ rows }: { rows: ProductionQueueItem[] }) {
             {row.parentOrderCode &&
               ` · ${t('production.queue.supplementalOf', { code: row.parentOrderCode })}`}
           </p>
+          <ReleaseSummary release={row.release} className="mt-2" />
           <ActProgressTable item={row} className="mt-3" />
           <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
             <span className="truncate">

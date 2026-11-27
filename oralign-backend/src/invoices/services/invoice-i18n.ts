@@ -79,6 +79,11 @@ export interface InvoiceLabels {
   withholding: (rate: string | null) => string;
   netPayable: string;
   amountPaid: string;
+  /**
+   * What the devis still asks for right after the payment an installment
+   * facture records (Invoice.quoteRemainingAfter, frozen at issue).
+   */
+  quoteRemaining: string;
   // Status (payment)
   status: string;
   statusPaid: string;
@@ -153,6 +158,7 @@ const FR: InvoiceLabels = {
     rate ? `Retenue à la source (${rate} %)` : 'Retenue à la source',
   netPayable: 'Net à payer',
   amountPaid: 'Montant payé',
+  quoteRemaining: 'Reste à payer sur le devis',
   status: 'Statut',
   statusPaid: 'Payé',
   statusPending: 'En attente',
@@ -229,6 +235,7 @@ const EN: InvoiceLabels = {
     rate ? `Withholding tax (${rate} %)` : 'Withholding tax',
   netPayable: 'Net amount due',
   amountPaid: 'Amount paid',
+  quoteRemaining: 'Remaining on the quotation',
   status: 'Status',
   statusPaid: 'Paid',
   statusPending: 'Pending',
@@ -258,8 +265,7 @@ const EN: InvoiceLabels = {
   iban: 'IBAN',
   swift: 'SWIFT',
   taxNumber: 'Tax number',
-  legalNotice:
-    'Invoice issued in compliance with Tunisian tax law.',
+  legalNotice: 'Invoice issued in compliance with Tunisian tax law.',
   pageOfTotal: (page, total) => `Page ${page} of ${total}`,
 };
 

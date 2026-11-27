@@ -37,6 +37,18 @@ export const notificationsService = {
     return res.data;
   },
 
+  /**
+   * Mark MY rows of one business subject read (the transfer desk's
+   * "Consulté"); idempotent. The key holds ':' and travels encoded.
+   */
+  markSubjectRead: async (subjectKey: string): Promise<{ updated: number }> => {
+    const res = await apiClient.post<{ updated: number }>(
+      `/notifications/subject/${encodeURIComponent(subjectKey)}/read`,
+      {},
+    );
+    return res.data;
+  },
+
   markAllRead: async (): Promise<{ updated: number }> => {
     const res = await apiClient.post<{ updated: number }>(
       '/notifications/read-all',

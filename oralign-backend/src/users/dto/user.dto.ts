@@ -19,6 +19,10 @@ import { Transform, Type } from 'class-transformer';
 import { UserRole, VerificationStatus } from '@prisma/client';
 import { rawBoolean } from '../../common/dto/query-transforms';
 import { FULL_NAME_MAX_LENGTH } from '../../common/access/actor-snapshot';
+import type {
+  DoctorActivityStatus,
+  DoctorActivitySummary,
+} from '../activity/doctor-activity.contract';
 
 const E164_PHONE_REGEX = /^\+[1-9]\d{1,14}$/;
 const ISO_COUNTRY_REGEX = /^[A-Z]{2}$/;
@@ -81,6 +85,16 @@ const blankToUndefined = ({ obj, key }: { obj: unknown; key: string }) => {
 /** Values of the `welcomeGift` list filter (dentists only). */
 export const WELCOME_GIFT_FILTERS = ['used', 'available'] as const;
 export type WelcomeGiftFilter = (typeof WELCOME_GIFT_FILTERS)[number];
+
+/**
+ * Values of the `activity` list filter (dentists only, doctor inactivity
+ * §5): active, warned (deadline within 30 days), inactive (dormant).
+ */
+export const ACTIVITY_FILTERS = [
+  'active',
+  'warned',
+  'inactive',
+] as const satisfies readonly DoctorActivityStatus[];
 
 /**
  * Upper bound of `limit` on the users lists. The admin dentist pickers
@@ -350,6 +364,41 @@ export class UserResponseDto {
       'The account runs on a temporary password: every route but GET /users/me and POST /auth/change-password answers 403 PASSWORD_CHANGE_REQUIRED until it chooses its own.',
   })
   mustChangePassword!: boolean;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description:
+      'Doctor inactivity: when the account turned dormant (no submitted order for inactivityMonths). Not the same as isActive: a dormant doctor keeps login, payments and chat, but order create / submit answer 403 ACCOUNT_DORMANT. Null = not dormant.',
+  })
+  inactiveSince!: Date | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description: 'Last admin reactivation (part of the inactivity anchor).',
+  })
+  activityResetAt!: Date | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description:
+      'When an admin approved the account (null for approvals before 2026-11-27).',
+  })
+  approvedAt!: Date | null;
+
+  @ApiProperty({
+    type: Object,
+    nullable: true,
+    required: false,
+    description:
+      'Dentists only (null for other roles; absent on write responses): { status, lastSubmittedOrderAt, anchorAt, deadlineAt, inactiveSince, activityResetAt, ruleEnabled }. deadlineAt is null when no deadline runs (rule switched off, account not approved / blocked / archived, or already dormant).',
+  })
+  activity?: DoctorActivitySummary | null;
 }
 
 /** `POST /users`: the account, plus the generated password ONCE when one was asked for. */
@@ -434,6 +483,17 @@ export class UserFilterDto {
   @IsOptional()
   @IsIn(WELCOME_GIFT_FILTERS)
   welcomeGift?: WelcomeGiftFilter;
+
+  @ApiProperty({
+    enum: [...ACTIVITY_FILTERS],
+    required: false,
+    description:
+      'Doctor activity (dentists only): active, warned (the inactivity deadline is within 30 days), inactive (dormant). Non-dentists never match.',
+  })
+  @Transform(blankToUndefined)
+  @IsOptional()
+  @IsIn(ACTIVITY_FILTERS)
+  activity?: DoctorActivityStatus;
 }
 
 /**
@@ -493,6 +553,11 @@ export class UsersStatsDto {
   giftAvailable!: number;
   @ApiProperty({ description: 'Dentists whose welcome gift is used' })
   giftUsed!: number;
+  @ApiProperty({
+    description:
+      'Dormant dentists (User.inactiveSince set, not archived): DORMANT_DOCTOR_WHERE, the same set as the activity=inactive filter.',
+  })
+  dormant!: number;
 }
 
 export class BulkActionDto {

@@ -16,9 +16,16 @@ import {
   round3,
   toAmount,
 } from '../../common/billing/tax-split';
+import {
+  buildDoctorBillingSnapshot,
+  DOCTOR_BILLING_SELECT,
+  practitionerInvoiceClient,
+  type DoctorBillingSource,
+} from '../../common/doctor/doctor-billing-snapshot';
 import { getInvoiceLabels, type InvoiceLanguage } from './invoice-i18n';
 import { InvoiceMailService } from './invoice-mail.service';
 import { invoicePaymentReference } from './payment-reference';
+import { quoteRemainingAfter } from './quote-balance';
 import { NotificationEvents } from '../../notifications/events/notification-events';
 
 /** Automatic invoices are Tunisian fiscal documents: always in French. */
@@ -56,38 +63,15 @@ export interface AutoInvoiceOptions {
   notify?: boolean;
 }
 
+/**
+ * The practitioner as the facture snapshots him: the shared billing
+ * select (practice, contact, identifiers), plus the language his covering
+ * e-mail is written in.
+ */
 const DOCTOR_SELECT = {
-  id: true,
-  fullName: true,
-  email: true,
-  phone: true,
+  ...DOCTOR_BILLING_SELECT,
   preferredLanguage: true,
-  dentistProfile: {
-    select: {
-      clinicName: true,
-      clinicAddress: true,
-      city: true,
-      country: true,
-      clinicPhone: true,
-      clinicEmail: true,
-      taxId: true,
-    },
-  },
-} as const;
-
-type DoctorRow = {
-  fullName: string;
-  email: string;
-  phone: string | null;
-  dentistProfile: {
-    clinicAddress: string | null;
-    city: string | null;
-    country: string | null;
-    clinicPhone: string | null;
-    clinicEmail: string | null;
-    taxId: string | null;
-  } | null;
-} | null;
+} satisfies Prisma.UserSelect;
 
 /**
  * Automatic invoicing.
@@ -202,9 +186,13 @@ export class InvoiceAutoService {
       include: {
         quotation: {
           select: {
+            id: true,
             tvaRate: true,
             currency: true,
             packName: true,
+            // The devis total, for the "Reste à payer" the facture freezes.
+            totalPrice: true,
+            totalTtc: true,
           },
         },
         installment: { select: { installmentNumber: true, quotationId: true } },
@@ -246,8 +234,15 @@ export class InvoiceAutoService {
     // out of it backwards, the payment's own stamp is added, and the
     // retenue is the one the payment recorded (its net is the cash).
     const stamp = round3(payment.stampAmount);
-    const settled = settledAmount(payment.amount, payment.withholdingAmount, stamp);
-    const tvaRate = resolveTvaRate(payment.quotation?.tvaRate, settings.defaultTvaRate);
+    const settled = settledAmount(
+      payment.amount,
+      payment.withholdingAmount,
+      stamp,
+    );
+    const tvaRate = resolveTvaRate(
+      payment.quotation?.tvaRate,
+      settings.defaultTvaRate,
+    );
     const totals = inclusiveInvoiceTotals(
       [{ quantity: 1, unitPriceTtc: settled }],
       tvaRate,
@@ -255,6 +250,15 @@ export class InvoiceAutoService {
       stamp,
     );
     const withholdingAmount = toAmount(payment.withholdingAmount);
+    // What the devis still asked for right after this payment, frozen on
+    // the facture ("Reste à payer", spec §4).
+    const remainingAfter = payment.quotation
+      ? await this.quoteRemainingAfter(payment.quotation, {
+          id: payment.id,
+          settled,
+          at: payment.paidAt ?? payment.createdAt,
+        })
+      : null;
 
     // ── Line: what was actually billed ───────────────────────────────
     const description = payment.installment
@@ -298,7 +302,8 @@ export class InvoiceAutoService {
           doctorId: payment.order.doctorId,
           ...this.clientBlock(doctor),
           issueDate: issuedAt,
-          currency: payment.quotation?.currency ?? settings.defaultCurrency ?? 'TND',
+          currency:
+            payment.quotation?.currency ?? settings.defaultCurrency ?? 'TND',
           language,
           tvaRate,
           discountAmount: 0,
@@ -316,6 +321,9 @@ export class InvoiceAutoService {
               : null,
           withholdingAmount,
           netPayable: toAmount(payment.amount),
+          // The retenue threshold the payment was charged under (snapshot).
+          withholdingThreshold: payment.withholdingThreshold,
+          quoteRemainingAfter: remainingAfter,
           notes: null,
           companySnapshot: this.companySnapshot(settings),
           createdByName: 'Automatique',
@@ -395,6 +403,7 @@ export class InvoiceAutoService {
         treatmentFeeWithholdingRate: true,
         treatmentFeeWithholdingAmount: true,
         treatmentFeeStampAmount: true,
+        treatmentFeeWithholdingThreshold: true,
         treatmentFeePaymentMethod: true,
         treatmentFeePaymentStatus: true,
         treatmentFeePaidAt: true,
@@ -498,6 +507,8 @@ export class InvoiceAutoService {
               : null,
           withholdingAmount,
           netPayable: toAmount(cash),
+          // The retenue threshold the fee was charged under (snapshot).
+          withholdingThreshold: order.treatmentFeeWithholdingThreshold,
           // The receipt the practitioner was handed for this fee keeps a
           // trace: the order still prints it, the facture names it.
           notes: legacyReceipt ? labels.replacesReceipt(legacyReceipt) : null,
@@ -581,7 +592,9 @@ export class InvoiceAutoService {
     }
     for (const orderId of fees) {
       try {
-        const res = await this.generateForTreatmentFee(orderId, { notify: false });
+        const res = await this.generateForTreatmentFee(orderId, {
+          notify: false,
+        });
         if (res.created) created += 1;
       } catch (error) {
         this.logger.warn(
@@ -716,20 +729,54 @@ export class InvoiceAutoService {
 
   /**
    * The customer is the practitioner (owner decision): their name heads
-   * the "Facturé à" box, the clinic name is printed from their profile,
-   * and the snapshot keeps the clinic's address, contacts and tax id.
+   * the "Facturé à" box and the facture snapshots the rest (spec §6): the
+   * practice name, address, contact (practice first, account fallback),
+   * tax id and registration number, through the one shared builder. The
+   * stored PDF reads these columns only, never the live profile.
    */
-  private clientBlock(doctor: DoctorRow) {
-    const clinic = doctor?.dentistProfile ?? null;
-    return {
-      clientName: doctor?.fullName ?? 'Docteur',
-      clientEmail: clinic?.clinicEmail ?? doctor?.email ?? null,
-      clientPhone: clinic?.clinicPhone ?? doctor?.phone ?? null,
-      clientAddress: clinic?.clinicAddress ?? null,
-      clientCity: clinic?.city ?? null,
-      clientCountry: clinic?.country ?? null,
-      clientTaxId: clinic?.taxId ?? null,
-    };
+  private clientBlock(doctor: DoctorBillingSource | null) {
+    return practitionerInvoiceClient(
+      doctor ? buildDoctorBillingSnapshot(doctor) : null,
+    );
+  }
+
+  /**
+   * "Reste à payer" on the devis right after the payment: the devis total
+   * (the Decimal totalPrice of a pack quote, else the legacy totalTtc)
+   * minus what its successful payments up to this one settled. One read
+   * of the quote's settled payments (index quotationId).
+   */
+  private async quoteRemainingAfter(
+    quotation: {
+      id: string;
+      totalPrice: Prisma.Decimal | null;
+      totalTtc: number;
+    },
+    current: { id: string; settled: Prisma.Decimal; at: Date },
+  ): Promise<Prisma.Decimal> {
+    const payments = await this.prisma.payment.findMany({
+      where: {
+        quotationId: quotation.id,
+        status: PaymentRecordStatus.success,
+      },
+      select: {
+        id: true,
+        amount: true,
+        withholdingAmount: true,
+        stampAmount: true,
+        paidAt: true,
+        createdAt: true,
+      },
+    });
+    return quoteRemainingAfter(
+      quotation.totalPrice ?? quotation.totalTtc,
+      payments.map((p) => ({
+        id: p.id,
+        settled: settledAmount(p.amount, p.withholdingAmount, p.stampAmount),
+        at: p.paidAt ?? p.createdAt,
+      })),
+      current,
+    );
   }
 
   private async countInstallments(quotationId: string): Promise<number> {

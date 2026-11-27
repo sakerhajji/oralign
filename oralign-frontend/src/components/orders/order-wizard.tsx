@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import Link from 'next/link';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CalendarDays,
   Camera,
@@ -12,6 +13,7 @@ import {
   Info,
   ListChecks,
   Lock,
+  Moon,
   Phone,
   Save,
   ScanLine,
@@ -124,7 +126,10 @@ const WelcomeGiftDialog = dynamic(
 );
 import { useAuth } from '@/lib/providers/auth-provider';
 import { useT } from '@/lib/i18n/lang-context';
-import { patientsService } from '@/lib/api';
+import { extractApiError, patientsService } from '@/lib/api';
+import { useCanOrder } from '@/lib/hooks/use-can-order';
+import { userKeys } from '@/lib/hooks/use-users';
+import { isAccountDormantCode } from '@/lib/account-activity/account-activity';
 import {
   patientKeys,
   useCreateOrder,
@@ -464,6 +469,43 @@ export function OrderWizard({
   const selectedDentist = dentistsQuery.data?.data.find(
     (doctor) => doctor.id === form.doctorId,
   );
+
+  // ── Doctor inactivity (spec §5) ────────────────────────────────────
+  // A dormant doctor gets no new order and cannot submit a draft (403
+  // ACCOUNT_DORMANT, also when an admin acts for him); editing an
+  // existing draft stays open. A dentist answers for himself
+  // (/users/me), an admin for the practitioner chosen in the picker.
+  const queryClient = useQueryClient();
+  const ordering = useCanOrder(isAdmin ? (selectedDentist ?? null) : undefined);
+  const orderingClosed = !ordering.canOrder;
+  // Creating the draft is what the server refuses first.
+  const createBlocked = orderingClosed && !savedOrder;
+  // A refusal the screen did not foresee (the account turned dormant
+  // since it loaded): refresh what drives the gate, so the notice shows.
+  const dormantRefusal = [createOrder.error, submitOrder.error].some(
+    (error) => error != null && isAccountDormantCode(extractApiError(error).errorCode),
+  );
+  useEffect(() => {
+    if (!dormantRefusal) return;
+    void queryClient.invalidateQueries({ queryKey: userKeys.currentUser() });
+    void queryClient.invalidateQueries({ queryKey: userKeys.lists() });
+  }, [dormantRefusal, queryClient]);
+
+  // The admin picker flags dormant practitioners in their label (the
+  // search still matches the name).
+  const dentistOptions = useMemo(
+    () =>
+      (dentistsQuery.data?.data ?? []).map((doctor) =>
+        doctor.inactiveSince
+          ? {
+              ...doctor,
+              fullName: t('accountActivity.wizard.dentistOption', { name: doctor.fullName }),
+            }
+          : doctor,
+      ),
+    [dentistsQuery.data, t],
+  );
+
   const activeStep = steps[step];
   const stepperSteps = steps.map((s) => ({ key: s.titleKey, title: t(s.titleKey) }));
 
@@ -978,8 +1020,9 @@ export function OrderWizard({
             form={form}
             newPatient={newPatient}
             selectedPatientName={selectedPatient?.fullName ?? savedOrder?.patient?.fullName}
-            dentists={dentistsQuery.data?.data ?? []}
+            dentists={dentistOptions}
             dentistsLoading={dentistsQuery.isLoading}
+            dentistDormant={isAdmin && createBlocked}
             patients={pickablePatients}
             patientsLoading={patientsQuery.isLoading}
             errors={fieldErrors}
@@ -1171,6 +1214,14 @@ export function OrderWizard({
         </label>
       )}
 
+      {/* Doctor inactivity: why the next action is closed (the admin's
+          "new order" case already explains under the dentist picker). */}
+      {orderingClosed && canModify && !(isAdmin && createBlocked && step === 0) && (
+        <DormantOrderingNotice
+          variant={isAdmin ? (createBlocked ? 'adminCreate' : 'adminSubmit') : 'self'}
+        />
+      )}
+
       <WizardFooter>
         <Button
           type="button"
@@ -1186,7 +1237,7 @@ export function OrderWizard({
             <Button
               type="button"
               variant="outline"
-              disabled={isSaving}
+              disabled={isSaving || createBlocked}
               onClick={saveDraft}
             >
               <Save className="mr-2 h-4 w-4" />
@@ -1200,8 +1251,9 @@ export function OrderWizard({
           {step < steps.length - 1 ? (
             <Button
               type="button"
-              disabled={isSaving}
+              disabled={isSaving || createBlocked}
               onClick={async () => {
+                if (createBlocked) return;
                 const valid = await validateCurrentStep();
                 if (!valid) return;
                 if ((step === 0 || (step < 3 && !savedOrder)) && canModify) {
@@ -1217,8 +1269,9 @@ export function OrderWizard({
           ) : (
             <Button
               type="button"
-              disabled={!canModify || !canSubmit || submitOrder.isPending}
+              disabled={!canModify || !canSubmit || submitOrder.isPending || orderingClosed}
               onClick={async () => {
+                if (orderingClosed) return;
                 const valid = await validateForSubmit();
                 if (!valid) return;
                 const order = await saveDraft();
@@ -1776,6 +1829,7 @@ function PatientStep({
   selectedPatientName,
   dentists,
   dentistsLoading,
+  dentistDormant,
   patients,
   patientsLoading,
   errors,
@@ -1783,6 +1837,8 @@ function PatientStep({
   updateNewPatient,
 }: {
   isAdmin: boolean;
+  /** The chosen practitioner is dormant: no new order (doctor inactivity). */
+  dentistDormant: boolean;
   canModify: boolean;
   patientMode: PatientMode;
   setPatientMode: (mode: PatientMode) => void;
@@ -1848,6 +1904,7 @@ function PatientStep({
             disabled={!canModify}
             onSelect={(doctorId) => updateField('doctorId', doctorId)}
           />
+          {dentistDormant && <DormantOrderingNotice variant="adminCreate" />}
         </div>
       )}
 
@@ -3212,4 +3269,51 @@ function formatClinicalConditions(
   if (standard.length > 0) parts.push(standard.join(', '));
   if (hasOther) parts.push(other.trim());
   return parts.length > 0 ? parts.join(' — ') : undefined;
+}
+
+/**
+ * Doctor inactivity (spec §5): why ordering is closed here. `self` = the
+ * dormant dentist on his own draft (kept, submittable after
+ * reactivation); `adminCreate` / `adminSubmit` = an admin acting for a
+ * dormant practitioner (reactivate from Users first).
+ */
+function DormantOrderingNotice({
+  variant,
+}: {
+  variant: 'self' | 'adminCreate' | 'adminSubmit';
+}) {
+  const { t } = useT();
+  const message =
+    variant === 'self'
+      ? t('accountActivity.wizard.blockedSelf')
+      : variant === 'adminCreate'
+        ? t('accountActivity.wizard.dentistDormant')
+        : t('accountActivity.wizard.blockedAdmin');
+  return (
+    <div
+      role="status"
+      className="flex flex-col gap-3 rounded-md border border-slate-300 bg-slate-50 p-3 text-sm sm:flex-row sm:items-start sm:justify-between dark:border-slate-700 dark:bg-slate-900/50"
+    >
+      <p className="flex min-w-0 items-start gap-2.5 text-slate-800 dark:text-slate-200">
+        <Moon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+        <span>
+          <span className="font-medium">{t('accountActivity.wizard.blockedTitle')}</span>
+          {' — '}
+          {message}
+        </span>
+      </p>
+      {variant !== 'self' && (
+        <Button
+          asChild
+          variant="outline"
+          size="sm"
+          className="shrink-0 self-start bg-background pointer-coarse:h-12"
+        >
+          <Link href="/dashboard/users?role=dentist&activity=inactive">
+            {t('accountActivity.wizard.openUsers')}
+          </Link>
+        </Button>
+      )}
+    </div>
+  );
 }

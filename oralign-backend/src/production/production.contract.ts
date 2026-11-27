@@ -60,7 +60,11 @@ import type {
  * changes they depend on). HTTP status in the comment.
  */
 export const PRODUCTION_ERROR = {
-  /** 409. A technician declared a delivery on steps whose batch is still locked. Neutral message, no amount. */
+  /**
+   * 409. A technician declared an act (print, thermoform, cut or delivery,
+   * spec §3) on steps whose batch is still locked. Neutral message, no
+   * amount. Admins get the confirmable warning steps_not_released instead.
+   */
   STEPS_NOT_RELEASED: 'STEPS_NOT_RELEASED',
   /** 409. Warnings apply that the request did not confirm; the body lists them (ProductionConfirmRequiredBody). */
   PRODUCTION_CONFIRM_REQUIRED: 'PRODUCTION_CONFIRM_REQUIRED',
@@ -118,7 +122,11 @@ export const PRODUCTION_WARNING = {
   beyond_planned_total: 'beyond_planned_total',
   /** The arch is not treated (archTreatment). */
   arch_not_treated: 'arch_not_treated',
-  /** Print / thermoform / cut (anyone) or deliver (admin only) on steps whose batch is locked. */
+  /**
+   * ADMIN ONLY: any act on steps whose batch is locked (the journaled
+   * override: confirmed with a note, stored on the row, listed in
+   * « Écarts »). A technician gets 409 STEPS_NOT_RELEASED instead.
+   */
   steps_not_released: 'steps_not_released',
 } as const;
 export type ProductionWarningCode =
@@ -254,17 +262,77 @@ export interface ProductionOrderSummary {
   lastActionAt: string | null;
   /** Every treated arch has a known total and delivered >= total (count-based). */
   deliveryComplete: boolean;
+  /** Which steps the workshop may work on (spec §3): releaseSummaryOf(). */
+  release: ProductionReleaseSummary;
 }
 
 export type ProductionQueueItem = ProductionOrderSummary;
 export type ProductionQueuePage = ProductionPage<ProductionQueueItem>;
+
+// ── Release block (spec §3; frozen in P0, built by P-C) ─────────────────
+// `release` on ProductionOrderSummary (queue cards, the queue table, the
+// sheet header: « Plan 1→7 · Débloquées 1→4 · Prochaine tranche 5→7 » /
+// « Aucune tranche débloquée »), computed by releaseSummaryOf()
+// (production-state.ts) from the SAME reading the declare rules use.
+// Technician-reachable: no key may match PRODUCTION_FORBIDDEN_KEY.
+
+/**
+ * none: nothing is released (batches all locked; an unlimited pack before
+ * anything is paid; a case without batches that is neither paid nor in a
+ * production status);
+ * partial: some released steps, and a locked batch (or a planned step
+ * outside every batch) is left;
+ * all: every planned step is (an unlimited pack once anything is paid);
+ * unscheduled: no batches and everything released (legacy production-
+ * status case, or a fully paid quote without a schedule).
+ */
+export type ProductionReleaseState = 'none' | 'partial' | 'all' | 'unscheduled';
+
+/** An inclusive span of aligner steps. */
+export interface ProductionStepSpan {
+  from: number;
+  to: number;
+}
+
+/** One arch of the release block. */
+export interface ProductionArchRelease {
+  /** 1 → the arch's planned total; null while the total is unknown. */
+  total: ProductionStepSpan | null;
+  /** The total is not final yet (shown « provisoire »): it does not trim. */
+  provisional: boolean;
+  /**
+   * Released spans, merged, each batch trimmed to the arch's APPROVED
+   * total (batch-coverage.ts). state all / unscheduled: [total] (or []
+   * while the total is unknown); none: [].
+   */
+  unlocked: ProductionStepSpan[];
+  /** Last released step (end of the last span): the workable limit; null = none. */
+  workableTo: number | null;
+}
+
+export interface ProductionReleaseSummary {
+  state: ProductionReleaseState;
+  /** null for an arch the case does not treat. */
+  arches: ArchPair<ProductionArchRelease | null>;
+  /**
+   * The lowest locked batch that holds a step of the approved plan, its
+   * end trimmed to the highest approved total of the treated arches;
+   * null when none is locked (and always on an unlimited-step pack, whose
+   * batches are payment placeholders, not aligner ranges).
+   */
+  next: ProductionStepSpan | null;
+}
 
 // ── GET production/orders/:orderId (case sheet) ────────────────────────
 
 /** locked = not released yet; released = may be delivered; delivered = batch done. */
 export type ReleasedRangeState = 'locked' | 'released' | 'delivered';
 
-/** A step batch of the payment schedule, WITHOUT any amount. */
+/**
+ * A step batch of the payment schedule, WITHOUT any amount, its end
+ * trimmed to the highest approved total of the treated arches (a batch
+ * wholly beyond them is left out).
+ */
 export interface ReleasedRange {
   from: number;
   to: number;
@@ -280,12 +348,16 @@ export interface ProductionDeclareWindow {
 export interface ProductionCaseSheet extends ProductionOrderSummary {
   clinicName: string | null;
   firstActionAt: string | null;
-  /** Ascending by `from`; null when the case has no step batches. */
+  /**
+   * Ascending by `from`; null when the case has no step batches (or on an
+   * unlimited-step pack: read `release`).
+   */
   releasedRanges: ReleasedRange[] | null;
   /**
-   * Per act and arch: the lowest step >= 1 its non-cancelled events do not
-   * cover ("de" of the form); null when the arch is not treated or every
-   * step up to a known planned total is covered.
+   * Per act and arch: the lowest RELEASED step >= 1 its non-cancelled
+   * events do not cover ("de" of the form); null when the arch is not
+   * treated, or every released step up to a known planned total is
+   * covered (the rest, if any, is locked: `release.next`).
    */
   nextStepFrom: Record<ProductionEventType, ArchPair<number | null>>;
   /** The caller may declare on this case at all (act-level gates still apply). */
@@ -545,7 +617,15 @@ export interface ProductionSummary {
 /** all = in the queue OR with progress; active = queue rule (D3); done = progress, out of the queue. */
 export type ProductionProgressState = 'all' | 'active' | 'done';
 
-export interface ProductionProgressRow extends ProductionOrderSummary {
+/**
+ * The admin "Avancement" row. It does not carry `release` (spec §3 puts
+ * the release block on the queue and the case sheet; the progress select
+ * loads one released batch only).
+ */
+export interface ProductionProgressRow extends Omit<
+  ProductionOrderSummary,
+  'release'
+> {
   /** planned - delivered, floored at 0; null when unknown or not treated. */
   remaining: ArchPair<number | null>;
   firstActionAt: string | null;
@@ -562,9 +642,14 @@ export const PRODUCTION_ANOMALY = {
   stage_skipped: 'stage_skipped',
   /** A confirmed already_declared: reprint, re-cut or re-delivery. */
   duplicate_declaration: 'duplicate_declaration',
-  /** A delivery confirmed with steps_not_released (admin). */
+  /**
+   * ANY act (print, thermoform, cut, delivery: `detail` names it) confirmed
+   * with steps_not_released: the admin override since spec §3, and the
+   * technicians' entries on locked steps declared before it (kept as
+   * history, DECISIONS §3). The key keeps its historic name.
+   */
   unreleased_delivery: 'unreleased_delivery',
-  /** Any other confirmed warning (previous_stage_missing, quantity_differs, beyond_planned_total, arch_not_treated, steps_not_released on a non-delivery). */
+  /** Any other confirmed warning (previous_stage_missing, quantity_differs, beyond_planned_total, arch_not_treated). */
   confirmed_warning: 'confirmed_warning',
   /** A cancelled row. */
   cancelled_event: 'cancelled_event',

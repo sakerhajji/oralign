@@ -11,7 +11,10 @@ type T = Record<Lang, string>;
  * Same leaf shape as dict.ts: every leaf is `{ en, fr } as T`.
  *
  * Never put money vocabulary here ("payé", "paiement", "facture"): a step
- * the lab may not deliver yet is "non libérée", nothing more (owner D1).
+ * the lab may not work on yet is "non débloquée", nothing more (owner D1,
+ * spec §3). One exception, rendered for admins only: `batchUnlock` (the
+ * « Débloquer la tranche » dialog of the quote panel and the case sheet),
+ * which must say that the installment stays due.
  */
 export const productionDomainDict = {
   production: {
@@ -159,10 +162,29 @@ export const productionDomainDict = {
         fr: 'Pas d’échelonnement sur ce cas : toutes les étapes suivent le cas.',
       } as T,
       ranges: {
-        released: { en: 'released', fr: 'libérées' } as T,
-        locked: { en: 'not released', fr: 'non libérées' } as T,
+        released: { en: 'unlocked', fr: 'débloquées' } as T,
+        locked: { en: 'not unlocked', fr: 'non débloquées' } as T,
         delivered: { en: 'delivered', fr: 'livrées' } as T,
       },
+      releaseTitle: { en: 'Unlocked steps', fr: 'Étapes débloquées' } as T,
+      // An act button once every unlocked step of it is declared.
+      unlockedDone: {
+        en: 'Every unlocked step declared',
+        fr: 'Étapes débloquées toutes déclarées',
+      } as T,
+      lockedNext: { en: 'Next locked: {span}', fr: 'Suite verrouillée : {span}' } as T,
+      nothingUnlocked: {
+        en: 'No batch unlocked: nothing to declare yet.',
+        fr: 'Aucune tranche débloquée : rien à déclarer pour l’instant.',
+      } as T,
+      noneBanner: {
+        en: 'No batch of this case is unlocked yet. You can read the case; entries open as soon as a batch is unlocked.',
+        fr: 'Aucune tranche de ce cas n’est encore débloquée. Vous pouvez consulter le cas ; les saisies s’ouvrent dès qu’une tranche est débloquée.',
+      } as T,
+      noneBannerAdmin: {
+        en: 'No batch of this case is unlocked yet. An entry on locked steps needs your confirmation and a note, and is listed in « Écarts ».',
+        fr: 'Aucune tranche de ce cas n’est encore débloquée. Une saisie sur des étapes verrouillées demande votre confirmation et une note, et apparaît dans « Écarts ».',
+      } as T,
       range: { en: 'Steps {from}–{to}', fr: 'Étapes {from} à {to}' } as T,
       rangeOne: { en: 'Step {step}', fr: 'Étape {step}' } as T,
       declareTitle: { en: 'Declare', fr: 'Déclarer' } as T,
@@ -270,10 +292,10 @@ export const productionDomainDict = {
         } as T,
       },
       steps_not_released: {
-        title: { en: 'Steps not released', fr: 'Étapes non libérées' } as T,
+        title: { en: 'Steps not unlocked', fr: 'Étapes non débloquées' } as T,
         detail: {
-          en: 'Some of these steps are not released yet.',
-          fr: 'Une partie de ces étapes n’est pas encore libérée.',
+          en: 'Some of these steps are not unlocked yet: the entry will be listed in « Écarts ».',
+          fr: 'Une partie de ces étapes n’est pas encore débloquée : la saisie apparaîtra dans « Écarts ».',
         } as T,
       },
     },
@@ -343,8 +365,8 @@ export const productionDomainDict = {
       } as T,
       hints: {
         notReleased: {
-          en: 'Steps {range} are not released for delivery yet.',
-          fr: 'Les étapes {range} ne sont pas encore libérées pour la livraison.',
+          en: 'Steps {range} are not unlocked yet: you can confirm with a note.',
+          fr: 'Les étapes {range} ne sont pas encore débloquées : vous pourrez confirmer avec une note.',
         } as T,
         beyondTotal: {
           en: 'The plan has {total} aligners on this arch.',
@@ -352,6 +374,10 @@ export const productionDomainDict = {
         } as T,
       },
       errors: {
+        notUnlocked: {
+          en: 'Steps {range} are not unlocked yet: they cannot be entered.',
+          fr: 'Les étapes {range} ne sont pas encore débloquées : elles ne peuvent pas être saisies.',
+        } as T,
         fromAfterTo: {
           en: '“To” must be the same step as “From” or a later one.',
           fr: '« À » doit être égale ou supérieure à « De ».',
@@ -742,14 +768,121 @@ export const productionDomainDict = {
       } as T,
     },
 
+    // The release block (spec §3): « Plan 1→7 · Débloquées 1→4 ·
+    // Prochaine tranche 5→7 ». {span} is "1→4" (release-format.ts).
+    release: {
+      plan: { en: 'Plan {span}', fr: 'Plan {span}' } as T,
+      // A span for screen readers ("1 to 7"; the screen shows "1→7").
+      spanWords: { en: '{from} to {to}', fr: '{from} à {to}' } as T,
+      planUnknown: { en: 'Plan to be confirmed', fr: 'Plan à confirmer' } as T,
+      unlocked: { en: 'Unlocked {spans}', fr: 'Débloquées {spans}' } as T,
+      next: { en: 'Next batch {span}', fr: 'Prochaine tranche {span}' } as T,
+      nextHint: {
+        en: 'Not unlocked yet: entries on these steps are refused until it is.',
+        fr: 'Pas encore débloquée : les saisies sur ces étapes sont refusées d’ici là.',
+      } as T,
+      none: { en: 'No batch unlocked', fr: 'Aucune tranche débloquée' } as T,
+      all: { en: 'Every step unlocked', fr: 'Toutes les étapes débloquées' } as T,
+      unscheduled: {
+        en: 'No schedule: every step unlocked',
+        fr: 'Sans échelonnement : toutes les étapes débloquées',
+      } as T,
+      // Screen readers: the whole line in one sentence.
+      aria: { en: 'Steps of the case: {summary}', fr: 'Étapes du cas : {summary}' } as T,
+      // Under a counter read against the unlocked steps.
+      ofPlanned: { en: 'of {total} planned', fr: 'sur {total} prévus' } as T,
+      counterAria: {
+        en: '{act}, {arch}: {done} of {workable} unlocked steps, {total} planned',
+        fr: '{act}, {arch} : {done} sur {workable} étapes débloquées, {total} prévues',
+      } as T,
+    },
+
+    // ADMIN ONLY (see the file comment): « Débloquer la tranche » without
+    // its payment, with a reason (POST …/step-batches/:batchId/unlock).
+    batchUnlock: {
+      button: { en: 'Unlock the batch', fr: 'Débloquer la tranche' } as T,
+      short: { en: 'Unlock', fr: 'Débloquer' } as T,
+      buttonAria: {
+        en: 'Unlock batch {n} ({steps})',
+        fr: 'Débloquer la tranche {n} ({steps})',
+      } as T,
+      title: { en: 'Unlock batch {n}?', fr: 'Débloquer la tranche {n} ?' } as T,
+      description: { en: 'Steps {steps}', fr: 'Étapes {steps}' } as T,
+      // An unlimited-step pack: its batches are placeholders, one unlock
+      // releases the whole plan.
+      everyStep: { en: 'every step of the plan', fr: 'toutes les étapes du plan' } as T,
+      descriptionAll: {
+        en: 'Unlimited-step pack: every step of the plan',
+        fr: 'Forfait sans limite d’étapes : toutes les étapes du plan',
+      } as T,
+      bodyAll: {
+        en: 'The lab can work on every step of the plan right away. The installment of this batch stays due: this unlock does not mark it paid, and the practitioner is not told.',
+        fr: 'Le labo pourra travailler sur toutes les étapes du plan dès maintenant. L’échéance de cette tranche reste due : ce déblocage ne la marque pas payée, et le praticien n’est pas prévenu.',
+      } as T,
+      body: {
+        en: 'The lab can work on these steps right away. The installment of this batch stays due: this unlock does not mark it paid, and the practitioner is not told.',
+        fr: 'Le labo pourra travailler sur ces étapes dès maintenant. L’échéance de cette tranche reste due : ce déblocage ne la marque pas payée, et le praticien n’est pas prévenu.',
+      } as T,
+      reason: { en: 'Reason', fr: 'Motif' } as T,
+      reasonHint: {
+        en: 'Required, 3 to 500 characters. Staff only: written to the case history.',
+        fr: 'Obligatoire, 3 à 500 caractères. Visible par l’équipe uniquement : inscrit à l’historique du cas.',
+      } as T,
+      reasonPh: {
+        en: 'Management approval, patient travelling…',
+        fr: 'Accord de la direction, patient en déplacement…',
+      } as T,
+      submit: { en: 'Unlock', fr: 'Débloquer' } as T,
+      submitting: { en: 'Unlocking…', fr: 'Déblocage…' } as T,
+      keep: { en: 'Cancel', fr: 'Annuler' } as T,
+      done: {
+        en: 'Batch {n} unlocked: {steps}.',
+        fr: 'Tranche {n} débloquée : {steps}.',
+      } as T,
+      already: {
+        en: 'This batch was already unlocked. The page was refreshed.',
+        fr: 'Cette tranche était déjà débloquée. La page a été actualisée.',
+      } as T,
+      loadError: {
+        en: 'The batches of this case could not be loaded.',
+        fr: 'Les tranches de ce cas n’ont pas pu être chargées.',
+      } as T,
+      errors: {
+        reasonShort: {
+          en: 'Give a reason of at least 3 characters.',
+          fr: 'Indiquez un motif d’au moins 3 caractères.',
+        } as T,
+        reasonLong: {
+          en: 'The reason is limited to 500 characters.',
+          fr: 'Le motif est limité à 500 caractères.',
+        } as T,
+        UNLOCK_REASON_REQUIRED: {
+          en: 'Give a reason of 3 to 500 characters.',
+          fr: 'Indiquez un motif de 3 à 500 caractères.',
+        } as T,
+        BATCH_NOT_FOUND: {
+          en: 'This batch is no longer on the quote (the plan changed). The page was refreshed.',
+          fr: 'Cette tranche n’est plus sur le devis (le plan a changé). La page a été actualisée.',
+        } as T,
+        BATCH_UNLOCK_QUOTE_NOT_LIVE: {
+          en: 'The quote is neither sent nor accepted: no batch can be unlocked on it.',
+          fr: 'Le devis n’est ni envoyé ni accepté : aucune tranche ne peut y être débloquée.',
+        } as T,
+        generic: {
+          en: 'The batch could not be unlocked. Try again.',
+          fr: 'La tranche n’a pas pu être débloquée. Réessayez.',
+        } as T,
+      },
+    },
+
     retry: { en: 'Try again', fr: 'Réessayer' } as T,
 
     // ProductionErrorCode → what the technician reads. Neutral wording:
     // no amount, no payment vocabulary.
     errors: {
       STEPS_NOT_RELEASED: {
-        en: 'These steps are not released for delivery yet. Please see the administrator.',
-        fr: 'Ces étapes ne sont pas encore libérées pour la livraison. Voyez l’administrateur.',
+        en: 'These steps are not unlocked yet. Please see the administrator.',
+        fr: 'Ces étapes ne sont pas encore débloquées. Voyez l’administrateur.',
       } as T,
       PRODUCTION_CONFIRM_REQUIRED: {
         en: 'This entry needs your confirmation and a note.',

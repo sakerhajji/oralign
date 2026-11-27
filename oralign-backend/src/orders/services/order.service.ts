@@ -60,6 +60,10 @@ import {
   openChildrenOf,
   ORDER_KIND_ERROR,
 } from '../order-kind';
+import {
+  assertDoctorCanOrderLocked,
+  assertNotDormant,
+} from '../../users/activity/doctor-ordering.policy';
 
 /** An audit row ready to be written (actor resolved, action set). */
 type AuditEntry = Awaited<ReturnType<OrderAuditService['entry']>>;
@@ -179,11 +183,17 @@ export class OrderService {
 
     const replayKey = this.creationReplayKey(caller, idempotencyKey);
     if (replayKey) {
-      const replayed = await this.findReplayedOrder(replayKey, doctorId);
+      const replayed = await this.findReplayedOrder(
+        replayKey,
+        doctorId,
+        caller,
+      );
       if (replayed) return replayed;
     }
 
-    await this.ensureDentistExists(doctorId);
+    // A dormant doctor (spec §5) cannot get a new order, whoever creates
+    // it: 403 ACCOUNT_DORMANT, read in the same query as the existence.
+    await this.ensureDentistExists(doctorId, { forNewOrder: true });
     await this.ensurePatientBelongsToDoctor(createOrderDto.patientId, doctorId);
     this.ensureUniqueToothInstructions(createOrderDto.toothInstructions ?? []);
 
@@ -233,7 +243,7 @@ export class OrderService {
 
     if (replayKey) await this.rememberCreation(replayKey, order.id);
 
-    return mapOrderToDto(order);
+    return mapOrderToDto(order, caller);
   }
 
   private creationReplayKey(
@@ -252,6 +262,7 @@ export class OrderService {
   private async findReplayedOrder(
     replayKey: string,
     doctorId: string,
+    caller: Caller,
   ): Promise<OrderResponseDto | null> {
     let orderId: string | undefined;
     try {
@@ -271,7 +282,7 @@ export class OrderService {
     this.logger.log(
       `Order creation replayed for ${orderId}; returning the existing draft.`,
     );
-    return mapOrderToDto(existing);
+    return mapOrderToDto(existing, caller);
   }
 
   private async rememberCreation(
@@ -318,7 +329,7 @@ export class OrderService {
     ]);
 
     return new PaginatedResponse(
-      orders.map((order) => mapOrderToDto(order)),
+      orders.map((order) => mapOrderToDto(order, caller)),
       total,
       currentPage,
       take,
@@ -328,7 +339,7 @@ export class OrderService {
 
   async getOrderById(id: string, caller: Caller): Promise<OrderResponseDto> {
     const order = await this.findAccessibleOrder(id, caller);
-    return mapOrderToDto(order);
+    return mapOrderToDto(order, caller);
   }
 
   async updateOrder(
@@ -409,7 +420,7 @@ export class OrderService {
       return updated;
     });
 
-    return mapOrderToDto(order);
+    return mapOrderToDto(order, caller);
   }
 
   /**
@@ -679,6 +690,11 @@ export class OrderService {
       submittedAt: { from: current.submittedAt, to: submittedAt.toISOString() },
     });
     const order = await this.prisma.$transaction(async (tx) => {
+      // Doctor inactivity (spec §5): a dormant doctor's draft stays a
+      // draft until an admin reactivates him (also when an admin submits
+      // for him). Locked read, so the daily sweep cannot deactivate him
+      // between this check and the submission it would then ignore.
+      await assertDoctorCanOrderLocked(tx, current.doctorId);
       const updated = await tx.dentalOrder.update({
         where: { id },
         data: {
@@ -718,7 +734,7 @@ export class OrderService {
       patientName: order.patient?.fullName ?? null,
     });
 
-    return mapOrderToDto(order);
+    return mapOrderToDto(order, caller);
   }
 
   /**
@@ -751,7 +767,7 @@ export class OrderService {
 
     if (current.status === status) {
       // Idempotent — no-op when the requested status matches reality.
-      return mapOrderToDto(current);
+      return mapOrderToDto(current, caller);
     }
 
     this.logger.log(
@@ -802,7 +818,7 @@ export class OrderService {
       nextStatus: status,
     });
 
-    return mapOrderToDto(order);
+    return mapOrderToDto(order, caller);
   }
 
   /**
@@ -1360,7 +1376,7 @@ export class OrderService {
       });
     });
 
-    return mapOrderToDto(order);
+    return mapOrderToDto(order, caller);
   }
 
   private buildWhere(
@@ -1520,15 +1536,25 @@ export class OrderService {
     }
   }
 
-  private async ensureDentistExists(doctorId: string): Promise<void> {
+  /**
+   * The live dentist the order belongs to (404 otherwise). `forNewOrder`:
+   * the order is being CREATED for him, so a dormant account answers 403
+   * ACCOUNT_DORMANT (users/activity). An owner change of an existing
+   * order is not a new order and stays allowed.
+   */
+  private async ensureDentistExists(
+    doctorId: string,
+    { forNewOrder = false }: { forNewOrder?: boolean } = {},
+  ): Promise<void> {
     const dentist = await this.prisma.user.findFirst({
       where: { id: doctorId, role: UserRole.dentist, deletedAt: null },
-      select: { id: true },
+      select: { id: true, inactiveSince: true },
     });
 
     if (!dentist) {
       throw new NotFoundException('Dentist not found');
     }
+    if (forNewOrder) assertNotDormant(dentist);
   }
 
   private async ensurePatientBelongsToDoctor(

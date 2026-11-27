@@ -1,11 +1,23 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { OnEvent } from '@nestjs/event-emitter';
 import type { Cache } from 'cache-manager';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   GoneException,
   NotFoundException,
 } from '../../common/exceptions/app.exception';
+import {
+  DOCTOR_PUBLIC_SELECT,
+  toDoctorPublicIdentity,
+} from '../../common/doctor/doctor-identity';
+import {
+  NotificationEvents,
+  type UserProfileChangedEvent,
+} from '../../notifications/events/notification-events';
+
+/** Cache key of one plan link's payload (10 min at most). */
+export const viewerCacheKey = (token: string) => `treatment-viewer:${token}`;
 
 export interface PublicViewerPayload {
   treatmentPlan: {
@@ -55,7 +67,7 @@ export class PublicTreatmentViewerService {
       );
     }
 
-    const cacheKey = `treatment-viewer:${token}`;
+    const cacheKey = viewerCacheKey(token);
     const cached = await this.cache.get<PublicViewerPayload>(cacheKey);
     if (cached) {
       const expiresAt = cached.treatmentPlan.publicExpiresAt
@@ -83,12 +95,8 @@ export class PublicTreatmentViewerService {
         order: {
           select: {
             deletedAt: true,
-            doctor: {
-              select: {
-                fullName: true,
-                dentistProfile: { select: { clinicName: true } },
-              },
-            },
+            // The one anonymous projection of a doctor: name + practice.
+            doctor: { select: DOCTOR_PUBLIC_SELECT },
             patient: {
               select: { fullName: true, gender: true },
             },
@@ -118,12 +126,7 @@ export class PublicTreatmentViewerService {
         resultViewUrl: plan.resultViewUrl ?? null,
         publicExpiresAt: plan.publicExpiresAt?.toISOString() ?? null,
       },
-      doctor: plan.order.doctor
-        ? {
-            fullName: plan.order.doctor.fullName ?? null,
-            clinicName: plan.order.doctor.dentistProfile?.clinicName ?? null,
-          }
-        : undefined,
+      doctor: toDoctorPublicIdentity(plan.order.doctor),
       patient: plan.order.patient
         ? {
             fullName: plan.order.patient.fullName.trim(),
@@ -150,6 +153,40 @@ export class PublicTreatmentViewerService {
       : 10 * 60_000;
     await this.cache.set(cacheKey, payload, ttlMs);
     return payload;
+  }
+
+  /**
+   * The doctor renamed himself or his practice: drop the cached payload
+   * of every link of his still open, so the patient reads the current
+   * name instead of the one cached up to 10 minutes ago. One indexed read
+   * of the tokens, then one DEL per link; expired links have no entry
+   * (the TTL never outlives the expiry). Failures are logged and
+   * swallowed: the profile write already committed.
+   */
+  @OnEvent(NotificationEvents.UserProfileChanged)
+  async onUserProfileChanged(
+    event: UserProfileChangedEvent,
+    now: Date = new Date(),
+  ): Promise<void> {
+    try {
+      const plans = await this.prisma.treatmentPlan.findMany({
+        where: {
+          publicToken: { not: null },
+          order: { doctorId: event.userId },
+          OR: [{ publicExpiresAt: null }, { publicExpiresAt: { gt: now } }],
+        },
+        select: { publicToken: true },
+      });
+      const keys = plans
+        .map((plan) => plan.publicToken)
+        .filter((token): token is string => !!token)
+        .map(viewerCacheKey);
+      await Promise.all(keys.map((key) => this.cache.del(key)));
+    } catch (err) {
+      this.logger.warn(
+        `plan link cache invalidation for user ${event.userId} failed: ${(err as Error).message}`,
+      );
+    }
   }
 }
 

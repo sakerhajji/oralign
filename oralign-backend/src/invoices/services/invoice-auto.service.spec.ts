@@ -52,6 +52,9 @@ const DOCTOR = {
     clinicPhone: '+21671000000',
     clinicEmail: 'contact@lespins.tn',
     taxId: '1234567/A',
+    registrationNumber: 'CNOMDT-42',
+    logoUrl: null,
+    deletedAt: null,
   },
 };
 
@@ -149,11 +152,153 @@ function makeService(
 }
 
 /** The `data` the service passed to invoice.create. */
-function createdData(prisma: ReturnType<typeof makeService>['prisma']) {
-  expect(prisma.invoice.create).toHaveBeenCalledTimes(1);
-  return (prisma.invoice.create.mock.calls[0][0] as { data: Record<string, any> })
-    .data;
+/** The slice of the invoice.create `data` the specs read. */
+interface CreatedInvoice {
+  [key: string]: unknown;
+  subTotalHt: number;
+  tvaAmount: number;
+  stampDuty: number;
+  totalTtc: number;
+  withholdingAmount: number;
+  netPayable: number;
+  lines: { create: Record<string, unknown>[] };
 }
+
+function createdData(
+  prisma: ReturnType<typeof makeService>['prisma'],
+): CreatedInvoice {
+  expect(prisma.invoice.create).toHaveBeenCalledTimes(1);
+  const calls = prisma.invoice.create.mock.calls as unknown as [
+    [{ data: CreatedInvoice }],
+  ];
+  return calls[0][0].data;
+}
+
+describe('InvoiceAutoService — the facture snapshots (spec §4 and §6)', () => {
+  it('freezes the practice name, the practitioner lead and the registration number', async () => {
+    const { service, prisma } = makeService({ payment: installmentPayment() });
+    await service.generateForPayment('p-1');
+    expect(createdData(prisma)).toMatchObject({
+      clientName: 'Dr Amel Ben Salah',
+      clientClinicName: 'Cabinet Les Pins',
+      clientIsPractitioner: true,
+      clientRegistrationNumber: 'CNOMDT-42',
+      // THE contact: the practice first.
+      clientEmail: 'contact@lespins.tn',
+      clientPhone: '+21671000000',
+    });
+  });
+
+  it('a practice without its own contact prints the account one', async () => {
+    const { service, prisma } = makeService({
+      payment: installmentPayment({
+        order: {
+          id: 'o-1',
+          orderCode: 'ORD-001',
+          patientId: 'pat-1',
+          doctorId: 'doc-1',
+          doctor: {
+            ...DOCTOR,
+            dentistProfile: {
+              ...DOCTOR.dentistProfile,
+              clinicPhone: null,
+              clinicEmail: '  ',
+            },
+          },
+        },
+      }),
+    });
+    await service.generateForPayment('p-1');
+    expect(createdData(prisma)).toMatchObject({
+      clientEmail: 'amel@clinic.tn',
+      clientPhone: '+21620000000',
+    });
+  });
+
+  it('freezes the devis balance right after THIS payment, never the later ones', async () => {
+    const { service, prisma } = makeService({
+      payment: installmentPayment({
+        quotation: {
+          id: 'q-1',
+          tvaRate: 0,
+          currency: 'TND',
+          packName: 'Pack Confort',
+          totalPrice: D('7140.000'),
+          totalTtc: 7140,
+        },
+      }),
+    });
+    prisma.payment.findMany.mockResolvedValue([
+      // Paid before: 2380 settled (2381 cash, stamp 1).
+      {
+        id: 'p-0',
+        amount: D('2381.000'),
+        withholdingAmount: D('0'),
+        stampAmount: D('1.000'),
+        paidAt: new Date('2026-09-01T10:00:00.000Z'),
+        createdAt: new Date('2026-09-01T10:00:00.000Z'),
+      },
+      // This payment (2380 settled).
+      {
+        id: 'p-1',
+        amount: D('2381.000'),
+        withholdingAmount: D('0'),
+        stampAmount: D('1.000'),
+        paidAt: PAID_AT,
+        createdAt: PAID_AT,
+      },
+      // Paid after: never counted on this facture.
+      {
+        id: 'p-2',
+        amount: D('2381.000'),
+        withholdingAmount: D('0'),
+        stampAmount: D('1.000'),
+        paidAt: new Date('2026-10-01T10:00:00.000Z'),
+        createdAt: new Date('2026-10-01T10:00:00.000Z'),
+      },
+    ]);
+    await service.generateForPayment('p-1');
+    const data = createdData(prisma);
+    expect(Number(data.quoteRemainingAfter)).toBe(2380);
+    expect(prisma.payment.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { quotationId: 'q-1', status: PaymentRecordStatus.success },
+      }),
+    );
+  });
+
+  it('a retenue kept back still settles the installment in full', async () => {
+    const { service, prisma } = makeService({
+      payment: installmentPayment({
+        amount: D('991.000'),
+        withholdingRate: D('1.00'),
+        withholdingAmount: D('10.000'),
+        quotation: {
+          id: 'q-1',
+          tvaRate: 0,
+          currency: 'TND',
+          packName: 'Pack Confort',
+          totalPrice: D('3000.000'),
+          totalTtc: 3000,
+        },
+      }),
+    });
+    await service.generateForPayment('p-1');
+    // 3000 - (991 + 10 - 1) = 2000.
+    expect(Number(createdData(prisma).quoteRemainingAfter)).toBe(2000);
+  });
+
+  it('a treatment-fee facture records no devis balance', async () => {
+    const { service, prisma } = makeService({ order: feeOrder() });
+    await service.generateForTreatmentFee('o-1');
+    const data = createdData(prisma);
+    expect(data).not.toHaveProperty('quoteRemainingAfter');
+    expect(data).toMatchObject({
+      clientIsPractitioner: true,
+      clientClinicName: 'Cabinet Les Pins',
+    });
+  });
+});
 
 describe('InvoiceAutoService — installment payments', () => {
   it('bills the installment TTC (TVA inside) and ADDS the stamp the payment charged on top', async () => {
@@ -253,7 +398,10 @@ describe('InvoiceAutoService — installment payments', () => {
       data.totalTtc,
       6,
     );
-    expect(data.totalTtc - data.withholdingAmount).toBeCloseTo(data.netPayable, 6);
+    expect(data.totalTtc - data.withholdingAmount).toBeCloseTo(
+      data.netPayable,
+      6,
+    );
     expect(data.lines.create[0]).toMatchObject({
       unitPriceTtc: 1000,
       lineHt: 840.336,
@@ -523,7 +671,11 @@ describe('InvoiceAutoService — treatment fee (+ CBCT)', () => {
   it('a card fee links its Payment, takes its reference and claims the number on it too', async () => {
     const { service, prisma } = makeService({
       order: feeOrder({ treatmentFeePaymentMethod: PaymentMethod.card }),
-      cardPayment: { id: 'p-card', invoiceNumber: null, transactionId: 'CTP-7' },
+      cardPayment: {
+        id: 'p-card',
+        invoiceNumber: null,
+        transactionId: 'CTP-7',
+      },
     });
     await service.generateForTreatmentFee('o-1');
     expect(createdData(prisma)).toMatchObject({
@@ -537,7 +689,7 @@ describe('InvoiceAutoService — treatment fee (+ CBCT)', () => {
           orderId: 'o-1',
           purpose: PaymentPurpose.treatment_fee,
           status: PaymentRecordStatus.success,
-        }),
+        }) as unknown,
       }),
     );
     expect(prisma.payment.updateMany).toHaveBeenCalledWith({
@@ -635,7 +787,10 @@ describe('InvoiceAutoService — treatment fee (+ CBCT)', () => {
   });
 
   it.each([
-    ['not settled', { treatmentFeePaymentStatus: PaymentRecordStatus.awaiting_confirmation }],
+    [
+      'not settled',
+      { treatmentFeePaymentStatus: PaymentRecordStatus.awaiting_confirmation },
+    ],
     ['no paid date', { treatmentFeePaidAt: null }],
     ['a welcome gift', { welcomeGiftAppliedAt: PAID_AT }],
     ['no fee', { treatmentFeeAmount: null }],
@@ -670,7 +825,11 @@ describe('InvoiceAutoService — treatment fee (+ CBCT)', () => {
         installment: null,
       }),
       order: feeOrder({ treatmentFeePaymentMethod: PaymentMethod.card }),
-      cardPayment: { id: 'p-card', invoiceNumber: null, transactionId: 'CTP-7' },
+      cardPayment: {
+        id: 'p-card',
+        invoiceNumber: null,
+        transactionId: 'CTP-7',
+      },
     });
     await expect(service.generateForPayment('p-card')).resolves.toEqual({
       created: true,
@@ -709,7 +868,10 @@ describe('InvoiceAutoService — backfill', () => {
       { treatmentFeeOrderId: 'o-done' },
     ]);
 
-    await expect(service.backfill()).resolves.toEqual({ scanned: 2, created: 2 });
+    await expect(service.backfill()).resolves.toEqual({
+      scanned: 2,
+      created: 2,
+    });
 
     expect(prisma.payment.findMany).toHaveBeenCalledWith({
       where: {

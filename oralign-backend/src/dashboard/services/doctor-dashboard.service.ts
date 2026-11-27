@@ -11,6 +11,11 @@ import {
 import { INITIAL_ORDERS_ONLY } from '../../orders/order-kind';
 import { PACK_DISPLAY_ORDER } from '../../packs/pack-order';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  AVAILABLE_PACK_SELECT,
+  toAvailablePack,
+  type AvailablePackDto,
+} from './available-pack.projection';
 
 const CACHE_TTL_MS = 30_000; // 30 s — per-doctor, smaller blast radius
 
@@ -33,7 +38,9 @@ const subMonths = (d: Date, n: number): Date => {
   return x;
 };
 
-const toNumber = (value: Prisma.Decimal | number | null | undefined): number => {
+const toNumber = (
+  value: Prisma.Decimal | number | null | undefined,
+): number => {
   if (value == null) return 0;
   if (typeof value === 'number') return value;
   return Number(value.toString());
@@ -270,7 +277,10 @@ export class DoctorDashboardService {
         where: {
           ...QUALIFYING_QUOTE,
           paymentStatus: {
-            in: [QuotationPaymentStatus.pending, QuotationPaymentStatus.partially_paid],
+            in: [
+              QuotationPaymentStatus.pending,
+              QuotationPaymentStatus.partially_paid,
+            ],
           },
           order: orderFilter,
         },
@@ -284,27 +294,33 @@ export class DoctorDashboardService {
 
     // Same soft-delete filter on the order relation — payments tied
     // to deleted orders shouldn't show up in the dashboard counters.
-    const [paymentsPending, paymentsCompleted, paymentsFailed, paymentsAwaiting] =
-      await this.prisma.$transaction([
-        this.prisma.payment.count({
-          where: { status: PaymentRecordStatus.pending, order: orderFilter },
-        }),
-        this.prisma.payment.count({
-          where: { status: PaymentRecordStatus.success, order: orderFilter },
-        }),
-        this.prisma.payment.count({
-          where: {
-            status: { in: [PaymentRecordStatus.failed, PaymentRecordStatus.rejected] },
-            order: orderFilter,
+    const [
+      paymentsPending,
+      paymentsCompleted,
+      paymentsFailed,
+      paymentsAwaiting,
+    ] = await this.prisma.$transaction([
+      this.prisma.payment.count({
+        where: { status: PaymentRecordStatus.pending, order: orderFilter },
+      }),
+      this.prisma.payment.count({
+        where: { status: PaymentRecordStatus.success, order: orderFilter },
+      }),
+      this.prisma.payment.count({
+        where: {
+          status: {
+            in: [PaymentRecordStatus.failed, PaymentRecordStatus.rejected],
           },
-        }),
-        this.prisma.payment.count({
-          where: {
-            status: PaymentRecordStatus.awaiting_confirmation,
-            order: orderFilter,
-          },
-        }),
-      ]);
+          order: orderFilter,
+        },
+      }),
+      this.prisma.payment.count({
+        where: {
+          status: PaymentRecordStatus.awaiting_confirmation,
+          order: orderFilter,
+        },
+      }),
+    ]);
 
     const totalRevenue = toNumber(paidAgg._sum.totalPrice);
     const paidAmount =
@@ -392,7 +408,9 @@ export class DoctorDashboardService {
       packExpiresAt.setDate(packExpiresAt.getDate() + 90);
       packRemainingDays = Math.max(
         0,
-        Math.ceil((packExpiresAt.getTime() - now.getTime()) / (24 * 60 * 60 * 1000)),
+        Math.ceil(
+          (packExpiresAt.getTime() - now.getTime()) / (24 * 60 * 60 * 1000),
+        ),
       );
       const max = latestPackLimit;
       if (max && !latestPaidWithPack.pack?.isUnlimitedSteps) {
@@ -638,54 +656,30 @@ export class DoctorDashboardService {
   }
 
   /**
-   * Available packs the doctor can subscribe / upgrade to: the active
-   * catalogue, in the order set by the admin, with the price of each arch
-   * (null when the pack does not offer it).
+   * The practitioner's pack catalogue: the active packs, in the order set
+   * by the admin, with their TTC price per arch (null when not offered),
+   * limits, validity and localized texts. Read-only: the pack of a case is
+   * the one an admin attaches to its quote. `isCurrent` marks the pack of
+   * the doctor's latest paid quote.
    */
-  async listAvailablePacks(doctorId: string) {
-    const packs = await this.prisma.pack.findMany({
-      where: { deletedAt: null, isActive: true },
-      orderBy: PACK_DISPLAY_ORDER,
-      include: {
-        prices: {
-          where: { isActive: true },
-          select: { id: true, archType: true, price: true, currency: true },
+  async listAvailablePacks(doctorId: string): Promise<AvailablePackDto[]> {
+    const [packs, current] = await Promise.all([
+      this.prisma.pack.findMany({
+        where: { deletedAt: null, isActive: true },
+        orderBy: PACK_DISPLAY_ORDER,
+        select: AVAILABLE_PACK_SELECT,
+      }),
+      this.prisma.quotation.findFirst({
+        where: {
+          deletedAt: null,
+          order: { doctorId },
+          packId: { not: null },
+          paymentStatus: QuotationPaymentStatus.paid,
         },
-      },
-    });
-    // Mark the doctor's current pack so the UI can render the
-    // "Current" badge without a second round-trip.
-    const current = await this.prisma.quotation.findFirst({
-      where: {
-        deletedAt: null,
-        order: { doctorId },
-        packId: { not: null },
-        paymentStatus: QuotationPaymentStatus.paid,
-      },
-      orderBy: { sentAt: 'desc' },
-      select: { packId: true },
-    });
-    return packs.map((p) => {
-      const priceOf = (archType: 'two_arches' | 'single_arch') => {
-        const row = p.prices.find((x) => x.archType === archType);
-        return row ? toNumber(row.price) : null;
-      };
-      return {
-        id: p.id,
-        name: p.name,
-        description: p.description,
-        maxStepsPerArch: p.maxStepsPerArch,
-        includedCorrections: p.includedCorrections,
-        isUnlimitedSteps: p.isUnlimitedSteps,
-        isUnlimitedCorrections: p.isUnlimitedCorrections,
-        isForOrthodontists: p.isForOrthodontists,
-        priceTwoArches: priceOf('two_arches'),
-        priceSingleArch: priceOf('single_arch'),
-        // For pages still open from the previous release: remove next release.
-        price: priceOf('two_arches') ?? priceOf('single_arch') ?? 0,
-        currency: p.prices[0]?.currency ?? 'TND',
-        isCurrent: current?.packId === p.id,
-      };
-    });
+        orderBy: { sentAt: 'desc' },
+        select: { packId: true },
+      }),
+    ]);
+    return packs.map((pack) => toAvailablePack(pack, current?.packId ?? null));
   }
 }

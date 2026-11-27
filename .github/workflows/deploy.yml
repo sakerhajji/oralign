@@ -1,106 +1,136 @@
-name: Deploy to VPS
+# ─────────────────────────────────────────────────────────────────
+# Deploy to production — MANUAL ONLY.
+#
+# A push to main never deploys. The owner starts this workflow
+# (Actions → Deploy to production → Run workflow). It:
+#   1. resolves the commit (latest main unless a SHA is given),
+#   2. refuses it unless the CI workflow passed on that exact commit,
+#   3. waits for the approval of the "production" environment
+#      (Settings → Environments → production → Required reviewers),
+#   4. on the VPS: backup (Postgres + uploads), then scripts/deploy.sh,
+#      which checks out exactly that commit, builds, migrates and
+#      health-checks,
+#   5. smoke-tests the public site and API.
+# Rollback: the "Rollback production" workflow. Setup: docs/ci-cd.md.
+# ─────────────────────────────────────────────────────────────────
+name: Deploy to production
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
+    inputs:
+      sha:
+        description: Commit to deploy (full SHA). Empty = latest main.
+        required: false
+        default: ''
+      skip_backup:
+        description: Skip the pre-deploy backup (not recommended)
+        type: boolean
+        default: false
 
-# Stop any in-flight deploy if a new commit lands.
+permissions:
+  contents: read
+  actions: read
+  checks: read
+
+# Never two deploys at once, and never cancel one half-way.
 concurrency:
   group: deploy-production
   cancel-in-progress: false
 
 jobs:
-  # ── Phase 1: cheap CI checks (run inside GitHub runner) ─────────
-  verify:
-    name: Lint & Build
+  gate:
+    name: CI must be green for this commit
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: |
-            oralign-backend/package-lock.json
-            oralign-frontend/package-lock.json
+          ref: main
+          fetch-depth: 0
 
-      - name: Backend — install
-        working-directory: oralign-backend
-        run: npm ci
-
-      - name: Backend — generate Prisma client
-        working-directory: oralign-backend
+      - name: Resolve the commit
+        id: resolve
         env:
-          DATABASE_URL: postgresql://u:p@localhost:5432/db
-        run: npx prisma generate
+          INPUT_SHA: ${{ inputs.sha }}
+        run: |
+          sha="${INPUT_SHA:-$(git rev-parse origin/main)}"
+          git cat-file -e "${sha}^{commit}" || { echo "::error::Unknown commit ${sha}"; exit 1; }
+          git merge-base --is-ancestor "${sha}" origin/main \
+            || { echo "::error::${sha} is not on main: only main is deployed"; exit 1; }
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+          echo "Deploying $(git log -1 --format='%h %s' "${sha}")" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Backend — lint
-        working-directory: oralign-backend
-        run: npm run lint -- --max-warnings=0 || true   # warn-only for now
-
-      - name: Backend — build
-        working-directory: oralign-backend
-        run: npm run build
-
-      - name: Frontend — install
-        working-directory: oralign-frontend
-        run: npm ci
-
-      - name: Frontend — lint
-        working-directory: oralign-frontend
-        run: npm run lint || true   # warn-only for now
-
-      - name: Frontend — build
-        working-directory: oralign-frontend
+      - name: CI passed on this commit
         env:
-          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
-          NEXT_PUBLIC_APP_NAME: Oralign
-          NEXT_PUBLIC_APP_URL: https://oralign.com.tn
-        run: npm run build
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.resolve.outputs.sha }}
+        run: |
+          conclusion=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${SHA}&event=push&per_page=1" \
+            --jq '.workflow_runs[0].conclusion // "none"')
+          echo "CI on ${SHA:0:12}: ${conclusion}"
+          [ "${conclusion}" = "success" ] \
+            || { echo "::error::CI is '${conclusion}' for ${SHA:0:12}. Deploy a commit whose CI passed."; exit 1; }
 
-  # ── Phase 2: deploy on VPS ──────────────────────────────────────
   deploy:
-    name: Deploy on VPS
-    needs: verify
+    name: Deploy on the VPS
+    needs: gate
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    timeout-minutes: 45
+    environment:
+      name: production
+      url: https://oralign.com.tn
     steps:
-      - name: SSH into VPS and run deploy.sh
+      # The SSH step used to die in ~4 s with no hint. Say what is wrong
+      # (never the values) before trying.
+      - name: Check the deploy secrets
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          missing=0
+          for name in VPS_HOST VPS_USER VPS_SSH_KEY; do
+            if [ -z "${!name}" ]; then echo "::error::Secret ${name} is empty or missing"; missing=1; fi
+          done
+          [ "$missing" = 0 ] || exit 1
+          case "$VPS_SSH_KEY" in
+            *"BEGIN OPENSSH PRIVATE KEY"*|*"BEGIN RSA PRIVATE KEY"*|*"BEGIN EC PRIVATE KEY"*) echo "Key header OK" ;;
+            *) echo "::error::VPS_SSH_KEY is not a private key (paste the whole file, BEGIN/END lines included)"; exit 1 ;;
+          esac
+          case "$VPS_SSH_KEY" in
+            *"ENCRYPTED"*) echo "::error::VPS_SSH_KEY has a passphrase: generate a deploy key without one"; exit 1 ;;
+          esac
+
+      - name: Backup, then deploy ${{ needs.gate.outputs.sha }}
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          DEPLOY_SHA: ${{ needs.gate.outputs.sha }}
+          SKIP_BACKUP: ${{ inputs.skip_backup }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          port: ${{ secrets.VPS_PORT }}
-          # 5-min timeout for build+migrate+restart
-          command_timeout: 5m
+          port: ${{ secrets.VPS_PORT || 22 }}
+          envs: DEPLOY_SHA,SKIP_BACKUP
+          command_timeout: 40m
           script: |
             set -euo pipefail
             cd /opt/oralign-app
-            bash scripts/deploy.sh
-
-      - name: Smoke check (frontend)
-        run: |
-          for i in 1 2 3 4 5; do
-            if curl -fsS -o /dev/null https://oralign.com.tn; then
-              echo "✓ frontend reachable"
-              exit 0
+            if [ "${SKIP_BACKUP}" != "true" ]; then
+              bash scripts/backup.sh
             fi
-            sleep 5
-          done
-          echo "✗ frontend smoke check failed" >&2
-          exit 1
+            DEPLOY_SHA="${DEPLOY_SHA}" bash scripts/deploy.sh
 
-      - name: Smoke check (api)
+      - name: Smoke test — site and API
         run: |
-          for i in 1 2 3 4 5; do
-            if curl -fsS https://api.oralign.com.tn/api/health >/dev/null; then
-              echo "✓ api reachable"
-              exit 0
-            fi
-            sleep 5
+          for url in https://oralign.com.tn https://api.oralign.com.tn/api/health; do
+            ok=0
+            for i in $(seq 1 12); do
+              if curl -fsS -o /dev/null "$url"; then ok=1; break; fi
+              sleep 5
+            done
+            [ "$ok" = 1 ] && echo "✓ $url" || { echo "::error::$url does not answer"; exit 1; }
           done
-          echo "✗ api smoke check failed" >&2
-          exit 1
+          echo "Deployed ${{ needs.gate.outputs.sha }}" >> "$GITHUB_STEP_SUMMARY"

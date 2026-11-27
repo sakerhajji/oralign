@@ -1,11 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { useRef, useState, type ReactNode } from 'react';
+import { useId, useRef, useState, type ReactNode } from 'react';
 import { AvailablePacks } from '@/components/dashboard/available-packs';
+import { packValidityFact } from '@/components/dashboard/pack-card-facts';
 import { useT } from '@/lib/i18n/lang-context';
 import { PermanentDeleteDialog } from '@/components/shared/permanent-delete-dialog';
 import { useAuth } from '@/lib/providers/auth-provider';
+import { useCanOrder } from '@/lib/hooks/use-can-order';
 import {
   usePacks,
   useCreatePack,
@@ -96,6 +98,9 @@ import {
 /** Clicks on the same arrow this close together are one continued move. */
 const REPEAT_MOVE_MS = 800;
 
+/** Page frame of the practitioner catalogue (and of the first paint). */
+const DOCTOR_PAGE = 'flex flex-col gap-5 p-3 sm:gap-6 sm:p-4 md:p-6';
+
 /** Active price for a specific arch, or null when not offered. */
 function priceForArch(pack: Pack, arch: ArchType): PackPrice | null {
   return (
@@ -124,8 +129,18 @@ export function PacksPageContent() {
 
   if (!user) {
     return (
-      <div className="p-6 text-sm text-muted-foreground">
-        {t('common.loading')}
+      <div className={DOCTOR_PAGE} aria-busy="true">
+        <span role="status" className="sr-only">
+          {t('common.loading')}
+        </span>
+        <div className="flex flex-col gap-5 sm:gap-6" aria-hidden="true">
+          <Skeleton className="h-8 w-56 max-w-full" />
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} className="h-[22rem] rounded-xl" />
+            ))}
+          </div>
+        </div>
       </div>
     );
   }
@@ -150,28 +165,53 @@ export function PacksPageContent() {
   );
 }
 
+/**
+ * Practitioner view: a neutral heading, the new-order shortcut and the
+ * read-only catalogue (spec §7 removed the « Choisissez le bon forfait »
+ * title and its intro). A dormant doctor (spec §5) gets the button
+ * disabled with the reason beside it and a way to reach the team; the
+ * server refuses the order anyway (403 ACCOUNT_DORMANT).
+ */
 function DoctorPacksCatalogue() {
   const { t } = useT();
+  const { canOrder } = useCanOrder();
+  const blockedId = useId();
 
   return (
-    <div className="flex flex-col gap-5 p-3 sm:gap-6 sm:p-4 md:p-6">
-      <header className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-        <div className="space-y-2">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
-              {t('packsDoctor.title')}
-            </h1>
-            <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
-              {t('packsDoctor.intro')}
+    <div className={DOCTOR_PAGE}>
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
+          {t('packsDoctor.title')}
+        </h1>
+        {canOrder ? (
+          <Button asChild className="w-full sm:w-auto pointer-coarse:h-12">
+            <Link href="/dashboard/orders/new">
+              <Plus className="size-4" aria-hidden="true" />
+              {t('packsDoctor.newOrder')}
+            </Link>
+          </Button>
+        ) : (
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:max-w-sm sm:items-end">
+            <Button
+              type="button"
+              disabled
+              aria-describedby={blockedId}
+              className="w-full sm:w-auto pointer-coarse:h-12"
+            >
+              <Plus className="size-4" aria-hidden="true" />
+              {t('packsDoctor.newOrder')}
+            </Button>
+            <p id={blockedId} className="text-sm text-muted-foreground sm:text-right">
+              {t('accountActivity.ordering.blocked')}{' '}
+              <Link
+                href="/dashboard/support"
+                className="font-medium text-foreground underline underline-offset-4 hover:no-underline pointer-coarse:inline-flex pointer-coarse:min-h-12 pointer-coarse:items-center"
+              >
+                {t('accountActivity.banner.contact')}
+              </Link>
             </p>
           </div>
-        </div>
-        <Button asChild>
-          <Link href="/dashboard/orders/new">
-            <Plus className="mr-2 size-4" />
-            {t('packsDoctor.newOrder')}
-          </Link>
-        </Button>
+        )}
       </header>
 
       <AvailablePacks />
@@ -217,8 +257,17 @@ function AdminPacksArea() {
   );
 }
 
-/** "7 aligners / arch · 2 refinements" — a pack's limits on one line. */
-function packLimits(pack: Pack, t: ReturnType<typeof useT>['t']): string {
+/**
+ * "Max 7 steps · 2 corrections · Valid for 2 years" — a pack's limits on
+ * one line. The validity reads like the practitioner card (label first,
+ * coverage months as the fallback) and is left out when neither is set.
+ */
+function packLimits(
+  pack: Pack,
+  t: ReturnType<typeof useT>['t'],
+  lang: string,
+): string {
+  const validity = packValidityFact(pack, (value) => pickLocalized(value, lang));
   return [
     pack.isUnlimitedSteps
       ? t('packsAdmin.unlimitedSteps')
@@ -228,6 +277,7 @@ function packLimits(pack: Pack, t: ReturnType<typeof useT>['t']): string {
       : pack.includedCorrections === 1
         ? t('packsDesk.correctionOne')
         : t('packsAdmin.correctionsTpl', { count: pack.includedCorrections ?? 0 }),
+    ...(validity ? [t(validity.key, validity.params)] : []),
   ].join(' · ');
 }
 
@@ -396,7 +446,7 @@ function PackCatalogue() {
                           ) : null}
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
-                          {packLimits(pack, t)}
+                          {packLimits(pack, t, lang)}
                         </TableCell>
                         <TableCell className="text-right whitespace-nowrap tabular-nums">
                           {price(pack, ArchType.TWO_ARCHES) ?? (
@@ -445,7 +495,7 @@ function PackCatalogue() {
                           <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
                         ) : null}
                         <p className="mt-1 text-xs text-muted-foreground">
-                          {packLimits(pack, t)}
+                          {packLimits(pack, t, lang)}
                         </p>
                       </div>
                       {orderButtons(pack)}

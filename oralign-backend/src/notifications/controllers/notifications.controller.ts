@@ -11,20 +11,28 @@ import {
 import {
   ApiBearerAuth,
   ApiOperation,
+  ApiParam,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { UserRole } from '@prisma/client';
 import {
   CurrentUser,
   JwtPayload,
 } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import type { Caller } from '../../common/access/caller';
 import {
   NotificationFilterDto,
+  SubjectReadResponseDto,
   UnreadCountResponseDto,
 } from '../dto/notification.dto';
 import { NotificationsService } from '../services/notifications.service';
+
+/** The service-layer principal of a verified token. */
+const callerOf = (user: JwtPayload): Caller => ({
+  userId: user.sub,
+  role: user.role,
+});
 
 /**
  * Recipient-only notification endpoints.
@@ -47,16 +55,13 @@ export class NotificationsController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'List the caller\'s notifications, newest first. Supports `unreadOnly` filter and PaginatedResponse pagination.',
+      "List the caller's notifications, newest first. Supports `unreadOnly` filter and PaginatedResponse pagination.",
   })
   async list(
     @Query() filters: NotificationFilterDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.notifications.list(
-      { userId: user.sub, role: user.role as UserRole },
-      filters,
-    );
+    return this.notifications.list(callerOf(user), filters);
   }
 
   @Get('unread-count')
@@ -66,11 +71,30 @@ export class NotificationsController {
   async unreadCount(
     @CurrentUser() user: JwtPayload,
   ): Promise<UnreadCountResponseDto> {
-    const count = await this.notifications.unreadCount({
-      userId: user.sub,
-      role: user.role as UserRole,
-    });
+    const count = await this.notifications.unreadCount(callerOf(user));
     return { count };
+  }
+
+  /**
+   * Three segments after `notifications/`, so it never meets `:id/read`.
+   * The key travels URL-encoded (`installment%3A<id>`); Express decodes it.
+   */
+  @Post('subject/:subjectKey/read')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Mark the caller\'s own rows of one subject as read ("Consulté" on the transfer desk). Idempotent. 400 NOTIFICATION_SUBJECT_INVALID on a malformed key.',
+  })
+  @ApiParam({
+    name: 'subjectKey',
+    example: 'installment:2b9c1f9e-6a43-4c1e-8a57-0b1c1d2e3f40',
+  })
+  @ApiResponse({ status: 200, type: SubjectReadResponseDto })
+  async markSubjectRead(
+    @Param('subjectKey') subjectKey: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<SubjectReadResponseDto> {
+    return this.notifications.markSubjectRead(callerOf(user), subjectKey);
   }
 
   @Post(':id/read')
@@ -79,23 +103,14 @@ export class NotificationsController {
     summary:
       'Mark one notification as read. 404 if not found, 403 if owned by another user. Idempotent on already-read rows.',
   })
-  async markRead(
-    @Param('id') id: string,
-    @CurrentUser() user: JwtPayload,
-  ) {
-    return this.notifications.markRead(id, {
-      userId: user.sub,
-      role: user.role as UserRole,
-    });
+  async markRead(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.notifications.markRead(id, callerOf(user));
   }
 
   @Post('read-all')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Mark every unread notification for the caller.' })
   async markAllRead(@CurrentUser() user: JwtPayload) {
-    return this.notifications.markAllRead({
-      userId: user.sub,
-      role: user.role as UserRole,
-    });
+    return this.notifications.markAllRead(callerOf(user));
   }
 }

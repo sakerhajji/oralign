@@ -53,9 +53,12 @@ export function useAdminDashboardKpis(
 }
 
 /**
- * Lightweight sidebar attention counts (new orders + pending approvals).
- * Polls every 30 s — these are low-frequency events, so a poll is the
- * right, cheap choice (no need for a dedicated socket channel). Admin-only.
+ * Lightweight sidebar attention counts (new orders, pending approvals, MY
+ * new bank transfers, dormant doctors). Polls every 30 s, refetches on
+ * focus, and is invalidated by the dashboard socket (mounted for admins in
+ * the sidebar) and after every payment write (invalidatePaymentViews), so
+ * the transfer badge drops the moment a receipt is opened or processed.
+ * Admin-only.
  */
 export function useAdminSidebarBadges(
   enabled = true,

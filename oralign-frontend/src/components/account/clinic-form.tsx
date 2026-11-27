@@ -1,9 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useQueryClient } from '@tanstack/react-query';
 import { toast } from '@/lib/toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -13,27 +12,49 @@ import { Switch } from '@/components/ui/switch';
 import { PhoneInput } from '@/components/ui/phone-input';
 import { LocationPicker } from '@/components/ui/location-picker';
 import { clinicSettingsSchema, type ClinicSettingsFormData } from '@/lib/schemas';
-import { type DentistProfile, type UpdateDentistProfileDto } from '@/lib/types';
+import { type DentistProfile } from '@/lib/types';
+import type { CreateClinicProfileBody } from '@/lib/api/dentist-profile.service';
 import { useCreateDentistProfile, useUpdateClinicProfile } from '@/lib/hooks';
 import { ScheduleForm } from '@/components/account/schedule-form';
-import { userKeys } from '@/lib/hooks/use-users';
+import { RegistrationNumberField } from '@/components/account/registration-number-field';
 import { useT } from '@/lib/i18n/lang-context';
+import {
+  REGISTRATION_NUMBER_MAX_LENGTH,
+  registrationNumberInput,
+  registrationNumberPayload,
+} from '@/lib/doctor/registration-number';
+import { registrationNumberField } from '@/lib/doctor/registration-number-schema';
+import { optionalTextPayload } from '@/lib/doctor/clinic-payload';
+import { gateRequiredPhone, gateRequiredText } from '@/lib/doctor/clinic-gate-schema';
 
-const normalizeOptional = (value?: string | null) => {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : undefined;
-};
+/** The clinic settings plus the private registration number (spec §6). */
+type ClinicFormValues = ClinicSettingsFormData & { registrationNumber?: string };
 
 export function ClinicForm({ profile }: { profile: DentistProfile | null }) {
   const { t } = useT();
-  const queryClient = useQueryClient();
   const { mutateAsync: createProfile, isPending: isCreating } = useCreateDentistProfile();
   const { mutateAsync: updateProfile, isPending: isUpdating } = useUpdateClinicProfile();
 
   const [createdProfileId, setCreatedProfileId] = useState<string | null>(null);
 
-  const form = useForm<ClinicSettingsFormData>({
-    resolver: zodResolver(clinicSettingsSchema),
+  const schema = useMemo(
+    () =>
+      clinicSettingsSchema.extend({
+        // Required by the onboarding gate: a blank here would send the
+        // doctor back to /onboarding/clinic (clinic-gate-schema.ts).
+        clinicAddress: gateRequiredText(t('onboardingPages.clinicForm.vClinicAddressRequired'), 2),
+        clinicPhone: gateRequiredPhone(t('onboardingPages.clinicForm.vClinicPhoneFormat')),
+        city: gateRequiredText(t('onboardingPages.clinicForm.vCityRequired')),
+        country: gateRequiredText(t('onboardingPages.clinicForm.vCountryRequired')),
+        registrationNumber: registrationNumberField(
+          t('doctorIdentity.registrationNumber.tooLong', { max: REGISTRATION_NUMBER_MAX_LENGTH }),
+        ),
+      }),
+    [t],
+  );
+
+  const form = useForm<ClinicFormValues>({
+    resolver: zodResolver(schema),
     defaultValues: {
       clinicName: '',
       clinicAddress: '',
@@ -44,6 +65,7 @@ export function ClinicForm({ profile }: { profile: DentistProfile | null }) {
       longitude: undefined,
       description: '',
       taxId: '',
+      registrationNumber: '',
       specialty: '',
       isListedPublicly: true,
     },
@@ -61,6 +83,7 @@ export function ClinicForm({ profile }: { profile: DentistProfile | null }) {
       longitude: profile.longitude ?? undefined,
       description: profile.description ?? '',
       taxId: profile.taxId ?? '',
+      registrationNumber: registrationNumberInput(profile.registrationNumber),
       specialty: profile.specialty ?? '',
       isListedPublicly: profile.isListedPublicly ?? true,
     });
@@ -84,54 +107,34 @@ export function ClinicForm({ profile }: { profile: DentistProfile | null }) {
       : null;
 
   const onSubmit = form.handleSubmit(async (values) => {
-    const payload: UpdateDentistProfileDto = {
+    // A field the doctor emptied is sent as null so the server clears it;
+    // a blank with nothing stored is left out (lib/doctor/clinic-payload).
+    const body: CreateClinicProfileBody = {
       clinicName: values.clinicName,
-      clinicAddress: normalizeOptional(values.clinicAddress),
-      clinicPhone: normalizeOptional(values.clinicPhone),
-      city: normalizeOptional(values.city),
-      country: normalizeOptional(values.country),
+      clinicAddress: optionalTextPayload(values.clinicAddress, profile?.clinicAddress),
+      clinicPhone: optionalTextPayload(values.clinicPhone, profile?.clinicPhone),
+      city: optionalTextPayload(values.city, profile?.city),
+      country: optionalTextPayload(values.country, profile?.country),
       latitude: values.latitude,
       longitude: values.longitude,
-      description: normalizeOptional(values.description),
-      taxId: normalizeOptional(values.taxId),
-      specialty: normalizeOptional(values.specialty),
+      description: optionalTextPayload(values.description, profile?.description),
+      taxId: optionalTextPayload(values.taxId, profile?.taxId),
+      // null clears a number the doctor removed (undefined would keep it).
+      registrationNumber: registrationNumberPayload(values.registrationNumber),
+      specialty: optionalTextPayload(values.specialty, profile?.specialty),
       isListedPublicly: values.isListedPublicly,
     };
 
     if (!activeProfileId) {
-      const created = await createProfile({
-        clinicName: values.clinicName,
-        clinicAddress: normalizeOptional(values.clinicAddress),
-        clinicPhone: normalizeOptional(values.clinicPhone),
-        city: normalizeOptional(values.city),
-        country: normalizeOptional(values.country),
-        latitude: values.latitude,
-        longitude: values.longitude,
-        description: normalizeOptional(values.description),
-        taxId: normalizeOptional(values.taxId),
-        specialty: normalizeOptional(values.specialty),
-        isListedPublicly: values.isListedPublicly,
-      });
+      const created = await createProfile(body);
+      // The hook refreshed the current user (and every doctor-identity query).
       setCreatedProfileId(created.id);
-      queryClient.invalidateQueries({ queryKey: userKeys.currentUser() });
       toast.success(t('accountClinic.toastClinicCreated'));
     } else {
-      await updateProfile({ id: activeProfileId, data: payload });
+      await updateProfile({ id: activeProfileId, data: body });
     }
 
-    form.reset({
-      clinicName: values.clinicName,
-      clinicAddress: values.clinicAddress,
-      clinicPhone: values.clinicPhone,
-      city: values.city,
-      country: values.country,
-      latitude: values.latitude,
-      longitude: values.longitude,
-      description: values.description,
-      taxId: values.taxId,
-      specialty: values.specialty,
-      isListedPublicly: values.isListedPublicly,
-    });
+    form.reset(values);
   });
 
   return (
@@ -181,9 +184,13 @@ export function ClinicForm({ profile }: { profile: DentistProfile | null }) {
                     />
                   )}
                 />
-                {form.formState.errors.clinicPhone && (
+                {form.formState.errors.clinicPhone ? (
                   <p className="text-sm text-destructive">
                     {form.formState.errors.clinicPhone.message}
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    {t('doctorIdentity.contact.clinicPhoneHint')}
                   </p>
                 )}
               </div>
@@ -192,21 +199,42 @@ export function ClinicForm({ profile }: { profile: DentistProfile | null }) {
                 <label className="text-sm font-medium" htmlFor="clinicAddress">
                   {t('accountClinic.addressLabel')}
                 </label>
-                <Input id="clinicAddress" {...form.register('clinicAddress')} />
+                <Input
+                  id="clinicAddress"
+                  aria-invalid={!!form.formState.errors.clinicAddress}
+                  {...form.register('clinicAddress')}
+                />
+                {form.formState.errors.clinicAddress && (
+                  <p className="text-sm text-destructive">{form.formState.errors.clinicAddress.message}</p>
+                )}
               </div>
 
               <div className="space-y-2">
                 <label className="text-sm font-medium" htmlFor="city">
                   {t('accountClinic.cityLabel')}
                 </label>
-                <Input id="city" {...form.register('city')} />
+                <Input
+                  id="city"
+                  aria-invalid={!!form.formState.errors.city}
+                  {...form.register('city')}
+                />
+                {form.formState.errors.city && (
+                  <p className="text-sm text-destructive">{form.formState.errors.city.message}</p>
+                )}
               </div>
 
               <div className="space-y-2">
                 <label className="text-sm font-medium" htmlFor="country">
                   {t('accountClinic.countryLabel')}
                 </label>
-                <Input id="country" {...form.register('country')} />
+                <Input
+                  id="country"
+                  aria-invalid={!!form.formState.errors.country}
+                  {...form.register('country')}
+                />
+                {form.formState.errors.country && (
+                  <p className="text-sm text-destructive">{form.formState.errors.country.message}</p>
+                )}
               </div>
 
               <div className="space-y-2 md:col-span-2">
@@ -266,6 +294,12 @@ export function ClinicForm({ profile }: { profile: DentistProfile | null }) {
                 )}
               </div>
 
+              <RegistrationNumberField
+                className="md:col-span-2"
+                registration={form.register('registrationNumber')}
+                error={form.formState.errors.registrationNumber?.message}
+              />
+
               <div className="space-y-2 md:col-span-2">
                 <label className="text-sm font-medium" htmlFor="specialty">
                   {t('accountClinic.specialtyLabel')}
@@ -301,7 +335,11 @@ export function ClinicForm({ profile }: { profile: DentistProfile | null }) {
             </div>
 
             <div className="flex justify-end">
-              <Button type="submit" disabled={!hasChanges || isSubmitting}>
+              <Button
+                type="submit"
+                className="pointer-coarse:h-12"
+                disabled={!hasChanges || isSubmitting}
+              >
                 {isSubmitting ? t('accountClinic.saving') : t('accountClinic.saveClinicDetails')}
               </Button>
             </div>

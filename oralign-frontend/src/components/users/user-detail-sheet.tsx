@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import Link from 'next/link';
-import { useForm, Controller } from 'react-hook-form';
+import { useForm, Controller, type UseFormRegisterReturn } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useQueryClient } from '@tanstack/react-query';
@@ -62,10 +62,19 @@ import { useAuth } from '@/lib/providers/auth-provider';
 import { getAvatarUrl, cn } from '@/lib/utils';
 import { useT } from '@/lib/i18n/lang-context';
 import { optionalCountrySchema, optionalE164PhoneSchema } from '@/lib/schemas';
+import { optionalTextPayload } from '@/lib/doctor/clinic-payload';
+import {
+  REGISTRATION_NUMBER_MAX_LENGTH,
+  registrationNumberInput,
+  registrationNumberPayload,
+} from '@/lib/doctor/registration-number';
+import { registrationNumberField } from '@/lib/doctor/registration-number-schema';
 import { toast } from '@/lib/toast';
 import { format } from 'date-fns';
 import { fr as frLocale } from 'date-fns/locale';
 import { WelcomeGiftMarkSection } from './welcome-gift-mark-section';
+import { AccountActivitySection } from './account-activity-section';
+import { ActivityBadge } from './activity-badge';
 import { TemporaryPasswordPanel } from './temporary-password-panel';
 import {
   User as UserIcon,
@@ -118,6 +127,10 @@ const makeClinicSchema = (t: Translate) =>
     description: z.string().optional(),
     // Clinic "Matricule fiscal" (doctor tax id) — admin-editable.
     taxId: z.string().max(60, t('usersUi.validation.taxIdMax')).optional(),
+    // Professional-order registration number (spec §6): optional, private.
+    registrationNumber: registrationNumberField(
+      t('doctorIdentity.registrationNumber.tooLong', { max: REGISTRATION_NUMBER_MAX_LENGTH }),
+    ),
     latitude: z.number().optional(),
     longitude: z.number().optional(),
   });
@@ -237,6 +250,7 @@ export function UserDetailSheet({
     defaultValues: {
       clinicName: '', clinicAddress: '', city: '', country: '',
       clinicPhone: '', clinicEmail: '', description: '', taxId: '',
+      registrationNumber: '',
       latitude: undefined, longitude: undefined,
     },
   });
@@ -279,6 +293,7 @@ export function UserDetailSheet({
       clinicEmail:   dp?.clinicEmail   ?? '',
       description:   dp?.description   ?? '',
       taxId:         dp?.taxId         ?? '',
+      registrationNumber: registrationNumberInput(dp?.registrationNumber),
       latitude:      dp?.latitude      ?? undefined,
       longitude:     dp?.longitude     ?? undefined,
     }, keep);
@@ -381,15 +396,20 @@ export function UserDetailSheet({
 
   const saveClinic = clinicForm.handleSubmit(async (data) => {
     setClinicError(null);
+    // A field the admin emptied is sent as null so the server clears it; a
+    // blank with nothing stored is left out (lib/doctor/clinic-payload).
+    const dp = user?.dentistProfile;
     const payload = {
       clinicName:    data.clinicName,
-      clinicAddress: data.clinicAddress || undefined,
-      city:          data.city          || undefined,
-      country:       data.country       || undefined,
-      clinicPhone:   data.clinicPhone   || undefined,
-      clinicEmail:   data.clinicEmail   || undefined,
-      description:   data.description  || undefined,
-      taxId:         data.taxId?.trim() || undefined,
+      clinicAddress: optionalTextPayload(data.clinicAddress, dp?.clinicAddress),
+      city:          optionalTextPayload(data.city,          dp?.city),
+      country:       optionalTextPayload(data.country,       dp?.country),
+      clinicPhone:   optionalTextPayload(data.clinicPhone,   dp?.clinicPhone),
+      clinicEmail:   optionalTextPayload(data.clinicEmail,   dp?.clinicEmail),
+      description:   optionalTextPayload(data.description,   dp?.description),
+      taxId:         optionalTextPayload(data.taxId,         dp?.taxId),
+      // null clears a number the admin removed (undefined would keep it).
+      registrationNumber: registrationNumberPayload(data.registrationNumber),
       latitude:      data.latitude,
       longitude:     data.longitude,
     };
@@ -560,6 +580,7 @@ export function UserDetailSheet({
                       {t('usersDesk.list.mustChangePassword')}
                     </Badge>
                   )}
+                  {user && <ActivityBadge user={user} className="h-4 px-1.5" />}
                 </div>
                 <div className="mt-1 text-xs text-muted-foreground">
                   <CountryPhoneDisplay phone={user?.phone} country={user?.country} />
@@ -907,6 +928,15 @@ export function UserDetailSheet({
                   </>
                 )}
 
+                {/* Doctor inactivity (spec §5): status, deadline,
+                    reactivation and the account history. */}
+                {user && isDentist && user.activity && (
+                  <>
+                    <Separator />
+                    <AccountActivitySection user={user} />
+                  </>
+                )}
+
                 <Separator />
 
                 <section>
@@ -1020,6 +1050,10 @@ export function UserDetailSheet({
                           placeholder={t('usersUi.sheet.taxIdPh')}
                         />
                       </Field>
+                      <AdminRegistrationNumberField
+                        registration={clinicForm.register('registrationNumber')}
+                        error={clinicForm.formState.errors.registrationNumber?.message}
+                      />
                     </div>
                   </section>
 
@@ -1371,6 +1405,52 @@ function Field({
       {children}
       {hint  && <p className="text-xs text-muted-foreground">{hint}</p>}
       {error && <p className="text-xs text-red-500">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * The practitioner's professional-order registration number in the admin
+ * clinic form (spec §6): optional and private like the matricule fiscal
+ * (the practitioner and the Oralign team only, never the public
+ * directory), not printed. Same bounds as the doctor's own forms.
+ */
+function AdminRegistrationNumberField({
+  registration,
+  error,
+}: {
+  registration: UseFormRegisterReturn;
+  error?: string;
+}) {
+  const { t } = useT();
+  const id = 'admin-registration-number';
+  const describedBy = `${id}-description`;
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id} className="text-sm">
+        {t('doctorIdentity.registrationNumber.label')}{' '}
+        <span className="font-normal text-muted-foreground">
+          {t('doctorIdentity.registrationNumber.optional')}
+        </span>
+      </Label>
+      <Input
+        id={id}
+        autoComplete="off"
+        spellCheck={false}
+        placeholder={t('doctorIdentity.registrationNumber.placeholder')}
+        aria-invalid={!!error}
+        aria-describedby={describedBy}
+        {...registration}
+      />
+      {error ? (
+        <p id={describedBy} className="text-xs text-red-500" role="alert">
+          {error}
+        </p>
+      ) : (
+        <p id={describedBy} className="text-xs text-muted-foreground">
+          {t('doctorIdentity.registrationNumber.adminHelp')}
+        </p>
+      )}
     </div>
   );
 }

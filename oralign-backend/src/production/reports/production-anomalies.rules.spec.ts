@@ -298,12 +298,24 @@ describe('duplicate_declaration / unreleased_delivery / confirmed_warning', () =
     ]);
   });
 
-  it('steps_not_released on another act is a confirmed_warning', () => {
+  it('steps_not_released on ANY other act is an unreleased finding too, naming the act (spec §3)', () => {
     const items = warningAnomalies([
       periodEvent({ type: thermoformed, warnings: ['steps_not_released'] }),
+      periodEvent({
+        type: cut,
+        warnings: ['steps_not_released', 'quantity_differs'],
+      }),
     ]);
-    expect(items.map((item) => [item.kind, item.warnings])).toEqual([
-      [PRODUCTION_ANOMALY.confirmed_warning, ['steps_not_released']],
+    expect(
+      items.map((item) => [item.kind, item.warnings, item.detail]),
+    ).toEqual([
+      [
+        PRODUCTION_ANOMALY.unreleased_delivery,
+        ['steps_not_released'],
+        thermoformed,
+      ],
+      [PRODUCTION_ANOMALY.unreleased_delivery, ['steps_not_released'], cut],
+      [PRODUCTION_ANOMALY.confirmed_warning, ['quantity_differs'], cut],
     ]);
   });
 

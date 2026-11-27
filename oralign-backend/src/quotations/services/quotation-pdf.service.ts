@@ -1,8 +1,10 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, Optional } from '@nestjs/common';
+import { OnEvent } from '@nestjs/event-emitter';
 import {
   ArchType,
   DevisLanguage,
   InstallmentStatus,
+  Prisma,
   Quotation,
   QuotationStatus,
 } from '@prisma/client';
@@ -14,9 +16,20 @@ import {
   BadRequestException,
   NotFoundException,
 } from '../../common/exceptions/app.exception';
+import type { WithholdingRule } from '../../common/billing/tax-split';
+import { NotificationEvents } from '../../notifications/events/notification-events';
+import { readChargeSettings } from '../../payments/services/payment-rules';
 import { getQuotationLabels, isRtl, pickTranslation } from './quotation-i18n';
 import { env } from '../../common/config/env';
-import { isTtcPriced } from '../quote-money';
+import { isTtcPriced, readOneQuoteMoney } from '../quote-money';
+import { CompanyBillingSettingsService } from './company-billing-settings.service';
+import {
+  estimateQuoteWithholding,
+  quoteBalance,
+  quotePaymentBases,
+  quoteWithholdingRule,
+} from './quote-document-money';
+import { readQuoteSnapshots } from './quotation-snapshots';
 
 const UPLOAD_ROOT = path.join(process.cwd(), 'uploads');
 const ARABIC_FONT_PATH =
@@ -36,9 +49,11 @@ interface TotalLine {
   label: string;
   value: string;
   emphasis?: boolean;
+  /** Bold, without the dark final background (the after-totals box). */
+  strong?: boolean;
 }
 
-interface RenderOptions {
+export interface QuotationRenderOptions {
   /**
    * Fiscal stamp ADDED to each payment (each payment gets its own
    * facture); null = unknown, not printed.
@@ -49,6 +64,43 @@ interface RenderOptions {
    * each one carries a stamp. 0 / absent = no plan yet, no stamp rows.
    */
   installmentCount?: number;
+  /**
+   * The amounts of those installments: each is a payment's base for the
+   * retenue estimate. Absent / empty: the devis is one payment of its total.
+   */
+  installmentAmounts?: number[];
+  /**
+   * The retenue rule the devis states (its snapshot, else the live rule:
+   * quoteWithholdingRule). null / absent: no « Retenue si appliquée » row.
+   */
+  withholdingRule?: WithholdingRule | null;
+  /**
+   * Settled so far (QuoteMoney.received: cash + retenue - stamps). Above 0
+   * the devis prints « Déjà réglé / Reste à payer ».
+   */
+  received?: number;
+}
+
+type RenderOptions = QuotationRenderOptions;
+
+/**
+ * The printable text of a value read from a snapshot or a row: strings as
+ * they are, numbers / booleans / Decimals / dates in their usual form,
+ * anything else (null, objects) as nothing, never "[object Object]".
+ */
+function printable(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (
+    typeof value === 'number' ||
+    typeof value === 'boolean' ||
+    typeof value === 'bigint'
+  ) {
+    return String(value);
+  }
+  if (value instanceof Date) return value.toISOString();
+  if (Prisma.Decimal.isDecimal(value)) return value.toString();
+  return '';
 }
 
 /** 10 -> "10", 7.5 -> "7,5" in French, "7.5" otherwise. */
@@ -75,7 +127,13 @@ export class QuotationPdfService implements OnModuleDestroy {
   private arabicFontBuffer: Buffer | null = null;
   private arabicFontChecked = false;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    // Optional so the template specs can build the service bare: without
+    // it a draft renders from what the row holds.
+    @Optional()
+    private readonly settings?: CompanyBillingSettingsService,
+  ) {}
 
   async onModuleDestroy(): Promise<void> {
     if (!this.browserPromise) return;
@@ -95,7 +153,11 @@ export class QuotationPdfService implements OnModuleDestroy {
         'Quote does not have a quotationNumber yet — cannot render PDF.',
       );
     }
-    if (!quote.companySnapshot) {
+    // A draft renders from snapshots built now and never persisted
+    // (DECISIONS §6: only send() freezes them); the row written back below
+    // only gains its file path.
+    const renderable = await this.withDraftSnapshots(quote);
+    if (!renderable.companySnapshot) {
       throw new BadRequestException(
         'Quote does not have a company snapshot yet — cannot render PDF.',
       );
@@ -109,10 +171,11 @@ export class QuotationPdfService implements OnModuleDestroy {
     const absPath = path.join(absDir, safeName);
     const relPath = path.posix.join(relDir, safeName);
 
-    await this.renderToFile(quote, absPath, {
-      stampDuty: await this.resolveStampDuty(quote),
-      installmentCount: await this.countPlannedPayments(quote),
-    });
+    await this.renderToFile(
+      renderable,
+      absPath,
+      await this.renderOptions(renderable),
+    );
 
     return this.prisma.quotation.update({
       where: { id: quote.id },
@@ -135,7 +198,11 @@ export class QuotationPdfService implements OnModuleDestroy {
     opts: { force?: boolean } = {},
   ): Promise<Quotation> {
     if (!opts.force && !quote.pdfFilePath) return quote;
-    if (!quote.quotationNumber || !quote.companySnapshot) return quote;
+    if (!quote.quotationNumber) return quote;
+    // A draft needs no stored snapshot: it renders from fresh ones.
+    if (quote.status !== QuotationStatus.draft && !quote.companySnapshot) {
+      return quote;
+    }
     try {
       return await this.generateAndPersist(quote);
     } catch (err) {
@@ -149,43 +216,128 @@ export class QuotationPdfService implements OnModuleDestroy {
   }
 
   /**
-   * How many payments the quote's plan takes, each with its own facture
-   * and stamp: the installments not cancelled. The payment-plan service
-   * re-renders the devis after every plan change, so the count printed
-   * is the current one. 0 when there is no plan (or it cannot be read).
+   * Everything the devis prints besides the row itself, read in one go:
+   *   - the stamp: frozen in the company snapshot, or the live setting for
+   *     snapshots taken before the stamp was recorded there;
+   *   - the planned payments (installments not cancelled: each one gets its
+   *     own facture and stamp, and is its own base for the retenue);
+   *   - the retenue rule: the snapshot's (since 2026-11-27), else live;
+   *   - what was settled so far, for « Déjà réglé / Reste à payer ».
+   * Every read is best effort: a failure leaves its rows out, never the PDF.
    */
-  private async countPlannedPayments(quote: Quotation): Promise<number> {
+  async renderOptions(quote: Quotation): Promise<RenderOptions> {
+    const company = this.asRecord(quote.companySnapshot) ?? {};
+    const snapshotStamp =
+      company.stampDuty !== undefined && company.stampDuty !== null
+        ? this.toNumber(company.stampDuty)
+        : null;
+    const needsLive =
+      snapshotStamp === null || typeof company.withholdingEnabled !== 'boolean';
+    const [installments, received, live] = await Promise.all([
+      this.plannedInstallmentAmounts(quote),
+      this.receivedOn(quote),
+      needsLive ? this.liveChargeSettings() : Promise.resolve(null),
+    ]);
+    return {
+      stampDuty: snapshotStamp ?? (live ? live.stampDuty.toNumber() : null),
+      installmentCount: installments.length,
+      installmentAmounts: installments,
+      withholdingRule: quoteWithholdingRule(
+        quote.companySnapshot,
+        live
+          ? {
+              enabled: live.withholdingEnabled,
+              rate: live.withholdingRate,
+              threshold: live.withholdingThreshold,
+            }
+          : null,
+      ),
+      received,
+    };
+  }
+
+  /** Amounts of the plan's installments, cancelled ones excluded. */
+  private async plannedInstallmentAmounts(quote: Quotation): Promise<number[]> {
     try {
-      return await this.prisma.quoteInstallment.count({
+      const rows = await this.prisma.quoteInstallment.findMany({
         where: {
           quotationId: quote.id,
           status: { not: InstallmentStatus.cancelled },
         },
+        select: { amount: true },
+        orderBy: { installmentNumber: 'asc' },
       });
+      return rows.map((row) => this.toNumber(row.amount));
+    } catch {
+      return [];
+    }
+  }
+
+  /** TTC settled on the quote so far (one grouped read, quote-money.ts). */
+  private async receivedOn(quote: Quotation): Promise<number> {
+    try {
+      const money = await readOneQuoteMoney(this.prisma, quote.id);
+      return money.received.toNumber();
     } catch {
       return 0;
     }
   }
 
-  /**
-   * The stamp the devis note mentions: frozen in the company snapshot
-   * when the number was allocated, or the live setting for snapshots
-   * taken before the stamp was recorded there.
-   */
-  private async resolveStampDuty(quote: Quotation): Promise<number | null> {
-    const company = (quote.companySnapshot as JsonRecord | null) ?? {};
-    if (company.stampDuty !== undefined && company.stampDuty !== null) {
-      return this.toNumber(company.stampDuty);
-    }
+  private async liveChargeSettings() {
     try {
-      const settings = await this.prisma.companyBillingSettings.findFirst({
-        where: { isActive: true },
-        orderBy: { updatedAt: 'desc' },
-        select: { stampDuty: true },
-      });
-      return settings ? this.toNumber(settings.stampDuty) : null;
+      return await readChargeSettings(this.prisma);
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * A draft with snapshots built now, in memory (the company settings and
+   * the doctor's current profile); any other quote as it is. Without the
+   * settings service (bare template specs) the row is used as stored.
+   */
+  private async withDraftSnapshots(quote: Quotation): Promise<Quotation> {
+    if (quote.status !== QuotationStatus.draft || !this.settings) return quote;
+    const settings = await this.settings.requireActive();
+    const snapshots = await readQuoteSnapshots(this.prisma, settings, quote);
+    return {
+      ...quote,
+      companySnapshot: snapshots.companySnapshot as Prisma.JsonValue,
+      clinicSnapshot: snapshots.clinicSnapshot as Prisma.JsonValue,
+    };
+  }
+
+  /**
+   * A payment settled on a quote: its stored devis is rendered again, so
+   * the practitioner downloads « Déjà réglé / Reste à payer » as they now
+   * stand (spec §4). Only a quote that already has a stored file is
+   * rendered (refreshStoredPdf); a render already running for the quote is
+   * awaited first, so two Chromium pages never write the same file. Best
+   * effort, after the payment committed: nothing here can undo it.
+   */
+  @OnEvent(NotificationEvents.PaymentReceived)
+  @OnEvent(NotificationEvents.PaymentConfirmed)
+  @OnEvent(NotificationEvents.CashPaymentRecorded)
+  async onQuotePaymentSettled(payload: { paymentId?: string }): Promise<void> {
+    if (!payload?.paymentId) return;
+    try {
+      const payment = await this.prisma.payment.findUnique({
+        where: { id: payload.paymentId },
+        select: { quotationId: true },
+      });
+      if (!payment?.quotationId) return;
+      await this.onDemandRenders.get(payment.quotationId)?.catch(() => null);
+      const quote = await this.prisma.quotation.findUnique({
+        where: { id: payment.quotationId },
+      });
+      if (!quote || quote.deletedAt) return;
+      await this.refreshStoredPdf(quote);
+    } catch (err) {
+      this.logger.warn(
+        `Could not refresh the devis after payment ${payload.paymentId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
     }
   }
 
@@ -237,7 +389,11 @@ export class QuotationPdfService implements OnModuleDestroy {
       throw new NotFoundException('No PDF has been generated for this quote.');
     }
     const abs = this.resolveSafe(quote.pdfFilePath);
-    if (!fs.existsSync(abs)) {
+    const present = await fs.promises.access(abs).then(
+      () => true,
+      () => false,
+    );
+    if (!present) {
       throw new NotFoundException('Generated PDF is missing on disk.');
     }
     return {
@@ -387,7 +543,7 @@ export class QuotationPdfService implements OnModuleDestroy {
       .filter(Boolean)
       .join(', ');
     const clinicCity = [clinic.city, clinic.country].filter(Boolean).join(', ');
-    const brandName = String(company.companyName ?? 'ORALIGN').trim() || 'ORALIGN';
+    const brandName = printable(company.companyName).trim() || 'ORALIGN';
 
     return `<!doctype html>
 <html lang="${this.htmlAttr(quote.language)}" dir="${rtl ? 'rtl' : 'ltr'}">
@@ -564,6 +720,17 @@ export class QuotationPdfService implements OnModuleDestroy {
         overflow-wrap: anywhere;
       }
       body.rtl .tax-note { margin-right: auto; margin-left: 0; }
+      .totals.after { margin-top: 6px; }
+      .total-row.strong { font-weight: 800; border-bottom: 0; }
+      .after-note {
+        width: min(100%, 262px);
+        margin: 4px 0 0 auto;
+        color: #555555;
+        font-size: 8.5px;
+        text-align: end;
+        overflow-wrap: anywhere;
+      }
+      body.rtl .after-note { margin-right: auto; margin-left: 0; }
       .text-block {
         margin-top: 10px;
         border: 1px solid #e2e4e8;
@@ -634,14 +801,14 @@ export class QuotationPdfService implements OnModuleDestroy {
         <article class="box">
           <h2 class="section-title">${this.html(labels.issuedBy)}</h2>
           ${this.renderBoxLines([
-            { text: String(company.companyName ?? ''), strong: true },
-            { text: String(company.companyAddress ?? '') },
+            { text: printable(company.companyName), strong: true },
+            { text: printable(company.companyAddress) },
             { text: cityCountry },
-            { text: String(company.companyPhone ?? '') },
-            { text: String(company.companyEmail ?? '') },
+            { text: printable(company.companyPhone) },
+            { text: printable(company.companyEmail) },
             {
               text: company.taxRegistrationNumber
-                ? `${labels.taxNumber}: ${company.taxRegistrationNumber}`
+                ? `${labels.taxNumber}: ${printable(company.taxRegistrationNumber)}`
                 : '',
             },
           ])}
@@ -651,19 +818,22 @@ export class QuotationPdfService implements OnModuleDestroy {
           <h2 class="section-title">${this.html(labels.billedTo)}</h2>
           ${this.renderBoxLines([
             {
-              text: `${labels.doctor}: ${String(clinic.doctorFullName ?? '—')}`,
+              text: `${labels.doctor}: ${printable(clinic.doctorFullName) || '—'}`,
               strong: true,
             },
             {
-              text: (clinic as { patientFullName?: string | null }).patientFullName
+              text: (clinic as { patientFullName?: string | null })
+                .patientFullName
                 ? `${labels.patient}: ${(clinic as { patientFullName?: string | null }).patientFullName}`
                 : '',
             },
-            { text: String(clinic.clinicName ?? '') },
-            { text: String(clinic.clinicAddress ?? '') },
+            { text: printable(clinic.clinicName) },
+            { text: printable(clinic.clinicAddress) },
             { text: clinicCity },
-            { text: String(clinic.clinicPhone ?? '') },
-            { text: String(clinic.clinicEmail ?? '') },
+            // THE contact (DECISIONS §6): practice first, account fallback.
+            // Snapshots taken before 2026-11-27 only carry the practice's.
+            { text: printable(clinic.contactPhone ?? clinic.clinicPhone) },
+            { text: printable(clinic.contactEmail ?? clinic.clinicEmail) },
           ])}
         </article>
       </section>
@@ -684,6 +854,7 @@ export class QuotationPdfService implements OnModuleDestroy {
           ${totals.map((line) => this.renderTotalLine(line)).join('')}
         </section>
         ${taxNote ? `<p class="tax-note">${this.html(taxNote)}</p>` : ''}
+        ${this.renderAfterTotals(quote, labels, options)}
       </section>
 
       ${quote.adminMessage ? this.renderTextBlock(labels.adminMessage, quote.adminMessage) : ''}
@@ -721,10 +892,14 @@ export class QuotationPdfService implements OnModuleDestroy {
 
     if (isPackQuote) {
       const packName = (quote as { packName?: string | null }).packName ?? '—';
-      const archType = (quote as { archType?: ArchType | null }).archType ?? null;
+      const archType =
+        (quote as { archType?: ArchType | null }).archType ?? null;
       const packBase = this.toNumber(
         quote.treatmentFees,
-        this.toNumber((quote as { totalPrice?: unknown }).totalPrice, quote.totalTtc),
+        this.toNumber(
+          (quote as { totalPrice?: unknown }).totalPrice,
+          quote.totalTtc,
+        ),
       );
       rows.push({
         label: `${this.packLabel(quote.language)}: ${packName}${this.archSuffix(archType, quote.language)}`,
@@ -736,7 +911,10 @@ export class QuotationPdfService implements OnModuleDestroy {
       }
     } else {
       rows.push(
-        { label: labels.treatmentFees, amount: this.toNumber(quote.treatmentFees) },
+        {
+          label: labels.treatmentFees,
+          amount: this.toNumber(quote.treatmentFees),
+        },
         {
           label: labels.fabricationFees,
           amount: this.toNumber(quote.fabricationFees),
@@ -811,41 +989,147 @@ export class QuotationPdfService implements OnModuleDestroy {
     const lines: TotalLine[] = [
       {
         label: labels.subtotalHt,
-        value: this.formatMoney(quote.subTotalHt, quote.currency, quote.language),
+        value: this.formatMoney(
+          quote.subTotalHt,
+          quote.currency,
+          quote.language,
+        ),
       },
     ];
 
     if (showTva) {
       lines.push({
         label: `${labels.vatRate} (${this.formatRate(tvaRate, quote.language)} %)`,
-        value: this.formatMoney(quote.tvaAmount, quote.currency, quote.language),
+        value: this.formatMoney(
+          quote.tvaAmount,
+          quote.currency,
+          quote.language,
+        ),
       });
     }
 
-    const stamp = options.stampDuty ?? 0;
-    const payments = Math.max(0, Math.floor(options.installmentCount ?? 0));
-    const withStamps = stamp > 0 && payments > 0;
+    const stamps = this.planStamps(quote, options);
     lines.push({
       label: labels.totalTtc,
       value: this.formatMoney(quote.totalTtc, quote.currency, quote.language),
       // One dark row only: the last one.
-      emphasis: !withStamps,
+      emphasis: !stamps,
     });
-    if (withStamps) {
-      // Millimes, so n × 1,000 + 2 380,000 never drifts.
-      const stampsM = Math.round(stamp * 1000) * payments;
-      const totalM = Math.round(this.toNumber(quote.totalTtc) * 1000) + stampsM;
+    if (stamps) {
       lines.push({
-        label: labels.stampRow(payments, this.formatAmount(stamp, quote.language)),
-        value: this.formatMoney(stampsM / 1000, quote.currency, quote.language),
+        label: labels.stampRow(
+          stamps.payments,
+          this.formatAmount(stamps.stamp, quote.language),
+        ),
+        value: this.formatMoney(
+          stamps.stampsM / 1000,
+          quote.currency,
+          quote.language,
+        ),
       });
       lines.push({
         label: labels.totalWithStamps,
-        value: this.formatMoney(totalM / 1000, quote.currency, quote.language),
+        value: this.formatMoney(
+          stamps.totalM / 1000,
+          quote.currency,
+          quote.language,
+        ),
         emphasis: true,
       });
     }
     return lines;
+  }
+
+  /**
+   * The plan's stamps (one per payment, each with its own facture), in
+   * millimes so n × 1,000 + 2 380,000 never drifts; null without a plan
+   * or without a known stamp.
+   */
+  private planStamps(
+    quote: Quotation,
+    options: RenderOptions,
+  ): {
+    stamp: number;
+    payments: number;
+    stampsM: number;
+    totalM: number;
+  } | null {
+    const stamp = options.stampDuty ?? 0;
+    const payments = Math.max(0, Math.floor(options.installmentCount ?? 0));
+    if (!(stamp > 0) || payments === 0) return null;
+    const stampsM = Math.round(stamp * 1000) * payments;
+    const totalM = Math.round(this.toNumber(quote.totalTtc) * 1000) + stampsM;
+    return { stamp, payments, stampsM, totalM };
+  }
+
+  /**
+   * Under the totals (spec §4), in a box of its own so the price block
+   * keeps its single dark row:
+   *   Retenue à la source si appliquée (r %)   - estimate
+   *   Net si retenue appliquée                 total to pay - estimate
+   *     (only while the rule lets it apply to at least one payment)
+   *   Déjà réglé / Reste à payer                (once money was received)
+   * then the estimate's note. Empty when there is nothing to say.
+   */
+  private renderAfterTotals(
+    quote: Quotation,
+    labels: ReturnType<typeof getQuotationLabels>,
+    options: RenderOptions,
+  ): string {
+    // The devis total: the Decimal totalPrice of a pack quote, else the
+    // legacy Float total.
+    const total = this.toNumber(
+      (quote as { totalPrice?: unknown }).totalPrice,
+      quote.totalTtc,
+    );
+    const estimate = estimateQuoteWithholding(
+      quotePaymentBases(options.installmentAmounts ?? [], total),
+      options.withholdingRule ?? null,
+    );
+    const balance = quoteBalance(total, options.received ?? 0);
+    const money = (value: number) =>
+      this.formatMoney(value, quote.currency, quote.language);
+    const rows: TotalLine[] = [];
+    if (estimate) {
+      const stamps = this.planStamps(quote, options);
+      const toPayM = stamps
+        ? stamps.totalM
+        : Math.round(this.toNumber(quote.totalTtc) * 1000);
+      const amountM = Math.round(estimate.amount.toNumber() * 1000);
+      rows.push({
+        label: labels.withholdingIfApplied(
+          this.formatRate(estimate.rate.toNumber(), quote.language),
+        ),
+        value: `- ${money(amountM / 1000)}`,
+      });
+      rows.push({
+        label: labels.netIfWithholding,
+        value: money((toPayM - amountM) / 1000),
+      });
+    }
+    if (balance) {
+      rows.push({
+        label: labels.alreadyPaid,
+        value: money(balance.paid.toNumber()),
+      });
+      rows.push({
+        label: labels.remainingToPay,
+        value: money(balance.remaining.toNumber()),
+        strong: true,
+      });
+    }
+    if (rows.length === 0) return '';
+    const note = estimate
+      ? labels.withholdingEstimateNote(
+          estimate.threshold && estimate.threshold.greaterThan(0)
+            ? money(estimate.threshold.toNumber())
+            : null,
+        )
+      : '';
+    return `<section class="totals after">
+          ${rows.map((line) => this.renderTotalLine(line)).join('')}
+        </section>
+        ${note ? `<p class="after-note">${this.html(note)}</p>` : ''}`;
   }
 
   private renderLineRow(row: QuoteLine, quote: Quotation): string {
@@ -861,7 +1145,8 @@ export class QuotationPdfService implements OnModuleDestroy {
   }
 
   private renderTotalLine(line: TotalLine): string {
-    return `<div class="total-row${line.emphasis ? ' final' : ''}">
+    const kind = line.emphasis ? ' final' : line.strong ? ' strong' : '';
+    return `<div class="total-row${kind}">
       <span>${this.html(line.label)}</span>
       <span>${this.html(line.value)}</span>
     </div>`;
@@ -874,7 +1159,9 @@ export class QuotationPdfService implements OnModuleDestroy {
     </section>`;
   }
 
-  private renderBoxLines(lines: Array<{ text: string; strong?: boolean }>): string {
+  private renderBoxLines(
+    lines: Array<{ text: string; strong?: boolean }>,
+  ): string {
     const html = lines
       .map((line) => ({ ...line, text: line.text.trim() }))
       .filter((line) => line.text.length > 0)
@@ -892,7 +1179,9 @@ export class QuotationPdfService implements OnModuleDestroy {
     return `<div><strong>${this.html(label)}:</strong> ${this.html(value)}</div>`;
   }
 
-  private resolveImageDataUrl(relPath: string | null | undefined): string | null {
+  private resolveImageDataUrl(
+    relPath: string | null | undefined,
+  ): string | null {
     if (!relPath) return null;
     try {
       const abs = this.resolveSafe(relPath);
@@ -921,10 +1210,9 @@ export class QuotationPdfService implements OnModuleDestroy {
     fallbackKey: string,
     language: DevisLanguage,
   ): string {
-    return String(
+    return (
       pickTranslation(snapshot[translationsKey], language) ||
-        snapshot[fallbackKey] ||
-        '',
+      printable(snapshot[fallbackKey])
     ).trim();
   }
 
@@ -978,8 +1266,15 @@ export class QuotationPdfService implements OnModuleDestroy {
     return base.toLowerCase().endsWith('.pdf') ? base : `${base}.pdf`;
   }
 
+  private asRecord(value: unknown): JsonRecord | null {
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as JsonRecord)
+      : null;
+  }
+
   private toNumber(value: unknown, fallback = 0): number {
-    if (typeof value === 'number') return Number.isFinite(value) ? value : fallback;
+    if (typeof value === 'number')
+      return Number.isFinite(value) ? value : fallback;
     if (typeof value === 'string') {
       const parsed = Number(value);
       return Number.isFinite(parsed) ? parsed : fallback;
@@ -1081,7 +1376,10 @@ export class QuotationPdfService implements OnModuleDestroy {
     }
   }
 
-  private archSuffix(archType: ArchType | null, language: DevisLanguage): string {
+  private archSuffix(
+    archType: ArchType | null,
+    language: DevisLanguage,
+  ): string {
     if (!archType) return '';
     const label =
       archType === ArchType.two_arches
@@ -1101,7 +1399,8 @@ export class QuotationPdfService implements OnModuleDestroy {
   private packMeta(quote: Quotation): string {
     const language = quote.language;
     const parts: string[] = [];
-    const maxSteps = (quote as { maxStepsPerArch?: number | null }).maxStepsPerArch;
+    const maxSteps = (quote as { maxStepsPerArch?: number | null })
+      .maxStepsPerArch;
     const corrections = (quote as { includedCorrections?: number | null })
       .includedCorrections;
     const isUnlimitedSteps = (quote as { isUnlimitedSteps?: boolean | null })
@@ -1150,7 +1449,7 @@ export class QuotationPdfService implements OnModuleDestroy {
   }
 
   private html(value: unknown): string {
-    return String(value ?? '')
+    return printable(value)
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')

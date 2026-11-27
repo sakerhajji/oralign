@@ -3,7 +3,7 @@ import type { Lang } from './dict';
 type T = Record<Lang, string>;
 
 /**
- * Account settings: billing settings form (Oralign gift card, loading states), account tabs, country/city picker —
+ * Account settings: billing settings form (Oralign gift card, inactivity rule card, loading states), account tabs, country/city picker —
  * spread into dict (`...settingsDeskDomainDict`) by the main dictionary.
  * Same leaf shape as dict.ts: every leaf is `{ en, fr } as T`.
  */
@@ -56,6 +56,10 @@ export const settingsDeskDomainDict = {
         en: 'Enter a whole number of 1 or more.',
         fr: 'Saisissez un nombre entier supérieur ou égal à 1.',
       } as T,
+      invalidMonths: {
+        en: 'Enter a whole number of months from 1 to 24.',
+        fr: 'Saisissez un nombre entier de mois entre 1 et 24.',
+      } as T,
       fixErrors: {
         en: 'Fix the highlighted fields to save.',
         fr: 'Corrigez les champs signalés pour enregistrer.',
@@ -63,6 +67,37 @@ export const settingsDeskDomainDict = {
       unsavedChanges: {
         en: 'Unsaved changes',
         fr: 'Modifications non enregistrées',
+      } as T,
+    },
+
+    // inactivity-rule-card.tsx — the doctor inactivity rule (spec §5), saved with the form
+    inactivity: {
+      title: { en: 'Practitioner inactivity', fr: 'Inactivité des praticiens' } as T,
+      statusOn: { en: 'On', fr: 'Activée' } as T,
+      statusOff: { en: 'Off', fr: 'Désactivée' } as T,
+      description: {
+        en: 'A practitioner who submits no order during the chosen period is deactivated automatically, after two warnings by e-mail and in the app (30 days, then 7 days before).',
+        fr: 'Un praticien qui ne soumet aucune commande pendant la période choisie est désactivé automatiquement, après deux avertissements par e-mail et dans l’application (30 jours puis 7 jours avant).',
+      } as T,
+      effects: {
+        en: 'Once deactivated, they keep access to their account, payments and ongoing treatments, but can no longer create or submit orders and no longer appear in the public directory. Nothing is deleted, and an admin can reactivate them at any time.',
+        fr: 'Désactivé, il garde l’accès à son compte, à ses paiements et à ses traitements en cours, mais ne peut plus créer ni soumettre de commande et n’apparaît plus dans l’annuaire public. Rien n’est supprimé, et un administrateur peut le réactiver à tout moment.',
+      } as T,
+      switchLabel: {
+        en: 'Apply the inactivity rule',
+        fr: 'Appliquer la règle d’inactivité',
+      } as T,
+      monthsLabel: {
+        en: 'Period without an order (months)',
+        fr: 'Période sans commande (mois)',
+      } as T,
+      monthsHelp: {
+        en: 'Calendar months since the last submitted order (or the account approval). 1 to 24.',
+        fr: 'Mois calendaires depuis la dernière commande soumise (ou l’approbation du compte). De 1 à 24.',
+      } as T,
+      firstRunNote: {
+        en: 'When you turn it on, nobody is deactivated straight away: practitioners already past the period get the 30-day warning first.',
+        fr: 'À l’activation, personne n’est désactivé d’emblée : les praticiens déjà au-delà de la période reçoivent d’abord l’avertissement à 30 jours.',
       } as T,
     },
 

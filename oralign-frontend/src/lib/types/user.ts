@@ -48,12 +48,16 @@ export interface UserStats {
   technicians: number;
   giftAvailable: number;
   giftUsed: number;
+  /** Dormant dentists (doctor inactivity, spec §5), not the blocked ones. */
+  dormant: number;
 }
 
 export interface UpdateUserDto {
   fullName?: string;
-  phone?: string;
-  country?: string;
+  /** E.164; null clears the stored number, undefined leaves it untouched. */
+  phone?: string | null;
+  /** ISO 3166-1 alpha-2; null clears it, undefined leaves it untouched. */
+  country?: string | null;
   avatarUrl?: string;
   /** 'fr' | 'en' — synced by the language switcher, read by the
    *  backend when rendering notifications + emails for this user. */

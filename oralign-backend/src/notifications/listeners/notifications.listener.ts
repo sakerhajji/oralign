@@ -1,10 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { NotificationType, PaymentMethod } from '@prisma/client';
+import {
+  BatchUnlockSource,
+  NotificationType,
+  PaymentMethod,
+  UserRole,
+} from '@prisma/client';
 import { NotificationsService } from '../services/notifications.service';
 import { OrderNotificationService } from '../../mail/order-notification.service';
+import { PrismaService } from '../../prisma/prisma.service';
 import {
   BatchEvent,
+  BatchUnlockedEvent,
   DentistOnboardingCompletedEvent,
   NotificationEvents,
   OrderEvent,
@@ -12,13 +19,25 @@ import {
   PaymentEvent,
   QuotationDecisionEvent,
   QuotationEvent,
+  TransferClosedEvent,
+  TransferReviewOpenedEvent,
   TreatmentFeeEvent,
+  TreatmentFeeRejectedEvent,
   TreatmentPlanDecisionEvent,
   TreatmentPlanEvent,
   UserRegisteredEvent,
   SupplementalOrderEvent,
   SupplementalOrderReviewedEvent,
 } from '../events/notification-events';
+import { installmentSubjectKey } from '../notification-subject';
+import {
+  motifSuffix,
+  pendingDeskLink,
+  releasedStepsSentence,
+  type StepRange,
+  stepsReleasedByPayment,
+  treatmentFeeEventSubject,
+} from './transfer-notices';
 
 /**
  * Build a `Dr. X · patient Y · order ORD-…` byline used in the body
@@ -124,6 +143,8 @@ export class NotificationsListener {
   constructor(
     private readonly notifications: NotificationsService,
     private readonly orderNotifications: OrderNotificationService,
+    // Read-only: the steps a confirmed transfer released (transfer-notices).
+    private readonly prisma: PrismaService,
   ) {}
 
   // ─── User lifecycle ─────────────────────────────────────────────────
@@ -761,7 +782,11 @@ export class NotificationsListener {
       const tailFr = payload.installmentNumber
         ? ` (échéance n°${payload.installmentNumber})`
         : '';
+      // One subject per declaration: each admin's row is his "Nouveau",
+      // and its link opens that transfer on the pending desk.
+      const subjectKey = installmentSubjectKey(payload.paymentId);
       await this.notifications.broadcastToAdmins({
+        subjectKey,
         type: NotificationType.payment_declared,
         title: {
           en: 'Bank transfer awaiting confirmation',
@@ -776,7 +801,7 @@ export class NotificationsListener {
               en: `${payload.amount} ${payload.currency} declared by the doctor${tailEn} — please verify the proof.`,
               fr: `${payload.amount} ${payload.currency} déclarés par le praticien${tailFr} — veuillez vérifier le justificatif.`,
             },
-        link: `/dashboard/payments/pending`,
+        link: pendingDeskLink(subjectKey),
         metadata: {
           paymentId: payload.paymentId,
           orderId: payload.orderId,
@@ -792,6 +817,13 @@ export class NotificationsListener {
 
   @OnEvent(NotificationEvents.PaymentConfirmed, { async: true })
   async onPaymentConfirmed(payload: PaymentEvent): Promise<void> {
+    // Every admin's "Nouveau" of this transfer is done. A separate safety
+    // boundary: a failure here never costs the doctor his message.
+    await this.safe('payment.confirmed.resolve', () =>
+      this.notifications.resolveSubject(
+        installmentSubjectKey(payload.paymentId),
+      ),
+    );
     await this.safe('payment.confirmed', async () => {
       const subjectEn = payload.patientName
         ? ` for patient ${payload.patientName}`
@@ -806,16 +838,22 @@ export class NotificationsListener {
       const installmentFr = payload.installmentNumber
         ? ` — l'échéance n°${payload.installmentNumber} est désormais payée`
         : '';
+      // The validation names the steps it released (DECISIONS §2), read
+      // after the commit; never a range an admin had released by hand.
+      // Nothing released by THIS payment (no batch, a manual unlock before
+      // it, an unlimited pack) or a failed read: the plain message.
+      const range = await this.stepsReleasedOrNone(payload.paymentId);
+      const steps = releasedStepsSentence(range);
       await this.notifications.create({
         recipientId: payload.doctorId,
         type: NotificationType.payment_confirmed,
         title: {
-          en: 'Payment confirmed',
-          fr: 'Paiement confirmé',
+          en: 'Bank transfer confirmed',
+          fr: 'Virement validé',
         },
         message: {
-          en: `${payload.amount} ${payload.currency}${subjectEn}${code} has been confirmed${installmentEn}.`,
-          fr: `${payload.amount} ${payload.currency}${subjectFr}${code} ont été confirmés${installmentFr}.`,
+          en: `${payload.amount} ${payload.currency}${subjectEn}${code} has been confirmed${installmentEn}.${steps.en}`,
+          fr: `${payload.amount} ${payload.currency}${subjectFr}${code} ont été confirmés${installmentFr}.${steps.fr}`,
         },
         link: `/dashboard/orders/${payload.orderId}?tab=quote`,
         metadata: {
@@ -824,6 +862,8 @@ export class NotificationsListener {
           orderCode: payload.orderCode ?? null,
           patientName: payload.patientName ?? null,
           installmentNumber: payload.installmentNumber ?? null,
+          fromStep: range?.fromStep ?? null,
+          toStep: range?.toStep ?? null,
         },
       });
     });
@@ -831,6 +871,11 @@ export class NotificationsListener {
 
   @OnEvent(NotificationEvents.PaymentRejected, { async: true })
   async onPaymentRejected(payload: PaymentEvent): Promise<void> {
+    await this.safe('payment.rejected.resolve', () =>
+      this.notifications.resolveSubject(
+        installmentSubjectKey(payload.paymentId),
+      ),
+    );
     await this.safe('payment.rejected', async () => {
       const subjectEn = payload.patientName
         ? ` for patient ${payload.patientName}`
@@ -845,16 +890,18 @@ export class NotificationsListener {
       const installmentFr = payload.installmentNumber
         ? ` (échéance n°${payload.installmentNumber})`
         : '';
+      // The doctor reads why (DECISIONS §2: « Motif : … »).
+      const motif = motifSuffix(payload.rejectionReason);
       await this.notifications.create({
         recipientId: payload.doctorId,
         type: NotificationType.payment_rejected,
         title: {
           en: 'Bank transfer rejected',
-          fr: 'Virement bancaire rejeté',
+          fr: 'Virement bancaire refusé',
         },
         message: {
-          en: `Your bank-transfer proof for ${payload.amount} ${payload.currency}${subjectEn}${code}${installmentEn} was rejected. Please review and submit again.`,
-          fr: `Votre justificatif de virement de ${payload.amount} ${payload.currency}${subjectFr}${code}${installmentFr} a été rejeté. Veuillez le vérifier et le soumettre à nouveau.`,
+          en: `Your bank-transfer proof for ${payload.amount} ${payload.currency}${subjectEn}${code}${installmentEn} was rejected. Please review it and send a new receipt.${motif.en}`,
+          fr: `Votre justificatif de virement de ${payload.amount} ${payload.currency}${subjectFr}${code}${installmentFr} a été refusé. Veuillez le vérifier et envoyer un nouveau reçu.${motif.fr}`,
         },
         link: `/dashboard/orders/${payload.orderId}?tab=quote`,
         metadata: {
@@ -863,9 +910,47 @@ export class NotificationsListener {
           orderCode: payload.orderCode ?? null,
           patientName: payload.patientName ?? null,
           installmentNumber: payload.installmentNumber ?? null,
+          rejectionReason: payload.rejectionReason ?? null,
         },
       });
     });
+  }
+
+  /**
+   * The doctor withdrew a declaration, or a new one replaced it: the old
+   * subject is closed for every admin. No new row: a replacement brings
+   * its own payment_declared, a withdrawal leaves nothing to do.
+   */
+  @OnEvent(NotificationEvents.PaymentWithdrawn, { async: true })
+  async onPaymentWithdrawn(payload: TransferClosedEvent): Promise<void> {
+    await this.safe('payment.withdrawn.resolve', () =>
+      this.notifications.resolveSubject(payload.subjectKey),
+    );
+  }
+
+  @OnEvent(NotificationEvents.PaymentSuperseded, { async: true })
+  async onPaymentSuperseded(payload: TransferClosedEvent): Promise<void> {
+    await this.safe('payment.superseded.resolve', () =>
+      this.notifications.resolveSubject(payload.subjectKey),
+    );
+  }
+
+  /**
+   * An admin opened a receipt (either kind): HIS rows of the subject read
+   * "Consulté"; the other admins keep their own "Nouveau". The global
+   * reviewOpenedAt stamp is the emitter's.
+   */
+  @OnEvent(NotificationEvents.TransferReviewOpened, { async: true })
+  async onTransferReviewOpened(
+    payload: TransferReviewOpenedEvent,
+  ): Promise<void> {
+    await this.safe('transfer.reviewOpened', () =>
+      this.notifications.markSubjectRead(
+        // Only the recipient is read; the role is not used there.
+        { userId: payload.adminId, role: UserRole.admin },
+        payload.subjectKey,
+      ),
+    );
   }
 
   @OnEvent(NotificationEvents.CashPaymentRecorded, { async: true })
@@ -895,6 +980,11 @@ export class NotificationsListener {
       const cheque = payload.method === PaymentMethod.cheque;
       const byEn = cheque ? 'by cheque' : 'cash';
       const byFr = cheque ? 'par chèque' : 'en espèces';
+      // Money received in person settles the installment like a validated
+      // transfer: the doctor's confirmation names the steps it released
+      // (DECISIONS §2), never a range an admin had released by hand.
+      const range = await this.stepsReleasedOrNone(payload.paymentId);
+      const steps = releasedStepsSentence(range);
       await Promise.all([
         this.notifications.broadcastToAdmins({
           type: NotificationType.cash_payment_recorded,
@@ -934,8 +1024,8 @@ export class NotificationsListener {
               : 'Paiement en espèces confirmé',
           },
           message: {
-            en: `${payload.amount} ${payload.currency} ${byEn}${subjectEn}${code} has been recorded by the team${installmentTailEn}.`,
-            fr: `${payload.amount} ${payload.currency} ${byFr}${subjectFr}${code} ont été enregistrés par l'équipe${installmentTailFr}.`,
+            en: `${payload.amount} ${payload.currency} ${byEn}${subjectEn}${code} has been recorded by the team${installmentTailEn}.${steps.en}`,
+            fr: `${payload.amount} ${payload.currency} ${byFr}${subjectFr}${code} ont été enregistrés par l'équipe${installmentTailFr}.${steps.fr}`,
           },
           link: `/dashboard/orders/${payload.orderId}?tab=quote`,
           metadata: {
@@ -944,6 +1034,8 @@ export class NotificationsListener {
             orderCode: payload.orderCode ?? null,
             patientName: payload.patientName ?? null,
             installmentNumber: payload.installmentNumber ?? null,
+            fromStep: range?.fromStep ?? null,
+            toStep: range?.toStep ?? null,
           },
         }),
       ]);
@@ -960,7 +1052,11 @@ export class NotificationsListener {
         patientName: payload.patientName,
         orderCode: payload.orderCode,
       });
+      // The declaration's identity is its declaredAt: a re-upload is a new
+      // subject (the old one is resolved by TreatmentFeeSuperseded).
+      const subjectKey = treatmentFeeEventSubject(payload);
       await this.notifications.broadcastToAdmins({
+        subjectKey,
         type: NotificationType.treatment_fee_declared,
         title: {
           en: 'Treatment-fee bank transfer awaiting confirmation',
@@ -975,7 +1071,7 @@ export class NotificationsListener {
               en: `${payload.amount} ${payload.currency} treatment-fee receipt uploaded by the doctor — please verify the proof.`,
               fr: `Reçu des honoraires de traitement de ${payload.amount} ${payload.currency} téléversé par le praticien — veuillez vérifier le justificatif.`,
             },
-        link: `/dashboard/payments/pending`,
+        link: pendingDeskLink(subjectKey),
         metadata: {
           orderId: payload.orderId,
           orderCode: payload.orderCode ?? null,
@@ -1050,6 +1146,9 @@ export class NotificationsListener {
 
   @OnEvent(NotificationEvents.TreatmentFeeConfirmed, { async: true })
   async onTreatmentFeeConfirmed(payload: TreatmentFeeEvent): Promise<void> {
+    await this.safe('treatmentFee.confirmed.resolve', () =>
+      this.resolveTreatmentFee(payload),
+    );
     await this.safe('treatmentFee.confirmed', async () => {
       const subjectEn = payload.patientName
         ? ` for patient ${payload.patientName}`
@@ -1082,14 +1181,73 @@ export class NotificationsListener {
     });
   }
 
+  /** Admin refused the fee transfer: the doctor reads the reason. */
+  @OnEvent(NotificationEvents.TreatmentFeeRejected, { async: true })
+  async onTreatmentFeeRejected(
+    payload: TreatmentFeeRejectedEvent,
+  ): Promise<void> {
+    await this.safe('treatmentFee.rejected.resolve', () =>
+      this.resolveTreatmentFee(payload),
+    );
+    await this.safe('treatmentFee.rejected', async () => {
+      const subjectEn = payload.patientName
+        ? ` for patient ${payload.patientName}`
+        : '';
+      const subjectFr = payload.patientName
+        ? ` pour le patient ${payload.patientName}`
+        : '';
+      const code = payload.orderCode ? ` (${payload.orderCode})` : '';
+      const motif = motifSuffix(payload.rejectionReason);
+      await this.notifications.create({
+        recipientId: payload.doctorId,
+        type: NotificationType.treatment_fee_rejected,
+        title: {
+          en: 'Treatment-fee transfer rejected',
+          fr: 'Virement des honoraires refusé',
+        },
+        message: {
+          en: `Your ${payload.amount} ${payload.currency} treatment-fee receipt${subjectEn}${code} was rejected. Please send a new receipt.${motif.en}`,
+          fr: `Votre reçu des honoraires de traitement de ${payload.amount} ${payload.currency}${subjectFr}${code} a été refusé. Veuillez envoyer un nouveau reçu.${motif.fr}`,
+        },
+        link: `/dashboard/orders/${payload.orderId}`,
+        metadata: {
+          orderId: payload.orderId,
+          orderCode: payload.orderCode ?? null,
+          patientName: payload.patientName ?? null,
+          amount: payload.amount,
+          currency: payload.currency,
+          method: payload.method,
+          rejectionReason: payload.rejectionReason,
+        },
+      });
+    });
+  }
+
+  /** The doctor removed the fee receipt, or uploaded a new one over it. */
+  @OnEvent(NotificationEvents.TreatmentFeeWithdrawn, { async: true })
+  async onTreatmentFeeWithdrawn(payload: TransferClosedEvent): Promise<void> {
+    await this.safe('treatmentFee.withdrawn.resolve', () =>
+      this.notifications.resolveSubject(payload.subjectKey),
+    );
+  }
+
+  @OnEvent(NotificationEvents.TreatmentFeeSuperseded, { async: true })
+  async onTreatmentFeeSuperseded(payload: TransferClosedEvent): Promise<void> {
+    await this.safe('treatmentFee.superseded.resolve', () =>
+      this.notifications.resolveSubject(payload.subjectKey),
+    );
+  }
+
   // ─── Step batches ───────────────────────────────────────────────────
 
   @OnEvent(NotificationEvents.BatchUnlocked, { async: true })
-  async onBatchUnlocked(payload: BatchEvent): Promise<void> {
+  async onBatchUnlocked(payload: BatchUnlockedEvent): Promise<void> {
     await this.safe('batch.unlocked', async () => {
-      // Admins get the actionable item (they need to deliver). The
-      // doctor already saw the payment confirmation a beat earlier,
-      // so we skip them here to avoid double-pinging.
+      // Admins get the actionable item (they need to deliver), whatever
+      // the source: broadcastToAdmins reaches active admins and super
+      // admins only. The doctor reads the released range in the transfer
+      // validation (onPaymentConfirmed) and is never told of a manual
+      // unlock; technicians are never notified (DECISIONS §2-§3).
       const byline = adminByline({
         doctorName: payload.doctorName,
         patientName: payload.patientName,
@@ -1097,15 +1255,26 @@ export class NotificationsListener {
       });
       const headEn = byline.en ? `${byline.en} — ` : '';
       const headFr = byline.fr ? `${byline.fr} — ` : '';
+      // A manual unlock leaves its installment due: say so to the team.
+      const manual = payload.source === BatchUnlockSource.manual;
+      const tailEn = manual
+        ? ' Unlocked by hand: the installment is still due.'
+        : '';
+      const tailFr = manual ? " Déblocage manuel : l'échéance reste due." : '';
       await this.notifications.broadcastToAdmins({
         type: NotificationType.batch_unlocked,
-        title: {
-          en: 'Step batch unlocked',
-          fr: "Lot d'étapes débloqué",
-        },
+        title: manual
+          ? {
+              en: 'Step batch unlocked by hand',
+              fr: "Lot d'étapes débloqué manuellement",
+            }
+          : {
+              en: 'Step batch unlocked',
+              fr: "Lot d'étapes débloqué",
+            },
         message: {
-          en: `${headEn}steps ${payload.fromStep}–${payload.toStep} are ready to deliver.`,
-          fr: `${headFr}les étapes ${payload.fromStep}–${payload.toStep} sont prêtes à livrer.`,
+          en: `${headEn}steps ${payload.fromStep}–${payload.toStep} are ready to deliver.${tailEn}`,
+          fr: `${headFr}les étapes ${payload.fromStep}–${payload.toStep} sont prêtes à livrer.${tailFr}`,
         },
         link: `/dashboard/orders/${payload.orderId}?tab=quote`,
         metadata: {
@@ -1117,6 +1286,7 @@ export class NotificationsListener {
           patientName: payload.patientName ?? null,
           fromStep: payload.fromStep,
           toStep: payload.toStep,
+          source: payload.source ?? null,
         },
       });
     });
@@ -1158,6 +1328,39 @@ export class NotificationsListener {
         },
       });
     });
+  }
+
+  /**
+   * The step range THIS payment released, for the doctor's validation
+   * message; null when it released none, and when the read fails (logged):
+   * the doctor then gets the plain validation rather than nothing.
+   */
+  private async stepsReleasedOrNone(
+    paymentId: string,
+  ): Promise<StepRange | null> {
+    try {
+      return await stepsReleasedByPayment(this.prisma, paymentId);
+    } catch (err) {
+      this.logger.warn(
+        `Released step range unreadable for payment ${paymentId}: ${(err as Error).message}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Close a treatment-fee subject for every admin: the declaration named
+   * by the event, or (legacy emitter without declaredAt) every open fee
+   * subject of the order.
+   */
+  private async resolveTreatmentFee(payload: {
+    orderId: string;
+    declaredAt?: string | null;
+  }): Promise<number> {
+    const subjectKey = treatmentFeeEventSubject(payload);
+    return subjectKey
+      ? this.notifications.resolveSubject(subjectKey)
+      : this.notifications.resolveTreatmentFeeSubjects(payload.orderId);
   }
 
   // ─── Safety wrapper ─────────────────────────────────────────────────

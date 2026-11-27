@@ -1,6 +1,7 @@
 import {
   InstallmentStatus,
   OrderStatus,
+  PaymentMethod,
   Prisma,
   type Quotation,
   QuotationPaymentStatus,
@@ -24,6 +25,10 @@ import {
   IN_FLIGHT_PAYMENT_STATUSES,
   RECEIVED_PAYMENT_STATUSES,
 } from '../payments/services/payment-rules';
+import {
+  type InstallmentLatestTransfer,
+  latestTransferOf,
+} from '../payments/services/transfer-state';
 
 /**
  * Money state of a devis: what was received, what is still in flight, and
@@ -452,6 +457,60 @@ export async function presentQuotes<T extends PresentableQuote>(
       money.get(quote.id) ?? emptyQuoteMoney(),
       hasFreeStepForReplan(quote, kept.get(quote.id) ?? []),
     ),
+  }));
+}
+
+/**
+ * The latest bank-transfer declaration of each installment (by createdAt,
+ * the id breaking ties), in ONE query over the installments' Payment rows
+ * (index installmentId): the doctor's pack panel reads each installment's
+ * transfer state from it (CONTRACT §2.1 latestTransfer). Installments
+ * without a declaration are absent from the map. Never a file path.
+ */
+export async function readLatestTransfers(
+  db: PaymentReader,
+  installmentIds: string[],
+): Promise<Map<string, InstallmentLatestTransfer>> {
+  const result = new Map<string, InstallmentLatestTransfer>();
+  if (installmentIds.length === 0) return result;
+  const rows = await db.payment.findMany({
+    where: {
+      installmentId: { in: installmentIds },
+      paymentMethod: PaymentMethod.bank_transfer,
+    },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    select: {
+      id: true,
+      installmentId: true,
+      status: true,
+      declaredAt: true,
+      reviewOpenedAt: true,
+      rejectionReason: true,
+      proofUrl: true,
+    },
+  });
+  for (const row of rows) {
+    if (!row.installmentId || result.has(row.installmentId)) continue;
+    result.set(row.installmentId, latestTransferOf(row));
+  }
+  return result;
+}
+
+/**
+ * Installments with their `latestTransfer` (null when none), for every
+ * response that lists a quote's installments (the payment plan).
+ */
+export async function withLatestTransfers<T extends { id: string }>(
+  db: PaymentReader,
+  installments: T[],
+): Promise<Array<T & { latestTransfer: InstallmentLatestTransfer | null }>> {
+  const latest = await readLatestTransfers(
+    db,
+    installments.map((row) => row.id),
+  );
+  return installments.map((row) => ({
+    ...row,
+    latestTransfer: latest.get(row.id) ?? null,
   }));
 }
 

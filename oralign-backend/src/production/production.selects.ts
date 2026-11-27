@@ -149,7 +149,14 @@ export type StateOrderRow = Prisma.DentalOrderGetPayload<{
   select: typeof STATE_ORDER_SELECT;
 }>;
 
-/** The head every per-case list shares (ProductionOrderSummary): 7 statements. */
+/**
+ * The head every per-case list shares (ProductionOrderSummary): 8
+ * statements whatever the page size (order, parent, patient, doctor,
+ * progress, approved plan, quotation, its batches). The quotation is the
+ * rules' finance-free fragment, so the release block reads exactly what a
+ * declaration is checked against; `paymentStatus` is read for the rule
+ * and never copied into a response (leak guard).
+ */
 export const ORDER_SUMMARY_SELECT = {
   id: true,
   orderCode: true,
@@ -161,13 +168,14 @@ export const ORDER_SUMMARY_SELECT = {
   doctor: { select: { fullName: true } },
   productionProgress: { select: PROGRESS_COUNTERS_SELECT },
   ...PLANNED_TOTALS_ORDER_SELECT,
+  quotation: { select: RULES_QUOTATION_SELECT },
 } satisfies Prisma.DentalOrderSelect;
 
 export type OrderSummaryRow = Prisma.DentalOrderGetPayload<{
   select: typeof ORDER_SUMMARY_SELECT;
 }>;
 
-/** The case sheet's order: the summary + clinic, dates and batches (9 statements). */
+/** The case sheet's order: the summary + clinic and dates (9 statements). */
 export const SHEET_ORDER_SELECT = {
   ...ORDER_SUMMARY_SELECT,
   createdAt: true,
@@ -178,7 +186,6 @@ export const SHEET_ORDER_SELECT = {
       dentistProfile: { select: { clinicName: true } },
     },
   },
-  quotation: { select: RULES_QUOTATION_SELECT },
 } satisfies Prisma.DentalOrderSelect;
 
 export type SheetOrderRow = Prisma.DentalOrderGetPayload<{

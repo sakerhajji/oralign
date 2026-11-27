@@ -23,6 +23,11 @@ const HIDDEN_FROM_DENTISTS = {
   initiatedById: true,
   confirmedById: true,
   rejectedById: true,
+  reviewOpenedById: true,
+  reviewOpenedByName: true,
+  cancelledById: true,
+  cancelledByName: true,
+  declarationKey: true,
 };
 
 function makeService(payment: Record<string, unknown> | null) {
@@ -42,7 +47,7 @@ const onOrderOf = (doctorId: string) => ({
 });
 
 describe('PaymentsService.getPayment (one payment)', () => {
-  it("a dentist reads their own payment without the admin's notes, ids and idempotency key", async () => {
+  it("a dentist reads their own payment without the admin's notes, ids, names and idempotency keys", async () => {
     const { service, findUnique } = makeService(onOrderOf(doctor.userId));
     await expect(service.getPayment('p1', doctor)).resolves.toMatchObject({
       id: 'p1',

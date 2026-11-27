@@ -9,6 +9,7 @@ import type { PrismaService } from '../../prisma/prisma.service';
 import type { Caller } from '../../common/access/caller';
 import { OrderAccessPolicy } from '../../common/access/order-access.policy';
 import { ForbiddenException } from '../../common/exceptions/app.exception';
+import { DOCTOR_SUMMARY_SELECT } from '../../common/doctor/doctor-identity';
 import {
   PatientOrderState,
   PatientSortField,
@@ -51,7 +52,8 @@ const notActive = {
 
 /** The include every page query must send, for a given order scope. */
 const listInclude = (orders: Prisma.DentalOrderWhereInput) => ({
-  doctor: { select: { id: true, fullName: true, email: true } },
+  // THE live doctor summary (common/doctor/doctor-identity.ts), no private ids.
+  doctor: { select: DOCTOR_SUMMARY_SELECT },
   _count: { select: { orders: { where: orders } } },
   orders: {
     where: orders,
@@ -125,6 +127,21 @@ const row = (over: Record<string, unknown> = {}) => ({
     id: doctor.userId,
     fullName: 'Dr Amine Ben Ali',
     email: 'amine@example.com',
+    phone: '+21650000001',
+    avatarUrl: null,
+    isActive: true,
+    deletedAt: null,
+    dentistProfile: {
+      clinicName: 'Cabinet Ben Ali',
+      clinicAddress: null,
+      city: 'Sfax',
+      country: 'TN',
+      clinicPhone: '+21674000000',
+      clinicEmail: null,
+      logoUrl: null,
+      specialty: null,
+      deletedAt: null,
+    },
   },
   _count: { orders: 0 },
   orders: [],
@@ -485,10 +502,27 @@ describe('PatientService.getPatients (patients list)', () => {
         phone: '+21650339214',
         gender: Gender.female,
         clinicalConditions: ['Crowding'],
+        // The live summary: person + practice, contact practice first.
         doctor: {
           id: doctor.userId,
           fullName: 'Dr Amine Ben Ali',
           email: 'amine@example.com',
+          phone: '+21650000001',
+          avatarUrl: null,
+          isActive: true,
+          deletedAt: null,
+          clinic: {
+            clinicName: 'Cabinet Ben Ali',
+            clinicAddress: null,
+            city: 'Sfax',
+            country: 'TN',
+            clinicPhone: '+21674000000',
+            clinicEmail: null,
+            logoUrl: null,
+            specialty: null,
+          },
+          contactPhone: '+21674000000',
+          contactEmail: 'amine@example.com',
         },
         createdAt,
         updatedAt: createdAt,

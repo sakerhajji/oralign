@@ -49,6 +49,12 @@ import { paymentsDeskDomainDict } from './dict.payments-desk-domain';
 import { supplementalOrdersDomainDict } from './dict.supplemental-orders-domain';
 import { productionDomainDict } from './dict.production-domain';
 import { productionAdminDomainDict } from './dict.production-admin-domain';
+// Programme "paiements / production / retenue / inactivité / profil" (P0
+// stubs, one unique top-level namespace each: the spread is shallow).
+import { transfersDomainDict } from './dict.transfers-domain';
+import { withholdingDomainDict } from './dict.withholding-domain';
+import { accountActivityDomainDict } from './dict.account-activity-domain';
+import { doctorIdentityDomainDict } from './dict.doctor-identity-domain';
 
 export const dict = {
   ...chromeDomainDict,
@@ -64,6 +70,10 @@ export const dict = {
   ...supplementalOrdersDomainDict,
   ...productionDomainDict,
   ...productionAdminDomainDict,
+  ...transfersDomainDict,
+  ...withholdingDomainDict,
+  ...accountActivityDomainDict,
+  ...doctorIdentityDomainDict,
 
   // ─── Generic / cross-cutting ────────────────────────────────────
   common: {
@@ -1010,6 +1020,10 @@ export const dict = {
       retry: { en: "Try again", fr: "Réessayer" } as T,
       system: { en: "System", fr: "Système" } as T,
       reason: { en: "Reason", fr: "Motif" } as T,
+      // A withdrawn transfer's optional note (not a refusal).
+      note: { en: "Note", fr: "Note" } as T,
+      // An admin's override note (e.g. a transfer confirmed without a receipt); staff only.
+      overrideNote: { en: "Admin note", fr: "Note de l’admin" } as T,
       sources: {
         order: { en: "Order", fr: "Commande" } as T,
         treatment_plan: { en: "Treatment", fr: "Traitement" } as T,
@@ -1055,12 +1069,28 @@ export const dict = {
           fr: "Honoraires payés",
         } as T,
         treatment_fee_proof_uploaded: {
-          en: "Payment proof uploaded",
-          fr: "Justificatif de paiement téléversé",
+          en: "Fee transfer receipt sent",
+          fr: "Reçu du virement des honoraires envoyé",
+        } as T,
+        treatment_fee_proof_replaced: {
+          en: "Fee transfer receipt replaced",
+          fr: "Reçu du virement des honoraires remplacé",
+        } as T,
+        treatment_fee_proof_removed: {
+          en: "Fee transfer withdrawn",
+          fr: "Virement des honoraires retiré",
+        } as T,
+        treatment_fee_review_opened: {
+          en: "Fee transfer receipt opened for checking",
+          fr: "Reçu des honoraires ouvert pour vérification",
         } as T,
         treatment_fee_confirmed: {
           en: "Treatment fee confirmed",
           fr: "Honoraires confirmés",
+        } as T,
+        treatment_fee_rejected: {
+          en: "Fee transfer refused",
+          fr: "Virement des honoraires refusé",
         } as T,
         treatment_plan_created: {
           en: "Treatment plan created",
@@ -1107,17 +1137,52 @@ export const dict = {
           fr: "Paiement confirmé",
         } as T,
         payment_failed: { en: "Payment failed", fr: "Paiement échoué" } as T,
+        // Only a bank transfer can be refused (an admin, with a reason).
         payment_rejected: {
-          en: "Payment rejected",
-          fr: "Paiement rejeté",
+          en: "Bank transfer refused",
+          fr: "Virement refusé",
         } as T,
         payment_cancelled: {
           en: "Payment cancelled",
           fr: "Paiement annulé",
         } as T,
+        // Bank-transfer transitions journaled since 2026-11-27.
+        payment_transfer_declared: {
+          en: "Bank transfer declared",
+          fr: "Virement déclaré",
+        } as T,
+        payment_proof_replaced: {
+          en: "Transfer receipt replaced",
+          fr: "Reçu du virement remplacé",
+        } as T,
+        payment_transfer_withdrawn: {
+          en: "Bank transfer withdrawn",
+          fr: "Virement retiré",
+        } as T,
+        payment_review_opened: {
+          en: "Transfer receipt opened for checking",
+          fr: "Reçu du virement ouvert pour vérification",
+        } as T,
+        payment_confirmed: {
+          en: "Bank transfer confirmed",
+          fr: "Virement validé",
+        } as T,
         batch_unlocked: {
           en: "Aligner batch unlocked",
           fr: "Lot d’aligneurs débloqué",
+        } as T,
+        // A journaled unlock says what released the batch (metadata.source).
+        batch_unlocked_payment: {
+          en: "Aligner batch unlocked · payment confirmed",
+          fr: "Lot d’aligneurs débloqué · paiement validé",
+        } as T,
+        batch_unlocked_installment_cancelled: {
+          en: "Aligner batch unlocked · installment cancelled",
+          fr: "Lot d’aligneurs débloqué · échéance annulée",
+        } as T,
+        batch_unlocked_manual: {
+          en: "Aligner batch unlocked manually",
+          fr: "Lot d’aligneurs débloqué manuellement",
         } as T,
         batch_delivered: {
           en: "Aligner batch delivered",
@@ -1290,7 +1355,9 @@ export const dict = {
         planVersion: { en: "Plan version", fr: "Version du plan" } as T,
         quotationNumber: { en: "Quotation", fr: "Devis" } as T,
         amount: { en: "Amount", fr: "Montant" } as T,
+        cashAmount: { en: "Amount paid", fr: "Montant versé" } as T,
         paymentMethod: { en: "Method", fr: "Mode" } as T,
+        receiptAttached: { en: "Receipt attached", fr: "Reçu joint" } as T,
         installment: { en: "Installment", fr: "Échéance" } as T,
         batch: { en: "Batch", fr: "Lot" } as T,
         steps: { en: "Steps", fr: "Étapes" } as T,
@@ -1660,51 +1727,58 @@ export const dict = {
       next: { en: 'Next', fr: 'Suivant' } as T,
     },
 
-    // Available packs section
+    // Practitioner pack catalogue (/dashboard/packs, components/dashboard/available-packs.tsx)
     packs: {
-      sectionTitle: { en: 'Available packs', fr: 'Forfaits disponibles' } as T,
-      sectionHint: {
-        en: 'informational — choose your pack on the order form.',
-        fr: 'informatif — choisissez votre forfait dans le formulaire de commande.',
-      } as T,
+      listLabel: { en: 'Pack catalogue', fr: 'Catalogue des forfaits' } as T,
+      loading: { en: 'Loading the packs…', fr: 'Chargement des forfaits…' } as T,
       none: { en: 'No packs are currently available.', fr: 'Aucun forfait n’est disponible pour le moment.' } as T,
-      recommended: { en: 'Recommended', fr: 'Recommandé' } as T,
+      loadError: { en: 'Could not load the packs.', fr: 'Impossible de charger les forfaits.' } as T,
+      retry: { en: 'Retry', fr: 'Réessayer' } as T,
+      pricesTtc: { en: 'Prices incl. VAT', fr: 'Prix TTC' } as T,
       archNotOffered: { en: 'Not available', fr: 'Non disponible' } as T,
       defaultDescription: {
         en: 'Customized aligner workflow tailored to your clinic.',
         fr: 'Parcours d’aligneurs personnalisé pour votre cabinet.',
       } as T,
+      featuresLabel: { en: 'Included in the pack', fr: 'Inclus dans le forfait' } as T,
       featureUnlimitedSteps: {
         en: 'Unlimited treatment steps',
         fr: 'Étapes de traitement illimitées',
       } as T,
+      featureStepPerArch: {
+        en: '{count} step per arch',
+        fr: '{count} étape par arcade',
+      } as T,
       featureStepsPerArch: {
         en: '{count} steps per arch',
-        fr: '{count} étape(s) par arcade',
+        fr: '{count} étapes par arcade',
       } as T,
       featureUnlimitedCorrections: {
         en: 'Unlimited corrections',
         fr: 'Corrections illimitées',
       } as T,
+      featureNoCorrection: {
+        en: 'No correction included',
+        fr: 'Aucune correction incluse',
+      } as T,
+      featureIncludedCorrection: {
+        en: '{count} correction included',
+        fr: '{count} correction incluse',
+      } as T,
       featureIncludedCorrections: {
         en: '{count} corrections included',
-        fr: '{count} correction(s) incluse(s)',
+        fr: '{count} corrections incluses',
       } as T,
-      featureForOrthodontists: {
-        en: 'Tailored for orthodontists',
-        fr: 'Conçu pour les orthodontistes',
-      } as T,
-      featureGeneralDentists: {
-        en: 'General dentists welcome',
-        fr: 'Ouvert aux omnipraticiens',
+      featureValidity: { en: 'Valid for {period}', fr: 'Validité : {period}' } as T,
+      featureValidityMonth: { en: 'Valid for {count} month', fr: 'Validité : {count} mois' } as T,
+      featureValidityMonths: { en: 'Valid for {count} months', fr: 'Validité : {count} mois' } as T,
+      hint: {
+        en: 'The pack is set on the quote for your case.',
+        fr: 'Le forfait est fixé sur le devis de votre cas.',
       } as T,
       hintCurrent: {
-        en: 'Your current pack. You can pick it again when you create a new order.',
-        fr: 'Votre forfait actuel. Vous pouvez le sélectionner à nouveau lors d’une prochaine commande.',
-      } as T,
-      hintChoose: {
-        en: 'Choose this pack from the New Order form when you create a case.',
-        fr: 'Sélectionnez ce forfait dans le formulaire « Nouvelle commande » lors de la création d’un cas.',
+        en: 'The pack of your latest paid quote.',
+        fr: 'Forfait de votre dernier devis réglé.',
       } as T,
     },
 
@@ -2488,6 +2562,12 @@ export const dict = {
       cancelled: { en: 'Cancelled', fr: 'Annulation' } as T,
       archived: { en: 'Archived', fr: 'Archivage' } as T,
       restored: { en: 'Restored', fr: 'Restauration' } as T,
+      // Migration 2026-11-27: the client snapshot of an invoice issued
+      // before it was recorded from the live profile (not historical).
+      client_snapshot_backfilled: {
+        en: 'Client snapshot recorded (data migration)',
+        fr: 'Instantané client enregistré (reprise des données)',
+      } as T,
     },
     historyField: {
       orderId: { en: 'Order', fr: 'Commande' } as T,
@@ -2502,6 +2582,11 @@ export const dict = {
       clientCity: { en: 'City', fr: 'Ville' } as T,
       clientCountry: { en: 'Country', fr: 'Pays' } as T,
       clientTaxId: { en: 'Tax number', fr: 'Matricule fiscal' } as T,
+      clientClinicName: { en: 'Practice (as invoiced)', fr: 'Cabinet (facturé)' } as T,
+      clientIsPractitioner: {
+        en: 'Billed to the practitioner',
+        fr: 'Facturée au praticien',
+      } as T,
       issueDate: { en: 'Issue date', fr: 'Date d’émission' } as T,
       dueDate: { en: 'Due date', fr: 'Date d’échéance' } as T,
       tvaRate: { en: 'VAT rate', fr: 'Taux de TVA' } as T,
@@ -2571,37 +2656,6 @@ export const dict = {
       cheque: { en: 'Cheque', fr: 'Chèque' } as T,
     },
 
-    // Reused widgets / column titles
-    columns: {
-      date: { en: 'Date', fr: 'Date' } as T,
-      doctorPatient: { en: 'Doctor · patient', fr: 'Praticien · patient' } as T,
-      order: { en: 'Order', fr: 'Commande' } as T,
-      method: { en: 'Method', fr: 'Mode' } as T,
-      installment: { en: 'Installment', fr: 'Échéance' } as T,
-      amount: { en: 'Amount', fr: 'Montant' } as T,
-      status: { en: 'Status', fr: 'Statut' } as T,
-      proof: { en: 'Proof', fr: 'Justificatif' } as T,
-      actions: { en: 'Actions', fr: 'Actions' } as T,
-      doctorSlashPatient: {
-        en: 'Doctor / Patient',
-        fr: 'Praticien / Patient',
-      } as T,
-    },
-
-    // Shared action labels
-    actions: {
-      viewReceipt: {
-        en: 'View the transfer proof uploaded by the doctor',
-        fr: 'Consulter le justificatif téléversé par le praticien',
-      } as T,
-      view: { en: 'View', fr: 'Consulter' } as T,
-      openQuote: { en: 'Open quote', fr: 'Ouvrir le devis' } as T,
-      previous: { en: 'Previous', fr: 'Précédent' } as T,
-      next: { en: 'Next', fr: 'Suivant' } as T,
-    },
-
-    // Empty / loading
-    emptyDefault: { en: 'No payments yet.', fr: 'Aucun paiement pour le moment.' } as T,
     submittedShort: { en: 'Submitted {date}', fr: 'Soumis le {date}' } as T,
     // The admin's inline invoice-number editor (invoice-number-editor.tsx):
     // every payment produces a FACTURE (FAC-…).
@@ -2646,93 +2700,6 @@ export const dict = {
   paymentsMine: {
     // (intentional placeholder — `mine/page.tsx` only calls `redirect()`)
     placeholder: { en: '', fr: '' } as T,
-  },
-
-  // /dashboard/payments/pending — admin queue of payments awaiting
-  // confirmation (bank transfers declared by doctors).
-  paymentsPending: {
-    title: {
-      en: 'Pending payment confirmations',
-      fr: 'Confirmations de paiement en attente',
-    } as T,
-    subtitle: {
-      en: "Doctor-declared bank transfers awaiting verification — both the per-order treatment fee and individual installments. Confirming a payment runs the SUCCESS transition: for installments the linked step batch unlocks; for treatment fees the order's treatment plan unlocks.",
-      fr: 'Virements bancaires déclarés par les praticiens en attente de vérification — qu’il s’agisse des honoraires de traitement ou des échéances. Confirmer un paiement déclenche la transition vers SUCCÈS : pour les échéances, le lot d’étapes lié se déverrouille ; pour les honoraires de traitement, le plan de traitement de la commande se déverrouille.',
-    } as T,
-
-    installmentsCardTitle: {
-      en: 'Installment payments awaiting confirmation',
-      fr: 'Paiements échelonnés en attente de confirmation',
-    } as T,
-    queueCountOne: { en: '1 payment in queue', fr: '1 paiement en file' } as T,
-    queueCountMany: {
-      en: '{count} payments in queue',
-      fr: '{count} paiements en file',
-    } as T,
-    pageOf: { en: 'Page {page} of {total}', fr: 'Page {page} sur {total}' } as T,
-    queueEmpty: {
-      en: 'Nothing to confirm — queue is empty.',
-      fr: 'Rien à confirmer — la file est vide.',
-    } as T,
-
-    confirm: { en: 'Confirm', fr: 'Confirmer' } as T,
-    reject: { en: 'Reject', fr: 'Rejeter' } as T,
-
-    confirmDialogTitle: {
-      en: 'Confirm bank transfer',
-      fr: 'Confirmer le virement bancaire',
-    } as T,
-    confirmDialogDesc: {
-      en: 'The linked installment will be marked paid and the step batch will unlock. This action is logged with your user id.',
-      fr: 'L’échéance correspondante sera marquée comme payée et le lot d’étapes sera déverrouillé. Cette action est consignée avec votre identifiant utilisateur.',
-    } as T,
-    notesLabel: { en: 'Notes (optional)', fr: 'Notes (facultatif)' } as T,
-    notesPh: {
-      en: 'e.g. matched on statement line 2026-05-22',
-      fr: 'p. ex. ligne du relevé du 2026-05-22 rapprochée',
-    } as T,
-    cancel: { en: 'Cancel', fr: 'Annuler' } as T,
-    confirmPayment: { en: 'Confirm payment', fr: 'Confirmer le paiement' } as T,
-
-    rejectDialogTitle: {
-      en: 'Reject bank transfer',
-      fr: 'Rejeter le virement bancaire',
-    } as T,
-    rejectDialogDesc: {
-      en: 'The payment will be marked rejected. The doctor can declare a fresh transfer afterwards; previous attempts stay in the audit trail.',
-      fr: 'Le paiement sera marqué comme rejeté. Le praticien pourra déclarer un nouveau virement par la suite ; les tentatives précédentes restent dans la piste d’audit.',
-    } as T,
-    rejectReasonLabel: {
-      en: 'Rejection reason *',
-      fr: 'Motif du rejet *',
-    } as T,
-    rejectReasonPh: {
-      en: 'Required — shown to the doctor.',
-      fr: 'Obligatoire — communiqué au praticien.',
-    } as T,
-    rejectPayment: { en: 'Reject payment', fr: 'Rejeter le paiement' } as T,
-
-    // Treatment-fee pending queue
-    treatmentFeesPendingTitle: {
-      en: 'Treatment fees awaiting confirmation',
-      fr: 'Honoraires de traitement en attente de confirmation',
-    } as T,
-    treatmentFeesPendingDesc: {
-      en: "Bank-transfer proofs uploaded by the doctor for the order's professional fee. Open the proof to review it and confirm in one place.",
-      fr: 'Justificatifs de virement téléversés par le praticien pour les honoraires de la commande. Ouvrez le justificatif pour le vérifier et confirmer en un seul endroit.',
-    } as T,
-    treatmentFeesPendingCount: {
-      en: '{count} pending',
-      fr: '{count} en attente',
-    } as T,
-    treatmentFeesPendingEmpty: {
-      en: 'No treatment fees waiting for confirmation.',
-      fr: 'Aucun honoraires de traitement en attente de confirmation.',
-    } as T,
-    reviewAndConfirm: {
-      en: 'Review & confirm',
-      fr: 'Vérifier & confirmer',
-    } as T,
   },
 
   // /dashboard/payments/[paymentId]/invoice — bilingual receipt PDF
@@ -3061,17 +3028,8 @@ export const dict = {
       en: 'Fiscal stamp (“Droit de timbre”) added on top of each payment: every payment gets its own invoice, so a plan of 3 installments carries 3 stamps. Set to 0 to disable.',
       fr: 'Droit de timbre fiscal ajouté à chaque paiement : chaque paiement a sa propre facture, un échéancier en 3 fois porte donc 3 timbres. Mettez 0 pour le désactiver.',
     } as T,
-    // ── Retenue à la source (withholding tax) ───────────────────
-    withholdingTitle: { en: 'Withholding tax', fr: 'Retenue à la source' } as T,
-    withholdingHelp: {
-      en: 'When paying, the practitioner may keep this percentage of the amount due (incl. tax, stamp duty excluded) and pay the rest. The invoice shows the amount withheld and the net paid.',
-      fr: 'Au paiement, le praticien peut retenir ce pourcentage du montant dû (TTC hors timbre) et payer le reste. La facture indique la retenue et le net payé.',
-    } as T,
-    withholdingRateLabel: { en: 'Withholding tax (%)', fr: 'Retenue à la source (%)' } as T,
-    withholdingRateHelp: {
-      en: '0 = turned off: practitioners are not offered the option. Up to 2 decimals.',
-      fr: '0 = désactivée : l’option n’est pas proposée aux praticiens. 2 décimales au plus.',
-    } as T,
+    // The retenue à la source card has its own copy (withholdingRules.*,
+    // dict.withholding-domain.ts).
     // ── CBCT paid supplement ────────────────────────────────────
     cbctEnabledLabel: {
       en: 'CBCT paid supplement',
@@ -3531,13 +3489,11 @@ export const dict = {
     } as T,
   },
 
+  // Practitioner view of /dashboard/packs: a neutral heading and the
+  // new-order shortcut (spec §7 removed the « Choisissez le bon forfait »
+  // title and its intro).
   packsDoctor: {
-    eyebrow: { en: 'Available packs', fr: 'Forfaits disponibles' } as T,
-    title: { en: 'Choose the right pack for your next case', fr: 'Choisissez le bon forfait pour votre prochain cas' } as T,
-    intro: {
-      en: 'This catalogue is informational. You select the pack inside the new-order workflow, after the clinical case is created.',
-      fr: 'Ce catalogue est informatif. La sélection du forfait se fait dans le workflow de nouvelle commande, après la création du cas clinique.',
-    } as T,
+    title: { en: 'Available packs', fr: 'Forfaits disponibles' } as T,
     newOrder: { en: 'Create an order', fr: 'Créer une commande' } as T,
   },
 
@@ -4420,7 +4376,6 @@ export const dict = {
         en: 'Transfer proof uploaded. An admin will confirm once funds land.',
         fr: 'Justificatif téléversé. Un administrateur confirmera dès réception des fonds.',
       } as T,
-      bankTransferConfirmed: { en: 'Bank transfer confirmed', fr: 'Virement bancaire confirmé' } as T,
       statusUpdated: { en: 'Order status updated.', fr: 'Statut de la commande mis à jour.' } as T,
       deleted: { en: 'Order deleted', fr: 'Commande supprimée' } as T,
       permanentlyDeleted: { en: 'Order permanently deleted', fr: 'Commande supprimée définitivement' } as T,
@@ -4512,8 +4467,6 @@ export const dict = {
         en: 'Bank transfer declared. An admin will confirm it shortly.',
         fr: 'Virement bancaire déclaré. Un administrateur le confirmera sous peu.',
       } as T,
-      bankTransferConfirmed: { en: 'Bank transfer confirmed.', fr: 'Virement bancaire confirmé.' } as T,
-      bankTransferRejected: { en: 'Bank transfer rejected.', fr: 'Virement bancaire rejeté.' } as T,
       cashRecorded: { en: 'Cash payment recorded.', fr: 'Paiement en espèces enregistré.' } as T,
     },
     quotationPaymentPlan: {

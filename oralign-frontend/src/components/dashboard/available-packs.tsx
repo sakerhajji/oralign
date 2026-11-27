@@ -1,25 +1,36 @@
 'use client';
 
+import { useId } from 'react';
+import {
+  CalendarClockIcon,
+  CheckCircle2Icon,
+  InfoIcon,
+  PackageIcon,
+  RefreshCwIcon,
+  TriangleAlertIcon,
+  type LucideIcon,
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import {
-  CheckCircle2Icon,
-  InfoIcon,
-  PackageIcon,
-  SparklesIcon,
-} from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { pickLocalized } from '@/lib/api/blog.service';
 import { useDoctorAvailablePacks } from '@/lib/hooks';
-import type { AvailablePack } from '@/lib/types';
 import { useT } from '@/lib/i18n/lang-context';
+import type { AvailablePack } from '@/lib/types';
+import { cn } from '@/lib/utils';
 import { formatPrice } from '@/lib/utils/currency';
+import {
+  packCardDescription,
+  packCardFacts,
+  packCardName,
+  type PackFactKind,
+  type PickText,
+} from './pack-card-facts';
 
 // A wrapping row rather than a grid: a row that is not full (one or two
 // packs, or the last packs of the list) sits in the middle of the page
@@ -27,167 +38,184 @@ import { formatPrice } from '@/lib/utils/currency';
 const CARD_ROW = 'flex flex-wrap justify-center gap-4';
 const CARD_WIDTH = 'w-full md:w-[calc((100%-1rem)/2)] lg:w-[calc((100%-2rem)/3)]';
 
+const FACT_ICON: Record<PackFactKind, LucideIcon> = {
+  steps: CheckCircle2Icon,
+  corrections: CheckCircle2Icon,
+  validity: CalendarClockIcon,
+};
+
 /**
- * Doctor-facing available packs, in the order set by the admin. Mirrors
- * the marketing pack cards but lives inside the dashboard, with a
- * "Current" badge on the pack the doctor most recently paid for.
+ * The practitioner's pack catalogue, in the order set by the admin.
+ * Read-only: the pack of a case is the one an admin attaches to its quote,
+ * so the cards carry no call to action. Prices are TTC.
  */
-export function AvailablePacks({ recommendedId }: { recommendedId?: string }) {
-  const { data, isLoading } = useDoctorAvailablePacks();
+export function AvailablePacks() {
+  const { data, isPending, isError, isFetching, refetch } =
+    useDoctorAvailablePacks();
   const { t } = useT();
 
-  if (isLoading) {
+  if (isPending) {
     return (
-      <div className={CARD_ROW}>
-        {Array.from({ length: 3 }).map((_, i) => (
-          <Skeleton key={i} className={cn('h-64 rounded-2xl', CARD_WIDTH)} />
-        ))}
+      <div aria-busy="true">
+        <span role="status" className="sr-only">
+          {t('dashboard.packs.loading')}
+        </span>
+        <div className={CARD_ROW} aria-hidden="true">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className={cn('h-[22rem] rounded-xl', CARD_WIDTH)} />
+          ))}
+        </div>
       </div>
+    );
+  }
+
+  // A failed background refresh keeps showing the cached catalogue; only
+  // a first load that failed gets the error state.
+  if (isError && !data) {
+    return (
+      <Card>
+        <CardContent className="flex flex-col items-center gap-3 py-8 text-center">
+          <TriangleAlertIcon className="size-6 text-destructive" aria-hidden="true" />
+          <p role="alert" className="text-sm text-muted-foreground">
+            {t('dashboard.packs.loadError')}
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void refetch()}
+            disabled={isFetching}
+            className="pointer-coarse:h-12 pointer-coarse:px-4"
+          >
+            <RefreshCwIcon
+              className={cn('size-4', isFetching && 'animate-spin')}
+              aria-hidden="true"
+            />
+            {t('dashboard.packs.retry')}
+          </Button>
+        </CardContent>
+      </Card>
     );
   }
 
   if (!data || data.length === 0) {
     return (
       <Card>
-        <CardContent className="grid h-32 place-items-center text-sm text-muted-foreground">
-          {t('dashboard.packs.none')}
+        <CardContent className="flex flex-col items-center gap-3 py-8 text-center">
+          <PackageIcon className="size-6 text-muted-foreground" aria-hidden="true" />
+          <p className="text-sm text-muted-foreground">{t('dashboard.packs.none')}</p>
         </CardContent>
       </Card>
     );
   }
 
   return (
-    <div className={CARD_ROW}>
+    <ul aria-label={t('dashboard.packs.listLabel')} className={CARD_ROW}>
       {data.map((pack) => (
-        <PackCard
-          key={pack.id}
-          pack={pack}
-          isRecommended={recommendedId === pack.id && !pack.isCurrent}
-        />
+        <li key={pack.id} className={cn('flex', CARD_WIDTH)}>
+          <PackCard pack={pack} />
+        </li>
       ))}
-    </div>
+    </ul>
   );
 }
 
-function PackCard({
-  pack,
-  isRecommended,
-}: {
-  pack: AvailablePack;
-  isRecommended: boolean;
-}) {
-  const { t } = useT();
+function PackCard({ pack }: { pack: AvailablePack }) {
+  const { t, lang } = useT();
+  const priceCaptionId = useId();
+  const pick: PickText = (value) => pickLocalized(value, lang);
+
+  const name = packCardName(pack, pick);
+  const description =
+    packCardDescription(pack, pick) ?? t('dashboard.packs.defaultDescription');
+  const facts = packCardFacts(pack, pick);
   const archPrices = [
     { label: t('quoteUi.attachPack.twoArches'), amount: pack.priceTwoArches },
     { label: t('quoteUi.attachPack.singleArch'), amount: pack.priceSingleArch },
   ];
 
-  const features: { label: string; ok: boolean }[] = [
-    {
-      label: pack.isUnlimitedSteps
-        ? t('dashboard.packs.featureUnlimitedSteps')
-        : t('dashboard.packs.featureStepsPerArch', {
-            count: pack.maxStepsPerArch ?? 0,
-          }),
-      ok: true,
-    },
-    {
-      label: pack.isUnlimitedCorrections
-        ? t('dashboard.packs.featureUnlimitedCorrections')
-        : t('dashboard.packs.featureIncludedCorrections', {
-            count: pack.includedCorrections ?? 0,
-          }),
-      ok: true,
-    },
-    {
-      label: pack.isForOrthodontists
-        ? t('dashboard.packs.featureForOrthodontists')
-        : t('dashboard.packs.featureGeneralDentists'),
-      ok: true,
-    },
-  ];
-
   return (
-    // Read-only catalogue card. Subscription happens on the order
-    // wizard (the doctor picks a pack as part of the New Order flow),
-    // NOT here — keeping a CTA on this card would lead doctors into
-    // a half-flow that needs an order to complete. Better to surface
-    // it as informational and let the order form be the single entry.
-    <Card
-      className={cn(
-        'relative',
-        CARD_WIDTH,
-        // The "Current" pack used to ship with a `ring-2 ring-primary`
-        // halo, but the team asked to drop it — the badge on the top-
-        // right already tells the doctor which pack is theirs and the
-        // ring made the catalogue feel cluttered. Recommended packs
-        // still get a soft tinted border so the suggestion reads
-        // distinctly from the default cards.
-        isRecommended && 'border-emerald-300/60',
-      )}
-    >
-      {/*
-        The "Current" badge used to sit here for the doctor's
-        active pack. Removed at product's request — the catalogue
-        is purely informational and the badge was redundant with
-        the inline hint in the card body.
-       */}
-      {isRecommended ? (
-        <Badge
-          variant="outline"
-          className="absolute right-4 top-4 gap-1 border-emerald-400 text-emerald-700 dark:text-emerald-300"
-        >
-          <SparklesIcon className="size-3" /> {t('dashboard.packs.recommended')}
-        </Badge>
-      ) : null}
-      <CardHeader>
-        <div className="flex items-center gap-2">
-          <div className="grid size-9 place-items-center rounded-xl bg-primary/10 text-primary">
+    <Card className="w-full">
+      <CardHeader className="gap-2">
+        <div className="flex items-center gap-3">
+          <span
+            className="grid size-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary"
+            aria-hidden="true"
+          >
             <PackageIcon className="size-4" />
-          </div>
-          <CardTitle className="text-lg">{pack.name}</CardTitle>
+          </span>
+          <h2 className="min-w-0 font-heading text-lg leading-snug font-semibold break-words">
+            {name}
+          </h2>
         </div>
-        <CardDescription className="line-clamp-2 min-h-[2.5rem]">
-          {pack.description ?? t('dashboard.packs.defaultDescription')}
+        {/* Two lines reserved side by side, so the price blocks of a row
+            line up when descriptions differ in length. */}
+        <CardDescription className="line-clamp-3 md:min-h-10">
+          {description}
         </CardDescription>
-        <dl className="mt-2 divide-y rounded-lg border">
-          {archPrices.map(({ label, amount }) => (
-            <div
-              key={label}
-              className="flex flex-wrap items-baseline justify-between gap-x-3 px-3 py-2"
-            >
-              <dt className="text-muted-foreground">{label}</dt>
-              {amount == null ? (
-                <dd className="text-muted-foreground">
-                  {t('dashboard.packs.archNotOffered')}
-                </dd>
-              ) : (
-                <dd className="text-base font-semibold tabular-nums">
-                  {formatPrice(amount, pack.currency)}
-                </dd>
-              )}
-            </div>
-          ))}
-        </dl>
       </CardHeader>
-      <CardContent className="flex-1 space-y-3">
-        <ul className="space-y-2 text-sm">
-          {features.map((f, i) => (
-            <li key={i} className="flex items-start gap-2">
-              <CheckCircle2Icon className="mt-0.5 size-4 text-emerald-600" />
-              <span>{f.label}</span>
-            </li>
-          ))}
-        </ul>
-        {/* Inline hint replacing the old "Subscribe" CTA. Surfaces
-            where to actually pick the pack so doctors don't hunt
-            for a button that's no longer here. */}
-        <p className="flex items-start gap-1.5 rounded-md border bg-muted/30 p-2 text-[11px] leading-snug text-muted-foreground">
-          <InfoIcon className="mt-0.5 size-3 shrink-0" />
+
+      <CardContent className="flex flex-1 flex-col gap-4">
+        <div className="overflow-hidden rounded-lg border">
+          <p
+            id={priceCaptionId}
+            className="border-b bg-muted/40 px-3 py-1.5 text-xs font-medium text-muted-foreground"
+          >
+            {t('dashboard.packs.pricesTtc')}
+          </p>
+          <dl aria-labelledby={priceCaptionId} className="divide-y">
+            {archPrices.map(({ label, amount }) => (
+              <div
+                key={label}
+                className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 px-3 py-2"
+              >
+                <dt className="text-muted-foreground">{label}</dt>
+                {amount == null ? (
+                  <dd className="text-muted-foreground">
+                    {t('dashboard.packs.archNotOffered')}
+                  </dd>
+                ) : (
+                  <dd className="text-base font-semibold tabular-nums">
+                    {formatPrice(amount, pack.currency)}
+                  </dd>
+                )}
+              </div>
+            ))}
+          </dl>
+        </div>
+
+        {facts.length > 0 ? (
+          <ul aria-label={t('dashboard.packs.featuresLabel')} className="space-y-2">
+            {facts.map((fact) => {
+              const Icon = FACT_ICON[fact.kind];
+              return (
+                <li key={fact.kind} className="flex items-start gap-2">
+                  <Icon
+                    className={cn(
+                      'mt-0.5 size-4 shrink-0',
+                      fact.kind === 'validity'
+                        ? 'text-primary'
+                        : 'text-emerald-600 dark:text-emerald-400',
+                    )}
+                    aria-hidden="true"
+                  />
+                  <span>{t(fact.key, fact.params)}</span>
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
+
+        <p className="mt-auto flex items-start gap-2 rounded-md border bg-muted/30 px-2.5 py-2 text-xs leading-snug text-muted-foreground">
+          <InfoIcon className="mt-px size-3.5 shrink-0" aria-hidden="true" />
           <span>
-            {pack.isCurrent
-              ? t('dashboard.packs.hintCurrent')
-              : t('dashboard.packs.hintChoose')}
+            {pack.isCurrent ? (
+              <>
+                <span className="font-medium text-foreground">
+                  {t('dashboard.packs.hintCurrent')}
+                </span>{' '}
+              </>
+            ) : null}
+            {t('dashboard.packs.hint')}
           </span>
         </p>
       </CardContent>

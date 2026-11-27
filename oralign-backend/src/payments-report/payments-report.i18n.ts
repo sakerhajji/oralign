@@ -51,6 +51,18 @@ export interface PaymentsReportLabels {
   countShort: string;
   amount: string;
   collectedAmount: string;
+  /** Brut / retenue / net (spec §4): headings of the money columns. */
+  gross: string;
+  withholding: string;
+  net: string;
+  /** "Brut (TND)": a money column whose cells print no currency. */
+  inCurrency: (label: string, currency: string) => string;
+  /** Title of the consolidated report's brut / retenue / net table. */
+  splitTitle: string;
+  /** What brut, retenue and net mean, under the summary. */
+  splitNote: string;
+  /** Before a section's net subtotal when a retenue was kept back. */
+  subtotalSplit: (gross: string, withholding: string) => string;
   totalCollected: string;
   total: string;
   summaryNote: string;
@@ -66,6 +78,9 @@ export interface PaymentsReportLabels {
     status: string;
     transaction: string;
     amount: string;
+    gross: string;
+    withholding: string;
+    net: string;
   };
   installmentOf: (rank: number, total: number | null) => string;
   /** The label of the document number under a row (FAC-…): a facture. */
@@ -153,6 +168,15 @@ const FR: PaymentsReportLabels = {
   countShort: 'Nb',
   amount: 'Montant',
   collectedAmount: 'Montant encaissé',
+  gross: 'Brut',
+  withholding: 'Retenue',
+  net: 'Net encaissé',
+  inCurrency: (label, currency) => `${label} (${currency})`,
+  splitTitle: 'Brut, retenue et net',
+  splitNote:
+    'Brut : total TTC des factures, droit de timbre inclus. Retenue : retenue à la source conservée par le praticien. Net : montant réellement encaissé (brut − retenue).',
+  subtotalSplit: (gross, withholding) =>
+    `Brut ${gross} · retenue ${withholding} · net`,
   totalCollected: 'Total encaissé',
   total: 'Total',
   summaryNote:
@@ -170,6 +194,9 @@ const FR: PaymentsReportLabels = {
     status: 'Statut',
     transaction: 'Réf. transaction',
     amount: 'Montant',
+    gross: 'Brut',
+    withholding: 'Retenue',
+    net: 'Net',
   },
   installmentOf: (rank, total) =>
     total ? `Échéance ${rank}/${total}` : `Échéance ${rank}`,
@@ -249,6 +276,15 @@ const EN: PaymentsReportLabels = {
   countShort: 'No.',
   amount: 'Amount',
   collectedAmount: 'Amount collected',
+  gross: 'Gross',
+  withholding: 'Withholding',
+  net: 'Net collected',
+  inCurrency: (label, currency) => `${label} (${currency})`,
+  splitTitle: 'Gross, withholding and net',
+  splitNote:
+    'Gross: total of the invoices incl. TVA and stamp duty. Withholding: tax withheld at source by the practitioner. Net: the amount actually collected (gross − withholding).',
+  subtotalSplit: (gross, withholding) =>
+    `Gross ${gross} · withholding ${withholding} · net`,
   totalCollected: 'Total collected',
   total: 'Total',
   summaryNote:
@@ -266,6 +302,9 @@ const EN: PaymentsReportLabels = {
     status: 'Status',
     transaction: 'Transaction ref.',
     amount: 'Amount',
+    gross: 'Gross',
+    withholding: 'Withholding',
+    net: 'Net',
   },
   installmentOf: (rank, total) =>
     total ? `Installment ${rank}/${total}` : `Installment ${rank}`,

@@ -107,13 +107,18 @@ describe('PaymentsService.listPayments (payment history)', () => {
       });
     });
 
-    it("a dentist's rows leave out the admin's notes, which admin acted, and the idempotency key", async () => {
+    it("a dentist's rows leave out the admin's notes, which admin acted, opened or cancelled, and both idempotency keys", async () => {
       expect((await listArgs({})).omit).toEqual({
         notes: true,
         idempotencyKey: true,
         initiatedById: true,
         confirmedById: true,
         rejectedById: true,
+        reviewOpenedById: true,
+        reviewOpenedByName: true,
+        cancelledById: true,
+        cancelledByName: true,
+        declarationKey: true,
       });
     });
 
@@ -442,6 +447,11 @@ describe('PaymentsService.listPayments (payment history)', () => {
           initiatedById: true,
           confirmedById: true,
           rejectedById: true,
+          reviewOpenedById: true,
+          reviewOpenedByName: true,
+          cancelledById: true,
+          cancelledByName: true,
+          declarationKey: true,
         },
       });
       expect(count).toHaveBeenCalledWith({ where });

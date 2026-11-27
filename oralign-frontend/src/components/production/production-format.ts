@@ -1,6 +1,6 @@
 import { ARCHES, choiceOf } from '@/lib/production/arches';
 import type { Translate } from '@/lib/production/errors';
-import { FUTURE_SKEW_MS, MAX_STEP, MIN_STEP } from '@/lib/production/limits';
+import { FUTURE_SKEW_MS } from '@/lib/production/limits';
 import { OrderStatus, UserRole } from '@/lib/types';
 import {
   type ArchPair,
@@ -10,7 +10,6 @@ import {
   type ProductionEventType,
   type ProductionEventView,
   type ProductionOrderSummary,
-  type ReleasedRange,
 } from '@/lib/types/production';
 import { businessToday, formatBusinessTime } from '@/lib/utils/business-day';
 
@@ -44,6 +43,11 @@ export const ACT_COUNTER: Record<ProductionEventType, 'printed' | 'thermoformed'
 
 export function isTechnicianRole(role: UserRole | string | null | undefined): boolean {
   return role === UserRole.TECHNICIAN;
+}
+
+/** An admin or a super admin: the production screens' wider rules (the manual unlock). */
+export function isAdminRole(role: UserRole | string | null | undefined): boolean {
+  return role === UserRole.ADMIN || role === UserRole.SUPER_ADMIN;
 }
 
 /** Who may open the production screens (super admins pass like admins). */
@@ -116,11 +120,6 @@ export function rangeText(t: Translate, from: number, to: number): string {
     : t('production.sheet.range', { from, to });
 }
 
-export function clampStep(value: number): number {
-  if (!Number.isFinite(value)) return MIN_STEP;
-  return Math.min(MAX_STEP, Math.max(MIN_STEP, Math.round(value)));
-}
-
 /** The smallest known planned total of these arches (null when none is known). */
 export function plannedTotalFor(
   planned: PlannedTotals,
@@ -147,47 +146,8 @@ export function nextStepFor(
   return steps.length ? Math.min(...steps) : null;
 }
 
-/**
- * The contract's default for "À": the end of the released range that
- * holds "De", else the planned total, else "De" itself.
- */
-export function defaultStepTo(
-  from: number,
-  ranges: readonly ReleasedRange[] | null,
-  plannedTotal: number | null,
-): number {
-  const holding = ranges?.find(
-    (range) => range.state !== 'locked' && range.from <= from && from <= range.to,
-  );
-  const to = holding?.to ?? (plannedTotal !== null && plannedTotal >= from ? plannedTotal : from);
-  return clampStep(Math.max(from, to));
-}
-
-/**
- * The parts of [from, to] outside every released range, merged; [] when
- * the case has no step schedule (the server decides those alone).
- */
-export function unreleasedParts(
-  from: number,
-  to: number,
-  ranges: readonly ReleasedRange[] | null,
-): { from: number; to: number }[] {
-  if (!ranges) return [];
-  const released = ranges
-    .filter((range) => range.state !== 'locked')
-    .sort((a, b) => a.from - b.from);
-  const gaps: { from: number; to: number }[] = [];
-  let cursor = from;
-  for (const range of released) {
-    if (range.to < cursor) continue;
-    if (range.from > to) break;
-    if (range.from > cursor) gaps.push({ from: cursor, to: Math.min(to, range.from - 1) });
-    cursor = Math.max(cursor, range.to + 1);
-    if (cursor > to) break;
-  }
-  if (cursor <= to) gaps.push({ from: cursor, to });
-  return gaps;
-}
+// The form's default "À" and the locked parts of a range read the
+// release block: release-format.ts (releasedStepTo, lockedParts).
 
 // ─── Declarations ───────────────────────────────────────────────────
 

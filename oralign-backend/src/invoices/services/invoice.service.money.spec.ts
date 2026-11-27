@@ -145,7 +145,9 @@ describe('toInvoiceJson', () => {
       withholdingAmount: D('35.700'),
       netPayable: D('2344.300'),
       emailedAt: null,
-      lines: [{ id: 'l-1', unitPrice: D('1999.160'), unitPriceTtc: D('2380.000') }],
+      lines: [
+        { id: 'l-1', unitPrice: D('1999.160'), unitPriceTtc: D('2380.000') },
+      ],
     });
     expect(json).toEqual({
       id: 'inv-1',
@@ -158,6 +160,26 @@ describe('toInvoiceJson', () => {
     });
   });
 });
+
+/** The practitioner as InvoiceService reads him (DOCTOR_BILLING_SELECT). */
+const PRACTITIONER = {
+  id: 'doc-1',
+  fullName: 'Dr Amel',
+  email: 'amel@mail.tn',
+  phone: '+21620000000',
+  dentistProfile: {
+    clinicName: 'Cabinet Les Pins',
+    clinicAddress: '12 rue des Pins',
+    city: 'Tunis',
+    country: 'TN',
+    clinicPhone: '+21671000000',
+    clinicEmail: 'contact@lespins.tn',
+    taxId: '1234567/A',
+    registrationNumber: 'CNOMDT-42',
+    logoUrl: null,
+    deletedAt: null,
+  },
+};
 
 /** An automatic installment invoice, as the desk reads it before an edit. */
 const AUTOMATIC = {
@@ -218,39 +240,61 @@ function makeService(row: Record<string, unknown> = AUTOMATIC) {
   const prisma = {
     invoice: {
       findFirst: jest.fn().mockResolvedValue(row),
-      create: jest.fn().mockImplementation(({ data }) => ({
-        ...data,
-        id: 'inv-new',
-        lines: data.lines.create,
-      })),
+      create: jest
+        .fn()
+        .mockImplementation(
+          ({ data }: { data: { lines: { create: unknown[] } } }) => ({
+            ...data,
+            id: 'inv-new',
+            lines: data.lines.create,
+          }),
+        ),
     },
     user: {
       findUnique: jest.fn().mockResolvedValue({ fullName: 'Admin' }),
-      findFirst: jest.fn().mockResolvedValue({ id: 'doc-1' }),
+      findFirst: jest.fn().mockResolvedValue(PRACTITIONER),
       findMany: jest.fn().mockResolvedValue([]),
     },
     invoiceAuditLog: { create: jest.fn() },
     $transaction: jest.fn((run: (client: typeof tx) => unknown) => run(tx)),
   };
+  const settings = {
+    defaultTvaRate: 19,
+    stampDuty: D('1.000'),
+    defaultCurrency: 'TND',
+    companyName: 'Oralign',
+    // The retenue switched on, from 1 000 TND (spec §4).
+    withholdingEnabled: true,
+    withholdingThreshold: D('1000.000'),
+  };
   const billingSettings = {
-    requireActive: jest.fn().mockResolvedValue({
-      defaultTvaRate: 19,
-      stampDuty: D('1.000'),
-      defaultCurrency: 'TND',
-      companyName: 'Oralign',
-    }),
+    requireActive: jest.fn().mockResolvedValue(settings),
+    getActive: jest.fn().mockResolvedValue(settings),
     allocateInvoiceNumber: jest.fn().mockResolvedValue('FAC-000200'),
   };
   const service = new InvoiceService(
     prisma as unknown as PrismaService,
     billingSettings as unknown as CompanyBillingSettingsService,
   );
-  return { service, prisma, tx };
+  return { service, prisma, tx, billingSettings, settings };
 }
 
+/** The `data` invoice.create received, as the specs read it. */
+interface CreatedInvoice {
+  [key: string]: unknown;
+  lines: { create: Record<string, unknown>[] };
+}
+const createdData = (prisma: ReturnType<typeof makeService>['prisma']) =>
+  (
+    prisma.invoice.create.mock.calls as unknown as [[{ data: CreatedInvoice }]]
+  )[0][0].data;
+
 const updateData = (tx: ReturnType<typeof makeService>['tx']) =>
-  (tx.invoice.updateMany.mock.calls[0][0] as { data: Record<string, unknown> })
-    .data;
+  (
+    tx.invoice.updateMany.mock.calls as unknown as [
+      [{ data: Record<string, unknown> }],
+    ]
+  )[0][0].data;
 
 describe('InvoiceService.create — TTC pricing', () => {
   it('stores the typed TTC price, the derived HT and the server-computed retenue', async () => {
@@ -267,7 +311,7 @@ describe('InvoiceService.create — TTC pricing', () => {
       },
       admin,
     );
-    const data = (prisma.invoice.create.mock.calls[0][0] as { data: any }).data;
+    const data = createdData(prisma);
     expect(data).toMatchObject({
       pricesIncludeTax: true,
       totalTtc: 2381,
@@ -284,6 +328,240 @@ describe('InvoiceService.create — TTC pricing', () => {
       unitPrice: 2000,
       unitPriceTtc: 2380,
       lineHt: 2000,
+    });
+  });
+});
+
+describe('InvoiceService.create — the client snapshot (spec §6)', () => {
+  it('the practitioner and his name sent: practice, contact (practice first) and identifiers are snapshotted', async () => {
+    const { service, prisma } = makeService();
+    await service.create(
+      {
+        clientName: 'Dr Amel',
+        doctorId: 'doc-1',
+        lines: [{ description: 'Pack', quantity: 1, unitPrice: 100 }],
+      },
+      admin,
+    );
+    const data = createdData(prisma);
+    expect(data).toMatchObject({
+      doctorId: 'doc-1',
+      clientName: 'Dr Amel',
+      clientEmail: 'contact@lespins.tn',
+      clientPhone: '+21671000000',
+      clientAddress: '12 rue des Pins',
+      clientCity: 'Tunis',
+      clientCountry: 'TN',
+      clientTaxId: '1234567/A',
+      clientClinicName: 'Cabinet Les Pins',
+      clientIsPractitioner: true,
+      clientRegistrationNumber: 'CNOMDT-42',
+    });
+    // One read of the practitioner, with what the snapshot needs.
+    expect(prisma.user.findFirst).toHaveBeenCalledWith({
+      where: { id: 'doc-1', deletedAt: null },
+      select: expect.objectContaining({
+        fullName: true,
+        dentistProfile: expect.anything() as unknown,
+      }) as unknown,
+    });
+  });
+
+  it('a field the admin typed is an override: it wins over the snapshot', async () => {
+    const { service, prisma } = makeService();
+    await service.create(
+      {
+        clientName: 'Dr Amel',
+        doctorId: 'doc-1',
+        clientEmail: 'compta@lespins.tn',
+        lines: [{ description: 'Pack', quantity: 1, unitPrice: 100 }],
+      },
+      admin,
+    );
+    const data = createdData(prisma);
+    expect(data.clientEmail).toBe('compta@lespins.tn');
+    expect(data.clientPhone).toBe('+21671000000');
+  });
+
+  it('billed under another name: not a practitioner invoice, no practice name, as typed', async () => {
+    const { service, prisma } = makeService();
+    await service.create(
+      {
+        clientName: 'Clinique Les Pins SARL',
+        doctorId: 'doc-1',
+        lines: [{ description: 'Pack', quantity: 1, unitPrice: 100 }],
+      },
+      admin,
+    );
+    const data = createdData(prisma);
+    expect(data).toMatchObject({
+      clientName: 'Clinique Les Pins SARL',
+      clientIsPractitioner: false,
+      clientClinicName: null,
+      clientRegistrationNumber: null,
+      clientEmail: null,
+    });
+  });
+
+  it('snapshots the retenue threshold in force; a manual invoice has no devis balance', async () => {
+    const { service, prisma } = makeService();
+    await service.create(
+      {
+        clientName: 'Dr Amel',
+        lines: [{ description: 'Pack', quantity: 1, unitPrice: 100 }],
+      },
+      admin,
+    );
+    const data = createdData(prisma);
+    expect(data.withholdingThreshold).toEqual(D('1000.000'));
+    expect(data).not.toHaveProperty('quoteRemainingAfter');
+  });
+});
+
+describe('InvoiceService — a manual retenue follows the rule (spec §4)', () => {
+  const line = (unitPrice: number) => [
+    { description: 'Pack', quantity: 1, unitPrice },
+  ];
+
+  it('refuses a retenue while it is switched off: 400 WITHHOLDING_DISABLED, nothing written', async () => {
+    const { service, prisma, settings } = makeService();
+    settings.withholdingEnabled = false;
+    await expect(
+      service.create(
+        {
+          clientName: 'Dr Amel',
+          pricesIncludeTax: true,
+          withholdingRate: 1,
+          lines: line(2380),
+        },
+        admin,
+      ),
+    ).rejects.toMatchObject({
+      statusCode: 400,
+      errorCode: 'WITHHOLDING_DISABLED',
+    });
+    expect(prisma.invoice.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses a retenue on a base under the threshold (TTC, stamp excluded)', async () => {
+    const { service } = makeService();
+    await expect(
+      service.create(
+        {
+          clientName: 'Dr Amel',
+          pricesIncludeTax: true,
+          withholdingRate: 1,
+          lines: line(999.999),
+        },
+        admin,
+      ),
+    ).rejects.toMatchObject({
+      statusCode: 400,
+      errorCode: 'WITHHOLDING_BELOW_THRESHOLD',
+      details: { withholdingThreshold: 1000 },
+    });
+  });
+
+  it('at the threshold exactly, the retenue applies', async () => {
+    const { service, prisma } = makeService();
+    await service.create(
+      {
+        clientName: 'Dr Amel',
+        pricesIncludeTax: true,
+        withholdingRate: 1,
+        lines: line(1000),
+      },
+      admin,
+    );
+    const data = createdData(prisma);
+    expect(data).toMatchObject({ withholdingAmount: 10, netPayable: 991 });
+  });
+
+  it('no retenue asked: always allowed, even switched off', async () => {
+    const { service, prisma, settings } = makeService();
+    settings.withholdingEnabled = false;
+    await service.create(
+      { clientName: 'Dr Amel', pricesIncludeTax: true, lines: line(500) },
+      admin,
+    );
+    expect(prisma.invoice.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('an edit that sets a new rate is checked against the threshold the invoice snapshotted', async () => {
+    const { service, tx } = makeService({
+      ...AUTOMATIC,
+      withholdingRate: null,
+      withholdingAmount: D('0'),
+      netPayable: D('2381.000'),
+      // Issued under a 5 000 threshold: 2 380 is under it.
+      withholdingThreshold: D('5000.000'),
+    });
+    await expect(
+      service.update('inv-1', { withholdingRate: 1 }, admin),
+    ).rejects.toMatchObject({ errorCode: 'WITHHOLDING_BELOW_THRESHOLD' });
+    expect(tx.invoice.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('an edit that sets a rate while the retenue is switched off is refused', async () => {
+    const { service, settings } = makeService();
+    settings.withholdingEnabled = false;
+    await expect(
+      service.update('inv-1', { withholdingRate: 1 }, admin),
+    ).rejects.toMatchObject({ errorCode: 'WITHHOLDING_DISABLED' });
+  });
+
+  it('an edit that keeps the rate is never re-checked (the automatic invoice keeps its retenue)', async () => {
+    const { service, tx, settings } = makeService();
+    settings.withholdingEnabled = false;
+    await service.update(
+      'inv-1',
+      {
+        withholdingRate: 1.5,
+        lines: [{ description: 'Pack', quantity: 1, unitPrice: 2380 }],
+      },
+      admin,
+    );
+    expect(updateData(tx)).toMatchObject({ withholdingAmount: 35.701 });
+  });
+});
+
+describe('InvoiceService.update — the client snapshot columns', () => {
+  it('re-saving the form unchanged keeps what the invoice froze', async () => {
+    const { service, tx } = makeService({
+      ...AUTOMATIC,
+      doctorId: 'doc-1',
+      clientIsPractitioner: true,
+      clientClinicName: 'Ancien cabinet',
+    });
+    await service.update(
+      'inv-1',
+      { clientName: 'Dr Amel', doctorId: 'doc-1', notes: 'merci' },
+      admin,
+    );
+    const data = updateData(tx);
+    expect(data).not.toHaveProperty('clientIsPractitioner');
+    expect(data).not.toHaveProperty('clientClinicName');
+  });
+
+  it('a new client name is decided again against the practitioner', async () => {
+    const { service, tx } = makeService({ ...AUTOMATIC, doctorId: 'doc-1' });
+    await service.update('inv-1', { clientName: 'Clinique SARL' }, admin);
+    expect(updateData(tx)).toMatchObject({
+      clientName: 'Clinique SARL',
+      clientIsPractitioner: false,
+      clientClinicName: null,
+      clientRegistrationNumber: null,
+    });
+  });
+
+  it('linking the practitioner billed in his own name takes his practice', async () => {
+    const { service, tx } = makeService({ ...AUTOMATIC, doctorId: null });
+    await service.update('inv-1', { doctorId: 'doc-1' }, admin);
+    expect(updateData(tx)).toMatchObject({
+      doctorId: 'doc-1',
+      clientIsPractitioner: true,
+      clientClinicName: 'Cabinet Les Pins',
+      clientRegistrationNumber: 'CNOMDT-42',
     });
   });
 });
@@ -313,7 +591,7 @@ describe('InvoiceService — remise typed as a percentage', () => {
       },
       admin,
     );
-    const data = (prisma.invoice.create.mock.calls[0][0] as { data: any }).data;
+    const data = createdData(prisma);
     // 2380 - 238 = 2142 TTC = HT 1800 + TVA 342; + 1 stamp = 2143.
     expect(data).toMatchObject({
       discountPercent: 10,
@@ -333,7 +611,13 @@ describe('InvoiceService.update — automatic invoices keep the payment retenue'
       'inv-1',
       {
         withholdingRate: 1.5,
-        lines: [{ description: 'Pack — Échéance 1 sur 2', quantity: 1, unitPrice: 2380 }],
+        lines: [
+          {
+            description: 'Pack — Échéance 1 sur 2',
+            quantity: 1,
+            unitPrice: 2380,
+          },
+        ],
       },
       admin,
     );
@@ -358,9 +642,7 @@ describe('InvoiceService.update — automatic invoices keep the payment retenue'
     });
     // TTC mode: the stored lines follow any money edit (derived HT).
     expect(tx.invoiceLine.createMany).toHaveBeenCalledWith({
-      data: [
-        expect.objectContaining({ unitPriceTtc: 2380, unitPrice: 2000 }),
-      ],
+      data: [expect.objectContaining({ unitPriceTtc: 2380, unitPrice: 2000 })],
     });
   });
 
@@ -405,7 +687,7 @@ describe('InvoiceService.update — automatic invoices keep the payment retenue'
     });
     expect(prisma.invoiceAuditLog.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ action: 'status_changed' }),
+        data: expect.objectContaining({ action: 'status_changed' }) as unknown,
       }),
     );
   });
@@ -469,12 +751,19 @@ describe('InvoiceService.searchPractitioners', () => {
 
     const res = await service.searchPractitioners('  amel ');
 
-    const where = (prisma.user.findMany.mock.calls[0][0] as { where: any }).where;
+    const [[search]] = prisma.user.findMany.mock.calls as [
+      [{ where: { OR: unknown } }],
+    ];
+    const where = search.where;
     expect(where).toMatchObject({ role: UserRole.dentist, deletedAt: null });
     expect(where.OR).toEqual(
       expect.arrayContaining([
         { fullName: { contains: 'amel', mode: 'insensitive' } },
-        { dentistProfile: { is: { clinicName: { contains: 'amel', mode: 'insensitive' } } } },
+        {
+          dentistProfile: {
+            is: { clinicName: { contains: 'amel', mode: 'insensitive' } },
+          },
+        },
       ]),
     );
     expect(res.data[0]).toEqual({
@@ -525,7 +814,9 @@ describe('InvoiceService.searchPractitioners', () => {
 
   it('a term shorter than 2 characters returns nothing without querying', async () => {
     const { service, prisma } = makeService();
-    await expect(service.searchPractitioners(' a ')).resolves.toEqual({ data: [] });
+    await expect(service.searchPractitioners(' a ')).resolves.toEqual({
+      data: [],
+    });
     expect(prisma.user.findMany).not.toHaveBeenCalled();
   });
 });

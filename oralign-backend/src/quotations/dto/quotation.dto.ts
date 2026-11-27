@@ -20,8 +20,13 @@ import {
   ArchType,
   DevisLanguage,
   PaymentMode,
+  PaymentRecordStatus,
   QuotationStatus,
 } from '@prisma/client';
+import {
+  TRANSFER_STATES,
+  type TransferState,
+} from '../../payments/services/transfer-state';
 
 // ─── Create ────────────────────────────────────────────────────────────────
 
@@ -202,7 +207,10 @@ export class QuotationResponseDto {
   @ApiProperty() fabricationFees!: number;
   @ApiProperty() deliveryFees!: number;
   @ApiProperty() discountAmount!: number;
-  @ApiPropertyOptional({ nullable: true, description: 'Remise typed as a percentage, null when typed as an amount.' })
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'Remise typed as a percentage, null when typed as an amount.',
+  })
   discountPercent?: number | null;
 
   @ApiProperty() subTotalHt!: number;
@@ -258,7 +266,9 @@ export class QuotationResponseDto {
       'TTC settled so far: Σ (amount + withholdingAmount) of successful payments (Decimal string).',
   })
   paidAmount!: string;
-  @ApiPropertyOptional({ description: 'totalPrice - paidAmount (Decimal string)' })
+  @ApiPropertyOptional({
+    description: 'totalPrice - paidAmount (Decimal string)',
+  })
   remainingAmount?: string | null;
 
   // ── Computed on every response (not stored) ──────────────────
@@ -267,7 +277,9 @@ export class QuotationResponseDto {
       'A payment attempt that may still settle exists (pending, unknown or awaiting confirmation).',
   })
   hasPaymentInFlight!: boolean;
-  @ApiProperty({ description: 'TTC settled so far, as a number (= paidAmount).' })
+  @ApiProperty({
+    description: 'TTC settled so far, as a number (= paidAmount).',
+  })
   receivedAmount!: number;
   @ApiProperty({
     description:
@@ -395,4 +407,49 @@ export class ConfigurePaymentPlanDto {
   @ValidateNested({ each: true })
   @Type(() => PaymentPlanInstallmentDto)
   installments!: PaymentPlanInstallmentDto[];
+}
+
+// ─── Payment-plan installments: their latest bank transfer ────────────────
+
+/**
+ * `latestTransfer` of each installment of GET quotations/:id/installments
+ * (CONTRACT §2.1, quote-money.ts withLatestTransfers): its latest
+ * bank-transfer declaration, null when it has none. Never a file path.
+ */
+export class InstallmentLatestTransferDto {
+  @ApiProperty()
+  paymentId!: string;
+
+  @ApiProperty({ enum: PaymentRecordStatus })
+  status!: PaymentRecordStatus;
+
+  @ApiProperty({
+    enum: TRANSFER_STATES,
+    description:
+      'State of THIS declaration (a withdrawn one reads awaiting_receipt). The installment itself is paid once its status is paid, whatever the method.',
+  })
+  state!: TransferState;
+
+  @ApiProperty({ type: Date, nullable: true })
+  declaredAt!: Date | null;
+
+  @ApiProperty({
+    type: Date,
+    nullable: true,
+    description: 'The FIRST time an admin opened the receipt ("À vérifier").',
+  })
+  reviewOpenedAt!: Date | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: "The admin's reason, on a refused declaration only.",
+  })
+  rejectionReason!: string | null;
+
+  @ApiProperty({
+    description:
+      'A receipt is attached; read it through GET payments/:paymentId/proof.',
+  })
+  hasProof!: boolean;
 }

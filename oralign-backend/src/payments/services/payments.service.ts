@@ -1,6 +1,7 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
   BatchStatus,
+  BatchUnlockSource,
   InstallmentStatus,
   OrderStatus,
   Payment,
@@ -31,14 +32,21 @@ import {
 } from '../gateways/payment-gateway.interface';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
+  type BatchUnlockedEvent,
+  type NotificationEventName,
   NotificationEvents,
   type PaymentEvent,
+  type TransferClosedEvent,
+  type TransferReviewOpenedEvent,
 } from '../../notifications/events/notification-events';
+import { installmentSubjectKey } from '../../notifications/notification-subject';
 import { env } from '../../common/config/env';
 import { QuotationService } from '../../quotations/services/quotation.service';
-import { projectBatches } from '../../production/production-batch-projection';
+import { unlockStepBatch } from '../../production/batch-unlock';
 import { isAdmin, type Caller } from '../../common/access/caller';
 import { lookupActorName } from '../../common/access/actor-snapshot';
+import { ORDER_AUDIT_ACTION } from '../../common/audit/order-audit-actions';
+import { writeOrderAudit } from '../../common/audit/order-audit-entry';
 import {
   assertInvoiceNumberFree,
   invoiceNumberTaken,
@@ -51,11 +59,41 @@ import {
 } from './payment-list-query';
 import {
   assertNoOtherPaymentInFlight,
+  assertWithholdingAllowed,
   isAdminRecordedMethod,
   paymentChargeData,
   readChargeSettings,
   resolvePaymentCharge,
 } from './payment-rules';
+import {
+  assertConfirmReceipt,
+  assertDeclarationReceipt,
+  canReadReceipt,
+  HIDDEN_FROM_DENTISTS,
+  parseTransferIdempotencyKey,
+  paymentTransferAuditMetadata,
+  proofNotFound,
+  rejectionReasonOrThrow,
+  transferAlreadyProcessed,
+  transferNotWithdrawable,
+  withdrawalNoteOf,
+} from './transfer-rules';
+import {
+  findDeclarationReplay,
+  isUniqueViolation,
+  lockInstallmentRow,
+  paymentPhaseAfterPartialSettlement,
+  releaseOrderFromReview,
+  supersedeAwaitingDeclarations,
+} from './transfer-transitions';
+import {
+  assertReceiptFile,
+  openReceipt,
+  type OpenedReceipt,
+  type ReceiptUpload,
+  removeReceiptFile,
+  writeReceiptFile,
+} from '../receipt-file';
 import {
   advanceOrderWhenPaid,
   QUOTE_PHASE_ORDER_STATUSES,
@@ -80,17 +118,11 @@ interface PaymentListOptions extends PaymentListFilters {
 }
 
 /**
- * Payment columns a dentist never reads, in their history or on one
- * payment: the admin's notes, which admin recorded, confirmed or rejected
- * the payment, and the idempotency key. Admins keep every column.
+ * 409: the installment is already paid (stable code, domain-error-codes.ts):
+ * a transfer confirmed on it, or declared / replaced on it, after another
+ * payment settled it.
  */
-const HIDDEN_FROM_DENTISTS = {
-  notes: true,
-  idempotencyKey: true,
-  initiatedById: true,
-  confirmedById: true,
-  rejectedById: true,
-} satisfies Prisma.PaymentOmit;
+export const INSTALLMENT_ALREADY_PAID = 'INSTALLMENT_ALREADY_PAID';
 
 /** The relations every row of a payment list carries. */
 const PAYMENT_LIST_INCLUDE = {
@@ -108,12 +140,26 @@ const PAYMENT_LIST_INCLUDE = {
   },
 } satisfies Prisma.PaymentInclude;
 
+/** What a refusal hands back and tells the doctor (names and order code). */
+const REJECTED_PAYMENT_INCLUDE = {
+  order: {
+    select: {
+      doctorId: true,
+      id: true,
+      orderCode: true,
+      doctor: { select: { fullName: true } },
+      patient: { select: { fullName: true } },
+    },
+  },
+  installment: { select: { installmentNumber: true } },
+} satisfies Prisma.PaymentInclude;
+
 interface SettleArgs {
   paymentId: string;
   transactionId: string;
   actor: Caller;
   notes?: string;
-  /** Under the lock, the payment must still be in this status (400 otherwise). */
+  /** Under the lock, the payment must still be in this status (409 TRANSFER_ALREADY_PROCESSED otherwise). */
   expectStatus?: PaymentRecordStatus;
   /** An installment already paid is a 409, not a silently cancelled payment. */
   conflictIfPaid?: boolean;
@@ -179,6 +225,8 @@ export function settledTotal(sum: {
  */
 @Injectable()
 export class PaymentsService {
+  private readonly logger = new Logger(PaymentsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly events: EventEmitter2,
@@ -268,6 +316,7 @@ export class PaymentsService {
   private async lockPayableInstallment(
     tx: Prisma.TransactionClient,
     installmentId: string,
+    opts: { declaration?: boolean } = {},
   ) {
     await tx.$queryRaw`SELECT id FROM "QuoteInstallment" WHERE id = ${installmentId} FOR UPDATE`;
     const installment = await tx.quoteInstallment.findUnique({
@@ -281,19 +330,56 @@ export class PaymentsService {
       },
     });
     if (!installment) throw new NotFoundException('Installment not found.');
-    this.assertPayable(installment);
+    if (opts.declaration) this.assertDeclarable(installment);
+    else this.assertPayable(installment);
     return installment;
+  }
+
+  /**
+   * The refusals the locked transaction re-checks, raised BEFORE
+   * approveOnFirstPayment accepts a `sent` quote in its own transaction
+   * (doctorApprovedAt, counted by loyalty): a retenue the rules refuse
+   * (400 WITHHOLDING_DISABLED / WITHHOLDING_BELOW_THRESHOLD) or another
+   * payment in flight on the installment (409 PAYMENT_ATTEMPT_IN_PROGRESS)
+   * must not leave the quote accepted with no payment behind it. Unlocked
+   * reads: the transaction stays the authority (resolvePaymentCharge and
+   * assertNoOtherPaymentInFlight run again under the installment lock).
+   */
+  private async assertPaymentAcceptable(
+    installment: { id: string; amount: Prisma.Decimal },
+    method: PaymentMethod,
+    applyWithholding: boolean | undefined,
+  ): Promise<void> {
+    await assertNoOtherPaymentInFlight(this.prisma, installment.id, method);
+    if (applyWithholding === true) {
+      assertWithholdingAllowed(
+        installment.amount,
+        await readChargeSettings(this.prisma),
+      );
+    }
   }
 
   // ─── BANK_TRANSFER ─────────────────────────────────────────────
 
   /**
-   * Doctor declares an outbound wire transfer for an installment. The
-   * Payment row sits in `awaiting_confirmation` until an admin reviews
-   * the bank statement and confirms (or rejects). Re-declaring on the
-   * SAME installment auto-cancels any prior pending declaration so
-   * the queue never carries stale rows; a card attempt still in flight
-   * blocks the declaration (409) so the installment is never paid twice.
+   * The doctor (or an admin for him) declares an outbound wire transfer
+   * for an installment (spec §1). The Payment row sits in
+   * `awaiting_confirmation` until an admin reviews the receipt against the
+   * bank statement and confirms (or refuses). A card attempt still in
+   * flight blocks the declaration (409) so the installment is never paid
+   * twice.
+   *
+   * Receipt (DECISIONS §1): mandatory for a dentist (400 PROOF_REQUIRED);
+   * an admin may omit it only with an override note. The file is checked
+   * (assertReceiptFile) and written only once the caller is authorised and
+   * the installment payable, under uploads/orders/<orderId>/payment-proofs,
+   * and unlinked when the transaction fails.
+   *
+   * Replace: a declaration still awaiting on the installment is
+   * superseded (status cancelled + cancelledAt/By, receipt kept, audit
+   * payment_proof_replaced, PaymentSuperseded). Replay: the same caller
+   * and Idempotency-Key answer the row already made (200), another
+   * installment with that key is a 409.
    *
    * The transfer is the cash: the installment + the stamp, minus the
    * retenue when the practitioner applies it. The row stores that cash as
@@ -303,76 +389,175 @@ export class PaymentsService {
     installmentId: string;
     caller: Caller;
     bankReference?: string;
-    proofUrl?: string | null;
+    /** The uploaded receipt (multer memoryStorage), if any. */
+    receipt?: ReceiptUpload | null;
     applyWithholding?: boolean;
+    /** Admin without a receipt: why (trimmed, 3-500). */
+    overrideNote?: string;
+    /** The raw Idempotency-Key header. */
+    idempotencyKey?: string;
   }): Promise<Payment> {
+    const key = parseTransferIdempotencyKey(args.idempotencyKey);
     const row = await this.loadInstallmentForCaller(
       args.installmentId,
       args.caller,
     );
-    this.assertPayable(row);
-    await this.ensureBankTransferIsConfigured();
-    await this.quotations.approveOnFirstPayment(row.quotationId, args.caller);
-
-    const created = await this.prisma.$transaction(async (tx) => {
-      const installment = await this.lockPayableInstallment(tx, row.id);
-      await assertNoOtherPaymentInFlight(
-        tx,
-        installment.id,
-        PaymentMethod.bank_transfer,
-      );
-      const charge = resolvePaymentCharge(
-        args.applyWithholding,
-        installment.amount,
-        await readChargeSettings(tx),
-      );
-      // Cancel any stale `awaiting_confirmation` declarations on the
-      // same installment so the admin never sees two pending rows
-      // for the same payment.
-      await tx.payment.updateMany({
-        where: {
-          installmentId: installment.id,
-          status: PaymentRecordStatus.awaiting_confirmation,
-        },
-        data: { status: PaymentRecordStatus.cancelled },
+    const orderId = row.quotation.orderId;
+    if (key) {
+      const replay = await findDeclarationReplay(this.prisma, {
+        callerId: args.caller.userId,
+        key,
+        installmentId: row.id,
       });
-      const payment = await tx.payment.create({
-        data: {
-          orderId: row.quotation.orderId,
-          quotationId: row.quotationId,
-          installmentId: installment.id,
-          ...paymentChargeData(charge),
-          status: PaymentRecordStatus.awaiting_confirmation,
-          paymentMethod: PaymentMethod.bank_transfer,
-          transactionId: args.bankReference ?? null,
-          proofUrl: args.proofUrl ?? null,
-          declaredAt: new Date(),
-          initiatedById: args.caller.userId,
-        },
-      });
-      // Move the order into `payment_review` to signal the queue, but
-      // only from the quote / payment phase: an extra installment added
-      // after a total edit can be paid on a case already in fabrication,
-      // shipped or finished, and that case must never go back. One
-      // conditional write, so the status check and the write are one step.
-      await moveOrderWithinPaymentPhase(
-        tx,
-        row.quotation.orderId,
-        OrderStatus.payment_review,
-      );
-      return payment;
+      if (replay) return replay;
+    }
+    const overrideNote = assertDeclarationReceipt({
+      caller: args.caller,
+      hasReceipt: Boolean(args.receipt),
+      overrideNote: args.overrideNote,
     });
+    this.assertDeclarable(row);
+    await this.ensureBankTransferIsConfigured();
+    const kind = args.receipt ? await assertReceiptFile(args.receipt) : null;
+    await this.assertPaymentAcceptable(
+      row,
+      PaymentMethod.bank_transfer,
+      args.applyWithholding,
+    );
+    await this.quotations.approveOnFirstPayment(row.quotationId, args.caller);
+    const actorName = await lookupActorName(this.prisma, args.caller.userId);
+
+    const proofUrl =
+      kind && args.receipt
+        ? await writeReceiptFile(orderId, args.receipt.buffer, kind)
+        : null;
+    let outcome:
+      | { replay: Payment }
+      | { payment: Payment; superseded: string[] };
+    try {
+      outcome = await this.prisma.$transaction(async (tx) => {
+        const installment = await this.lockPayableInstallment(tx, row.id, {
+          declaration: true,
+        });
+        if (key) {
+          // A concurrent repeat of the same key committed while we waited.
+          const replay = await findDeclarationReplay(tx, {
+            callerId: args.caller.userId,
+            key,
+            installmentId: row.id,
+          });
+          if (replay) return { replay };
+        }
+        await assertNoOtherPaymentInFlight(
+          tx,
+          installment.id,
+          PaymentMethod.bank_transfer,
+        );
+        const charge = resolvePaymentCharge(
+          args.applyWithholding,
+          installment.amount,
+          await readChargeSettings(tx),
+        );
+        const now = new Date();
+        // The admin never sees two pending rows for the same installment.
+        const superseded = await supersedeAwaitingDeclarations(tx, {
+          installmentId: installment.id,
+          actor: args.caller,
+          actorName,
+          at: now,
+        });
+        const payment = await tx.payment.create({
+          data: {
+            orderId,
+            quotationId: row.quotationId,
+            installmentId: installment.id,
+            ...paymentChargeData(charge),
+            status: PaymentRecordStatus.awaiting_confirmation,
+            paymentMethod: PaymentMethod.bank_transfer,
+            transactionId: args.bankReference ?? null,
+            proofUrl,
+            // Admin-only column: why this declaration has no receipt.
+            notes: overrideNote,
+            declaredAt: now,
+            initiatedById: args.caller.userId,
+            declarationKey: key,
+          },
+        });
+        // Move the order into `payment_review` to signal the queue, but
+        // only from the quote / payment phase: an extra installment added
+        // after a total edit can be paid on a case already in fabrication,
+        // shipped or finished, and that case must never go back. One
+        // conditional write, so the status check and the write are one step.
+        await moveOrderWithinPaymentPhase(
+          tx,
+          orderId,
+          OrderStatus.payment_review,
+        );
+        await writeOrderAudit(tx, orderId, args.caller, {
+          action:
+            superseded.length > 0
+              ? ORDER_AUDIT_ACTION.PAYMENT_PROOF_REPLACED
+              : ORDER_AUDIT_ACTION.PAYMENT_TRANSFER_DECLARED,
+          paymentId: payment.id,
+          actorName,
+          metadata: {
+            ...paymentTransferAuditMetadata(payment, row.installmentNumber, {
+              overrideNote,
+              replacedPaymentId: superseded[0],
+            }),
+          },
+        });
+        return { payment, superseded };
+      });
+    } catch (error) {
+      await removeReceiptFile(proofUrl);
+      if (key && isUniqueViolation(error)) {
+        // Two repeats of one key raced to the insert: the winner's row.
+        const replay = await findDeclarationReplay(this.prisma, {
+          callerId: args.caller.userId,
+          key,
+          installmentId: row.id,
+        });
+        if (replay) return replay;
+      }
+      throw error;
+    }
+    if ('replay' in outcome) {
+      await removeReceiptFile(proofUrl);
+      return outcome.replay;
+    }
+
+    const { payment: created, superseded } = outcome;
+    const order = row.quotation.order;
+    const subjectKey = installmentSubjectKey(created.id);
+    // After the commit, so the listener never reads a row that is not
+    // there yet. The superseded subjects first: their bell rows resolve
+    // before the new one rings.
+    for (const paymentId of superseded) {
+      this.emit(NotificationEvents.PaymentSuperseded, {
+        kind: 'installment',
+        subjectKey: installmentSubjectKey(paymentId),
+        reason: 'superseded',
+        orderId,
+        orderCode: order.orderCode,
+        doctorId: order.doctorId,
+        paymentId,
+        quotationId: row.quotationId,
+        installmentNumber: row.installmentNumber,
+        actorId: args.caller.userId,
+        replacedBySubjectKey: subjectKey,
+      } satisfies TransferClosedEvent);
+    }
     // Bell ping for admins — their pending-confirmations queue just grew a
-    // row. After the commit, so the listener never reads a row that is not
-    // there yet.
-    this.events.emit(NotificationEvents.PaymentDeclared, {
+    // row. doctorId is the order's doctor, also when an admin declared.
+    this.emit(NotificationEvents.PaymentDeclared, {
       paymentId: created.id,
       quotationId: row.quotationId,
-      orderId: row.quotation.orderId,
-      orderCode: row.quotation.order.orderCode,
-      doctorId: args.caller.userId,
-      doctorName: row.quotation.order.doctor?.fullName ?? null,
-      patientName: row.quotation.order.patient?.fullName ?? null,
+      orderId,
+      orderCode: order.orderCode,
+      doctorId: order.doctorId,
+      doctorName: order.doctor?.fullName ?? null,
+      patientName: order.patient?.fullName ?? null,
       amount: created.amount.toString(),
       withholdingAmount: created.withholdingAmount.toString(),
       stampAmount: created.stampAmount.toString(),
@@ -383,10 +568,21 @@ export class PaymentsService {
     return created;
   }
 
+  /**
+   * Admin confirms a transfer (awaiting_confirmation → success) through the
+   * single success transition (settleWithin: installment lock, quote
+   * settlement, batch unlock), then journals payment_confirmed in the same
+   * transaction. Idempotent: a repeat on a confirmed transfer answers the
+   * row (200); a transfer refused, withdrawn or replaced meanwhile is 409
+   * TRANSFER_ALREADY_PROCESSED; an installment paid by another payment is
+   * 409 INSTALLMENT_ALREADY_PAID. A transfer without a receipt needs the
+   * admin's override note (400 PROOF_OVERRIDE_NOTE_REQUIRED).
+   */
   async confirmBankTransfer(
     paymentId: string,
     notes: string | undefined,
     caller: Caller,
+    options: { overrideNote?: string } = {},
   ): Promise<Payment> {
     if (!isAdmin(caller)) {
       throw new ForbiddenException(
@@ -402,26 +598,60 @@ export class PaymentsService {
         'Only bank-transfer payments can be confirmed manually.',
       );
     }
+    if (existing.status === PaymentRecordStatus.success) return existing;
     if (existing.status !== PaymentRecordStatus.awaiting_confirmation) {
-      throw new BadRequestException(
-        `Cannot confirm a payment in status ${existing.status}.`,
-      );
+      throw transferAlreadyProcessed(existing.status);
     }
+    // A row's receipt never changes (a replacement is a new row).
+    const overrideNote = assertConfirmReceipt(
+      Boolean(existing.proofUrl),
+      options.overrideNote,
+    );
+    const actorName = await lookupActorName(this.prisma, caller.userId);
     // The declared charge (retenue + stamp) is confirmed as declared: the
     // admin checks the cash on the statement against `amount`.
-    return this.handleSuccess({
-      paymentId,
-      transactionId: existing.transactionId ?? `bank_${randomUUID()}`,
-      actor: caller,
-      notes,
-      // Re-checked under the installment lock: a concurrent reject must
-      // not be overturned, and an installment paid meanwhile is a 409 the
-      // admin has to see, not a transfer silently cancelled.
-      expectStatus: PaymentRecordStatus.awaiting_confirmation,
-      conflictIfPaid: true,
+    const settled = await this.prisma.$transaction(async (tx) => {
+      const settlement = await this.settleWithin(tx, {
+        paymentId,
+        transactionId: existing.transactionId ?? `bank_${randomUUID()}`,
+        actor: caller,
+        notes,
+        // Re-checked under the installment lock: a concurrent reject must
+        // not be overturned, and an installment paid meanwhile is a 409
+        // the admin has to see, not a transfer silently cancelled.
+        expectStatus: PaymentRecordStatus.awaiting_confirmation,
+        conflictIfPaid: true,
+      });
+      // Last, after the order locks of the settlement (its foreign key
+      // takes a key-share lock on the order).
+      if (!settlement.skipNotify) {
+        await writeOrderAudit(tx, settlement.payment.orderId, caller, {
+          action: ORDER_AUDIT_ACTION.PAYMENT_CONFIRMED,
+          paymentId,
+          actorName,
+          metadata: {
+            ...paymentTransferAuditMetadata(
+              settlement.payment,
+              settlement.installmentNumber,
+              { overrideNote },
+            ),
+          },
+        });
+      }
+      return settlement;
     });
+    return this.notifySettlement(settled);
   }
 
+  /**
+   * Admin refuses a transfer with a reason (trimmed, 3-500 characters,
+   * 400 REJECTION_REASON_INVALID). Under the installment FOR UPDATE lock
+   * (the lock confirm takes), a status-guarded write: a transfer confirmed
+   * or withdrawn meanwhile is 409 TRANSFER_ALREADY_PROCESSED, a repeat on a
+   * refused one answers the row (200). The order goes back from
+   * payment_review to payment_pending when nothing else awaits the admin.
+   * The doctor reads « Motif : … » (PaymentRejected.rejectionReason).
+   */
   async rejectBankTransfer(
     paymentId: string,
     rejectionReason: string,
@@ -432,8 +662,16 @@ export class PaymentsService {
         'Only admins can reject bank-transfer payments.',
       );
     }
+    const reason = rejectionReasonOrThrow(rejectionReason);
     const existing = await this.prisma.payment.findUnique({
       where: { id: paymentId },
+      select: {
+        id: true,
+        orderId: true,
+        installmentId: true,
+        paymentMethod: true,
+        status: true,
+      },
     });
     if (!existing) throw new NotFoundException('Payment not found.');
     if (existing.paymentMethod !== PaymentMethod.bank_transfer) {
@@ -441,49 +679,334 @@ export class PaymentsService {
         'Only bank-transfer payments can be rejected here.',
       );
     }
-    if (existing.status !== PaymentRecordStatus.awaiting_confirmation) {
-      throw new BadRequestException(
-        `Cannot reject a payment in status ${existing.status}.`,
-      );
+    if (
+      existing.status !== PaymentRecordStatus.awaiting_confirmation &&
+      existing.status !== PaymentRecordStatus.rejected
+    ) {
+      throw transferAlreadyProcessed(existing.status);
     }
-    const rejected = await this.prisma.payment.update({
-      where: { id: paymentId },
-      data: {
-        status: PaymentRecordStatus.rejected,
-        rejectedAt: new Date(),
-        rejectedById: caller.userId,
-        rejectionReason,
-      },
-      include: {
-        order: {
-          select: {
-            doctorId: true,
-            id: true,
-            orderCode: true,
-            doctor: { select: { fullName: true } },
-            patient: { select: { fullName: true } },
-          },
+    const actorName = await lookupActorName(this.prisma, caller.userId);
+    const { payment, changed } = await this.prisma.$transaction(async (tx) => {
+      if (existing.installmentId) {
+        await lockInstallmentRow(tx, existing.installmentId);
+      }
+      const { count } = await tx.payment.updateMany({
+        where: {
+          id: paymentId,
+          paymentMethod: PaymentMethod.bank_transfer,
+          status: PaymentRecordStatus.awaiting_confirmation,
         },
+        data: {
+          status: PaymentRecordStatus.rejected,
+          rejectedAt: new Date(),
+          rejectedById: caller.userId,
+          rejectionReason: reason,
+        },
+      });
+      const current = await tx.payment.findUnique({
+        where: { id: paymentId },
+        include: REJECTED_PAYMENT_INCLUDE,
+      });
+      if (!current) throw new NotFoundException('Payment not found.');
+      if (count === 0) {
+        // Not ours to write: an idempotent repeat, or processed meanwhile.
+        if (current.status === PaymentRecordStatus.rejected) {
+          return { payment: current, changed: false };
+        }
+        throw transferAlreadyProcessed(current.status);
+      }
+      await releaseOrderFromReview(tx, existing.orderId);
+      await writeOrderAudit(tx, existing.orderId, caller, {
+        action: ORDER_AUDIT_ACTION.PAYMENT_REJECTED,
+        paymentId,
+        actorName,
+        metadata: {
+          ...paymentTransferAuditMetadata(
+            current,
+            current.installment?.installmentNumber,
+            { reason },
+          ),
+        },
+      });
+      return { payment: current, changed: true };
+    });
+    if (changed) {
+      // Tell the doctor the proof was refused, and why, so he can re-submit.
+      this.emit(NotificationEvents.PaymentRejected, {
+        paymentId: payment.id,
+        quotationId: payment.quotationId!,
+        orderId: payment.orderId,
+        orderCode: payment.order.orderCode,
+        doctorId: payment.order.doctorId,
+        doctorName: payment.order.doctor?.fullName ?? null,
+        patientName: payment.order.patient?.fullName ?? null,
+        amount: payment.amount.toString(),
+        withholdingAmount: payment.withholdingAmount.toString(),
+        stampAmount: payment.stampAmount.toString(),
+        currency: payment.currency ?? 'TND',
+        method: payment.paymentMethod,
+        installmentNumber: payment.installment?.installmentNumber,
+        rejectionReason: reason,
+      } satisfies PaymentEvent);
+    }
+    return payment;
+  }
+
+  /**
+   * The doctor (or an admin for him) withdraws a declaration still
+   * awaiting confirmation: status cancelled + cancelledAt/By, the receipt
+   * kept, audit payment_transfer_withdrawn, PaymentWithdrawn. Under the
+   * installment lock, status-guarded; a repeat on a cancelled row answers
+   * it (200); a transfer the admin already processed is 409
+   * TRANSFER_NOT_WITHDRAWABLE. The order leaves payment_review when nothing
+   * else awaits. Another dentist's payment is a 404.
+   */
+  async withdrawBankTransfer(
+    paymentId: string,
+    caller: Caller,
+    note?: string,
+  ): Promise<Payment> {
+    if (!isAdmin(caller) && caller.role !== UserRole.dentist) {
+      throw new NotFoundException('Payment not found.');
+    }
+    const existing = await this.prisma.payment.findUnique({
+      where: { id: paymentId },
+      select: {
+        id: true,
+        orderId: true,
+        quotationId: true,
+        installmentId: true,
+        paymentMethod: true,
+        status: true,
+        order: { select: { doctorId: true, deletedAt: true } },
+      },
+    });
+    if (
+      !existing ||
+      existing.order.deletedAt ||
+      (!isAdmin(caller) && existing.order.doctorId !== caller.userId)
+    ) {
+      throw new NotFoundException('Payment not found.');
+    }
+    if (existing.paymentMethod !== PaymentMethod.bank_transfer) {
+      throw transferNotWithdrawable(existing.status);
+    }
+    if (
+      existing.status !== PaymentRecordStatus.awaiting_confirmation &&
+      existing.status !== PaymentRecordStatus.cancelled
+    ) {
+      throw transferNotWithdrawable(existing.status);
+    }
+    const reason = withdrawalNoteOf(note);
+    const actorName = await lookupActorName(this.prisma, caller.userId);
+    const { payment, changed, installmentNumber, orderCode } =
+      await this.prisma.$transaction(async (tx) => {
+        if (existing.installmentId) {
+          await lockInstallmentRow(tx, existing.installmentId);
+        }
+        const { count } = await tx.payment.updateMany({
+          where: {
+            id: paymentId,
+            paymentMethod: PaymentMethod.bank_transfer,
+            status: PaymentRecordStatus.awaiting_confirmation,
+          },
+          data: {
+            status: PaymentRecordStatus.cancelled,
+            cancelledAt: new Date(),
+            cancelledById: caller.userId,
+            cancelledByName: actorName,
+          },
+        });
+        const current = await tx.payment.findUnique({
+          where: { id: paymentId },
+          include: {
+            installment: { select: { installmentNumber: true } },
+            order: { select: { orderCode: true } },
+          },
+        });
+        if (!current) throw new NotFoundException('Payment not found.');
+        const { installment, order, ...row } = current;
+        const result = {
+          payment: row,
+          installmentNumber: installment?.installmentNumber ?? null,
+          orderCode: order.orderCode,
+        };
+        if (count === 0) {
+          if (current.status === PaymentRecordStatus.cancelled) {
+            return { ...result, changed: false };
+          }
+          throw transferNotWithdrawable(current.status);
+        }
+        await releaseOrderFromReview(tx, existing.orderId);
+        await writeOrderAudit(tx, existing.orderId, caller, {
+          action: ORDER_AUDIT_ACTION.PAYMENT_TRANSFER_WITHDRAWN,
+          paymentId,
+          actorName,
+          metadata: {
+            ...paymentTransferAuditMetadata(current, result.installmentNumber, {
+              reason,
+            }),
+          },
+        });
+        return { ...result, changed: true };
+      });
+    if (changed) {
+      this.emit(NotificationEvents.PaymentWithdrawn, {
+        kind: 'installment',
+        subjectKey: installmentSubjectKey(paymentId),
+        reason: 'withdrawn',
+        orderId: existing.orderId,
+        orderCode,
+        doctorId: existing.order.doctorId,
+        paymentId,
+        quotationId: existing.quotationId,
+        installmentNumber,
+        actorId: caller.userId,
+      } satisfies TransferClosedEvent);
+    }
+    return payment;
+  }
+
+  /**
+   * An admin opened a transfer receipt. The FIRST opening of a transfer
+   * still awaiting stamps the global reviewOpenedAt/ById/ByName ("Reçu
+   * envoyé" → "À vérifier") with the payment_review_opened audit row, under
+   * the installment lock and status-guarded; later openings, and openings
+   * of a processed transfer, stamp nothing. Every call emits
+   * TransferReviewOpened so THIS admin's subject rows turn read.
+   */
+  async markTransferReviewOpened(
+    paymentId: string,
+    caller: Caller,
+  ): Promise<{
+    paymentId: string;
+    reviewOpenedAt: Date | null;
+    firstOpen: boolean;
+  }> {
+    if (!isAdmin(caller)) {
+      throw new ForbiddenException('Admin-only action.');
+    }
+    const existing = await this.prisma.payment.findUnique({
+      where: { id: paymentId },
+      select: {
+        id: true,
+        orderId: true,
+        installmentId: true,
+        paymentMethod: true,
+        status: true,
+        reviewOpenedAt: true,
+      },
+    });
+    if (!existing || existing.paymentMethod !== PaymentMethod.bank_transfer) {
+      throw new NotFoundException('Payment not found.');
+    }
+    let reviewOpenedAt = existing.reviewOpenedAt;
+    let firstOpen = false;
+    if (
+      existing.status === PaymentRecordStatus.awaiting_confirmation &&
+      !existing.reviewOpenedAt
+    ) {
+      const actorName = await lookupActorName(this.prisma, caller.userId);
+      const stamped = await this.prisma.$transaction(async (tx) => {
+        if (existing.installmentId) {
+          await lockInstallmentRow(tx, existing.installmentId);
+        }
+        const now = new Date();
+        const { count } = await tx.payment.updateMany({
+          where: {
+            id: paymentId,
+            status: PaymentRecordStatus.awaiting_confirmation,
+            reviewOpenedAt: null,
+          },
+          data: {
+            reviewOpenedAt: now,
+            reviewOpenedById: caller.userId,
+            reviewOpenedByName: actorName,
+          },
+        });
+        const current = await tx.payment.findUnique({
+          where: { id: paymentId },
+          include: { installment: { select: { installmentNumber: true } } },
+        });
+        if (count > 0 && current) {
+          const audit = paymentTransferAuditMetadata(
+            current,
+            current.installment?.installmentNumber,
+          );
+          await writeOrderAudit(tx, existing.orderId, caller, {
+            action: ORDER_AUDIT_ACTION.PAYMENT_REVIEW_OPENED,
+            paymentId,
+            actorName,
+            metadata: {
+              installmentNumber: audit.installmentNumber,
+              method: audit.method,
+              amount: audit.amount,
+              hasProof: audit.hasProof,
+            },
+          });
+        }
+        return { first: count > 0, at: current?.reviewOpenedAt ?? null };
+      });
+      firstOpen = stamped.first;
+      reviewOpenedAt = stamped.at;
+    }
+    this.emit(NotificationEvents.TransferReviewOpened, {
+      kind: 'installment',
+      subjectKey: installmentSubjectKey(paymentId),
+      orderId: existing.orderId,
+      paymentId,
+      adminId: caller.userId,
+      firstOpen,
+      // A transfer processed before anyone opened it has no stamp: the
+      // instant of this opening, for the listener's information only.
+      reviewOpenedAt: (reviewOpenedAt ?? new Date()).toISOString(),
+    } satisfies TransferReviewOpenedEvent);
+    return { paymentId, reviewOpenedAt, firstOpen };
+  }
+
+  /**
+   * The receipt of a transfer, for the authenticated stream (GET
+   * payments/:paymentId/proof): the owning dentist and admins only. A
+   * designer, a technician, another dentist, a payment without a receipt
+   * or a file missing on disk all answer the same 404 PROOF_NOT_FOUND.
+   */
+  async readPaymentProof(
+    paymentId: string,
+    caller: Caller,
+  ): Promise<{ receipt: OpenedReceipt; downloadName: string }> {
+    if (!isAdmin(caller) && caller.role !== UserRole.dentist) {
+      throw proofNotFound();
+    }
+    const payment = await this.prisma.payment.findUnique({
+      where: { id: paymentId },
+      select: {
+        proofUrl: true,
+        order: { select: { doctorId: true, orderCode: true } },
         installment: { select: { installmentNumber: true } },
       },
     });
-    // Tell the doctor the proof was rejected so they can re-submit.
-    this.events.emit(NotificationEvents.PaymentRejected, {
-      paymentId: rejected.id,
-      quotationId: rejected.quotationId!,
-      orderId: rejected.orderId,
-      orderCode: rejected.order.orderCode,
-      doctorId: rejected.order.doctorId,
-      doctorName: rejected.order.doctor?.fullName ?? null,
-      patientName: rejected.order.patient?.fullName ?? null,
-      amount: rejected.amount.toString(),
-      withholdingAmount: rejected.withholdingAmount.toString(),
-      stampAmount: rejected.stampAmount.toString(),
-      currency: 'TND',
-      method: rejected.paymentMethod,
-      installmentNumber: rejected.installment?.installmentNumber,
-    } satisfies PaymentEvent);
-    return rejected;
+    if (!payment?.proofUrl || !canReadReceipt(caller, payment.order.doctorId)) {
+      throw proofNotFound();
+    }
+    const receipt = await openReceipt(payment.proofUrl);
+    if (!receipt) throw proofNotFound();
+    const rank = payment.installment?.installmentNumber;
+    return {
+      receipt,
+      downloadName: `recu-${payment.order.orderCode}${rank ? `-echeance-${rank}` : ''}`,
+    };
+  }
+
+  /**
+   * Emit a post-commit event: the transition is already committed, so a
+   * listener failure is logged, never thrown at the caller.
+   */
+  private emit(name: NotificationEventName, payload: object): void {
+    try {
+      this.events.emit(name, payload);
+    } catch (error) {
+      this.logger.warn(`Failed to emit ${name}: ${(error as Error).message}`);
+    }
   }
 
   // ─── CASH / CHEQUE ─────────────────────────────────────────────
@@ -503,9 +1026,7 @@ export class PaymentsService {
     applyWithholding?: boolean;
   }): Promise<Payment> {
     if (!isAdmin(args.caller)) {
-      throw new ForbiddenException(
-        'Only admins can record cash payments.',
-      );
+      throw new ForbiddenException('Only admins can record cash payments.');
     }
     const method = args.method ?? PaymentMethod.cash;
     if (!isAdminRecordedMethod(method)) {
@@ -520,6 +1041,7 @@ export class PaymentsService {
       { adminOnly: true },
     );
     this.assertPayable(row);
+    await this.assertPaymentAcceptable(row, method, args.applyWithholding);
     await this.quotations.approveOnFirstPayment(row.quotationId, args.caller);
     const settled = await this.prisma.$transaction(async (tx) => {
       const installment = await this.lockPayableInstallment(tx, row.id);
@@ -686,9 +1208,8 @@ export class PaymentsService {
       return quietly(payment);
     }
     if (args.expectStatus && payment.status !== args.expectStatus) {
-      throw new BadRequestException(
-        `Cannot confirm a payment in status ${payment.status}.`,
-      );
+      // Refused, withdrawn or replaced while we waited on the lock.
+      throw transferAlreadyProcessed(payment.status);
     }
 
     // The installment may have already been marked paid by a
@@ -697,7 +1218,7 @@ export class PaymentsService {
       if (args.conflictIfPaid) {
         throw new ConflictException(
           "Cette échéance est déjà payée : ce virement ne peut pas être confirmé. Rejetez-le, et remboursez le praticien si l'argent a bien été reçu.",
-          'INSTALLMENT_ALREADY_PAID',
+          INSTALLMENT_ALREADY_PAID,
         );
       }
       // A card charge that landed anyway becomes a duplicate-paid
@@ -718,8 +1239,7 @@ export class PaymentsService {
         status: PaymentRecordStatus.success,
         transactionId: args.transactionId,
         paidAt: now,
-        confirmedAt:
-          payment.paymentMethod === PaymentMethod.card ? null : now,
+        confirmedAt: payment.paymentMethod === PaymentMethod.card ? null : now,
         confirmedById:
           payment.paymentMethod === PaymentMethod.card
             ? null
@@ -739,22 +1259,23 @@ export class PaymentsService {
       },
     });
 
-    // Unlock batch (if not already delivered — defensive).
-    if (
+    // Unlock batch (if not already delivered — defensive). The one writer
+    // (production/batch-unlock.ts): guarded update, then the D2 projection
+    // (steps an admin delivered before the payment (D1) flip the batch to
+    // `delivered` now, in this transaction), then the batch_unlocked
+    // journal row. A card settlement has no admin: the system unlocks.
+    const unlocked =
       installment.stepBatch &&
       installment.stepBatch.status === BatchStatus.locked
-    ) {
-      await tx.quoteStepBatch.update({
-        where: { id: installment.stepBatch.id },
-        data: { status: BatchStatus.unlocked, unlockedAt: now },
-      });
-      // An admin may have delivered these steps before the payment (D1):
-      // the batch becomes `delivered` now, in this transaction (D2).
-      await projectBatches(tx, {
-        orderId: installment.quotation.orderId,
-        actorId: null,
-      });
-    }
+        ? await unlockStepBatch(tx, {
+            batchId: installment.stepBatch.id,
+            source: BatchUnlockSource.payment,
+            actor:
+              payment.paymentMethod === PaymentMethod.card ? null : args.actor,
+            paymentId: payment.id,
+            at: now,
+          })
+        : null;
 
     // Recalculate quote totals. Settled = cash + retenue - stamp: a
     // practitioner who kept back the retenue has paid the installment in
@@ -768,13 +1289,16 @@ export class PaymentsService {
       _sum: { amount: true, withholdingAmount: true, stampAmount: true },
     });
     const totalPaid = settledTotal(aggregate._sum);
-    const totalPrice = installment.quotation.totalPrice ?? new Prisma.Decimal(0);
+    const totalPrice =
+      installment.quotation.totalPrice ?? new Prisma.Decimal(0);
     // The plan validator accepts installments within 0.001 of the
     // total (MONEY_EPSILON in quotation-payment-plan.service.ts), so
     // settlement must honor the same tolerance — otherwise a plan one
     // millime short of a fractional loyalty net can never reach
     // `paid`. A tolerated shortfall reports remainingAmount 0.
-    const settled = totalPaid.gte(totalPrice.minus(new Prisma.Decimal('0.001')));
+    const settled = totalPaid.gte(
+      totalPrice.minus(new Prisma.Decimal('0.001')),
+    );
     const remaining = settled
       ? new Prisma.Decimal(0)
       : Prisma.Decimal.max(totalPrice.minus(totalPaid), new Prisma.Decimal(0));
@@ -806,6 +1330,9 @@ export class PaymentsService {
     // already in fabrication, shipped or finished, and paying it must
     // leave that status alone. The full-payment move is the quote edit's
     // own rule (advanceOrderWhenPaid), so both paths agree on "paid".
+    // A partial payment leaves the order in payment_review while another
+    // installment transfer still awaits the admin (DECISIONS §1, the rule
+    // a refusal applies), in payment_pending otherwise.
     const orderId = installment.quotation.orderId;
     if (newStatus === QuotationPaymentStatus.paid) {
       await advanceOrderWhenPaid(tx, orderId);
@@ -813,7 +1340,7 @@ export class PaymentsService {
       await moveOrderWithinPaymentPhase(
         tx,
         orderId,
-        OrderStatus.payment_pending,
+        await paymentPhaseAfterPartialSettlement(tx, orderId),
       );
     }
     const order = await tx.dentalOrder.findUnique({
@@ -840,9 +1367,7 @@ export class PaymentsService {
       order,
       installmentNumber: installment.installmentNumber,
       batchUnlocked:
-        installment.stepBatch?.status === BatchStatus.locked
-          ? installment.stepBatch
-          : null,
+        unlocked && installment.stepBatch ? installment.stepBatch : null,
       skipNotify: false,
     };
   }
@@ -899,7 +1424,11 @@ export class PaymentsService {
         fromStep: batchUnlocked.fromStep,
         toStep: batchUnlocked.toStep,
         batchNumber: batchUnlocked.batchNumber,
-      });
+        source: BatchUnlockSource.payment,
+        paymentId: payment.id,
+        installmentNumber,
+        actorId: payment.confirmedById ?? null,
+      } satisfies BatchUnlockedEvent);
     }
     return payment;
   }
@@ -911,7 +1440,9 @@ export class PaymentsService {
    * `awaiting_confirmation` when the caller doesn't pass a status —
    * that's the inbox view.
    */
-  async listPendingConfirmations(opts: PaymentListOptions & { caller: Caller }) {
+  async listPendingConfirmations(
+    opts: PaymentListOptions & { caller: Caller },
+  ) {
     if (!isAdmin(opts.caller)) {
       throw new ForbiddenException('Admin-only.');
     }
@@ -921,7 +1452,9 @@ export class PaymentsService {
       // was asked for. Explicit statuses[] / status filters still win.
       statuses:
         opts.statuses ??
-        (opts.status ? [opts.status] : [PaymentRecordStatus.awaiting_confirmation]),
+        (opts.status
+          ? [opts.status]
+          : [PaymentRecordStatus.awaiting_confirmation]),
       forceScope: 'all',
     });
   }
@@ -1238,6 +1771,25 @@ export class PaymentsService {
         `Available from ${row.availableFrom.toISOString()} — payments cannot be initiated earlier.`,
       );
     }
+  }
+
+  /**
+   * assertPayable for a bank-transfer declaration (and a receipt
+   * replacement, which is one): an installment paid meanwhile, typically
+   * because an admin confirmed the very transfer being replaced, is a 409
+   * INSTALLMENT_ALREADY_PAID the client answers with « déjà traité » and a
+   * refetch, never a code-less 400 it can only offer to retry.
+   */
+  private assertDeclarable(
+    row: Parameters<PaymentsService['assertPayable']>[0],
+  ): void {
+    if (row.status === InstallmentStatus.paid) {
+      throw new ConflictException(
+        'Cette échéance est déjà payée : ce virement a déjà été traité.',
+        INSTALLMENT_ALREADY_PAID,
+      );
+    }
+    this.assertPayable(row);
   }
 
   /**

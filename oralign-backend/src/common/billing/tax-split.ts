@@ -35,7 +35,8 @@ export const round3 = (value: NumLike): Prisma.Decimal =>
   dec(value).toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP);
 
 /** Decimal → JS number with 3 decimals, for DTOs and Float columns. */
-export const toAmount = (value: NumLike): number => Number(round3(value).toFixed(3));
+export const toAmount = (value: NumLike): number =>
+  Number(round3(value).toFixed(3));
 
 const nonNegative = (value: NumLike): Prisma.Decimal => {
   const d = dec(value);
@@ -123,7 +124,9 @@ export function computeWithholding(
   if (rate.isZero() || b.isZero()) {
     return { rate: null, base: b, amount: new Prisma.Decimal(0), net: b };
   }
-  const capped = rate.greaterThanOrEqualTo(100) ? new Prisma.Decimal(99.99) : rate;
+  const capped = rate.greaterThanOrEqualTo(100)
+    ? new Prisma.Decimal(99.99)
+    : rate;
   const amount = round3(b.mul(capped).div(100));
   return { rate: capped, base: b, amount, net: b.minus(amount) };
 }
@@ -133,7 +136,10 @@ export function computeWithholding(
  * the last non-zero weight absorbing the rounding so the parts add up to
  * `total` exactly. All-zero weights give all-zero parts.
  */
-export function spreadProportionally(total: NumLike, weights: NumLike[]): Money[] {
+export function spreadProportionally(
+  total: NumLike,
+  weights: NumLike[],
+): Money[] {
   const t = round3(total);
   const w = weights.map((x) => nonNegative(x));
   const sum = w.reduce((acc, x) => acc.plus(x), new Prisma.Decimal(0));
@@ -165,17 +171,28 @@ export interface PaymentCharge {
   withholding: Money;
   /** total - withholding: the cash charged or received. */
   cash: Money;
+  /**
+   * The retenue threshold in force when the charge was computed (spec §4),
+   * a SNAPSHOT stored beside the rate on Payment / DentalOrder / Invoice.
+   * null = not known to the caller (a charge built without the settings).
+   * It describes the rule; it never changes the figures above.
+   */
+  withholdingThreshold: Money | null;
 }
 
 /**
  * What one payment of `due` (TTC) charges: the stamp is added, the
  * retenue (on the TTC, stamp excluded) comes off. What the payment
  * settles on the devis is always `due` (= cash + withholding - stamp).
+ * `withholdingThreshold` is only carried along as the snapshot: this is
+ * the arithmetic, the eligibility rule is withholdingIneligibility (the
+ * payment entry points apply it through payment-rules.ts).
  */
 export function paymentCharge(
   due: NumLike,
   stamp: NumLike,
   withholdingRatePercent?: NumLike,
+  withholdingThreshold?: NumLike,
 ): PaymentCharge {
   const d = round3(nonNegative(due));
   const s = d.isZero() ? new Prisma.Decimal(0) : round3(nonNegative(stamp));
@@ -188,7 +205,70 @@ export function paymentCharge(
     withholdingRate: w.rate,
     withholding: w.amount,
     cash: total.minus(w.amount),
+    withholdingThreshold:
+      withholdingThreshold === null ||
+      withholdingThreshold === undefined ||
+      withholdingThreshold === ''
+        ? null
+        : round3(nonNegative(withholdingThreshold)),
   };
+}
+
+/**
+ * The retenue à la source rule in force (spec §4): the company settings,
+ * or a document's snapshot of them (Quotation.companySnapshot).
+ */
+export interface WithholdingRule {
+  /** CompanyBillingSettings.withholdingEnabled; anything but true is off. */
+  enabled?: boolean | null;
+  /** The rate (%); 0 or unset means the retenue cannot apply. */
+  rate?: NumLike;
+  /**
+   * The payment base (TTC, stamp excluded) from which the retenue may
+   * apply. null / undefined = no threshold (a rule read without one).
+   */
+  threshold?: NumLike;
+}
+
+/** Why the retenue cannot apply to a payment; null when it can. */
+export type WithholdingIneligibility = 'disabled' | 'below_threshold';
+
+/**
+ * Default rule (DECISIONS §4, accountant to confirm): the retenue may be
+ * applied when it is switched on, its rate is above 0 and the payment's
+ * base reaches the threshold. The base is what one payment settles, TTC
+ * with the stamp excluded: the installment amount, or the treatment fee
+ * + CBCT. Compared in Decimal at the millime, ≥ (the threshold itself
+ * qualifies). The practitioner still opts in payment by payment.
+ *
+ *   enabled, 1 %, threshold 1 000:   999.999 -> below_threshold
+ *                                   1 000.000 -> eligible
+ *   switched off (or rate 0)                  -> disabled
+ */
+export function withholdingIneligibility(
+  base: NumLike,
+  rule: WithholdingRule,
+): WithholdingIneligibility | null {
+  // gt(0), not isPositive(): Decimal.js counts 0 as positive.
+  if (rule.enabled !== true || !dec(rule.rate).gt(0)) return 'disabled';
+  if (
+    rule.threshold === null ||
+    rule.threshold === undefined ||
+    rule.threshold === ''
+  ) {
+    return null;
+  }
+  return round3(nonNegative(base)).lessThan(round3(nonNegative(rule.threshold)))
+    ? 'below_threshold'
+    : null;
+}
+
+/** True when the retenue may be applied to a payment of `base`. */
+export function isWithholdingEligible(
+  base: NumLike,
+  rule: WithholdingRule,
+): boolean {
+  return withholdingIneligibility(base, rule) === null;
 }
 
 export interface InclusiveLineInput {
@@ -240,12 +320,19 @@ export function inclusiveInvoiceTotals(
   const lineTtc = lines.map((l) =>
     round3(nonNegative(l.quantity ?? 1).mul(nonNegative(l.unitPriceTtc))),
   );
-  const grossTtc = lineTtc.reduce((acc, x) => acc.plus(x), new Prisma.Decimal(0));
+  const grossTtc = lineTtc.reduce(
+    (acc, x) => acc.plus(x),
+    new Prisma.Decimal(0),
+  );
   const rawDiscount = round3(nonNegative(discountTtc));
-  const discountApplied = rawDiscount.greaterThan(grossTtc) ? grossTtc : rawDiscount;
+  const discountApplied = rawDiscount.greaterThan(grossTtc)
+    ? grossTtc
+    : rawDiscount;
   // TTC of the lines after the discount: what TVA applies to.
   const taxable = grossTtc.minus(discountApplied);
-  const s = taxable.isZero() ? new Prisma.Decimal(0) : round3(nonNegative(stamp));
+  const s = taxable.isZero()
+    ? new Prisma.Decimal(0)
+    : round3(nonNegative(stamp));
   const totalTtc = taxable.plus(s);
 
   const shares = spreadProportionally(taxable, lineTtc);
@@ -261,7 +348,10 @@ export function inclusiveInvoiceTotals(
     const q = nonNegative(lines[i].quantity ?? 1);
     return q.isZero() ? new Prisma.Decimal(0) : round3(ht.div(q));
   });
-  const subTotalHt = lineHt.reduce((acc, x) => acc.plus(x), new Prisma.Decimal(0));
+  const subTotalHt = lineHt.reduce(
+    (acc, x) => acc.plus(x),
+    new Prisma.Decimal(0),
+  );
   const withholding = computeWithholding(taxable, withholdingRatePercent);
 
   return {

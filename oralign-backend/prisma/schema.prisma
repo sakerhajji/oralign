@@ -417,6 +417,29 @@ enum PaymentRecordStatus {
   expired
 }
 
+// What released a step batch (QuoteStepBatch.unlockSource), written only
+// by production/batch-unlock.ts:
+//   payment               its installment was settled
+//   installment_cancelled a quote edit closed its installment at 0
+//   manual                an admin, with a reason, installment still pending
+enum BatchUnlockSource {
+  payment
+  installment_cancelled
+  manual
+}
+
+// The doctor inactivity journal (AccountActivityEvent.kind). warning_30d,
+// warning_7d and deactivated are written by the daily sweep (system);
+// reactivated, blocked and unblocked by an admin.
+enum AccountActivityEventKind {
+  warning_30d
+  warning_7d
+  deactivated
+  reactivated
+  blocked
+  unblocked
+}
+
 // Distinguishes the legacy approved-quotation calculation from the
 // production order-based loyalty rules. Existing rows are migrated as
 // approved_quotes_v1 and are recalculated non-destructively into v2.
@@ -493,6 +516,23 @@ model User {
   // doctor reset to "available" receives a new gift on a later case.
   welcomeGiftUsedAt   DateTime?
 
+  // ── Doctor inactivity (spec §5, src/users/activity) ──────────────
+  // A DORMANT state, apart from isActive: isActive = "Bloqué" (full
+  // lockout) and is never touched by the inactivity rule. A dormant doctor
+  // keeps login, payments, plan approval and chat; only ordering and the
+  // public directory are closed to him (403 ACCOUNT_DORMANT).
+  //   inactiveSince   set by the daily sweep when the deadline passes;
+  //                   null = active by activity. Cleared on reactivation.
+  //   activityResetAt set on an admin reactivation: part of the anchor, so
+  //                   the next sweep does not deactivate him again at once.
+  //   approvedAt      stamped when an admin approves the account (no
+  //                   history before 2026-11-27: null = use createdAt).
+  // anchor = max(last submitted order, activityResetAt, approvedAt ??
+  // createdAt); deadline = anchor + CompanyBillingSettings.inactivityMonths.
+  inactiveSince       DateTime?
+  activityResetAt     DateTime?
+  approvedAt          DateTime?
+
   // Timestamps
   lastLoginAt         DateTime?
   createdAt           DateTime           @default(now())
@@ -524,6 +564,18 @@ model User {
   rejectedPayments     Payment[]         @relation("PaymentRejectedBy")
   initiatedPayments    Payment[]         @relation("PaymentInitiatedBy")
   deliveredBatches     QuoteStepBatch[]  @relation("BatchDeliveredBy")
+  // Transfer review trail (spec §1, all SetNull + name snapshot): the first
+  // admin who opened a receipt, who withdrew / superseded a declaration,
+  // who refused a treatment-fee transfer, who unlocked a step batch.
+  reviewOpenedPayments   Payment[]        @relation("PaymentReviewOpenedBy")
+  cancelledPayments      Payment[]        @relation("PaymentCancelledBy")
+  rejectedTreatmentFees  DentalOrder[]    @relation("TreatmentFeeRejectedBy")
+  unlockedBatches        QuoteStepBatch[] @relation("BatchUnlockedBy")
+  // Inactivity journal: this account's own events (Cascade) and the
+  // events an admin wrote on other accounts (SetNull + actorName).
+  accountActivityEvents      AccountActivityEvent[] @relation("AccountActivityUser")
+  actedAccountActivityEvents AccountActivityEvent[] @relation("AccountActivityActor")
+  billingSettingsAuditEntries BillingSettingsAuditLog[] @relation("BillingSettingsAuditActor")
 
   // In-app notifications addressed to this user. The NotificationsModule
   // owns the read-state lifecycle; the relation is here purely so we can
@@ -569,6 +621,38 @@ model User {
   @@index([isActive])
   @@index([deletedAt])               // fast soft-delete filtering
   @@index([lockedUntil])             // lockout queries
+  @@index([role, inactiveSince])     // dormant doctors (filter, counter, sweep)
+}
+
+// Append-only journal of a doctor account's activity state (spec §5): the
+// sweep's warnings and deactivation, an admin's reactivation, block and
+// unblock. Nothing is ever deleted by the rule; the journal goes with the
+// account (Cascade), which can itself only be purged when it owns no
+// clinical history. @@unique([userId, kind, anchorAt]) is the sweep's
+// idempotency key: anchorAt is the CYCLE KEY for warning_30d / warning_7d
+// / deactivated (one of each per cycle): the activity anchor, or the
+// latest rule switch-on / unblock when that is later, so a re-enabled rule
+// or an unblocked account opens a fresh cycle (doctor-activity.rules.ts).
+// For the admin kinds it is the event instant. actorId null = the system
+// (the sweep).
+model AccountActivityEvent {
+  id         String                   @id @default(uuid())
+  userId     String
+  user       User                     @relation("AccountActivityUser", fields: [userId], references: [id], onDelete: Cascade)
+  kind       AccountActivityEventKind
+  anchorAt   DateTime
+  deadlineAt DateTime
+  actorId    String?
+  actor      User?                    @relation("AccountActivityActor", fields: [actorId], references: [id], onDelete: SetNull)
+  actorName  String?
+  actorRole  UserRole?
+  reason     String?
+  metadata   Json?
+  createdAt  DateTime                 @default(now())
+
+  @@unique([userId, kind, anchorAt])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([kind, createdAt])
 }
 
 // ─────────────────────────────────────────
@@ -719,6 +803,25 @@ model DentalOrder {
   treatmentFeePaymentStatus     PaymentRecordStatus?
   // Relative path under uploads/ for the bank-transfer receipt.
   treatmentFeeProofPath         String?
+  // ── Treatment-fee transfer review (spec §1; no Payment row) ─────
+  // The 5 transfer states are DERIVED (payments/services/transfer-state.ts):
+  // awaiting_confirmation + reviewOpenedAt null = "Reçu envoyé", + set =
+  // "À vérifier"; rejected = "Refusé". declaredAt is the declaration's
+  // identity (Notification.subjectKey treatment_fee:<orderId>:<epoch ms>);
+  // a new upload restamps it and clears the review / rejection columns.
+  // Rows declared before 2026-11-27 were backfilled with updatedAt.
+  treatmentFeeDeclaredAt        DateTime?
+  treatmentFeeReviewOpenedAt    DateTime?
+  treatmentFeeRejectedAt        DateTime?
+  treatmentFeeRejectedById      String?
+  treatmentFeeRejectedByName    String?
+  treatmentFeeRejectionReason   String?
+  // Idempotency-Key of the last declaration (proof upload), compared under
+  // the order FOR UPDATE lock: a replay returns the order as it stands.
+  treatmentFeeDeclarationKey    String?
+  // Retenue threshold in force when the fee was charged (snapshot; null =
+  // charged before the threshold existed).
+  treatmentFeeWithholdingThreshold Decimal?               @db.Decimal(12, 3)
 
   // Sequential treatment-fee receipt number (TF-000001) — a SEPARATE
   // sequence from the installment FAC- invoices. Allocated lazily on
@@ -783,6 +886,8 @@ model DentalOrder {
   doctor                        User                      @relation("OrderDoctor", fields: [doctorId], references: [id], onDelete: Restrict)
   patient                       Patient                   @relation(fields: [patientId], references: [id], onDelete: Restrict)
   assignedDesigner              User?                     @relation("OrderDesigner", fields: [assignedDesignerId], references: [id], onDelete: SetNull)
+  // Actor ref (DELETION-POLICY rule 4): SetNull + treatmentFeeRejectedByName.
+  treatmentFeeRejectedBy        User?                     @relation("TreatmentFeeRejectedBy", fields: [treatmentFeeRejectedById], references: [id], onDelete: SetNull)
   parentOrder                   DentalOrder?               @relation("OrderSupplementals", fields: [parentOrderId], references: [id], onDelete: Restrict)
   supplementalOrders            DentalOrder[]              @relation("OrderSupplementals")
   supplementalRequest           SupplementalOrderRequest?
@@ -820,6 +925,10 @@ model DentalOrder {
   // The treatment fees received over a period (payments summary, history
   // filtered by paid date).
   @@index([treatmentFeePaymentStatus, treatmentFeePaidAt])
+  // The transfer queue (awaiting / refused fees by declaration date).
+  @@index([treatmentFeePaymentStatus, treatmentFeeDeclaredAt])
+  // Inactivity: a doctor's last submitted order (MAX(submittedAt)).
+  @@index([doctorId, submittedAt])
 }
 
 // One row per supplemental child order: its typed answers and its review.
@@ -971,12 +1080,18 @@ model OrderAuditLog {
   // { field: { from, to } } for direct order edits/status transitions.
   changes   Json?
   // Small contextual payload (reason, file names, payment amount, etc.).
+  // Never a file path: assigned designers read the order history.
   metadata  Json?
+  // The Payment a transfer / unlock row is about (common/audit
+  // order-audit-actions.ts). A plain indexed column, NO foreign key: the
+  // ledger is Restrict-protected and must never be blocked by its journal.
+  paymentId String?
 
   createdAt DateTime @default(now())
 
   @@index([orderId, createdAt(sort: Desc)])
   @@index([actorId])
+  @@index([paymentId, createdAt(sort: Desc)])
 }
 
 model OrderToothInstruction {
@@ -1586,6 +1701,10 @@ model DentistProfile {
   // distinct from CompanyBillingSettings.taxRegistrationNumber, which is
   // the Oralign (company) header tax id.
   taxId          String?
+  // Professional-order registration number of the practitioner. Optional
+  // and PRIVATE like taxId (never on the public directory); stored once and
+  // reused, not printed on documents until the owner decides.
+  registrationNumber String?
 
   description    String?
   logoUrl        String?        // validated path only, no raw URLs
@@ -1759,6 +1878,24 @@ model CompanyBillingSettings {
   // Payment / DentalOrder / Invoice when applied, so editing it here never
   // rewrites a payment already made.
   withholdingRate         Decimal       @default(1) @db.Decimal(5, 2)
+  // Master switch of the retenue (spec §4). OFF until the accountant
+  // validates the rule: existing rows were backfilled false
+  // (20261127000001_spec_model), whatever their rate.
+  withholdingEnabled      Boolean       @default(false)
+  // Payment base (TTC, stamp excluded) at or above which the retenue may
+  // be applied; « initialement 1 000 DT ». Compared in Decimal, snapshotted
+  // on Payment / DentalOrder / Invoice like the rate.
+  withholdingThreshold    Decimal       @default(1000) @db.Decimal(12, 3)
+  // ── Doctor inactivity rule (spec §5) ─────────────────────────────
+  // Rollout switch of the daily sweep (off = it never runs) and the
+  // inactivity period in calendar months.
+  inactivityRuleEnabled   Boolean       @default(false)
+  inactivityMonths        Int           @default(6)
+  // When the switch last went from off to on (null = never switched on).
+  // Opens a fresh warning cycle for every doctor (doctor-activity.rules.ts
+  // cycleKey): warnings sent before a switch-off never count after it, so
+  // a re-enabled rule always gives the full 30-day and 7-day notice.
+  inactivityRuleEnabledAt DateTime?
 
   // ── CBCT paid supplement ─────────────────────────────────────────
   // When enabled with a fee > 0, requesting CBCT on a new order adds
@@ -1814,6 +1951,25 @@ model CompanyBillingSettings {
   updatedAt               DateTime      @updatedAt
 
   @@index([isActive])
+}
+
+// Append-only trail of the fiscal and rollout settings (withholdingEnabled,
+// withholdingRate, withholdingThreshold, stampDuty, defaultTvaRate,
+// inactivityRuleEnabled, inactivityMonths): one row per field that moved,
+// written in the same transaction as the settings update. The actor is a
+// reference (SetNull) with a name snapshot, so the trail outlives the
+// admin account.
+model BillingSettingsAuditLog {
+  id        String   @id @default(uuid())
+  actorId   String?
+  actor     User?    @relation("BillingSettingsAuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  actorName String?
+  field     String
+  before    Json?
+  after     Json?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
 }
 
 // ─────────────────────────────────────────
@@ -2141,6 +2297,17 @@ model QuoteStepBatch {
   status         BatchStatus      @default(locked)
 
   unlockedAt     DateTime?
+  // Who and what released the steps (production/batch-unlock.ts, the ONE
+  // writer): a settled installment (payment), an installment cancelled at
+  // 0 by a quote edit (installment_cancelled) or an admin with a reason
+  // while the installment stays pending (manual). Actor = SetNull + name
+  // snapshot; null actor = the system (card settlement). Rows unlocked
+  // before 2026-11-27 had unlockSource backfilled from their installment.
+  unlockedById   String?
+  unlockedBy     User?            @relation("BatchUnlockedBy", fields: [unlockedById], references: [id], onDelete: SetNull)
+  unlockedByName String?
+  unlockSource   BatchUnlockSource?
+  unlockReason   String?          // manual only
   deliveredAt    DateTime?
   deliveredById  String?
   deliveredBy    User?            @relation("BatchDeliveredBy", fields: [deliveredById], references: [id], onDelete: SetNull)
@@ -2243,7 +2410,10 @@ model Payment {
   // service layer and translated to an idempotent 200 OK).
   idempotencyKey  String?             @unique
 
-  // BANK_TRANSFER: relative path under /uploads/payments/<id>/proof.<ext>.
+  // BANK_TRANSFER receipt, a path under the uploads root. Legacy rows hold
+  // /uploads/payments/<uuid>.<ext>; from 2026-11-27 receipts are written
+  // under uploads/orders/<orderId>/payment-proofs/<uuid>.<ext>. Private:
+  // read only through GET payments/:paymentId/proof, never the public mount.
   proofUrl        String?
   // Admin notes when confirming / rejecting manual payments.
   notes           String?
@@ -2261,8 +2431,35 @@ model Payment {
   initiatedById   String?
   initiatedBy     User?               @relation("PaymentInitiatedBy", fields: [initiatedById], references: [id], onDelete: SetNull)
 
+  // ── Transfer review (spec §1) ───────────────────────────────────
+  // The 5 transfer states are DERIVED, the status enum is unchanged
+  // (payments/services/transfer-state.ts): awaiting_confirmation +
+  // reviewOpenedAt null = "Reçu envoyé", + set = "À vérifier".
+  // reviewOpenedAt: the FIRST time an admin opened the receipt (global
+  // workflow state; the per-admin "Nouveau / Consulté" is
+  // Notification.readAt by subjectKey).
+  reviewOpenedAt     DateTime?
+  reviewOpenedById   String?
+  reviewOpenedBy     User?            @relation("PaymentReviewOpenedBy", fields: [reviewOpenedById], references: [id], onDelete: SetNull)
+  reviewOpenedByName String?
+  // A declaration withdrawn by the doctor or superseded by a new one
+  // (status cancelled): when and by whom. The file is kept.
+  cancelledAt        DateTime?
+  cancelledById      String?
+  cancelledBy        User?            @relation("PaymentCancelledBy", fields: [cancelledById], references: [id], onDelete: SetNull)
+  cancelledByName    String?
+  // Idempotency-Key of a transfer declaration (not the card-only
+  // idempotencyKey above): a replay by the same caller returns this row.
+  declarationKey     String?
+  // Retenue threshold in force when the charge was computed (snapshot;
+  // null = created before the threshold existed).
+  withholdingThreshold Decimal?       @db.Decimal(12, 3)
+
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
+
+  // NULLs are distinct: rows without a key (cards, cash, legacy) never collide.
+  @@unique([initiatedById, declarationKey])
 
   @@index([orderId])
   @@index([quotationId])
@@ -2282,6 +2479,9 @@ model Payment {
   @@index([provider, status, lastProviderCheckAt])
   // The money received over a period: successful payments by paid date.
   @@index([status, paidAt])
+  // The transfer queue ("Nouveau / À vérifier / Validé / Refusé"), newest
+  // declaration first.
+  @@index([paymentMethod, status, declaredAt(sort: Desc)])
 }
 
 // ─────────────────────────────────────────
@@ -2323,11 +2523,17 @@ enum NotificationType {
   payment_confirmed        // admin confirmed a bank/cash payment
   payment_rejected         // admin rejected a bank transfer proof
   treatment_fee_confirmed  // admin confirmed the doctor's treatment-fee bank transfer → treatment plan can now start
+  treatment_fee_rejected   // admin refused the treatment-fee transfer (message carries « Motif : … »)
   batch_unlocked           // a step batch moved from locked → unlocked
   batch_delivered          // admin marked a step batch as delivered
   installment_overdue      // an installment passed its due date unpaid
   production_delivered            // the lab declared aligners delivered (ProductionNotice, in_app)
   production_delivery_cancelled   // a delivery already notified was cancelled (correction)
+  account_inactivity_warning      // the account will turn dormant in 30 / 7 days without a submitted order
+  account_deactivated             // the account turned dormant (no order for inactivityMonths)
+  account_reactivated             // an admin reactivated the dormant account
+  // ── Admin-facing (inactivity) ────────────────────────────────
+  doctor_deactivated_inactivity   // the sweep turned a doctor's account dormant
   // ── Generic ──────────────────────────────────────────────────
   system_message
 }
@@ -2346,6 +2552,14 @@ model Notification {
   /// state, always re-fetch from the real resource.
   metadata    Json?
   readAt      DateTime?
+  /// The business subject a row is about, built ONLY by
+  /// notifications/notification-subject.ts: `installment:<paymentId>` or
+  /// `treatment_fee:<orderId>:<treatmentFeeDeclaredAt epoch ms>`. One row
+  /// per admin per subject; readAt is that admin's "Consulté". Every row of
+  /// a subject is resolved (readAt set) when any admin processes it or the
+  /// doctor replaces / withdraws. Null on rows that are about nothing
+  /// actionable; the transfer badge ignores them.
+  subjectKey  String?
   createdAt   DateTime         @default(now())
 
   recipient   User             @relation(fields: [recipientId], references: [id], onDelete: Cascade)
@@ -2354,6 +2568,10 @@ model Notification {
   // composite index serves both filters in one scan.
   @@index([recipientId, readAt])
   @@index([recipientId, createdAt])
+  // My unread rows of a subject (badge, seenByMe, mark-subject-read) …
+  @@index([recipientId, subjectKey, readAt])
+  // … and every recipient's rows of a subject (resolveSubject).
+  @@index([subjectKey])
 }
 
 // ─────────────────────────────────────────
@@ -2893,6 +3111,20 @@ model Invoice {
   clientCity     String?
   clientCountry  String?
   clientTaxId    String?       // matricule fiscal of the client
+  // Snapshot of the billed practitioner's clinic (spec §6): the stored
+  // invoice PDF reads it instead of the live DentistProfile.
+  clientClinicName         String?
+  // The invoice is billed to its practitioner (doctorId) in his own name:
+  // decided at creation, so the "Docteur : X" lead no longer compares
+  // with the live User.fullName.
+  clientIsPractitioner     Boolean @default(false)
+  // Snapshot of DentistProfile.registrationNumber (not printed for now).
+  clientRegistrationNumber String?
+  // Invoices issued before 2026-11-27: clientIsPractitioner and
+  // clientClinicName were BACKFILLED from the live profile at migration
+  // time (20261127000001_spec_model), each such row marked by an
+  // InvoiceAuditLog 'client_snapshot_backfilled' entry: not truly
+  // historical.
 
   issueDate      DateTime      @default(now())
   dueDate        DateTime?
@@ -2929,6 +3161,14 @@ model Invoice {
   withholdingRate   Decimal?   @db.Decimal(5, 2)
   withholdingAmount Decimal    @default(0) @db.Decimal(12, 3)
   netPayable        Decimal    @default(0) @db.Decimal(12, 3)
+  // Retenue threshold in force (snapshot copied from the Payment / the
+  // order's fee, or from the settings for a manual invoice); null = issued
+  // before the threshold existed.
+  withholdingThreshold Decimal? @db.Decimal(12, 3)
+  // What was still owed on the devis right after the payment this invoice
+  // records ("Reste à payer"), frozen at issue. Null on manual invoices,
+  // treatment-fee invoices and invoices issued before 2026-11-27.
+  quoteRemainingAfter  Decimal? @db.Decimal(12, 3)
   // Treatment fee (+ CBCT) this invoice bills. The idempotency key of the
   // automatic fee invoice: a fee paid in cash or by transfer has no
   // Payment row, so `paymentId` cannot key it. Plain column, no FK.

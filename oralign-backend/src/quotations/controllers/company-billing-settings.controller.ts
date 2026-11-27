@@ -7,6 +7,7 @@ import {
   Put,
   Body,
   Post,
+  Query,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -25,10 +26,17 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Public } from '../../common/decorators/public.decorator';
+import {
+  CurrentUser,
+  type JwtPayload,
+} from '../../common/decorators/current-user.decorator';
 import { PublicReadThrottle } from '../../common/decorators/public-read-throttle.decorator';
 import { BadRequestException } from '../../common/exceptions/app.exception';
+import { toAmount } from '../../common/billing/tax-split';
 import { LocalStorageService } from '../../storage/local-storage.service';
 import {
+  BillingSettingsHistoryPageDto,
+  BillingSettingsHistoryQueryDto,
   CompanyBillingSettingsResponseDto,
   LegalInfoDto,
   UpsertCompanyBillingSettingsDto,
@@ -75,14 +83,27 @@ export class CompanyBillingSettingsController {
   @Put()
   @ApiOperation({
     summary:
-      'Upsert the company billing settings. First call requires companyName.',
+      'Upsert the company billing settings. First call requires companyName. Every change of a fiscal or rollout field (retenue switch / rate / threshold, stamp, TVA, inactivity switch / months) writes one history row per field, in the same transaction.',
   })
   @ApiResponse({ status: 200, type: CompanyBillingSettingsResponseDto })
   async upsert(
     @Body() dto: UpsertCompanyBillingSettingsDto,
+    @CurrentUser() user: JwtPayload,
   ): Promise<CompanyBillingSettingsResponseDto> {
-    const settings = await this.service.upsert(dto);
+    const settings = await this.service.upsert(dto, { userId: user.sub });
     return CompanyBillingSettingsService.toDto(settings);
+  }
+
+  @Get('history')
+  @ApiOperation({
+    summary:
+      'History of the fiscal and rollout settings, newest first: one row per field change (field, before, after, admin name, date).',
+  })
+  @ApiResponse({ status: 200, type: BillingSettingsHistoryPageDto })
+  async history(
+    @Query() query: BillingSettingsHistoryQueryDto,
+  ): Promise<BillingSettingsHistoryPageDto> {
+    return this.service.listHistory(query.page, query.limit);
   }
 
   @Post('logo')
@@ -165,9 +186,7 @@ export class CompanyBillingSettingsController {
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.dentist, UserRole.admin, UserRole.super_admin)
 export class PublicBillingDefaultsController {
-  constructor(
-    private readonly service: CompanyBillingSettingsService,
-  ) {}
+  constructor(private readonly service: CompanyBillingSettingsService) {}
 
   @Get('public-defaults')
   @ApiOperation({
@@ -184,6 +203,8 @@ export class PublicBillingDefaultsController {
         defaultTvaRate: { type: 'number', example: 19 },
         stampDuty: { type: 'number', example: 1 },
         withholdingRate: { type: 'number', example: 1 },
+        withholdingEnabled: { type: 'boolean', example: false },
+        withholdingThreshold: { type: 'number', nullable: true, example: 1000 },
         cbctSupplementEnabled: { type: 'boolean', example: false },
         cbctSupplementFee: { type: 'number', example: 0 },
         companyName: { type: 'string', nullable: true },
@@ -209,6 +230,8 @@ export class PublicBillingDefaultsController {
     defaultTvaRate: number;
     stampDuty: number;
     withholdingRate: number;
+    withholdingEnabled: boolean;
+    withholdingThreshold: number | null;
     cbctSupplementEnabled: boolean;
     cbctSupplementFee: number;
     refinementTwoArchesFee: number;
@@ -232,15 +255,13 @@ export class PublicBillingDefaultsController {
     // runtime shape matches the structural subtype below. We cast
     // through `unknown` to make TypeScript accept the narrowing
     // without weakening callers' types.
-    const rawBank = (settings?.bankDetails ?? null) as
-      | {
-          bankName?: string;
-          accountName?: string;
-          rib?: string;
-          iban?: string;
-          swift?: string;
-        }
-      | null;
+    const rawBank = (settings?.bankDetails ?? null) as {
+      bankName?: string;
+      accountName?: string;
+      rib?: string;
+      iban?: string;
+      swift?: string;
+    } | null;
     // Treat an empty `{}` (admin saved nothing) as null so the UI
     // shows the friendly "not configured yet" fallback instead of an
     // empty panel.
@@ -254,21 +275,24 @@ export class PublicBillingDefaultsController {
         ? rawBank
         : null;
     return {
-      defaultTreatmentFee: settings
-        ? Number(settings.defaultTreatmentFee)
-        : 0,
+      defaultTreatmentFee: settings ? Number(settings.defaultTreatmentFee) : 0,
       defaultCurrency: settings?.defaultCurrency ?? 'TND',
       // Prices are TTC: the payment dialogs show the TVA and the stamp
-      // inside them, and offer the retenue à la source when its rate > 0.
+      // inside them, and offer the retenue à la source when it is switched
+      // on, its rate is above 0 and the payment reaches the threshold (the
+      // server enforces the same rule: payment-rules.ts).
       defaultTvaRate: settings?.defaultTvaRate ?? 19,
       stampDuty: settings ? Number(settings.stampDuty) : 1,
       withholdingRate: settings ? Number(settings.withholdingRate) : 0,
+      withholdingEnabled: settings?.withholdingEnabled ?? false,
+      // null when nothing is configured (the retenue is then off anyway).
+      withholdingThreshold: settings
+        ? toAmount(settings.withholdingThreshold)
+        : null,
       // CBCT supplement — Number-unwrapped like defaultTreatmentFee so
       // the order form can show the configured price before requesting.
       cbctSupplementEnabled: settings?.cbctSupplementEnabled ?? false,
-      cbctSupplementFee: settings
-        ? Number(settings.cbctSupplementFee)
-        : 0,
+      cbctSupplementFee: settings ? Number(settings.cbctSupplementFee) : 0,
       // Beyond-the-pack tariffs (grille 2026) — informational for the
       // doctor-facing catalogue; 0 means "not configured, hide the line".
       refinementTwoArchesFee: settings

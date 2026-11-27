@@ -6,11 +6,13 @@ import * as React from "react"
 import { useAuth } from "@/lib/providers/auth-provider"
 import {
   useAdminSidebarBadges,
+  useDashboardSocket,
   useSupportSocket,
   useSupportUnreadCount,
 } from "@/lib/hooks"
 import { UserRole } from "@/lib/types"
 import { landingPathFor } from "@/lib/hooks/use-onboarding"
+import { useAccountDormantRefresh, useCanOrder } from "@/lib/hooks/use-can-order"
 
 import { getAvatarUrl } from "@/lib/utils"
 import { useT } from "@/lib/i18n/lang-context"
@@ -29,6 +31,7 @@ import {
   SidebarMenuItem,
   useSidebarActions,
 } from "@/components/ui/sidebar"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   CalendarCheckIcon,
   ClipboardListIcon,
@@ -41,6 +44,7 @@ import {
   GaugeIcon,
   HeartIcon,
   LayoutDashboardIcon,
+  LockIcon,
   MessageCircleIcon,
   NewspaperIcon,
   PackageIcon,
@@ -88,6 +92,34 @@ interface NavItemDef {
    * counter query resolves.
    */
   badge?: number
+  /** What the badge counts, in words (tooltip and screen readers). */
+  badgeLabel?: string
+}
+
+// ─── Attention badges ────────────────────────────────────────────────────────
+
+const PENDING_PAYMENTS_URL = "/dashboard/payments/pending"
+
+type BadgeCounter = "support" | "orders" | "users" | "transfers"
+
+/** The entries that carry a live count, and the dictionary key of its words. */
+const BADGE_OF_URL: Record<string, { counter: BadgeCounter; labelKey: string }> = {
+  "/dashboard/support": { counter: "support", labelKey: "sidebarBadges.support" },
+  "/dashboard/orders": { counter: "orders", labelKey: "sidebarBadges.orders" },
+  "/dashboard/users": { counter: "users", labelKey: "sidebarBadges.users" },
+  [PENDING_PAYMENTS_URL]: { counter: "transfers", labelKey: "sidebarBadges.transfers" },
+}
+
+/** An entry's live count and its words, or nothing for an entry without one. */
+function navBadge(
+  url: string,
+  counts: Record<BadgeCounter, number>,
+  t: (path: string, vars?: Record<string, string | number>) => string,
+): Pick<NavItemDef, "badge" | "badgeLabel"> {
+  const entry = BADGE_OF_URL[url]
+  if (!entry) return {}
+  const count = counts[entry.counter]
+  return { badge: count, badgeLabel: count > 0 ? t(entry.labelKey, { count }) : undefined }
 }
 
 // ─── Static nav data ─────────────────────────────────────────────────────────
@@ -145,7 +177,7 @@ const NAV_MAIN: NavItemDef[] = [
   },
   {
     titleKey: "chrome.nav.pendingPayments",
-    url: "/dashboard/payments/pending",
+    url: PENDING_PAYMENTS_URL,
     icon: <CreditCardIcon />,
     // Admin queue: pending bank-transfer confirmations + recent activity.
     roles: [UserRole.ADMIN, UserRole.SUPER_ADMIN],
@@ -253,6 +285,49 @@ const NEW_ORDER_ROLES: UserRole[] = [
   UserRole.SUPER_ADMIN,
 ]
 
+// ─── Dormant doctor's quick-create ───────────────────────────────────────────
+//
+// A dormant dentist (doctor inactivity, spec §5) may not order: the CTA
+// drops the black pill for a muted outline with a lock, says why on hover
+// and keyboard focus (tooltip) and to screen readers (description), and
+// still leads somewhere: /dashboard/orders/new shows the explanation page
+// with "Contact Oralign" instead of the wizard, so a tap on a phone (no
+// tooltip there) explains too. Same h-10 geometry as the pill in both
+// rail states, so hover-expand never shifts the nav rows below.
+
+function DormantNewOrderButton() {
+  const { t } = useT()
+  const hintId = React.useId()
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          asChild
+          variant="outline"
+          className="h-10 w-full justify-start gap-2 border-dashed text-muted-foreground transition-colors group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:h-10 group-data-[collapsible=icon]:w-10 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
+        >
+          <Link
+            href="/dashboard/orders/new"
+            aria-label={t("chrome.nav.newOrderAria")}
+            aria-describedby={hintId}
+          >
+            <LockIcon className="size-4 shrink-0" aria-hidden="true" />
+            <span className="truncate group-data-[collapsible=icon]:hidden">
+              {t("chrome.nav.newOrder")}
+            </span>
+            <span id={hintId} className="sr-only">
+              {t("accountActivity.ordering.blocked")}
+            </span>
+          </Link>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="right" aria-hidden="true">
+        {t("accountActivity.ordering.blocked")}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
@@ -278,13 +353,29 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   // SupportBubble owns the socket lifecycle.
   useSupportSocket({ enabled: isAdmin })
 
-  // Admin-only attention counts for the Orders + Users nav badges:
+  // Admin-only attention counts for the nav badges:
   //   • newOrders        — orders a doctor just submitted, awaiting triage.
   //   • pendingApprovals — dentists who signed up and need approval.
-  // Lightweight endpoint, polled every 30 s (low-frequency events).
+  //   • newTransfers     — MY new bank transfers (receipts I have not
+  //                        opened yet): the pending desk's Nouveaux tab.
+  // Lightweight endpoint, polled every 30 s, and refreshed at once by the
+  // dashboard socket below and after each of my own transfer actions.
   const sidebarBadgesQuery = useAdminSidebarBadges(isAdmin)
   const newOrdersBadge = sidebarBadgesQuery.data?.newOrders ?? 0
   const pendingApprovalsBadge = sidebarBadgesQuery.data?.pendingApprovals ?? 0
+  const newTransfersBadge = sidebarBadgesQuery.data?.newTransfers ?? 0
+
+  // The dashboard socket for the whole admin session (refcounted, shared
+  // with the dashboard pages): a receipt sent, opened or processed by
+  // another admin refreshes the badge, the pending desk and the bell
+  // without waiting for the poll.
+  useDashboardSocket({ enabled: isAdmin })
+
+  // Doctor inactivity (spec §5): a dormant dentist keeps the dashboard
+  // but may not order, so the quick-create CTA below explains instead of
+  // linking. Any 403 ACCOUNT_DORMANT refreshes /users/me for every gate.
+  const ordering = useCanOrder()
+  useAccountDormantRefresh()
 
   // Filter nav items by role. Items without a `roles` constraint are visible
   // to everyone; items with `roles` are only shown to matching users.
@@ -304,20 +395,19 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         // Resolve the language-aware label here so NavMain stays a
         // dumb renderer (it just prints `title`).
         title: t(item.titleKey),
-        // Live attention badge per nav item. Support = unread messages;
-        // Orders = new submitted orders; Users = dentists awaiting
-        // approval. Order/Users counts are admin-only (the query only
-        // runs for admins, so they're 0 for everyone else).
-        badge:
-          item.url === "/dashboard/support"
-            ? supportUnread
-            : item.url === "/dashboard/orders"
-              ? newOrdersBadge
-              : item.url === "/dashboard/users"
-                ? pendingApprovalsBadge
-                : undefined,
+        // Live attention badge per nav item, and what it means in words
+        // (tooltip + screen readers). Support = unread messages; Orders =
+        // new submitted orders; Users = dentists awaiting approval;
+        // Pending payments = my new transfers. All but Support are
+        // admin-only (the query only runs for admins, so 0 otherwise).
+        ...navBadge(item.url, {
+          support: supportUnread,
+          orders: newOrdersBadge,
+          users: pendingApprovalsBadge,
+          transfers: newTransfersBadge,
+        }, t),
       })),
-    [user, isAdmin, supportUnread, newOrdersBadge, pendingApprovalsBadge, t],
+    [user, isAdmin, supportUnread, newOrdersBadge, pendingApprovalsBadge, newTransfersBadge, t],
   )
 
   // The technician's queue + day, or the admins' production group. Built
@@ -516,7 +606,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             Designers don't see it (they can't create orders).
             When the sidebar is in icon-collapsed mode we shrink it to a
             square + plus icon so the strip stays clean. */}
-        {canCreateOrder && (
+        {canCreateOrder && !ordering.canOrder && (
+          <SidebarGroup className="py-1">
+            <DormantNewOrderButton />
+          </SidebarGroup>
+        )}
+        {canCreateOrder && ordering.canOrder && (
           <SidebarGroup className="py-1">
             <Button
               asChild

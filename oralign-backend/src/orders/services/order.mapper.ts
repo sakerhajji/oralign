@@ -1,9 +1,25 @@
-import { OrderFile, Prisma, TreatmentPlanStatus } from '@prisma/client';
 import {
+  OrderFile,
+  PaymentRecordStatus,
+  Prisma,
+  TreatmentPlanStatus,
+  UserRole,
+} from '@prisma/client';
+import { isAdmin, type Caller } from '../../common/access/caller';
+import {
+  DOCTOR_SUMMARY_SELECT,
+  toDoctorSummary,
+  type DoctorSummaryRow,
+} from '../../common/doctor/doctor-identity';
+import { canReadReceipt } from '../../payments/services/transfer-rules';
+import {
+  type OrderDoctorDto,
   OrderFileResponseDto,
   OrderResponseDto,
   OrderWelcomeGiftDto,
 } from '../dto/order.dto';
+import type { OrderTreatmentFeeTransferDto } from '../dto/treatment-fee.dto';
+import { currentFeeRefusal } from './treatment-fee-transfer';
 import { MediaVariantInfo } from '../../media/media.types';
 
 /**
@@ -14,14 +30,9 @@ import { MediaVariantInfo } from '../../media/media.types';
  */
 
 export const orderInclude = Prisma.validator<Prisma.DentalOrderInclude>()({
-  doctor: {
-    select: {
-      id: true,
-      fullName: true,
-      email: true,
-      dentistProfile: { select: { clinicName: true } },
-    },
-  },
+  // The shared live summary (DECISIONS §6); orderDoctorOf decides how much
+  // of it each reader gets.
+  doctor: { select: DOCTOR_SUMMARY_SELECT },
   patient: {
     select: {
       id: true,
@@ -62,7 +73,10 @@ export const orderInclude = Prisma.validator<Prisma.DentalOrderInclude>()({
   _count: {
     select: {
       treatmentPlans: {
-        where: { deletedAt: null, status: { not: TreatmentPlanStatus.pending } },
+        where: {
+          deletedAt: null,
+          status: { not: TreatmentPlanStatus.pending },
+        },
       },
     },
   },
@@ -72,7 +86,51 @@ export type OrderWithRelations = Prisma.DentalOrderGetPayload<{
   include: typeof orderInclude;
 }>;
 
-export function mapOrderToDto(order: OrderWithRelations): OrderResponseDto {
+/** An order as the API returns it: the DTO plus its fee-transfer fields. */
+export type OrderResponseView = OrderResponseDto & OrderTreatmentFeeTransferDto;
+
+/**
+ * The order's doctor as `viewer` reads it, from the shared summary
+ * (DECISIONS §6, toDoctorSummary): admins and the owning dentist get the
+ * whole summary (account phone, avatar, practice, and the contact to show:
+ * practice phone / e-mail first, account as fallback), plus `clinicName`
+ * for the existing readers. Any other reader (an assigned designer, the
+ * lab ZIP's order-data.json and the order PDF, a caller that passes no
+ * viewer) keeps what it read before: the name, the login e-mail and the
+ * practice name.
+ */
+export function orderDoctorOf(
+  row: DoctorSummaryRow,
+  doctorId: string,
+  viewer: Caller | null | undefined,
+): OrderDoctorDto {
+  const summary = toDoctorSummary(row);
+  const clinicName = summary.clinic?.clinicName ?? undefined;
+  const seesSummary =
+    !!viewer &&
+    (isAdmin(viewer) ||
+      (viewer.role === UserRole.dentist && viewer.userId === doctorId));
+  if (seesSummary) return { ...summary, clinicName };
+  return {
+    id: summary.id,
+    fullName: summary.fullName,
+    email: summary.email,
+    clinicName,
+  };
+}
+
+/**
+ * The order DTO as `viewer` reads it. The treatment-fee receipt PATH is
+ * kept only for the owning dentist and admins (canReadReceipt); every
+ * other reader (an assigned designer, the lab ZIP's order-data.json, a
+ * caller that passes no viewer) gets `treatmentFeeHasProof` only. The path
+ * is never a URL anyway: the file is private and read through GET
+ * orders/:id/treatment-fee/proof.
+ */
+export function mapOrderToDto(
+  order: OrderWithRelations,
+  viewer?: Caller | null,
+): OrderResponseView {
   return {
     id: order.id,
     orderCode: order.orderCode,
@@ -89,8 +147,7 @@ export function mapOrderToDto(order: OrderWithRelations): OrderResponseDto {
     treatmentPlan: order.treatmentPlan ?? undefined,
     dontMoveOption: order.dontMoveOption ?? undefined,
     apRelationship: order.apRelationship ?? undefined,
-    anteroposteriorRelationship:
-      order.anteroposteriorRelationship ?? undefined,
+    anteroposteriorRelationship: order.anteroposteriorRelationship ?? undefined,
     elastics: order.elastics ?? undefined,
     openBite: order.openBite ?? undefined,
     midline: order.midline ?? undefined,
@@ -117,12 +174,7 @@ export function mapOrderToDto(order: OrderWithRelations): OrderResponseDto {
     })),
     files: order.files.map((file) => mapOrderFileToDto(file)),
     doctor: order.doctor
-      ? {
-          id: order.doctor.id,
-          fullName: order.doctor.fullName,
-          email: order.doctor.email,
-          clinicName: order.doctor.dentistProfile?.clinicName ?? undefined,
-        }
+      ? orderDoctorOf(order.doctor, order.doctorId, viewer)
       : undefined,
     patient: {
       id: order.patient.id,
@@ -173,13 +225,48 @@ export function mapOrderToDto(order: OrderWithRelations): OrderResponseDto {
     cbctFeeCurrency: order.cbctFeeCurrency ?? undefined,
     treatmentFeePaymentMethod: order.treatmentFeePaymentMethod ?? undefined,
     treatmentFeePaymentStatus: order.treatmentFeePaymentStatus ?? undefined,
-    treatmentFeeProofPath: order.treatmentFeeProofPath ?? undefined,
+    treatmentFeeProofPath: canReadReceipt(viewer, order.doctorId)
+      ? (order.treatmentFeeProofPath ?? undefined)
+      : undefined,
+    ...mapTreatmentFeeTransfer(order),
     welcomeGift: mapWelcomeGift(order),
     // Notification fields used by the orders list to render badges
     // ("Awaiting your review", "Approved", "Replanning requested", …).
     latestPlanStatus: order.treatmentPlans?.[0]?.status ?? undefined,
     treatmentPlansCount: order._count?.treatmentPlans ?? 0,
     deletedAt: order.deletedAt ?? null,
+  };
+}
+
+/**
+ * The fee-transfer fields of an order (spec §1): whether a receipt is
+ * attached (never where), the declaration's instants, the refusal and its
+ * reason while the fee stands refused (currentFeeRefusal), the retenue
+ * threshold snapshot. The state itself is derived by the client
+ * (transfer-state.ts mirror) from these and the fee status.
+ */
+export function mapTreatmentFeeTransfer(order: {
+  treatmentFeePaidAt: Date | null;
+  treatmentFeePaymentStatus: PaymentRecordStatus | null;
+  treatmentFeeProofPath: string | null;
+  treatmentFeeDeclaredAt: Date | null;
+  treatmentFeeReviewOpenedAt: Date | null;
+  treatmentFeeRejectedAt: Date | null;
+  treatmentFeeRejectionReason: string | null;
+  treatmentFeeWithholdingThreshold: Prisma.Decimal | null;
+}): OrderTreatmentFeeTransferDto {
+  const refusal = currentFeeRefusal(order);
+  return {
+    treatmentFeeHasProof: Boolean(order.treatmentFeeProofPath),
+    treatmentFeeDeclaredAt: order.treatmentFeeDeclaredAt ?? null,
+    treatmentFeeReviewOpenedAt: order.treatmentFeeReviewOpenedAt ?? null,
+    treatmentFeeRejectedAt: refusal.rejectedAt,
+    treatmentFeeRejectionReason: refusal.rejectionReason,
+    treatmentFeeWithholdingThreshold:
+      order.treatmentFeeWithholdingThreshold !== null &&
+      order.treatmentFeeWithholdingThreshold !== undefined
+        ? Number(order.treatmentFeeWithholdingThreshold)
+        : null,
   };
 }
 
@@ -237,10 +324,12 @@ export function mapOrderFileToDto(file: OrderFile): OrderFileResponseDto {
  */
 function sanitizeVariantsForApi(
   variants: Prisma.JsonValue | null,
-): Record<
-  string,
-  { width?: number; height?: number; sizeBytes?: number; format?: string }
-> | undefined {
+):
+  | Record<
+      string,
+      { width?: number; height?: number; sizeBytes?: number; format?: string }
+    >
+  | undefined {
   if (!variants || typeof variants !== 'object' || Array.isArray(variants)) {
     return undefined;
   }

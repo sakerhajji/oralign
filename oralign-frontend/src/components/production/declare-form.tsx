@@ -37,7 +37,6 @@ import {
   RECIPIENT_NAME_MAX,
   archesOf,
   choiceOf,
-  defaultStepTo,
   isInFuture,
   isTechnicianRole,
   nextStepFor,
@@ -45,9 +44,9 @@ import {
   productionErrorText,
   stepsText,
   tunisNow,
-  unreleasedParts,
   type Translate,
 } from './production-format';
+import { lockedParts, nothingReleased, releasedStepTo, spanLabel } from './release-format';
 
 /** What the form needs from the case sheet (the admin's batch button loads it too). */
 export type DeclareContext = Pick<
@@ -59,6 +58,7 @@ export type DeclareContext = Pick<
   | 'planned'
   | 'nextStepFrom'
   | 'releasedRanges'
+  | 'release'
   | 'declareWindow'
 >;
 
@@ -185,10 +185,17 @@ function defaultSteps(
   arch: ProductionArchChoice,
 ): { from: number; to: number } {
   const arches = archesOf(arch);
-  const from = nextStepFor(context.nextStepFrom[act], arches) ?? MIN_STEP;
+  // nextStepFrom is the next RELEASED step (spec §3): with every unlocked
+  // step done it is null, and "De" falls back to the first unlocked one.
+  const firstUnlocked = arches
+    .map((one) => context.release.arches[one]?.unlocked[0]?.from ?? null)
+    .filter((step): step is number => step !== null);
+  const from =
+    nextStepFor(context.nextStepFrom[act], arches) ??
+    (firstUnlocked.length ? Math.min(...firstUnlocked) : MIN_STEP);
   return {
     from,
-    to: defaultStepTo(from, context.releasedRanges, plannedTotalFor(context.planned, arches)),
+    to: releasedStepTo(from, context.release, arches, plannedTotalFor(context.planned, arches)),
   };
 }
 
@@ -307,11 +314,15 @@ function DeclareForm({
     nextByArch.lower !== null &&
     nextByArch.upper !== nextByArch.lower;
   const actComplete =
-    !stepsTouched && arches.every((arch) => context.treatedArches.includes(arch) && nextByArch[arch] === null);
+    !stepsTouched &&
+    !nothingReleased(context.release) &&
+    arches.every((arch) => context.treatedArches.includes(arch) && nextByArch[arch] === null);
+  // Spec §3: every act, not only the delivery. The technician is refused
+  // (409 STEPS_NOT_RELEASED), so it is a field error for her; an admin may
+  // confirm with a note, so it is a hint.
   const unreleased =
-    isDelivery && from !== null && to !== null && to >= from
-      ? unreleasedParts(from, to, context.releasedRanges)
-      : [];
+    from !== null && to !== null && to >= from ? lockedParts(from, to, context.release, arches) : [];
+  const unreleasedText = unreleased.map(spanLabel).join(', ');
   // The approved plan's total is final: a technician may not go past it.
   const approvedTotals = arches.flatMap((arch) => {
     const planned = context.planned[arch];
@@ -330,6 +341,10 @@ function DeclareForm({
     // A technician cannot go past an approved plan (the server refuses it).
     if (!next.to && technician && approvedTotal !== null && to !== null && to > approvedTotal) {
       next.to = t('production.form.errors.beyondTotal', { total: approvedTotal });
+    }
+    // Nor work on locked steps (spec §3: 409 STEPS_NOT_RELEASED).
+    if (!next.from && !next.to && technician && unreleased.length > 0) {
+      next.to = t('production.form.errors.notUnlocked', { range: unreleasedText });
     }
     if (draft.quantityText !== null && (quantity === null || quantity < 1 || quantity > MAX_QUANTITY)) {
       next.quantity = t('production.form.errors.quantityRange');
@@ -612,11 +627,14 @@ function DeclareForm({
             </p>
           )}
           {actComplete && <p>{t('production.form.allCovered')}</p>}
-          {unreleased.length > 0 && (
+          {unreleased.length > 0 && !technician && (
             <p className="text-amber-700 dark:text-amber-400">
-              {t('production.form.hints.notReleased', {
-                range: unreleased.map((part) => (part.from === part.to ? part.from : `${part.from}–${part.to}`)).join(', '),
-              })}
+              {t('production.form.hints.notReleased', { range: unreleasedText })}
+            </p>
+          )}
+          {unreleased.length > 0 && technician && !errors.to && (
+            <p className="font-medium text-destructive">
+              {t('production.form.errors.notUnlocked', { range: unreleasedText })}
             </p>
           )}
           {!technician && approvedTotal !== null && to !== null && to > approvedTotal && (

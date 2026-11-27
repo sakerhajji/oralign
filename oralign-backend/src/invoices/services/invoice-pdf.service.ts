@@ -18,6 +18,7 @@ import {
   splitInclusive,
   toAmount,
 } from '../../common/billing/tax-split';
+import { doctorContact } from '../../common/doctor/doctor-identity';
 import {
   getInvoiceLabels,
   InvoiceLabels,
@@ -27,6 +28,26 @@ import {
 import { invoicePaymentReference } from './payment-reference';
 
 const UPLOAD_ROOT = path.join(process.cwd(), 'uploads');
+
+/**
+ * The printable text of a value read from a snapshot or a row: strings as
+ * they are, numbers / booleans / Decimals / dates in their usual form,
+ * anything else (null, objects) as nothing, never "[object Object]".
+ */
+function printable(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (
+    typeof value === 'number' ||
+    typeof value === 'boolean' ||
+    typeof value === 'bigint'
+  ) {
+    return String(value);
+  }
+  if (value instanceof Date) return value.toISOString();
+  if (Prisma.Decimal.isDecimal(value)) return value.toString();
+  return '';
+}
 
 type JsonRecord = Record<string, unknown>;
 
@@ -72,6 +93,7 @@ export type InvoicePaymentView = Pick<
   | 'createdAt'
   | 'invoiceNumber'
   | 'withholdingAmount'
+  | 'withholdingRate'
   | 'stampAmount'
 >;
 
@@ -180,6 +202,12 @@ export interface InvoiceRecordMoney {
   withholdingRate: number | null;
   withholdingAmount: number;
   netPayable: number;
+  /**
+   * "Reste à payer" on the devis right after the payment this facture
+   * records, frozen at issue (spec §4). null / absent: not an installment
+   * facture, or one issued before 2026-11-27: no row.
+   */
+  quoteRemainingAfter?: number | null;
 }
 
 /**
@@ -190,8 +218,14 @@ export interface InvoiceRecordMoney {
  *   Total HT, TVA (r %), Droit de timbre (when > 0), Total TTC
  *   [Retenue à la source (r %), Net à payer]  only with a withholding
  *   [Montant payé = net]                       only when paid
+ *   [Reste à payer sur le devis]               only when frozen at issue
  * The stamp is ADDED (HT + TVA + timbre = Total TTC), the retenue is on
- * the TTC without the stamp, and Net à payer = Total TTC - retenue.
+ * the TTC without the stamp, and Net à payer = Total TTC - retenue. The
+ * retenue rows print only for a retenue the payment really applied: the
+ * payment entry points (and the manual invoice) refuse one the rule does
+ * not allow (switched off, base under the threshold snapshotted on the
+ * row), so a recorded amount is an eligible one, and the PDF never
+ * re-decides it.
  * The last money row of the list is the dark "final" one.
  */
 export function buildInvoiceRecordTotals(
@@ -213,8 +247,9 @@ export function buildInvoiceRecordTotals(
   // added after, so it is no part of the gross); HT pricing the HT.
   if (discount > 0) {
     const grossTtc =
-      Math.round((inv.totalTtc - Math.max(0, inv.stampDuty) + discount) * 1000) /
-      1000;
+      Math.round(
+        (inv.totalTtc - Math.max(0, inv.stampDuty) + discount) * 1000,
+      ) / 1000;
     totals.push(
       inv.pricesIncludeTax
         ? { label: labels.grossTtc, value: money(grossTtc) }
@@ -254,6 +289,16 @@ export function buildInvoiceRecordTotals(
   if (inv.status === InvoiceStatus.paid) {
     totals.push({ label: labels.amountPaid, value: money(net), kind: 'paid' });
   }
+  if (
+    inv.quoteRemainingAfter !== null &&
+    inv.quoteRemainingAfter !== undefined &&
+    Number.isFinite(inv.quoteRemainingAfter)
+  ) {
+    totals.push({
+      label: labels.quoteRemaining,
+      value: money(Math.max(0, inv.quoteRemainingAfter)),
+    });
+  }
   return totals;
 }
 
@@ -273,7 +318,9 @@ export function invoiceRecordPaymentText(args: {
   const { labels } = args;
   const parts: string[] = [];
   if (args.method) {
-    parts.push(`${labels.paymentMethod}${labels.sep}${paymentMethodLabel(args.method, labels)}`);
+    parts.push(
+      `${labels.paymentMethod}${labels.sep}${paymentMethodLabel(args.method, labels)}`,
+    );
   }
   if (args.paid && args.paidAt) {
     parts.push(`${labels.settledOn} ${args.formatDate(args.paidAt)}`);
@@ -356,7 +403,10 @@ export class InvoicePdfService implements OnModuleDestroy {
     paymentId: string;
     language?: InvoiceLanguage;
   }): Promise<{ buffer: Buffer; fileName: string; mimeType: string }> {
-    const payload = await this.loadPaymentForRender(args.paymentId, args.language);
+    const payload = await this.loadPaymentForRender(
+      args.paymentId,
+      args.language,
+    );
     const html = this.renderHtml(payload);
     const buffer = await this.renderHtmlToBuffer(html);
     const fileName = this.safePdfFileName(
@@ -439,15 +489,9 @@ export class InvoicePdfService implements OnModuleDestroy {
         lines: { orderBy: { position: 'asc' } },
         order: { select: { orderCode: true } },
         patient: { select: { fullName: true } },
-        // The clinic name is read from the practitioner's profile: the
-        // client snapshot has no column for it. The name tells whether the
-        // invoice bills that practitioner (see billedToLead below).
-        doctor: {
-          select: {
-            fullName: true,
-            dentistProfile: { select: { clinicName: true } },
-          },
-        },
+        // No live practitioner read: the stored facture prints its own
+        // snapshot (clientIsPractitioner, clientClinicName, spec §6), so
+        // renaming a doctor or his practice never rewrites it.
       },
     });
     if (!invoice) {
@@ -456,7 +500,8 @@ export class InvoicePdfService implements OnModuleDestroy {
 
     const settings = await this.settingsService.requireActive();
     const lang: InvoiceLanguage =
-      language ?? ((invoice.language === 'en' ? 'en' : 'fr') as InvoiceLanguage);
+      language ??
+      ((invoice.language === 'en' ? 'en' : 'fr') as InvoiceLanguage);
     const labels = getInvoiceLabels(lang);
     const currency = invoice.currency || settings.defaultCurrency || 'TND';
     const n = (v: unknown): number => this.toNumber(v);
@@ -497,6 +542,10 @@ export class InvoicePdfService implements OnModuleDestroy {
           invoice.withholdingRate === null ? null : n(invoice.withholdingRate),
         withholdingAmount: n(invoice.withholdingAmount),
         netPayable: n(invoice.netPayable),
+        quoteRemainingAfter:
+          invoice.quoteRemainingAfter === null
+            ? null
+            : n(invoice.quoteRemainingAfter),
       },
       labels,
       (v) => this.formatMoney(v, currency, lang),
@@ -505,22 +554,15 @@ export class InvoicePdfService implements OnModuleDestroy {
 
     const paid = invoice.status === InvoiceStatus.paid;
     const sep = labels.sep;
-    // "Docteur : <name>" + the clinic only for an invoice written under the
-    // rule "the customer is the practitioner": linked to a practitioner AND
-    // billed in that practitioner's name. Invoices made before that rule
-    // billed a patient (doctorId = the patient's dentist) or a clinic name;
-    // labelling those "Docteur" would print a patient as the doctor. They
-    // keep their plain client name.
-    const practitionerName = invoice.doctorId
-      ? invoice.doctor?.fullName.trim()
-      : undefined;
-    const billsPractitioner =
-      Boolean(practitionerName) &&
-      invoice.clientName.trim() === practitionerName;
-    const billedToLead = billsPractitioner
+    // "Docteur : <name>" + the practice only for an invoice billed to its
+    // practitioner in his own name, as decided at creation and frozen on
+    // the row (clientIsPractitioner, clientClinicName; rows issued before
+    // 2026-11-27 were backfilled once by the migration). Invoices that
+    // billed a patient or a company name keep their plain client name.
+    const billedToLead = invoice.clientIsPractitioner
       ? [
           { text: `${labels.doctor}${sep}${invoice.clientName}`, strong: true },
-          { text: invoice.doctor?.dentistProfile?.clinicName ?? '' },
+          { text: invoice.clientClinicName ?? '' },
         ]
       : [{ text: invoice.clientName, strong: true }];
 
@@ -530,13 +572,16 @@ export class InvoicePdfService implements OnModuleDestroy {
         amount: invoice.totalTtc,
         // Drives nothing visible on a record (the `record` block below
         // overrides status, date and settlement); kept coherent anyway.
-        status: paid ? PaymentRecordStatus.success : PaymentRecordStatus.pending,
+        status: paid
+          ? PaymentRecordStatus.success
+          : PaymentRecordStatus.pending,
         paymentMethod: invoice.paymentMethod ?? PaymentMethod.cash,
         transactionId: invoice.paymentReference,
         paidAt: invoice.paidAt,
         createdAt: invoice.issueDate,
         invoiceNumber: invoice.invoiceNumber,
         withholdingAmount: invoice.withholdingAmount,
+        withholdingRate: invoice.withholdingRate,
         stampAmount: invoice.stampDuty,
       },
       quotation: {
@@ -710,8 +755,7 @@ export class InvoicePdfService implements OnModuleDestroy {
     const snapshotLanguage = this.snapshotLanguage(
       this.asJsonRecord(payment.quotation.companySnapshot),
     );
-    const finalLanguage: InvoiceLanguage =
-      language ?? snapshotLanguage ?? 'fr';
+    const finalLanguage: InvoiceLanguage = language ?? snapshotLanguage ?? 'fr';
 
     return {
       payment,
@@ -747,6 +791,7 @@ export class InvoicePdfService implements OnModuleDestroy {
         createdAt: true,
         treatmentFeeAmount: true,
         treatmentFeeWithholdingAmount: true,
+        treatmentFeeWithholdingRate: true,
         treatmentFeeStampAmount: true,
         treatmentFeePaymentMethod: true,
         treatmentFeePaymentStatus: true,
@@ -806,6 +851,7 @@ export class InvoicePdfService implements OnModuleDestroy {
       invoiceNumber,
       withholdingAmount:
         order.treatmentFeeWithholdingAmount ?? new Prisma.Decimal(0),
+      withholdingRate: order.treatmentFeeWithholdingRate,
       // Charged on top with the fee's payment; none before 2026-11-20.
       stampAmount: order.treatmentFeeStampAmount ?? new Prisma.Decimal(0),
     };
@@ -960,16 +1006,13 @@ export class InvoicePdfService implements OnModuleDestroy {
   // ─── HTML template ─────────────────────────────────────────────
 
   private renderHtml(payload: InvoiceRenderPayload): string {
-    const { payment, quotation, installment, settings, language } = payload;
+    const { payment, quotation, settings, language } = payload;
     const numberFallbackPrefix = payload.numberFallbackPrefix ?? 'INV';
     const labels = getInvoiceLabels(language);
     const companySnapshot = this.asJsonRecord(quotation.companySnapshot);
     const clinicSnapshot = this.asJsonRecord(quotation.clinicSnapshot);
     const company = this.mergeCompany(settings, companySnapshot);
-    const clinic = this.mergeClinic(
-      quotation.order.doctor,
-      clinicSnapshot,
-    );
+    const clinic = this.mergeClinic(quotation.order.doctor, clinicSnapshot);
     const logo = this.resolveImageDataUrl(company.companyLogoPath);
     // Caller-supplied rows/totals win (stored Invoice record); otherwise
     // they are derived from the payment, exactly as they always were.
@@ -995,7 +1038,8 @@ export class InvoicePdfService implements OnModuleDestroy {
     // The document's own date: a stored invoice's issue date, otherwise
     // the day the money landed. Never the render day — re-downloading an
     // invoice must not re-date it.
-    const documentDate = record?.issueDate ?? payment.paidAt ?? payment.createdAt;
+    const documentDate =
+      record?.issueDate ?? payment.paidAt ?? payment.createdAt;
     const paymentText = record
       ? record.paymentText
       : this.paymentSummary(payload, labels);
@@ -1284,14 +1328,12 @@ export class InvoicePdfService implements OnModuleDestroy {
             { text: clinic.clinicName ?? '' },
             { text: clinic.clinicAddress ?? '' },
             { text: clinicCity },
-            { text: clinic.clinicPhone ?? '' },
-            { text: clinic.clinicEmail ?? '' },
-            { text: clinic.doctorEmail ?? '' },
-            { text: clinic.doctorPhone ?? '' },
+            // THE contact (DECISIONS §6): practice first, account fallback,
+            // printed once.
+            { text: clinic.contactPhone ?? '' },
+            { text: clinic.contactEmail ?? '' },
             {
-              text: clinic.taxId
-                ? `${labels.taxNumber}: ${clinic.taxId}`
-                : '',
+              text: clinic.taxId ? `${labels.taxNumber}: ${clinic.taxId}` : '',
             },
             ...(payload.billedToTail ?? []),
           ])}
@@ -1329,8 +1371,9 @@ export class InvoicePdfService implements OnModuleDestroy {
       <footer class="footer">
         <p>${this.html(labels.legalNotice)}</p>
         ${legal ? `<p>${this.html(legal)}</p>` : ''}
-        ${showBank && bank && Object.values(bank).some(Boolean)
-          ? `<div class="bank-title">${this.html(labels.bankDetails)}</div>
+        ${
+          showBank && bank && Object.values(bank).some(Boolean)
+            ? `<div class="bank-title">${this.html(labels.bankDetails)}</div>
              <div class="bank-grid">
                ${this.renderBankLine(labels.bankName, bank.bankName)}
                ${this.renderBankLine(labels.accountName, bank.accountName)}
@@ -1338,7 +1381,8 @@ export class InvoicePdfService implements OnModuleDestroy {
                ${this.renderBankLine(labels.iban, bank.iban)}
                ${this.renderBankLine(labels.swift, bank.swift)}
              </div>`
-          : ''}
+            : ''
+        }
         <div class="page-mark">${this.html(labels.pageOfTotal(1, 1))}</div>
       </footer>
     </main>
@@ -1391,41 +1435,54 @@ export class InvoicePdfService implements OnModuleDestroy {
   }
 
   /**
-   * Same logic as `mergeCompany` for the doctor/clinic block. The
-   * snapshot wins when present; otherwise we use the live dentist
-   * profile + user row.
+   * The doctor/clinic block: the snapshot wins key by key (the devis'
+   * clinicSnapshot, or a stored invoice's client columns); the live
+   * profile only fills a key the snapshot lacks, which only happens on
+   * the legacy receipt renderers (a stored invoice passes no live
+   * profile). The contact is THE contact (practice first, account
+   * fallback, `doctorContact`): the snapshot's own contact keys when it
+   * has them (devis sent since 2026-11-27), else its practice phone /
+   * e-mail, else the live rule.
    */
   private mergeClinic(
     doctor: InvoiceRenderPayload['quotation']['order']['doctor'],
     snapshot: JsonRecord | null,
   ): {
     doctorFullName: string;
-    doctorEmail: string | null;
-    doctorPhone: string | null;
     clinicName: string | null;
     clinicAddress: string | null;
     city: string | null;
     country: string | null;
-    clinicPhone: string | null;
-    clinicEmail: string | null;
+    contactPhone: string | null;
+    contactEmail: string | null;
     taxId: string | null;
   } {
     const fromSnap = (key: string): string | null => {
       const v = snapshot?.[key];
-      return typeof v === 'string' && v.length > 0 ? v : null;
+      return typeof v === 'string' && v.trim().length > 0 ? v : null;
     };
     const profile = doctor.dentistProfile;
+    const live = doctorContact(
+      { phone: doctor.phone ?? null, email: doctor.email || null },
+      profile,
+    );
     return {
       doctorFullName: fromSnap('doctorFullName') ?? doctor.fullName,
-      doctorEmail: fromSnap('doctorEmail') ?? doctor.email ?? null,
-      doctorPhone: doctor.phone ?? null,
       clinicName: fromSnap('clinicName') ?? profile?.clinicName ?? null,
       clinicAddress:
         fromSnap('clinicAddress') ?? profile?.clinicAddress ?? null,
       city: fromSnap('city') ?? profile?.city ?? null,
       country: fromSnap('country') ?? profile?.country ?? null,
-      clinicPhone: fromSnap('clinicPhone') ?? profile?.clinicPhone ?? null,
-      clinicEmail: fromSnap('clinicEmail') ?? profile?.clinicEmail ?? null,
+      contactPhone:
+        fromSnap('contactPhone') ??
+        fromSnap('clinicPhone') ??
+        fromSnap('doctorPhone') ??
+        live.contactPhone,
+      contactEmail:
+        fromSnap('contactEmail') ??
+        fromSnap('clinicEmail') ??
+        fromSnap('doctorEmail') ??
+        live.contactEmail,
       // Doctor's "Matricule fiscal" — snapshot wins (for historical
       // quotes that locked it in) then the live dentist profile.
       taxId: fromSnap('taxId') ?? profile?.taxId ?? null,
@@ -1482,9 +1539,7 @@ export class InvoicePdfService implements OnModuleDestroy {
       ? `${labels.packLabel}: ${quotation.packName}`
       : labels.treatmentFee;
 
-    const description = installment
-      ? packLabel
-      : labels.treatmentFee;
+    const description = installment ? packLabel : labels.treatmentFee;
     const note = installment
       ? labels.installmentLine(
           installment.installmentNumber,
@@ -1541,8 +1596,25 @@ export class InvoicePdfService implements OnModuleDestroy {
       kind: withheld > 0 ? 'normal' : 'final',
     });
     if (withheld > 0) {
-      lines.push({ label: labels.withholding(null), value: `- ${money(withheld)}` });
-      lines.push({ label: labels.netPayable, value: money(cash), kind: 'final' });
+      // The rate the payment recorded (snapshot), never the live setting.
+      const withheldRate =
+        payment.withholdingRate === null ||
+        payment.withholdingRate === undefined
+          ? null
+          : this.toNumber(payment.withholdingRate);
+      lines.push({
+        label: labels.withholding(
+          withheldRate && withheldRate > 0
+            ? this.formatRate(withheldRate, language)
+            : null,
+        ),
+        value: `- ${money(withheld)}`,
+      });
+      lines.push({
+        label: labels.netPayable,
+        value: money(cash),
+        kind: 'final',
+      });
     }
     lines.push({
       label: labels.amountPaid,
@@ -1608,10 +1680,7 @@ export class InvoicePdfService implements OnModuleDestroy {
     const method = this.methodLabel(payment.paymentMethod, labels);
     const reference = invoicePaymentReference(payment.transactionId);
     const tx = reference ? `${labels.transactionRef}: ${reference}` : '';
-    const when = this.formatDate(
-      payment.paidAt ?? payment.createdAt,
-      language,
-    );
+    const when = this.formatDate(payment.paidAt ?? payment.createdAt, language);
     const head = `${labels.paidVia} ${method}`;
     const dateLine = `${labels.paidOn}: ${when}`;
     return [head, dateLine, tx].filter(Boolean).join(' · ');
@@ -1626,7 +1695,9 @@ export class InvoicePdfService implements OnModuleDestroy {
 
   // ─── Misc utilities (cloned from QuotationPdfService) ──────────
 
-  private resolveImageDataUrl(relPath: string | null | undefined): string | null {
+  private resolveImageDataUrl(
+    relPath: string | null | undefined,
+  ): string | null {
     if (!relPath) return null;
     try {
       const abs = this.resolveSafe(relPath);
@@ -1691,7 +1762,8 @@ export class InvoicePdfService implements OnModuleDestroy {
   }
 
   private toNumber(value: unknown, fallback = 0): number {
-    if (typeof value === 'number') return Number.isFinite(value) ? value : fallback;
+    if (typeof value === 'number')
+      return Number.isFinite(value) ? value : fallback;
     if (typeof value === 'string') {
       const parsed = Number(value);
       return Number.isFinite(parsed) ? parsed : fallback;
@@ -1760,10 +1832,7 @@ export class InvoicePdfService implements OnModuleDestroy {
     }
   }
 
-  private methodLabel(
-    method: PaymentMethod,
-    labels: InvoiceLabels,
-  ): string {
+  private methodLabel(method: PaymentMethod, labels: InvoiceLabels): string {
     return paymentMethodLabel(method, labels);
   }
 
@@ -1793,7 +1862,7 @@ export class InvoicePdfService implements OnModuleDestroy {
   }
 
   private html(value: unknown): string {
-    return String(value ?? '')
+    return printable(value)
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')

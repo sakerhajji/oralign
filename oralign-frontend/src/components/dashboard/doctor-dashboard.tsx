@@ -19,7 +19,9 @@ import { DoctorLatestOrders } from './doctor-latest-orders';
 import { OutstandingBalanceDialog } from './outstanding-balance-dialog';
 import { PaidOrdersDialog } from './paid-orders-dialog';
 import { WelcomeGiftBanner } from '@/components/welcome-gift/welcome-gift-banner';
+import { DormantAccountBanner } from './dormant-account-banner';
 import { useDashboardSocket, useDoctorDashboardKpis } from '@/lib/hooks';
+import { useCanOrder } from '@/lib/hooks/use-can-order';
 import { useT } from '@/lib/i18n/lang-context';
 
 // Number formatters keyed on the current language so French users see
@@ -64,6 +66,7 @@ export function DoctorDashboard() {
   const loading = isLoading;
   const { t } = useT();
   const { TND, N } = useFormatters();
+  const { canOrder } = useCanOrder();
 
   // Click on the Outstanding-balance KPI (and the Unpaid-orders KPI —
   // they show the same underlying data) opens a detailed breakdown
@@ -98,9 +101,14 @@ export function DoctorDashboard() {
         </Button>
       </div>
 
+      {/* Doctor inactivity (spec §5): ordering suspended (dormant) or
+          the deadline within 30 days. Nothing for an active account. */}
+      <DormantAccountBanner />
+
       {/* Welcome gift — renders only while the doctor has
-          not used the gift yet and the gift is on. */}
-      <WelcomeGiftBanner />
+          not used the gift yet and the gift is on. Its "New order" CTA
+          is pointless while the account cannot order. */}
+      <WelcomeGiftBanner showCta={canOrder} />
 
       {/* Visible error banner — without this every KPI sits in a
           skeleton state forever and the doctor has no clue why. */}

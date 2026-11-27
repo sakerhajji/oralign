@@ -79,11 +79,16 @@ export interface ReportRow {
   method: PaymentMethod | null;
   status: PaymentRecordStatus | null;
   /**
-   * Exact amount; null when no fee was set. The CASH of the payment, as the
-   * takings sum it: the droit de timbre charged on top included, the
-   * retenue kept back by the practitioner excluded.
+   * Exact amount; null when no fee was set. The CASH of the payment (the
+   * net), as the takings sum it: the droit de timbre charged on top
+   * included, the retenue kept back by the practitioner excluded.
    */
   amount: Prisma.Decimal | null;
+  /**
+   * The retenue à la source the practitioner kept back on this payment
+   * (0 / null: none). Brut = amount + withholding (spec §4).
+   */
+  withholding: Prisma.Decimal | null;
   /** Gateway id, bank reference, cash receipt or our ORA- reference. */
   transactionRef: string | null;
   /** The printed receipt (FAC-…, TF-…). */
@@ -102,7 +107,8 @@ export interface ReportSection {
   rows: ReportRow[];
   /**
    * Successful payments only, summed by the same queries as the desk's
-   * figures (PaymentsSummaryService): cash received, stamps included.
+   * figures (PaymentsSummaryService): cash received (net), stamps
+   * included, with the retenue kept back beside it (brut = net + retenue).
    */
   collected: MethodTallies;
 }

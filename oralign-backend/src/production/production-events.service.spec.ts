@@ -593,33 +593,79 @@ describe('ProductionEventsService.declare', () => {
     });
   });
 
-  it('409 STEPS_NOT_RELEASED for a technician delivering locked steps; nothing written', async () => {
-    // In the queue (batch 1 is paid) but steps 6-10 are still locked.
-    const { service, tx } = world({
-      events: [
-        eventRow({ type: cut, arch: upper, stepFrom: 6, stepTo: 10 }),
-        eventRow({ type: cut, arch: lower, stepFrom: 6, stepTo: 10 }),
-      ],
+  it.each(Object.values(ProductionEventType))(
+    '409 STEPS_NOT_RELEASED for a technician declaring %s on locked steps, even confirmed; nothing written (spec §3)',
+    async (type) => {
+      // In the queue (batch 1 is paid) but steps 6-10 are still locked.
+      const { service, tx } = world({
+        events: [
+          eventRow({ type: cut, arch: upper, stepFrom: 6, stepTo: 10 }),
+          eventRow({ type: cut, arch: lower, stepFrom: 6, stepTo: 10 }),
+        ],
+        batches: [
+          {
+            id: 'b1',
+            fromStep: 1,
+            toStep: 5,
+            status: BatchStatus.unlocked,
+            deliveredByProduction: false,
+          },
+          {
+            id: 'b2',
+            fromStep: 6,
+            toStep: 10,
+            status: BatchStatus.locked,
+            deliveredByProduction: false,
+          },
+        ],
+      });
+      await expect(
+        service.declare(
+          declareDto({
+            type,
+            stepFrom: 6,
+            stepTo: 10,
+            deliveredTo:
+              type === delivered ? DeliveryRecipient.practitioner : undefined,
+            // The pre-spec confirm-with-note path is gone for her.
+            confirmWarnings: [PRODUCTION_WARNING.steps_not_released],
+            note: 'Le cabinet a appelé',
+          }),
+          KEY,
+          technician,
+          NOW,
+        ),
+      ).rejects.toMatchObject({
+        statusCode: 409,
+        errorCode: PRODUCTION_ERROR.STEPS_NOT_RELEASED,
+      });
+      expect(tx.productionEvent.createManyAndReturn).not.toHaveBeenCalled();
+      expect(tx.productionProgress.upsert).not.toHaveBeenCalled();
+    },
+  );
+
+  it('a case in a production status whose batches are all locked: readable, every act refused for her', async () => {
+    const options = {
+      status: OrderStatus.fabrication,
       batches: [
         {
           id: 'b1',
           fromStep: 1,
           toStep: 5,
-          status: BatchStatus.unlocked,
-          deliveredByProduction: false,
-        },
-        {
-          id: 'b2',
-          fromStep: 6,
-          toStep: 10,
           status: BatchStatus.locked,
           deliveredByProduction: false,
         },
       ],
-    });
+    };
     await expect(
-      service.declare(
-        declareDto({ stepFrom: 6, stepTo: 10 }),
+      world(options).service.declare(
+        declareDto({
+          type: printed,
+          arch: ProductionArchChoiceParam.upper,
+          stepFrom: 1,
+          stepTo: 1,
+          deliveredTo: undefined,
+        }),
         KEY,
         technician,
         NOW,
@@ -628,7 +674,51 @@ describe('ProductionEventsService.declare', () => {
       statusCode: 409,
       errorCode: PRODUCTION_ERROR.STEPS_NOT_RELEASED,
     });
-    expect(tx.productionEvent.createManyAndReturn).not.toHaveBeenCalled();
+  });
+
+  it('an admin prints locked steps once he confirms steps_not_released with a note (the journaled override)', async () => {
+    const options = {
+      events: [],
+      batches: [
+        {
+          id: 'b1',
+          fromStep: 1,
+          toStep: 5,
+          status: BatchStatus.locked,
+          deliveredByProduction: false,
+        },
+      ],
+    };
+    const print = (over: Partial<DeclareProductionEventDto> = {}) =>
+      declareDto({
+        type: printed,
+        arch: ProductionArchChoiceParam.upper,
+        deliveredTo: undefined,
+        ...over,
+      });
+    await expect(
+      world(options).service.declare(print(), KEY, admin, NOW),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      errorCode: PRODUCTION_ERROR.PRODUCTION_CONFIRM_REQUIRED,
+      details: { warnings: [PRODUCTION_WARNING.steps_not_released] },
+    });
+    const { service, tx } = world(options);
+    const result = await service.declare(
+      print({
+        confirmWarnings: [PRODUCTION_WARNING.steps_not_released],
+        note: 'Impression anticipée, accord direction',
+      }),
+      KEY,
+      admin,
+      NOW,
+    );
+    expect(result.events[0]).toMatchObject({
+      warnings: [PRODUCTION_WARNING.steps_not_released],
+      note: 'Impression anticipée, accord direction',
+      createdById: admin.userId,
+    });
+    expect(tx.quoteStepBatch.updateMany).not.toHaveBeenCalled();
   });
 
   it('an admin delivers locked steps once he confirms steps_not_released with a note; the batch stays locked', async () => {

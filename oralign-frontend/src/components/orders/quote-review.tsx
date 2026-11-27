@@ -74,6 +74,12 @@ import {
 } from '@/lib/types';
 import { formatRate, PriceIncludesTaxNote } from '@/components/payments/withholding';
 import { QuotePackPanel } from './quote-pack-panel';
+import {
+  estimateQuoteRetenue,
+  quotePaymentBases,
+  quoteRetenueRule,
+  type QuoteRetenueRule,
+} from './quote-retenue-estimate';
 import { QuoteStep } from './quote-step';
 
 interface Props {
@@ -171,6 +177,16 @@ export function QuoteReview({ orderId, role, canCreate = true }: Props) {
   const patientName =
     order?.patient?.fullName ?? t('quoteUi.review.patientFallback');
   const orderCode = order?.orderCode ?? '';
+  // The company's retenue rule (spec §4): what a draft states, and what a
+  // devis sent before the rule was snapshotted falls back to.
+  const threshold = Number(settings?.withholdingThreshold ?? 0);
+  const liveRetenue: QuoteRetenueRule | null = settings
+    ? {
+        enabled: settings.withholdingEnabled === true,
+        rate: Number(settings.withholdingRate ?? 0) || 0,
+        threshold: Number.isFinite(threshold) && threshold > 0 ? threshold : null,
+      }
+    : null;
 
   return isAdmin ? (
     <AdminLayout
@@ -181,6 +197,7 @@ export function QuoteReview({ orderId, role, canCreate = true }: Props) {
       orderCode={orderCode}
       defaultTvaRate={settings?.defaultTvaRate ?? 19}
       stampDuty={settings?.stampDuty ?? 0}
+      liveRetenue={liveRetenue}
     />
   ) : (
     <DoctorLayout
@@ -420,6 +437,7 @@ function AdminLayout({
   orderCode,
   defaultTvaRate,
   stampDuty,
+  liveRetenue,
 }: {
   quote: Quotation;
   orderId: string;
@@ -428,6 +446,8 @@ function AdminLayout({
   /** Company default, used for quotes stored without a rate. */
   defaultTvaRate: number;
   stampDuty: number;
+  /** The live retenue rule (null until the settings answer). */
+  liveRetenue: QuoteRetenueRule | null;
 }) {
   const { t } = useT();
   const update = useUpdateQuotation();
@@ -588,6 +608,7 @@ function AdminLayout({
         newTotal={newTotal}
         defaultTvaRate={defaultTvaRate}
         stampDuty={stampDuty}
+        liveRetenue={liveRetenue}
         saving={update.isPending}
         saveDraft={saveDraft}
       />
@@ -788,6 +809,7 @@ function QuoteSummary({
   newTotal,
   defaultTvaRate,
   stampDuty,
+  liveRetenue,
   saving,
   saveDraft,
 }: {
@@ -807,6 +829,7 @@ function QuoteSummary({
   newTotal: number;
   defaultTvaRate: number;
   stampDuty: number;
+  liveRetenue: QuoteRetenueRule | null;
   saving: boolean;
   saveDraft: () => Promise<void>;
 }) {
@@ -861,6 +884,22 @@ function QuoteSummary({
     (inst) => inst.status !== InstallmentStatus.CANCELLED,
   ).length;
   const plan = previewPlanStamps(figures.ttc, paymentCount, stampDuty);
+  // « Retenue si appliquée » (spec §4), as the devis prints it: the rule
+  // the sent devis froze (a draft: the live one), each planned payment its
+  // own base (no plan yet: the total). An estimate, the practitioner opts
+  // in at each payment.
+  const retenue = hasPack
+    ? estimateQuoteRetenue(
+        quotePaymentBases(
+          (installments.data ?? [])
+            .filter((inst) => inst.status !== InstallmentStatus.CANCELLED)
+            .map((inst) => inst.amount),
+          figures.ttc,
+        ),
+        quoteRetenueRule(quote.companySnapshot, liveRetenue, isDraft),
+      )
+    : null;
+  const toPay = plan.count > 0 && plan.stamps > 0 ? plan.total : figures.ttc;
 
   // Sending needs a pack and a plan. A pending total change is saved
   // first (run), and the server rebalances the unpaid installments.
@@ -996,6 +1035,33 @@ function QuoteSummary({
                   </p>
                 ) : null}
               </div>
+              {retenue ? (
+                <div className="space-y-2 border-t pt-3">
+                  <SummaryRow
+                    label={t('quoteEditor.withholdingIfApplied', {
+                      rate: formatRate(retenue.rate, lang),
+                    })}
+                    value={`− ${money(retenue.amount)}`}
+                  />
+                  <SummaryRow
+                    label={t('quoteEditor.netIfWithholding')}
+                    value={money(minusMoney(toPay, retenue.amount))}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {retenue.threshold
+                      ? t('quoteEditor.withholdingEstimateNote', {
+                          threshold: money(retenue.threshold),
+                        })
+                      : t('quoteEditor.withholdingEstimateNoteAll')}
+                    {retenue.eligiblePayments < retenue.payments
+                      ? ` ${t('quoteEditor.withholdingEstimatePartial', {
+                          count: retenue.eligiblePayments,
+                          total: retenue.payments,
+                        })}`
+                      : null}
+                  </p>
+                </div>
+              ) : null}
               {received > 0 ? (
                 <div className="space-y-2 border-t pt-3">
                   <SummaryRow label={t('quoteEditor.alreadyPaid')} value={money(received)} />

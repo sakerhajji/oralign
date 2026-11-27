@@ -101,6 +101,11 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     return this.prisma.companyBillingSettings;
   }
 
+  /** Append-only trail of the fiscal / rollout settings (spec §4). */
+  get billingSettingsAuditLog() {
+    return this.prisma.billingSettingsAuditLog;
+  }
+
   // ─── Packs · Installments · Step batches · Payments ──────────────
   // Added in 20260524 alongside the packs/payments migration.
 
@@ -145,6 +150,11 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
 
   get notification() {
     return this.prisma.notification;
+  }
+
+  /** Doctor inactivity journal (spec §5, src/users/activity). */
+  get accountActivityEvent() {
+    return this.prisma.accountActivityEvent;
   }
 
   // ─── Support chat ─────────────────────────────────────────────────────────

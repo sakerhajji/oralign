@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { ChevronDown, CirclePlus, Loader2 } from 'lucide-react';
+import { ChevronDown, CirclePlus, Loader2, Moon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -15,6 +15,7 @@ import {
   useSupplementalEligibility,
   useSupplementalOrders,
 } from '@/lib/hooks/use-supplemental-orders';
+import { useCanOrder } from '@/lib/hooks/use-can-order';
 import { useT } from '@/lib/i18n/lang-context';
 import { buildSupplementalWizardHref } from '@/lib/orders/order-navigation';
 import { SupplementalReviewStatus, type SupplementalKind } from '@/lib/types';
@@ -27,6 +28,9 @@ const TRIGGER_CLASS = 'h-11 w-full gap-2 sm:w-auto';
  * "Nouvelle demande" menu of an initial case. Shown only to callers the
  * server allows to create (`canCreate`); a kind with an open draft resumes
  * it, a blocked kind shows why. Creation happens on click, never on load.
+ * A dormant doctor (doctor inactivity, spec §5) can still resume a draft,
+ * but every new request is disabled with the reason (403 ACCOUNT_DORMANT
+ * otherwise).
  */
 export function SupplementalOrderActions({ parentOrderId }: { parentOrderId: string }) {
   const { t } = useT();
@@ -34,6 +38,7 @@ export function SupplementalOrderActions({ parentOrderId }: { parentOrderId: str
   const eligibility = useSupplementalEligibility(parentOrderId);
   const requests = useSupplementalOrders(parentOrderId);
   const { start, pendingKind } = useCreateSupplementalDraft();
+  const { canOrder } = useCanOrder();
 
   if (eligibility.isPending) {
     return (
@@ -73,17 +78,26 @@ export function SupplementalOrderActions({ parentOrderId }: { parentOrderId: str
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-[min(24rem,calc(100vw-2rem))]">
         <DropdownMenuLabel>{t('supplemental.actions.menuTitle')}</DropdownMenuLabel>
+        {!canOrder && (
+          <p className="flex items-start gap-2 px-2 pb-2 text-xs leading-5 text-muted-foreground">
+            <Moon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+            {t('accountActivity.supplemental.blocked')}
+          </p>
+        )}
         <DropdownMenuSeparator />
         {SUPPLEMENTAL_KINDS.map((kind) => {
           const Icon = KIND_ICON[kind];
           const state = kinds[kind];
           const draft = resumableDraft(kind);
-          const blocked = !draft && !state.allowed;
+          const dormant = !draft && !canOrder;
+          const blocked = dormant || (!draft && !state.allowed);
           const detail = draft
             ? t('supplemental.actions.resumeDraft', { code: draft.order.orderCode })
-            : blocked && state.blockedReason
-              ? t(`supplemental.blockedReason.${state.blockedReason}`)
-              : t(`supplemental.typeDescription.${kind}`);
+            : dormant
+              ? t('accountActivity.status.inactive')
+              : blocked && state.blockedReason
+                ? t(`supplemental.blockedReason.${state.blockedReason}`)
+                : t(`supplemental.typeDescription.${kind}`);
           return (
             <DropdownMenuItem
               key={kind}

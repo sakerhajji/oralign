@@ -2,6 +2,7 @@ import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import {
   ArchType,
   BatchStatus,
+  BatchUnlockSource,
   InstallmentStatus,
   OrderStatus,
   PaymentMode,
@@ -30,9 +31,18 @@ import { isAdmin, type Caller } from '../../common/access/caller';
 import {
   NotificationEvents,
   type BatchEvent,
+  type BatchUnlockedEvent,
 } from '../../notifications/events/notification-events';
 import { ProductionEventsService } from '../../production/production-events.service';
 import { lockProductionOrder } from '../../production/production-batch-projection';
+import {
+  unlockStepBatch,
+  type UnlockedStepBatch,
+} from '../../production/batch-unlock';
+import {
+  BATCH_UNLOCK_ERROR,
+  validReason,
+} from '../../common/exceptions/domain-error-codes';
 import { lookupActorName } from '../../common/access/actor-snapshot';
 import {
   coverageWindowPatch,
@@ -60,6 +70,7 @@ import {
   type QuotationView,
   readOneQuoteMoney,
   settleQuote,
+  withLatestTransfers,
 } from '../quote-money';
 import { CompanyBillingSettingsService } from './company-billing-settings.service';
 import { QuotationPdfService } from './quotation-pdf.service';
@@ -119,6 +130,64 @@ const PLACEHOLDER_DELIVERY_ORDER_SELECT = {
       stepBatches: { select: { id: true, status: true } },
     },
   },
+} satisfies Prisma.DentalOrderSelect;
+
+/**
+ * Refusals of this service that are not QUOTE_ERROR codes (quote-money.ts).
+ * The HTTP status is in each comment.
+ */
+export const PAYMENT_PLAN_ERROR = {
+  /**
+   * 409. A pack change or a re-plan would delete an OPEN installment whose
+   * step batch an admin released by hand (manual unlock, spec §3): the lab
+   * may already work on those steps. Settle that installment first (it is
+   * then kept like every paid row).
+   */
+  RELEASED_BATCH_IN_PLAN: 'QUOTE_PLAN_BATCH_RELEASED',
+  /**
+   * 409. Manual unlock of a locked batch while the quote is neither sent
+   * nor accepted (draft, recalled, rejected, cancelled): the same states
+   * in which no installment can be paid (PaymentsService.assertPayable).
+   */
+  QUOTE_NOT_UNLOCKABLE: 'BATCH_UNLOCK_QUOTE_NOT_LIVE',
+} as const;
+
+/** The quote states in which a batch may be released by hand: the payable ones. */
+const UNLOCKABLE_QUOTE_STATUSES: readonly QuotationStatus[] = [
+  QuotationStatus.sent,
+  QuotationStatus.approved,
+];
+
+/**
+ * What the manual unlock reads before its locks: the path's quotation and
+ * the installment whose row lock comes first. No money column.
+ */
+const UNLOCK_BATCH_TARGET_SELECT = {
+  id: true,
+  quotationId: true,
+  installmentId: true,
+  quotation: {
+    select: {
+      orderId: true,
+      deletedAt: true,
+      order: { select: { deletedAt: true } },
+    },
+  },
+} satisfies Prisma.QuoteStepBatchSelect;
+
+/** The batch as the manual unlock re-reads it under its locks. */
+const UNLOCK_BATCH_LIVE_SELECT = {
+  quotationId: true,
+  status: true,
+  quotation: { select: { status: true, deletedAt: true } },
+} satisfies Prisma.QuoteStepBatchSelect;
+
+/** The names of the BatchUnlocked event (admins' "lot débloqué" ping). */
+const UNLOCK_EVENT_ORDER_SELECT = {
+  orderCode: true,
+  doctorId: true,
+  doctor: { select: { fullName: true } },
+  patient: { select: { fullName: true } },
 } satisfies Prisma.DentalOrderSelect;
 
 /**
@@ -355,6 +424,19 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
         await readOneQuoteMoney(tx, quotationId),
         'change the pack',
       );
+      // No money moved, yet a batch may be released: by hand (spec §3).
+      // Its steps may already be in the lab: never wipe it.
+      const released = await tx.quoteStepBatch.findMany({
+        where: { quotationId, status: { not: BatchStatus.locked } },
+        select: { id: true },
+        take: 1,
+      });
+      if (released.length > 0) {
+        throw new ConflictException(
+          'Une tranche de ce devis a été débloquée manuellement : le forfait ne peut plus être changé.',
+          PAYMENT_PLAN_ERROR.RELEASED_BATCH_IN_PLAN,
+        );
+      }
 
       await tx.quoteStepBatch.deleteMany({ where: { quotationId } });
       await tx.quoteInstallment.deleteMany({ where: { quotationId } });
@@ -581,6 +663,17 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
           QUOTE_ERROR.PAYMENT_IN_FLIGHT,
         );
       }
+      // An open row whose batch an admin released by hand (spec §3): the
+      // lab may already work on its steps, so it is never deleted.
+      const releasedByHand = replaced.find(
+        (row) => row.stepBatch && row.stepBatch.status !== BatchStatus.locked,
+      );
+      if (releasedByHand) {
+        throw new ConflictException(
+          `La tranche de l'échéance n°${releasedByHand.installmentNumber} a été débloquée manuellement : réglez cette échéance avant de modifier le plan.`,
+          PAYMENT_PLAN_ERROR.RELEASED_BATCH_IN_PLAN,
+        );
+      }
       // The new rows must sum to what the kept rows leave to pay (a
       // cancelled row is at 0). Decimal arithmetic so we don't hit Number
       // precision artefacts.
@@ -758,10 +851,7 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
           : 'FULL_PAYMENT requires exactly one installment.',
       );
     }
-    if (
-      mode === PaymentMode.installments &&
-      newRows < (keptRows > 0 ? 1 : 2)
-    ) {
+    if (mode === PaymentMode.installments && newRows < (keptRows > 0 ? 1 : 2)) {
       throw new BadRequestException(
         keptRows > 0
           ? 'INSTALLMENTS requires at least one new installment next to the kept (paid or cancelled) installments.'
@@ -851,18 +941,38 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
     this.orderAccess.assertCanRead(quote.order, caller);
   }
 
+  /** Both halves of the plan, behind one access check. */
   async getPlan(quotationId: string, caller: Caller) {
     await this.assertPlanReadable(quotationId, caller);
     const [installments, batches] = await Promise.all([
-      this.prisma.quoteInstallment.findMany({
-        where: { quotationId },
-        orderBy: { installmentNumber: 'asc' },
-      }),
-      this.prisma.quoteStepBatch.findMany({
-        where: { quotationId },
-        orderBy: { batchNumber: 'asc' },
-      }),
+      this.readInstallments(quotationId),
+      this.readBatches(quotationId, caller),
     ]);
+    return { installments, batches };
+  }
+
+  /** GET quotations/:id/installments: the schedule, without the batches. */
+  async getInstallments(quotationId: string, caller: Caller) {
+    await this.assertPlanReadable(quotationId, caller);
+    return this.readInstallments(quotationId);
+  }
+
+  /**
+   * GET quotations/:id/step-batches: the batches only, so the transfer
+   * read (withLatestTransfers) and the installments query never run for a
+   * half the route throws away.
+   */
+  async getBatches(quotationId: string, caller: Caller) {
+    await this.assertPlanReadable(quotationId, caller);
+    return this.readBatches(quotationId, caller);
+  }
+
+  /** The installments, overdue marked, each with its latest transfer. */
+  private async readInstallments(quotationId: string) {
+    const installments = await this.prisma.quoteInstallment.findMany({
+      where: { quotationId },
+      orderBy: { installmentNumber: 'asc' },
+    });
     // Mark overdue on read — cheap derivation, no scheduler needed.
     const now = Date.now();
     const annotated = installments.map((row) =>
@@ -872,7 +982,163 @@ export class QuotationPaymentPlanService implements OnApplicationBootstrap {
         ? { ...row, status: InstallmentStatus.overdue }
         : row,
     );
-    return { installments: annotated, batches };
+    // Each installment's latest bank-transfer declaration (CONTRACT §2.1
+    // latestTransfer: state, review stamp, refusal reason, hasProof; never
+    // a file path), read in one query over the plan's installments.
+    return withLatestTransfers(this.prisma, annotated);
+  }
+
+  /** The batches; a manual unlock's reason is shown to staff only. */
+  private async readBatches(quotationId: string, caller: Caller) {
+    const batches = await this.prisma.quoteStepBatch.findMany({
+      where: { quotationId },
+      orderBy: { batchNumber: 'asc' },
+    });
+    // A manual unlock's reason is an admin's internal note (spec §3: the
+    // doctor is not told): staff only.
+    return isAdmin(caller)
+      ? batches
+      : batches.map((batch) => ({ ...batch, unlockReason: null }));
+  }
+
+  /**
+   * POST quotations/:quotationId/step-batches/:batchId/unlock (admin, spec
+   * §3, CONTRACT §2.5): release a LOCKED batch by hand, with a reason,
+   * while its installment stays pending (the money rules are untouched).
+   * One transaction, in the programme's lock order: the installment row
+   * FOR UPDATE, then the order (lockProductionOrder), then the one writer
+   * unlockStepBatch(source manual): guarded update, D2 projection (steps
+   * an admin delivered before flip the batch), batch_unlocked journal row.
+   *   • 400 UNLOCK_REASON_REQUIRED before any read when the reason is not
+   *     3-500 characters once trimmed;
+   *   • 404 BATCH_NOT_FOUND when the batch is not on this live quotation
+   *     (also when a re-plan deleted it while this call waited for a lock);
+   *   • 409 BATCH_UNLOCK_QUOTE_NOT_LIVE when the quote is neither sent nor
+   *     accepted (nothing could be paid on it either);
+   *   • an unlocked or delivered batch is returned as is (idempotent 200,
+   *     nothing written, no event).
+   * BatchUnlocked (source manual) goes out after the commit: the admins'
+   * "lot débloqué" item; listeners never tell the doctor of a manual one,
+   * nobody tells the technician.
+   */
+  async unlockBatch(
+    quotationId: string,
+    batchId: string,
+    rawReason: unknown,
+    caller: Caller,
+  ): Promise<QuoteStepBatch> {
+    if (!isAdmin(caller)) {
+      throw new ForbiddenException('Only admins can unlock a batch.');
+    }
+    const reason = validReason(rawReason);
+    if (!reason) {
+      throw new BadRequestException(
+        'Indiquez le motif du déblocage (3 à 500 caractères).',
+        BATCH_UNLOCK_ERROR.UNLOCK_REASON_REQUIRED,
+      );
+    }
+    const notFound = () =>
+      new NotFoundException(
+        'Batch not found',
+        BATCH_UNLOCK_ERROR.BATCH_NOT_FOUND,
+      );
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const target = await tx.quoteStepBatch.findUnique({
+        where: { id: batchId },
+        select: UNLOCK_BATCH_TARGET_SELECT,
+      });
+      if (
+        !target ||
+        target.quotationId !== quotationId ||
+        target.quotation.deletedAt ||
+        target.quotation.order.deletedAt
+      ) {
+        throw notFound();
+      }
+      const { orderId } = target.quotation;
+      // Installment first, then the order: a settlement of the same
+      // installment (settleWithin) queues behind, never deadlocks.
+      await tx.$queryRaw`SELECT id FROM "QuoteInstallment" WHERE id = ${target.installmentId} FOR UPDATE`;
+      await lockProductionOrder(tx, orderId);
+
+      // Re-read under the locks: a re-plan or a pack change (they lock the
+      // installments first) may have deleted the batch meanwhile, and the
+      // quote may have been recalled. A batch already released is the
+      // idempotent answer whatever the quote's status.
+      const live = await tx.quoteStepBatch.findUnique({
+        where: { id: batchId },
+        select: UNLOCK_BATCH_LIVE_SELECT,
+      });
+      if (
+        !live ||
+        live.quotationId !== quotationId ||
+        live.quotation.deletedAt
+      ) {
+        throw notFound();
+      }
+      if (
+        live.status === BatchStatus.locked &&
+        !UNLOCKABLE_QUOTE_STATUSES.includes(live.quotation.status)
+      ) {
+        throw new ConflictException(
+          "Le devis n'est ni envoyé ni accepté : la tranche ne peut pas être débloquée.",
+          PAYMENT_PLAN_ERROR.QUOTE_NOT_UNLOCKABLE,
+        );
+      }
+
+      const released = await unlockStepBatch(tx, {
+        batchId,
+        source: BatchUnlockSource.manual,
+        actor: caller,
+        reason,
+      });
+      // One after the other: a transaction client runs one query at a time.
+      const batch = await tx.quoteStepBatch.findUniqueOrThrow({
+        where: { id: batchId },
+      });
+      const order = released
+        ? await tx.dentalOrder.findUnique({
+            where: { id: orderId },
+            select: UNLOCK_EVENT_ORDER_SELECT,
+          })
+        : null;
+      return { batch, released, order };
+    });
+
+    if (result.released && result.order) {
+      this.emitManualUnlock(result.released, result.order, caller);
+      this.logger.log(
+        `Batch ${result.released.batchNumber} (steps ${result.released.fromStep}-${result.released.toStep}) of quote ${quotationId} unlocked by hand by ${caller.userId}`,
+      );
+    }
+    return result.batch;
+  }
+
+  /** After the commit, like every notification event. */
+  private emitManualUnlock(
+    released: UnlockedStepBatch,
+    order: Prisma.DentalOrderGetPayload<{
+      select: typeof UNLOCK_EVENT_ORDER_SELECT;
+    }>,
+    caller: Caller,
+  ): void {
+    this.events.emit(NotificationEvents.BatchUnlocked, {
+      batchId: released.id,
+      quotationId: released.quotationId,
+      orderId: released.orderId,
+      orderCode: order.orderCode,
+      doctorId: order.doctorId,
+      doctorName: order.doctor.fullName,
+      patientName: order.patient.fullName,
+      fromStep: released.fromStep,
+      toStep: released.toStep,
+      batchNumber: released.batchNumber,
+      source: BatchUnlockSource.manual,
+      paymentId: null,
+      installmentNumber: released.installmentNumber,
+      actorId: caller.userId,
+    } satisfies BatchUnlockedEvent);
   }
 
   /**

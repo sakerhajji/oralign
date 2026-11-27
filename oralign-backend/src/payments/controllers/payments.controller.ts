@@ -8,25 +8,24 @@ import {
   Param,
   Post,
   Query,
-  Req,
+  Res,
   UploadedFile,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
   ApiBody,
   ApiConsumes,
+  ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiProduces,
   ApiTags,
 } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
-import { diskStorage } from 'multer';
-import { extname, join } from 'path';
-import { randomUUID } from 'crypto';
-import { mkdirSync } from 'fs';
+import type { Response } from 'express';
+import type { Caller } from '../../common/access/caller';
 import {
   CurrentUser,
   JwtPayload,
@@ -45,25 +44,20 @@ import {
   PaymentSummaryQueryDto,
   RecordCashPaymentDto,
   RejectPaymentDto,
+  TransferReviewOpenedDto,
+  WithdrawPaymentDto,
 } from '../dto/payment.dto';
+import {
+  ReceiptFileInterceptor,
+  type ReceiptUpload,
+  sendReceipt,
+} from '../receipt-file';
 import { ClicToPayPaymentsService } from '../services/clictopay-payments.service';
 import { PaymentPractitionersService } from '../services/payment-practitioners.service';
 import { PaymentsService } from '../services/payments.service';
 import { PaymentsSummaryService } from '../services/payments-summary.service';
 import { toPaymentJson } from '../services/payment-rules';
-
-const PROOF_UPLOAD_ROOT = join(process.cwd(), 'uploads', 'payments');
-mkdirSync(PROOF_UPLOAD_ROOT, { recursive: true });
-
-const PROOF_ALLOWED_MIMES = [
-  'image/png',
-  'image/jpeg',
-  'image/webp',
-  'image/heic',
-  'application/pdf',
-];
-
-const PROOF_MAX_BYTES = 5 * 1024 * 1024;
+import { paymentForViewer } from '../services/transfer-rules';
 
 /**
  * Payment endpoints. The controller is intentionally thin — every
@@ -102,7 +96,7 @@ export class PaymentsController {
   ) {
     return this.clicToPayPayments.createSession(
       dto,
-      { userId: user.sub, role: user.role as UserRole },
+      { userId: user.sub, role: user.role },
       idempotencyKey,
     );
   }
@@ -120,7 +114,7 @@ export class PaymentsController {
   ) {
     return this.clicToPayPayments.verify(paymentId, {
       userId: user.sub,
-      role: user.role as UserRole,
+      role: user.role,
     });
   }
 
@@ -143,7 +137,7 @@ export class PaymentsController {
     return this.clicToPayPayments.createLegacyInstallmentSession(
       quotationId,
       installmentId,
-      { userId: user.sub, role: user.role as UserRole },
+      { userId: user.sub, role: user.role },
       idempotencyKey,
     );
   }
@@ -155,27 +149,21 @@ export class PaymentsController {
   )
   @Roles(UserRole.dentist, UserRole.admin, UserRole.super_admin)
   @HttpCode(HttpStatus.OK)
-  @UseInterceptors(
-    FileInterceptor('proofFile', {
-      storage: diskStorage({
-        destination: (_req, _file, cb) => cb(null, PROOF_UPLOAD_ROOT),
-        filename: (_req, file, cb) =>
-          cb(null, `${randomUUID()}${extname(file.originalname || '').toLowerCase()}`),
-      }),
-      limits: { fileSize: PROOF_MAX_BYTES },
-      fileFilter: (_req, file, cb) => {
-        if (PROOF_ALLOWED_MIMES.includes(file.mimetype)) cb(null, true);
-        else cb(new Error('Proof must be PNG/JPG/WebP/HEIC or PDF.'), false);
-      },
-    }),
-  )
+  // memoryStorage: nothing reaches the disk before the service has
+  // authorised the caller, checked the installment and the bytes.
+  @UseInterceptors(ReceiptFileInterceptor('proofFile'))
   @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary:
+      'Declare a bank transfer for an installment. Receipt (JPEG/PNG/WebP/PDF, 10 MB) required for a dentist; an admin without one gives overrideNote. Idempotency-Key: a repeat by the same caller answers the same row. A declaration still awaiting on the installment is superseded. 409 INSTALLMENT_ALREADY_PAID once the installment is paid (e.g. an admin confirmed the transfer being replaced).',
+  })
   @ApiBody({
     schema: {
       type: 'object',
       properties: {
         bankReference: { type: 'string' },
         applyWithholding: { type: 'string', enum: ['true', 'false'] },
+        overrideNote: { type: 'string' },
         proofFile: { type: 'string', format: 'binary' },
       },
     },
@@ -184,36 +172,97 @@ export class PaymentsController {
     @Param('quotationId') _quotationId: string,
     @Param('installmentId') installmentId: string,
     @Body() dto: DeclareBankTransferDto,
-    @UploadedFile() proof: Express.Multer.File | undefined,
+    @UploadedFile() proof: ReceiptUpload | undefined,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
     @CurrentUser() user: JwtPayload,
   ) {
-    const proofUrl = proof
-      ? `/uploads/payments/${proof.filename}`
-      : null;
+    const caller = callerOf(user);
     const payment = await this.payments.declareBankTransfer({
       installmentId,
-      caller: { userId: user.sub, role: user.role as UserRole },
+      caller,
       bankReference: dto.bankReference,
-      proofUrl,
+      receipt: proof ?? null,
       applyWithholding: dto.applyWithholding,
+      overrideNote: dto.overrideNote,
+      idempotencyKey,
     });
-    return toPaymentJson(payment);
+    return presentPayment(payment, caller);
+  }
+
+  /**
+   * The doctor (or an admin for him) withdraws a declaration still
+   * awaiting confirmation. The receipt is kept; a repeat answers 200.
+   */
+  @Post('payments/:paymentId/withdraw')
+  @Roles(UserRole.dentist, UserRole.admin, UserRole.super_admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Withdraw a bank-transfer declaration still awaiting confirmation (status cancelled, receipt kept). 409 TRANSFER_NOT_WITHDRAWABLE once processed.',
+  })
+  async withdraw(
+    @Param('paymentId') paymentId: string,
+    @Body() dto: WithdrawPaymentDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    const caller = callerOf(user);
+    return presentPayment(
+      await this.payments.withdrawBankTransfer(paymentId, caller, dto.note),
+      caller,
+    );
+  }
+
+  /**
+   * The receipt itself, for the owning dentist and admins (an
+   * authenticated blob on the screens: the file is never public). Every
+   * other caller, and a payment without one, gets 404 PROOF_NOT_FOUND:
+   * designers and technicians are let through the role check on purpose,
+   * so they read the same 404 as for a missing file.
+   */
+  @Get('payments/:paymentId/proof')
+  @Roles(
+    UserRole.dentist,
+    UserRole.admin,
+    UserRole.super_admin,
+    UserRole.designer,
+    UserRole.technician,
+  )
+  @ApiOperation({
+    summary:
+      'Stream the bank-transfer receipt (owning dentist and admins). private, no-store; nosniff.',
+  })
+  @ApiProduces('image/jpeg', 'image/png', 'image/webp', 'application/pdf')
+  @ApiNotFoundResponse({ description: 'PROOF_NOT_FOUND' })
+  async readProof(
+    @Param('paymentId') paymentId: string,
+    @CurrentUser() user: JwtPayload,
+    @Res() res: Response,
+  ): Promise<void> {
+    const { receipt, downloadName } = await this.payments.readPaymentProof(
+      paymentId,
+      callerOf(user),
+    );
+    sendReceipt(res, receipt, downloadName);
   }
 
   // ─── Doctor reads their own payment ────────────────────────────
 
   @Get('quotations/:quotationId/payments/:paymentId')
-  @Roles(UserRole.dentist, UserRole.admin, UserRole.super_admin, UserRole.designer)
+  @Roles(
+    UserRole.dentist,
+    UserRole.admin,
+    UserRole.super_admin,
+    UserRole.designer,
+  )
   @HttpCode(HttpStatus.OK)
   async getOwnPayment(
     @Param('paymentId') paymentId: string,
     @CurrentUser() user: JwtPayload,
   ) {
-    return toPaymentJson(
-      await this.payments.getPayment(paymentId, {
-        userId: user.sub,
-        role: user.role as UserRole,
-      }),
+    const caller = callerOf(user);
+    return presentPayment(
+      await this.payments.getPayment(paymentId, caller),
+      caller,
     );
   }
 
@@ -226,11 +275,10 @@ export class PaymentsController {
     @Query() filters: PaymentFilterDto,
     @CurrentUser() user: JwtPayload,
   ) {
+    const caller = callerOf(user);
     return toPaymentPage(
-      await this.payments.listPendingConfirmations({
-        ...filters,
-        caller: { userId: user.sub, role: user.role as UserRole },
-      }),
+      await this.payments.listPendingConfirmations({ ...filters, caller }),
+      caller,
     );
   }
 
@@ -244,11 +292,10 @@ export class PaymentsController {
     @Query() filters: PaymentFilterDto,
     @CurrentUser() user: JwtPayload,
   ) {
+    const caller = callerOf(user);
     return toPaymentPage(
-      await this.payments.listPayments({
-        ...filters,
-        caller: { userId: user.sub, role: user.role as UserRole },
-      }),
+      await this.payments.listPayments({ ...filters, caller }),
+      caller,
     );
   }
 
@@ -304,11 +351,10 @@ export class PaymentsController {
     @Query() filters: PaymentFilterDto,
     @CurrentUser() user: JwtPayload,
   ) {
+    const caller = callerOf(user);
     return toPaymentPage(
-      await this.payments.listPayments({
-        ...filters,
-        caller: { userId: user.sub, role: user.role as UserRole },
-      }),
+      await this.payments.listPayments({ ...filters, caller }),
+      caller,
     );
   }
 
@@ -319,49 +365,78 @@ export class PaymentsController {
     @Param('paymentId') paymentId: string,
     @CurrentUser() user: JwtPayload,
   ) {
-    return toPaymentJson(
-      await this.payments.getPayment(paymentId, {
-        userId: user.sub,
-        role: user.role as UserRole,
-      }),
+    const caller = callerOf(user);
+    return presentPayment(
+      await this.payments.getPayment(paymentId, caller),
+      caller,
     );
+  }
+
+  /**
+   * An admin opened the receipt: the first opening stamps reviewOpenedAt
+   * ("À vérifier"), every opening marks this admin's notifications of the
+   * transfer read.
+   */
+  @Post('admin/payments/:paymentId/review-opened')
+  @Roles(UserRole.admin, UserRole.super_admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Record that an admin opened a transfer receipt (the first opening stamps reviewOpenedAt; processed transfers are not stamped).',
+  })
+  @ApiOkResponse({ type: TransferReviewOpenedDto })
+  async reviewOpened(
+    @Param('paymentId') paymentId: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<TransferReviewOpenedDto> {
+    return this.payments.markTransferReviewOpened(paymentId, callerOf(user));
   }
 
   @Post('admin/payments/:paymentId/confirm')
   @Roles(UserRole.admin, UserRole.super_admin)
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Confirm a bank transfer (a repeat on a confirmed one: 200). 409 TRANSFER_ALREADY_PROCESSED / INSTALLMENT_ALREADY_PAID; 400 PROOF_OVERRIDE_NOTE_REQUIRED without a receipt.',
+  })
   async confirm(
     @Param('paymentId') paymentId: string,
     @Body() dto: ConfirmPaymentDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return toPaymentJson(
-      await this.payments.confirmBankTransfer(paymentId, dto.notes, {
-        userId: user.sub,
-        role: user.role as UserRole,
+    const caller = callerOf(user);
+    return presentPayment(
+      await this.payments.confirmBankTransfer(paymentId, dto.notes, caller, {
+        overrideNote: dto.overrideNote,
       }),
+      caller,
     );
   }
 
   @Post('admin/payments/:paymentId/reject')
   @Roles(UserRole.admin, UserRole.super_admin)
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Refuse a bank transfer with a reason (3-500 characters; a repeat: 200). 409 TRANSFER_ALREADY_PROCESSED.',
+  })
   async reject(
     @Param('paymentId') paymentId: string,
     @Body() dto: RejectPaymentDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return toPaymentJson(
-      await this.payments.rejectBankTransfer(paymentId, dto.rejectionReason, {
-        userId: user.sub,
-        role: user.role as UserRole,
-      }),
+    const caller = callerOf(user);
+    return presentPayment(
+      await this.payments.rejectBankTransfer(
+        paymentId,
+        dto.rejectionReason,
+        caller,
+      ),
+      caller,
     );
   }
 
-  @Post(
-    'admin/quotations/:quotationId/installments/:installmentId/record-cash',
-  )
+  @Post('admin/quotations/:quotationId/installments/:installmentId/record-cash')
   @Roles(UserRole.admin, UserRole.super_admin)
   @HttpCode(HttpStatus.OK)
   async recordCash(
@@ -370,22 +445,46 @@ export class PaymentsController {
     @Body() dto: RecordCashPaymentDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return toPaymentJson(
+    const caller = callerOf(user);
+    return presentPayment(
       await this.payments.recordCash({
         installmentId,
         receiptNumber: dto.receiptNumber,
         notes: dto.notes,
         method: dto.method,
         applyWithholding: dto.applyWithholding,
-        caller: { userId: user.sub, role: user.role as UserRole },
+        caller,
       }),
+      caller,
     );
   }
 }
 
-/** A payment list page, each row with its retenue fields as numbers. */
+/** The principal of a request, as the services take it. */
+function callerOf(user: JwtPayload): Caller {
+  return { userId: user.sub, role: user.role };
+}
+
+/**
+ * A payment as `caller` reads it: its retenue and stamp fields as numbers
+ * and the retenue threshold snapshot as a 3-decimal number, null = taken
+ * before the threshold existed (both by toPaymentJson, the one conversion
+ * the ClicToPay responses share), `hasProof`, and, for a dentist, without
+ * the admin-only columns (paymentForViewer).
+ */
+function presentPayment<T extends Parameters<typeof toPaymentJson>[0]>(
+  payment: T,
+  caller: Caller,
+) {
+  return paymentForViewer(toPaymentJson(payment), caller);
+}
+
+/** A payment list page, each row presented for the caller. */
 function toPaymentPage<
   T extends { data: Parameters<typeof toPaymentJson>[0][] },
->(page: T) {
-  return { ...page, data: page.data.map((row) => toPaymentJson(row)) };
+>(page: T, caller: Caller) {
+  return {
+    ...page,
+    data: page.data.map((row) => presentPayment(row, caller)),
+  };
 }

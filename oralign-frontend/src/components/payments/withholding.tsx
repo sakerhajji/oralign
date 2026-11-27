@@ -1,12 +1,20 @@
 'use client';
 
-import { useId } from 'react';
+import { useEffect, useId } from 'react';
+import { Info } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
+import type { BillingPublicDefaults } from '@/lib/api/company-billing.service';
 import { extractApiError } from '@/lib/api/error';
-import { paymentSplitOf, type PaymentChargePreview } from '@/lib/billing/tax-split';
+import {
+  paymentSplitOf,
+  withholdingIneligibility,
+  type PaymentChargePreview,
+  type WithholdingRulePreview,
+} from '@/lib/billing/tax-split';
 import { useBillingPublicDefaults } from '@/lib/hooks';
 import type { Lang } from '@/lib/i18n/dict';
 import { useT } from '@/lib/i18n/lang-context';
+import { withholdingRefusalText } from '@/lib/payments/payment-refusals';
 import type { Quotation } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { formatAmount, formatPrice } from '@/lib/utils/currency';
@@ -30,12 +38,21 @@ import { formatAmount, formatPrice } from '@/lib/utils/currency';
  * choice alone. Every installment is its own payment, so a payment of
  * several installments sums the per-installment previews (one stamp and
  * one rounded retenue each) instead of taking them on the sum.
+ *
+ * The retenue is offered only when the rule lets it apply (spec §4): the
+ * company switch is on, the rate is above 0, and each payment reaches the
+ * threshold (TTC, stamp excluded). WithholdingChoice reads the rule itself
+ * and unticks the choice when it stops applying, so no payment screen can
+ * send a retenue the server would refuse (400 WITHHOLDING_DISABLED /
+ * WITHHOLDING_BELOW_THRESHOLD).
  */
 
 const num = (value: unknown): number => {
   const parsed = Number(value ?? 0);
   return Number.isFinite(parsed) ? parsed : 0;
 };
+
+type Translate = ReturnType<typeof useT>['t'];
 
 /**
  * "1", "1,5" (fr) / "1.5" (en): a rate as a person writes it. The
@@ -47,11 +64,49 @@ export function formatRate(rate: number | string | null | undefined, lang: Lang)
   });
 }
 
+/** The retenue rule as the payment screens read it: numbers, never strings. */
+export interface WithholdingRuleState extends Required<WithholdingRulePreview> {
+  enabled: boolean;
+  /** 0 when not configured. */
+  rate: number;
+  /** null = no threshold (none configured, or 0: every payment). */
+  threshold: number | null;
+}
+
+/**
+ * The retenue rule the public defaults describe: the switch (absent = off,
+ * like the backend default), the rate and the threshold (null = none).
+ */
+export function withholdingRuleOf(
+  data: Pick<BillingPublicDefaults, 'withholdingRate' | 'withholdingEnabled' | 'withholdingThreshold'> | null | undefined,
+): WithholdingRuleState {
+  const rate = Number(data?.withholdingRate ?? 0);
+  const threshold = data?.withholdingThreshold;
+  return {
+    enabled: data?.withholdingEnabled === true,
+    rate: Number.isFinite(rate) && rate > 0 ? rate : 0,
+    threshold:
+      typeof threshold === 'number' && Number.isFinite(threshold) && threshold > 0 ? threshold : null,
+  };
+}
+
+/**
+ * The company's retenue rule, for screens that show whether it applies
+ * (WithholdingChoice, a devis' "retenue si appliquée"). `ready` is false
+ * until the defaults answered (or failed: the rule then reads as off).
+ */
+export function useWithholdingRule(enabled = true) {
+  const { data, isError } = useBillingPublicDefaults(enabled);
+  return { rule: withholdingRuleOf(data), ready: !!data || isError };
+}
+
 /**
  * Rates that drive the quote's price wording, the stamp and the retenue
  * option: the quote's own TVA rate when it has one, otherwise the company
  * default (old pack quotes were stored at 0 % although their price
- * includes TVA).
+ * includes TVA). `withholdingRate` is the rate in force: 0 while the
+ * retenue is switched off, so a screen that offers it on `rate > 0` never
+ * offers it then. The threshold is applied by WithholdingChoice.
  */
 export function useQuoteTaxRates(
   quote: Pick<Quotation, 'tvaRate'> | null | undefined,
@@ -60,12 +115,17 @@ export function useQuoteTaxRates(
   const { data, isError } = useBillingPublicDefaults(enabled);
   const own = Number(quote?.tvaRate ?? 0);
   const tvaRate = own > 0 ? own : Number(data?.defaultTvaRate ?? 0);
-  const withholdingRate = Number(data?.withholdingRate ?? 0);
+  const rule = withholdingRuleOf(data);
   return {
     tvaRate: Number.isFinite(tvaRate) ? tvaRate : 0,
     /** Droit de timbre added to each payment; 0 = none. */
     stampDuty: Math.max(0, Number(data?.stampDuty ?? 0) || 0),
-    withholdingRate: Number.isFinite(withholdingRate) && withholdingRate > 0 ? withholdingRate : 0,
+    /** The retenue rate in force; 0 when switched off or not configured. */
+    withholdingRate: rule.enabled ? rule.rate : 0,
+    /** The company switch of the retenue (spec §4). */
+    withholdingEnabled: rule.enabled,
+    /** Base (TTC, stamp excluded) a payment must reach; null = none. */
+    withholdingThreshold: rule.threshold,
     /** False until the defaults answered (or failed). */
     ready: !!data || isError,
   };
@@ -76,14 +136,33 @@ export type QuoteTaxRates = ReturnType<typeof useQuoteTaxRates>;
 /**
  * 409 from a card session: a live attempt for the same amount carries the
  * other retenue choice. Only this refusal gets the "finish it or wait for
- * it to expire" explanation; the other PAYMENT_ATTEMPT_IN_PROGRESS cases
- * (a transfer awaiting confirmation, a card already in flight) are told
- * by the server's own message, which the mutation hooks toast.
+ * it to expire" explanation; the PAYMENT_ATTEMPT_IN_PROGRESS cases (a
+ * transfer awaiting confirmation, a card already in flight) are toasted
+ * by the mutation hooks, in the user's language
+ * (lib/payments/payment-refusals.ts).
  */
 export const WITHHOLDING_CHOICE_CONFLICT = 'WITHHOLDING_CHOICE_CONFLICT';
 
 export function isWithholdingChoiceConflict(error: unknown): boolean {
   return extractApiError(error).errorCode === WITHHOLDING_CHOICE_CONFLICT;
+}
+
+/**
+ * The user's-language copy of a retenue refusal (400 WITHHOLDING_DISABLED
+ * / WITHHOLDING_BELOW_THRESHOLD, the threshold formatted when the body
+ * carries it); null for any other error, which keeps its own message.
+ * The mapping is lib/payments/payment-refusals.ts, shared with the payment
+ * hooks, which toast it.
+ */
+export function withholdingErrorCopy(
+  error: unknown,
+  t: Translate,
+  currency?: string | null,
+): string | null {
+  const body = (error as { response?: { data?: unknown } } | null)?.response?.data;
+  return withholdingRefusalText(extractApiError(error).errorCode, body, t, (value) =>
+    formatPrice(value, currency),
+  );
 }
 
 /** What the amount settles: an installment, several, or a treatment fee. */
@@ -124,8 +203,6 @@ export function recordedSplit(
     rate: split.withholding <= 0 || rate == null || num(rate) <= 0 ? null : num(rate),
   };
 }
-
-type Translate = ReturnType<typeof useT>['t'];
 
 /**
  * "Échéance 1 000,000 TND", "Timbre 1,000 TND", "Retenue 10,000 TND": the
@@ -287,8 +364,15 @@ export interface DueLine {
  * The payment's breakdown and, when the company offers it, the
  * practitioner's retenue choice: one checkbox "Appliquer la retenue à la
  * source (1 %)" above the live rows (amount due TTC, droit de timbre,
- * retenue when ticked, to pay). Without the option (rate 0, or a method
- * the practitioner doesn't pay himself) only the rows show.
+ * retenue when ticked, to pay). Without the option (switched off, rate 0,
+ * or a method the practitioner doesn't pay himself) only the rows show.
+ *
+ * Eligibility (spec §4) is read here, from the company rule: the payment
+ * (each one, for several installments: `charge.smallestDue`) must reach
+ * the threshold. Below it the checkbox gives way to a one-line note, and
+ * a ticked choice that stops applying (another scope, a new rule) is
+ * unticked through `onCheckedChange(false)`, so the caller never sends a
+ * retenue the server would refuse.
  */
 export function WithholdingChoice({
   rate,
@@ -314,9 +398,10 @@ export function WithholdingChoice({
   /**
    * What the payment charges (previewPaymentCharge, or
    * previewInstallmentCharges for several installments, whose `count`
-   * gives the number of stamps).
+   * gives the number of stamps and `smallestDue` the payment the
+   * threshold is checked on).
    */
-  charge: PaymentChargePreview & { count?: number };
+  charge: PaymentChargePreview & { count?: number; smallestDue?: number };
   /** Labels the amount due: an installment, several, or a treatment fee. */
   kind?: ChargeKind;
   /** The amount due in parts (fee + CBCT); replaces the single due line. */
@@ -333,7 +418,21 @@ export function WithholdingChoice({
 }) {
   const { t, lang } = useT();
   const id = useId();
-  const offered = offer && !!rate && rate > 0;
+  const { rule, ready } = useWithholdingRule();
+  const count = Math.max(1, charge.count ?? 1);
+  // Each installment is its own payment: the smallest one must qualify.
+  const base = charge.smallestDue ?? charge.due;
+  const ineligible = ready
+    ? withholdingIneligibility(base, { enabled: rule.enabled, rate, threshold: rule.threshold })
+    : 'disabled';
+  const offered = offer && ineligible === null;
+  const belowThreshold =
+    offer && ready && ineligible === 'below_threshold' && charge.due > 0 && rule.threshold !== null;
+  // A ticked retenue that no longer applies is unticked, once the rule is
+  // known (a choice restored before the defaults load is kept until then).
+  useEffect(() => {
+    if (ready && checked && ineligible !== null) onCheckedChange(false);
+  }, [ready, checked, ineligible, onCheckedChange]);
   const rateLabel = formatRate(rate, lang);
   const money = (value: number) => formatPrice(value, currency);
   const help =
@@ -342,7 +441,6 @@ export function WithholdingChoice({
           rate: rateLabel,
         })
       : null;
-  const count = Math.max(1, charge.count ?? 1);
   const stampEach = Math.round((charge.stamp * 1000) / count) / 1000;
   const dueLabel = t(
     kind === 'fee'
@@ -383,6 +481,18 @@ export function WithholdingChoice({
             ) : null}
           </label>
         </div>
+      ) : belowThreshold ? (
+        <p className="flex items-start gap-2 border-b px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
+          <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+          <span>
+            {t(
+              count > 1
+                ? 'withholdingRules.hint.belowThresholdEach'
+                : 'withholdingRules.hint.belowThreshold',
+              { threshold: money(rule.threshold ?? 0) },
+            )}
+          </span>
+        </p>
       ) : null}
       <dl className="space-y-1.5 px-3 py-3 text-sm" aria-live="polite">
         {dueLines && dueLines.length > 0 ? (

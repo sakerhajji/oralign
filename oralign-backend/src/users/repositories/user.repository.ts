@@ -2,6 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UserRole, Prisma, VerificationStatus } from '@prisma/client';
 import { UserFilterDto } from '../dto/user.dto';
+import { DORMANT_DOCTOR_WHERE } from '../activity/doctor-activity.contract';
+import {
+  ACTIVITY_ACCOUNT_SELECT,
+  type ActivityAccountRow,
+} from '../activity/doctor-activity.repository';
 
 /**
  * Relations every mapped user read carries: the clinic profile, and the
@@ -35,6 +40,8 @@ export type UserStats = {
   technicians: number;
   giftAvailable: number;
   giftUsed: number;
+  /** Dormant dentists (DORMANT_DOCTOR_WHERE). */
+  dormant: number;
 };
 
 @Injectable()
@@ -124,15 +131,24 @@ export class UserRepository {
     });
   }
 
+  /**
+   * `activityWhere`: the `activity` filter resolved by
+   * DoctorActivityService (warned / active are derived, not columns).
+   */
   async findAll(
     skip: number,
     take: number,
     filters?: UserFilterDto,
+    activityWhere?: Prisma.UserWhereInput,
   ): Promise<{
     users: UserWithProfile[];
     total: number;
   }> {
-    const where = UserRepository.buildWhere({ deletedAt: null }, filters);
+    const where = UserRepository.buildWhere(
+      { deletedAt: null },
+      filters,
+      activityWhere,
+    );
 
     const [users, total] = await Promise.all([
       this.prisma.user.findMany({
@@ -165,6 +181,7 @@ export class UserRepository {
       isEmailVerified?: boolean;
       isActive?: boolean;
       verificationStatus?: VerificationStatus;
+      approvedAt?: Date;
     },
   ): Promise<UserWithProfile> {
     return this.prisma.user.update({
@@ -241,22 +258,50 @@ export class UserRepository {
     return result.count;
   }
 
+  /**
+   * Bulk block / unblock, in one transaction: the targeted rows are
+   * locked (id order, so two bulk writes never deadlock), the accounts the
+   * write really FLIPS are handed to `journal` (the activity journal rows,
+   * written in the same transaction), then the write. `count` keeps its
+   * historic meaning: every live, non-spared row the selection matched.
+   */
   async bulkUpdateStatus(
     ids: string[],
     isActive: boolean,
     options: BulkWriteOptions = {},
+    journal?: (
+      tx: Prisma.TransactionClient,
+      flipped: ActivityAccountRow[],
+      at: Date,
+    ) => Promise<unknown>,
   ): Promise<number> {
-    const result = await this.prisma.user.updateMany({
-      where: { id: { in: ids }, deletedAt: null, ...spared(options) },
-      data: { isActive, updatedAt: new Date() },
+    if (ids.length === 0) return 0;
+    const where: Prisma.UserWhereInput = {
+      id: { in: ids },
+      deletedAt: null,
+      ...spared(options),
+    };
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" IN (${Prisma.join(ids)}) ORDER BY "id" FOR UPDATE`;
+      const flipped = await tx.user.findMany({
+        where: { ...where, isActive: !isActive },
+        select: ACTIVITY_ACCOUNT_SELECT,
+      });
+      const at = new Date();
+      const { count } = await tx.user.updateMany({
+        where,
+        data: { isActive, updatedAt: at },
+      });
+      if (journal && flipped.length > 0) await journal(tx, flipped, at);
+      return count;
     });
-    return result.count;
   }
 
   async findAllDeleted(
     skip: number,
     take: number,
     filters?: UserFilterDto,
+    activityWhere?: Prisma.UserWhereInput,
   ): Promise<{
     users: UserWithProfile[];
     total: number;
@@ -264,6 +309,7 @@ export class UserRepository {
     const where = UserRepository.buildWhere(
       { deletedAt: { not: null } },
       filters,
+      activityWhere,
     );
 
     const [users, total] = await Promise.all([
@@ -299,6 +345,7 @@ export class UserRepository {
       technicians,
       giftAvailable,
       giftUsed,
+      dormant,
     ] = await Promise.all([
       this.prisma.user.count({ where: live }),
       this.prisma.user.count({ where: { ...live, isActive: true } }),
@@ -320,6 +367,7 @@ export class UserRepository {
       this.prisma.user.count({
         where: { ...dentist, welcomeGiftUsedAt: { not: null } },
       }),
+      this.prisma.user.count({ where: DORMANT_DOCTOR_WHERE }),
     ]);
     return {
       total,
@@ -331,6 +379,7 @@ export class UserRepository {
       technicians,
       giftAvailable,
       giftUsed,
+      dormant,
     };
   }
 
@@ -338,11 +387,13 @@ export class UserRepository {
    * The list `where`: the scope (live or deleted) AND every filter given.
    * Built as an AND list so the `welcomeGift` filter (dentists only) can
    * never overwrite a `role` filter — a non-dentist role simply matches
-   * nothing.
+   * nothing. The same holds for `activityWhere` (the resolved `activity`
+   * filter, dentists only).
    */
   static buildWhere(
     scope: Prisma.UserWhereInput,
     filters?: UserFilterDto,
+    activityWhere?: Prisma.UserWhereInput,
   ): Prisma.UserWhereInput {
     const and: Prisma.UserWhereInput[] = [scope];
     const search = filters?.search?.trim();
@@ -364,6 +415,7 @@ export class UserRepository {
           filters.welcomeGift === 'used' ? { not: null } : null,
       });
     }
+    if (activityWhere) and.push(activityWhere);
     return and.length === 1 ? scope : { AND: and };
   }
 

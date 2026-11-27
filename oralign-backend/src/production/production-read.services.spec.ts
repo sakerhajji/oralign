@@ -130,7 +130,100 @@ describe('ProductionQueueService', () => {
         lower: null,
       },
       deliveryComplete: false,
+      // No quotation, production status: the legacy "everything" (spec §3).
+      release: {
+        state: 'unscheduled',
+        arches: {
+          upper: {
+            total: { from: 1, to: 12 },
+            provisional: false,
+            unlocked: [{ from: 1, to: 12 }],
+            workableTo: 12,
+          },
+          lower: null,
+        },
+        next: null,
+      },
     });
+    // The release block rides in the same findMany: the rules' quotation
+    // fragment, its batches without any installment.
+    const quotation = args.select.quotation as {
+      select: Record<string, unknown>;
+    };
+    expect(quotation.select).toHaveProperty('stepBatches');
+    expect(quotation.select).not.toHaveProperty('installments');
+  });
+
+  it('each card reads its release from the batches: « Plan 1→7 · Débloquées 1→4 · Prochaine tranche 5→7 »', async () => {
+    const { prisma, asPrisma, policy } = makePrisma();
+    const batch = (
+      id: string,
+      from: number,
+      to: number,
+      status: BatchStatus,
+    ) => ({
+      id,
+      fromStep: from,
+      toStep: to,
+      status,
+      deliveredByProduction: false,
+    });
+    prisma.dentalOrder.findMany.mockResolvedValue([
+      summaryRow({
+        status: OrderStatus.payment_pending,
+        treatmentPlans: [{ totalUpperAligners: 7, totalLowerAligners: null }],
+        quotation: {
+          maxStepsPerArch: 20,
+          isUnlimitedSteps: false,
+          deletedAt: null,
+          paymentStatus: QuotationPaymentStatus.partially_paid,
+          treatmentValidityMonths: 12,
+          stepBatches: [
+            batch('b1', 1, 4, BatchStatus.unlocked),
+            batch('b2', 5, 7, BatchStatus.locked),
+          ],
+        },
+      }),
+      summaryRow({
+        id: 'o2',
+        status: OrderStatus.fabrication,
+        treatmentPlans: [{ totalUpperAligners: 7, totalLowerAligners: null }],
+        quotation: {
+          maxStepsPerArch: 20,
+          isUnlimitedSteps: false,
+          deletedAt: null,
+          paymentStatus: QuotationPaymentStatus.pending,
+          treatmentValidityMonths: 12,
+          stepBatches: [batch('b3', 1, 7, BatchStatus.locked)],
+        },
+      }),
+    ]);
+
+    const page = await new ProductionQueueService(asPrisma, policy).list(
+      {},
+      technician,
+    );
+
+    expect(page.data[0].release).toEqual({
+      state: 'partial',
+      arches: {
+        upper: {
+          total: { from: 1, to: 7 },
+          provisional: false,
+          unlocked: [{ from: 1, to: 4 }],
+          workableTo: 4,
+        },
+        lower: null,
+      },
+      next: { from: 5, to: 7 },
+    });
+    // Production status, nothing paid: still in her queue, nothing workable.
+    expect(page.data[1].release).toMatchObject({
+      state: 'none',
+      arches: { upper: { unlocked: [], workableTo: null } },
+      next: { from: 1, to: 7 },
+    });
+    expect(prisma.dentalOrder.findMany).toHaveBeenCalledTimes(1);
   });
 
   it('a full page of varied rows still costs two calls: no per-row lookup (N+1 guard)', async () => {
@@ -238,6 +331,66 @@ describe('ProductionSheetService', () => {
       sheetVersion: '0',
     });
     expect(sheet.history[0]).toMatchObject({ id: 'e1', canCancel: true });
+    expect(sheet.release.state).toBe('unscheduled');
+  });
+
+  it('a partly released case: next steps stop at the released range, ranges trimmed to the plan', async () => {
+    const { prisma, asPrisma, policy } = makePrisma();
+    const batch = (
+      id: string,
+      from: number,
+      to: number,
+      status: BatchStatus,
+    ) => ({
+      id,
+      fromStep: from,
+      toStep: to,
+      status,
+      deliveredByProduction: false,
+    });
+    prisma.dentalOrder.findUnique.mockResolvedValue(
+      summaryRow({
+        status: OrderStatus.payment_pending,
+        // Pack of 20, approved plan of 7: the last batch holds no aligner.
+        treatmentPlans: [{ totalUpperAligners: 7, totalLowerAligners: null }],
+        quotation: {
+          maxStepsPerArch: 20,
+          isUnlimitedSteps: false,
+          deletedAt: null,
+          paymentStatus: QuotationPaymentStatus.partially_paid,
+          treatmentValidityMonths: 12,
+          stepBatches: [
+            batch('b1', 1, 4, BatchStatus.unlocked),
+            batch('b2', 5, 10, BatchStatus.locked),
+            batch('b3', 11, 20, BatchStatus.locked),
+          ],
+        },
+      }),
+    );
+    // Steps 1-4 printed (event() default): printing has nothing released left.
+    const sheet = await new ProductionSheetService(asPrisma, policy).get(
+      'o1',
+      technician,
+      NOW,
+    );
+    expect(sheet.releasedRanges).toEqual([
+      { from: 1, to: 4, state: 'released' },
+      { from: 5, to: 7, state: 'locked' },
+    ]);
+    expect(sheet.nextStepFrom.model_printed).toEqual({
+      upper: null,
+      lower: null,
+    });
+    expect(sheet.nextStepFrom.aligner_thermoformed).toEqual({
+      upper: 1,
+      lower: null,
+    });
+    expect(sheet.release).toMatchObject({
+      state: 'partial',
+      next: { from: 5, to: 7 },
+      arches: { upper: { unlocked: [{ from: 1, to: 4 }], workableTo: 4 } },
+    });
+    expect(sheet.canDeclare).toBe(true);
   });
 
   it('a history case is readable but not declarable for her', async () => {

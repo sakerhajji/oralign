@@ -67,6 +67,16 @@ export const LEGACY_DELIVERY_AUTO_CONFIRM: readonly ProductionWarningCode[] = [
 /** Every step there is: the release state of a case without step batches. */
 const ALL_STEPS: StepRange = { from: 0, to: Number.MAX_SAFE_INTEGER };
 
+/**
+ * The released set is "every step" (no schedule, or an unlimited pack once
+ * paid), not a union of batch ranges.
+ */
+export function releasesEveryStep(released: readonly StepRange[]): boolean {
+  return released.some(
+    (range) => range.from <= ALL_STEPS.from && range.to >= ALL_STEPS.to,
+  );
+}
+
 /** The admin rules apply only to admins; everyone else gets the technician's. */
 export function isRestricted(caller: Pick<Caller, 'role'>): boolean {
   return !isAdmin(caller);
@@ -166,15 +176,17 @@ export interface ReleaseBatch {
 }
 
 /**
- * The steps released to the workshop (§3.1.5):
+ * The steps released to the workshop (§3.1.5, spec §3 "source officielle =
+ * tranches payées et débloquées"):
  *   • with batches on the live quotation: the union of the unlocked and
- *     delivered ranges (a step outside every batch is not released);
+ *     delivered ranges (a step outside every batch is not released),
+ *     whatever the order status;
  *   • on an unlimited-step pack, whose batches are payment placeholders
  *     ([1,1], [2,2]… from the plan editor), not aligner ranges: every
- *     step once one batch is unlocked or delivered, or the order is in a
- *     production status; none otherwise (CONC-01);
+ *     step once one batch is unlocked or delivered (or the quote is paid),
+ *     none before, even in a production status (DECISIONS §3, CONC-01);
  *   • without batches: every step when the quote is paid or the order is
- *     in a production status, none otherwise.
+ *     in a production status (legacy), none otherwise.
  * `quotation` is the LIVE quotation (null when none or deleted).
  */
 export function releasedSteps(input: {
@@ -187,12 +199,10 @@ export function releasedSteps(input: {
 }): StepRange[] {
   const batches = input.quotation?.batches ?? [];
   if (batches.length > 0 && input.quotation?.isUnlimitedSteps) {
-    const paidSome = batches.some((batch) =>
-      RELEASED_BATCH_STATUSES.includes(batch.status),
-    );
-    return paidSome || PRODUCTION_STATUSES.includes(input.status)
-      ? [ALL_STEPS]
-      : [];
+    const paidSome =
+      input.quotation.paymentStatus === QuotationPaymentStatus.paid ||
+      batches.some((batch) => RELEASED_BATCH_STATUSES.includes(batch.status));
+    return paidSome ? [ALL_STEPS] : [];
   }
   if (batches.length > 0) {
     return mergeStepRanges(
@@ -256,9 +266,12 @@ export interface RowRuleInput {
 }
 
 /**
- * The technician's hard gates (§3.1.4): a step above the APPROVED plan's
- * total is a 400; a delivery of steps that are not all released is a 409
- * with a neutral message (no amount, no payment wording, D1).
+ * The technician's hard gates (§3.1.4, spec §3): a step above the APPROVED
+ * plan's total is a 400; ANY act (print, thermoform, cut, delivery) on
+ * steps that are not all released is a 409 STEPS_NOT_RELEASED with a
+ * neutral message (no amount, no payment wording). This supersedes D1's
+ * delivery-only gate (DECISIONS "Spec supersessions"). Admins keep the
+ * confirmable steps_not_released warning (rowWarnings).
  */
 export function assertTechnicianGates(input: RowRuleInput): void {
   if (!input.restricted) return;
@@ -273,12 +286,9 @@ export function assertTechnicianGates(input: RowRuleInput): void {
       PRODUCTION_ERROR.STEP_BEYOND_PLANNED_TOTAL,
     );
   }
-  if (
-    input.type === ProductionEventType.aligner_delivered &&
-    !isRangeReleased(input.range, input.released)
-  ) {
+  if (!isRangeReleased(input.range, input.released)) {
     throw new ConflictException(
-      'Some of these steps are not released for delivery yet. Please see an administrator.',
+      'Some of these steps are not released yet. Please see an administrator.',
       PRODUCTION_ERROR.STEPS_NOT_RELEASED,
     );
   }
@@ -318,11 +328,9 @@ export function rowWarnings(input: RowRuleInput): ProductionWarningCode[] {
   if (!input.treatedArches.includes(input.arch)) {
     found.add(PRODUCTION_WARNING.arch_not_treated);
   }
-  const isDelivery = input.type === ProductionEventType.aligner_delivered;
-  if (
-    !isRangeReleased(input.range, input.released) &&
-    (!isDelivery || !input.restricted)
-  ) {
+  // The admin override (DECISIONS §3): confirmed with a note, stored on
+  // the row, listed in « Écarts ». The technician met the 409 gate first.
+  if (!input.restricted && !isRangeReleased(input.range, input.released)) {
     found.add(PRODUCTION_WARNING.steps_not_released);
   }
   return sortWarnings(found);

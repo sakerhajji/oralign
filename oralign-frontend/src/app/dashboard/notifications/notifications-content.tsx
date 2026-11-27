@@ -30,6 +30,7 @@ import {
   useNotifications,
   useUnreadNotificationCount,
 } from '@/lib/hooks';
+import { useAccountNoticeRefresh } from '@/lib/hooks/use-can-order';
 import type { Notification } from '@/lib/types';
 
 type Filter = 'all' | 'unread' | 'read';
@@ -62,6 +63,10 @@ export function NotificationsPageContent() {
   const unreadQuery = useUnreadNotificationCount();
   const markRead = useMarkNotificationRead();
   const markAll = useMarkAllNotificationsRead();
+
+  // An account notice newer than /users/me (« compte réactivé ») opens
+  // or closes the ordering gates without waiting for its cache.
+  useAccountNoticeRefresh(listQuery.data?.data);
 
   const all = listQuery.data?.data ?? [];
   const items =

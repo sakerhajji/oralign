@@ -189,6 +189,12 @@ export interface QuoteInstallment {
   paidAt?: string | null;
   createdAt: string;
   updatedAt: string;
+  /**
+   * The installment's latest bank-transfer declaration (P-A, one grouped
+   * query per quote), null when it has none. Optional while an older API
+   * omits it: the panel then reads the installment status alone.
+   */
+  latestTransfer?: InstallmentLatestTransfer | null;
 }
 
 export interface QuoteStepBatch {
@@ -199,6 +205,9 @@ export interface QuoteStepBatch {
   fromStep: number;
   toStep: number;
   status: BatchStatus;
+  unlockedAt?: string | null;
+  /** What released the steps (spec §3); null on batches still locked. */
+  unlockSource?: BatchUnlockSource | null;
   deliveredAt?: string | null;
   deliveredById?: string | null;
   createdAt: string;
@@ -239,7 +248,14 @@ export interface Payment {
   idempotencyKey?: string | null;
   transactionId?: string | null;
   bankReference?: string | null;
+  /**
+   * Stored receipt path: the owning dentist and admins only, and never a
+   * URL to open (the folder is private). Read the bytes through
+   * GET payments/:paymentId/proof; test `hasProof` instead.
+   */
   proofUrl?: string | null;
+  /** Whether a transfer receipt is attached (every reader, P-A). */
+  hasProof?: boolean;
   receiptNumber?: string | null;
   /** Printed receipt/invoice number (sequential FAC-XXXXXX; admin-editable). */
   invoiceNumber?: string | null;
@@ -255,6 +271,12 @@ export interface Payment {
   paidAt?: string | null;
   confirmedAt?: string | null;
   rejectedAt?: string | null;
+  /** Bank transfer: the FIRST time an admin opened the receipt ("À vérifier"). */
+  reviewOpenedAt?: string | null;
+  /** A declaration withdrawn or superseded (status cancelled): when. */
+  cancelledAt?: string | null;
+  /** Retenue threshold in force when the charge was computed (snapshot). */
+  withholdingThreshold?: number | string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -308,14 +330,6 @@ export interface DeclareBankTransferDto {
   /** Apply the retenue à la source (sent as a multipart string field). */
   applyWithholding?: boolean;
   // proofFile is sent as multipart FormData — not on the DTO type itself.
-}
-
-export interface ConfirmPaymentDto {
-  notes?: string;
-}
-
-export interface RejectPaymentDto {
-  rejectionReason: string;
 }
 
 export interface RecordCashPaymentDto {
@@ -387,8 +401,16 @@ export interface PaymentFilterDto {
 
 /** Money received in one bucket: amount with exactly 3 decimals, e.g. "1250.500". */
 export interface PaymentsSummaryBucket {
+  /** The cash received (net of any retenue), TND, 3 dp. */
   amount: string;
   count: number;
+  /**
+   * Brut = net + retenue (TND string, 3 dp). Sent since 2026-11-27; an
+   * older API omits it (read it as `amount`).
+   */
+  gross?: string;
+  /** The retenue à la source kept back by the practitioners (TND string, 3 dp). */
+  withholding?: string;
 }
 
 export interface PaymentsSummaryByMethod {
@@ -499,3 +521,135 @@ export enum OrderFileCategory {
   VIDEO = 'video',
   OTHER = 'other',
 }
+
+// ─── Programme contract (P0, CONTRACT.md): transfers, batches, retenue ────
+// Mirrors oralign-backend: payments/services/transfer-state.ts,
+// payments/services/transfer-queue.service.ts,
+// common/exceptions/domain-error-codes.ts and the BatchUnlockSource enum.
+
+/** QuoteStepBatch.unlockSource. manual = an admin, with a reason. */
+export type BatchUnlockSource = 'payment' | 'installment_cancelled' | 'manual';
+
+/** The two queues a bank-transfer declaration sits in. */
+export type TransferKind = 'installment' | 'treatment_fee';
+
+/**
+ * The five spec states of a transfer, DERIVED from the status enum
+ * (backend transfer-state.ts; frontend lib/payments/transfer-state.ts):
+ * awaiting_receipt = payable, nothing in flight; receipt_sent =
+ * awaiting_confirmation unopened; to_verify = awaiting_confirmation opened
+ * by an admin; paid = success; refused = rejected.
+ */
+export type TransferState =
+  | 'awaiting_receipt'
+  | 'receipt_sent'
+  | 'to_verify'
+  | 'paid'
+  | 'refused';
+
+/**
+ * Per installment on the quote response (P-A): its latest bank-transfer
+ * declaration, null when it has none. Never a file path.
+ */
+export interface InstallmentLatestTransfer {
+  paymentId: string;
+  status: PaymentRecordStatus;
+  state: TransferState;
+  declaredAt: string | null;
+  reviewOpenedAt: string | null;
+  rejectionReason: string | null;
+  hasProof: boolean;
+}
+
+/** ?filter= of GET admin/payments/transfer-queue, in tab order. */
+export type TransferQueueFilter = 'nouveau' | 'a_verifier' | 'valide' | 'refuse';
+
+/** Money of a queue row: JSON numbers, 3 decimals. */
+export interface TransferQueueAmounts {
+  /** What the transfer settles: the installment, or the fee + CBCT (TTC). */
+  due: number;
+  stamp: number;
+  withholdingRate: number | null;
+  withholding: number;
+  /** due + stamp - withholding: the amount on the bank statement. */
+  cash: number;
+  currency: string;
+}
+
+/** One row of the merged admin transfer queue (installments + fees). */
+export interface TransferQueueRow {
+  kind: TransferKind;
+  /** The row's identity for "Nouveau / Consulté" (notification subject). */
+  subjectKey: string;
+  paymentId: string | null;
+  orderId: string;
+  orderCode: string;
+  quotationId: string | null;
+  installmentNumber: number | null;
+  doctor: { id: string; fullName: string } | null;
+  patient: { id: string; fullName: string } | null;
+  amounts: TransferQueueAmounts;
+  status: PaymentRecordStatus;
+  state: TransferState;
+  hasProof: boolean;
+  declaredAt: string | null;
+  reviewOpenedAt: string | null;
+  processedAt: string | null;
+  rejectionReason: string | null;
+  /** false = "Nouveau" for the calling admin. */
+  seenByMe: boolean;
+}
+
+export interface TransferQueuePage {
+  data: TransferQueueRow[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  counts: Record<TransferQueueFilter, number>;
+}
+
+/** Stable errorCode values of the transfer flows (backend domain-error-codes.ts). */
+export const TRANSFER_ERROR = {
+  /** 400: a dentist declared without a receipt (both flows). */
+  PROOF_REQUIRED: 'PROOF_REQUIRED',
+  /** 400: an admin skipped the receipt (declare or confirm) without a note. */
+  PROOF_OVERRIDE_NOTE_REQUIRED: 'PROOF_OVERRIDE_NOTE_REQUIRED',
+  /** 400: not JPEG / PNG / WebP / PDF (HEIC refused server-side). */
+  RECEIPT_TYPE: 'RECEIPT_TYPE',
+  /** 400: over 10 MB. */
+  RECEIPT_TOO_LARGE: 'RECEIPT_TOO_LARGE',
+  /** 400: refusal reason not 3-500 characters. */
+  REJECTION_REASON_INVALID: 'REJECTION_REASON_INVALID',
+  /** 409: already processed by another admin (or withdrawn): refetch, « déjà traité ». */
+  TRANSFER_ALREADY_PROCESSED: 'TRANSFER_ALREADY_PROCESSED',
+  /** 409: replace / withdraw on a transfer no longer awaiting confirmation. */
+  TRANSFER_NOT_WITHDRAWABLE: 'TRANSFER_NOT_WITHDRAWABLE',
+  /** 400: malformed Idempotency-Key header. */
+  IDEMPOTENCY_KEY_INVALID: 'TRANSFER_IDEMPOTENCY_KEY_INVALID',
+  /** 409: Idempotency-Key reused for another target. */
+  IDEMPOTENCY_KEY_REUSED: 'TRANSFER_IDEMPOTENCY_KEY_REUSED',
+  /** 404: no receipt, or not readable by this caller. */
+  PROOF_NOT_FOUND: 'PROOF_NOT_FOUND',
+  /** 400: malformed notification subject key. */
+  SUBJECT_KEY_INVALID: 'NOTIFICATION_SUBJECT_INVALID',
+} as const;
+export type TransferErrorCode = (typeof TRANSFER_ERROR)[keyof typeof TRANSFER_ERROR];
+
+/** Retenue à la source errorCode values. */
+export const WITHHOLDING_ERROR = {
+  /** 400: retenue asked while it is switched off (or the rate is 0). */
+  WITHHOLDING_DISABLED: 'WITHHOLDING_DISABLED',
+  /** 400: retenue asked on a payment below the threshold. */
+  WITHHOLDING_BELOW_THRESHOLD: 'WITHHOLDING_BELOW_THRESHOLD',
+} as const;
+export type WithholdingErrorCode = (typeof WITHHOLDING_ERROR)[keyof typeof WITHHOLDING_ERROR];
+
+/** Step-batch release errorCode values. */
+export const BATCH_UNLOCK_ERROR = {
+  /** 400: manual unlock without a 3-500 character reason. */
+  UNLOCK_REASON_REQUIRED: 'UNLOCK_REASON_REQUIRED',
+  /** 404: the batch is not on this quotation. */
+  BATCH_NOT_FOUND: 'BATCH_NOT_FOUND',
+} as const;
+export type BatchUnlockErrorCode = (typeof BATCH_UNLOCK_ERROR)[keyof typeof BATCH_UNLOCK_ERROR];

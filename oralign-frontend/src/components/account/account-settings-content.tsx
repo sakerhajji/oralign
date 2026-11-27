@@ -24,7 +24,17 @@ import {
   type ClinicSettingsFormData,
   type SecuritySettingsFormData,
 } from '@/lib/schemas';
-import { type UpdateDentistProfileDto, type UpdateUserDto, UserRole } from '@/lib/types';
+import { type UpdateUserDto, UserRole } from '@/lib/types';
+import type { UpdateClinicProfileBody } from '@/lib/api/dentist-profile.service';
+import { RegistrationNumberField } from '@/components/account/registration-number-field';
+import {
+  REGISTRATION_NUMBER_MAX_LENGTH,
+  registrationNumberInput,
+  registrationNumberPayload,
+} from '@/lib/doctor/registration-number';
+import { registrationNumberField } from '@/lib/doctor/registration-number-schema';
+import { gateRequiredPhone, gateRequiredText } from '@/lib/doctor/clinic-gate-schema';
+import { optionalTextChanged, optionalTextPayload } from '@/lib/doctor/clinic-payload';
 import {
   useAccountData,
   useChangePassword,
@@ -38,7 +48,7 @@ import {
 import { usersService } from '@/lib/api';
 import { getAvatarUrl } from '@/lib/utils';
 import { useAuth } from '@/lib/providers';
-import { userKeys } from '@/lib/hooks/use-users';
+import { invalidateDoctorIdentityQueries } from '@/lib/hooks/use-dentist-profiles';
 import { useT } from '@/lib/i18n/lang-context';
 
 const TIME_REGEX = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
@@ -47,6 +57,9 @@ const normalizeOptional = (value?: string | null) => {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
 };
+
+/** The clinic tab: the clinic settings plus the private registration number (spec §6). */
+type ClinicTabValues = ClinicSettingsFormData & { registrationNumber?: string };
 
 export function AccountSettingsContent() {
   const { t } = useT();
@@ -79,12 +92,27 @@ export function AccountSettingsContent() {
     },
   });
 
-  const clinicForm = useForm<ClinicSettingsFormData>({
-    resolver: zodResolver(clinicSettingsSchema),
+  const clinicSchema = useMemo(
+    () =>
+      clinicSettingsSchema.extend({
+        // Required by the onboarding gate: a blank here would send the
+        // doctor back to /onboarding/clinic (clinic-gate-schema.ts).
+        clinicAddress: gateRequiredText(t('onboardingPages.clinicForm.vClinicAddressRequired'), 2),
+        clinicPhone: gateRequiredPhone(t('onboardingPages.clinicForm.vClinicPhoneFormat')),
+        registrationNumber: registrationNumberField(
+          t('doctorIdentity.registrationNumber.tooLong', { max: REGISTRATION_NUMBER_MAX_LENGTH }),
+        ),
+      }),
+    [t],
+  );
+
+  const clinicForm = useForm<ClinicTabValues>({
+    resolver: zodResolver(clinicSchema),
     defaultValues: {
       clinicName: '',
       clinicAddress: '',
       clinicPhone: '',
+      registrationNumber: '',
     },
   });
 
@@ -115,6 +143,7 @@ export function AccountSettingsContent() {
       clinicName: dentistProfile.clinicName ?? '',
       clinicAddress: dentistProfile.clinicAddress ?? '',
       clinicPhone: dentistProfile.clinicPhone ?? '',
+      registrationNumber: registrationNumberInput(dentistProfile.registrationNumber),
     });
   }, [dentistProfile, clinicForm]);
 
@@ -175,26 +204,25 @@ export function AccountSettingsContent() {
       if (avatarFile) {
         updatedUser = await usersService.uploadAvatar(user.id, avatarFile);
         login(updatedUser);
-        queryClient.invalidateQueries({ queryKey: userKeys.currentUser() });
+        // The photo shows wherever the doctor does (spec §6).
+        void invalidateDoctorIdentityQueries(queryClient);
       }
 
-      const trimmedPhone = normalizeOptional(values.phone);
+      // An emptied stored number is sent as null (the server clears it;
+      // undefined would keep it). The country here is the phone field's
+      // own (its dial-code picker): it goes with a number only.
+      const phone = optionalTextPayload(values.phone, user.phone);
+      const country = phone ? normalizeOptional(values.country) : undefined;
       const updateData: UpdateUserDto = {
         fullName: values.fullName,
+        phone,
+        country,
       };
-
-      if (trimmedPhone) {
-        updateData.phone = trimmedPhone;
-        updateData.country = normalizeOptional(values.country);
-      } else {
-        updateData.phone = undefined;
-        updateData.country = undefined;
-      }
 
       const hasProfileDataChanges =
         values.fullName !== user.fullName ||
-        trimmedPhone !== (user.phone ?? undefined) ||
-        (trimmedPhone ? normalizeOptional(values.country) !== user.country : !!user.phone);
+        optionalTextChanged(phone, user.phone) ||
+        (!!phone && country !== (user.country ?? undefined));
 
       if (hasProfileDataChanges) {
         updatedUser = await profileMutation.mutateAsync({ id: user.id, data: updateData });
@@ -238,18 +266,20 @@ export function AccountSettingsContent() {
     setIsSavingSchedule(true);
     try {
       let profileId = dentistProfile?.id;
-      const clinicPayload: UpdateDentistProfileDto = {
+      const clinicPayload = {
         clinicName: values.clinicName,
-        clinicAddress: normalizeOptional(values.clinicAddress),
-        clinicPhone: normalizeOptional(values.clinicPhone),
-      };
+        // Address and practice phone are required by the schema (the
+        // onboarding gate needs them, clinic-gate-schema.ts), so they are
+        // never blank here; optionalTextPayload trims them and keeps the
+        // shared rule (a blank on create stays out of the body).
+        clinicAddress: optionalTextPayload(values.clinicAddress, dentistProfile?.clinicAddress),
+        clinicPhone: optionalTextPayload(values.clinicPhone, dentistProfile?.clinicPhone),
+        // null clears a number the doctor removed (undefined would keep it).
+        registrationNumber: registrationNumberPayload(values.registrationNumber),
+      } satisfies UpdateClinicProfileBody;
 
       if (!profileId) {
-        const createdProfile = await createProfile({
-          clinicName: values.clinicName,
-          clinicAddress: normalizeOptional(values.clinicAddress),
-          clinicPhone: normalizeOptional(values.clinicPhone),
-        });
+        const createdProfile = await createProfile(clinicPayload);
         profileId = createdProfile.id;
         toast.success(t('accountSettings.toastClinicCreated'));
       } else {
@@ -285,6 +315,7 @@ export function AccountSettingsContent() {
         clinicName: values.clinicName,
         clinicAddress: values.clinicAddress,
         clinicPhone: values.clinicPhone,
+        registrationNumber: values.registrationNumber,
       });
     } finally {
       setIsSavingSchedule(false);
@@ -466,17 +497,27 @@ export function AccountSettingsContent() {
                             )}
                           />
                           <input type="hidden" {...profileForm.register('country')} />
-                          {(profileForm.formState.errors.phone || profileForm.formState.errors.country) && (
+                          {profileForm.formState.errors.phone || profileForm.formState.errors.country ? (
                             <p className="text-sm text-destructive">
                               {profileForm.formState.errors.phone?.message ??
                                 profileForm.formState.errors.country?.message}
                             </p>
+                          ) : (
+                            isDentist && (
+                              <p className="text-xs text-muted-foreground">
+                                {t('doctorIdentity.contact.accountPhoneHint')}
+                              </p>
+                            )
                           )}
                         </div>
                       </div>
 
                       <div className="flex justify-end">
-                        <Button type="submit" disabled={isProfileSubmitting || !profileHasChanges}>
+                        <Button
+                          type="submit"
+                          className="pointer-coarse:h-12"
+                          disabled={isProfileSubmitting || !profileHasChanges}
+                        >
                           {isProfileSubmitting
                             ? t('accountSettings.saving')
                             : t('accountSettings.saveChanges')}
@@ -534,9 +575,13 @@ export function AccountSettingsContent() {
                                 />
                               )}
                             />
-                            {clinicForm.formState.errors.clinicPhone && (
+                            {clinicForm.formState.errors.clinicPhone ? (
                               <p className="text-sm text-destructive">
                                 {clinicForm.formState.errors.clinicPhone.message}
+                              </p>
+                            ) : (
+                              <p className="text-xs text-muted-foreground">
+                                {t('doctorIdentity.contact.clinicPhoneHint')}
                               </p>
                             )}
                           </div>
@@ -545,8 +590,23 @@ export function AccountSettingsContent() {
                             <label className="text-sm font-medium" htmlFor="clinicAddress">
                               {t('accountSettings.addressLabel')}
                             </label>
-                            <Input id="clinicAddress" {...clinicForm.register('clinicAddress')} />
+                            <Input
+                              id="clinicAddress"
+                              aria-invalid={!!clinicForm.formState.errors.clinicAddress}
+                              {...clinicForm.register('clinicAddress')}
+                            />
+                            {clinicForm.formState.errors.clinicAddress && (
+                              <p className="text-sm text-destructive">
+                                {clinicForm.formState.errors.clinicAddress.message}
+                              </p>
+                            )}
                           </div>
+
+                          <RegistrationNumberField
+                            className="md:col-span-2"
+                            registration={clinicForm.register('registrationNumber')}
+                            error={clinicForm.formState.errors.registrationNumber?.message}
+                          />
                         </div>
 
                         <Separator />
@@ -568,6 +628,7 @@ export function AccountSettingsContent() {
                         <div className="flex justify-end">
                           <Button
                             type="submit"
+                            className="pointer-coarse:h-12"
                             disabled={isClinicSubmitting || !clinicHasChanges}
                           >
                             {isClinicSubmitting
@@ -644,7 +705,11 @@ export function AccountSettingsContent() {
                       </div>
 
                       <div className="flex justify-end">
-                        <Button type="submit" disabled={isPasswordSubmitting || !passwordHasChanges}>
+                        <Button
+                          type="submit"
+                          className="pointer-coarse:h-12"
+                          disabled={isPasswordSubmitting || !passwordHasChanges}
+                        >
                           {isPasswordSubmitting
                             ? t('accountSettings.updating')
                             : t('accountSettings.updatePassword')}

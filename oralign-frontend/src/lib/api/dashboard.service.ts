@@ -15,6 +15,14 @@ export interface AdminSidebarBadges {
   newOrders: number;
   /** Dentists awaiting admin approval (verificationStatus = pending). */
   pendingApprovals: number;
+  /**
+   * MY new bank transfers: still awaiting confirmation and not yet opened
+   * by me (distinct subjects) — the pending desk's "Nouveau" tab. Optional
+   * while an older API omits it.
+   */
+  newTransfers?: number;
+  /** Dentists turned dormant by the inactivity rule (not "inactive" = blocked). */
+  dormantDoctors?: number;
 }
 
 /**

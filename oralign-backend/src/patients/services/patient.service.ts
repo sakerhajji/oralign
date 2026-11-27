@@ -21,30 +21,24 @@ import { OrderAccessPolicy } from '../../common/access/order-access.policy';
 import { assertNoDependents } from '../../common/deletion/deletion-blocked';
 import { INACTIVE_ORDER_STATUSES } from '../../orders/order-status-groups';
 import { businessDayRange } from '../../common/time/business-day';
-
-type PatientWithDoctor = Prisma.PatientGetPayload<{
-  include: {
-    doctor: {
-      select: {
-        id: true;
-        fullName: true;
-        email: true;
-      };
-    };
-  };
-}>;
+import {
+  DOCTOR_SUMMARY_SELECT,
+  toDoctorSummary,
+} from '../../common/doctor/doctor-identity';
 
 // Module level (not only a class field) so the list include below can
-// extend it.
+// extend it. The doctor is THE live summary (spec §6: User + practice,
+// one select for every owner / admin screen), joined by the page query
+// itself: one batched read for the page, never one per patient. Private
+// identifiers (taxId, registrationNumber) are not read: the patient desk
+// never shows them.
 const INCLUDE_DOCTOR = {
-  doctor: {
-    select: {
-      id: true,
-      fullName: true,
-      email: true,
-    },
-  },
-} as const;
+  doctor: { select: DOCTOR_SUMMARY_SELECT },
+} satisfies Prisma.PatientInclude;
+
+type PatientWithDoctor = Prisma.PatientGetPayload<{
+  include: typeof INCLUDE_DOCTOR;
+}>;
 
 /**
  * A row of the patients list: the dentist, plus how many orders the caller
@@ -618,13 +612,7 @@ export class PatientService {
       profilePhotoUrl: p.profilePhotoUrl ?? undefined,
       clinicalConditions: p.clinicalConditions ?? [],
       clinicalConditionsOther: p.clinicalConditionsOther ?? undefined,
-      doctor: patient.doctor
-        ? {
-            id: patient.doctor.id,
-            fullName: patient.doctor.fullName,
-            email: patient.doctor.email,
-          }
-        : undefined,
+      doctor: patient.doctor ? toDoctorSummary(patient.doctor) : undefined,
       createdAt: patient.createdAt,
       updatedAt: patient.updatedAt,
       deletedAt: patient.deletedAt,

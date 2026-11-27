@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { AppointmentStatus, DayOfWeek, VerificationStatus } from '@prisma/client';
+import { AppointmentStatus, DayOfWeek } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { PUBLIC_PRACTITIONER_PROFILE_WHERE } from '../users/activity/doctor-ordering.policy';
 import { MailService } from '../mail/mail.service';
 import {
   BadRequestException,
@@ -168,17 +169,10 @@ export class AppointmentsService {
       throw new BadRequestException('requestedAt is not a valid date');
     }
 
+    // Same public predicate as the directory: a dormant doctor (spec §5)
+    // takes no new booking. Pending requests stay actionable.
     const profile = await this.prisma.dentistProfile.findFirst({
-      where: {
-        id: dto.dentistProfileId,
-        deletedAt: null,
-        isListedPublicly: true,
-        user: {
-          verificationStatus: VerificationStatus.approved,
-          isActive: true,
-          deletedAt: null,
-        },
-      },
+      where: { ...PUBLIC_PRACTITIONER_PROFILE_WHERE, id: dto.dentistProfileId },
       select: {
         id: true,
         clinicName: true,
@@ -337,7 +331,10 @@ export class AppointmentsService {
    * status and emails the patient the final decision. Returns the HTML the
    * controller serves back to the practitioner's browser.
    */
-  async respond(token: string, decision: 'accepted' | 'declined'): Promise<string> {
+  async respond(
+    token: string,
+    decision: 'accepted' | 'declined',
+  ): Promise<string> {
     const appt = await this.prisma.appointment.findUnique({
       where: { actionToken: token },
       select: {
@@ -364,7 +361,9 @@ export class AppointmentsService {
       return this.renderActionPage('already', lang);
     }
 
-    const practitionerLang = pickLang(appt.dentistProfile.user.preferredLanguage);
+    const practitionerLang = pickLang(
+      appt.dentistProfile.user.preferredLanguage,
+    );
 
     // Atomic pending → decision flip. If a concurrent click already handled
     // it, updateMany matches 0 rows and we show the neutral page.
@@ -403,16 +402,7 @@ export class AppointmentsService {
 
   private async assertBookableProfile(dentistProfileId: string): Promise<void> {
     const profile = await this.prisma.dentistProfile.findFirst({
-      where: {
-        id: dentistProfileId,
-        deletedAt: null,
-        isListedPublicly: true,
-        user: {
-          verificationStatus: VerificationStatus.approved,
-          isActive: true,
-          deletedAt: null,
-        },
-      },
+      where: { ...PUBLIC_PRACTITIONER_PROFILE_WHERE, id: dentistProfileId },
       select: { id: true },
     });
     if (!profile) {

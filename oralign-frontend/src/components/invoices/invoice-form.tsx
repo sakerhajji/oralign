@@ -32,6 +32,7 @@ import {
   previewInclusiveInvoice,
   previewPercentOf,
   previewWithholding,
+  withholdingIneligibility,
 } from '@/lib/billing/tax-split';
 import {
   useCompanyBilling,
@@ -125,6 +126,55 @@ const METHOD_OPTIONS: PaymentMethod[] = [
 const MAX_WITHHOLDING = 99.99;
 
 type DoctorOrder = InvoiceClientMatch['orders'][number];
+
+/** The client fields a practitioner prefills (and the server snapshots). */
+type ClientField =
+  | 'clientEmail'
+  | 'clientPhone'
+  | 'clientAddress'
+  | 'clientCity'
+  | 'clientCountry'
+  | 'clientTaxId';
+
+const CLIENT_FIELDS: ClientField[] = [
+  'clientEmail',
+  'clientPhone',
+  'clientAddress',
+  'clientCity',
+  'clientCountry',
+  'clientTaxId',
+];
+
+/** A trimmed, non-empty string, or null. */
+const filled = (value: string | null | undefined): string | null => {
+  const trimmed = (value ?? '').trim();
+  return trimmed === '' ? null : trimmed;
+};
+
+/** Same name once trimmed: the server's "billed to the practitioner" rule. */
+const sameName = (a: string | null | undefined, b: string | null | undefined): boolean => {
+  const name = filled(b);
+  return name !== null && filled(a) === name;
+};
+
+/**
+ * What picking a practitioner fills in: the practice's e-mail and phone
+ * first, his account ones as fallback (the server's contact rule, blank
+ * values counting as missing), the practice address and tax number.
+ */
+function clientPrefill(match: InvoiceClientMatch): Record<ClientField, string> & {
+  clientName: string;
+} {
+  return {
+    clientName: match.fullName,
+    clientEmail: filled(match.clinicEmail) ?? filled(match.email) ?? '',
+    clientPhone: filled(match.clinicPhone) ?? filled(match.phone) ?? '',
+    clientAddress: filled(match.clinicAddress) ?? '',
+    clientCity: filled(match.city) ?? '',
+    clientCountry: filled(match.country) ?? '',
+    clientTaxId: filled(match.taxId) ?? '',
+  };
+}
 
 interface TotalsPreview {
   /** Per line, as the line column shows it: TTC in TTC mode, HT otherwise. */
@@ -247,6 +297,7 @@ export function InvoiceForm({ invoice }: { invoice?: Invoice | null }) {
   const [picked, setPicked] = React.useState<InvoiceClientMatch | null>(null);
   const clientNameRef = React.useRef<HTMLInputElement>(null);
   const linesRef = React.useRef<HTMLDivElement>(null);
+  const withholdingRef = React.useRef<HTMLDivElement>(null);
 
   const matches = useInvoiceClientSearch(debouncedQuery);
 
@@ -281,13 +332,7 @@ export function InvoiceForm({ invoice }: { invoice?: Invoice | null }) {
     setPicked(match);
     setForm((prev) => ({
       ...prev,
-      clientName: match.fullName,
-      clientEmail: match.clinicEmail ?? match.email ?? '',
-      clientPhone: match.clinicPhone ?? match.phone ?? '',
-      clientAddress: match.clinicAddress ?? '',
-      clientCity: match.city ?? '',
-      clientCountry: match.country ?? '',
-      clientTaxId: match.taxId ?? '',
+      ...clientPrefill(match),
       doctorId: match.id,
       // An order line links the patient and the order.
       patientId: undefined,
@@ -484,7 +529,53 @@ export function InvoiceForm({ invoice }: { invoice?: Invoice | null }) {
     : computedTotals;
   const currency = invoice?.currency ?? settings.data?.defaultCurrency ?? 'TND';
   const money = (value: number) => formatPrice(value, currency);
-  const companyWithholdingRate = n(settings.data?.withholdingRate);
+  // The retenue rule (spec §4): the company switch, and the threshold in
+  // force. An invoice being edited is held to the threshold it snapshotted
+  // at issue (none before the threshold existed), as the server does.
+  const withholdingOn = settings.data?.withholdingEnabled === true;
+  const liveThreshold = n(settings.data?.withholdingThreshold);
+  const threshold = invoice
+    ? invoice.withholdingThreshold === null || invoice.withholdingThreshold === undefined
+      ? null
+      : n(invoice.withholdingThreshold)
+    : settings.data
+      ? liveThreshold
+      : null;
+  const companyWithholdingRate = withholdingOn ? n(settings.data?.withholdingRate) : 0;
+  // The server checks a retenue being set (a new invoice, or a new rate):
+  // an unchanged rate was accepted when it was set.
+  const withholdingChanged = invoice
+    ? form.withholdingRate !== n(invoice.withholdingRate)
+    : true;
+  const withholdingBase = Math.max(0, round3(totals.totalTtc - totals.stampDuty));
+  const withholdingRefusal =
+    settings.data && withholdingChanged && form.withholdingRate > 0 && totals.withholdingAmount > 0
+      ? withholdingIneligibility(withholdingBase, {
+          enabled: withholdingOn,
+          rate: form.withholdingRate,
+          threshold,
+        })
+      : null;
+  const withholdingError =
+    withholdingRefusal === 'disabled'
+      ? t('invoiceDesk.withholdingDisabled')
+      : withholdingRefusal === 'below_threshold'
+        ? t('invoiceDesk.withholdingBelowThreshold', { threshold: money(threshold ?? 0) })
+        : null;
+  // The company-rate shortcut only where it may apply.
+  const companyRateApplies =
+    companyWithholdingRate > 0 &&
+    withholdingIneligibility(withholdingBase, {
+      enabled: withholdingOn,
+      rate: companyWithholdingRate,
+      threshold,
+    }) === null;
+  // Billed to the linked practitioner in his own name (the server decides
+  // the same at creation, and snapshots his practice).
+  const linkedPractitioner = picked && form.doctorId === picked.id ? picked : null;
+  const billsPractitioner = linkedPractitioner
+    ? sameName(form.clientName, linkedPractitioner.fullName)
+    : false;
   // "TVA (19 %)" while every line uses the invoice rate; plain "TVA" otherwise.
   const singleRate = lines.every((l) => l.tvaRate === undefined || l.tvaRate === form.tvaRate);
   const tvaLabel = singleRate
@@ -495,27 +586,42 @@ export function InvoiceForm({ invoice }: { invoice?: Invoice | null }) {
   const errors = {
     clientName: form.clientName.trim() === '' ? t('invoicesAdmin.errDoctorName') : null,
     lines: validLines.length === 0 ? t('invoicesAdmin.noLines') : null,
+    withholding: withholdingError,
   };
-  const firstError = errors.clientName ?? errors.lines;
+  const firstError = errors.clientName ?? errors.lines ?? errors.withholding;
+
+  /**
+   * The client fields that travel. A new invoice billed to its
+   * practitioner sends only what the admin changed (a cleared field as an
+   * empty override): the server snapshots the rest from his profile, the
+   * one builder of that block. Anything else sends what is typed.
+   */
+  const clientFields = (): Pick<CreateInvoiceInput, ClientField> => {
+    const prefill = !isEdit && billsPractitioner && linkedPractitioner
+      ? clientPrefill(linkedPractitioner)
+      : null;
+    const out: Pick<CreateInvoiceInput, ClientField> = {};
+    for (const key of CLIENT_FIELDS) {
+      const typed = form[key].trim();
+      out[key] = prefill ? (typed === prefill[key] ? undefined : typed) : typed || undefined;
+    }
+    return out;
+  };
 
   const submit = (event?: React.FormEvent) => {
     event?.preventDefault();
     if (firstError) {
       setShowErrors(true);
       if (errors.clientName) clientNameRef.current?.focus();
-      else linesRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      else if (errors.lines) linesRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      else withholdingRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
 
     // Only the intent travels — never a total.
     const payload: CreateInvoiceInput = {
       clientName: form.clientName.trim(),
-      clientEmail: form.clientEmail.trim() || undefined,
-      clientPhone: form.clientPhone.trim() || undefined,
-      clientAddress: form.clientAddress.trim() || undefined,
-      clientCity: form.clientCity.trim() || undefined,
-      clientCountry: form.clientCountry.trim() || undefined,
-      clientTaxId: form.clientTaxId.trim() || undefined,
+      ...clientFields(),
       issueDate: form.issueDate || undefined,
       dueDate: form.dueDate || undefined,
       status: form.status,
@@ -605,6 +711,18 @@ export function InvoiceForm({ invoice }: { invoice?: Invoice | null }) {
                     {t('invoicesAdmin.clientClear')}
                   </Button>
                 </div>
+                <p
+                  className={cn(
+                    'mt-1 text-xs',
+                    billsPractitioner
+                      ? 'text-muted-foreground'
+                      : 'text-amber-700 dark:text-amber-400',
+                  )}
+                >
+                  {billsPractitioner
+                    ? t('invoiceDesk.snapshotPractitioner')
+                    : t('invoiceDesk.snapshotOtherName')}
+                </p>
                 {picked.orders.length === 0 ? (
                   <p className="mt-1 text-xs text-muted-foreground">
                     {t('invoicesAdmin.noOrders')}
@@ -631,6 +749,17 @@ export function InvoiceForm({ invoice }: { invoice?: Invoice | null }) {
               </div>
             ) : (
               <div className="space-y-2">
+                {invoice?.doctorId ? (
+                  // What this invoice froze about its practitioner at issue
+                  // (spec §6): the PDF prints exactly this.
+                  <p className="rounded-lg border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                    {invoice.clientIsPractitioner
+                      ? t('invoiceDesk.snapshotFrozen', {
+                          clinic: invoice.clientClinicName?.trim() || '—',
+                        })
+                      : t('invoiceDesk.snapshotFrozenNone')}
+                  </p>
+                ) : null}
                 <div className="relative">
                   <SearchIcon className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
@@ -996,7 +1125,7 @@ export function InvoiceForm({ invoice }: { invoice?: Invoice | null }) {
               onChange={(v) => set('stampDuty', v)}
               suffix={currency}
             />
-            <div className="grid gap-1.5">
+            <div ref={withholdingRef} className="grid gap-1.5">
               <NumberField
                 label={t('invoicesAdmin.fieldWithholdingRate')}
                 value={form.withholdingRate}
@@ -1005,9 +1134,24 @@ export function InvoiceForm({ invoice }: { invoice?: Invoice | null }) {
                 fractionDigits={2}
                 hint={t('invoicesAdmin.withholdingHint')}
               />
+              {withholdingError ? (
+                <p
+                  role={showErrors ? 'alert' : undefined}
+                  className={cn(
+                    'text-xs',
+                    showErrors ? 'text-destructive' : 'text-amber-700 dark:text-amber-400',
+                  )}
+                >
+                  {withholdingError}
+                </p>
+              ) : withholdingOn && threshold !== null && threshold > 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  {t('invoiceDesk.withholdingThresholdNote', { threshold: money(threshold) })}
+                </p>
+              ) : null}
               {/* One click to the company rate; always there (disabled once
                   applied) so the column never jumps. */}
-              {companyWithholdingRate > 0 ? (
+              {companyRateApplies ? (
                 <Button
                   type="button"
                   variant="link"
@@ -1069,6 +1213,18 @@ export function InvoiceForm({ invoice }: { invoice?: Invoice | null }) {
               <dt className="font-medium">{t('invoicesAdmin.previewNetPayable')}</dt>
               <dd className="text-lg font-semibold tabular-nums">{money(totals.netPayable)}</dd>
             </div>
+            {invoice?.quoteRemainingAfter !== null && invoice?.quoteRemainingAfter !== undefined ? (
+              // "Reste à payer" on the devis, frozen at issue (spec §4).
+              <div className="space-y-0.5 border-t pt-2">
+                <TotalRow
+                  label={t('invoiceDesk.quoteRemainingAfter')}
+                  value={money(n(invoice.quoteRemainingAfter))}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {t('invoiceDesk.quoteRemainingAfterHint')}
+                </p>
+              </div>
+            ) : null}
           </dl>
 
           <div className="hidden gap-2 border-t p-5 xl:grid">

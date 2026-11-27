@@ -42,6 +42,9 @@ export const QUOTE_ERROR_CODES = [
   'QUOTE_PAYMENT_RECEIVED',
   // Edit of a declined quote.
   'QUOTE_NOT_EDITABLE',
+  // Pack change or re-plan that would delete an open installment whose
+  // step batch an admin released by hand (spec §3, manual unlock).
+  'QUOTE_PLAN_BATCH_RELEASED',
 ] as const;
 export type QuoteErrorCode = (typeof QUOTE_ERROR_CODES)[number];
 

@@ -15,10 +15,22 @@ import {
   toastMutationError,
   ordersService,
 } from '@/lib/api';
+import { classifyApiError } from '@/lib/api/error';
 import type { TreatmentFeeRow } from '@/lib/api/orders.service';
 import { isWelcomeGiftNothingDue } from '@/lib/api/welcome-gift.service';
+import { receiptUploadError } from '@/lib/payments/receipt-errors';
+import {
+  inFlightPaymentOf,
+  inFlightRefusalKey,
+  isPaymentAttemptInProgress,
+  withholdingRefusalText,
+  type RefusedMethod,
+} from '@/lib/payments/payment-refusals';
+import { isTransferInFlight, treatmentFeeTransferState } from '@/lib/payments/transfer-state';
 import { useT } from '@/lib/i18n/lang-context';
+import { formatPrice } from '@/lib/utils/currency';
 import { invalidatePaymentViews, treatmentFeeKeys } from './payment-keys';
+import { companyBillingKeys } from './use-company-billing';
 import { welcomeGiftKeys } from './use-welcome-gift';
 import {
   CreateOrderDto,
@@ -138,6 +150,58 @@ function onTreatmentFeeError(
   toastOrderMutationError(t, error);
 }
 
+/** The API's body of a failed request (its details: withholdingThreshold…). */
+function errorBodyOf(error: unknown): unknown {
+  return (error as { response?: { data?: unknown } } | null)?.response?.data;
+}
+
+/**
+ * A payment of the fee received in person (cash / cheque, admin) refused:
+ *   • 400 WITHHOLDING_DISABLED / _BELOW_THRESHOLD, in the admin's language
+ *     (the server writes it in French only); the public defaults are read
+ *     again so the retenue choice unticks itself;
+ *   • 409 PAYMENT_ATTEMPT_IN_PROGRESS: another payment of the fee is open.
+ *     The order is read again (the banner then shows it) and says which:
+ *     a transfer to confirm or refuse first, or a card attempt.
+ * Anything else as every fee write (onTreatmentFeeError).
+ */
+function onFeeInPersonError(
+  queryClient: ReturnType<typeof useQueryClient>,
+  t: Translate,
+  error: unknown,
+  orderId: string,
+  method: RefusedMethod,
+) {
+  const { errorCode } = extractApiError(error);
+  const withholding = withholdingRefusalText(errorCode, errorBodyOf(error), t, (value) =>
+    formatPrice(value),
+  );
+  if (withholding) {
+    void queryClient.invalidateQueries({ queryKey: companyBillingKeys.publicDefaults() });
+    toast.error(withholding, { duration: REFUSAL_TOAST_MS });
+    return;
+  }
+  if (isPaymentAttemptInProgress(errorCode)) {
+    const queryKey = orderKeys.detail(orderId);
+    void queryClient
+      .invalidateQueries({ queryKey })
+      .then(() => {
+        const order = queryClient.getQueryData<DentalOrder>(queryKey);
+        return order ? isTransferInFlight(treatmentFeeTransferState(order)) : null;
+      })
+      .catch(() => null)
+      .then((transferAwaiting) => {
+        void queryClient.invalidateQueries({ queryKey: orderKeys.history(orderId) });
+        invalidatePaymentViews(queryClient);
+        toast.error(t(inFlightRefusalKey('admin', inFlightPaymentOf(method, transferAwaiting))), {
+          duration: REFUSAL_TOAST_MS,
+        });
+      });
+    return;
+  }
+  onTreatmentFeeError(queryClient, t, error, orderId);
+}
+
 export const orderKeys = {
   all: ['orders'] as const,
   lists: () => [...orderKeys.all, 'list'] as const,
@@ -191,6 +255,17 @@ export function useOrderPrefetch(): (id: string) => void {
   };
 }
 
+/**
+ * While the order's treatment-fee transfer waits on the lab, the order is
+ * read again every 30 s (on a visible tab), so the doctor sees « Payé »
+ * or « Refusé » without a reload once an admin decides.
+ */
+const FEE_IN_FLIGHT_REFRESH_MS = 30_000;
+
+function feeTransferInFlight(order: DentalOrder | undefined): boolean {
+  return !!order && isTransferInFlight(treatmentFeeTransferState(order));
+}
+
 export function useOrder(id?: string): UseQueryResult<DentalOrder, Error> {
   return useQuery({
     queryKey: orderKeys.detail(id ?? ''),
@@ -200,6 +275,8 @@ export function useOrder(id?: string): UseQueryResult<DentalOrder, Error> {
     refetchOnMount: 'always',
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
+    refetchInterval: (query) =>
+      feeTransferInFlight(query.state.data) ? FEE_IN_FLIGHT_REFRESH_MS : false,
     retry: 2,
   });
 }
@@ -285,10 +362,12 @@ export function useSubmitOrder(): UseMutationResult<
 
 /**
  * Pay the treatment fee on an order. Routes by method:
- *   • card / cash         → instant success (admin only for cash)
- *   • bank_transfer       → records intent; doctor must still upload
- *     a receipt with `useUploadTreatmentFeeProof` and an admin must
- *     confirm with `useConfirmTreatmentFeePayment`.
+ *   • cash / cheque       → instant success (admin only)
+ *   • bank_transfer       → admins only; a dentist declares the transfer
+ *     WITH its receipt through `useUploadTreatmentFeeProof`, and an admin
+ *     confirms it in the pending-payments desk (useConfirmTransfer).
+ * A card goes through `useCreateTreatmentFeeCardSession` (ClicToPay).
+ * Refusals: onFeeInPersonError.
  */
 export function usePayTreatmentFee(): UseMutationResult<
   DentalOrder,
@@ -319,69 +398,101 @@ export function usePayTreatmentFee(): UseMutationResult<
         toast.success(t('toasts.orders.treatmentFeePaid'));
       }
     },
-    onError: (error, { id }) => onTreatmentFeeError(queryClient, t, error, id),
-  });
-}
-
-/** Upload the bank-transfer receipt for the treatment fee. */
-export function useUploadTreatmentFeeProof(): UseMutationResult<
-  DentalOrder,
-  Error,
-  { id: string; proof: File; amount: number; applyWithholding?: boolean }
-> {
-  const queryClient = useQueryClient();
-  const { t } = useT();
-  return useMutation({
-    mutationFn: ({ id, proof, amount, applyWithholding }) =>
-      ordersService.uploadTreatmentFeeProof(id, proof, amount, applyWithholding),
-    onSuccess: (order, { id }) => {
-      syncOrderCaches(queryClient, order);
-      queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
-      queryClient.invalidateQueries({ queryKey: orderKeys.history(id) });
-      invalidatePaymentViews(queryClient);
-      toast.success(t('toasts.orders.receiptUploaded'));
-    },
-    onError: (error, { id }) => onTreatmentFeeError(queryClient, t, error, id),
-  });
-}
-
-/** Admin confirms a pending bank-transfer treatment-fee payment. */
-export function useConfirmTreatmentFeePayment(): UseMutationResult<
-  DentalOrder,
-  Error,
-  string
-> {
-  const queryClient = useQueryClient();
-  const { t } = useT();
-  return useMutation({
-    mutationFn: (id) => ordersService.confirmTreatmentFeePayment(id),
-    onSuccess: (order, id) => {
-      syncOrderCaches(queryClient, order);
-      queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
-      queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
-      queryClient.invalidateQueries({ queryKey: orderKeys.history(id) });
-      // The confirmed fee leaves the queue, turns paid in the history
-      // and counts in that day's takings.
-      invalidatePaymentViews(queryClient);
-      toast.success(t('toasts.orders.bankTransferConfirmed'));
-    },
-    onError: (error) => toastOrderMutationError(t, error),
+    onError: (error, { id, method }) =>
+      onFeeInPersonError(
+        queryClient,
+        t,
+        error,
+        id,
+        // Cash, a cheque, or an admin's transfer: what blocks it is told
+        // apart from the order read afresh.
+        method === 'card' ? 'card' : method === 'cheque' ? 'cheque' : 'cash',
+      ),
   });
 }
 
 /**
- * Admin queue of treatment-fee bank-transfer payments awaiting
- * confirmation. 30-second poll because admin queues feel sluggish
- * without near-real-time updates; the data is small.
+ * Declare the treatment-fee transfer with its receipt, or replace the
+ * receipt of one still awaiting confirmation (`intent: 'replace'`).
+ * Failures are explained inline by the receipt picker (not toasted),
+ * except the welcome gift's "nothing due"; one that means the fee moved
+ * on the server reloads the order.
  */
-export function usePendingTreatmentFees(
-  params: { page?: number; limit?: number } = {},
-) {
-  return useQuery({
-    queryKey: treatmentFeeKeys.pending(params),
-    queryFn: () => ordersService.listPendingTreatmentFees(params),
-    staleTime: 1000 * 15,
-    refetchInterval: 1000 * 30,
+export function useUploadTreatmentFeeProof(): UseMutationResult<
+  DentalOrder,
+  Error,
+  {
+    id: string;
+    proof: File;
+    amount: number;
+    applyWithholding?: boolean;
+    /** One key per declaration intent, reused by its retries. */
+    idempotencyKey?: string;
+    onUploadProgress?: (fraction: number) => void;
+    intent?: 'declare' | 'replace';
+  }
+> {
+  const queryClient = useQueryClient();
+  const { t } = useT();
+  return useMutation({
+    mutationFn: ({ id, proof, amount, applyWithholding, idempotencyKey, onUploadProgress }) =>
+      ordersService.uploadTreatmentFeeProof(id, proof, amount, applyWithholding, {
+        idempotencyKey,
+        onUploadProgress,
+      }),
+    onSuccess: (order, { id, intent }) => {
+      syncOrderCaches(queryClient, order);
+      queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
+      queryClient.invalidateQueries({ queryKey: orderKeys.history(id) });
+      invalidatePaymentViews(queryClient);
+      toast.success(
+        intent === 'replace'
+          ? t('transfers.toasts.receiptReplaced')
+          : t('toasts.orders.receiptUploaded'),
+      );
+    },
+    onError: (error, { id }) => {
+      if (isWelcomeGiftNothingDue(error)) {
+        onTreatmentFeeError(queryClient, t, error, id);
+        return;
+      }
+      const { status, errorCode, kind } = classifyApiError(error);
+      if (receiptUploadError({ status, errorCode, kind }).refetch) {
+        refreshOrderFee(queryClient, id);
+      }
+    },
+  });
+}
+
+/** Reload an order and everything that shows its fee. */
+function refreshOrderFee(queryClient: ReturnType<typeof useQueryClient>, id: string) {
+  void queryClient.invalidateQueries({ queryKey: orderKeys.detail(id) });
+  void queryClient.invalidateQueries({ queryKey: orderKeys.history(id) });
+  invalidatePaymentViews(queryClient);
+}
+
+/**
+ * Withdraw the treatment-fee transfer still awaiting confirmation: the
+ * fee is payable again, the receipt stays archived. A transfer the lab
+ * processed meanwhile answers 409: say so and show its new state.
+ */
+export function useWithdrawTreatmentFeeProof(): UseMutationResult<DentalOrder, Error, string> {
+  const queryClient = useQueryClient();
+  const { t } = useT();
+  return useMutation({
+    mutationFn: (id) => ordersService.withdrawTreatmentFeeProof(id),
+    onSuccess: (order, id) => {
+      syncOrderCaches(queryClient, order);
+      queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
+      refreshOrderFee(queryClient, id);
+      toast.success(t('transfers.toasts.withdrawn'));
+    },
+    onError: (error, id) => {
+      const { status, errorCode, kind, message } = classifyApiError(error);
+      const view = receiptUploadError({ status, errorCode, kind });
+      if (view.refetch) refreshOrderFee(queryClient, id);
+      toast.error(view.kind === 'server' ? message : t(view.messageKey));
+    },
   });
 }
 

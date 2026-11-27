@@ -2,14 +2,14 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { TreatmentFeeReceiptDialog } from '@/components/orders/treatment-fee-receipt-dialog';
 import { ReceiptNumberLink } from '@/components/payments/invoice-number-editor';
-import { PaymentStatusBadge } from '@/components/payments/payment-status-badge';
+import { ReceiptSummary, ReceiptViewerDialog } from '@/components/payments/receipt-viewer';
 import {
   AmountWithWithholding,
   recordedSplit,
   recordedSplitParts,
 } from '@/components/payments/withholding';
+import { Button } from '@/components/ui/button';
 import {
   Table,
   TableBody,
@@ -20,8 +20,10 @@ import {
 } from '@/components/ui/table';
 import type { TreatmentFeeRow } from '@/lib/api/orders.service';
 import { useT } from '@/lib/i18n/lang-context';
+import { treatmentFeeTransferState } from '@/lib/payments/transfer-state';
 import { PaymentRecordStatus } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { formatBusinessDayShort } from '@/lib/utils/business-day';
 import { DEFAULT_MERCHANT_CURRENCY, formatPrice } from '@/lib/utils/currency';
 import {
   BusyList,
@@ -32,8 +34,11 @@ import {
   PHONE_LIST,
   PhoneRow,
   TABLE_FRAME,
+  TransferStatusCell,
   dateTimeLine,
   orderHref,
+  refusalPart,
+  transferStatusBadge,
   useMethodLabel,
   withReturnTo,
   type PhoneRowAction,
@@ -46,10 +51,13 @@ const COLS = {
   date: 'w-32 pl-4',
   dentist: 'hidden w-36 2xl:table-cell',
   method: 'w-32',
-  status: 'w-32',
+  // « En cours de vérification » on one line, a refusal's reason under it.
+  status: 'w-48',
   amount: 'w-32 text-right',
   receipt: 'w-40 pr-4 text-right',
 };
+
+const PENDING_QUEUE = '/dashboard/payments/pending';
 
 const receiptPath = (row: TreatmentFeeRow) =>
   `/dashboard/orders/${row.orderId}/treatment-fee-invoice`;
@@ -74,9 +82,26 @@ const feeSplit = (row: FeeRow) =>
   recordedSplit(row.amount, row.withholdingAmount, row.withholdingRate, row.stampAmount);
 
 /**
+ * Whether a fee receipt is attached: `hasProof` (P-A), else the stored
+ * path the owner and admins still receive from an older API.
+ */
+const hasProof = (row: TreatmentFeeRow) => row.hasProof ?? !!row.proofPath;
+
+/** The fee's derived transfer state: the server's, else from its columns. */
+const stateOf = (row: TreatmentFeeRow) =>
+  row.state ??
+  treatmentFeeTransferState({
+    treatmentFeePaidAt: row.paidAt,
+    treatmentFeePaymentStatus: row.status,
+    treatmentFeeReviewOpenedAt: row.reviewOpenedAt ?? null,
+  });
+
+/**
  * The treatment-fees tab: one row per order's fee. A fee is dated by the
- * day it was paid; a bank transfer still to confirm has no such day yet.
- * An admin confirms one from its proof, right here.
+ * day it was paid; a bank transfer still to confirm (or refused) has no
+ * such day, only the day its receipt was sent. The receipt opens through
+ * the authenticated stream; an admin confirms or refuses a transfer in
+ * the pending desk, where the review is recorded.
  */
 export function TreatmentFeesTable({
   rows,
@@ -100,13 +125,20 @@ export function TreatmentFeesTable({
   const toConfirm = (row: TreatmentFeeRow) =>
     row.status === PaymentRecordStatus.AWAITING_CONFIRMATION;
   const viewProof = (row: TreatmentFeeRow) =>
-    row.proofPath ? () => setProofRow(row) : undefined;
+    hasProof(row) ? () => setProofRow(row) : undefined;
+  /** « Envoyé le 6 nov. » of a transfer not paid yet (awaiting or refused). */
+  const sentLine = (row: TreatmentFeeRow) =>
+    !row.paidAt && row.declaredAt
+      ? t('transfers.history.sentOn', {
+          date: formatBusinessDayShort(row.declaredAt, lang, today),
+        })
+      : null;
 
   const phoneAction = (row: TreatmentFeeRow): PhoneRowAction => {
     if (row.status === PaymentRecordStatus.SUCCESS) {
       return { kind: 'receipt', href: withReturnTo(receiptPath(row), returnTo) };
     }
-    if (row.proofPath) return { kind: 'proof', onOpen: () => setProofRow(row) };
+    if (hasProof(row)) return { kind: 'proof', onOpen: () => setProofRow(row) };
     return { kind: 'order', href: orderHref(row.orderId, returnTo) };
   };
 
@@ -137,10 +169,19 @@ export function TreatmentFeesTable({
                   <TableCell className={cn('py-2.5', COLS.date)}>
                     {row.paidAt ? (
                       <DateTime iso={row.paidAt} />
-                    ) : toConfirm(row) ? (
-                      <span className="text-muted-foreground">
-                        {t('paymentsDesk.list.toConfirm')}
-                      </span>
+                    ) : toConfirm(row) || sentLine(row) ? (
+                      <>
+                        {toConfirm(row) ? (
+                          <span className="block truncate text-muted-foreground">
+                            {t('paymentsDesk.list.toConfirm')}
+                          </span>
+                        ) : null}
+                        {sentLine(row) ? (
+                          <span className="block truncate text-xs text-muted-foreground tabular-nums">
+                            {sentLine(row)}
+                          </span>
+                        ) : null}
+                      </>
                     ) : (
                       <Dash />
                     )}
@@ -168,7 +209,13 @@ export function TreatmentFeesTable({
                     <MethodCell method={row.method} onViewProof={viewProof(row)} />
                   </TableCell>
                   <TableCell className={cn('py-2.5', COLS.status)}>
-                    <PaymentStatusBadge status={row.status} />
+                    <TransferStatusCell
+                      status={row.status}
+                      method={row.method}
+                      reviewOpenedAt={row.reviewOpenedAt}
+                      rejectionReason={row.rejectionReason}
+                      audience={isAdmin ? 'admin' : 'doctor'}
+                    />
                   </TableCell>
                   <TableCell className={cn('py-2.5 font-medium tabular-nums', COLS.amount)}>
                     {amount === null ? (
@@ -209,7 +256,9 @@ export function TreatmentFeesTable({
           // confirm has no date: its badge says so. With a stamp or a
           // retenue, the fee, the stamp and the retenue last.
           const meta = [
-            row.paidAt ? dateTimeLine(row.paidAt, lang, today) : null,
+            // A refusal says why first: it is what the doctor acts on.
+            refusalPart(row.status, row.rejectionReason, t),
+            row.paidAt ? dateTimeLine(row.paidAt, lang, today) : sentLine(row),
             isAdmin ? row.doctor?.fullName : null,
             methodLabel(row.method),
             row.orderCode,
@@ -222,7 +271,12 @@ export function TreatmentFeesTable({
               <PhoneRow
                 title={row.patient?.fullName ?? row.orderCode}
                 amount={feeAmount(row) ?? '—'}
-                status={<PaymentStatusBadge status={row.status} />}
+                status={transferStatusBadge(
+                  row.status,
+                  row.method,
+                  row.reviewOpenedAt,
+                  isAdmin ? 'admin' : 'doctor',
+                )}
                 meta={meta}
                 action={phoneAction(row)}
               />
@@ -232,29 +286,40 @@ export function TreatmentFeesTable({
       </ul>
 
       {proofRow && (
-        <TreatmentFeeReceiptDialog
+        <ReceiptViewerDialog
           open
           onOpenChange={(open) => {
             if (!open) setProofRow(null);
           }}
-          orderId={proofRow.orderId}
-          orderCode={proofRow.orderCode}
-          proofPath={proofRow.proofPath}
-          amount={proofRow.amount}
-          withholdingAmount={proofRow.withholdingAmount}
-          withholdingRate={proofRow.withholdingRate}
-          stampAmount={proofRow.stampAmount}
-          kind="fee"
-          currency={DEFAULT_MERCHANT_CURRENCY}
-          doctorName={proofRow.doctor?.fullName ?? null}
-          patientName={proofRow.patient?.fullName ?? null}
-          method={proofRow.method}
-          // A fee has no "declared on" date, only the day it was paid
-          // (none while it waits for confirmation): label it as such.
-          submittedAt={proofRow.paidAt}
-          dateLabel="paid"
-          status={proofRow.status}
-          canConfirm={isAdmin && toConfirm(proofRow)}
+          source={{ kind: 'treatment_fee', orderId: proofRow.orderId }}
+          // A replaced receipt is fetched again.
+          version={proofRow.declaredAt ?? proofRow.updatedAt}
+          description={t('transfers.viewer.descFee', { code: proofRow.orderCode })}
+          fileBaseName={proofRow.orderCode}
+          details={
+            <ReceiptSummary
+              state={stateOf(proofRow)}
+              status={proofRow.status}
+              audience={isAdmin ? 'admin' : 'doctor'}
+              cash={proofRow.amount}
+              split={feeSplit(proofRow)}
+              currency={DEFAULT_MERCHANT_CURRENCY}
+              kind="fee"
+              sentAt={proofRow.declaredAt ?? null}
+              rejectionReason={proofRow.rejectionReason}
+              patientName={proofRow.patient?.fullName ?? null}
+            />
+          }
+          // A fee transfer is confirmed or refused in the pending desk,
+          // where the lab's review is recorded; this viewer shows the
+          // receipt and, to an admin, the way there.
+          footerAction={
+            isAdmin && toConfirm(proofRow) ? (
+              <Button asChild variant="outline" className="h-11 sm:h-9 pointer-coarse:h-12">
+                <Link href={PENDING_QUEUE}>{t('paymentsDesk.list.confirmInQueue')}</Link>
+              </Button>
+            ) : undefined
+          }
         />
       )}
     </BusyList>

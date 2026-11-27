@@ -1,11 +1,21 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
+import {
+  CurrentUser,
+  type JwtPayload,
+} from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
-import { AdminDashboardService } from '../services/admin-dashboard.service';
-import { AdminAnalyticsLimitDto, DashboardRangeDto } from '../dto/dashboard.dto';
+import {
+  AdminDashboardService,
+  type AdminSidebarBadges,
+} from '../services/admin-dashboard.service';
+import {
+  AdminAnalyticsLimitDto,
+  DashboardRangeDto,
+} from '../dto/dashboard.dto';
 
 @ApiTags('admin-dashboard')
 @ApiBearerAuth('access-token')
@@ -17,7 +27,8 @@ export class AdminDashboardController {
 
   @Get('kpis')
   @ApiOperation({
-    summary: 'Aggregated KPI rollup (revenue, orders, doctors, patients, packs, payments).',
+    summary:
+      'Aggregated KPI rollup (revenue, orders, doctors, patients, packs, payments).',
   })
   async kpis(@Query() range: DashboardRangeDto) {
     return this.service.getKpis(range);
@@ -26,14 +37,18 @@ export class AdminDashboardController {
   @Get('sidebar-badges')
   @ApiOperation({
     summary:
-      'Lightweight attention counts for the sidebar (new submitted orders + dentists awaiting approval).',
+      'Lightweight attention counts for the sidebar: new submitted orders, dentists awaiting approval, MY new bank transfers (distinct subjects: the Nouveau tab of the pending desk) and dormant dentists.',
   })
-  async sidebarBadges() {
-    return this.service.getSidebarBadges();
+  async sidebarBadges(
+    @CurrentUser() user: JwtPayload,
+  ): Promise<AdminSidebarBadges> {
+    return this.service.getSidebarBadges({ userId: user.sub, role: user.role });
   }
 
   @Get('top-doctors')
-  @ApiOperation({ summary: 'Top doctors by orders / paid orders / outstanding balance.' })
+  @ApiOperation({
+    summary: 'Top doctors by orders / paid orders / outstanding balance.',
+  })
   async topDoctors(@Query() filter: AdminAnalyticsLimitDto) {
     return this.service.getTopDoctors(filter);
   }

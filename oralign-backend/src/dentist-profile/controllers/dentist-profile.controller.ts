@@ -52,7 +52,13 @@ export class DentistProfileController {
   @Roles(UserRole.dentist, UserRole.admin, 'super_admin' as UserRole)
   @ApiBearerAuth('access-token')
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Create dentist profile (dentist/admin only)' })
+  @ApiOperation({
+    summary: 'Create dentist profile (dentist/admin only)',
+    description:
+      'A clinic deleted earlier (soft delete) is restored with the sent ' +
+      'fields, as the onboarding setup does. 409 PROFILE_EXISTS while a ' +
+      'live clinic exists.',
+  })
   @ApiResponse({
     status: 201,
     description: 'Dentist profile created successfully',
@@ -105,9 +111,14 @@ export class DentistProfileController {
   async createProfileForUser(
     @Param('userId') userId: string,
     @Body() createProfileDto: CreateDentistProfileDto,
-    @CurrentUser() _caller: JwtPayload,
+    @CurrentUser() caller: JwtPayload,
   ): Promise<DentistProfileResponseDto> {
-    return this.profileService.createProfile(userId, createProfileDto);
+    // The admin is the actor of the user.profileChanged event, not the owner.
+    return this.profileService.createProfile(
+      userId,
+      createProfileDto,
+      caller.sub,
+    );
   }
 
   // Full private directory dump (every clinic's taxId / clinicEmail).
@@ -237,7 +248,7 @@ export class DentistProfileController {
     // for anyone who is not the owner or an admin (audit M-2).
     return this.profileService.getProfileById(id, {
       userId: user.sub,
-      role: user.role as UserRole,
+      role: user.role,
     });
   }
 

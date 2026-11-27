@@ -1,5 +1,6 @@
 import {
   computeWithholding,
+  isWithholdingEligible,
   paymentCharge,
   percentOf,
   inclusiveInvoiceTotals,
@@ -7,6 +8,7 @@ import {
   splitInclusive,
   spreadProportionally,
   toAmount,
+  withholdingIneligibility,
 } from './tax-split';
 
 const n = toAmount;
@@ -127,11 +129,31 @@ describe('tax-split', () => {
     it('adds no stamp to nothing', () => {
       expect(n(paymentCharge(0, 1, 1).cash)).toBe(0);
     });
+
+    it('carries the threshold as a snapshot only: the figures do not move', () => {
+      const without = paymentCharge(500, 1, 1);
+      const withIt = paymentCharge(500, 1, 1, '1000');
+      expect(without.withholdingThreshold).toBeNull();
+      expect(withIt.withholdingThreshold?.toFixed(3)).toBe('1000.000');
+      // paymentCharge is the arithmetic only: the eligibility rule
+      // (withholdingIneligibility) is applied by the payment entry points.
+      expect(n(withIt.withholding)).toBe(n(without.withholding));
+      expect(n(withIt.cash)).toBe(n(without.cash));
+      expect(paymentCharge(500, 1, 1, '').withholdingThreshold).toBeNull();
+      expect(paymentCharge(500, 1, 1, 0).withholdingThreshold?.toFixed(3)).toBe(
+        '0.000',
+      );
+    });
   });
 
   describe('inclusiveInvoiceTotals', () => {
     it('matches the automatic invoice of one payment: the stamp is added', () => {
-      const t = inclusiveInvoiceTotals([{ quantity: 1, unitPriceTtc: 1515.25 }], 19, 0, 1);
+      const t = inclusiveInvoiceTotals(
+        [{ quantity: 1, unitPriceTtc: 1515.25 }],
+        19,
+        0,
+        1,
+      );
       expect(n(t.subTotalHt)).toBe(1273.319);
       expect(n(t.tvaAmount)).toBe(241.931);
       expect(n(t.stamp)).toBe(1);
@@ -161,7 +183,12 @@ describe('tax-split', () => {
     });
 
     it('applies a TTC discount, then adds the stamp', () => {
-      const t = inclusiveInvoiceTotals([{ quantity: 2, unitPriceTtc: 100 }], 19, 50, 1);
+      const t = inclusiveInvoiceTotals(
+        [{ quantity: 2, unitPriceTtc: 100 }],
+        19,
+        50,
+        1,
+      );
       expect(n(t.grossTtc)).toBe(200);
       expect(n(t.discountApplied)).toBe(50);
       expect(n(t.totalTtc)).toBe(151);
@@ -171,7 +198,12 @@ describe('tax-split', () => {
     });
 
     it('clamps a discount larger than the gross', () => {
-      const t = inclusiveInvoiceTotals([{ quantity: 1, unitPriceTtc: 80 }], 19, 500, 1);
+      const t = inclusiveInvoiceTotals(
+        [{ quantity: 1, unitPriceTtc: 80 }],
+        19,
+        500,
+        1,
+      );
       expect(n(t.discountApplied)).toBe(80);
       expect(n(t.totalTtc)).toBe(0);
       expect(n(t.stamp)).toBe(0);
@@ -190,6 +222,64 @@ describe('tax-split', () => {
       expect(n(t.lineHt[0])).toBe(100);
       expect(n(t.lineHt[1])).toBe(100);
       expect(n(t.tvaAmount)).toBe(26);
+    });
+  });
+
+  describe('withholdingIneligibility (spec §4: switch + threshold)', () => {
+    const on = { enabled: true, rate: '1', threshold: '1000' };
+
+    it('is eligible at the threshold and above, compared at the millime', () => {
+      expect(withholdingIneligibility('1000', on)).toBeNull();
+      expect(withholdingIneligibility('1000.000', on)).toBeNull();
+      expect(withholdingIneligibility(2380, on)).toBeNull();
+      expect(isWithholdingEligible('1000', on)).toBe(true);
+    });
+
+    it('is below the threshold one millime under it', () => {
+      expect(withholdingIneligibility('999.999', on)).toBe('below_threshold');
+      // A 2 380 devis paid as 3 x 793.333: each payment is its own base.
+      expect(withholdingIneligibility('793.333', on)).toBe('below_threshold');
+      expect(isWithholdingEligible('999.999', on)).toBe(false);
+    });
+
+    it('rounds the base half-up to the millime before comparing', () => {
+      // 999.9995 rounds to 1000.000, like the charge itself.
+      expect(withholdingIneligibility('999.9995', on)).toBeNull();
+      expect(withholdingIneligibility('999.9994', on)).toBe('below_threshold');
+    });
+
+    it.each([
+      [{ ...on, enabled: false }],
+      [{ ...on, enabled: null }],
+      [{ ...on, enabled: undefined }],
+      [{ ...on, rate: '0' }],
+      [{ ...on, rate: null }],
+      [{ ...on, rate: '-1' }],
+    ])('is disabled when switched off or without a rate (%p)', (rule) => {
+      // Disabled wins over the threshold: the base does not matter.
+      expect(withholdingIneligibility('5000', rule)).toBe('disabled');
+      expect(withholdingIneligibility('10', rule)).toBe('disabled');
+    });
+
+    it('has no threshold when none is given, and 0 lets every payment through', () => {
+      expect(
+        withholdingIneligibility('10', {
+          enabled: true,
+          rate: 1,
+          threshold: null,
+        }),
+      ).toBeNull();
+      expect(
+        withholdingIneligibility('10', { enabled: true, rate: 1 }),
+      ).toBeNull();
+      expect(
+        withholdingIneligibility('0.001', { ...on, threshold: '0' }),
+      ).toBeNull();
+    });
+
+    it('treats a negative base as 0', () => {
+      expect(withholdingIneligibility('-5', on)).toBe('below_threshold');
+      expect(withholdingIneligibility(null, on)).toBe('below_threshold');
     });
   });
 });

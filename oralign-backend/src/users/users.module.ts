@@ -3,9 +3,10 @@ import { UserService } from './services/user.service';
 import { UserRepository } from './repositories/user.repository';
 import { UserController } from './controllers/user.controller';
 import { PrismaModule } from '../prisma/prisma.module';
+import { DoctorActivityModule } from './activity/doctor-activity.module';
 
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, DoctorActivityModule],
   controllers: [UserController],
   providers: [UserService, UserRepository],
   exports: [UserService, UserRepository],

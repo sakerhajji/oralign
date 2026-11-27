@@ -1,27 +1,49 @@
 'use client';
 
+import { useEffect } from 'react';
 import {
   keepPreviousData,
   useMutation,
   useQuery,
   useQueryClient,
+  type QueryKey,
   type UseMutationResult,
   type UseQueryResult,
 } from '@tanstack/react-query';
 import { toast } from '@/lib/toast';
-import { paymentsService, type PaymentsReportFile } from '@/lib/api/payments.service';
+import {
+  paymentsService,
+  type PaymentsReportFile,
+  type ProofReadError,
+} from '@/lib/api/payments.service';
+import { ordersService } from '@/lib/api/orders.service';
 import { invoicesService } from '@/lib/api/invoices.service';
-import { extractApiError, extractApiErrorMessage } from '@/lib/api/error';
+import {
+  classifyApiError,
+  extractApiError,
+  extractApiErrorMessage,
+} from '@/lib/api/error';
+import { receiptUploadError, type ReceiptErrorView } from '@/lib/payments/receipt-errors';
+import {
+  inFlightPaymentOf,
+  inFlightRefusalKey,
+  isPaymentAttemptInProgress,
+  withholdingRefusalText,
+  type RefusalAudience,
+  type RefusedMethod,
+} from '@/lib/payments/payment-refusals';
+import { installmentTransferOf, isTransferInFlight } from '@/lib/payments/transfer-state';
 import { isWelcomeGiftNothingDue } from '@/lib/api/welcome-gift.service';
 import { useT } from '@/lib/i18n/lang-context';
+import { formatPrice } from '@/lib/utils/currency';
 import { paymentPlanKeys } from './use-quotation-payment-plan';
 import { quotationKeys } from './use-quotations';
 import { orderKeys } from './use-orders';
 import { invoiceKeys } from './use-admin-invoices';
+import { companyBillingKeys } from './use-company-billing';
 import { invalidatePaymentViews, paymentKeys } from './payment-keys';
-import { PaymentPurpose } from '@/lib/types';
+import { PaymentMethod, PaymentPurpose } from '@/lib/types';
 import type {
-  ConfirmPaymentDto,
   HostedPaymentSession,
   PaginatedResponse,
   Payment,
@@ -31,13 +53,93 @@ import type {
   PaymentsReportRequest,
   PaymentsSummary,
   PaymentsSummaryParams,
+  QuoteInstallment,
   RecordCashPaymentDto,
-  RejectPaymentDto,
 } from '@/lib/types';
 
 export { paymentKeys } from './payment-keys';
 
 const PAYMENT_STALE_TIME = 10_000;
+
+/** On-screen time of a refusal that explains what to do first. */
+const REFUSAL_TOAST_MS = 9_000;
+
+type Translate = ReturnType<typeof useT>['t'];
+type QueryClient = ReturnType<typeof useQueryClient>;
+
+/** The API's body of a failed request (its details: withholdingThreshold…). */
+function errorBodyOf(error: unknown): unknown {
+  return (error as { response?: { data?: unknown } } | null)?.response?.data;
+}
+
+/**
+ * A retenue refusal (400 WITHHOLDING_DISABLED / _BELOW_THRESHOLD) in the
+ * user's language, the server writing it in French only. The rule moved
+ * on the server: the public defaults are read again, so the retenue
+ * choice of an open dialog unticks itself. False for any other error.
+ */
+function toastWithholdingRefusal(queryClient: QueryClient, t: Translate, error: unknown): boolean {
+  const text = withholdingRefusalText(
+    extractApiError(error).errorCode,
+    errorBodyOf(error),
+    t,
+    (value) => formatPrice(value),
+  );
+  if (!text) return false;
+  void queryClient.invalidateQueries({ queryKey: companyBillingKeys.publicDefaults() });
+  toast.error(text, { duration: REFUSAL_TOAST_MS });
+  return true;
+}
+
+/**
+ * Whether the installment's latest bank transfer waits on the admin, read
+ * afresh (the plan is refetched); null when the plan cannot tell (not
+ * loaded, or an API without `latestTransfer`).
+ */
+async function installmentTransferAwaiting(
+  queryClient: QueryClient,
+  quotationId: string,
+  installmentId: string,
+): Promise<boolean | null> {
+  const queryKey = paymentPlanKeys.installments(quotationId);
+  await queryClient.invalidateQueries({ queryKey });
+  const row = queryClient
+    .getQueryData<QuoteInstallment[]>(queryKey)
+    ?.find((inst) => inst.id === installmentId);
+  if (!row || row.latestTransfer === undefined) return null;
+  return isTransferInFlight(installmentTransferOf(row).state);
+}
+
+/**
+ * 409 PAYMENT_ATTEMPT_IN_PROGRESS on an installment: another payment of it
+ * is open. Reload the plan so the panel shows it, then say what to do
+ * first, in the reader's words (lib/payments/payment-refusals.ts).
+ */
+function toastInstallmentInFlight(
+  queryClient: QueryClient,
+  t: Translate,
+  args: {
+    audience: RefusalAudience;
+    method: RefusedMethod;
+    quotationId: string;
+    installmentId: string;
+    orderId?: string;
+  },
+): void {
+  const awaiting =
+    args.method === 'card'
+      ? Promise.resolve(null)
+      : installmentTransferAwaiting(queryClient, args.quotationId, args.installmentId);
+  void awaiting
+    .catch(() => null)
+    .then((transferAwaiting) => {
+      refreshQuotePlan(queryClient, args.quotationId, args.orderId);
+      toast.error(
+        t(inFlightRefusalKey(args.audience, inFlightPaymentOf(args.method, transferAwaiting))),
+        { duration: REFUSAL_TOAST_MS },
+      );
+    });
+}
 
 /**
  * Options of the payments desk's live queries. `refetchInterval` keeps a
@@ -47,18 +149,6 @@ const PAYMENT_STALE_TIME = 10_000;
 export interface LiveQueryOptions {
   enabled?: boolean;
   refetchInterval?: number | false;
-}
-
-export function usePendingConfirmations(
-  filters: PaymentFilterDto = {},
-): UseQueryResult<PaginatedResponse<PaymentListItem>, Error> {
-  return useQuery({
-    queryKey: paymentKeys.pending(filters as Record<string, unknown>),
-    queryFn: () => paymentsService.listPendingConfirmations(filters),
-    staleTime: PAYMENT_STALE_TIME,
-    refetchOnMount: 'always',
-    refetchOnWindowFocus: true,
-  });
 }
 
 /**
@@ -281,7 +371,20 @@ export function useUpdateInvoiceNumber(): UseMutationResult<
  */
 const HOSTED_PAGE_VIEW = 'DESKTOP' as const;
 
-export function usePayByCard(): UseMutationResult<
+/** Who starts the card payment: the words of its refusals follow. */
+export interface CardPaymentOptions {
+  /** 'doctor' (default): the practitioner pays; 'admin': for him. */
+  audience?: RefusalAudience;
+}
+
+/**
+ * Start a ClicToPay card payment of an installment. Refusals are toasted:
+ * a retenue that no longer applies and « a transfer awaits the admin »
+ * (409 PAYMENT_ATTEMPT_IN_PROGRESS, the only reason a card start is
+ * refused for another payment in flight) in the user's language; any
+ * other one in the server's words.
+ */
+export function usePayByCard({ audience = 'doctor' }: CardPaymentOptions = {}): UseMutationResult<
   HostedPaymentSession,
   Error,
   {
@@ -294,6 +397,7 @@ export function usePayByCard(): UseMutationResult<
   }
 > {
   const queryClient = useQueryClient();
+  const { t } = useT();
   return useMutation({
     mutationFn: ({ orderId, installmentId, idempotencyKey, language, applyWithholding }) =>
       paymentsService.createClicToPaySession({
@@ -307,11 +411,31 @@ export function usePayByCard(): UseMutationResult<
       }),
     // The attempt is a payment row from now on ("in progress").
     onSuccess: () => invalidatePaymentViews(queryClient),
-    onError: (err) => toast.error(extractApiErrorMessage(err)),
+    onError: (err, { quotationId, installmentId, orderId }) => {
+      if (toastWithholdingRefusal(queryClient, t, err)) return;
+      if (isPaymentAttemptInProgress(extractApiError(err).errorCode)) {
+        toastInstallmentInFlight(queryClient, t, {
+          audience,
+          method: 'card',
+          quotationId,
+          installmentId,
+          orderId,
+        });
+        return;
+      }
+      toast.error(extractApiErrorMessage(err));
+    },
   });
 }
 
-export function useCreateTreatmentFeeCardSession(): UseMutationResult<
+/**
+ * Start a ClicToPay card payment of a treatment fee; refusals as for
+ * `usePayByCard` (409 PAYMENT_ATTEMPT_IN_PROGRESS: the fee's transfer
+ * awaits the admin, and the order is read again to show it).
+ */
+export function useCreateTreatmentFeeCardSession({
+  audience = 'doctor',
+}: CardPaymentOptions = {}): UseMutationResult<
   HostedPaymentSession,
   Error,
   {
@@ -341,11 +465,30 @@ export function useCreateTreatmentFeeCardSession(): UseMutationResult<
         toast.error(t('welcomeGift.errors.nothingDue'));
         return;
       }
+      if (toastWithholdingRefusal(queryClient, t, err)) return;
+      if (isPaymentAttemptInProgress(extractApiError(err).errorCode)) {
+        // The order banner then shows the transfer in flight.
+        void queryClient.invalidateQueries({ queryKey: orderKeys.detail(orderId) });
+        void queryClient.invalidateQueries({ queryKey: orderKeys.history(orderId) });
+        invalidatePaymentViews(queryClient);
+        toast.error(t(inFlightRefusalKey(audience, inFlightPaymentOf('card', null))), {
+          duration: REFUSAL_TOAST_MS,
+        });
+        return;
+      }
       toast.error(extractApiErrorMessage(err));
     },
   });
 }
 
+/**
+ * Declare a pack-installment bank transfer with its receipt — or replace
+ * the receipt of one still awaiting confirmation (`intent: 'replace'`:
+ * the server supersedes the old declaration). Failures are NOT toasted:
+ * the receipt picker explains them inline, with a retry
+ * (lib/payments/receipt-errors.ts). A failure that means the transfer
+ * moved on the server refreshes the plan.
+ */
 export function useDeclareBankTransfer(): UseMutationResult<
   Payment,
   Error,
@@ -356,6 +499,13 @@ export function useDeclareBankTransfer(): UseMutationResult<
     proofFile?: File | Blob | null;
     orderId?: string;
     applyWithholding?: boolean;
+    /** One key per declaration intent, reused by its retries. */
+    idempotencyKey?: string;
+    onUploadProgress?: (fraction: number) => void;
+    /** Which success copy to show. */
+    intent?: 'declare' | 'replace';
+    /** Several declarations in a row ("all remaining"): the caller says it once. */
+    silent?: boolean;
   }
 > {
   const queryClient = useQueryClient();
@@ -367,6 +517,8 @@ export function useDeclareBankTransfer(): UseMutationResult<
       bankReference,
       proofFile,
       applyWithholding,
+      idempotencyKey,
+      onUploadProgress,
     }) =>
       paymentsService.declareBankTransfer({
         quotationId,
@@ -374,51 +526,183 @@ export function useDeclareBankTransfer(): UseMutationResult<
         bankReference,
         proofFile,
         applyWithholding,
+        idempotencyKey,
+        onUploadProgress,
       }),
-    onSuccess: (payment, { orderId }) => {
+    onSuccess: (payment, { orderId, intent, silent }) => {
       invalidateAfterPayment(queryClient, payment, orderId);
-      toast.success(t('toasts.payments.bankTransferDeclared'));
+      if (silent) return;
+      toast.success(
+        intent === 'replace'
+          ? t('transfers.toasts.receiptReplaced')
+          : t('toasts.payments.bankTransferDeclared'),
+      );
     },
-    onError: (err) => toast.error(extractApiErrorMessage(err)),
+    onError: (err, { quotationId, orderId }) => {
+      if (receiptErrorOf(err).refetch) {
+        refreshQuotePlan(queryClient, quotationId, orderId);
+      }
+    },
   });
 }
 
-export function useConfirmBankTransfer(): UseMutationResult<
+/** The receipt-picker meaning of a failed upload or withdrawal. */
+export function receiptErrorOf(error: unknown): ReceiptErrorView {
+  const { status, errorCode, kind } = classifyApiError(error);
+  return receiptUploadError({ status, errorCode, kind });
+}
+
+/** Reload a quote's installments, batches and money, and its order. */
+function refreshQuotePlan(
+  queryClient: ReturnType<typeof useQueryClient>,
+  quotationId: string,
+  orderId?: string,
+) {
+  invalidatePaymentViews(queryClient);
+  void queryClient.invalidateQueries({ queryKey: paymentPlanKeys.installments(quotationId) });
+  void queryClient.invalidateQueries({ queryKey: paymentPlanKeys.batches(quotationId) });
+  void queryClient.invalidateQueries({ queryKey: quotationKeys.detail(quotationId) });
+  void queryClient.invalidateQueries({
+    queryKey: orderId ? quotationKeys.byOrder(orderId) : quotationKeys.all,
+  });
+  if (orderId) {
+    void queryClient.invalidateQueries({ queryKey: orderKeys.detail(orderId) });
+    void queryClient.invalidateQueries({ queryKey: orderKeys.history(orderId) });
+  }
+}
+
+/**
+ * Withdraw a pack-installment transfer still awaiting confirmation. The
+ * installment is payable again; the receipt stays archived. A transfer
+ * the lab processed meanwhile answers 409: say so and show its new state.
+ */
+export function useWithdrawBankTransfer(): UseMutationResult<
   Payment,
   Error,
-  { paymentId: string; dto: ConfirmPaymentDto; orderId?: string }
+  { paymentId: string; quotationId: string; orderId?: string; note?: string }
 > {
   const queryClient = useQueryClient();
   const { t } = useT();
   return useMutation({
-    mutationFn: ({ paymentId, dto }) =>
-      paymentsService.confirmBankTransfer(paymentId, dto),
+    mutationFn: ({ paymentId, note }) => paymentsService.withdrawBankTransfer(paymentId, note),
     onSuccess: (payment, { orderId }) => {
-      invalidateAfterPayment(queryClient, payment, orderId);
-      toast.success(t('toasts.payments.bankTransferConfirmed'));
+      invalidateAfterPayment(queryClient, payment, orderId ?? payment.orderId);
+      toast.success(t('transfers.toasts.withdrawn'));
     },
-    onError: (err) => toast.error(extractApiErrorMessage(err)),
+    onError: (err, { quotationId, orderId }) => {
+      const view = receiptErrorOf(err);
+      if (view.refetch) refreshQuotePlan(queryClient, quotationId, orderId);
+      toast.error(
+        view.kind === 'server' ? extractApiErrorMessage(err) : t(view.messageKey),
+      );
+    },
   });
 }
 
-export function useRejectBankTransfer(): UseMutationResult<
-  Payment,
-  Error,
-  { paymentId: string; dto: RejectPaymentDto; orderId?: string }
-> {
+/**
+ * The doctor's own payment row (GET quotations/:qid/payments/:pid): what a
+ * declaration was made with, e.g. its retenue choice, before replacing it.
+ */
+export function useOwnPayment(
+  quotationId: string | null | undefined,
+  paymentId: string | null | undefined,
+  enabled = true,
+): UseQueryResult<Payment, Error> {
+  return useQuery({
+    queryKey: [...paymentKeys.detail(paymentId ?? ''), 'own', quotationId ?? ''] as const,
+    queryFn: () =>
+      paymentsService.getOwnPayment({
+        quotationId: quotationId ?? '',
+        paymentId: paymentId ?? '',
+      }),
+    enabled: enabled && !!quotationId && !!paymentId,
+    staleTime: PAYMENT_STALE_TIME,
+  });
+}
+
+/** Which receipt to read through the authenticated streams (CONTRACT §2.1 / §2.2). */
+export type TransferReceiptSource =
+  | { kind: 'installment'; paymentId: string }
+  | { kind: 'treatment_fee'; orderId: string };
+
+/**
+ * Receipt bytes, kept apart from `paymentKeys.all`: every payment write
+ * invalidates that root, and an open receipt must not be downloaded
+ * again for it. `version` (the declaration instant) refetches a replaced
+ * receipt.
+ */
+export const transferReceiptKeys = {
+  all: ['transfer-receipt'] as const,
+  of: (source: TransferReceiptSource, version?: string | null) =>
+    [
+      ...transferReceiptKeys.all,
+      source.kind,
+      source.kind === 'installment' ? source.paymentId : source.orderId,
+      version ?? null,
+    ] as const,
+};
+
+/**
+ * A transfer receipt's bytes, through the authenticated stream (the
+ * uploads folder is private). The owning dentist and admins only; a 404
+ * (PROOF_NOT_FOUND) is not retried.
+ */
+export function useTransferReceipt(
+  source: TransferReceiptSource | null,
+  options: { enabled?: boolean; version?: string | null } = {},
+): UseQueryResult<Blob, ProofReadError> {
+  return useQuery<Blob, ProofReadError>({
+    queryKey: source
+      ? transferReceiptKeys.of(source, options.version)
+      : [...transferReceiptKeys.all, 'none'],
+    queryFn: () => {
+      if (!source) throw new Error('No receipt');
+      return source.kind === 'installment'
+        ? paymentsService.getPaymentProof(source.paymentId)
+        : ordersService.getTreatmentFeeProof(source.orderId);
+    },
+    enabled: (options.enabled ?? true) && !!source,
+    staleTime: 5 * 60_000,
+    gcTime: 5 * 60_000,
+    retry: (count, error) => error.status !== 404 && error.status !== 403 && count < 1,
+  });
+}
+
+/** How often a screen waiting on the lab's decision looks again. */
+export const TRANSFER_REFRESH_MS = 30_000;
+
+/**
+ * While a transfer waits on the lab, refresh `queryKeys` every 30 s on a
+ * visible tab, so the doctor's panel turns « Payé » or « Refusé » without
+ * a reload once an admin decides (the dashboard socket is admins-only).
+ * Stops as soon as `active` is false.
+ */
+export function useRefreshWhileInFlight(
+  queryKeys: readonly QueryKey[],
+  active: boolean,
+  intervalMs: number = TRANSFER_REFRESH_MS,
+): void {
   const queryClient = useQueryClient();
-  const { t } = useT();
-  return useMutation({
-    mutationFn: ({ paymentId, dto }) =>
-      paymentsService.rejectBankTransfer(paymentId, dto),
-    onSuccess: (payment, { orderId }) => {
-      invalidateAfterPayment(queryClient, payment, orderId);
-      toast.success(t('toasts.payments.bankTransferRejected'));
-    },
-    onError: (err) => toast.error(extractApiErrorMessage(err)),
-  });
+  // The keys as a value: a new array literal each render must not restart the timer.
+  const signature = JSON.stringify(queryKeys);
+  useEffect(() => {
+    if (!active) return;
+    const keys = JSON.parse(signature) as QueryKey[];
+    const timer = window.setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      for (const queryKey of keys) void queryClient.invalidateQueries({ queryKey });
+    }, intervalMs);
+    return () => window.clearInterval(timer);
+  }, [active, intervalMs, queryClient, signature]);
 }
 
+/**
+ * Admin: record cash or a cheque handed over for an installment. A retenue
+ * that no longer applies, and another payment of the installment still
+ * open (409 PAYMENT_ATTEMPT_IN_PROGRESS: a transfer to confirm or refuse
+ * first, or a card attempt not yet decided, told apart from the plan read
+ * afresh), are explained in the admin's language.
+ */
 export function useRecordCash(): UseMutationResult<
   Payment,
   Error,
@@ -438,6 +722,19 @@ export function useRecordCash(): UseMutationResult<
       invalidateAfterPayment(queryClient, payment, orderId);
       toast.success(t('toasts.payments.cashRecorded'));
     },
-    onError: (err) => toast.error(extractApiErrorMessage(err)),
+    onError: (err, { quotationId, installmentId, orderId, dto }) => {
+      if (toastWithholdingRefusal(queryClient, t, err)) return;
+      if (isPaymentAttemptInProgress(extractApiError(err).errorCode)) {
+        toastInstallmentInFlight(queryClient, t, {
+          audience: 'admin',
+          method: dto.method === PaymentMethod.CHEQUE ? 'cheque' : 'cash',
+          quotationId,
+          installmentId,
+          orderId,
+        });
+        return;
+      }
+      toast.error(extractApiErrorMessage(err));
+    },
   });
 }

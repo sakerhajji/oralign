@@ -11,7 +11,16 @@ import {
   UserStats,
   CreateUserResponse,
   TemporaryPasswordResponse,
+  AccountActivityEvent,
+  DoctorActivitySweepResult,
+  ReactivateDoctorBody,
 } from '@/lib/types';
+
+/** GET /users/:id/activity-events params (limit ≤ 50). */
+export interface ActivityEventsParams {
+  page?: number;
+  limit?: number;
+}
 
 export const usersService = {
   /**
@@ -43,6 +52,44 @@ export const usersService = {
    */
   getUserStats: async (): Promise<UserStats> => {
     const response = await apiClient.get<UserStats>('/users/stats');
+    return response.data;
+  },
+
+  /**
+   * Admin: reactivate a dormant practitioner (doctor inactivity). The
+   * reason (3-500 characters) is kept in the account's activity journal;
+   * the doctor is notified. Idempotent: an account that is no longer
+   * dormant is answered as it is. 400 REACTIVATION_REASON_REQUIRED,
+   * ACCOUNT_ACTIVITY_NOT_A_DOCTOR.
+   */
+  reactivateDoctor: async (id: string, body: ReactivateDoctorBody): Promise<User> => {
+    const response = await apiClient.post<User>(`/users/${id}/reactivate`, body);
+    return response.data;
+  },
+
+  /**
+   * Admin: the account's activity journal (inactivity warnings,
+   * deactivation, reactivation, block / unblock), newest first.
+   */
+  getActivityEvents: async (
+    id: string,
+    params: ActivityEventsParams = {},
+  ): Promise<PaginatedResponse<AccountActivityEvent>> => {
+    const response = await apiClient.get<PaginatedResponse<AccountActivityEvent>>(
+      `/users/${id}/activity-events`,
+      { params },
+    );
+    return response.data;
+  },
+
+  /**
+   * Super admin (support / e2e): run the daily inactivity sweep now.
+   * Does nothing while the rule is switched off.
+   */
+  runInactivitySweep: async (): Promise<DoctorActivitySweepResult> => {
+    const response = await apiClient.post<DoctorActivitySweepResult>(
+      '/admin/doctor-activity/sweep',
+    );
     return response.data;
   },
 

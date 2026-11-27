@@ -8,6 +8,8 @@ import type {
   UserWithProfile,
 } from '../repositories/user.repository';
 import { UserService } from './user.service';
+import type { EventEmitter2 } from '@nestjs/event-emitter';
+import type { DoctorActivityService } from '../activity/doctor-activity.service';
 
 // Real bcryptjs at cost 12 (hash + compare per test) can pass 5 s when the
 // Docker image build runs this suite next to `next build`.
@@ -49,9 +51,13 @@ function makeService(
   repo: Partial<Record<keyof UserRepository, jest.Mock>>,
   mail: Partial<Record<keyof MailService, jest.Mock>> = {},
 ) {
+  // Not under test here: no activity block, no profile listener.
+  const activity = { summaries: jest.fn().mockResolvedValue(new Map()) };
   return new UserService(
     repo as unknown as UserRepository,
     mail as unknown as MailService,
+    activity as unknown as DoctorActivityService,
+    { emit: jest.fn() } as unknown as EventEmitter2,
   );
 }
 

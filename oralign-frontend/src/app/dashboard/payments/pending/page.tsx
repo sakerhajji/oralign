@@ -1,19 +1,13 @@
 'use client';
 
 import { Suspense } from 'react';
-import { useT } from '@/lib/i18n/lang-context';
-import { PendingPaymentsContent } from './pending-content';
+import { PendingDeskSkeleton, PendingPaymentsContent } from './pending-content';
 
-function PendingPaymentsFallback() {
-  const { t } = useT();
-  return (
-    <div className="p-6 text-sm text-muted-foreground">{t('common.loading')}</div>
-  );
-}
-
+// The desk reads its tab from the address (useSearchParams): the boundary
+// shows the desk's own skeleton until it can.
 export default function PendingPaymentsPage() {
   return (
-    <Suspense fallback={<PendingPaymentsFallback />}>
+    <Suspense fallback={<PendingDeskSkeleton />}>
       <PendingPaymentsContent />
     </Suspense>
   );

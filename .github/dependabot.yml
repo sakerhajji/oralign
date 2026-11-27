@@ -1,0 +1,36 @@
+# Dependency update pull requests, grouped so they stay few:
+# one PR per app per month for minor/patch updates, one per week for
+# the GitHub Actions. Majors are left to a planned upgrade.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /oralign-backend
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    groups:
+      backend-minor-patch:
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
+
+  - package-ecosystem: npm
+    directory: /oralign-frontend
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    groups:
+      frontend-minor-patch:
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']

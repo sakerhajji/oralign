@@ -1,5 +1,12 @@
 import apiClient from './client';
-import { serialisePaymentFilters } from './payments.service';
+import { asBlob } from './blob-download';
+import {
+  RECEIPT_UPLOAD_TIMEOUT_MS,
+  proofError,
+  serialisePaymentFilters,
+  uploadProgress,
+} from './payments.service';
+import type { TransferState } from '@/lib/types';
 import {
   CreateOrderDto,
   DentalOrder,
@@ -39,7 +46,23 @@ export interface TreatmentFeeRow {
   status: PaymentRecordStatus | null;
   /** null while a bank transfer waits for confirmation. */
   paidAt: string | null;
-  proofPath: string | null;
+  /**
+   * Stored receipt path (owning dentist and admins only). Never a URL: the
+   * folder is private, the bytes come from GET orders/:id/treatment-fee/proof.
+   * Test `hasProof`.
+   */
+  proofPath?: string | null;
+  /** Whether a fee receipt is attached (P-A). */
+  hasProof?: boolean;
+  /** The transfer declaration's identity: when the receipt was sent. */
+  declaredAt?: string | null;
+  /** First time an admin opened the receipt ("En cours de vérification"). */
+  reviewOpenedAt?: string | null;
+  /** A refused transfer: when and why (status `rejected`). */
+  rejectedAt?: string | null;
+  rejectionReason?: string | null;
+  /** The derived spec state (CONTRACT §7). */
+  state?: TransferState;
   /** The ORDER's submission, not the payment's. */
   submittedAt: string | null;
   updatedAt: string;
@@ -161,11 +184,11 @@ export const ordersService = {
 
   /**
    * Pay the treatment fee on an order. The backend routes by method:
-   *   • card / cash         → instant success, stamps treatmentFeePaidAt
-   *   • bank_transfer       → records `awaiting_confirmation`; the
-   *     caller should ALSO upload a receipt with `uploadTreatmentFeeProof`
-   *     and an admin will then call `confirmTreatmentFeePayment` once
-   *     the funds land.
+   *   • cash / cheque       → admin only, instant success
+   *   • bank_transfer       → admins only now: a dentist's transfer is
+   *     declared WITH its receipt, through `uploadTreatmentFeeProof`
+   *     (POST …/pay bank_transfer answers a dentist 400 PROOF_REQUIRED).
+   *     An admin confirms it once the funds land.
    */
   payTreatmentFee: async (
     id: string,
@@ -186,9 +209,10 @@ export const ordersService = {
   },
 
   /**
-   * Upload the bank-transfer receipt for the treatment fee. The
-   * backend stores the file and sets the lifecycle to
-   * `awaiting_confirmation`.
+   * Declare the treatment-fee bank transfer with its receipt (JPEG / PNG /
+   * WebP / PDF ≤ 10 MB, prepared by lib/payments/compress-receipt.ts): the
+   * fee turns `awaiting_confirmation`. A receipt still awaiting
+   * confirmation is REPLACED (its file kept); a refused one is cleared.
    */
   uploadTreatmentFeeProof: async (
     id: string,
@@ -197,6 +221,12 @@ export const ordersService = {
     // derives the fee server-side (audit M-4).
     _amount?: number,
     applyWithholding = false,
+    options: {
+      /** One key per declaration intent, reused by its retries (CONTRACT §0). */
+      idempotencyKey?: string;
+      /** Upload progress, 0..1. */
+      onUploadProgress?: (fraction: number) => void;
+    } = {},
   ): Promise<DentalOrder> => {
     const form = new FormData();
     form.append('proof', proof);
@@ -205,34 +235,43 @@ export const ordersService = {
     const response = await apiClient.post<DentalOrder>(
       `/orders/${id}/treatment-fee/proof`,
       form,
+      {
+        headers: options.idempotencyKey
+          ? { 'Idempotency-Key': options.idempotencyKey }
+          : undefined,
+        timeout: RECEIPT_UPLOAD_TIMEOUT_MS,
+        onUploadProgress: uploadProgress(options.onUploadProgress),
+      },
     );
     return response.data;
   },
 
   /**
-   * Admin endpoint — confirms a pending bank-transfer payment.
-   * Stamps `treatmentFeePaidAt`, which unlocks treatment-plan creation.
+   * Withdraw the fee transfer still awaiting confirmation (the owning
+   * dentist, or an admin): the fee is payable again, the receipt stays
+   * archived. 409 TRANSFER_NOT_WITHDRAWABLE once the lab processed it.
    */
-  confirmTreatmentFeePayment: async (id: string): Promise<DentalOrder> => {
-    const response = await apiClient.post<DentalOrder>(
-      `/orders/${id}/treatment-fee/confirm`,
+  withdrawTreatmentFeeProof: async (id: string): Promise<DentalOrder> => {
+    const response = await apiClient.delete<DentalOrder>(
+      `/orders/${id}/treatment-fee/proof`,
     );
     return response.data;
   },
 
   /**
-   * Admin: paginated treatment-fee bank-transfer payments awaiting
-   * confirmation. Same envelope shape as the installment-payment
-   * pending queue so the UI can render both with one table primitive.
+   * The fee receipt through the authenticated stream (the owning dentist
+   * and admins; 404 PROOF_NOT_FOUND for anyone else).
    */
-  listPendingTreatmentFees: async (params: {
-    page?: number;
-    limit?: number;
-  }) => {
-    const response = await apiClient.get<
-      PaginatedResponse<TreatmentFeeRow>
-    >('/orders/admin/treatment-fees/pending', { params });
-    return response.data;
+  getTreatmentFeeProof: async (id: string): Promise<Blob> => {
+    try {
+      const response = await apiClient.get<Blob>(`/orders/${id}/treatment-fee/proof`, {
+        responseType: 'blob',
+        timeout: RECEIPT_UPLOAD_TIMEOUT_MS,
+      });
+      return asBlob(response.data, 'application/octet-stream');
+    } catch (error) {
+      throw await proofError(error);
+    }
   },
 
   /**

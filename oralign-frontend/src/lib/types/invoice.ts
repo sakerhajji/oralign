@@ -55,6 +55,12 @@ export interface Invoice {
   clientCity: string | null;
   clientCountry: string | null;
   clientTaxId: string | null;
+  /** Snapshot of the billed practitioner's clinic (spec §6). */
+  clientClinicName?: string | null;
+  /** Billed to its practitioner in his own name (decided at creation). */
+  clientIsPractitioner?: boolean;
+  /** Snapshot of the practitioner's registration number (not printed). */
+  clientRegistrationNumber?: string | null;
 
   issueDate: string;
   dueDate: string | null;
@@ -80,6 +86,10 @@ export interface Invoice {
   withholdingRate?: number | string | null;
   withholdingAmount?: number | string;
   netPayable?: number | string;
+  /** Retenue threshold in force at issue (snapshot); null before the rule. */
+  withholdingThreshold?: number | string | null;
+  /** "Reste à payer" on the devis right after this payment, frozen at issue. */
+  quoteRemainingAfter?: number | string | null;
   /** Set on the automatic invoice of a treatment fee (+ CBCT). */
   treatmentFeeOrderId?: string | null;
   /** Last time the PDF was e-mailed to the practitioner, and to whom. */

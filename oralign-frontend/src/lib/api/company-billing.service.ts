@@ -1,6 +1,7 @@
 import apiClient from './client';
 import type {
   BankDetails,
+  BillingSettingsHistoryPage,
   CompanyBillingSettings,
   LegalInfo,
   UpsertCompanyBillingSettingsDto,
@@ -30,8 +31,20 @@ export interface BillingPublicDefaults {
   defaultTvaRate: number;
   /** Droit de timbre ADDED to every payment (each payment has its own facture). */
   stampDuty: number;
-  /** Retenue à la source (%) the practitioner may apply when paying; 0 = off. */
+  /** Retenue à la source (%) the practitioner may apply when paying. */
   withholdingRate: number;
+  /**
+   * Master switch of the retenue (spec §4): off, it is never offered and
+   * the server refuses it (400 WITHHOLDING_DISABLED). Absent on an older
+   * API = off.
+   */
+  withholdingEnabled?: boolean;
+  /**
+   * Base (TTC, stamp excluded) a payment must reach for the retenue to be
+   * offered (400 WITHHOLDING_BELOW_THRESHOLD below it); null when nothing
+   * is configured.
+   */
+  withholdingThreshold?: number | null;
   /** CBCT paid supplement — drives the price note in the order wizard
    *  and the breakdown in the treatment-fee payment dialog. */
   cbctSupplementEnabled: boolean;
@@ -85,6 +98,21 @@ export const companyBillingService = {
     return res.data;
   },
 
+  /**
+   * The journal of the fiscal and rollout settings (retenue, stamp, TVA,
+   * inactivity rule), newest first. Admin only.
+   */
+  getHistory: async (
+    page = 1,
+    limit = 20,
+  ): Promise<BillingSettingsHistoryPage> => {
+    const res = await apiClient.get<BillingSettingsHistoryPage>(
+      '/admin/company-billing-settings/history',
+      { params: { page, limit } },
+    );
+    return res.data;
+  },
+
   upsert: async (
     dto: UpsertCompanyBillingSettingsDto,
   ): Promise<CompanyBillingSettings> => {
@@ -128,31 +156,7 @@ export const companyBillingService = {
   },
 };
 
-/**
- * Resolve any stored upload path to its public absolute URL, no matter
- * how it was stored:
- *
- *   "/uploads/treatment-fee-proofs/abc.pdf" → http://api/.../uploads/treatment-fee-proofs/abc.pdf
- *   "treatment-fee-proofs/abc.pdf"          → http://api/.../uploads/treatment-fee-proofs/abc.pdf
- *   "http://example.com/x.pdf"              → http://example.com/x.pdf  (already absolute, returned verbatim)
- *
- * Different controllers historically stored paths in different shapes
- * (some with the `/uploads` prefix baked in, others without) — this
- * helper canonicalises all of them so the caller never has to think
- * about it. Returns null when the input is null/empty.
- */
-export function resolveUploadUrl(
-  relativePath: string | null | undefined,
-): string | null {
-  if (!relativePath) return null;
-  // Already absolute? Pass it through (covers S3 / CDN migrations later).
-  if (/^https?:\/\//i.test(relativePath)) return relativePath;
-  const base =
-    process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
-  const origin = base.replace(/\/api\/?$/, '');
-  // Normalise to "uploads/<rest>" so we can always prefix `${origin}/`.
-  const cleaned = relativePath
-    .replace(/^\/+/, '')
-    .replace(/^uploads\//, '');
-  return `${origin}/uploads/${cleaned}`;
-}
+// Receipts (payment and treatment-fee proofs) have no public URL: they are
+// read only through the authenticated streams (GET payments/:id/proof,
+// GET orders/:id/treatment-fee/proof). The old resolveUploadUrl helper
+// that built /uploads/... links for them was removed with its last caller.

@@ -2,15 +2,26 @@ import { posix } from 'path';
 import type { NextFunction, Request, Response } from 'express';
 
 /**
- * Upload folders that hold patient records. Their files are served ONLY by
- * the authenticated, RBAC-checked routes (GET orders/:id/files/:fileId/
- * download, the treatment-plan streams, the production streams), never by
- * the public static handler: a stored name is `<Doctor>_<Patient>_
- * <category>_<NNN>.<ext>` under `orders/<orderId>/<category>/`, which
- * anyone who has seen an order can rebuild, and a static URL keeps working
- * after the account that saw it is deactivated.
+ * Upload folders that hold patient records and bank-transfer receipts.
+ * Their files are served ONLY by the authenticated, RBAC-checked routes
+ * (GET orders/:id/files/:fileId/download, the treatment-plan streams, the
+ * production streams, GET payments/:paymentId/proof and GET
+ * orders/:id/treatment-fee/proof), never by the public static handler: a
+ * stored name is `<Doctor>_<Patient>_<category>_<NNN>.<ext>` under
+ * `orders/<orderId>/<category>/`, which anyone who has seen an order can
+ * rebuild, and a static URL keeps working after the account that saw it
+ * is deactivated.
+ *
+ *   orders                  patient records; receipts from 2026-11-27
+ *                           (orders/<orderId>/payment-proofs/)
+ *   payments                legacy installment receipts
+ *   treatment-fee-proofs    legacy treatment-fee receipts
  */
-export const PRIVATE_UPLOAD_DIRS: readonly string[] = ['orders'];
+export const PRIVATE_UPLOAD_DIRS: readonly string[] = [
+  'orders',
+  'payments',
+  'treatment-fee-proofs',
+];
 
 /**
  * Whether a request path below the `/uploads` mount reaches a private

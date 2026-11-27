@@ -13,6 +13,8 @@ import { extractApiErrorMessage } from '@/lib/api/error';
 import { useT } from '@/lib/i18n/lang-context';
 import { quotationKeys, toastQuoteError } from './use-quotations';
 import { orderKeys } from './use-orders';
+import { productionKeys } from './use-production';
+import { invalidateProductionAdmin } from './use-production-admin';
 import type {
   AttachPackToQuotationDto,
   ConfigurePaymentPlanDto,
@@ -119,6 +121,33 @@ export function useConfigurePaymentPlan(): UseMutationResult<
       toast.success(t('toasts.quotationPaymentPlan.planConfigured'));
     },
     onError: (err) => toastQuoteError(err, t),
+  });
+}
+
+/**
+ * Admin « Débloquer la tranche » (POST …/step-batches/:batchId/unlock).
+ * No toast here: the reason dialog owns the feedback (field errors, the
+ * « déjà débloquée » case). Refreshes the quote panel, the order history
+ * (the journal row) and the lab screens that read the release block.
+ */
+export function useUnlockBatch(): UseMutationResult<
+  QuoteStepBatch,
+  Error,
+  { quotationId: string; orderId: string; batchId: string; reason: string }
+> {
+  const queryClient = useQueryClient();
+  const refresh = (quotationId: string, orderId: string) => {
+    invalidatePaymentPlan(queryClient, { id: quotationId, orderId });
+    void queryClient.invalidateQueries({ queryKey: productionKeys.sheet(orderId) });
+    void queryClient.invalidateQueries({ queryKey: productionKeys.queues() });
+    void invalidateProductionAdmin(queryClient);
+  };
+  return useMutation({
+    mutationFn: ({ quotationId, batchId, reason }) =>
+      quotationPaymentPlanService.unlockBatch(quotationId, batchId, reason),
+    onSuccess: (_batch, { quotationId, orderId }) => refresh(quotationId, orderId),
+    // A 404 means the plan changed under the dialog: show the fresh one.
+    onError: (_error, { quotationId, orderId }) => refresh(quotationId, orderId),
   });
 }
 

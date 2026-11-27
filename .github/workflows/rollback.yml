@@ -1,0 +1,61 @@
+# ─────────────────────────────────────────────────────────────────
+# Rollback production — MANUAL ONLY, same approval as a deploy.
+#
+# Puts the code back to the previous deployed commit (or the SHA you
+# give) with scripts/rollback.sh. Database migrations are forward-only:
+# a rollback does NOT undo them. If a migration destroyed data, restore
+# the backup that "Deploy to production" took just before (see
+# docs/ci-cd.md → Restore a backup).
+# ─────────────────────────────────────────────────────────────────
+name: Rollback production
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Commit to go back to (full SHA). Empty = the commit before the last deploy.
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    name: Roll back on the VPS
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment:
+      name: production
+      url: https://oralign.com.tn
+    steps:
+      - name: Roll back
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          TARGET_SHA: ${{ inputs.sha }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          envs: TARGET_SHA
+          command_timeout: 35m
+          script: |
+            set -euo pipefail
+            cd /opt/oralign-app
+            if [ -n "${TARGET_SHA}" ]; then bash scripts/rollback.sh "${TARGET_SHA}"; else bash scripts/rollback.sh; fi
+
+      - name: Smoke test — site and API
+        run: |
+          for url in https://oralign.com.tn https://api.oralign.com.tn/api/health; do
+            ok=0
+            for i in $(seq 1 12); do
+              if curl -fsS -o /dev/null "$url"; then ok=1; break; fi
+              sleep 5
+            done
+            [ "$ok" = 1 ] && echo "✓ $url" || { echo "::error::$url does not answer"; exit 1; }
+          done

@@ -21,6 +21,11 @@ import {
   renderVerificationEmail,
   type ProductionDeliveryEmailArgs,
 } from './templates';
+import {
+  renderAccountDeactivatedEmail,
+  renderAccountReactivatedEmail,
+  renderInactivityWarningEmail,
+} from './templates.account-activity';
 import { env } from '../common/config/env';
 import { aligned, checkDomainAuth, domainOf, resolveDkim } from './mail-auth';
 
@@ -397,6 +402,49 @@ export class MailService {
       args,
       args.lang,
     );
+    return this.send({ to: args.to, subject, html });
+  }
+
+  // ─── Doctor inactivity emails (spec §5, users/activity) ──────────────────
+  //
+  // Sent by DoctorActivityNoticesListener after the journal row commits,
+  // in the language the event carries (the doctor's preferredLanguage).
+  // Always to User.email, never the clinic address.
+
+  /** "Your account will become inactive on …" (30 and 7 days before). */
+  async sendInactivityWarningEmail(args: {
+    to: string;
+    lang: Lang;
+    fullName: string;
+    deadlineAt: string;
+    anchorAt: string;
+    daysLeft: number;
+    newOrderUrl: string;
+  }): Promise<boolean> {
+    const { html, subject } = renderInactivityWarningEmail(args, args.lang);
+    return this.send({ to: args.to, subject, html });
+  }
+
+  /** "Your account is now inactive" (the sweep deactivated it). */
+  async sendAccountDeactivatedEmail(args: {
+    to: string;
+    lang: Lang;
+    fullName: string;
+    dashboardUrl: string;
+    supportUrl: string;
+  }): Promise<boolean> {
+    const { html, subject } = renderAccountDeactivatedEmail(args, args.lang);
+    return this.send({ to: args.to, subject, html });
+  }
+
+  /** "Your account is reactivated" (an admin reactivated it). */
+  async sendAccountReactivatedEmail(args: {
+    to: string;
+    lang: Lang;
+    fullName: string;
+    newOrderUrl: string;
+  }): Promise<boolean> {
+    const { html, subject } = renderAccountReactivatedEmail(args, args.lang);
     return this.send({ to: args.to, subject, html });
   }
 

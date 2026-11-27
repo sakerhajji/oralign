@@ -18,16 +18,16 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { join } from 'path';
 import { pipeline } from 'stream';
 import {
   ApiBearerAuth,
   ApiBody,
   ApiConsumes,
+  ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
   ApiParam,
+  ApiProduces,
   ApiQuery,
   ApiResponse,
   ApiTags,
@@ -51,7 +51,6 @@ import {
   InitChunkedUploadDto,
   OrderFilterDto,
   OrderResponseDto,
-  PayTreatmentFeeDto,
   SubmitOrderDto,
   TreatmentFeeProofDto,
   UpdateOrderDto,
@@ -59,10 +58,19 @@ import {
   UpdateToothInstructionsDto,
 } from '../dto/order.dto';
 import {
+  ConfirmTreatmentFeeDto,
+  PayTreatmentFeeRequestDto,
+  RejectTreatmentFeeDto,
   TreatmentFeeFilterDto,
   TreatmentFeePageDto,
   TreatmentFeeQueueQueryDto,
+  TreatmentFeeReviewOpenedDto,
 } from '../dto/treatment-fee.dto';
+import {
+  ReceiptFileInterceptor,
+  type ReceiptUpload,
+  sendReceipt,
+} from '../../payments/receipt-file';
 import { ChunkedUploadService } from '../services/chunked-upload.service';
 import { OrderService } from '../services/order.service';
 import { OrderFilesService } from '../services/order-files.service';
@@ -276,23 +284,23 @@ export class OrderController {
   /**
    * Pay the order's treatment fee. Routes by `body.method`:
    *
-   *   • `card`          → instant (mock collector); stamps paidAt
-   *   • `cash`          → admin-only; stamps paidAt
-   *   • `bank_transfer` → marks status=awaiting_confirmation; the
-   *     doctor still owes a proof upload via /treatment-fee/proof,
-   *     and the admin must confirm via /treatment-fee/confirm.
+   *   • `card`          → refused: the ClicToPay hosted checkout only
+   *   • `cash` / `cheque` → admin-only; stamps paidAt
+   *   • `bank_transfer` → an ADMIN declaring for the doctor without a
+   *     receipt, with `overrideNote`. A dentist declares through
+   *     POST /treatment-fee/proof (400 PROOF_REQUIRED here).
    */
   @Post(':id/treatment-fee/pay')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Pay the treatment fee. Card/Cash → instant. Bank transfer → records intent; needs proof + admin confirm.',
+      'Pay the treatment fee. Cash/cheque (admin) → instant. Bank transfer: admin without a receipt, with overrideNote; a dentist uploads the receipt instead (400 PROOF_REQUIRED).',
   })
   @ApiParam({ name: 'id', type: String })
   @ApiResponse({ status: 200, type: OrderResponseDto })
   async payTreatmentFee(
     @Param('id') id: string,
-    @Body() body: PayTreatmentFeeDto,
+    @Body() body: PayTreatmentFeeRequestDto,
     @CurrentUser() user: JwtPayload,
   ): Promise<OrderResponseDto> {
     // Amount is computed server-side (audit M-4) — the client only
@@ -302,18 +310,22 @@ export class OrderController {
       body.method,
       { userId: user.sub, role: user.role },
       body.applyWithholding,
+      body.overrideNote,
     );
   }
 
   /**
-   * Upload the bank-transfer receipt for the treatment fee. Sets the
-   * payment lifecycle to `awaiting_confirmation`. Multer handles the
-   * file; we store the relative path under uploads/.
+   * Upload the bank-transfer receipt of the treatment fee: the doctor's
+   * declaration (JPEG / PNG / WebP / PDF, 10 MB). memoryStorage: nothing
+   * reaches the disk before the service has authorised the caller and
+   * checked the fee and the bytes. Idempotency-Key: a repeat on this
+   * order answers the order as it stands.
    */
   @Post(':id/treatment-fee/proof')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Upload a bank-transfer receipt for the treatment fee.',
+    summary:
+      'Upload the bank-transfer receipt of the treatment fee (declares the transfer; a declaration still awaiting is replaced). 400 PROOF_REQUIRED / RECEIPT_TYPE / RECEIPT_TOO_LARGE; 409 TRANSFER_ALREADY_PROCESSED once the fee is paid (e.g. an admin confirmed the transfer being replaced).',
   })
   @ApiParam({ name: 'id', type: String })
   @ApiConsumes('multipart/form-data')
@@ -326,63 +338,153 @@ export class OrderController {
       },
     },
   })
-  @UseInterceptors(
-    FileInterceptor('proof', {
-      limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB cap on receipts
-      storage: diskStorage({
-        destination: join(process.cwd(), 'uploads', 'treatment-fee-proofs'),
-        filename: (_req, file, cb) =>
-          cb(
-            null,
-            `${Date.now()}-${file.originalname.replace(/[^\w.-]+/g, '_')}`,
-          ),
-      }),
-    }),
-  )
+  @UseInterceptors(ReceiptFileInterceptor('proof'))
   async uploadTreatmentFeeProof(
     @Param('id') id: string,
-    @UploadedFile() proof: Express.Multer.File,
+    @UploadedFile() proof: ReceiptUpload | undefined,
     @Body() body: TreatmentFeeProofDto,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
     @CurrentUser() user: JwtPayload,
   ): Promise<OrderResponseDto> {
-    if (!proof) {
-      throw new BadRequestException(
-        'A bank-transfer receipt file is required.',
-      );
-    }
-    // Store relative to uploads/ so the resolver in the frontend
-    // matches every other media path. The amount is derived server-side
-    // (audit M-4), not read from the multipart body.
-    const relativePath = `/uploads/treatment-fee-proofs/${proof.filename}`;
+    // The amount is derived server-side (audit M-4), not read from the
+    // multipart body.
     return this.treatmentFees.uploadTreatmentFeeProof(
       id,
-      relativePath,
+      proof ?? null,
       { userId: user.sub, role: user.role },
       body.applyWithholding,
+      idempotencyKey,
     );
   }
 
   /**
-   * Admin confirms a bank-transfer payment. Flips the payment status
+   * The doctor (or an admin) withdraws the fee declaration still awaiting
+   * confirmation: the fee is payable again, the receipt file is kept.
+   */
+  @Delete(':id/treatment-fee/proof')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Withdraw the treatment-fee transfer still awaiting confirmation (the receipt file is kept). 409 TRANSFER_NOT_WITHDRAWABLE once processed.',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiResponse({ status: 200, type: OrderResponseDto })
+  async withdrawTreatmentFeeProof(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<OrderResponseDto> {
+    return this.treatmentFees.withdrawTreatmentFeeProof(id, {
+      userId: user.sub,
+      role: user.role,
+    });
+  }
+
+  /**
+   * The fee receipt itself, for the owning dentist and admins (an
+   * authenticated blob on the screens). Designers and technicians are let
+   * through the role check on purpose: they read the same 404
+   * PROOF_NOT_FOUND as for a missing file.
+   */
+  @Get(':id/treatment-fee/proof')
+  @Roles(
+    UserRole.dentist,
+    UserRole.admin,
+    UserRole.super_admin,
+    UserRole.designer,
+    UserRole.technician,
+  )
+  @SkipThrottle()
+  @ApiOperation({
+    summary:
+      'Stream the treatment-fee receipt (owning dentist and admins). private, no-store; nosniff.',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiProduces('image/jpeg', 'image/png', 'image/webp', 'application/pdf')
+  @ApiNotFoundResponse({ description: 'PROOF_NOT_FOUND' })
+  async readTreatmentFeeProof(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @Res() response: Response,
+  ): Promise<void> {
+    const { receipt, downloadName } =
+      await this.treatmentFees.readTreatmentFeeProof(id, {
+        userId: user.sub,
+        role: user.role,
+      });
+    sendReceipt(response, receipt, downloadName);
+  }
+
+  /**
+   * An admin opened the fee receipt: the first opening stamps
+   * treatmentFeeReviewOpenedAt ("À vérifier"), every opening marks this
+   * admin's notifications of the declaration read.
+   */
+  @Post(':id/treatment-fee/review-opened')
+  @Roles(UserRole.admin, UserRole.super_admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Record that an admin opened the treatment-fee receipt (the first opening stamps treatmentFeeReviewOpenedAt).',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ type: TreatmentFeeReviewOpenedDto })
+  async treatmentFeeReviewOpened(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<TreatmentFeeReviewOpenedDto> {
+    return this.treatmentFees.markTreatmentFeeReviewOpened(id, {
+      userId: user.sub,
+      role: user.role,
+    });
+  }
+
+  /**
+   * Admin confirms a pending bank-transfer fee. Flips the payment status
    * to `success` and stamps `treatmentFeePaidAt`, which unlocks
-   * treatment-plan creation. Cash + card don't need this endpoint —
-   * they stamp `treatmentFeePaidAt` directly.
+   * treatment-plan creation. A repeat on a paid fee answers 200. Cash and
+   * card don't need this endpoint — they stamp `treatmentFeePaidAt`
+   * directly.
    */
   @Post(':id/treatment-fee/confirm')
   @Roles(UserRole.admin, UserRole.super_admin)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Admin confirms a pending bank-transfer treatment-fee payment.',
+    summary:
+      'Admin confirms a pending bank-transfer treatment fee. 409 TRANSFER_ALREADY_PROCESSED; 400 PROOF_OVERRIDE_NOTE_REQUIRED without a receipt.',
   })
   @ApiParam({ name: 'id', type: String })
   async confirmTreatmentFeePayment(
     @Param('id') id: string,
+    @Body() body: ConfirmTreatmentFeeDto,
     @CurrentUser() user: JwtPayload,
   ): Promise<OrderResponseDto> {
-    return this.treatmentFees.confirmTreatmentFeePayment(id, {
-      userId: user.sub,
-      role: user.role,
-    });
+    return this.treatmentFees.confirmTreatmentFeePayment(
+      id,
+      { userId: user.sub, role: user.role },
+      { overrideNote: body.overrideNote, declaredAt: body.declaredAt },
+    );
+  }
+
+  /** Admin refuses the fee transfer with a reason (the doctor reads it). */
+  @Post(':id/treatment-fee/reject')
+  @Roles(UserRole.admin, UserRole.super_admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Admin refuses the treatment-fee transfer with a reason (3-500 characters; a repeat: 200). 409 TRANSFER_ALREADY_PROCESSED.',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiResponse({ status: 200, type: OrderResponseDto })
+  async rejectTreatmentFeePayment(
+    @Param('id') id: string,
+    @Body() body: RejectTreatmentFeeDto,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<OrderResponseDto> {
+    return this.treatmentFees.rejectTreatmentFeePayment(
+      id,
+      { userId: user.sub, role: user.role },
+      { rejectionReason: body.rejectionReason, declaredAt: body.declaredAt },
+    );
   }
 
   // ── Admin treatment-fee list endpoints ────────────────────────────

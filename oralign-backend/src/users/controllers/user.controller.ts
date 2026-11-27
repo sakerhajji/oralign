@@ -58,6 +58,12 @@ import {
   STORAGE_SERVICE,
   StorageService,
 } from '../../storage/storage.interface';
+import {
+  ActivityEventsQueryDto,
+  ReactivateDoctorDto,
+} from '../activity/doctor-activity.dto';
+import type { AccountActivityEventDto } from '../activity/doctor-activity.contract';
+import type { PaginatedResponse } from '../../common/dto/response.dto';
 
 /** The service-side principal of a verified token (the hierarchy needs the role). */
 function callerOf(user: JwtPayload): Caller {
@@ -120,6 +126,44 @@ export class UserController {
     @CurrentUser() user: JwtPayload,
   ): Promise<TemporaryPasswordResponseDto> {
     return this.userService.issueTemporaryPassword(id, callerOf(user));
+  }
+
+  @Post(':id/reactivate')
+  @Roles(UserRole.admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Reactivate a dormant practitioner (doctor inactivity, admin only). Reason required (3-500 characters), journaled; the doctor is notified. Idempotent: an account that is not dormant is answered as it is.',
+  })
+  @ApiParam({ name: 'id', type: String, description: 'User ID' })
+  @ApiResponse({ status: 200, type: UserResponseDto })
+  @ApiResponse({
+    status: 400,
+    description: 'REACTIVATION_REASON_REQUIRED, ACCOUNT_ACTIVITY_NOT_A_DOCTOR',
+  })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  async reactivateDoctor(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReactivateDoctorDto,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<UserResponseDto> {
+    return this.userService.reactivateDoctor(id, dto.reason, callerOf(user));
+  }
+
+  @Get(':id/activity-events')
+  @Roles(UserRole.admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Activity journal of an account (inactivity warnings, deactivation, reactivation, block / unblock), newest first (admin only)',
+  })
+  @ApiParam({ name: 'id', type: String, description: 'User ID' })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  async listActivityEvents(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: ActivityEventsQueryDto,
+  ): Promise<PaginatedResponse<AccountActivityEventDto>> {
+    return this.userService.listActivityEvents(id, query.page, query.limit);
   }
 
   @Post(':id/restore')
@@ -275,7 +319,7 @@ export class UserController {
   ): Promise<UserResponseDto> {
     return this.userService.updateUser(id, updateUserDto, {
       id: currentUser.sub,
-      role: currentUser.role as UserRole,
+      role: currentUser.role,
     });
   }
 
@@ -455,7 +499,7 @@ export class UserController {
       { avatarUrl },
       {
         id: currentUser.sub,
-        role: currentUser.role as UserRole,
+        role: currentUser.role,
       },
     );
   }

@@ -23,6 +23,7 @@ import {
   AttachPackToQuotationDto,
   ConfigurePaymentPlanDto,
 } from '../dto/quotation.dto';
+import { UnlockStepBatchDto } from '../dto/step-batch-unlock.dto';
 import { QuotationPaymentPlanService } from '../services/quotation-payment-plan.service';
 
 /**
@@ -56,7 +57,7 @@ export class QuotationPaymentPlanController {
   ) {
     return this.service.attachPack(id, dto, {
       userId: user.sub,
-      role: user.role as UserRole,
+      role: user.role,
     });
   }
 
@@ -79,7 +80,7 @@ export class QuotationPaymentPlanController {
   ) {
     return this.service.configurePaymentPlan(id, dto, {
       userId: user.sub,
-      role: user.role as UserRole,
+      role: user.role,
     });
   }
 
@@ -97,11 +98,10 @@ export class QuotationPaymentPlanController {
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
   ) {
-    const { installments } = await this.service.getPlan(id, {
+    return this.service.getInstallments(id, {
       userId: user.sub,
-      role: user.role as UserRole,
+      role: user.role,
     });
-    return installments;
   }
 
   @Get('quotations/:id/step-batches')
@@ -113,11 +113,36 @@ export class QuotationPaymentPlanController {
   )
   @HttpCode(HttpStatus.OK)
   async getBatches(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
-    const { batches } = await this.service.getPlan(id, {
+    return this.service.getBatches(id, {
       userId: user.sub,
-      role: user.role as UserRole,
+      role: user.role,
     });
-    return batches;
+  }
+
+  // ─── Admin — release a batch by hand (spec §3) ─────────────────
+
+  @Post('quotations/:quotationId/step-batches/:batchId/unlock')
+  @Roles(UserRole.admin, UserRole.super_admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Release a LOCKED step batch without its payment (manual unlock): the ' +
+      'lab may then work on its steps, the installment stays pending, the ' +
+      'unlock is journaled (batch_unlocked, source manual, with the reason) ' +
+      'and the practitioner is not notified. Repeat on an unlocked or ' +
+      'delivered batch: 200 with the row as is. 400 UNLOCK_REASON_REQUIRED ' +
+      '(reason 3-500 characters once trimmed); 404 BATCH_NOT_FOUND.',
+  })
+  async unlockBatch(
+    @Param('quotationId') quotationId: string,
+    @Param('batchId') batchId: string,
+    @Body() dto: UnlockStepBatchDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.unlockBatch(quotationId, batchId, dto.reason, {
+      userId: user.sub,
+      role: user.role,
+    });
   }
 
   // ─── Admin — deliver a batch ───────────────────────────────────
@@ -145,7 +170,7 @@ export class QuotationPaymentPlanController {
   ) {
     return this.service.deliverBatch(quotationId, batchId, {
       userId: user.sub,
-      role: user.role as UserRole,
+      role: user.role,
     });
   }
 }

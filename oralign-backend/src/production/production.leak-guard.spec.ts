@@ -449,9 +449,10 @@ describe('production responses never carry money, contact or path keys', () => {
     const { prisma, policy } = prismaMock();
     const queue = new ProductionQueueService(prisma, policy);
     for (const tab of Object.values(ProductionQueueTabParam)) {
-      expect(findForbiddenKeys(await queue.list({ tab }, technician))).toEqual(
-        [],
-      );
+      const page = await queue.list({ tab }, technician);
+      // The release block is there, read from the money-filled fixture.
+      expect(page.data[0].release.state).toBe('partial');
+      expect(findForbiddenKeys(page)).toEqual([]);
     }
   });
 
@@ -466,6 +467,14 @@ describe('production responses never carry money, contact or path keys', () => {
       { from: 1, to: 5, state: 'released' },
       { from: 6, to: 10, state: 'locked' },
     ]);
+    // The release block (spec §3) is built from the same fixture, where the
+    // quotation and its batches carry every money column: none leaks.
+    expect(sheet.release).toMatchObject({
+      state: 'partial',
+      next: { from: 6, to: 10 },
+    });
+    expect(findForbiddenKeys(sheet.release)).toEqual([]);
+    expect(JSON.stringify(sheet.release)).not.toMatch(/b1|b2|i1|FAC-/);
     expect(findForbiddenKeys(sheet)).toEqual([]);
   });
 

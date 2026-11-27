@@ -156,9 +156,11 @@ function liveRanges(
  * The confirmed warnings of the LIVE rows: a cancelled row is reported as
  * cancelled_event only (it no longer duplicates nor skips anything).
  *   • already_declared → duplicate_declaration;
- *   • steps_not_released on a delivery → unreleased_delivery;
- *   • every other code (steps_not_released on another act included) →
- *     one confirmed_warning listing them.
+ *   • steps_not_released on ANY act → unreleased_delivery (spec §3: no
+ *     act on locked steps goes unreported; `detail` names the act). Since
+ *     the spec only an admin can confirm it; older technician entries on
+ *     locked steps are kept and listed here (DECISIONS §3);
+ *   • every other code → one confirmed_warning listing them.
  * One finding per row, i.e. per arch.
  */
 export function warningAnomalies(
@@ -178,7 +180,6 @@ export function warningAnomalies(
       at: event.performedAt.toISOString(),
       detail: event.type,
     };
-    const isDelivery = event.type === ProductionEventType.aligner_delivered;
     const rest: ProductionWarningCode[] = [];
     for (const code of codes) {
       if (code === PRODUCTION_WARNING.already_declared) {
@@ -187,7 +188,7 @@ export function warningAnomalies(
           kind: PRODUCTION_ANOMALY.duplicate_declaration,
           warnings: [code],
         });
-      } else if (code === PRODUCTION_WARNING.steps_not_released && isDelivery) {
+      } else if (code === PRODUCTION_WARNING.steps_not_released) {
         items.push({
           ...base,
           kind: PRODUCTION_ANOMALY.unreleased_delivery,

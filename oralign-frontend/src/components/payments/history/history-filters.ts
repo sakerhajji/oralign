@@ -119,12 +119,18 @@ export const METHOD_VALUES: readonly PaymentMethod[] = [
 const METHOD_FILTER_VALUES: readonly MethodFilter[] = ['all', ...METHOD_VALUES];
 
 /**
- * The statuses each tab can hold. A treatment fee is only ever paid or
- * awaiting the confirmation of its transfer; an installment payment is an
- * attempt and can end every way.
+ * The statuses each tab can hold. A treatment fee is paid, awaiting the
+ * confirmation of its transfer, or its transfer was refused (spec §1: the
+ * lab may refuse a fee transfer, with a reason); an installment payment is
+ * an attempt and can end every way.
  */
 export const TAB_STATUSES: Record<HistoryTab, readonly StatusFilter[]> = {
-  frais: ['all', PaymentRecordStatus.SUCCESS, PaymentRecordStatus.AWAITING_CONFIRMATION],
+  frais: [
+    'all',
+    PaymentRecordStatus.SUCCESS,
+    PaymentRecordStatus.AWAITING_CONFIRMATION,
+    PaymentRecordStatus.REJECTED,
+  ],
   echeances: [
     'all',
     PaymentRecordStatus.SUCCESS,

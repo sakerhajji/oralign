@@ -3,12 +3,19 @@
 import Link from 'next/link';
 import type { ComponentProps, ReactNode } from 'react';
 import { ChevronRight, Paperclip } from 'lucide-react';
+import { PaymentStatusBadge } from '@/components/payments/payment-status-badge';
+import { TransferStateBadge } from '@/components/payments/transfer-state-badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TableHead } from '@/components/ui/table';
 import type { Lang } from '@/lib/i18n/dict';
 import { useT } from '@/lib/i18n/lang-context';
-import { PaymentMethod } from '@/lib/types';
+import {
+  refusalReasonOf,
+  transferStateOf,
+  type TransferAudience,
+} from '@/lib/payments/transfer-state';
+import { PaymentMethod, PaymentRecordStatus } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import {
   formatBusinessDay,
@@ -109,6 +116,79 @@ export function MethodCell({
 
 export function Dash() {
   return <span className="text-muted-foreground">—</span>;
+}
+
+/**
+ * A row's status badge. A bank transfer waiting on the lab or refused
+ * reads as its derived state (« Reçu envoyé » / « En cours de
+ * vérification » / « Refusé », CONTRACT §7); every other row keeps the
+ * payment status badge. Used by the table column and the phone rows.
+ * `audience` 'admin' reads the lab's words (« À vérifier »), as on the
+ * pending desk and in the receipt viewer of the same row.
+ */
+export function transferStatusBadge(
+  status: PaymentRecordStatus | null | undefined,
+  method: PaymentMethod | null | undefined,
+  reviewOpenedAt?: string | null,
+  audience: TransferAudience = 'doctor',
+): ReactNode {
+  const transferStep =
+    method === PaymentMethod.BANK_TRANSFER &&
+    (status === PaymentRecordStatus.AWAITING_CONFIRMATION ||
+      status === PaymentRecordStatus.REJECTED);
+  return transferStep ? (
+    <TransferStateBadge
+      state={transferStateOf({ status, reviewOpenedAt })}
+      audience={audience}
+      className="max-w-full"
+    />
+  ) : (
+    <PaymentStatusBadge status={status} />
+  );
+}
+
+/** The status column: the badge, and a refusal's reason under it. */
+export function TransferStatusCell({
+  status,
+  method,
+  reviewOpenedAt,
+  rejectionReason,
+  audience = 'doctor',
+}: {
+  status: PaymentRecordStatus | null | undefined;
+  method: PaymentMethod | null | undefined;
+  reviewOpenedAt?: string | null;
+  rejectionReason?: string | null;
+  /** Whose words the state reads in (see transferStatusBadge). */
+  audience?: TransferAudience;
+}) {
+  const { t } = useT();
+  const reason =
+    status === PaymentRecordStatus.REJECTED ? refusalReasonOf(rejectionReason) : null;
+  return (
+    <span className="flex min-w-0 flex-col items-start gap-1">
+      {transferStatusBadge(status, method, reviewOpenedAt, audience)}
+      {reason ? (
+        <span
+          className="line-clamp-2 max-w-full text-xs leading-snug text-red-800 dark:text-red-300"
+          title={reason}
+        >
+          {t('transfers.history.reasonInline', { reason })}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+/** « Motif : … » of a refused row, first on a phone row's meta line; null otherwise. */
+export function refusalPart(
+  status: PaymentRecordStatus | null | undefined,
+  rejectionReason: string | null | undefined,
+  t: (path: string, vars?: Record<string, string | number>) => string,
+): string | null {
+  if (status !== PaymentRecordStatus.REJECTED) return null;
+  const reason = refusalReasonOf(rejectionReason);
+  return reason ? t('transfers.history.reasonInline', { reason }) : null;
 }
 
 /** What a tap on a phone row opens: its receipt, its proof or its order. */

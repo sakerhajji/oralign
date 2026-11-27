@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common';
 import { DevController } from './controllers/dev.controller';
 import { PaymentsController } from './controllers/payments.controller';
+import { TransferQueueController } from './controllers/transfer-queue.controller';
 import { MockPaymentGateway } from './gateways/mock-payment.gateway';
 import { PAYMENT_GATEWAY } from './gateways/payment-gateway.interface';
 import { PaymentsService } from './services/payments.service';
+import { TransferQueueService } from './services/transfer-queue.service';
 import { PaymentsSummaryService } from './services/payments-summary.service';
 import { PaymentPractitionersService } from './services/payment-practitioners.service';
 import { ClicToPayClient } from './clictopay/clictopay.client';
@@ -34,6 +36,10 @@ import { QuotationModule } from '../quotations/quotation.module';
  * Its OnModuleInit also throws as a belt-and-braces guard.
  */
 const controllers = [
+  // Before PaymentsController: its `admin/payments/:paymentId` would
+  // otherwise match `admin/payments/transfer-queue` (Express registration
+  // order).
+  TransferQueueController,
   PaymentsController,
   ...(!env.isProd ? [DevController] : []),
 ];
@@ -47,6 +53,8 @@ const controllers = [
   providers: [
     PaymentsService,
     PaymentsSummaryService,
+    // The admin pending desk's merged transfer queue (P0 skeleton, P-B).
+    TransferQueueService,
     PaymentPractitionersService,
     ClicToPayClient,
     ClicToPayPaymentsService,

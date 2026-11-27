@@ -70,4 +70,21 @@ export const quotationPaymentPlanService = {
     );
     return res.data;
   },
+
+  /**
+   * Admin: release a LOCKED batch by hand, with a reason (spec §3). The
+   * installment stays due; a repeat on an unlocked batch returns it as is.
+   * 400 UNLOCK_REASON_REQUIRED, 404 BATCH_NOT_FOUND (BATCH_UNLOCK_ERROR).
+   */
+  unlockBatch: async (
+    quotationId: string,
+    batchId: string,
+    reason: string,
+  ): Promise<QuoteStepBatch> => {
+    const res = await apiClient.post<QuoteStepBatch>(
+      `/quotations/${encodeURIComponent(quotationId)}/step-batches/${encodeURIComponent(batchId)}/unlock`,
+      { reason },
+    );
+    return res.data;
+  },
 };

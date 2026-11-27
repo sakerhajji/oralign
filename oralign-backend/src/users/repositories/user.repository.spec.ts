@@ -155,6 +155,14 @@ describe('UserRepository reads', () => {
         },
         12,
       ],
+      [
+        {
+          role: UserRole.dentist,
+          deletedAt: null,
+          inactiveSince: { not: null },
+        },
+        6,
+      ],
     ];
     const count = jest.fn((args: { where: Prisma.UserWhereInput }) => {
       const hit = answers.find(
@@ -175,7 +183,67 @@ describe('UserRepository reads', () => {
       technicians: 2,
       giftAvailable: 30,
       giftUsed: 12,
+      dormant: 6,
     });
-    expect(count).toHaveBeenCalledTimes(7);
+    expect(count).toHaveBeenCalledTimes(8);
+  });
+});
+
+describe('UserRepository — doctor activity', () => {
+  it('adds the resolved activity filter as its own AND term', () => {
+    const activity: Prisma.UserWhereInput = {
+      role: UserRole.dentist,
+      inactiveSince: { not: null },
+    };
+    expect(
+      UserRepository.buildWhere(LIVE, { role: UserRole.admin }, activity),
+    ).toEqual({ AND: [LIVE, { role: UserRole.admin }, activity] });
+  });
+
+  it('bulk block: locks in id order, journals only the accounts it flips, keeps the historic count', async () => {
+    const flipped = [{ id: 'a', role: UserRole.dentist }];
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([]),
+      user: {
+        findMany: jest.fn().mockResolvedValue(flipped),
+        updateMany: jest.fn().mockResolvedValue({ count: 2 }),
+      },
+    };
+    const prisma = {
+      $transaction: jest.fn((run: (client: typeof tx) => unknown) => run(tx)),
+    } as unknown as PrismaService;
+    const journal = jest.fn().mockResolvedValue(1);
+
+    const count = await new UserRepository(prisma).bulkUpdateStatus(
+      ['a', 'b'],
+      false,
+      { spareSuperAdmins: true },
+      journal,
+    );
+
+    expect(count).toBe(2);
+    const lock = (tx.$queryRaw.mock.calls[0] as unknown[])[0] as string[];
+    expect(lock.join('?')).toContain('ORDER BY "id" FOR UPDATE');
+    expect(tx.user.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: { in: ['a', 'b'] },
+          deletedAt: null,
+          role: { not: UserRole.super_admin },
+          isActive: true,
+        },
+      }),
+    );
+    expect(journal).toHaveBeenCalledWith(tx, flipped, expect.any(Date));
+    expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      tx.user.findMany.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('bulk block with an empty selection touches nothing', async () => {
+    const prisma = { $transaction: jest.fn() } as unknown as PrismaService;
+    await expect(
+      new UserRepository(prisma).bulkUpdateStatus([], true),
+    ).resolves.toBe(0);
   });
 });

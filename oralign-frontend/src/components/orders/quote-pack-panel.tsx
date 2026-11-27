@@ -33,20 +33,44 @@ import {
   PaymentMode,
   QuotationStatus,
   UserRole,
+  type InstallmentLatestTransfer,
   type Quotation,
   type QuoteInstallment,
   type QuoteStepBatch,
 } from '@/lib/types';
 import {
+  paymentPlanKeys,
+  receiptErrorOf,
   useAttachPackToQuotation,
   useConfigurePaymentPlan,
   useInstallments,
   useStepBatches,
   usePayByCard,
   useDeclareBankTransfer,
+  useOwnPayment,
   useRecordCash,
+  useRefreshWhileInFlight,
   useBillingPublicDefaults,
+  useWithdrawBankTransfer,
 } from '@/lib/hooks';
+import { quotationKeys } from '@/lib/hooks/use-quotations';
+import { ReceiptPicker, type PreparedReceipt } from '@/components/payments/receipt-picker';
+import { ReceiptSummary, ReceiptViewerDialog } from '@/components/payments/receipt-viewer';
+import { TransferStateBadge } from '@/components/payments/transfer-state-badge';
+import { WithdrawTransferDialog } from '@/components/payments/withdraw-transfer-dialog';
+import { installmentIdempotencyKey, newIdempotencyKey } from '@/lib/payments/idempotency';
+import type { ReceiptErrorView } from '@/lib/payments/receipt-errors';
+import {
+  installmentTransferOf,
+  isTransferInFlight,
+  refusalReasonOf,
+  transferStateOf,
+} from '@/lib/payments/transfer-state';
+import {
+  businessToday,
+  formatBusinessDay,
+  formatBusinessDayShort,
+} from '@/lib/utils/business-day';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -67,15 +91,24 @@ import {
 } from '@/components/billing/pack-choice';
 import { archLabel, packFacts, packName } from '@/components/billing/pack-picker';
 import { QuoteStep } from '@/components/orders/quote-step';
-// "Marquer livré" goes through the production delivery declaration (D2).
-import { BatchDeliveryButton } from '@/components/production/batch-delivery-button';
+// "Marquer livré" goes through the production delivery declaration (D2);
+// « Débloquer la tranche » is the admin's manual unlock (spec §3).
 import {
+  BatchDeliveryButton,
+  BatchUnlockButton,
+} from '@/components/production/batch-delivery-button';
+import { canOfferBatchUnlock } from '@/components/production/release-format';
+import {
+  formatRate,
   isWithholdingChoiceConflict,
   PriceIncludesTaxNote,
+  recordedSplit,
   useQuoteTaxRates,
+  useWithholdingRule,
   WithholdingChoice,
   type QuoteTaxRates,
 } from '@/components/payments/withholding';
+import { estimateQuoteRetenue, quotePaymentBases } from '@/components/orders/quote-retenue-estimate';
 import { previewInstallmentCharges, previewPlanStamps } from '@/lib/billing/tax-split';
 import { formatTimestampDay } from '@/lib/utils/calendar-date';
 import { formatAmount, formatPrice } from '@/lib/utils/currency';
@@ -101,6 +134,7 @@ import {
   CheckCircle2,
   Clock,
   CreditCard,
+  Eye,
   FileText,
   Hash,
   Landmark,
@@ -115,11 +149,12 @@ import {
   ShieldCheck,
   Stethoscope,
   Truck,
+  Undo2,
   Unlock,
   Upload,
   User as UserIcon,
   Wallet,
-  X,
+  XCircle,
 } from 'lucide-react';
 
 const QUOTE_PAYMENT_METHODS: PaymentMethod[] = [
@@ -1194,6 +1229,38 @@ function InstallmentStatusBadge({ status }: { status: InstallmentStatus }) {
   }
 }
 
+/**
+ * Under an installment's status on the admin plan: its bank transfer
+ * still waiting on the lab (« Reçu envoyé » / « À vérifier ») or refused,
+ * with the refusal reason; nothing otherwise. Confirming and refusing are
+ * the pending desk's, where the review is recorded.
+ */
+function AdminTransferHint({
+  installment,
+  className,
+}: {
+  installment: QuoteInstallment;
+  className?: string;
+}) {
+  const { t } = useT();
+  const { state, transfer } = installmentTransferOf(installment);
+  if (!isTransferInFlight(state) && state !== 'refused') return null;
+  const reason = state === 'refused' ? refusalReasonOf(transfer?.rejectionReason) : null;
+  return (
+    <span className={cn('flex min-w-0 flex-col gap-1', className)}>
+      <TransferStateBadge state={state} audience="admin" />
+      {state === 'refused' ? (
+        <span
+          className="line-clamp-2 max-w-56 text-xs leading-snug text-red-800 dark:text-red-300"
+          title={reason ?? undefined}
+        >
+          {t('transfers.refused.reason', { reason: reason ?? t('transfers.refused.noReason') })}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 function BatchStatusBadge({ status }: { status: BatchStatus }) {
   const { t } = useT();
   const label = t(`quoteUi.batchStatus.${status}`);
@@ -1265,6 +1332,13 @@ function AdminPlanView({
     batches.forEach((b) => m.set(b.installmentId, b));
     return m;
   }, [batches]);
+
+  // « Débloquer la tranche »: a LOCKED batch of a live quote (the server
+  // refuses a draft, rejected or cancelled one with 409
+  // BATCH_UNLOCK_QUOTE_NOT_LIVE); on an unlimited-step pack only while
+  // nothing is released yet (one unlock releases every step).
+  const canUnlock = (batch: QuoteStepBatch | undefined): boolean =>
+    !!batch && quoteIsPayable && canOfferBatchUnlock(quote, batch, batches);
 
   // "Modifier l'échéancier": the open rows are re-planned, the kept ones
   // (paid or cancelled, batches included) stay. Offered while something
@@ -1358,6 +1432,7 @@ function AdminPlanView({
                   (inst.status === InstallmentStatus.PENDING ||
                     inst.status === InstallmentStatus.OVERDUE) &&
                   new Date(inst.availableFrom).getTime() <= now;
+                const unlockable = canUnlock(batch);
                 return (
                   <TableRow key={inst.id}>
                     <TableCell>{inst.installmentNumber}</TableCell>
@@ -1366,7 +1441,10 @@ function AdminPlanView({
                       {isOpenInstallment(inst) ? <StampHint stamp={rates.stampDuty} /> : null}
                     </TableCell>
                     <TableCell>
-                      <InstallmentStatusBadge status={inst.status} />
+                      <div className="flex flex-col items-start gap-1">
+                        <InstallmentStatusBadge status={inst.status} />
+                        <AdminTransferHint installment={inst} />
+                      </div>
                     </TableCell>
                     <TableCell className="text-xs">
                       {batch
@@ -1399,6 +1477,9 @@ function AdminPlanView({
                             label={t('quoteUi.adminPlan.markDelivered')}
                           />
                         ) : null}
+                        {batch && unlockable ? (
+                          <BatchUnlockButton quote={quote} batch={batch} />
+                        ) : null}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -1415,6 +1496,7 @@ function AdminPlanView({
                 (inst.status === InstallmentStatus.PENDING ||
                   inst.status === InstallmentStatus.OVERDUE) &&
                 new Date(inst.availableFrom).getTime() <= now;
+              const unlockable = canUnlock(batch);
               return (
                 <div
                   key={inst.id}
@@ -1430,7 +1512,10 @@ function AdminPlanView({
                       </p>
                       {isOpenInstallment(inst) ? <StampHint stamp={rates.stampDuty} /> : null}
                     </div>
-                    <InstallmentStatusBadge status={inst.status} />
+                    <div className="flex flex-col items-end gap-1 text-right">
+                      <InstallmentStatusBadge status={inst.status} />
+                      <AdminTransferHint installment={inst} className="items-end" />
+                    </div>
                   </div>
                   <div className="mt-4 grid gap-2 text-sm">
                     <InfoLine
@@ -1456,7 +1541,7 @@ function AdminPlanView({
                       }
                     />
                   </div>
-                  {(isPayable || batch?.status === BatchStatus.UNLOCKED) && (
+                  {(isPayable || batch?.status === BatchStatus.UNLOCKED || unlockable) && (
                     <div className="mt-4 grid gap-2">
                       {isPayable ? (
                         <AdminInstallmentActions
@@ -1470,6 +1555,13 @@ function AdminPlanView({
                           quote={quote}
                           batch={batch}
                           label={t('quoteUi.adminPlan.markDelivered')}
+                          className="h-10 w-full justify-center"
+                        />
+                      ) : null}
+                      {batch && unlockable ? (
+                        <BatchUnlockButton
+                          quote={quote}
+                          batch={batch}
                           className="h-10 w-full justify-center"
                         />
                       ) : null}
@@ -1573,7 +1665,9 @@ function AdminCardDialog({
   onClose: () => void;
 }) {
   const { t, lang } = useT();
-  const payCard = usePayByCard();
+  // Its refusals are worded for the admin (« confirmez ou refusez
+  // d'abord le virement en attente »).
+  const payCard = usePayByCard({ audience: 'admin' });
   const [applyWithholding, setApplyWithholding] = useState(false);
   const [attemptConflict, setAttemptConflict] = useState(false);
   const apply = rates.withholdingRate > 0 && applyWithholding;
@@ -1856,7 +1950,7 @@ function DoctorPlanView({
   doctorName?: string | null;
   orderCode?: string | null;
 }) {
-  const { t } = useT();
+  const { t, lang } = useT();
   // Pay buttons used to be gated on `quote.status === APPROVED`, but
   // the doctor's review now skips an explicit Approve step — paying
   // the first installment IS the approval (backend auto-transitions
@@ -1871,23 +1965,46 @@ function DoctorPlanView({
     return m;
   }, [batches]);
 
-  // All currently-payable rows (pending/overdue and the available-from
-  // date has arrived). The first one drives the per-row "Pay now"
-  // button; the full list drives the "Pay all" affordance + the
-  // dialog's scope toggle. The backend still enforces availableFrom
-  // and the sequential-pay rule, so the UI just filters proactively.
+  // Each installment's latest bank-transfer declaration and its derived
+  // state (CONTRACT §7): « Reçu envoyé » / « En cours de vérification »
+  // wait on the lab, « Refusé » carries its reason.
+  const transfers = useMemo(
+    () => new Map(installments.map((inst) => [inst.id, installmentTransferOf(inst)])),
+    [installments],
+  );
+
+  // All currently-payable rows (pending/overdue, the available-from date
+  // has arrived, and no transfer of theirs waits on the lab: declaring
+  // again would REPLACE it). The first one drives the per-row "Pay now"
+  // button; the full list drives the "Pay all" affordance + the dialog's
+  // scope toggle. The backend still enforces availableFrom, so the UI
+  // just filters proactively.
   const [now] = useState(() => Date.now());
   const payable = useMemo(
     () =>
       installments.filter(
         (i) =>
-          (i.status === InstallmentStatus.PENDING ||
-            i.status === InstallmentStatus.OVERDUE) &&
-          new Date(i.availableFrom).getTime() <= now,
+          isOpenInstallment(i) &&
+          new Date(i.availableFrom).getTime() <= now &&
+          !isTransferInFlight(transfers.get(i.id)?.state),
       ),
-    [installments, now],
+    [installments, now, transfers],
   );
   const nextPayable = payable[0];
+  const inFlightCount = installments.filter((i) =>
+    isTransferInFlight(transfers.get(i.id)?.state),
+  ).length;
+
+  // While a transfer waits on the lab, look again every 30 s: the row
+  // turns « Payé » (and its steps unlock) or « Refusé » without a reload.
+  useRefreshWhileInFlight(
+    [
+      paymentPlanKeys.installments(quote.id),
+      paymentPlanKeys.batches(quote.id),
+      quotationKeys.byOrder(quote.orderId),
+    ],
+    inFlightCount > 0,
+  );
 
   // Price wording and the stamp, and warms the cache the pay dialog reads
   // its retenue rate from.
@@ -1902,6 +2019,121 @@ function DoctorPlanView({
   );
   // The whole plan: the pack total plus one stamp per payment.
   const plan = previewPlanStamps(quote.totalPrice, paymentCountOf(installments), rates.stampDuty);
+  // « Retenue si appliquée » (spec §4), as the devis states it, from the
+  // rule in force now: the one the pay dialogs offer (switched on, a rate,
+  // each payment at or above the threshold). Each planned installment is
+  // its own base. An estimate: the practitioner ticks it at each payment;
+  // shown while something is left to pay.
+  const { rule: withholdingRule, ready: withholdingRuleReady } = useWithholdingRule();
+  const retenue =
+    withholdingRuleReady && installments.some(isOpenInstallment)
+      ? estimateQuoteRetenue(
+          quotePaymentBases(
+            installments
+              .filter((inst) => inst.status !== InstallmentStatus.CANCELLED)
+              .map((inst) => inst.amount),
+            quote.totalPrice,
+          ),
+          withholdingRule,
+        )
+      : null;
+  const planToPay = plan.count > 0 && plan.stamps > 0 ? plan.total : toDec(quote.totalPrice);
+
+  // ONE pay dialog, one receipt viewer, one withdraw confirmation for the
+  // whole plan, owned here: a row's buttons move as the plan refetches
+  // (a declared row stops being payable), the dialog must not move with
+  // them. The dialog is remounted per opening (`seq`).
+  const seqRef = useRef(0);
+  const [payRequest, setPayRequest] = useState<PayRequest | null>(null);
+  const [viewing, setViewing] = useState<TransferTarget | null>(null);
+  const [withdrawing, setWithdrawing] = useState<TransferTarget | null>(null);
+  const withdraw = useWithdrawBankTransfer();
+
+  const openPay = (installment: QuoteInstallment, scope: PayScope, mode: PayMode) => {
+    seqRef.current += 1;
+    setPayRequest({
+      installment,
+      payable,
+      scope,
+      mode,
+      transfer: transfers.get(installment.id)?.transfer ?? null,
+      seq: seqRef.current,
+    });
+  };
+
+  const statusOf = (inst: QuoteInstallment, alignEnd: boolean) => {
+    const batch = batchByInstallment.get(inst.id);
+    const info = transfers.get(inst.id);
+    const state = info?.state ?? null;
+    const transfer = info?.transfer ?? null;
+    return (
+      <div className={cn('flex flex-col gap-1', alignEnd ? 'items-end' : 'items-start')}>
+        <InstallmentStatusBadge status={inst.status} />
+        {isTransferInFlight(state) || state === 'refused' ? (
+          <TransferStateBadge state={state} />
+        ) : null}
+        {batch ? <BatchStatusBadge status={batch.status} /> : null}
+        {isTransferInFlight(state) && transfer?.declaredAt ? (
+          <span className="text-[11px] text-muted-foreground tabular-nums">
+            {t('transfers.sentShort', {
+              date: formatBusinessDayShort(transfer.declaredAt, lang, businessToday()),
+            })}
+          </span>
+        ) : null}
+      </div>
+    );
+  };
+
+  /** « Motif : … » of a refused transfer: clamped in the table, in full on a card. */
+  const refusalOf = (inst: QuoteInstallment, clamp: boolean) => {
+    const info = transfers.get(inst.id);
+    if (info?.state !== 'refused') return null;
+    const reason = refusalReasonOf(info.transfer?.rejectionReason);
+    const text = t('transfers.refused.reason', {
+      reason: reason ?? t('transfers.refused.noReason'),
+    });
+    return clamp ? (
+      <span
+        className="mt-1 line-clamp-2 block max-w-56 text-xs leading-snug text-red-800 dark:text-red-300"
+        title={text}
+      >
+        {text}
+      </span>
+    ) : (
+      <p className="mt-3 rounded-md border-l-2 border-red-300 bg-red-50/70 px-3 py-2 text-sm text-red-950 dark:bg-red-950/30 dark:text-red-100">
+        {text}
+      </p>
+    );
+  };
+
+  const actionsOf = (inst: QuoteInstallment, fullWidth: boolean) => {
+    const info = transfers.get(inst.id);
+    const state = info?.state ?? null;
+    const transfer = info?.transfer ?? null;
+    if (transfer && isTransferInFlight(state)) {
+      const target = { installment: inst, transfer };
+      return (
+        <TransferInFlightActions
+          fullWidth={fullWidth}
+          hasProof={transfer.hasProof}
+          onView={() => setViewing(target)}
+          onReplace={() => openPay(inst, 'single', 'replace')}
+          onWithdraw={() => setWithdrawing(target)}
+        />
+      );
+    }
+    const available = new Date(inst.availableFrom).getTime() <= now;
+    if (!isApproved || nextPayable?.id !== inst.id || !available) return null;
+    const refused = state === 'refused';
+    return (
+      <DoctorPayButton
+        label={refused ? t('transfers.actions.resubmit') : undefined}
+        icon={refused ? 'upload' : 'card'}
+        fullWidth={fullWidth}
+        onClick={() => openPay(inst, 'single', refused ? 'resubmit' : 'pay')}
+      />
+    );
+  };
 
   return (
     <>
@@ -1927,6 +2159,42 @@ function DoctorPlanView({
               </div>
             </dl>
           ) : null}
+          {retenue ? (
+            <>
+              <dl className="mt-2 space-y-1 border-t pt-2 text-sm">
+                <div className="flex items-baseline justify-between gap-3">
+                  <dt className="min-w-0 text-muted-foreground">
+                    {t('quoteEditor.withholdingIfApplied', { rate: formatRate(retenue.rate, lang) })}
+                  </dt>
+                  <dd className="shrink-0 tabular-nums">
+                    − {money(retenue.amount, quote.currency)}
+                  </dd>
+                </div>
+                <div className="flex items-baseline justify-between gap-3 font-medium">
+                  <dt className="min-w-0">{t('quoteEditor.netIfWithholding')}</dt>
+                  <dd className="shrink-0 tabular-nums">
+                    {money(
+                      (Math.round(planToPay * 1000) - Math.round(retenue.amount * 1000)) / 1000,
+                      quote.currency,
+                    )}
+                  </dd>
+                </div>
+              </dl>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                {retenue.threshold
+                  ? t('quoteUi.doctor.retenueNote', {
+                      threshold: money(retenue.threshold, quote.currency),
+                    })
+                  : t('quoteUi.doctor.retenueNoteAll')}
+                {retenue.eligiblePayments < retenue.payments
+                  ? ` ${t('quoteEditor.withholdingEstimatePartial', {
+                      count: retenue.eligiblePayments,
+                      total: retenue.payments,
+                    })}`
+                  : null}
+              </p>
+            </>
+          ) : null}
           <PriceIncludesTaxNote
             className="mt-1 sm:text-right"
             tvaRate={rates.tvaRate}
@@ -1936,7 +2204,7 @@ function DoctorPlanView({
         </CardContent>
       </Card>
 
-      {isApproved && payable.length > 1 ? (
+      {isApproved && payable.length > 1 && nextPayable ? (
         <Card className="border-emerald-200/60 bg-emerald-50/40">
           <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -1953,16 +2221,11 @@ function DoctorPlanView({
                   : t('quoteUi.doctor.payAllAfter')}
               </p>
             </div>
-            <DoctorPayActions
-              quote={quote}
-              installment={nextPayable!}
-              payable={payable}
-              defaultScope="all"
+            <DoctorPayButton
               label={t('quoteUi.doctor.payAllBtn')}
-              patientName={patientName}
-              doctorName={doctorName}
-              orderCode={orderCode}
+              icon="card"
               fullWidth
+              onClick={() => openPay(nextPayable, 'all', 'pay')}
             />
           </CardContent>
         </Card>
@@ -1978,6 +2241,15 @@ function DoctorPlanView({
               ? t('quoteUi.doctor.timelineDescApproved')
               : t('quoteUi.doctor.timelineDescNotApproved')}
           </CardDescription>
+          {inFlightCount > 0 ? (
+            <p
+              role="status"
+              className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs leading-relaxed text-amber-950 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
+            >
+              <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              {t('transfers.panel.inFlightNote', { count: inFlightCount })}
+            </p>
+          ) : null}
         </CardHeader>
         <CardContent className="p-0">
           <div className="hidden md:block">
@@ -1999,49 +2271,33 @@ function DoctorPlanView({
                 const batch = batchByInstallment.get(inst.id);
                 const available =
                   new Date(inst.availableFrom).getTime() <= now;
-                const isNext = nextPayable?.id === inst.id;
                 return (
                   <TableRow key={inst.id}>
-                    <TableCell>{inst.installmentNumber}</TableCell>
-                    <TableCell className="font-mono">
+                    <TableCell className="align-top">{inst.installmentNumber}</TableCell>
+                    <TableCell className="align-top font-mono">
                       {money(inst.amount, quote.currency)}
                       {isOpenInstallment(inst) ? (
                         <StampHint stamp={rates.stampDuty} className="font-sans" />
                       ) : null}
                     </TableCell>
-                    <TableCell className="space-y-1">
-                      <InstallmentStatusBadge status={inst.status} />
-                      {batch ? (
-                        <div className="text-xs">
-                          <BatchStatusBadge status={batch.status} />
-                        </div>
-                      ) : null}
+                    <TableCell className="align-top">
+                      {statusOf(inst, false)}
+                      {refusalOf(inst, true)}
                     </TableCell>
-                    <TableCell className="text-xs">
+                    <TableCell className="align-top text-xs">
                       {batch
                         ? `${batch.fromStep} → ${batch.toStep}`
                         : '—'}
                     </TableCell>
-                    <TableCell className="text-xs">
-                      {new Date(inst.availableFrom).toLocaleDateString()}
+                    <TableCell className="align-top text-xs">
+                      {formatTimestampDay(inst.availableFrom, lang)}
                       {!available ? (
                         <div className="text-muted-foreground">
                           {t('quoteUi.doctor.lockedUntil')}
                         </div>
                       ) : null}
                     </TableCell>
-                    <TableCell className="text-right">
-                      {isApproved && isNext && available ? (
-                        <DoctorPayActions
-                          quote={quote}
-                          installment={inst}
-                          payable={payable}
-                          patientName={patientName}
-                          doctorName={doctorName}
-                          orderCode={orderCode}
-                        />
-                      ) : null}
-                    </TableCell>
+                    <TableCell className="align-top text-right">{actionsOf(inst, false)}</TableCell>
                   </TableRow>
                 );
               })}
@@ -2053,6 +2309,7 @@ function DoctorPlanView({
               const batch = batchByInstallment.get(inst.id);
               const available = new Date(inst.availableFrom).getTime() <= now;
               const isNext = nextPayable?.id === inst.id;
+              const actions = actionsOf(inst, true);
               return (
                 <div
                   key={inst.id}
@@ -2071,11 +2328,9 @@ function DoctorPlanView({
                       </p>
                       {isOpenInstallment(inst) ? <StampHint stamp={rates.stampDuty} /> : null}
                     </div>
-                    <div className="flex flex-col items-end gap-1">
-                      <InstallmentStatusBadge status={inst.status} />
-                      {batch ? <BatchStatusBadge status={batch.status} /> : null}
-                    </div>
+                    {statusOf(inst, true)}
                   </div>
+                  {refusalOf(inst, false)}
                   <div className="mt-4 grid gap-2 text-sm">
                     <InfoLine
                       label={t('quoteUi.adminPlan.colSteps')}
@@ -2083,7 +2338,7 @@ function DoctorPlanView({
                     />
                     <InfoLine
                       label={t('quoteUi.adminPlan.colAvailable')}
-                      value={new Date(inst.availableFrom).toLocaleDateString()}
+                      value={formatTimestampDay(inst.availableFrom, lang)}
                     />
                     {!available ? (
                       <p className="rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
@@ -2091,81 +2346,220 @@ function DoctorPlanView({
                       </p>
                     ) : null}
                   </div>
-                  {isApproved && isNext && available ? (
-                    <div className="mt-4">
-                      <DoctorPayActions
-                        quote={quote}
-                        installment={inst}
-                        payable={payable}
-                        patientName={patientName}
-                        doctorName={doctorName}
-                        orderCode={orderCode}
-                        fullWidth
-                      />
-                    </div>
-                  ) : null}
+                  {actions ? <div className="mt-4">{actions}</div> : null}
                 </div>
               );
             })}
           </div>
         </CardContent>
       </Card>
-    </>
-  );
-}
 
-function DoctorPayActions({
-  quote,
-  installment,
-  payable,
-  defaultScope = 'single',
-  label,
-  patientName,
-  doctorName,
-  orderCode,
-  fullWidth = false,
-}: {
-  quote: Quotation;
-  installment: QuoteInstallment;
-  /** Every currently-payable installment, including `installment`. */
-  payable: QuoteInstallment[];
-  /** Which mode the dialog opens in. */
-  defaultScope?: 'single' | 'all';
-  label?: string;
-  /** Optional context surfaced in the dialog's right-hand summary. */
-  patientName?: string | null;
-  doctorName?: string | null;
-  orderCode?: string | null;
-  fullWidth?: boolean;
-}) {
-  const { t } = useT();
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <Button
-        size="sm"
-        onClick={() => setOpen(true)}
-        className={cn(fullWidth && 'h-10 w-full justify-center sm:w-auto')}
-      >
-        <CreditCard className="mr-1 h-4 w-4" />
-        {label ?? t('quoteUi.doctor.payNow')}
-      </Button>
-      <PaymentMethodDialog
-        open={open}
-        onClose={() => setOpen(false)}
-        quote={quote}
-        installment={installment}
-        payable={payable}
-        defaultScope={defaultScope}
-        patientName={patientName}
-        doctorName={doctorName}
-        orderCode={orderCode}
+      {payRequest ? (
+        <PaymentMethodDialog
+          key={payRequest.seq}
+          open
+          onClose={() => setPayRequest(null)}
+          quote={quote}
+          installment={payRequest.installment}
+          payable={payRequest.payable}
+          defaultScope={payRequest.scope}
+          mode={payRequest.mode}
+          transfer={payRequest.transfer}
+          patientName={patientName}
+          doctorName={doctorName}
+          orderCode={orderCode}
+        />
+      ) : null}
+
+      {viewing ? (
+        <InstallmentReceiptViewer
+          quote={quote}
+          target={viewing}
+          orderCode={orderCode}
+          onClose={() => setViewing(null)}
+        />
+      ) : null}
+
+      <WithdrawTransferDialog
+        open={!!withdrawing}
+        onOpenChange={(open) => {
+          if (!open) setWithdrawing(null);
+        }}
+        description={t('transfers.withdrawDialog.descInstallment', {
+          n: withdrawing?.installment.installmentNumber ?? '',
+        })}
+        pending={withdraw.isPending}
+        onConfirm={() => {
+          if (!withdrawing) return;
+          withdraw.mutate(
+            {
+              paymentId: withdrawing.transfer.paymentId,
+              quotationId: quote.id,
+              orderId: quote.orderId,
+            },
+            { onSettled: () => setWithdrawing(null) },
+          );
+        }}
       />
     </>
   );
 }
 
+/** One installment's declaration waiting on the lab. */
+interface TransferTarget {
+  installment: QuoteInstallment;
+  transfer: InstallmentLatestTransfer;
+}
+
 type PayScope = 'single' | 'all';
+
+/**
+ * Why the pay dialog opens: a payment; a new receipt for a transfer still
+ * waiting on the lab (`replace`: bank transfer only, the server supersedes
+ * the old declaration); a payment after a refused transfer (`resubmit`:
+ * the reason on top).
+ */
+type PayMode = 'pay' | 'replace' | 'resubmit';
+
+interface PayRequest {
+  installment: QuoteInstallment;
+  /** The payable rows when the dialog opened: they stay put while it is open. */
+  payable: QuoteInstallment[];
+  scope: PayScope;
+  mode: PayMode;
+  transfer: InstallmentLatestTransfer | null;
+  seq: number;
+}
+
+/** 48 px under a finger, compact from sm up. */
+const ROW_TAP = 'min-h-11 sm:min-h-8 pointer-coarse:min-h-12';
+
+function DoctorPayButton({
+  label,
+  icon,
+  fullWidth = false,
+  onClick,
+}: {
+  label?: string;
+  icon: 'card' | 'upload';
+  fullWidth?: boolean;
+  onClick: () => void;
+}) {
+  const { t } = useT();
+  const Icon = icon === 'upload' ? Upload : CreditCard;
+  return (
+    <Button
+      size="sm"
+      onClick={onClick}
+      className={cn(ROW_TAP, fullWidth && 'w-full justify-center sm:w-auto')}
+    >
+      <Icon className="mr-1 h-4 w-4" aria-hidden="true" />
+      {label ?? t('quoteUi.doctor.payNow')}
+    </Button>
+  );
+}
+
+/** « Voir le reçu » / « Remplacer le reçu » / « Retirer » on a declaration in flight. */
+function TransferInFlightActions({
+  hasProof,
+  fullWidth,
+  onView,
+  onReplace,
+  onWithdraw,
+}: {
+  hasProof: boolean;
+  fullWidth: boolean;
+  onView: () => void;
+  onReplace: () => void;
+  onWithdraw: () => void;
+}) {
+  const { t } = useT();
+  const button = cn(ROW_TAP, fullWidth && 'w-full justify-center');
+  return (
+    <div
+      className={cn(
+        fullWidth ? 'grid grid-cols-1 gap-2 sm:grid-cols-3' : 'flex flex-wrap justify-end gap-1.5',
+      )}
+    >
+      {hasProof ? (
+        <Button size="sm" variant="outline" className={button} onClick={onView}>
+          <Eye aria-hidden="true" />
+          {t('transfers.actions.viewReceipt')}
+        </Button>
+      ) : null}
+      <Button size="sm" variant="outline" className={button} onClick={onReplace}>
+        <Upload aria-hidden="true" />
+        {t('transfers.actions.replaceReceipt')}
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        className={cn(button, 'text-muted-foreground')}
+        onClick={onWithdraw}
+      >
+        <Undo2 aria-hidden="true" />
+        {t('transfers.actions.withdraw')}
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * The receipt of a declaration in flight, with what was wired (the
+ * doctor's own payment row: cash, stamp, retenue).
+ */
+function InstallmentReceiptViewer({
+  quote,
+  target,
+  orderCode,
+  onClose,
+}: {
+  quote: Quotation;
+  target: TransferTarget;
+  orderCode?: string | null;
+  onClose: () => void;
+}) {
+  const { t } = useT();
+  const { installment, transfer } = target;
+  const own = useOwnPayment(quote.id, transfer.paymentId);
+  const payment = own.data;
+  const code = orderCode || quote.quotationNumber || '—';
+  return (
+    <ReceiptViewerDialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+      source={{ kind: 'installment', paymentId: transfer.paymentId }}
+      version={transfer.declaredAt}
+      description={t('transfers.viewer.descInstallment', {
+        n: installment.installmentNumber,
+        code,
+      })}
+      fileBaseName={`${code}-${installment.installmentNumber}`}
+      details={
+        <ReceiptSummary
+          state={transferStateOf(transfer)}
+          cash={payment?.amount ?? null}
+          split={
+            payment
+              ? recordedSplit(
+                  payment.amount,
+                  payment.withholdingAmount,
+                  payment.withholdingRate,
+                  payment.stampAmount,
+                  payment.settledAmount,
+                )
+              : null
+          }
+          currency={quote.currency}
+          sentAt={transfer.declaredAt}
+          rejectionReason={transfer.rejectionReason}
+        />
+      }
+    />
+  );
+}
 
 function PaymentMethodDialog({
   open,
@@ -2174,6 +2568,8 @@ function PaymentMethodDialog({
   installment,
   payable,
   defaultScope,
+  mode = 'pay',
+  transfer = null,
   patientName,
   doctorName,
   orderCode,
@@ -2184,23 +2580,37 @@ function PaymentMethodDialog({
   installment: QuoteInstallment;
   payable: QuoteInstallment[];
   defaultScope: PayScope;
+  mode?: PayMode;
+  /** The installment's latest declaration (replace: the one replaced; resubmit: the refused one). */
+  transfer?: InstallmentLatestTransfer | null;
   patientName?: string | null;
   doctorName?: string | null;
   orderCode?: string | null;
 }) {
   const { t, lang } = useT();
+  const replacing = mode === 'replace';
   const { data: billingDefaults, isLoading: billingDefaultsLoading } =
     useBillingPublicDefaults(open);
   const rates = useQuoteTaxRates(quote, open);
+  // Replacing a receipt keeps what the declaration was made with: its
+  // retenue choice comes from the doctor's own payment row.
+  const ownPayment = useOwnPayment(quote.id, transfer?.paymentId, open && replacing);
   // Retenue à la source: one choice for the whole payment, applied to each
-  // installment separately (each one is its own invoice).
-  const [applyWithholding, setApplyWithholding] = useState(false);
+  // installment separately (each one is its own invoice). null = not
+  // touched yet (a replacement then keeps the declaration's choice).
+  const [withholdingChoice, setWithholdingChoice] = useState<boolean | null>(null);
+  const applyWithholding =
+    withholdingChoice ??
+    (replacing && ownPayment.data ? toDec(ownPayment.data.withholdingAmount) > 0 : false);
   // A card session refused because one is already open with the other choice.
   const [attemptConflict, setAttemptConflict] = useState(false);
   // Backend currently allows all three methods. If the project later
   // adds `allowedPaymentMethods` on the quote, swap this constant for
-  // `quote.allowedPaymentMethods ?? QUOTE_PAYMENT_METHODS`.
-  const [method, setMethod] = useState<PaymentMethod>(PaymentMethod.CARD);
+  // `quote.allowedPaymentMethods ?? QUOTE_PAYMENT_METHODS`. After a refused
+  // transfer the doctor most likely sends a new receipt: transfer first.
+  const [method, setMethod] = useState<PaymentMethod>(
+    mode === 'pay' ? PaymentMethod.CARD : PaymentMethod.BANK_TRANSFER,
+  );
   const [scope, setScope] = useState<PayScope>(
     defaultScope === 'all' ? 'single' : defaultScope,
   );
@@ -2208,16 +2618,22 @@ function PaymentMethodDialog({
   const payCard = usePayByCard();
   const declareBT = useDeclareBankTransfer();
   const [bankReference, setBankReference] = useState('');
-  const [proofFile, setProofFile] = useState<File | null>(null);
+  // The receipt, prepared (compressed / converted) by the picker.
+  const [receipt, setReceipt] = useState<PreparedReceipt | null>(null);
+  const [uploadFraction, setUploadFraction] = useState<number | null>(null);
+  const [uploadError, setUploadError] = useState<ReceiptErrorView | null>(null);
+  const [triedWithoutReceipt, setTriedWithoutReceipt] = useState(false);
+  // One base key per receipt sent; each installment derives its own from
+  // it, so a retry replays what already reached the server.
+  const baseKeyRef = useRef<string | null>(null);
+  // Installments already declared by this dialog: a retry after a partial
+  // failure sends only the others.
+  const declaredIdsRef = useRef<Set<string>>(new Set());
+  // The rows of a declaration in progress stay fixed: each success
+  // refetches the plan, which would otherwise shrink the list mid-way.
+  const [lockedTargets, setLockedTargets] = useState<QuoteInstallment[] | null>(null);
+  const [submitting, setSubmitting] = useState(false);
   const bankTransferRef = useRef<HTMLDivElement | null>(null);
-  const proofPreview = useMemo(
-    () => (proofFile ? URL.createObjectURL(proofFile) : null),
-    [proofFile],
-  );
-  useEffect(() => {
-    if (!proofPreview) return;
-    return () => URL.revokeObjectURL(proofPreview);
-  }, [proofPreview]);
 
   // The "all" path fires one request per installment — we surface
   // progress to the doctor so it doesn't look frozen on the 2nd of N.
@@ -2225,8 +2641,8 @@ function PaymentMethodDialog({
     { done: number; total: number } | null
   >(null);
 
-  const canPickAll = payable.length > 1;
-  const targets = scope === 'all' ? payable : [installment];
+  const canPickAll = payable.length > 1 && !replacing;
+  const targets = lockedTargets ?? (scope === 'all' ? payable : [installment]);
   const total = targets.reduce((acc, t) => acc + toDec(t.amount), 0);
   const isResolvingPaymentOptions = billingDefaultsLoading && open;
   const hasBalanceDue = total > 0;
@@ -2238,9 +2654,9 @@ function PaymentMethodDialog({
       !isResolvingPaymentOptions && hasBalanceDue
         ? QUOTE_PAYMENT_METHODS.filter(
             (m) => m !== PaymentMethod.BANK_TRANSFER || hasBankTransfer,
-          )
+          ).filter((m) => !replacing || m === PaymentMethod.BANK_TRANSFER)
         : [],
-    [hasBalanceDue, hasBankTransfer, isResolvingPaymentOptions],
+    [hasBalanceDue, hasBankTransfer, isResolvingPaymentOptions, replacing],
   );
   const activeMethod = methods.includes(method) ? method : methods[0] ?? null;
   // The practitioner applies the retenue on what they pay themselves; cash
@@ -2258,6 +2674,8 @@ function PaymentMethodDialog({
     rates.withholdingRate,
     withholdingApplied,
   );
+  const refusalReason =
+    mode === 'resubmit' ? refusalReasonOf(transfer?.rejectionReason) : null;
 
   useEffect(() => {
     if (!open || activeMethod !== PaymentMethod.BANK_TRANSFER) return;
@@ -2272,13 +2690,23 @@ function PaymentMethodDialog({
     return () => window.clearTimeout(timer);
   }, [activeMethod, open]);
 
+  const changeReceipt = (next: PreparedReceipt | null) => {
+    setReceipt(next);
+    setUploadError(null);
+    setTriedWithoutReceipt(false);
+    // Another receipt is another declaration.
+    baseKeyRef.current = null;
+  };
+
   const close = () => {
     setProgress(null);
     setBankReference('');
-    setProofFile(null);
-    setMethod(PaymentMethod.CARD);
+    changeReceipt(null);
+    declaredIdsRef.current = new Set();
+    setLockedTargets(null);
+    setMethod(mode === 'pay' ? PaymentMethod.CARD : PaymentMethod.BANK_TRANSFER);
     setScope(defaultScope === 'all' ? 'single' : defaultScope);
-    setApplyWithholding(false);
+    setWithholdingChoice(null);
     setAttemptConflict(false);
     onClose();
   };
@@ -2324,35 +2752,65 @@ function PaymentMethodDialog({
       return;
     }
 
-    // Sequential loop — per-installment declarations so a retry on
-    // the same row never double-charges, and we surface partial
-    // progress to the doctor in case one tranche fails mid-way.
-    setProgress({ done: 0, total: targets.length });
+    // BANK_TRANSFER — the receipt is mandatory (the server answers a
+    // dentist PROOF_REQUIRED without one).
+    if (!receipt) {
+      setTriedWithoutReceipt(true);
+      return;
+    }
+    // Sequential loop — one declaration per installment, same receipt and
+    // reference so the admin matches them to the doctor's single bank
+    // wire; each with its own key so a retry never declares twice, and
+    // partial progress shown in case one tranche fails mid-way.
+    const batch = targets;
+    setLockedTargets(batch);
+    baseKeyRef.current ??= newIdempotencyKey();
+    const baseKey = baseKeyRef.current;
+    setUploadError(null);
+    setSubmitting(true);
+    const countDone = () => batch.filter((row) => declaredIdsRef.current.has(row.id)).length;
+    setProgress({ done: countDone(), total: batch.length });
     try {
-      for (let i = 0; i < targets.length; i++) {
-        const t = targets[i]!;
-        // BANK_TRANSFER — one declaration per installment, same
-        // reference + proof so the admin can match them to the
-        // doctor's single bank wire.
+      for (const row of batch) {
+        if (declaredIdsRef.current.has(row.id)) continue;
+        setUploadFraction(null);
         await declareBT.mutateAsync({
           quotationId: quote.id,
-          installmentId: t.id,
+          installmentId: row.id,
           orderId: quote.orderId,
           bankReference: bankReference.trim() || undefined,
-          proofFile,
+          proofFile: receipt.file,
           applyWithholding: withholdingApplied,
+          idempotencyKey: installmentIdempotencyKey(baseKey, row.installmentNumber),
+          onUploadProgress: setUploadFraction,
+          intent: replacing ? 'replace' : 'declare',
+          silent: batch.length > 1,
         });
-        setProgress({ done: i + 1, total: targets.length });
+        declaredIdsRef.current.add(row.id);
+        setProgress({ done: countDone(), total: batch.length });
+      }
+      if (batch.length > 1) {
+        toast.success(t('transfers.dialog.declaredAll', { count: batch.length }));
       }
       close();
-    } catch {
-      // Per-mutation hook has already raised a toast; surface progress
-      // so the doctor sees what landed.
-      setProgress((p) => (p ? { ...p } : null));
+    } catch (err) {
+      // Explained inline under the receipt, with a retry when it helps.
+      const view = receiptErrorOf(err);
+      if (view.newKey) baseKeyRef.current = null;
+      setUploadError(view);
+      const done = countDone();
+      setProgress(done > 0 ? { done, total: batch.length } : null);
+    } finally {
+      setSubmitting(false);
+      setUploadFraction(null);
     }
   };
 
-  const isPending = payCard.isPending || declareBT.isPending;
+  const isPending = payCard.isPending || declareBT.isPending || submitting;
+  const partialDone =
+    !isPending && progress && progress.total > 1 && progress.done > 0 && progress.done < progress.total
+      ? progress
+      : null;
 
   // Right-column status pill: changes tone with the chosen scope —
   // single tranche reads as a focused action; "all remaining" reads as
@@ -2360,7 +2818,7 @@ function PaymentMethodDialog({
   // forcing the doctor to re-read the header.
   const scopeLabel =
     scope === 'all'
-      ? t('quoteUi.payDialog.scopeAllLabel', { count: payable.length })
+      ? t('quoteUi.payDialog.scopeAllLabel', { count: targets.length })
       : t('quoteUi.payDialog.scopeSingleLabel', {
           n: installment.installmentNumber,
         });
@@ -2379,13 +2837,15 @@ function PaymentMethodDialog({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
               <DialogTitle className="text-lg font-semibold sm:text-xl">
-                {t('quoteUi.payDialog.title', {
-                  amount: money(charge.cash, quote.currency),
-                })}
+                {replacing
+                  ? t('transfers.dialog.replaceTitle')
+                  : t('quoteUi.payDialog.title', {
+                      amount: money(charge.cash, quote.currency),
+                    })}
               </DialogTitle>
               <DialogDescription>
                 {scope === 'all'
-                  ? t('quoteUi.payDialog.descAll', { count: payable.length })
+                  ? t('quoteUi.payDialog.descAll', { count: targets.length })
                   : t('quoteUi.payDialog.descSingle', {
                       n: installment.installmentNumber,
                     })}
@@ -2425,7 +2885,7 @@ function PaymentMethodDialog({
             />
             <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
               {scope === 'all'
-                ? t('quoteUi.payDialog.asideAll', { count: payable.length })
+                ? t('quoteUi.payDialog.asideAll', { count: targets.length })
                 : t('quoteUi.payDialog.asideSingle', {
                     n: installment.installmentNumber,
                   })}
@@ -2518,7 +2978,32 @@ function PaymentMethodDialog({
             className="min-w-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:[scrollbar-gutter:stable]"
           >
             <div className="space-y-5 p-5 sm:p-6 lg:p-7">
-              {canPickAll ? (
+              {/* After a refusal: why, before anything else. */}
+              {mode === 'resubmit' ? (
+                <div
+                  role="note"
+                  className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-xs leading-relaxed text-red-900 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200"
+                >
+                  <XCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                  <span>
+                    <span className="block font-medium">{t('transfers.refused.previous')}</span>
+                    {t('transfers.refused.reason', {
+                      reason: refusalReason ?? t('transfers.refused.noReason'),
+                    })}
+                  </span>
+                </div>
+              ) : null}
+              {replacing ? (
+                <p className="rounded-lg border bg-muted/40 p-3 text-xs leading-relaxed text-muted-foreground">
+                  {transfer?.declaredAt
+                    ? t('transfers.dialog.replaceDesc', {
+                        date: formatBusinessDay(transfer.declaredAt, lang),
+                      })
+                    : t('transfers.dialog.replaceDescUndated')}
+                </p>
+              ) : null}
+
+              {canPickAll && !lockedTargets ? (
                 <div>
                   <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                     {t('quoteUi.payDialog.scopeHeading')}
@@ -2576,7 +3061,7 @@ function PaymentMethodDialog({
                 </div>
               ) : null}
 
-              {methods.length > 0 ? (
+              {methods.length > 0 && !replacing ? (
                 <div>
                   <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                     {t('quoteUi.payDialog.methodHeading')}
@@ -2605,7 +3090,7 @@ function PaymentMethodDialog({
                             setMethod(m);
                             if (m === PaymentMethod.CARD) setScope('single');
                           }}
-                          disabled={isPending}
+                          disabled={isPending || !!lockedTargets}
                           className={cn(
                             'flex min-h-16 items-center gap-3 rounded-lg border bg-card p-3 text-left transition',
                             isSelected
@@ -2646,13 +3131,13 @@ function PaymentMethodDialog({
                   offer={offersWithholding}
                   checked={applyWithholding}
                   onCheckedChange={(checked) => {
-                    setApplyWithholding(checked);
+                    setWithholdingChoice(checked);
                     setAttemptConflict(false);
                   }}
                   charge={charge}
                   kind={scope === 'all' ? 'installments' : 'installment'}
                   currency={quote.currency}
-                  disabled={isPending}
+                  disabled={isPending || !!lockedTargets}
                   netLabel={
                     activeMethod === PaymentMethod.BANK_TRANSFER
                       ? t('withholdingUi.toTransfer')
@@ -2743,94 +3228,26 @@ function PaymentMethodDialog({
                         onChange={(e) => setBankReference(e.target.value)}
                         placeholder={t('quoteUi.payDialog.bankRefPlaceholder')}
                         disabled={isPending}
+                        maxLength={120}
+                        className="pointer-coarse:h-12"
                       />
                     </div>
 
-                    <div className="space-y-2">
-                      <div>
-                        <p className="text-xs font-medium">
-                          {t('quoteUi.payDialog.uploadReceiptTitle')}
-                        </p>
-                        <p className="text-[11px] text-muted-foreground">
-                          {t('quoteUi.payDialog.uploadReceiptHint')}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2 rounded-lg border border-dashed bg-muted/30 p-2">
-                        <label
-                          htmlFor="installment-proof"
-                          className={cn(
-                            'flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-md p-1',
-                            isPending && 'cursor-not-allowed opacity-60',
-                          )}
-                        >
-                          <Upload className="h-4 w-4 shrink-0 text-muted-foreground" />
-                          <span className="truncate text-sm">
-                            {proofFile
-                              ? proofFile.name
-                              : t('quoteUi.payDialog.chooseReceipt')}
-                          </span>
-                        </label>
-                        {proofFile ? (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            aria-label={t('quoteUi.payDialog.removeReceiptAria')}
-                            disabled={isPending}
-                            onClick={() => setProofFile(null)}
-                            className="h-8 w-8 shrink-0"
-                          >
-                            <X className="h-3.5 w-3.5" />
-                          </Button>
-                        ) : null}
-                        <input
-                          id="installment-proof"
-                          type="file"
-                          className="sr-only"
-                          accept="image/png,image/jpeg,image/webp,image/heic,application/pdf"
-                          onChange={(e) =>
-                            setProofFile(e.target.files?.[0] ?? null)
-                          }
-                          disabled={isPending}
-                        />
-                      </div>
-                    </div>
-
-                    {proofFile ? (
-                      <div className="space-y-2">
-                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                          {t('quoteUi.payDialog.receiptPreview')}
-                        </p>
-                        {proofPreview &&
-                        ['image/png', 'image/jpeg', 'image/webp'].includes(
-                          proofFile.type,
-                        ) ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={proofPreview}
-                            alt={t('quoteUi.payDialog.receiptAlt')}
-                            className="max-h-[280px] w-full rounded-lg border bg-muted/30 object-contain"
-                          />
-                        ) : proofPreview &&
-                          proofFile.type === 'application/pdf' ? (
-                          <iframe
-                            title={t('quoteUi.payDialog.receiptAlt')}
-                            src={proofPreview}
-                            className="h-[320px] w-full rounded-lg border bg-white"
-                          />
-                        ) : (
-                          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
-                            <FileText className="h-4 w-4 shrink-0" />
-                            <span className="truncate">{proofFile.name}</span>
-                          </div>
-                        )}
-                      </div>
-                    ) : null}
+                    <ReceiptPicker
+                      value={receipt}
+                      onChange={changeReceipt}
+                      disabled={isPending}
+                      uploading={declareBT.isPending}
+                      progress={uploadFraction}
+                      error={uploadError}
+                      onRetry={() => void submit()}
+                      showRequired={triedWithoutReceipt}
+                    />
 
                     <p className="rounded-lg border border-blue-100 bg-blue-50/60 p-3 text-xs leading-relaxed text-blue-900/85">
                       {scope === 'all'
                         ? t('quoteUi.payDialog.btNoteAll', {
-                            count: payable.length,
+                            count: targets.length,
                           })
                         : t('quoteUi.payDialog.btNoteSingle')}
                     </p>
@@ -2862,7 +3279,28 @@ function PaymentMethodDialog({
                 </p>
               ) : null}
 
-              {progress ? (
+              {isPending && progress && progress.total > 1 ? (
+                <div
+                  role="status"
+                  className="flex items-center gap-2 rounded-lg border bg-card p-3 text-xs"
+                >
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                  {t('quoteUi.payDialog.progress', {
+                    done: progress.done,
+                    total: progress.total,
+                  })}
+                </div>
+              ) : partialDone ? (
+                <p
+                  role="status"
+                  className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-950"
+                >
+                  {t('transfers.dialog.partial', {
+                    done: partialDone.done,
+                    total: partialDone.total,
+                  })}
+                </p>
+              ) : isPending && activeMethod === PaymentMethod.CARD && progress ? (
                 <div
                   role="status"
                   className="flex items-center gap-2 rounded-lg border bg-card p-3 text-xs"
@@ -2884,15 +3322,15 @@ function PaymentMethodDialog({
             variant="outline"
             onClick={close}
             disabled={isPending}
-            className="h-11 w-full sm:h-9 sm:w-auto"
+            className="h-11 w-full sm:h-9 sm:w-auto pointer-coarse:h-12"
           >
             {activeMethod ? t('common.cancel') : t('common.close')}
           </Button>
           {activeMethod ? (
             <Button
-              onClick={submit}
+              onClick={() => void submit()}
               disabled={isPending}
-              className="h-11 w-full gap-1.5 font-medium shadow-sm sm:h-9 sm:min-w-[180px] sm:w-auto"
+              className="h-11 w-full gap-1.5 font-medium shadow-sm sm:h-9 sm:min-w-[180px] sm:w-auto pointer-coarse:h-12"
             >
               {isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -2906,17 +3344,19 @@ function PaymentMethodDialog({
               {activeMethod === PaymentMethod.CARD
                 ? scope === 'all'
                   ? t('quoteUi.payDialog.payTranches', {
-                      count: payable.length,
+                      count: targets.length,
                     })
                   : t('quoteUi.payDialog.payByCard', {
                       amount: money(charge.cash, quote.currency),
                     })
                 : activeMethod === PaymentMethod.BANK_TRANSFER
-                  ? scope === 'all'
-                    ? t('quoteUi.payDialog.submitDeclarations', {
-                        count: payable.length,
-                      })
-                    : t('quoteUi.payDialog.submitDeclaration')
+                  ? replacing
+                    ? t('transfers.dialog.replaceSubmit')
+                    : scope === 'all'
+                      ? t('quoteUi.payDialog.submitDeclarations', {
+                          count: targets.length,
+                        })
+                      : t('quoteUi.payDialog.submitDeclaration')
                   : t('quoteUi.payDialog.gotIt')}
             </Button>
           ) : null}

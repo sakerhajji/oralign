@@ -26,11 +26,17 @@ import {
   countersFromProgress,
   firstUncoveredStep,
   isDeliveryComplete,
+  mergeStepRanges,
   orderKindOf,
-  plannedTotalsInputOf,
-  resolvePlannedTotals,
   treatedArches,
+  type StepRange,
 } from './kernel';
+import {
+  orderFactsOf,
+  releaseSummaryOf,
+  trimmedBatchSpan,
+  type OrderFacts,
+} from './production-state';
 import { canCancel, liveRanges, type RangeEvent } from './production.rules';
 import type {
   DossierRow,
@@ -103,9 +109,21 @@ export function toEventWithOrder(
   return { ...toEventView(row, caller, now), order: toOrderRef(row.order) };
 }
 
+/**
+ * The summary head (one argument: the queue maps rows with it). The
+ * release block is computed from the rules' reading of the same row
+ * (orderFactsOf), i.e. exactly what a declaration is checked against.
+ */
 export function toOrderSummary(row: OrderSummaryRow): ProductionOrderSummary {
-  const input = plannedTotalsInputOf(row);
-  const planned = resolvePlannedTotals(input);
+  return toOrderSummaryWith(row, orderFactsOf(row));
+}
+
+/** toOrderSummary() for a caller that already holds the row's facts (the sheet). */
+export function toOrderSummaryWith(
+  row: OrderSummaryRow,
+  facts: OrderFacts,
+): ProductionOrderSummary {
+  const { planned } = facts;
   const counters = countersFromProgress(row.productionProgress);
   return {
     orderId: row.id,
@@ -118,11 +136,12 @@ export function toOrderSummary(row: OrderSummaryRow): ProductionOrderSummary {
     practitionerName: row.doctor.fullName,
     status: row.status,
     archTreatment: row.archTreatment,
-    treatedArches: treatedArches(input),
+    treatedArches: facts.treated,
     planned,
     counters,
     lastActionAt: iso(row.productionProgress?.lastActionAt ?? null),
     deliveryComplete: isDeliveryComplete(planned, counters),
+    release: releaseSummaryOf(facts),
   };
 }
 
@@ -132,34 +151,56 @@ const RANGE_STATE: Readonly<Record<BatchStatus, ReleasedRangeState>> = {
   [BatchStatus.delivered]: 'delivered',
 };
 
-/** The live quotation's batches as step ranges, ascending; null without any. Never an amount. */
+/**
+ * The live quotation's batches as step ranges, ascending; null without
+ * any. Never an amount. Each range ends at the highest approved total of
+ * the treated arches (a batch cut from the pack maximum never shows
+ * aligners the plan does not have); a batch wholly beyond it is left out.
+ */
 export function toReleasedRanges(
   batches:
     | readonly { fromStep: number; toStep: number; status: BatchStatus }[]
     | null,
+  facts: Pick<OrderFacts, 'treated' | 'planned'>,
 ): ReleasedRange[] | null {
   if (!batches || batches.length === 0) return null;
   return [...batches]
     .sort((a, b) => a.fromStep - b.fromStep || a.toStep - b.toStep)
-    .map((batch) => ({
-      from: batch.fromStep,
-      to: batch.toStep,
-      state: RANGE_STATE[batch.status],
-    }));
+    .flatMap((batch) => {
+      const span = trimmedBatchSpan(batch, facts.treated, facts.planned);
+      return span ? [{ ...span, state: RANGE_STATE[batch.status] }] : [];
+    });
 }
 
-/** Per act and arch, the lowest step the live events do not cover; null when untreated or done. */
+/**
+ * Per act and arch, the lowest RELEASED step the live events do not
+ * cover; null when untreated, or when every released step up to the
+ * planned total is covered (the next steps are locked: the form never
+ * proposes them by default).
+ */
 export function nextStepFromOf(
   events: readonly RangeEvent[],
   planned: ProductionOrderSummary['planned'],
+  released: readonly StepRange[],
 ): Record<ProductionEventType, ArchPair<number | null>> {
+  const spans = mergeStepRanges(released);
   const next = {} as Record<ProductionEventType, ArchPair<number | null>>;
   for (const act of PRODUCTION_ACTS) {
     const forArch = (arch: ProductionArch): number | null => {
       const target = planned[arch];
-      return target === null
-        ? null
-        : firstUncoveredStep(liveRanges(events, act, arch), target.total);
+      if (target === null) return null;
+      const covered = liveRanges(events, act, arch);
+      for (const span of spans) {
+        const start = Math.max(span.from, 1);
+        const limit = Math.min(
+          span.to,
+          target.total ?? Number.MAX_SAFE_INTEGER,
+        );
+        if (limit < start) continue;
+        const step = firstUncoveredStep(covered, limit, start);
+        if (step !== null) return step;
+      }
+      return null;
     };
     next[act] = {
       upper: forArch(ProductionArch.upper),

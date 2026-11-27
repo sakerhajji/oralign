@@ -3,6 +3,7 @@ import { OrderStatus, Prisma } from '@prisma/client';
 import { OrderAccessPolicy } from '../../common/access/order-access.policy';
 import { Caller } from '../../common/access/caller';
 import { ConflictException } from '../../common/exceptions/app.exception';
+import { DOCTOR_NAME_SELECT } from '../../common/doctor/doctor-identity';
 import { startCoverageWindow } from '../../orders/coverage-window';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
@@ -30,7 +31,12 @@ import {
   UpdateAlignerTotalDto,
 } from '../dto/aligner-delivery.dto';
 
-/** Columns of a delivery row the summary is built from. */
+/**
+ * Columns of a delivery row the summary is built from. The recorder is
+ * read live (DOCTOR_NAME_SELECT: a name, nothing else) so a renamed
+ * account shows its current name; `createdByName` is the snapshot kept
+ * for an account that no longer exists (spec §6).
+ */
 const deliverySelect = {
   id: true,
   fromAligner: true,
@@ -38,6 +44,7 @@ const deliverySelect = {
   quantity: true,
   deliveredAt: true,
   createdByName: true,
+  createdBy: { select: DOCTOR_NAME_SELECT },
   createdAt: true,
 } satisfies Prisma.AlignerDeliverySelect;
 
@@ -277,7 +284,8 @@ export function buildSummary(input: {
       toAligner: row.toAligner,
       quantity: row.quantity,
       deliveredAt: toIsoDate(row.deliveredAt),
-      createdByName: row.createdByName,
+      // Live first, the snapshot when the account is gone.
+      createdByName: row.createdBy?.fullName ?? row.createdByName,
       createdAt: row.createdAt.toISOString(),
     })),
   };

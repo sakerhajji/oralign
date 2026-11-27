@@ -24,6 +24,23 @@ jest.mock('./order.mapper', () => ({
   orderInclude: {},
   mapOrderToDto: (order: unknown) => order,
 }));
+// The receipt checks and storage have their own spec (receipt-file.spec):
+// here a receipt is accepted and "written" without touching the disk.
+jest.mock('../../payments/receipt-file', () => ({
+  assertReceiptFile: jest
+    .fn()
+    .mockResolvedValue({ kind: 'pdf', ext: 'pdf', mime: 'application/pdf' }),
+  writeReceiptFile: jest
+    .fn()
+    .mockResolvedValue('/uploads/orders/o-1/payment-proofs/r.pdf'),
+  removeReceiptFile: jest.fn().mockResolvedValue(undefined),
+  openReceipt: jest.fn(),
+}));
+
+/** A receipt as multer hands it over (its checks are mocked above). */
+const receipt = { buffer: Buffer.from('%PDF-1.4 receipt'), size: 16 };
+const PROOF = '/uploads/orders/o-1/payment-proofs/r.pdf';
+const NOTE = 'Virement reçu, confirmé par la banque';
 
 const admin: Caller = { userId: 'u-admin', role: UserRole.admin };
 const doctor: Caller = { userId: 'u-doc', role: UserRole.dentist };
@@ -83,8 +100,15 @@ function makeService(
         defaultTreatmentFee: d('300.000'),
         withholdingRate: d(options.withholdingRate ?? '1'),
         stampDuty: d(options.stampDuty ?? '1'),
+        // The retenue switched on, no threshold (P-D1's rule).
+        withholdingEnabled: true,
+        withholdingThreshold: d('0'),
         bankDetails: { rib: '123', bankName: 'Bank' },
       }),
+    },
+    // The actor's name snapshot of the audit rows.
+    user: {
+      findUnique: jest.fn().mockResolvedValue({ fullName: 'Admin One' }),
     },
     $transaction: jest.fn((run: (client: typeof tx) => unknown) => run(tx)),
   };
@@ -109,6 +133,13 @@ const money = (value: unknown) => (value as Prisma.Decimal).toFixed(3);
 /** The metadata argument of the (first) order audit entry. */
 const auditMetadata = (audit: { entry: jest.Mock }) =>
   (audit.entry.mock.calls[0] as unknown[])[3];
+/** The metadata of the (first) audit row written in the transaction. */
+const writtenAudit = (tx: { orderAuditLog: { create: jest.Mock } }) =>
+  (
+    tx.orderAuditLog.create.mock.calls[0] as [
+      { data: { action: string; metadata: unknown } },
+    ]
+  )[0].data;
 
 describe('TreatmentFeeService — the stamp and the retenue à la source', () => {
   it('cash with the retenue: 300 + 50 CBCT + 1 stamp - 3.500 = 347.500 received, retenue and stamp beside it', async () => {
@@ -200,12 +231,7 @@ describe('TreatmentFeeService — the stamp and the retenue à la source', () =>
 
   it('a transfer proof stores the declared retenue; confirming keeps it', async () => {
     const { service, update } = makeService(order());
-    await service.uploadTreatmentFeeProof(
-      'o-1',
-      '/uploads/treatment-fee-proofs/x.pdf',
-      doctor,
-      true,
-    );
+    await service.uploadTreatmentFeeProof('o-1', receipt, doctor, true);
     const data = written(update);
     expect(data.treatmentFeePaymentStatus).toBe(
       PaymentRecordStatus.awaiting_confirmation,
@@ -221,6 +247,7 @@ describe('TreatmentFeeService — the stamp and the retenue à la source', () =>
       treatmentFeeWithholdingRate: d('1'),
       treatmentFeeWithholdingAmount: d('3.500'),
       treatmentFeeStampAmount: d('1.000'),
+      treatmentFeeProofPath: PROOF,
     });
     // The stamp setting changed since the declaration: confirming keeps
     // the declared figures all the same.
@@ -240,8 +267,11 @@ describe('TreatmentFeeService — the stamp and the retenue à la source', () =>
         stampAmount: '1',
       }),
     );
-    // The fee due: 347.500 + 3.500 - 1.
-    expect(auditMetadata(confirm.audit)).toMatchObject({ amount: 350 });
+    // The fee due: 347.500 + 3.500 - 1, journaled in the transaction.
+    expect(writtenAudit(confirm.tx)).toMatchObject({
+      action: 'treatment_fee_confirmed',
+      metadata: { amount: 350, hasProof: true },
+    });
   });
 
   it('confirming a transfer declared before the stamp (null) keeps cash + retenue as the due', async () => {
@@ -252,10 +282,13 @@ describe('TreatmentFeeService — the stamp and the retenue à la source', () =>
       treatmentFeeWithholdingRate: d('1'),
       treatmentFeeWithholdingAmount: d('3.500'),
       treatmentFeeStampAmount: null,
+      treatmentFeeProofPath: PROOF,
     });
     const confirm = makeService(declared);
     await confirm.service.confirmTreatmentFeePayment('o-1', admin);
-    expect(auditMetadata(confirm.audit)).toMatchObject({ amount: 350 });
+    expect(writtenAudit(confirm.tx)).toMatchObject({
+      metadata: { amount: 350 },
+    });
     expect(confirm.events.emit).toHaveBeenCalledWith(
       NotificationEvents.TreatmentFeeConfirmed,
       expect.objectContaining({ amount: '346.5', stampAmount: '0' }),
@@ -270,12 +303,7 @@ describe('TreatmentFeeService — the stamp and the retenue à la source', () =>
         treatmentFeeWithholdingAmount: d('3.500'),
       }),
     );
-    await service.uploadTreatmentFeeProof(
-      'o-1',
-      '/uploads/x.pdf',
-      doctor,
-      false,
-    );
+    await service.uploadTreatmentFeeProof('o-1', receipt, doctor, false);
     const data = written(update);
     expect(money(data.treatmentFeeAmount)).toBe('351.000');
     expect(money(data.treatmentFeeStampAmount)).toBe('1.000');
@@ -283,13 +311,14 @@ describe('TreatmentFeeService — the stamp and the retenue à la source', () =>
     expect(data.treatmentFeeWithholdingAmount).toBeNull();
   });
 
-  it('a bank-transfer declaration through /pay stores the same charge', async () => {
+  it("an admin's bank-transfer declaration through /pay (no receipt, a note) stores the same charge", async () => {
     const { service, update, events } = makeService(order());
     await service.payTreatmentFee(
       'o-1',
       PaymentMethod.bank_transfer,
-      doctor,
+      admin,
       true,
+      NOTE,
     );
     const data = written(update);
     expect(data.treatmentFeePaymentStatus).toBe(
@@ -314,8 +343,8 @@ describe('TreatmentFeeService — one payment at a time', () => {
       () => [PaymentMethod.cheque, admin] as const,
     ],
     [
-      'a transfer declared by the doctor',
-      () => [PaymentMethod.bank_transfer, doctor] as const,
+      'a transfer an admin declares without a receipt',
+      () => [PaymentMethod.bank_transfer, admin] as const,
     ],
   ])('refuses %s while a card payment is in flight (409)', async (_l, args) => {
     const [method, caller] = args();
@@ -323,7 +352,7 @@ describe('TreatmentFeeService — one payment at a time', () => {
       cardInFlight: true,
     });
     await expect(
-      service.payTreatmentFee('o-1', method, caller),
+      service.payTreatmentFee('o-1', method, caller, undefined, NOTE),
     ).rejects.toMatchObject({
       statusCode: 409,
       errorCode: 'PAYMENT_ATTEMPT_IN_PROGRESS',
@@ -351,7 +380,7 @@ describe('TreatmentFeeService — one payment at a time', () => {
   it('refuses a transfer proof while a card payment is in flight (409)', async () => {
     const { service, update } = makeService(order(), { cardInFlight: true });
     await expect(
-      service.uploadTreatmentFeeProof('o-1', '/uploads/x.pdf', doctor),
+      service.uploadTreatmentFeeProof('o-1', receipt, doctor),
     ).rejects.toMatchObject({ statusCode: 409 });
     expect(update).not.toHaveBeenCalled();
   });

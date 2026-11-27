@@ -4,6 +4,7 @@ import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
+  IsDateString,
   IsEnum,
   IsInt,
   IsOptional,
@@ -17,7 +18,11 @@ import {
   toOptionalTrimmed,
   toQueryList,
 } from '../../common/dto/query-transforms';
-import { SortOrder } from './order.dto';
+import {
+  TRANSFER_STATES,
+  type TransferState,
+} from '../../payments/services/transfer-state';
+import { PayTreatmentFeeDto, SortOrder } from './order.dto';
 
 export enum TreatmentFeeSortBy {
   paidAt = 'paidAt',
@@ -101,7 +106,7 @@ export class TreatmentFeeFilterDto {
     enum: PaymentRecordStatus,
     isArray: true,
     description:
-      'One or more statuses, comma-separated or as repeated query params. A fee is awaiting_confirmation (a declared transfer) or success.',
+      'One or more statuses, comma-separated or as repeated query params. A fee is awaiting_confirmation (a declared transfer), rejected (a transfer the admin refused, with its reason) or success.',
   })
   @IsOptional()
   @Transform(({ value }) => toQueryList(value))
@@ -209,8 +214,48 @@ export class TreatmentFeeRowDto {
   @ApiProperty({ type: Date, nullable: true })
   paidAt!: Date | null;
 
-  @ApiProperty({ type: String, nullable: true })
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Stored path of the receipt, for the owning dentist and admins (the only callers of these lists). Never a URL: the file is read through GET orders/:id/treatment-fee/proof.',
+  })
   proofPath!: string | null;
+
+  @ApiProperty({ description: 'A receipt is attached to the declaration.' })
+  hasProof!: boolean;
+
+  @ApiProperty({
+    enum: TRANSFER_STATES,
+    description:
+      'Derived transfer state (transfer-state.ts): awaiting_receipt, receipt_sent, to_verify (an admin opened the receipt), paid, refused.',
+  })
+  state!: TransferState;
+
+  @ApiProperty({
+    type: Date,
+    nullable: true,
+    description:
+      "When the transfer was declared (the declaration's identity: subject treatment_fee:<orderId>:<epoch ms>).",
+  })
+  declaredAt!: Date | null;
+
+  @ApiProperty({
+    type: Date,
+    nullable: true,
+    description: 'The FIRST time an admin opened the receipt.',
+  })
+  reviewOpenedAt!: Date | null;
+
+  @ApiProperty({ type: Date, nullable: true })
+  rejectedAt!: Date | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: "The admin's reason, when the transfer was refused.",
+  })
+  rejectionReason!: string | null;
 
   @ApiProperty({ type: Date, nullable: true })
   submittedAt!: Date | null;
@@ -249,4 +294,131 @@ export class TreatmentFeePageDto {
 
   @ApiProperty({ example: 2, description: '0 when there is no row.' })
   totalPages!: number;
+}
+
+/** Upper bound of a free-text input; the trimmed 3-500 rule is the service's. */
+const NOTE_MAX_INPUT = 2000;
+
+/**
+ * POST orders/:id/treatment-fee/pay. `bank_transfer` is for an admin
+ * declaring for the doctor WITHOUT a receipt, with `overrideNote`; a
+ * dentist declares through the receipt upload (400 PROOF_REQUIRED here).
+ */
+export class PayTreatmentFeeRequestDto extends PayTreatmentFeeDto {
+  @ApiPropertyOptional({
+    maxLength: NOTE_MAX_INPUT,
+    description:
+      'Admin, bank_transfer without a receipt: why (trimmed, 3-500 characters, else 400 PROOF_OVERRIDE_NOTE_REQUIRED).',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(NOTE_MAX_INPUT)
+  overrideNote?: string;
+}
+
+/** POST orders/:id/treatment-fee/confirm. */
+export class ConfirmTreatmentFeeDto {
+  @ApiPropertyOptional({
+    maxLength: NOTE_MAX_INPUT,
+    description:
+      'Required to confirm a declaration that has NO receipt (trimmed, 3-500 characters, else 400 PROOF_OVERRIDE_NOTE_REQUIRED). Journaled.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(NOTE_MAX_INPUT)
+  overrideNote?: string;
+
+  @ApiPropertyOptional({
+    example: '2026-11-27T09:30:00.000Z',
+    description:
+      'Optional: the declaredAt of the declaration the admin reviewed. A receipt replaced since is a 409 TRANSFER_ALREADY_PROCESSED, never confirmed unseen.',
+  })
+  @IsOptional()
+  @IsDateString()
+  declaredAt?: string;
+}
+
+/** POST orders/:id/treatment-fee/reject. */
+export class RejectTreatmentFeeDto {
+  @ApiProperty({
+    minLength: 3,
+    maxLength: 500,
+    description:
+      'Why the transfer is refused, shown to the doctor as « Motif : … ». Trimmed, 3-500 characters (400 REJECTION_REASON_INVALID).',
+  })
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
+  @IsString()
+  @MaxLength(NOTE_MAX_INPUT)
+  rejectionReason!: string;
+
+  @ApiPropertyOptional({
+    example: '2026-11-27T09:30:00.000Z',
+    description:
+      'Optional: the declaredAt of the declaration the admin reviewed (409 TRANSFER_ALREADY_PROCESSED when replaced since).',
+  })
+  @IsOptional()
+  @IsDateString()
+  declaredAt?: string;
+}
+
+/** POST orders/:id/treatment-fee/review-opened. */
+export class TreatmentFeeReviewOpenedDto {
+  @ApiProperty()
+  orderId!: string;
+
+  @ApiProperty({
+    example: 'treatment_fee:2b1c…:1764235800000',
+    description: 'notification-subject.ts key of the declaration.',
+  })
+  subjectKey!: string;
+
+  @ApiProperty({
+    type: Date,
+    nullable: true,
+    description:
+      'The FIRST opening by an admin. Null on a declaration processed before anyone opened it.',
+  })
+  reviewOpenedAt!: Date | null;
+
+  @ApiProperty({ description: 'True when this call stamped reviewOpenedAt.' })
+  firstOpen!: boolean;
+}
+
+/**
+ * The treatment-fee transfer fields every order response carries next to
+ * OrderResponseDto (order.mapper.ts). `treatmentFeeProofPath` stays on
+ * OrderResponseDto, for the owning dentist and admins only.
+ */
+export class OrderTreatmentFeeTransferDto {
+  @ApiProperty({
+    description:
+      'A receipt is attached to the fee declaration. Read it through GET orders/:id/treatment-fee/proof (owner and admins).',
+  })
+  treatmentFeeHasProof!: boolean;
+
+  @ApiProperty({ type: Date, nullable: true })
+  treatmentFeeDeclaredAt!: Date | null;
+
+  @ApiProperty({
+    type: Date,
+    nullable: true,
+    description: 'The FIRST time an admin opened the receipt.',
+  })
+  treatmentFeeReviewOpenedAt!: Date | null;
+
+  @ApiProperty({ type: Date, nullable: true })
+  treatmentFeeRejectedAt!: Date | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  treatmentFeeRejectionReason!: string | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description:
+      'Retenue threshold in force when the fee was charged (snapshot; null = before the threshold existed).',
+  })
+  treatmentFeeWithholdingThreshold!: number | null;
 }

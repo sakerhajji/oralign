@@ -223,10 +223,48 @@ export interface ProductionOrderSummary {
   counters: ArchPair<ActCounters>;
   lastActionAt: string | null;
   deliveryComplete: boolean;
+  /** Which steps the workshop may work on (spec §3). */
+  release: ProductionReleaseSummary;
 }
 
 export type ProductionQueueItem = ProductionOrderSummary;
 export type ProductionQueuePage = ProductionPage<ProductionQueueItem>;
+
+// ── Release block (spec §3) ────────────────────────────────────────────
+// Mirrors backend production.contract.ts: `release` on the queue items and
+// the case sheet (« Plan 1→7 · Débloquées 1→4 · Prochaine tranche 5→7 »).
+
+/**
+ * none: nothing released (batches all locked, an unlimited pack before
+ * anything is paid); partial: some steps, a locked tranche (or a planned
+ * step outside every batch) left; all: every planned step; unscheduled:
+ * no batches and everything released (legacy).
+ */
+export type ProductionReleaseState = 'none' | 'partial' | 'all' | 'unscheduled';
+
+export interface ProductionStepSpan {
+  from: number;
+  to: number;
+}
+
+export interface ProductionArchRelease {
+  /** 1 → planned total; null while the total is unknown. */
+  total: ProductionStepSpan | null;
+  /** Shown « provisoire »: a provisional total never trims. */
+  provisional: boolean;
+  /** Merged, each batch trimmed to the arch's approved total; all / unscheduled: [total]. */
+  unlocked: ProductionStepSpan[];
+  /** End of the last unlocked span; null = nothing workable. */
+  workableTo: number | null;
+}
+
+export interface ProductionReleaseSummary {
+  state: ProductionReleaseState;
+  /** null for an arch the case does not treat. */
+  arches: ArchPair<ProductionArchRelease | null>;
+  /** The lowest locked tranche, trimmed to the plan; null when none (always on an unlimited pack). */
+  next: ProductionStepSpan | null;
+}
 
 export interface ProductionQueueParams {
   tab?: ProductionQueueTab;
@@ -254,7 +292,9 @@ export interface ProductionDeclareWindow {
 export interface ProductionCaseSheet extends ProductionOrderSummary {
   clinicName: string | null;
   firstActionAt: string | null;
+  /** Ascending; each range ends at the highest approved total (null without batches). */
   releasedRanges: ReleasedRange[] | null;
+  /** The lowest RELEASED uncovered step per act and arch; null when none is left to do. */
   nextStepFrom: Record<ProductionEventType, ArchPair<number | null>>;
   canDeclare: boolean;
   cannotDeclareReason: 'ORDER_NOT_IN_PRODUCTION' | null;
@@ -514,7 +554,8 @@ export interface ProductionProgressParams {
   limit?: number;
 }
 
-export interface ProductionProgressRow extends ProductionOrderSummary {
+/** The admin "Avancement" row: no `release` (queue and case sheet only). */
+export interface ProductionProgressRow extends Omit<ProductionOrderSummary, 'release'> {
   remaining: ArchPair<number | null>;
   firstActionAt: string | null;
   inQueue: boolean;
@@ -525,6 +566,8 @@ export type ProductionProgressPage = ProductionPage<ProductionProgressRow>;
 export const PRODUCTION_ANOMALY_KINDS = [
   'stage_skipped',
   'duplicate_declaration',
+  // ANY act (detail names it) confirmed with steps_not_released (spec §3);
+  // the key keeps its historic name.
   'unreleased_delivery',
   'confirmed_warning',
   'cancelled_event',

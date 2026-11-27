@@ -11,6 +11,8 @@ import { toast } from '@/lib/toast';
 import { notificationsService } from '@/lib/api/notifications.service';
 import { extractApiErrorMessage } from '@/lib/api/error';
 import { useT } from '@/lib/i18n/lang-context';
+import { dashboardKeys } from './use-dashboard';
+import { transferQueueKeys } from './transfer-queue-keys';
 import type {
   Notification,
   NotificationFilters,
@@ -52,6 +54,20 @@ export function useUnreadNotificationCount(
   });
 }
 
+/**
+ * The unread count as the bell last read it, with no poll of its own: a
+ * refetchInterval runs per observer, so a second polling observer would
+ * double the bell's requests. Undefined until the bell (or the
+ * notifications page) has read it once.
+ */
+export function useCachedUnreadNotificationCount(): number | undefined {
+  return useQuery({
+    queryKey: notificationKeys.unreadCount(),
+    queryFn: () => notificationsService.unreadCount(),
+    enabled: false,
+  }).data;
+}
+
 export function useNotifications(
   filters: NotificationFilters = {},
   enabled = true,
@@ -66,8 +82,14 @@ export function useNotifications(
   });
 }
 
+/**
+ * A row marked read can be an admin's transfer row: his "Nouveau" on the
+ * pending desk and the sidebar badge move with it.
+ */
 function invalidate(queryClient: ReturnType<typeof useQueryClient>) {
   queryClient.invalidateQueries({ queryKey: notificationKeys.all });
+  queryClient.invalidateQueries({ queryKey: dashboardKeys.adminSidebarBadges() });
+  queryClient.invalidateQueries({ queryKey: transferQueueKeys.lists() });
 }
 
 export function useMarkNotificationRead(): UseMutationResult<

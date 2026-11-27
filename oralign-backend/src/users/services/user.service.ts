@@ -19,7 +19,7 @@ import {
 } from '../dto/user.dto';
 import { generateTemporaryPassword } from '../temporary-password';
 import { PRODUCTION_ERROR } from '../../production/production.contract';
-import { UserRole, VerificationStatus } from '@prisma/client';
+import { type Prisma, UserRole, VerificationStatus } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PaginatedResponse } from '../../common/dto/response.dto';
 import { MailService } from '../../mail/mail.service';
@@ -28,9 +28,33 @@ import { env } from '../../common/config/env';
 import { assertNoDependents } from '../../common/deletion/deletion-blocked';
 import { type Caller } from '../../common/access/caller';
 import type { Lang } from '../../common/i18n/lang';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import {
+  NotificationEvents,
+  type UserProfileChangedEvent,
+} from '../../notifications/events/notification-events';
+import { DoctorActivityService } from '../activity/doctor-activity.service';
+import type {
+  AccountActivityEventDto,
+  DoctorActivitySummary,
+} from '../activity/doctor-activity.contract';
 
 /** preferredLanguage of an account an admin creates (POST /users). */
 const ADMIN_CREATED_ACCOUNT_LANGUAGE: Lang = 'fr';
+
+/**
+ * Account fields whose change announces user.profileChanged (the cached
+ * doctor identity is dropped). Secrets and the password trail never are.
+ */
+const PROFILE_FIELDS = [
+  'fullName',
+  'phone',
+  'country',
+  'avatarUrl',
+  'preferredLanguage',
+  'role',
+  'isEmailVerified',
+] as const;
 
 @Injectable()
 export class UserService {
@@ -39,6 +63,8 @@ export class UserService {
   constructor(
     private userRepository: UserRepository,
     private readonly mailService: MailService,
+    private readonly activity: DoctorActivityService,
+    private readonly events: EventEmitter2,
   ) {}
 
   /**
@@ -184,6 +210,10 @@ export class UserService {
     );
   }
 
+  /**
+   * GET users/me and GET users/:id: the account with, for a dentist, his
+   * activity block (the doctor's own dormant banner and the admin sheet).
+   */
   async getUserById(id: string): Promise<UserResponseDto> {
     const user = await this.userRepository.findById(id);
 
@@ -191,13 +221,15 @@ export class UserService {
       throw new NotFoundException('User not found');
     }
 
-    return this.mapToDto(user);
+    const activity = await this.activity.summaries([user]);
+    return this.mapToDto(user, activity);
   }
 
   /**
    * `GET /users`: one page of non-deleted accounts, newest first. `page`
    * and `limit` arrive validated (UserListQueryDto: page ≥ 1, limit within
-   * bounds), so `skip` is never NaN or negative.
+   * bounds), so `skip` is never NaN or negative. Dentist rows carry their
+   * activity block (three batched queries per page, no N+1).
    */
   async getAllUsers(
     query: UserListQueryDto,
@@ -207,8 +239,49 @@ export class UserService {
       (page - 1) * limit,
       limit,
       query,
+      await this.activityWhere(query),
     );
-    return this.toPage(users, total, page, limit);
+    const activity = await this.activity.summaries(users);
+    return this.toPage(users, total, page, limit, activity);
+  }
+
+  /** The `activity` filter as a `where` fragment (undefined = no filter). */
+  private async activityWhere(
+    query: UserListQueryDto,
+  ): Promise<Prisma.UserWhereInput | undefined> {
+    return query.activity
+      ? this.activity.listFilterWhere(query.activity)
+      : undefined;
+  }
+
+  /**
+   * POST users/:id/reactivate: an admin reactivates a dormant doctor with
+   * a reason (journaled, the doctor is notified). Idempotent: an account
+   * that is not dormant is answered as it is, nothing written.
+   */
+  async reactivateDoctor(
+    id: string,
+    reason: unknown,
+    caller: Caller,
+  ): Promise<UserResponseDto> {
+    const user = await this.userRepository.findById(id);
+    if (!user || user.deletedAt) {
+      throw new NotFoundException('User not found');
+    }
+    this.assertSuperAdminHierarchy(caller.role, user.role, {
+      editsAccount: true,
+    });
+    await this.activity.reactivate(id, caller, reason);
+    return this.getUserById(id);
+  }
+
+  /** GET users/:id/activity-events: the account's activity journal. */
+  async listActivityEvents(
+    id: string,
+    page: number,
+    limit: number,
+  ): Promise<PaginatedResponse<AccountActivityEventDto>> {
+    return this.activity.listEvents(id, page, limit);
   }
 
   /** `GET /users/stats`: counts over non-deleted accounts (admin KPIs). */
@@ -327,7 +400,38 @@ export class UserService {
         'force-reset',
       );
     }
+    this.announceProfileChange(updatedUser, updateData, currentUser.id);
     return this.mapToDto(updatedUser);
+  }
+
+  /**
+   * user.profileChanged after an identity write (this PUT, and the avatar
+   * upload that goes through it): the cached doctor identity is dropped
+   * (DentistProfileService). Only the field names travel, never values;
+   * nothing is emitted when no identity field was written.
+   */
+  private announceProfileChange(
+    user: UserWithProfile,
+    written: Record<string, unknown>,
+    actorId: string,
+  ): void {
+    const fields = PROFILE_FIELDS.filter(
+      (field) => written[field] !== undefined,
+    );
+    if (fields.length === 0) return;
+    const payload: UserProfileChangedEvent = {
+      userId: user.id,
+      dentistProfileId: user.dentistProfile?.id ?? null,
+      fields: [...fields],
+      actorId,
+    };
+    try {
+      this.events.emit(NotificationEvents.UserProfileChanged, payload);
+    } catch (error) {
+      this.logger.warn(
+        `user.profileChanged listener failed for user ${user.id}: ${(error as Error).message}`,
+      );
+    }
   }
 
   /**
@@ -394,6 +498,8 @@ export class UserService {
    * Bulk block / unblock. Below super admin, super admin accounts are
    * spared: an admin blocking them would lock their own superiors out
    * (sign-in answers ACCOUNT_INACTIVE and every session is refused).
+   * Every account the write really flips gets a `blocked` / `unblocked`
+   * row in its activity journal, in the same transaction (who, when).
    */
   async bulkUpdateStatus(
     ids: string[],
@@ -404,9 +510,17 @@ export class UserService {
     const skippedSuperAdmins = spare
       ? await this.userRepository.countSuperAdmins(ids, { deleted: false })
       : 0;
-    const count = await this.userRepository.bulkUpdateStatus(ids, isActive, {
-      spareSuperAdmins: spare,
-    });
+    const count = await this.userRepository.bulkUpdateStatus(
+      ids,
+      isActive,
+      { spareSuperAdmins: spare },
+      (tx, flipped, at) =>
+        this.activity.journalStatusChange(tx, flipped, {
+          isActive,
+          caller,
+          at,
+        }),
+    );
     const action = isActive ? 'activated' : 'blocked';
     return {
       message: `${count} users ${action} successfully`,
@@ -502,6 +616,8 @@ export class UserService {
    * access to the dashboard until a human has reviewed the registration.
    * When the status transitions to `approved` we fire a welcome email; the
    * send is non-blocking so a misconfigured SMTP doesn't break the API call.
+   * The same transition stamps `approvedAt`, the inactivity anchor of a
+   * doctor who has not submitted an order yet (never cleared afterwards).
    */
   async updateApproval(
     id: string,
@@ -518,17 +634,16 @@ export class UserService {
 
     const wasNotApproved =
       user.verificationStatus !== VerificationStatus.approved;
+    const approvesNow =
+      wasNotApproved && verificationStatus === VerificationStatus.approved;
     const updatedUser = await this.userRepository.update(id, {
       verificationStatus,
+      ...(approvesNow ? { approvedAt: new Date() } : {}),
     });
 
     // The welcome mail is worded for practitioners; a lab account gets no
     // e-mail of any kind.
-    if (
-      wasNotApproved &&
-      verificationStatus === VerificationStatus.approved &&
-      updatedUser.role !== UserRole.technician
-    ) {
+    if (approvesNow && updatedUser.role !== UserRole.technician) {
       const frontendUrl = env.frontendUrl;
       void this.mailService
         .sendApprovalGrantedEmail(
@@ -555,6 +670,7 @@ export class UserService {
       (page - 1) * limit,
       limit,
       query,
+      await this.activityWhere(query),
     );
     return this.toPage(users, total, page, limit);
   }
@@ -684,9 +800,10 @@ export class UserService {
     total: number,
     page: number,
     limit: number,
+    activity?: ReadonlyMap<string, DoctorActivitySummary>,
   ): PaginatedResponse<UserResponseDto> {
     return new PaginatedResponse(
-      users.map((user) => this.mapToDto(user)),
+      users.map((user) => this.mapToDto(user, activity)),
       total,
       page,
       limit,
@@ -694,7 +811,15 @@ export class UserService {
     );
   }
 
-  private mapToDto(user: UserWithProfile): UserResponseDto {
+  /**
+   * `activity`: the activity blocks computed for this read (summaries);
+   * without it (write responses) the block is left out, and the client
+   * refetches the detail.
+   */
+  private mapToDto(
+    user: UserWithProfile,
+    activity?: ReadonlyMap<string, DoctorActivitySummary>,
+  ): UserResponseDto {
     const giftOrder =
       user.role === UserRole.dentist ? user.doctorOrders[0] : undefined;
     return {
@@ -729,6 +854,11 @@ export class UserService {
         : null,
       // The handover trace (temporaryPasswordIssued*) stays server-side.
       mustChangePassword: user.mustChangePassword === true,
+      // Doctor inactivity (spec §5): dormancy is NOT isActive.
+      inactiveSince: user.inactiveSince ?? null,
+      activityResetAt: user.activityResetAt ?? null,
+      approvedAt: user.approvedAt ?? null,
+      ...(activity ? { activity: activity.get(user.id) ?? null } : {}),
     };
   }
 }

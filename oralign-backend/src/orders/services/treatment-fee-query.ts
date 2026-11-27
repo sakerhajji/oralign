@@ -28,8 +28,11 @@ export interface TreatmentFeeListFilters {
 
 /**
  * Orders whose fee has a payment on record (the welcome-gift orders have
- * none), archived ones left out. A paid-date period leaves out the fees
- * not paid yet: a transfer awaiting confirmation has no paid date.
+ * none, and a withdrawn declaration clears its method), archived ones left
+ * out. A fee is awaiting_confirmation (a declared transfer), rejected (a
+ * transfer the admin refused: the doctor declares again) or success;
+ * `statuses` filters on them. A paid-date period leaves out the fees not
+ * paid yet: a transfer awaiting confirmation or refused has no paid date.
  * `doctorId` is the caller's resolved scope (a dentist's own id, or the
  * dentist an admin picked).
  */
@@ -57,10 +60,10 @@ export function treatmentFeeWhere(
 }
 
 /**
- * Newest payment first by default, and there the fees awaiting
- * confirmation (no paid date yet) come on top: they are the ones that
- * need an action. Oldest first puts them last. The id ends every sort so
- * rows sharing a value keep one stable order across pages.
+ * Newest payment first by default, and there the fees not paid yet (a
+ * transfer awaiting confirmation, or refused) come on top: they are the
+ * ones that need an action. Oldest first puts them last. The id ends every
+ * sort so rows sharing a value keep one stable order across pages.
  */
 export function treatmentFeeOrderBy(
   filters: Pick<TreatmentFeeListFilters, 'sortBy' | 'sortOrder'>,

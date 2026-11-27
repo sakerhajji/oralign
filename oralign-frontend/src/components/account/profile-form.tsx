@@ -13,18 +13,15 @@ import { Form } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { PhoneInput } from '@/components/ui/phone-input';
 import { accountProfileSchema, type AccountProfileFormData } from '@/lib/schemas';
-import { type UpdateUserDto, type User } from '@/lib/types';
+import { UserRole, type UpdateUserDto, type User } from '@/lib/types';
 import { useUpdateProfile } from '@/lib/hooks';
 import { usersService, extractApiErrorMessage } from '@/lib/api';
 import { getAvatarUrl } from '@/lib/utils';
 import { useAuth } from '@/lib/providers';
 import { userKeys } from '@/lib/hooks/use-users';
+import { invalidateDoctorIdentityQueries } from '@/lib/hooks/use-dentist-profiles';
+import { optionalTextChanged, optionalTextPayload } from '@/lib/doctor/clinic-payload';
 import { useT } from '@/lib/i18n/lang-context';
-
-const normalizeOptional = (value?: string | null) => {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : undefined;
-};
 
 interface ProfileFormProps {
   user: User;
@@ -121,8 +118,10 @@ export function ProfileForm({ user, onboarding = false, onSaved }: ProfileFormPr
       setAvatarPreview(getAvatarUrl(updated.avatarUrl));
       queryClient.setQueryData(userKeys.currentUser(), updated);
       login(updated);
-      queryClient.invalidateQueries({ queryKey: userKeys.currentUser() });
-      queryClient.invalidateQueries({ queryKey: userKeys.lists() });
+      // The photo shows on every screen that carries the doctor (orders,
+      // patients, plans, dashboard…), not only /users/me: refresh them all
+      // (spec §6). The current user is one of those queries.
+      void invalidateDoctorIdentityQueries(queryClient);
       toast.success(t('accountProfile.toastAvatarUpdated'));
     } catch (err) {
       setAvatarPreview(previousPreview);
@@ -133,32 +132,27 @@ export function ProfileForm({ user, onboarding = false, onSaved }: ProfileFormPr
   };
 
   const countryValue = form.watch('country');
+  const isDentist = user.role === UserRole.DENTIST;
   const isSubmitting = isPending;
   const hasChanges = form.formState.isDirty;
 
   const onSubmit = form.handleSubmit(async (values) => {
     try {
-      const trimmedPhone = normalizeOptional(values.phone);
-      const trimmedCountry = normalizeOptional(values.country);
+      // An emptied stored phone or country is sent as null (the server
+      // clears it; undefined would keep it), a blank with nothing stored
+      // is left out.
+      const phone = optionalTextPayload(values.phone, user.phone);
+      const country = optionalTextPayload(values.country, user.country);
       const updateData: UpdateUserDto = {
         fullName: values.fullName,
+        phone,
+        country,
       };
-
-      if (trimmedPhone) {
-        updateData.phone = trimmedPhone;
-      } else {
-        updateData.phone = undefined;
-      }
-      if (trimmedCountry) {
-        updateData.country = trimmedCountry;
-      } else {
-        updateData.country = undefined;
-      }
 
       const hasProfileDataChanges =
         values.fullName !== user.fullName ||
-        trimmedPhone !== (user.phone ?? undefined) ||
-        trimmedCountry !== (user.country ?? undefined);
+        optionalTextChanged(phone, user.phone) ||
+        optionalTextChanged(country, user.country);
 
       let updatedUser = user;
       if (hasProfileDataChanges) {
@@ -292,11 +286,18 @@ export function ProfileForm({ user, onboarding = false, onSaved }: ProfileFormPr
                   />
                 )}
               />
-              {(form.formState.errors.phone || form.formState.errors.country) && (
+              {form.formState.errors.phone || form.formState.errors.country ? (
                 <p className="text-sm text-destructive">
                   {form.formState.errors.phone?.message ??
                     form.formState.errors.country?.message}
                 </p>
+              ) : (
+                // Which phone the documents print (spec §6): practice first.
+                isDentist && (
+                  <p className="text-xs text-muted-foreground">
+                    {t('doctorIdentity.contact.accountPhoneHint')}
+                  </p>
+                )
               )}
             </div>
 

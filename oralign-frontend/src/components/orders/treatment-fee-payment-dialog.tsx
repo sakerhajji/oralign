@@ -1,18 +1,16 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Banknote,
   CheckCircle2,
   CreditCard,
   FilePen,
-  FileText,
   Landmark,
   Loader2,
   ShieldCheck,
-  Upload,
-  X,
+  XCircle,
 } from 'lucide-react';
 import {
   Dialog,
@@ -26,6 +24,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import {
   isWithholdingChoiceConflict,
   PriceIncludesTaxNote,
+  useQuoteTaxRates,
   WithholdingChoice,
 } from '@/components/payments/withholding';
 import { previewPaymentCharge } from '@/lib/billing/tax-split';
@@ -37,15 +36,29 @@ import {
   BankTransferInstructions,
   transferBeneficiary,
 } from '@/components/payments/bank-transfer-instructions';
+import { ReceiptPicker, type PreparedReceipt } from '@/components/payments/receipt-picker';
 import {
+  receiptErrorOf,
   useBillingPublicDefaults,
   useCreateTreatmentFeeCardSession,
   usePayTreatmentFee,
   useUploadTreatmentFeeProof,
 } from '@/lib/hooks';
+import { newIdempotencyKey } from '@/lib/payments/idempotency';
+import type { ReceiptErrorView } from '@/lib/payments/receipt-errors';
+import { refusalReasonOf } from '@/lib/payments/transfer-state';
+import { formatBusinessDay } from '@/lib/utils/business-day';
 import type { DentalOrder } from '@/lib/types';
 
-type MethodKey = 'card' | 'bank_transfer' | 'cash' | 'cheque';
+export type MethodKey = 'card' | 'bank_transfer' | 'cash' | 'cheque';
+
+/**
+ * Why the dialog opens: a first payment; a new receipt for a transfer
+ * still awaiting confirmation (`replace`: bank transfer only, the server
+ * supersedes the old declaration); a payment after a refused transfer
+ * (`resubmit`: the refusal reason on top, every method).
+ */
+export type FeeDialogMode = 'pay' | 'replace' | 'resubmit';
 
 interface MethodConfig {
   key: MethodKey;
@@ -81,15 +94,19 @@ const addMoney = (a: number, b: number, minus = 0) =>
  *  1. Order is submitted → parent surfaces this dialog
  *  2. User picks one of the three method tiles
  *  3a. Card / Cash → single "Confirm" button → backend stamps paidAt
- *  3b. Bank transfer → step 2 of the dialog asks for the receipt file,
- *     uploading flips the status to `awaiting_confirmation`. Admin
- *     confirms separately via the order detail page banner.
+ *  3b. Bank transfer → the bank details, then the receipt (ReceiptPicker:
+ *     camera on a phone, file, compression, preview, progress, inline
+ *     errors with a retry). Sending it declares the transfer
+ *     (`awaiting_confirmation`); the lab confirms or refuses it.
  *
  * Closing rules:
  *  • Card / Cash success → dialog closes automatically.
  *  • Bank transfer receipt upload → dialog closes; the order banner
  *    keeps the user informed that admin confirmation is pending.
  *  • Esc / overlay click → closes only when no request is in flight.
+ *
+ * The parent remounts it per opening (`key`) so `mode` / `initialMethod`
+ * seed fresh state.
  */
 export function TreatmentFeePaymentDialog({
   open,
@@ -97,6 +114,8 @@ export function TreatmentFeePaymentDialog({
   order,
   isAdmin,
   onPaid,
+  mode = 'pay',
+  initialMethod,
 }: {
   open: boolean;
   onOpenChange: (next: boolean) => void;
@@ -105,6 +124,9 @@ export function TreatmentFeePaymentDialog({
   isAdmin: boolean;
   /** Fired after a terminal success so the parent can navigate. */
   onPaid?: () => void;
+  mode?: FeeDialogMode;
+  /** The method picked on opening (e.g. bank transfer for « Envoyer un nouveau reçu »). */
+  initialMethod?: MethodKey;
 }) {
   const { t, lang } = useT();
   // Doctor-safe defaults endpoint. The previous version called
@@ -115,8 +137,14 @@ export function TreatmentFeePaymentDialog({
   // is callable by dentist + admin.
   const { data: defaults, isLoading: defaultsLoading } =
     useBillingPublicDefaults();
+  // The retenue rule in force (spec §4): rate 0 while it is switched off,
+  // and the stamp; the threshold is applied by WithholdingChoice.
+  const rates = useQuoteTaxRates(null);
   const pay = usePayTreatmentFee();
-  const cardSession = useCreateTreatmentFeeCardSession();
+  // Card refusals are worded for whoever starts it.
+  const cardSession = useCreateTreatmentFeeCardSession({
+    audience: isAdmin ? 'admin' : 'doctor',
+  });
   const uploadProof = useUploadTreatmentFeeProof();
 
   // Settings-driven amount + currency so the doctor sees what the
@@ -151,24 +179,39 @@ export function TreatmentFeePaymentDialog({
   const hasAmountDue = amount > 0;
   const hasBankTransfer = hasUsableBankTransferDetails(bankDetails);
 
-  // Filter methods by role and payment availability.
+  const replacing = mode === 'replace';
+  // Filter methods by role and payment availability. Replacing a receipt
+  // keeps the transfer: no other method while it waits on the lab.
   const methods = useMemo(
     () =>
       !isResolvingAmount && hasAmountDue
-        ? METHODS.filter((m) => !m.adminOnly || isAdmin).filter(
-            (m) => m.key !== 'bank_transfer' || hasBankTransfer,
-          )
+        ? METHODS.filter((m) => !m.adminOnly || isAdmin)
+            .filter((m) => m.key !== 'bank_transfer' || hasBankTransfer)
+            .filter((m) => !replacing || m.key === 'bank_transfer')
         : [],
-    [hasAmountDue, hasBankTransfer, isAdmin, isResolvingAmount],
+    [hasAmountDue, hasBankTransfer, isAdmin, isResolvingAmount, replacing],
   );
 
-  const [selected, setSelected] = useState<MethodKey | null>(null);
-  const [proofFile, setProofFile] = useState<File | null>(null);
+  const [selected, setSelected] = useState<MethodKey | null>(
+    replacing ? 'bank_transfer' : (initialMethod ?? null),
+  );
+  // The receipt, prepared (compressed / converted) by the picker.
+  const [receipt, setReceipt] = useState<PreparedReceipt | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [uploadError, setUploadError] = useState<ReceiptErrorView | null>(null);
+  const [triedWithoutReceipt, setTriedWithoutReceipt] = useState(false);
+  // One key per receipt sent: a retry after a dropped connection reuses
+  // it, so the server answers the declaration it already made.
+  const idempotencyKeyRef = useRef<string | null>(null);
+  const refusalReason =
+    mode === 'resubmit' ? refusalReasonOf(order.treatmentFeeRejectionReason) : null;
 
-  // Retenue à la source: offered when the company rate is above 0. A
-  // practitioner who already declared with it finds it ticked again.
-  // Display only — the server computes the retenue from the choice.
-  const withholdingRate = defaults?.withholdingRate ?? 0;
+  // Retenue à la source: offered when the rule is switched on with a rate
+  // above 0 and the fee reaches the threshold (WithholdingChoice unticks
+  // it otherwise). A practitioner who already declared with it finds it
+  // ticked again. Display only — the server computes the retenue from
+  // the choice.
+  const withholdingRate = rates.withholdingRate;
   const [applyWithholding, setApplyWithholding] = useState(
     () => Number(order.treatmentFeeWithholdingAmount ?? 0) > 0,
   );
@@ -176,7 +219,7 @@ export function TreatmentFeePaymentDialog({
   // The fee's facture carries its own droit de timbre, added on top; the
   // retenue is taken on the fee TTC (stamp excluded). A new payment
   // snapshots the current stamp, as the server does.
-  const stampDuty = Math.max(0, Number(defaults?.stampDuty ?? 0) || 0);
+  const stampDuty = rates.stampDuty;
   const charge = previewPaymentCharge(amount, stampDuty, withholdingRate, wantsWithholding);
   // What actually changes hands: the fee + the stamp - the retenue.
   const toPay = charge.cash;
@@ -189,19 +232,6 @@ export function TreatmentFeePaymentDialog({
   const selectedMethodConfig = selectedMethod
     ? METHODS.find((m) => m.key === selectedMethod)
     : null;
-
-  // Object-URL preview so the doctor can eyeball the receipt before
-  // submitting. Derived from the file (not effect-driven state, which
-  // would cascade renders); the effect below only revokes it when the
-  // file changes or the dialog unmounts so we never leak blob URLs.
-  const proofPreview = useMemo(
-    () => (proofFile ? URL.createObjectURL(proofFile) : null),
-    [proofFile],
-  );
-  useEffect(() => {
-    if (!proofPreview) return;
-    return () => URL.revokeObjectURL(proofPreview);
-  }, [proofPreview]);
 
   const busy = pay.isPending || cardSession.isPending || uploadProof.isPending;
 
@@ -248,27 +278,62 @@ export function TreatmentFeePaymentDialog({
     );
   };
 
-  // Bank transfer → two-step. Step 1: record intent (backend logs
-  // `awaiting_confirmation`). Step 2: upload proof file.
+  // Bank transfer → ONE call: the receipt declares the transfer (the
+  // server refuses a dentist's transfer without one, PROOF_REQUIRED).
   const handleBankTransferUpload = () => {
-    if (!proofFile) return;
+    if (!receipt) {
+      setTriedWithoutReceipt(true);
+      return;
+    }
+    idempotencyKeyRef.current ??= newIdempotencyKey();
+    setUploadError(null);
+    setUploadProgress(null);
     uploadProof.mutate(
       {
         id: order.id,
-        proof: proofFile,
+        proof: receipt.file,
         amount: toPay,
         applyWithholding: wantsWithholding,
+        idempotencyKey: idempotencyKeyRef.current,
+        onUploadProgress: setUploadProgress,
+        intent: replacing ? 'replace' : 'declare',
       },
       {
         onSuccess: () => {
+          idempotencyKeyRef.current = null;
           onPaid?.();
           onOpenChange(false);
         },
+        onError: (error) => {
+          const view = receiptErrorOf(error);
+          if (view.newKey) idempotencyKeyRef.current = null;
+          setUploadError(view);
+        },
+        onSettled: () => setUploadProgress(null),
       },
     );
   };
 
+  const changeReceipt = (next: PreparedReceipt | null) => {
+    setReceipt(next);
+    setUploadError(null);
+    setTriedWithoutReceipt(false);
+    // Another receipt is another declaration.
+    idempotencyKeyRef.current = null;
+  };
+
+  /** Close and forget the choices: the next opening starts afresh. */
+  const closeDialog = () => {
+    if (busy) return;
+    setSelected(replacing ? 'bank_transfer' : (initialMethod ?? null));
+    changeReceipt(null);
+    onOpenChange(false);
+  };
+
   const isBankTransferSelected = selectedMethod === 'bank_transfer';
+  const declaredOn = order.treatmentFeeDeclaredAt
+    ? formatBusinessDay(order.treatmentFeeDeclaredAt, lang)
+    : null;
 
   return (
     <Dialog
@@ -276,8 +341,8 @@ export function TreatmentFeePaymentDialog({
       onOpenChange={(next) => {
         if (busy) return; // Prevent close while a request is in flight
         if (!next) {
-          setSelected(null);
-          setProofFile(null);
+          closeDialog();
+          return;
         }
         onOpenChange(next);
       }}
@@ -286,7 +351,7 @@ export function TreatmentFeePaymentDialog({
         {/* ─── Header ─────────────────────────────────────────── */}
         <DialogHeader className="shrink-0 space-y-1 border-b bg-card px-6 py-5 text-left sm:px-8">
           <DialogTitle className="text-lg font-semibold sm:text-xl">
-            {t('feeUi.payDialog.title')}
+            {replacing ? t('transfers.dialog.replaceTitle') : t('feeUi.payDialog.title')}
           </DialogTitle>
           <DialogDescription className="truncate font-mono text-xs text-muted-foreground">
             {t('feeUi.payDialog.orderCode', { code: order.orderCode })}
@@ -395,6 +460,28 @@ export function TreatmentFeePaymentDialog({
               producing any scrollable overflow.
              */}
             <div className="space-y-4 p-5 sm:p-6 lg:p-7">
+              {/* After a refusal: why, before anything else. */}
+              {mode === 'resubmit' ? (
+                <div
+                  role="note"
+                  className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-xs leading-relaxed text-red-900 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200"
+                >
+                  <XCircle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>
+                    <span className="block font-medium">{t('transfers.refused.previous')}</span>
+                    {t('transfers.refused.reason', {
+                      reason: refusalReason ?? t('transfers.refused.noReason'),
+                    })}
+                  </span>
+                </div>
+              ) : null}
+              {replacing ? (
+                <p className="rounded-lg border bg-muted/40 p-3 text-xs leading-relaxed text-muted-foreground">
+                  {declaredOn
+                    ? t('transfers.dialog.replaceDesc', { date: declaredOn })
+                    : t('transfers.dialog.replaceDescUndated')}
+                </p>
+              ) : null}
               {/*
                 Step 1 — payment method. No selection → full description
                 tiles so the doctor learns what each method does; a method
@@ -405,6 +492,7 @@ export function TreatmentFeePaymentDialog({
                 <SelectedMethodStrip
                   method={selectedMethodConfig}
                   disabled={busy}
+                  canChange={!replacing}
                   onChange={() => setSelected(null)}
                 />
               ) : methods.length === 0 ? (
@@ -499,85 +587,17 @@ export function TreatmentFeePaymentDialog({
 
               {isBankTransferSelected && (
                 <Card id="bank-transfer-receipt" className="scroll-mt-4">
-                  <CardContent className="space-y-3 pt-4">
-                    <div>
-                      <p className="text-sm font-medium">
-                        {t('feeUi.payDialog.uploadReceiptTitle')}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {t('feeUi.payDialog.uploadReceiptHint')}
-                      </p>
-                    </div>
-                    <label
-                      className={cn(
-                        'flex cursor-pointer items-center gap-3 rounded-lg border border-dashed bg-muted/30 p-3',
-                        'hover:bg-muted/50',
-                        busy && 'cursor-not-allowed opacity-60',
-                      )}
-                    >
-                      <Upload className="h-4 w-4 text-muted-foreground" />
-                      <span className="flex-1 truncate text-sm">
-                        {proofFile
-                          ? proofFile.name
-                          : t('feeUi.payDialog.pickFile')}
-                      </span>
-                      {proofFile && (
-                        <button
-                          type="button"
-                          aria-label={t('feeUi.payDialog.removeFileAria')}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            setProofFile(null);
-                          }}
-                          className="rounded p-1 hover:bg-muted"
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </button>
-                      )}
-                      <input
-                        type="file"
-                        accept="image/*,.pdf"
-                        className="hidden"
-                        disabled={busy}
-                        onChange={(e) =>
-                          setProofFile(e.target.files?.[0] ?? null)
-                        }
-                      />
-                    </label>
-
-                    {/*
-                      Receipt preview — let the doctor verify they picked
-                      the right file before it's submitted. Image → inline
-                      thumbnail; PDF → inline frame; anything else → a
-                      filename tile.
-                     */}
-                    {proofFile && (
-                      <div className="space-y-2">
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                          {t('feeUi.payDialog.previewConfirm')}
-                        </p>
-                        {proofPreview && proofFile.type.startsWith('image/') ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={proofPreview}
-                            alt={t('feeUi.payDialog.previewAlt')}
-                            className="max-h-[320px] w-full rounded-lg border bg-muted/30 object-contain"
-                          />
-                        ) : proofPreview &&
-                          proofFile.type === 'application/pdf' ? (
-                          <iframe
-                            title={t('feeUi.payDialog.previewAlt')}
-                            src={proofPreview}
-                            className="h-[360px] w-full rounded-lg border bg-white"
-                          />
-                        ) : (
-                          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
-                            <FileText className="h-4 w-4 shrink-0" />
-                            <span className="truncate">{proofFile.name}</span>
-                          </div>
-                        )}
-                      </div>
-                    )}
+                  <CardContent className="pt-4">
+                    <ReceiptPicker
+                      value={receipt}
+                      onChange={changeReceipt}
+                      disabled={busy}
+                      uploading={uploadProof.isPending}
+                      progress={uploadProgress}
+                      error={uploadError}
+                      onRetry={handleBankTransferUpload}
+                      showRequired={triedWithoutReceipt}
+                    />
                   </CardContent>
                 </Card>
               )}
@@ -591,26 +611,29 @@ export function TreatmentFeePaymentDialog({
             type="button"
             variant="outline"
             disabled={busy}
-            onClick={() => onOpenChange(false)}
+            className="pointer-coarse:h-12"
+            onClick={closeDialog}
           >
             {methods.length === 0 ? t('common.close') : t('common.cancel')}
           </Button>
           {methods.length > 0 && isBankTransferSelected ? (
             <Button
               type="button"
-              disabled={busy || !proofFile}
+              disabled={busy}
               onClick={handleBankTransferUpload}
-              className="gap-2"
+              className="gap-2 pointer-coarse:h-12"
             >
               {uploadProof.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-              {t('feeUi.payDialog.uploadReceiptBtn')}
+              {replacing
+                ? t('transfers.dialog.replaceSubmit')
+                : t('feeUi.payDialog.uploadReceiptBtn')}
             </Button>
           ) : methods.length > 0 ? (
             <Button
               type="button"
               disabled={busy || !selectedMethod}
               onClick={handleInstantPay}
-              className="gap-2"
+              className="gap-2 pointer-coarse:h-12"
             >
               {(pay.isPending || cardSession.isPending) && (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -705,10 +728,13 @@ function PaymentUnavailableNotice({
 function SelectedMethodStrip({
   method,
   disabled,
+  canChange = true,
   onChange,
 }: {
   method: MethodConfig;
   disabled?: boolean;
+  /** false when the method is fixed (replacing a transfer's receipt). */
+  canChange?: boolean;
   onChange: () => void;
 }) {
   const { t } = useT();
@@ -727,16 +753,18 @@ function SelectedMethodStrip({
           {t(`feeUi.methods.${method.key}.description`)}
         </p>
       </div>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        disabled={disabled}
-        onClick={onChange}
-        className="shrink-0 text-xs"
-      >
-        {t('feeUi.payDialog.changeBtn')}
-      </Button>
+      {canChange ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={disabled}
+          onClick={onChange}
+          className="shrink-0 text-xs pointer-coarse:h-12"
+        >
+          {t('feeUi.payDialog.changeBtn')}
+        </Button>
+      ) : null}
     </div>
   );
 }

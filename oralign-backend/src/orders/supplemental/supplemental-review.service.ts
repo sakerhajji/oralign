@@ -51,6 +51,7 @@ import {
   type SupplementalTx,
 } from './supplemental-order.repository';
 import { SupplementalOrderService } from './supplemental-order.service';
+import { assertDoctorCanOrder } from '../../users/activity/doctor-ordering.policy';
 import {
   assertCanConvert,
   assertCanReview,
@@ -214,6 +215,9 @@ export class SupplementalReviewService {
       }
       const linked = liveConversionId(warranty);
       if (linked) return linked;
+      // A new replacement order for a dormant doctor: 403 ACCOUNT_DORMANT
+      // (spec §5); the existing link above is still returned.
+      await assertDoctorCanOrder(tx, warranty.doctorId);
       return this.createReplacement(tx, {
         warranty,
         parent,

@@ -3,6 +3,8 @@
 import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { OrderWizard } from '@/components/orders/order-wizard';
+import { DormantOrderGate } from '@/components/dashboard/dormant-account-banner';
+import { useCanOrder } from '@/lib/hooks/use-can-order';
 
 // Patient ids are UUIDs. Anything else in the link is dropped here rather
 // than sent to the API as a lookup that can only fail.
@@ -23,16 +25,30 @@ function NewOrderWizard() {
   );
 }
 
+/**
+ * A dormant doctor (doctor inactivity, spec §5) cannot create an order:
+ * the page explains instead of opening a wizard that would end on 403
+ * ACCOUNT_DORMANT. Admins always get the wizard (its dentist picker
+ * flags dormant practitioners); the server stays the authority.
+ */
+function NewOrderContent() {
+  const { canOrder } = useCanOrder();
+  if (!canOrder) return <DormantOrderGate />;
+  return (
+    // Reading the query through `useSearchParams` (not the page's
+    // `searchParams` prop) keeps the route static, so the sidebar's
+    // prefetched "New order" stays instant; it needs this boundary,
+    // whose empty fallback only shows on a hard load, before hydration.
+    <Suspense fallback={null}>
+      <NewOrderWizard />
+    </Suspense>
+  );
+}
+
 export default function NewOrderPage() {
   return (
     <div className="@container/main flex flex-1 flex-col bg-muted/20 p-4 lg:p-6">
-      {/* Reading the query through `useSearchParams` (not the page's
-          `searchParams` prop) keeps the route static, so the sidebar's
-          prefetched "New order" stays instant; it needs this boundary,
-          whose empty fallback only shows on a hard load, before hydration. */}
-      <Suspense fallback={null}>
-        <NewOrderWizard />
-      </Suspense>
+      <NewOrderContent />
     </div>
   );
 }

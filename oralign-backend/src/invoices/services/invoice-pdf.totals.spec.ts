@@ -117,7 +117,10 @@ describe('buildInvoiceRecordTotals (the FACTURE totals block)', () => {
   it('TTC pricing with a discount opens with the gross TTC of the lines (stamp excluded) and the discount', () => {
     // 2400 of lines - 20 = 2380, + 1 stamp = 2381: the gross is 2400.
     expect(
-      rows({ ...BASE, discountAmount: 20, status: InvoiceStatus.issued }).slice(0, 3),
+      rows({ ...BASE, discountAmount: 20, status: InvoiceStatus.issued }).slice(
+        0,
+        3,
+      ),
     ).toEqual([
       ['Total TTC brut', '2400.000', 'normal'],
       ['Remise', '- 20.000', 'normal'],
@@ -138,7 +141,11 @@ describe('buildInvoiceRecordTotals (the FACTURE totals block)', () => {
 
   it('an unpaid invoice prints no "Montant payé"; no stamp line when there is none', () => {
     const out = rows({ ...BASE, status: InvoiceStatus.issued, stampDuty: 0 });
-    expect(out.map(([label]) => label)).toEqual(['Total HT', 'TVA (19 %)', 'Total TTC']);
+    expect(out.map(([label]) => label)).toEqual([
+      'Total HT',
+      'TVA (19 %)',
+      'Total TTC',
+    ]);
   });
 
   it('a legacy row left at netPayable 0 pays its total', () => {
@@ -152,7 +159,12 @@ describe('buildInvoiceRecordTotals (the FACTURE totals block)', () => {
   it('English labels', () => {
     expect(
       rows(
-        { ...BASE, withholdingRate: 1, withholdingAmount: 23.8, netPayable: 2357.2 },
+        {
+          ...BASE,
+          withholdingRate: 1,
+          withholdingAmount: 23.8,
+          netPayable: 2357.2,
+        },
         en,
       ).map(([label]) => label),
     ).toEqual([
@@ -164,6 +176,45 @@ describe('buildInvoiceRecordTotals (the FACTURE totals block)', () => {
       'Net amount due',
       'Amount paid',
     ]);
+  });
+});
+
+describe('buildInvoiceRecordTotals — « Reste à payer » frozen at issue (spec §4)', () => {
+  it('Total TTC, Retenue, Net, Montant payé, then the devis balance', () => {
+    expect(
+      rows({
+        ...BASE,
+        withholdingRate: 1,
+        withholdingAmount: 23.8,
+        netPayable: 2357.2,
+        quoteRemainingAfter: 4760,
+      }).slice(-5),
+    ).toEqual([
+      ['Total TTC', '2381.000', 'normal'],
+      ['Retenue à la source (1 %)', '- 23.800', 'normal'],
+      ['Net à payer', '2357.200', 'final'],
+      ['Montant payé', '2357.200', 'paid'],
+      ['Reste à payer sur le devis', '4760.000', 'normal'],
+    ]);
+  });
+
+  it('the last installment leaves 0; no row at all without the snapshot', () => {
+    expect(rows({ ...BASE, quoteRemainingAfter: 0 }).at(-1)).toEqual([
+      'Reste à payer sur le devis',
+      '0.000',
+      'normal',
+    ]);
+    const labels = rows({ ...BASE, quoteRemainingAfter: null }).map(([l]) => l);
+    expect(labels).not.toContain('Reste à payer sur le devis');
+    expect(rows(BASE).map(([l]) => l)).not.toContain(
+      'Reste à payer sur le devis',
+    );
+  });
+
+  it('English label', () => {
+    expect(rows({ ...BASE, quoteRemainingAfter: 10 }, en).at(-1)?.[0]).toBe(
+      'Remaining on the quotation',
+    );
   });
 });
 
@@ -180,7 +231,9 @@ describe('invoiceRecordPaymentText (the settlement line)', () => {
         labels: fr,
         formatDate,
       }),
-    ).toBe('Mode de paiement : Carte bancaire · Réglée le 19 nov. 2026 · Réf. CTP-42');
+    ).toBe(
+      'Mode de paiement : Carte bancaire · Réglée le 19 nov. 2026 · Réf. CTP-42',
+    );
   });
 
   it('no "Réglée le" on an unpaid invoice; cheque has its own label', () => {
@@ -301,10 +354,10 @@ describe('InvoicePdfService — stored invoice rendered as a FACTURE (HTML)', ()
     ],
     order: { orderCode: 'ORD-001' },
     patient: { fullName: 'Sami Trabelsi' },
-    doctor: {
-      fullName: 'Dr Amel Ben Salah',
-      dentistProfile: { clinicName: 'Cabinet Les Pins' },
-    },
+    // The snapshot written at creation (spec §6): the PDF reads it only.
+    clientIsPractitioner: true,
+    clientClinicName: 'Cabinet Les Pins',
+    quoteRemainingAfter: null,
   };
   const SETTINGS = {
     companyName: 'Oralign',
@@ -318,7 +371,12 @@ describe('InvoicePdfService — stored invoice rendered as a FACTURE (HTML)', ()
 
   async function html(over: Record<string, unknown> = {}) {
     const prisma = {
-      invoice: { findFirst: jest.fn().mockResolvedValue({ ...INVOICE, ...over }) },
+      invoice: {
+        findFirst: jest.fn().mockResolvedValue({ ...INVOICE, ...over }),
+      },
+      // Any live read of the practitioner would hit this and fail the test.
+      user: { findUnique: jest.fn(), findFirst: jest.fn() },
+      dentistProfile: { findUnique: jest.fn(), findFirst: jest.fn() },
     };
     const settings = { requireActive: jest.fn().mockResolvedValue(SETTINGS) };
     const service = new InvoicePdfService(
@@ -333,7 +391,10 @@ describe('InvoicePdfService — stored invoice rendered as a FACTURE (HTML)', ()
       ): Promise<InvoiceRenderPayload>;
       renderHtml(payload: InvoiceRenderPayload): string;
     };
-    const payload = await internals.loadInvoiceRecordForRender('inv-1', undefined);
+    const payload = await internals.loadInvoiceRecordForRender(
+      'inv-1',
+      undefined,
+    );
     return internals.renderHtml(payload).replace(/\s+/g, ' ');
   }
 
@@ -362,7 +423,10 @@ describe('InvoicePdfService — stored invoice rendered as a FACTURE (HTML)', ()
   });
 
   it('a cancelled invoice says "Annulée", never "Échec"; an issued one shows the RIB', async () => {
-    const cancelled = await html({ status: InvoiceStatus.cancelled, paidAt: null });
+    const cancelled = await html({
+      status: InvoiceStatus.cancelled,
+      paidAt: null,
+    });
     expect(cancelled).toContain('Statut: Annulée');
     expect(cancelled).not.toContain('Échec');
     expect(cancelled).not.toContain('Réglée le');
@@ -381,8 +445,49 @@ describe('InvoicePdfService — stored invoice rendered as a FACTURE (HTML)', ()
   // Rows written before "the customer is the practitioner": a manual
   // invoice billed to a PATIENT (doctorId = the patient's dentist), or an
   // old automatic one billed to the clinic name.
+  it('reads the snapshot only: never the live practitioner', async () => {
+    const prisma = {
+      invoice: { findFirst: jest.fn().mockResolvedValue(INVOICE) },
+    };
+    const settings = { requireActive: jest.fn().mockResolvedValue(SETTINGS) };
+    const service = new InvoicePdfService(
+      prisma as unknown as PrismaService,
+      settings as unknown as CompanyBillingSettingsService,
+    );
+    const internals = service as unknown as {
+      loadInvoiceRecordForRender(id: string, lang: undefined): Promise<unknown>;
+    };
+    await internals.loadInvoiceRecordForRender('inv-1', undefined);
+    const [[query]] = prisma.invoice.findFirst.mock.calls as [
+      [{ include: Record<string, unknown> }],
+    ];
+    expect(query.include).not.toHaveProperty('doctor');
+  });
+
+  it('a renamed practitioner or practice never rewrites the facture (snapshot columns win)', async () => {
+    // The live account may say anything now: the PDF prints the snapshot.
+    const out = await html({ clientClinicName: 'Cabinet Les Pins (2025)' });
+    expect(out).toContain('Docteur : Dr Amel Ben Salah');
+    expect(out).toContain('Cabinet Les Pins (2025)');
+  });
+
+  it('prints the devis balance frozen at issue last, after the amount paid', async () => {
+    const out = await html({ quoteRemainingAfter: D('1586.666') });
+    const paid = out.indexOf('Montant payé');
+    const remaining = out.indexOf('Reste à payer sur le devis');
+    expect(paid).toBeGreaterThan(0);
+    expect(remaining).toBeGreaterThan(paid);
+    expect(out.slice(remaining)).toMatch(
+      /^Reste à payer sur le devis<\/span> <span>1 586,666 TND/,
+    );
+  });
+
   it('an old invoice billed to a patient keeps the plain name: never "Docteur : <patient>", no clinic line', async () => {
-    const out = await html({ clientName: 'Sami Trabelsi' });
+    const out = await html({
+      clientName: 'Sami Trabelsi',
+      clientIsPractitioner: false,
+      clientClinicName: null,
+    });
     expect(out).not.toContain('Docteur :');
     expect(out).toContain('Sami Trabelsi');
     expect(out).not.toContain('Cabinet Les Pins');
@@ -390,7 +495,11 @@ describe('InvoicePdfService — stored invoice rendered as a FACTURE (HTML)', ()
   });
 
   it('an old automatic invoice billed to the clinic name prints that name once, not as "Docteur"', async () => {
-    const out = await html({ clientName: 'Cabinet Ennasr' });
+    const out = await html({
+      clientName: 'Cabinet Ennasr',
+      clientIsPractitioner: false,
+      clientClinicName: null,
+    });
     expect(out).not.toContain('Docteur :');
     expect(out.split('Cabinet Ennasr')).toHaveLength(2);
     expect(out).not.toContain('Cabinet Les Pins');
@@ -399,14 +508,15 @@ describe('InvoicePdfService — stored invoice rendered as a FACTURE (HTML)', ()
   it('an invoice with no practitioner linked prints its client name plainly', async () => {
     const out = await html({
       doctorId: null,
-      doctor: null,
       clientName: 'Clinique Les Pins SARL',
+      clientIsPractitioner: false,
+      clientClinicName: null,
     });
     expect(out).not.toContain('Docteur :');
     expect(out).toContain('Clinique Les Pins SARL');
   });
 
-  it('the practitioner name matches despite stray spaces', async () => {
+  it('the lead follows the decision frozen at creation (stray spaces included)', async () => {
     const out = await html({ clientName: '  Dr Amel Ben Salah ' });
     expect(out).toContain('Docteur : Dr Amel Ben Salah');
     expect(out).toContain('Cabinet Les Pins');
@@ -432,7 +542,10 @@ describe('InvoicePdfService — legacy on-the-fly renderer (no stored invoice)',
     {} as unknown as CompanyBillingSettingsService,
   );
   const internals = service as unknown as {
-    buildTotals(payload: InvoiceRenderPayload, labels: typeof fr): {
+    buildTotals(
+      payload: InvoiceRenderPayload,
+      labels: typeof fr,
+    ): {
       label: string;
       value: string;
       kind?: string;
@@ -443,7 +556,10 @@ describe('InvoicePdfService — legacy on-the-fly renderer (no stored invoice)',
     ): { description: string; amount: number }[];
   };
 
-  function payload(payment: Record<string, unknown>, over: Record<string, unknown> = {}) {
+  function payload(
+    payment: Record<string, unknown>,
+    over: Record<string, unknown> = {},
+  ) {
     return {
       payment: {
         id: 'p-1',
@@ -463,12 +579,17 @@ describe('InvoicePdfService — legacy on-the-fly renderer (no stored invoice)',
     } as unknown as InvoiceRenderPayload;
   }
   const plain = (lines: { label: string; value: string; kind?: string }[]) =>
-    lines.map((l) => [l.label, l.value.replace(/\s/g, ' '), l.kind ?? 'normal']);
+    lines.map((l) => [
+      l.label,
+      l.value.replace(/\s/g, ' '),
+      l.kind ?? 'normal',
+    ]);
 
   it('ADDS the payment stamp on top of the settled installment, retenue off, net = the cash', () => {
     const p = payload({
       amount: D('991.000'),
       withholdingAmount: D('10.000'),
+      withholdingRate: D('1.00'),
       stampAmount: D('1.000'),
     });
     expect(plain(internals.buildTotals(p, fr))).toEqual([
@@ -476,12 +597,27 @@ describe('InvoicePdfService — legacy on-the-fly renderer (no stored invoice)',
       ['TVA (19 %)', '159,664 TND', 'normal'],
       ['Droit de timbre', '1,000 TND', 'normal'],
       ['Total TTC', '1 001,000 TND', 'normal'],
-      ['Retenue à la source', '- 10,000 TND', 'normal'],
+      // The rate the payment recorded (snapshot), never the live one.
+      ['Retenue à la source (1 %)', '- 10,000 TND', 'normal'],
       ['Net à payer', '991,000 TND', 'final'],
       ['Montant payé', '991,000 TND', 'paid'],
     ]);
     // The line is what the payment settled: the installment, stamp excluded.
     expect(internals.buildLineItems(p, fr)[0].amount).toBe(1000);
+  });
+
+  it('a retenue recorded without its rate prints the plain label', () => {
+    const p = payload({
+      amount: D('991.000'),
+      withholdingAmount: D('10.000'),
+      withholdingRate: null,
+      stampAmount: D('1.000'),
+    });
+    expect(plain(internals.buildTotals(p, fr))).toContainEqual([
+      'Retenue à la source',
+      '- 10,000 TND',
+      'normal',
+    ]);
   });
 
   it('a payment made before 2026-11-20 (stampAmount 0) prints no stamp, whatever the live setting', () => {

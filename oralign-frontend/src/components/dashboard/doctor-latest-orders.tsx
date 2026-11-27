@@ -57,6 +57,7 @@ import {
   type SortOrder,
 } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { doctorContactEmail } from '@/lib/doctor/doctor-contact';
 
 const DASHBOARD_ORDERS_LIMIT = 8;
 
@@ -622,7 +623,7 @@ export function DoctorLatestOrders() {
                               {order.doctor?.fullName ?? t('dashboard.orders.notSet')}
                             </p>
                             <p className="truncate text-xs text-muted-foreground">
-                              {order.doctor?.email}
+                              {doctorContactEmail(order.doctor)}
                             </p>
                           </div>
                         </TableCell>

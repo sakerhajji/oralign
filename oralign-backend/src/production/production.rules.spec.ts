@@ -28,6 +28,7 @@ import {
   isRangeReleased,
   matchesFingerprint,
   releasedSteps,
+  releasesEveryStep,
   requestedPerformedAt,
   resolvedQuantity,
   rowWarnings,
@@ -262,7 +263,43 @@ describe('production.rules', () => {
       ).toEqual([]);
     });
 
-    it('unlimited-step pack: its placeholder batches release every step once one is paid (CONC-01)', () => {
+    it('a production status never releases a locked batch (spec §3: the paid batches are the one source)', () => {
+      const released = releasedSteps({
+        status: OrderStatus.fabrication,
+        quotation: {
+          paymentStatus: QuotationPaymentStatus.partially_paid,
+          isUnlimitedSteps: false,
+          batches: [
+            batch(1, 4, BatchStatus.unlocked),
+            batch(5, 7, BatchStatus.locked),
+          ],
+        },
+      });
+      expect(released).toEqual([{ from: 1, to: 4 }]);
+      expect(releasesEveryStep(released)).toBe(false);
+      expect(
+        releasedSteps({
+          status: OrderStatus.fabrication,
+          quotation: {
+            paymentStatus: QuotationPaymentStatus.pending,
+            isUnlimitedSteps: false,
+            batches: [batch(1, 7, BatchStatus.locked)],
+          },
+        }),
+      ).toEqual([]);
+    });
+
+    it('releasesEveryStep tells the "everything" sentinel from a union of batches', () => {
+      expect(
+        releasesEveryStep(
+          releasedSteps({ status: OrderStatus.fabrication, quotation: null }),
+        ),
+      ).toBe(true);
+      expect(releasesEveryStep([{ from: 1, to: 200 }])).toBe(false);
+      expect(releasesEveryStep([])).toBe(false);
+    });
+
+    it('unlimited-step pack: its placeholder batches release every step once one is paid, none before (CONC-01, DECISIONS §3)', () => {
       const unlimited = (status: OrderStatus, ...batches: BatchStatus[]) =>
         releasedSteps({
           status,
@@ -287,14 +324,24 @@ describe('production.rules', () => {
           unlimited(OrderStatus.payment_pending, BatchStatus.delivered),
         ),
       ).toBe(true);
-      // Nothing paid yet: nothing released, unless the case is in production.
+      // Nothing paid yet: nothing released, a production status included.
       expect(
         unlimited(OrderStatus.payment_pending, BatchStatus.locked),
       ).toEqual([]);
+      expect(unlimited(OrderStatus.fabrication, BatchStatus.locked)).toEqual(
+        [],
+      );
+      // A fully paid quote releases everything whatever its batches say.
       expect(
-        isRangeReleased(
-          { from: 1, to: 30 },
-          unlimited(OrderStatus.fabrication, BatchStatus.locked),
+        releasesEveryStep(
+          releasedSteps({
+            status: OrderStatus.fabrication,
+            quotation: {
+              paymentStatus: QuotationPaymentStatus.paid,
+              isUnlimitedSteps: true,
+              batches: [batch(1, 1, BatchStatus.locked)],
+            },
+          }),
         ),
       ).toBe(true);
     });
@@ -310,45 +357,89 @@ describe('production.rules', () => {
         statusCode: 400,
         errorCode: PRODUCTION_ERROR.STEP_BEYOND_PLANNED_TOTAL,
       });
-      // A provisional total is only a warning.
+      // A provisional total is only a warning (on released steps).
       expect(() =>
         assertTechnicianGates(
           row({
             range: { from: 18, to: 21 },
             planned: { upper: provisional(20), lower: null },
+            released: [{ from: 1, to: 30 }],
           }),
         ),
       ).not.toThrow();
     });
 
-    it('409 STEPS_NOT_RELEASED on a delivery of locked steps, with a neutral message', () => {
-      const error = thrown(() =>
-        assertTechnicianGates(
-          row({
-            type: delivered,
-            range: { from: 18, to: 20 },
-            released: [{ from: 1, to: 10 }],
-          }),
+    it.each(Object.values(ProductionEventType))(
+      '409 STEPS_NOT_RELEASED on %s of locked steps, with a neutral message (spec §3: all four acts)',
+      (type) => {
+        const error = thrown(() =>
+          assertTechnicianGates(
+            row({
+              type,
+              range: { from: 8, to: 12 },
+              released: [{ from: 1, to: 10 }],
+            }),
+          ),
+        );
+        expect(error).toMatchObject({
+          statusCode: 409,
+          errorCode: PRODUCTION_ERROR.STEPS_NOT_RELEASED,
+        });
+        expect(String(error.message)).not.toMatch(
+          /pa(y|ie)|amount|montant|TND|install|échéance/i,
+        );
+      },
+    );
+
+    it('lets the technician work inside the released steps, and on nothing when none is', () => {
+      for (const type of Object.values(ProductionEventType)) {
+        expect(() =>
+          assertTechnicianGates(
+            row({
+              type,
+              range: { from: 1, to: 4 },
+              released: [{ from: 1, to: 4 }],
+            }),
+          ),
+        ).not.toThrow();
+        expect(
+          thrown(() =>
+            assertTechnicianGates(
+              row({ type, range: { from: 1, to: 1 }, released: [] }),
+            ),
+          ),
+        ).toMatchObject({ errorCode: PRODUCTION_ERROR.STEPS_NOT_RELEASED });
+      }
+    });
+
+    it('the approved-total 400 comes before the release 409', () => {
+      expect(
+        thrown(() =>
+          assertTechnicianGates(
+            row({
+              range: { from: 19, to: 22 },
+              released: [{ from: 1, to: 4 }],
+            }),
+          ),
         ),
-      );
-      expect(error).toMatchObject({
-        statusCode: 409,
-        errorCode: PRODUCTION_ERROR.STEPS_NOT_RELEASED,
+      ).toMatchObject({
+        errorCode: PRODUCTION_ERROR.STEP_BEYOND_PLANNED_TOTAL,
       });
-      expect(String(error.message)).not.toMatch(/pa(y|ie)|amount|montant|TND/i);
     });
 
     it('never gates an admin', () => {
-      expect(() =>
-        assertTechnicianGates(
-          row({
-            restricted: false,
-            type: delivered,
-            range: { from: 18, to: 25 },
-            released: [],
-          }),
-        ),
-      ).not.toThrow();
+      for (const type of Object.values(ProductionEventType)) {
+        expect(() =>
+          assertTechnicianGates(
+            row({
+              restricted: false,
+              type,
+              range: { from: 18, to: 25 },
+              released: [],
+            }),
+          ),
+        ).not.toThrow();
+      }
     });
   });
 
@@ -427,12 +518,13 @@ describe('production.rules', () => {
       ).toEqual([PRODUCTION_WARNING.arch_not_treated]);
     });
 
-    it('steps_not_released: any non-delivery act, and an ADMIN delivery', () => {
+    it('steps_not_released: the ADMIN override, on every act; never a technician warning', () => {
       const locked = {
         range: { from: 15, to: 18 },
         released: [{ from: 1, to: 10 }],
       };
-      expect(rowWarnings(row(locked))).toEqual([
+      // Printing has no previous act: steps_not_released is the only code.
+      expect(rowWarnings(row({ ...locked, restricted: false }))).toEqual([
         PRODUCTION_WARNING.steps_not_released,
       ]);
       expect(
@@ -451,22 +543,12 @@ describe('production.rules', () => {
           }),
         ),
       ).toEqual([PRODUCTION_WARNING.steps_not_released]);
-      // The technician's delivery is the 409 gate instead, never a warning.
-      expect(
-        rowWarnings(
-          row({
-            ...locked,
-            type: delivered,
-            events: [
-              event({
-                type: ProductionEventType.aligner_cut,
-                stepFrom: 15,
-                stepTo: 18,
-              }),
-            ],
-          }),
-        ),
-      ).toEqual([]);
+      // The technician meets the 409 gate first: never a warning, any act.
+      for (const type of Object.values(ProductionEventType)) {
+        expect(rowWarnings(row({ ...locked, type }))).not.toContain(
+          PRODUCTION_WARNING.steps_not_released,
+        );
+      }
     });
 
     it('returns the codes in PRODUCTION_WARNING order', () => {

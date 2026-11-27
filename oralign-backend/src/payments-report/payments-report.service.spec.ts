@@ -40,6 +40,7 @@ function installmentRow(overrides: Record<string, unknown> = {}) {
   return {
     id: 'p-1',
     amount: d('850.5'),
+    withholdingAmount: d('0'),
     status: PaymentRecordStatus.success,
     paymentMethod: PaymentMethod.card,
     transactionId: 'GW-123',
@@ -63,6 +64,7 @@ function feeRow(overrides: Record<string, unknown> = {}) {
     id: 'o-1',
     orderCode: 'ORD-2',
     treatmentFeeAmount: d('150'),
+    treatmentFeeWithholdingAmount: null,
     treatmentFeePaymentMethod: PaymentMethod.card,
     treatmentFeePaymentStatus: PaymentRecordStatus.success,
     treatmentFeePaidAt: new Date('2026-11-04T08:00:00.000Z'),
@@ -386,6 +388,7 @@ describe('PaymentsReportService', () => {
         method: PaymentMethod.card,
         status: PaymentRecordStatus.success,
         amount: d('850.5'),
+        withholding: d('0'),
         transactionRef: 'GW-123',
         receiptNumber: 'FAC-000010',
         installment: { rank: 2, total: 3, packName: 'Pack Confort' },
@@ -429,9 +432,60 @@ describe('PaymentsReportService', () => {
       });
     });
 
+    it('carries the retenue each payment kept back (brut = net + retenue, spec 4)', async () => {
+      const { service } = setup({
+        installments: [
+          installmentRow({ amount: d('991'), withholdingAmount: d('10') }),
+        ],
+        fees: [
+          feeRow({
+            treatmentFeeAmount: d('199'),
+            treatmentFeeWithholdingAmount: d('2'),
+          }),
+        ],
+      });
+      const model = await service.buildModel(request(), admin);
+      const fees = model.sections.find((s) => s.kind === 'treatment_fee');
+      const installments = model.sections.find((s) => s.kind === 'installment');
+      expect(fees?.rows[0]).toMatchObject({
+        amount: d('199'),
+        withholding: d('2'),
+      });
+      expect(installments?.rows[0]).toMatchObject({
+        amount: d('991'),
+        withholding: d('10'),
+      });
+    });
+
+    it('sums the retenue beside the cash, from the same summary groupBy', async () => {
+      const { service, prisma } = setup({
+        installmentGroups: [
+          {
+            paymentMethod: PaymentMethod.bank_transfer,
+            _sum: { amount: d('991'), withholdingAmount: d('10') },
+            _count: { _all: 1 },
+          },
+        ],
+      });
+      const model = await service.buildModel(
+        request({ kind: PaymentsReportKind.installment }),
+        admin,
+      );
+      const groupBy = (prisma.payment.groupBy.mock.calls as unknown[][])[0][0];
+      expect(groupBy).toMatchObject({
+        _sum: { amount: true, withholdingAmount: true },
+      });
+      const tally = model.sections[0].collected.bank_transfer;
+      expect(tally.amount.toFixed(3)).toBe('991.000');
+      expect(tally.withholding.toFixed(3)).toBe('10.000');
+    });
+
     it('a fee invoiced on a facture prints the facture number, read in one query', async () => {
       const { service, prisma } = setup({
-        fees: [feeRow(), feeRow({ id: 'o-2', treatmentFeeInvoiceNumber: null })],
+        fees: [
+          feeRow(),
+          feeRow({ id: 'o-2', treatmentFeeInvoiceNumber: null }),
+        ],
         feeInvoices: [
           { treatmentFeeOrderId: 'o-1', invoiceNumber: 'FAC-000120' },
           { treatmentFeeOrderId: 'o-2', invoiceNumber: 'FAC-000121' },

@@ -13,6 +13,282 @@ type T = Record<Lang, string>;
  * a status, a method or a period reads the same on screen and on paper.
  */
 export const paymentsDeskDomainDict = {
+  // The admin pending desk (app/dashboard/payments/pending,
+  // components/payments/pending): the merged bank-transfer queue, its
+  // review dialog and receipt viewer. Owned by P-B.
+  pendingDesk: {
+    title: { en: 'Pending payments', fr: 'Paiements en attente' } as T,
+    subtitle: {
+      en: 'Practitioners’ bank transfers to verify: pack installments and treatment fees.',
+      fr: 'Les virements des praticiens à vérifier : échéances de forfait et honoraires de traitement.',
+    } as T,
+    refresh: { en: 'Refresh', fr: 'Actualiser' } as T,
+    updatedAt: { en: 'Updated {time}', fr: 'Mis à jour à {time}' } as T,
+    historyLink: { en: 'Payment history', fr: 'Historique des paiements' } as T,
+    tabs: {
+      aria: { en: 'Transfers by state', fr: 'Virements par état' } as T,
+      nouveau: { en: 'New', fr: 'Nouveaux' } as T,
+      a_verifier: { en: 'To verify', fr: 'À vérifier' } as T,
+      valide: { en: 'Confirmed', fr: 'Validés' } as T,
+      refuse: { en: 'Rejected', fr: 'Refusés' } as T,
+    },
+    tabHint: {
+      nouveau: {
+        en: 'Transfers awaiting confirmation that you have not opened yet.',
+        fr: 'Les virements en attente que vous n’avez pas encore ouverts.',
+      } as T,
+      a_verifier: {
+        en: 'Every transfer awaiting confirmation, newest first.',
+        fr: 'Tous les virements en attente de confirmation, les plus récents d’abord.',
+      } as T,
+      recent: {
+        en: 'The last {days} days. The full history is in',
+        fr: 'Les {days} derniers jours. L’historique complet est dans',
+      } as T,
+    },
+    col: {
+      declared: { en: 'Declared', fr: 'Déclaré le' } as T,
+      who: { en: 'Patient · practitioner', fr: 'Patient · praticien' } as T,
+      subject: { en: 'For', fr: 'Objet' } as T,
+      amount: { en: 'Transferred', fr: 'Montant viré' } as T,
+      state: { en: 'State', fr: 'État' } as T,
+      receipt: { en: 'Receipt', fr: 'Reçu' } as T,
+      action: { en: 'Action', fr: 'Action' } as T,
+    },
+    caption: { en: 'Bank transfers to verify', fr: 'Virements bancaires à vérifier' } as T,
+    kind: {
+      installment: { en: 'Installment {n}', fr: 'Échéance n°{n}' } as T,
+      installmentNoRank: { en: 'Pack installment', fr: 'Échéance de forfait' } as T,
+      treatment_fee: { en: 'Treatment fee', fr: 'Honoraires de traitement' } as T,
+    },
+    seen: {
+      new: { en: 'New', fr: 'Nouveau' } as T,
+      seen: { en: 'Seen', fr: 'Consulté' } as T,
+    },
+    receipt: {
+      attached: { en: 'Attached', fr: 'Joint' } as T,
+      none: { en: 'No receipt', fr: 'Sans reçu' } as T,
+    },
+    action: {
+      review: { en: 'Review', fr: 'Examiner' } as T,
+      view: { en: 'View', fr: 'Voir' } as T,
+      rowAria: {
+        en: 'Open the transfer of {name}',
+        fr: 'Ouvrir le virement de {name}',
+      } as T,
+    },
+    processedOn: {
+      valide: { en: 'Confirmed {date}', fr: 'Validé le {date}' } as T,
+      refuse: { en: 'Rejected {date}', fr: 'Refusé le {date}' } as T,
+    },
+    empty: {
+      nouveau: { en: 'No new transfer', fr: 'Aucun nouveau virement' } as T,
+      nouveauBody: {
+        en: 'Transfers you have not opened yet appear here.',
+        fr: 'Les virements que vous n’avez pas encore ouverts apparaissent ici.',
+      } as T,
+      a_verifier: { en: 'Nothing to verify', fr: 'Rien à vérifier' } as T,
+      a_verifierBody: {
+        en: 'No transfer is awaiting confirmation.',
+        fr: 'Aucun virement n’attend de confirmation.',
+      } as T,
+      valide: {
+        en: 'No transfer confirmed in the last {days} days',
+        fr: 'Aucun virement validé ces {days} derniers jours',
+      } as T,
+      refuse: {
+        en: 'No transfer rejected in the last {days} days',
+        fr: 'Aucun virement refusé ces {days} derniers jours',
+      } as T,
+    },
+    loadError: {
+      en: 'The transfers could not be loaded',
+      fr: 'Impossible de charger les virements',
+    } as T,
+    retry: { en: 'Retry', fr: 'Réessayer' } as T,
+    noAccess: {
+      en: 'This desk is for administrators',
+      fr: 'Cet écran est réservé aux administrateurs',
+    } as T,
+    noAccessBody: {
+      en: 'Your payments are in the payment history.',
+      fr: 'Vos paiements sont dans l’historique des paiements.',
+    } as T,
+    staleError: {
+      en: 'The list could not be refreshed; it may be out of date.',
+      fr: 'La liste n’a pas pu être actualisée ; elle peut ne plus être à jour.',
+    } as T,
+    // A notification's link to a transfer that is no longer in the queue.
+    gone: {
+      title: {
+        en: 'This transfer is no longer awaiting',
+        fr: 'Ce virement n’est plus en attente',
+      } as T,
+      body: {
+        en: 'It is not in the list on screen: it may already have been processed, or the practitioner withdrew or replaced it.',
+        fr: 'Il ne figure pas dans la liste affichée : il a peut-être déjà été traité, ou le praticien l’a retiré ou remplacé.',
+      } as T,
+      // The link named another tab (Validés, Refusés) and the transfer is
+      // not in it: nothing is said about its state.
+      notInTabTitle: {
+        en: 'This transfer is not in this tab',
+        fr: 'Ce virement ne figure pas dans cet onglet',
+      } as T,
+      notInTabBody: {
+        en: 'Open “To verify” to see every transfer still awaiting.',
+        fr: 'Ouvrez « À vérifier » pour voir tous les virements encore en attente.',
+      } as T,
+      dismiss: { en: 'Dismiss', fr: 'Masquer' } as T,
+    },
+    pager: {
+      aria: { en: 'Pages of transfers', fr: 'Pages des virements' } as T,
+      pageOf: {
+        en: 'Page {page} of {total} · {count} transfers',
+        fr: 'Page {page} sur {total} · {count} virements',
+      } as T,
+      previous: { en: 'Previous', fr: 'Précédente' } as T,
+      next: { en: 'Next', fr: 'Suivante' } as T,
+    },
+    review: {
+      titleInstallment: {
+        en: 'Transfer · installment {n}',
+        fr: 'Virement · échéance n°{n}',
+      } as T,
+      titleInstallmentNoRank: {
+        en: 'Transfer · pack installment',
+        fr: 'Virement · échéance de forfait',
+      } as T,
+      titleFee: {
+        en: 'Transfer · treatment fee',
+        fr: 'Virement · honoraires de traitement',
+      } as T,
+      order: { en: 'Order {code}', fr: 'Commande {code}' } as T,
+      openOrder: { en: 'Open the order', fr: 'Ouvrir la commande' } as T,
+      patient: { en: 'Patient', fr: 'Patient' } as T,
+      doctor: { en: 'Practitioner', fr: 'Praticien' } as T,
+      declaredAt: { en: 'Declared', fr: 'Déclaré le' } as T,
+      openedAt: { en: 'First opened', fr: 'Ouvert pour la première fois le' } as T,
+      processedValide: { en: 'Confirmed', fr: 'Validé le' } as T,
+      processedRefuse: { en: 'Rejected', fr: 'Refusé le' } as T,
+      reason: { en: 'Reason given', fr: 'Motif du refus' } as T,
+      cash: { en: 'Expected on the statement', fr: 'À trouver sur le relevé' } as T,
+      statementHint: {
+        en: 'Check that this amount is on the bank statement before confirming.',
+        fr: 'Vérifiez que ce montant figure sur le relevé bancaire avant de confirmer.',
+      } as T,
+      noProofWarning: {
+        en: 'No receipt is attached. To confirm anyway, a justification note is required.',
+        fr: 'Aucun reçu n’est joint. Pour confirmer quand même, une note justificative est obligatoire.',
+      } as T,
+      confirm: { en: 'Confirm transfer', fr: 'Confirmer le virement' } as T,
+      reject: { en: 'Reject', fr: 'Refuser' } as T,
+      close: { en: 'Close', fr: 'Fermer' } as T,
+      back: { en: 'Back', fr: 'Retour' } as T,
+      confirmTitle: { en: 'Confirm receipt of the money?', fr: 'Confirmer la réception ?' } as T,
+      confirmBodyInstallment: {
+        en: 'Installment {n} will be marked paid and its step range released. The practitioner is notified.',
+        fr: 'L’échéance n°{n} sera marquée payée et sa tranche d’étapes débloquée. Le praticien en est informé.',
+      } as T,
+      confirmBodyInstallmentNoRank: {
+        en: 'The installment will be marked paid and its step range released. The practitioner is notified.',
+        fr: 'L’échéance sera marquée payée et sa tranche d’étapes débloquée. Le praticien en est informé.',
+      } as T,
+      confirmBodyFee: {
+        en: 'The treatment fee will be marked paid and the treatment plan can be prepared. The practitioner is notified.',
+        fr: 'Les honoraires seront marqués payés et le plan de traitement pourra être préparé. Le praticien en est informé.',
+      } as T,
+      notesLabel: { en: 'Internal note (optional)', fr: 'Note interne (facultatif)' } as T,
+      notesPh: {
+        en: 'e.g. matched on the statement of 26/11',
+        fr: 'p. ex. rapproché sur le relevé du 26/11',
+      } as T,
+      notesHelp: {
+        en: 'Seen by administrators only.',
+        fr: 'Visible par les administrateurs uniquement.',
+      } as T,
+      overrideLabel: {
+        en: 'Justification note (required without a receipt)',
+        fr: 'Note justificative (obligatoire sans reçu)',
+      } as T,
+      overridePh: {
+        en: 'e.g. transfer seen on the statement of 26/11, receipt not sent',
+        fr: 'p. ex. virement vu sur le relevé du 26/11, reçu non transmis',
+      } as T,
+      overrideHelp: {
+        en: 'Recorded in the order history. Between {min} and {max} characters.',
+        fr: 'Consignée dans l’historique de la commande. Entre {min} et {max} caractères.',
+      } as T,
+      confirmSubmit: { en: 'Confirm', fr: 'Confirmer' } as T,
+      rejectLabel: { en: 'Reason for rejection', fr: 'Motif du refus' } as T,
+      rejectHelp: {
+        en: 'The practitioner reads this reason. Between {min} and {max} characters.',
+        fr: 'Le praticien lira ce motif. Entre {min} et {max} caractères.',
+      } as T,
+      rejectPh: {
+        en: 'e.g. the amount does not match the statement',
+        fr: 'p. ex. le montant ne correspond pas au relevé',
+      } as T,
+      rejectSubmit: { en: 'Reject the transfer', fr: 'Refuser le virement' } as T,
+      counter: { en: '{count}/{max}', fr: '{count}/{max}' } as T,
+      tooShort: { en: 'At least {min} characters.', fr: 'Au moins {min} caractères.' } as T,
+      tooLong: { en: 'At most {max} characters.', fr: 'Au plus {max} caractères.' } as T,
+      alreadyTitle: { en: 'Already processed', fr: 'Déjà traité' } as T,
+      alreadyBody: {
+        en: 'Another administrator already processed this transfer, or the practitioner withdrew or replaced it. The list has been refreshed.',
+        fr: 'Un autre administrateur a déjà traité ce virement, ou le praticien l’a retiré ou remplacé. La liste a été actualisée.',
+      } as T,
+      failedTitle: { en: 'The action failed', fr: 'L’action a échoué' } as T,
+    },
+    viewer: {
+      loading: { en: 'Loading the receipt…', fr: 'Chargement du reçu…' } as T,
+      noneTitle: { en: 'No receipt attached', fr: 'Aucun reçu joint' } as T,
+      noneBody: {
+        en: 'This transfer was declared without a receipt.',
+        fr: 'Ce virement a été déclaré sans reçu.',
+      } as T,
+      notFoundTitle: { en: 'Receipt not found', fr: 'Reçu introuvable' } as T,
+      notFoundBody: {
+        en: 'This receipt is no longer available.',
+        fr: 'Ce reçu n’est plus disponible.',
+      } as T,
+      errorTitle: { en: 'The receipt cannot be shown', fr: 'Impossible d’afficher le reçu' } as T,
+      noPreviewTitle: { en: 'No preview', fr: 'Aperçu indisponible' } as T,
+      noPreviewBody: {
+        en: 'This format cannot be shown here: download the file.',
+        fr: 'Ce format ne s’affiche pas ici : téléchargez le fichier.',
+      } as T,
+      zoom: { en: 'Enlarge', fr: 'Agrandir' } as T,
+      openTab: { en: 'Open in a new tab', fr: 'Ouvrir dans un onglet' } as T,
+      download: { en: 'Download', fr: 'Télécharger' } as T,
+      imgAlt: { en: 'Transfer receipt, order {code}', fr: 'Reçu de virement, commande {code}' } as T,
+      iframeTitle: {
+        en: 'Transfer receipt (PDF), order {code}',
+        fr: 'Reçu de virement (PDF), commande {code}',
+      } as T,
+      lightboxCaption: { en: 'Receipt · {code}', fr: 'Reçu · {code}' } as T,
+      pdfPhoneHint: {
+        en: 'On a phone, open the PDF in a tab to read it in full.',
+        fr: 'Sur téléphone, ouvrez le PDF dans un onglet pour le lire en entier.',
+      } as T,
+    },
+    toast: {
+      confirmed: { en: 'Transfer confirmed', fr: 'Virement confirmé' } as T,
+      rejected: {
+        en: 'Transfer rejected — the practitioner is notified',
+        fr: 'Virement refusé — le praticien est informé',
+      } as T,
+    },
+  },
+
+  // What the sidebar's attention badges say to a screen reader and in their
+  // tooltip (components/app-sidebar.tsx → nav-main.tsx). Owned by P-B.
+  sidebarBadges: {
+    support: { en: '{count} unread', fr: '{count} non lus' } as T,
+    orders: { en: '{count} new orders', fr: '{count} nouvelles commandes' } as T,
+    users: { en: '{count} accounts to approve', fr: '{count} comptes à approuver' } as T,
+    transfers: { en: '{count} new transfers', fr: '{count} nouveaux virements' } as T,
+  },
+
   paymentsDesk: {
     title: { en: 'Payment history', fr: 'Historique des paiements' } as T,
     subtitle: {
@@ -117,6 +393,11 @@ export const paymentsDeskDomainDict = {
         fr: 'Paiements réussis uniquement, toutes catégories confondues. Les filtres des onglets ne modifient pas ces montants.',
       } as T,
       error: { en: 'Couldn’t load the totals.', fr: 'Impossible de charger les totaux.' } as T,
+      // When practitioners kept a retenue à la source back (spec §4): the
+      // figures above are the net (the cash); brut = net + retenue.
+      gross: { en: 'Gross {amount}', fr: 'Brut {amount}' } as T,
+      withheld: { en: 'Withholding tax {amount}', fr: 'Retenue {amount}' } as T,
+      net: { en: 'Net {amount}', fr: 'Net {amount}' } as T,
     },
 
     tabs: {
@@ -403,8 +684,8 @@ export const paymentsDeskDomainDict = {
       fr: 'Prix TTC : TVA {rate} % incluse',
     } as T,
     // 409 WITHHOLDING_CHOICE_CONFLICT from a card session (installment or
-    // treatment fee). Other PAYMENT_ATTEMPT_IN_PROGRESS refusals keep the
-    // server's message.
+    // treatment fee). PAYMENT_ATTEMPT_IN_PROGRESS refusals have their own
+    // copy (transfers.inFlight.*, lib/payments/payment-refusals.ts).
     choiceConflict: {
       en: 'A card payment is already open for this amount with the other withholding tax choice. Finish it on the payment page you opened, or wait a few minutes for it to expire, then try again.',
       fr: 'Un paiement par carte est déjà ouvert pour ce montant avec un autre choix de retenue à la source. Terminez-le sur la page de paiement déjà ouverte, ou attendez quelques minutes qu’il expire, puis réessayez.',

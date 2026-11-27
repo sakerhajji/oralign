@@ -1,8 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
   BatchStatus,
-  CompanyBillingSettings,
-  DentistProfile,
+  BatchUnlockSource,
   DevisLanguage,
   InstallmentStatus,
   OrderStatus,
@@ -26,14 +25,14 @@ import {
   UpdateQuotationDto,
 } from '../dto/quotation.dto';
 import { CompanyBillingSettingsService } from './company-billing-settings.service';
-import { pickTranslation } from './quotation-i18n';
 import { QuotationPaymentPlanService } from './quotation-payment-plan.service';
 import { QuotationPdfService } from './quotation-pdf.service';
+import { readQuoteSnapshots } from './quotation-snapshots';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { NotificationEvents } from '../../notifications/events/notification-events';
 import { isAdmin, type Caller } from '../../common/access/caller';
 import { lookupActorName } from '../../common/access/actor-snapshot';
-import { projectBatches } from '../../production/production-batch-projection';
+import { unlockStepBatches } from '../../production/batch-unlock';
 import {
   isQuotable,
   QUOTABLE_ORDER_SELECT,
@@ -92,11 +91,13 @@ export interface QuoteTotals {
  * are allowed while no money was received and none is in flight (see
  * quote-money.ts for what "received" and "in flight" mean).
  *
- * Snapshots — see Prisma comments. `companySnapshot` mirrors
- * CompanyBillingSettings at send time, `clinicSnapshot` mirrors the
- * doctor's DentistProfile at the same moment, so the PDF remains
- * faithful to the moment of issue no matter what admins / doctors edit
- * later.
+ * Snapshots (spec §6) — see Prisma comments and quotation-snapshots.ts.
+ * `companySnapshot` mirrors CompanyBillingSettings (stamp and retenue rule
+ * included) and `clinicSnapshot` the doctor's practice and contact, both
+ * REBUILT on every draft -> sent: a recalled devis sent again carries the
+ * current data, and the PDF stays faithful to the moment of issue no
+ * matter what admins / doctors edit later. A draft never persists one:
+ * its PDF renders from snapshots built in memory (QuotationPdfService).
  */
 @Injectable()
 export class QuotationService {
@@ -321,89 +322,6 @@ export class QuotationService {
   /** The row plus the money flags every quote response carries. */
   present<T extends Quotation>(quote: T): Promise<QuotationView<T>> {
     return presentQuote(this.prisma, quote);
-  }
-
-  // ─── Snapshot ─────────────────────────────────────────────────────────────
-
-  /**
-   * Build the JSONB payload that gets persisted on the Quotation row so
-   * old PDFs stay correct even if the admin edits company info later.
-   * Translations are resolved at snapshot time using the quote's chosen
-   * language (with French fallback).
-   */
-  private buildCompanySnapshot(
-    settings: CompanyBillingSettings,
-    language: DevisLanguage,
-    currency: string,
-    tvaRate: number,
-  ) {
-    return {
-      companyName: settings.companyName,
-      companyLogoPath: settings.companyLogoPath ?? null,
-      companyAddress: settings.companyAddress ?? null,
-      companyCity: settings.companyCity ?? null,
-      companyCountry: settings.companyCountry ?? null,
-      companyPhone: settings.companyPhone ?? null,
-      companyEmail: settings.companyEmail ?? null,
-      taxRegistrationNumber: settings.taxRegistrationNumber ?? null,
-      tvaRate,
-      // The devis states that this stamp is added to each payment (one
-      // facture per payment); frozen with the rest of the company block.
-      stampDuty: toAmount(settings.stampDuty),
-      currency,
-      selectedLanguage: language,
-      legalText: pickTranslation(settings.legalTextTranslations, language),
-      footerText: pickTranslation(settings.footerTextTranslations, language),
-      // Carry the FULL translation maps so the PDF renderer can
-      // re-resolve when the admin or doctor regenerates in a
-      // different language without losing the historical snapshot.
-      // Legacy snapshots without these fields stay valid — the
-      // renderer falls back to the resolved `legalText`/`footerText`
-      // strings above.
-      legalTextTranslations:
-        (settings.legalTextTranslations as Record<string, unknown> | null) ??
-        null,
-      footerTextTranslations:
-        (settings.footerTextTranslations as Record<string, unknown> | null) ??
-        null,
-      bankDetails:
-        (settings.bankDetails as Record<string, string> | null) ?? null,
-      generatedAt: new Date().toISOString(),
-    };
-  }
-
-  /**
-   * Clinic snapshot — the doctor's dentist profile at the moment the
-   * Quote is sent. Used as the "Billed to" block on the PDF.
-   */
-  private buildClinicSnapshot(
-    doctor: { id: string; fullName: string; email: string },
-    profile: DentistProfile | null,
-    patient: { fullName: string | null } | null = null,
-  ) {
-    return {
-      doctorId: doctor.id,
-      doctorFullName: doctor.fullName,
-      doctorEmail: doctor.email,
-      // Patient name is snapshotted alongside the clinic so the PDF
-      // header has it without re-joining the live Patient row at
-      // render time. Optional — legacy quotes pre-date this field and
-      // the PDF renderer falls back to `—` when it's missing.
-      patientFullName: patient?.fullName ?? null,
-      clinicName: profile?.clinicName ?? null,
-      clinicAddress: profile?.clinicAddress ?? null,
-      city: profile?.city ?? null,
-      country: profile?.country ?? null,
-      clinicPhone: profile?.clinicPhone ?? null,
-      clinicEmail: profile?.clinicEmail ?? null,
-      // Doctor's "Matricule fiscal" — snapshotted so historical quotes
-      // lock in the tax id that was on file at send time. The invoice
-      // renderer reads this key first, then falls back to the live
-      // profile.
-      taxId: profile?.taxId ?? null,
-      logoUrl: profile?.logoUrl ?? null,
-      generatedAt: new Date().toISOString(),
-    };
   }
 
   // ─── Public methods ───────────────────────────────────────────────────────
@@ -674,16 +592,22 @@ export class QuotationService {
               where: { id: { in: ids } },
               data: { amount: 0, status: InstallmentStatus.cancelled },
             });
-            const unlocked = await tx.quoteStepBatch.updateMany({
+            // Their locked batches are released through the one writer
+            // (production/batch-unlock.ts): a guarded update per batch, then
+            // ONE D2 projection on the whole set (steps delivered before
+            // they were released flip their batch to delivered now, in this
+            // transaction), then a batch_unlocked journal row per batch with
+            // source installment_cancelled and the editing admin.
+            const locked = await tx.quoteStepBatch.findMany({
               where: { installmentId: { in: ids }, status: BatchStatus.locked },
-              data: { status: BatchStatus.unlocked, unlockedAt: new Date() },
+              select: { id: true },
+              orderBy: { batchNumber: 'asc' },
             });
-            // Steps delivered before they were released flip their batch
-            // to delivered now, in this transaction (D2).
-            if (unlocked.count > 0) {
-              await projectBatches(tx, {
-                orderId: fresh.orderId,
-                actorId: null,
+            if (locked.length > 0) {
+              await unlockStepBatches(tx, {
+                batchIds: locked.map((batch) => batch.id),
+                source: BatchUnlockSource.installment_cancelled,
+                actor: caller,
               });
             }
           }
@@ -810,11 +734,19 @@ export class QuotationService {
   }
 
   /**
-   * Ensure the quote has a number + snapshots, generating them if
-   * needed. Called by both `send()` and the PDF generator so either
-   * entry point produces a complete record.
+   * Ensure a quote that is about to be rendered has what its PDF needs.
+   *   - A draft gets its DEV- number (allocated the first time its PDF is
+   *     generated, whichever comes first with send) and nothing else: a
+   *     draft PDF renders from snapshots built in memory, so previewing a
+   *     draft never freezes the doctor's or the company's data (DECISIONS
+   *     §6). send() is what freezes them.
+   *   - A quote out of draft keeps its snapshots; a legacy one issued
+   *     without them gets them now (and its number), once.
    */
   async ensureSnapshotAndNumber(quote: Quotation): Promise<Quotation> {
+    if (quote.status === QuotationStatus.draft) {
+      return this.ensureNumber(quote);
+    }
     if (
       quote.quotationNumber &&
       quote.companySnapshot &&
@@ -824,44 +756,11 @@ export class QuotationService {
     }
 
     const settings = await this.settingsService.requireActive();
-    const order = await this.prisma.dentalOrder.findUniqueOrThrow({
-      where: { id: quote.orderId },
-      include: {
-        doctor: {
-          select: {
-            id: true,
-            fullName: true,
-            email: true,
-            dentistProfile: true,
-          },
-        },
-        // Patient is needed both for the snapshot (PDF "billed to"
-        // section) and for the new `dv_<patient>_<date>` number
-        // format. Single join, both consumers happy.
-        patient: { select: { fullName: true } },
-      },
-    });
-
-    const companySnapshot = this.buildCompanySnapshot(
-      settings,
-      quote.language,
-      quote.currency,
-      quote.tvaRate,
-    );
-    const clinicSnapshot = this.buildClinicSnapshot(
-      {
-        id: order.doctor.id,
-        fullName: order.doctor.fullName,
-        email: order.doctor.email,
-      },
-      order.doctor.dentistProfile ?? null,
-      order.patient,
-    );
-
+    const snapshots = await readQuoteSnapshots(this.prisma, settings, quote);
     const quotationNumber =
       quote.quotationNumber ??
       (await this.settingsService.allocateQuotationNumber({
-        patientFullName: order.patient?.fullName ?? null,
+        patientFullName: snapshots.patientFullName,
         createdAt: quote.createdAt,
       }));
 
@@ -869,20 +768,47 @@ export class QuotationService {
       where: { id: quote.id },
       data: {
         quotationNumber,
-        companySnapshot: companySnapshot as unknown as Prisma.InputJsonValue,
-        clinicSnapshot: clinicSnapshot as unknown as Prisma.InputJsonValue,
+        companySnapshot: quote.companySnapshot ?? snapshots.companySnapshot,
+        clinicSnapshot: quote.clinicSnapshot ?? snapshots.clinicSnapshot,
       },
     });
+  }
+
+  /** The DEV- number of a quote, allocated once (guarded on null). */
+  private async ensureNumber(quote: Quotation): Promise<Quotation> {
+    if (quote.quotationNumber) return quote;
+    const order = await this.prisma.dentalOrder.findUnique({
+      where: { id: quote.orderId },
+      select: { patient: { select: { fullName: true } } },
+    });
+    const allocated = await this.settingsService.allocateQuotationNumber({
+      patientFullName: order?.patient?.fullName ?? null,
+      createdAt: quote.createdAt,
+    });
+    // A concurrent render or send numbered it first: keep that number.
+    const claimed = await this.prisma.quotation.updateMany({
+      where: { id: quote.id, quotationNumber: null },
+      data: { quotationNumber: allocated },
+    });
+    if (claimed.count === 0) {
+      return this.prisma.quotation.findUniqueOrThrow({
+        where: { id: quote.id },
+      });
+    }
+    return { ...quote, quotationNumber: allocated };
   }
 
   /**
    * Send the quote to the doctor. Transitions:
    *   quotation.status: draft → sent
    *   order.status: → quotation_sent
-   * Locks in quotationNumber + companySnapshot + clinicSnapshot, and
-   * renders the stored devis PDF so the practitioner always downloads
-   * the version that was sent (best effort: a renderer failure is logged
-   * and never blocks the send; generate-pdf can retry it).
+   * Freezes quotationNumber and REBUILDS companySnapshot + clinicSnapshot
+   * from the current settings and doctor profile (spec §6: every draft ->
+   * sent, so a recalled devis sent again is never stale), in the same
+   * transaction as the status change, guarded on draft (a double click
+   * sends once). Then renders the stored devis PDF so the practitioner
+   * always downloads the version that was sent (best effort: a renderer
+   * failure is logged and never blocks the send; generate-pdf retries).
    */
   async send(id: string, caller: Caller): Promise<QuotationView<Quotation>> {
     if (!isAdmin(caller)) {
@@ -915,21 +841,38 @@ export class QuotationService {
       }
     }
 
-    quote = await this.ensureSnapshotAndNumber(quote);
+    // The number first (guarded claim, so a concurrent draft render and
+    // this send agree on one), then the snapshots as of now.
+    quote = await this.ensureNumber(quote);
+    const settings = await this.settingsService.requireActive();
+    const sentAt = new Date();
+    const snapshots = await readQuoteSnapshots(
+      this.prisma,
+      settings,
+      quote,
+      sentAt,
+    );
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      const u = await tx.quotation.update({
-        where: { id: quote.id },
+      const sent = await tx.quotation.updateMany({
+        where: { id: quote.id, status: QuotationStatus.draft },
         data: {
           status: QuotationStatus.sent,
-          sentAt: new Date(),
+          sentAt,
+          companySnapshot: snapshots.companySnapshot,
+          clinicSnapshot: snapshots.clinicSnapshot,
         },
       });
+      if (sent.count === 0) {
+        throw new BadRequestException(
+          'This quotation was already sent by another request.',
+        );
+      }
       await tx.dentalOrder.update({
         where: { id: quote.orderId },
         data: { status: OrderStatus.quotation_sent },
       });
-      return u;
+      return tx.quotation.findUniqueOrThrow({ where: { id: quote.id } });
     });
     const sent = await this.quotationPdf.refreshStoredPdf(updated, {
       force: true,
@@ -979,10 +922,7 @@ export class QuotationService {
    * a flow, so we can't accidentally send a pack quote down the legacy
    * fabrication path (which would skip payment entirely).
    */
-  async approve(
-    id: string,
-    caller: Caller,
-  ): Promise<QuotationView<Quotation>> {
+  async approve(id: string, caller: Caller): Promise<QuotationView<Quotation>> {
     const quote = await this.loadQuotation(id);
     const order = await this.assertOrderReadable(quote.orderId, caller);
 
@@ -1239,7 +1179,10 @@ export class QuotationService {
   }
 
   private assertRecallable(status: QuotationStatus): void {
-    if (status !== QuotationStatus.sent && status !== QuotationStatus.approved) {
+    if (
+      status !== QuotationStatus.sent &&
+      status !== QuotationStatus.approved
+    ) {
       throw new BadRequestException(
         `Only "sent" or "approved" quotations can be recalled to draft (current: ${status}).`,
       );

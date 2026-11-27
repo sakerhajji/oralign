@@ -8,6 +8,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  isWithholdingEligible,
   paymentSplitOf,
   previewPlanStamps,
   previewInclusiveInvoice,
@@ -15,6 +16,7 @@ import {
   previewPaymentCharge,
   previewWithholding,
   sumPaymentCharges,
+  withholdingIneligibility,
 } from './tax-split.ts';
 
 describe('previewPaymentCharge', () => {
@@ -77,8 +79,9 @@ describe('previewInstallmentCharges', () => {
 
   it('is the single payment when there is one installment', () => {
     const one = previewInstallmentCharges([1000], 1, 1, true);
-    const { count, ...rest } = one;
+    const { count, smallestDue, ...rest } = one;
     assert.equal(count, 1);
+    assert.equal(smallestDue, 1000);
     assert.deepEqual(rest, previewPaymentCharge(1000, 1, 1, true));
   });
 
@@ -166,5 +169,65 @@ describe('previewPlanStamps', () => {
   it('adds nothing without a stamp or a payment', () => {
     assert.equal(previewPlanStamps(3000, 3, 0).total, 3000);
     assert.equal(previewPlanStamps(3000, 0, 1).stamps, 0);
+  });
+});
+
+describe('withholdingIneligibility (mirror of the server rule)', () => {
+  const on = { enabled: true, rate: 1, threshold: 1000 };
+
+  it('is eligible at the threshold and above, to the millime', () => {
+    assert.equal(withholdingIneligibility(1000, on), null);
+    assert.equal(withholdingIneligibility('1000.000', on), null);
+    assert.equal(withholdingIneligibility(2380, on), null);
+    assert.equal(isWithholdingEligible(1000, on), true);
+  });
+
+  it('is below the threshold one millime under it', () => {
+    assert.equal(withholdingIneligibility(999.999, on), 'below_threshold');
+    // A 2 380 devis in 3 x 793.333: each payment is its own base.
+    assert.equal(withholdingIneligibility('793.333', on), 'below_threshold');
+    assert.equal(isWithholdingEligible(999.999, on), false);
+  });
+
+  it('is disabled when switched off or without a rate, whatever the amount', () => {
+    for (const rule of [
+      { ...on, enabled: false },
+      { ...on, enabled: null },
+      { ...on, enabled: undefined },
+      { ...on, rate: 0 },
+      { ...on, rate: null },
+      { ...on, rate: -1 },
+    ]) {
+      assert.equal(withholdingIneligibility(5000, rule), 'disabled');
+      assert.equal(withholdingIneligibility(10, rule), 'disabled');
+    }
+  });
+
+  it('has no threshold when none is given; 0 lets every payment through', () => {
+    assert.equal(withholdingIneligibility(10, { enabled: true, rate: 1, threshold: null }), null);
+    assert.equal(withholdingIneligibility(10, { enabled: true, rate: 1 }), null);
+    assert.equal(withholdingIneligibility(0.001, { ...on, threshold: 0 }), null);
+  });
+
+  it('reads decimal strings as the API sends them', () => {
+    assert.equal(withholdingIneligibility('1000.000', { enabled: true, rate: '1.00', threshold: '1000.000' }), null);
+    assert.equal(
+      withholdingIneligibility('999.999', { enabled: true, rate: '1', threshold: '1000' }),
+      'below_threshold',
+    );
+  });
+});
+
+describe('sumPaymentCharges smallestDue', () => {
+  it('is the smallest counted due, so one choice for all only when it qualifies', () => {
+    const c = previewInstallmentCharges(['1200', '793.333', 0, '1500'], 1, 1, false);
+    assert.equal(c.count, 3);
+    assert.equal(c.smallestDue, 793.333);
+    assert.equal(isWithholdingEligible(c.smallestDue, { enabled: true, rate: 1, threshold: 1000 }), false);
+  });
+
+  it('is 0 without any payment', () => {
+    assert.equal(sumPaymentCharges([]).smallestDue, 0);
+    assert.equal(previewInstallmentCharges([0, null], 1, 1, true).smallestDue, 0);
   });
 });

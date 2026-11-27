@@ -117,6 +117,7 @@ import {
   UserRole,
 } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { doctorContactEmail } from '@/lib/doctor/doctor-contact';
 import {
   OrderPatientCell,
   OrderReviewBadge,
@@ -1070,7 +1071,7 @@ export default function OrdersPage() {
                           {order.doctor?.fullName ?? t('ordersPage.noDentist')}
                         </p>
                         <p className="truncate text-xs text-muted-foreground">
-                          {order.doctor?.email}
+                          {doctorContactEmail(order.doctor)}
                         </p>
                       </div>
                     </TableCell>

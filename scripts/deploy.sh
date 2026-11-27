@@ -66,6 +66,16 @@ step "Pulling latest code"
 git fetch --prune origin
 git checkout main
 git pull --ff-only origin main
+# DEPLOY_SHA (set by the "Deploy to production" workflow): deploy that
+# exact commit, the one whose CI passed, even if main moved on since.
+if [[ -n "${DEPLOY_SHA:-}" ]]; then
+  git merge-base --is-ancestor "${DEPLOY_SHA}" HEAD \
+    || fail "DEPLOY_SHA ${DEPLOY_SHA} is not on origin/main"
+  if [[ "$(git rev-parse HEAD)" != "$(git rev-parse "${DEPLOY_SHA}^{commit}")" ]]; then
+    git checkout --detach "${DEPLOY_SHA}"
+    ok "main moved on since CI: deploying ${DEPLOY_SHA:0:12} exactly (detached)"
+  fi
+fi
 NEW_COMMIT=$(git rev-parse HEAD)
 ok "Now at ${NEW_COMMIT:0:12} ($(git log -1 --pretty=%s))"
 

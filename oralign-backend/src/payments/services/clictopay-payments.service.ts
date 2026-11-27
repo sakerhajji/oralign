@@ -27,6 +27,10 @@ import {
   type TreatmentFeeEvent,
 } from '../../notifications/events/notification-events';
 import { assertTreatmentFeeApplies } from '../../orders/order-kind';
+import {
+  isAwaitingFee,
+  SETTLED_IN_PERSON_FEE_DATA,
+} from '../../orders/services/treatment-fee-transfer';
 import { PrismaService } from '../../prisma/prisma.service';
 import { QuotationService } from '../../quotations/services/quotation.service';
 import { ClicToPayClient } from '../clictopay/clictopay.client';
@@ -37,13 +41,16 @@ import {
   assertNoOtherPaymentInFlight,
   chargesTheSame,
   expectedCharge,
+  PAYMENT_ATTEMPT_IN_PROGRESS,
   PAYMENT_CHARGE_CHANGED,
   paymentChargeData,
   paymentGross,
   paymentSettled,
   readChargeSettings,
+  readTreatmentFeeSettings,
   resolvePaymentCharge,
   toRate,
+  TRANSFER_IN_FLIGHT_MESSAGE,
   treatmentFeeDue,
   WITHHOLDING_CHOICE_CONFLICT,
 } from './payment-rules';
@@ -207,7 +214,9 @@ export class ClicToPayPaymentsService {
           providerErrorMessage: null,
         },
       });
-      this.logger.log(`ClicToPay session registered for payment ${payment.id}.`);
+      this.logger.log(
+        `ClicToPay session registered for payment ${payment.id}.`,
+      );
       return this.toSession(registered);
     } catch (error) {
       const failure = this.normaliseError(error);
@@ -244,8 +253,13 @@ export class ClicToPayPaymentsService {
     }
   }
 
-  async verify(paymentId: string, caller: Caller): Promise<HostedPaymentSession> {
-    const payment = await this.prisma.payment.findUnique({ where: { id: paymentId } });
+  async verify(
+    paymentId: string,
+    caller: Caller,
+  ): Promise<HostedPaymentSession> {
+    const payment = await this.prisma.payment.findUnique({
+      where: { id: paymentId },
+    });
     if (!payment || payment.provider !== PaymentProvider.clictopay) {
       throw new NotFoundException('Payment not found.');
     }
@@ -264,7 +278,7 @@ export class ClicToPayPaymentsService {
         orderId: payment.providerOrderId ?? undefined,
         orderNumber: payment.providerOrderId
           ? undefined
-          : payment.merchantOrderNumber ?? undefined,
+          : (payment.merchantOrderNumber ?? undefined),
       });
     } catch (error) {
       const failure = this.normaliseError(error);
@@ -301,7 +315,9 @@ export class ClicToPayPaymentsService {
           verificationCount: { increment: 1 },
         },
       });
-      this.logger.error(`ClicToPay identity mismatch for payment ${payment.id}.`);
+      this.logger.error(
+        `ClicToPay identity mismatch for payment ${payment.id}.`,
+      );
       return this.toSession(unknown);
     }
 
@@ -321,7 +337,8 @@ export class ClicToPayPaymentsService {
         payment.purpose === PaymentPurpose.installment
           ? await this.payments.handleSuccess({
               paymentId: payment.id,
-              transactionId: payment.providerOrderId ?? payment.merchantOrderNumber!,
+              transactionId:
+                payment.providerOrderId ?? payment.merchantOrderNumber!,
               actor: caller,
             })
           : await this.settleTreatmentFee(payment.id);
@@ -336,7 +353,10 @@ export class ClicToPayPaymentsService {
     // Registered, never paid, past its deadline: the hosted session is dead.
     // Surfacing it as EXPIRED is what lets the return page offer a fresh
     // attempt instead of sending the customer back to a dead URL.
-    if (nextStatus === PaymentRecordStatus.pending && this.isSessionStale(updated)) {
+    if (
+      nextStatus === PaymentRecordStatus.pending &&
+      this.isSessionStale(updated)
+    ) {
       await this.expireSession(updated.id);
       const expired = await this.prisma.payment.findUnique({
         where: { id: updated.id },
@@ -473,28 +493,14 @@ export class ClicToPayPaymentsService {
       select: { cbctFeeAmount: true },
     });
     if (!order) return null;
-    const settings = await this.readFeeSettings(this.prisma);
+    // The one read of the fee's settings (fee, stamp, retenue and its
+    // threshold snapshot), shared with TreatmentFeeService.
+    const settings = await readTreatmentFeeSettings(this.prisma);
     return expectedCharge(
       dto.applyWithholding,
-      treatmentFeeDue(settings?.defaultTreatmentFee, order.cbctFeeAmount),
-      settings ?? {},
+      treatmentFeeDue(settings.defaultTreatmentFee, order.cbctFeeAmount),
+      settings,
     );
-  }
-
-  /** The settings a treatment-fee attempt is priced with. */
-  private readFeeSettings(
-    db: Pick<Prisma.TransactionClient, 'companyBillingSettings'>,
-  ) {
-    return db.companyBillingSettings.findFirst({
-      where: { isActive: true },
-      orderBy: { updatedAt: 'desc' },
-      select: {
-        defaultTreatmentFee: true,
-        defaultCurrency: true,
-        withholdingRate: true,
-        stampDuty: true,
-      },
-    });
   }
 
   private liveAttemptWhere(
@@ -505,9 +511,15 @@ export class ClicToPayPaymentsService {
       status: { in: LIVE_STATUSES },
     };
     if (dto.purpose === PaymentPurpose.installment) {
-      return dto.installmentId ? { ...base, installmentId: dto.installmentId } : null;
+      return dto.installmentId
+        ? { ...base, installmentId: dto.installmentId }
+        : null;
     }
-    return { ...base, orderId: dto.orderId, purpose: PaymentPurpose.treatment_fee };
+    return {
+      ...base,
+      orderId: dto.orderId,
+      purpose: PaymentPurpose.treatment_fee,
+    };
   }
 
   /** Usable: still pending, with a hosted URL, and before its deadline. */
@@ -577,7 +589,11 @@ export class ClicToPayPaymentsService {
         where: { id: dto.installmentId },
         include: { quotation: { include: { order: true } } },
       });
-      if (!installment || installment.quotation.deletedAt || installment.quotation.order.deletedAt) {
+      if (
+        !installment ||
+        installment.quotation.deletedAt ||
+        installment.quotation.order.deletedAt
+      ) {
         throw new NotFoundException('Installment not found.');
       }
       if (installment.quotation.orderId !== dto.orderId) {
@@ -590,7 +606,11 @@ export class ClicToPayPaymentsService {
       this.assertInstallmentPayable(installment);
       // A transfer awaiting the admin is another payment of the same
       // installment: 409 rather than a second charge.
-      await assertNoOtherPaymentInFlight(tx, installment.id, PaymentMethod.card);
+      await assertNoOtherPaymentInFlight(
+        tx,
+        installment.id,
+        PaymentMethod.card,
+      );
 
       const live = await tx.payment.findFirst({
         where: {
@@ -624,7 +644,10 @@ export class ClicToPayPaymentsService {
       );
       const attemptNumber =
         (await tx.payment.count({
-          where: { installmentId: installment.id, provider: PaymentProvider.clictopay },
+          where: {
+            installmentId: installment.id,
+            provider: PaymentProvider.clictopay,
+          },
         })) + 1;
       const payment = await tx.payment.create({
         data: {
@@ -645,7 +668,10 @@ export class ClicToPayPaymentsService {
       });
       return { payment, created: true };
     });
-    await this.quotations.approveOnFirstPayment(created.payment.quotationId!, caller);
+    await this.quotations.approveOnFirstPayment(
+      created.payment.quotationId!,
+      caller,
+    );
     return created;
   }
 
@@ -656,8 +682,11 @@ export class ClicToPayPaymentsService {
   ): Promise<{ payment: Payment; created: boolean }> {
     return this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "DentalOrder" WHERE id = ${dto.orderId} FOR UPDATE`;
-      const order = await tx.dentalOrder.findUnique({ where: { id: dto.orderId } });
-      if (!order || order.deletedAt) throw new NotFoundException('Order not found.');
+      const order = await tx.dentalOrder.findUnique({
+        where: { id: dto.orderId },
+      });
+      if (!order || order.deletedAt)
+        throw new NotFoundException('Order not found.');
       this.assertOrderAccess(order.doctorId, caller);
       assertTreatmentFeeApplies(order);
       if (order.treatmentFeePaidAt) {
@@ -673,6 +702,17 @@ export class ClicToPayPaymentsService {
         throw new BadRequestException(
           "Nothing to pay: this case's fees are covered by the welcome gift.",
           'WELCOME_GIFT_NOTHING_DUE',
+        );
+      }
+      // A bank transfer of this fee awaits the admin: charging the card
+      // beside it is how a fee gets paid twice. Same rule as an installment
+      // (assertNoOtherPaymentInFlight) and as the cash path: confirm or
+      // refuse the transfer, or withdraw it, first. Read under the row lock
+      // the declaration also takes, so the two can never both win.
+      if (isAwaitingFee(order)) {
+        throw new ConflictException(
+          TRANSFER_IN_FLIGHT_MESSAGE,
+          PAYMENT_ATTEMPT_IN_PROGRESS,
         );
       }
 
@@ -692,15 +732,15 @@ export class ClicToPayPaymentsService {
       const reusable = live && !this.isSessionStale(live) ? live : null;
       if (reusable) this.assertSameWithholdingChoice(reusable, dto);
 
-      const settings = await this.readFeeSettings(tx);
+      const settings = await readTreatmentFeeSettings(tx);
       const due = treatmentFeeDue(
-        settings?.defaultTreatmentFee,
+        settings.defaultTreatmentFee,
         order.cbctFeeAmount,
       );
       if (reusable) {
         this.assertSameCharge(
           reusable,
-          expectedCharge(dto.applyWithholding, due, settings ?? {}),
+          expectedCharge(dto.applyWithholding, due, settings),
         );
         return { payment: reusable, created: false };
       }
@@ -716,11 +756,7 @@ export class ClicToPayPaymentsService {
       // The card is charged the cash: the fee + CBCT + the stamp, minus the
       // retenue when applied. Settlement copies retenue and stamp onto the
       // order.
-      const charge = resolvePaymentCharge(
-        dto.applyWithholding,
-        due,
-        settings ?? {},
-      );
+      const charge = resolvePaymentCharge(dto.applyWithholding, due, settings);
       const attemptNumber =
         (await tx.payment.count({
           where: {
@@ -735,7 +771,7 @@ export class ClicToPayPaymentsService {
           quotationId: null,
           installmentId: null,
           ...paymentChargeData(charge),
-          currency: settings?.defaultCurrency ?? 'TND',
+          currency: settings.defaultCurrency ?? 'TND',
           purpose: PaymentPurpose.treatment_fee,
           provider: PaymentProvider.clictopay,
           status: PaymentRecordStatus.pending,
@@ -782,10 +818,23 @@ export class ClicToPayPaymentsService {
       if (order.treatmentFeePaidAt) {
         return { payment: settled, order, notify: false };
       }
+      if (isAwaitingFee(order)) {
+        // Not reachable through the guards (a declaration refuses a live
+        // card attempt and an attempt refuses a declaration awaiting), but
+        // the money was taken: the card wins, and the declaration stays in
+        // the order history for the admin to sort out.
+        this.logger.warn(
+          `Card payment ${payment.id} settled the treatment fee of order ${order.id} while a bank transfer awaited confirmation.`,
+        );
+      }
       const applied = appliesWithholding(payment);
       const updatedOrder = await tx.dentalOrder.update({
         where: { id: order.id },
         data: {
+          // The fee columns now describe THIS card payment: no earlier
+          // declaration, review, refusal or receipt pointer survives it
+          // (the receipt file stays on disk, the refusal in the history).
+          ...SETTLED_IN_PERSON_FEE_DATA,
           treatmentFeePaidAt: now,
           // The cash collected; the fee due is this + the retenue - the
           // stamp, both copied from the attempt the card was charged with.
@@ -795,6 +844,8 @@ export class ClicToPayPaymentsService {
             ? payment.withholdingAmount
             : null,
           treatmentFeeStampAmount: payment.stampAmount,
+          // The retenue threshold the attempt was priced under (snapshot).
+          treatmentFeeWithholdingThreshold: payment.withholdingThreshold,
           treatmentFeePaymentMethod: PaymentMethod.card,
           treatmentFeePaymentStatus: PaymentRecordStatus.success,
         },
@@ -824,13 +875,20 @@ export class ClicToPayPaymentsService {
     return result.payment;
   }
 
-  private async assertPaymentAccess(payment: Payment, caller: Caller): Promise<void> {
+  private async assertPaymentAccess(
+    payment: Payment,
+    caller: Caller,
+  ): Promise<void> {
     if (isAdmin(caller)) return;
     const order = await this.prisma.dentalOrder.findUnique({
       where: { id: payment.orderId },
       select: { doctorId: true },
     });
-    if (!order || caller.role !== UserRole.dentist || order.doctorId !== caller.userId) {
+    if (
+      !order ||
+      caller.role !== UserRole.dentist ||
+      order.doctorId !== caller.userId
+    ) {
       throw new ForbiddenException('You cannot access this payment.');
     }
   }
@@ -878,7 +936,10 @@ export class ClicToPayPaymentsService {
     if (status.amount !== undefined && status.amount !== expectedAmount) {
       return 'The provider returned a different payment amount.';
     }
-    if (status.currency !== undefined && status.currency !== env.clicToPay.currency) {
+    if (
+      status.currency !== undefined &&
+      status.currency !== env.clicToPay.currency
+    ) {
       return 'The provider returned a different currency.';
     }
     return null;
@@ -900,7 +961,10 @@ export class ClicToPayPaymentsService {
     }
   }
 
-  private callbackUrl(configuredUrl: string | undefined, paymentId: string): string {
+  private callbackUrl(
+    configuredUrl: string | undefined,
+    paymentId: string,
+  ): string {
     if (!configuredUrl) {
       throw new AppException(
         503,
@@ -919,7 +983,10 @@ export class ClicToPayPaymentsService {
       .slice(0, 32);
   }
 
-  private assertReplayMatches(payment: Payment, dto: CreateClicToPaySessionDto): void {
+  private assertReplayMatches(
+    payment: Payment,
+    dto: CreateClicToPaySessionDto,
+  ): void {
     if (
       payment.orderId !== dto.orderId ||
       payment.purpose !== dto.purpose ||

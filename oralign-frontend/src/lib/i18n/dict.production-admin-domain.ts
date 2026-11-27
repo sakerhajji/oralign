@@ -267,10 +267,12 @@ export const productionAdminDomainDict = {
           } as T,
         },
         unreleased_delivery: {
-          title: { en: 'Delivered before release', fr: 'Livré avant libération' } as T,
+          // Any of the four acts on a locked step (P-C): the key keeps its
+          // old name, the row's detail names the act.
+          title: { en: 'Entered before unlock', fr: 'Saisi avant déblocage' } as T,
           body: {
-            en: 'An administrator confirmed the delivery of steps whose batch was not paid yet. The batch turns delivered once it is paid.',
-            fr: 'Un administrateur a confirmé la livraison d’étapes dont le lot n’était pas encore payé. Le lot passera livré une fois payé.',
+            en: 'Steps entered (print, thermoform, cut or delivery) while their batch was not unlocked yet: an administrator’s confirmed override with a note, or a technician entry made before the 27/11/2026 rule. A delivered batch turns delivered once it is unlocked.',
+            fr: 'Des étapes saisies (impression, thermoformage, découpe ou livraison) alors que leur tranche n’était pas encore débloquée : dérogation confirmée par un administrateur avec une note, ou saisie technicien antérieure à la règle du 27/11/2026. Une tranche livrée passe livrée une fois débloquée.',
           } as T,
         },
         confirmed_warning: {

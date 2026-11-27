@@ -70,6 +70,50 @@ export function previewWithholding(
   };
 }
 
+/**
+ * The retenue à la source rule in force (spec §4), as the billing
+ * settings (or a document's snapshot) describe it.
+ */
+export interface WithholdingRulePreview {
+  /** The master switch; anything but true is off. */
+  enabled?: boolean | null;
+  /** The rate (%); 0 or unset means the retenue cannot apply. */
+  rate?: number | string | null;
+  /** Base (TTC, stamp excluded) from which it may apply; null = no threshold. */
+  threshold?: number | string | null;
+}
+
+/** Why the retenue cannot apply to a payment; null when it can. */
+export type WithholdingIneligibility = 'disabled' | 'below_threshold';
+
+/**
+ * Mirror of the server's withholdingIneligibility (common/billing/
+ * tax-split.ts): switched on, a rate above 0, and the payment's base (the
+ * installment, or the fee + CBCT: TTC, stamp excluded) at or above the
+ * threshold, compared in millimes. Each payment is its own base: a 2 380
+ * devis paid as 3 x 793,333 never qualifies at a 1 000 threshold.
+ */
+export function withholdingIneligibility(
+  base: number | string | null | undefined,
+  rule: WithholdingRulePreview,
+): WithholdingIneligibility | null {
+  if (rule.enabled !== true || toBasisPoints(rule.rate) === 0) return 'disabled';
+  if (rule.threshold === null || rule.threshold === undefined || rule.threshold === '') {
+    return null;
+  }
+  const baseM = Math.max(0, toMillimes(base));
+  const thresholdM = Math.max(0, toMillimes(rule.threshold));
+  return baseM < thresholdM ? 'below_threshold' : null;
+}
+
+/** True when the retenue may be applied to a payment of `base`. */
+export function isWithholdingEligible(
+  base: number | string | null | undefined,
+  rule: WithholdingRulePreview,
+): boolean {
+  return withholdingIneligibility(base, rule) === null;
+}
+
 export interface InclusiveSplitPreview {
   total: number;
   stamp: number;
@@ -212,6 +256,12 @@ export function previewPaymentCharge(
 export interface PaymentChargesPreview extends PaymentChargePreview {
   /** How many payments the figures add up (each one its own facture and stamp). */
   count: number;
+  /**
+   * The smallest due among those payments (0 when there are none): the
+   * retenue threshold applies payment by payment, so one retenue choice
+   * for all of them is only possible when this one reaches it.
+   */
+  smallestDue: number;
 }
 
 /**
@@ -224,12 +274,16 @@ export function sumPaymentCharges(charges: PaymentChargePreview[]): PaymentCharg
   let stampM = 0;
   let withholdingM = 0;
   let count = 0;
+  let smallestM: number | null = null;
   for (const c of charges) {
     const d = toMillimes(c.due);
     dueM += d;
     stampM += toMillimes(c.stamp);
     withholdingM += toMillimes(c.withholding);
-    if (d > 0) count += 1;
+    if (d > 0) {
+      count += 1;
+      smallestM = smallestM === null ? d : Math.min(smallestM, d);
+    }
   }
   return {
     due: fromMillimes(dueM),
@@ -239,6 +293,7 @@ export function sumPaymentCharges(charges: PaymentChargePreview[]): PaymentCharg
     withholding: fromMillimes(withholdingM),
     cash: fromMillimes(dueM + stampM - withholdingM),
     count,
+    smallestDue: fromMillimes(smallestM ?? 0),
   };
 }
 

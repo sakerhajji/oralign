@@ -1075,7 +1075,8 @@ export const commerceDomainDict = {
       changeBtn: { en: 'Change', fr: 'Changer' } as T,
     },
 
-    // treatment-fee-payment-dialog.tsx — bank instructions panel
+    // components/payments/bank-transfer-instructions.tsx — bank details panel
+    // (treatment fee and pack installment transfers)
     bank: {
       notConfiguredTitle: {
         en: 'Bank account not configured yet',

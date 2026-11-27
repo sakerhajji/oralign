@@ -22,6 +22,10 @@ import { useT } from '@/lib/i18n/lang-context';
 import { pickLocalized } from '@/lib/api/blog.service';
 import { hasUsableBankTransferDetails } from '@/lib/payments/bank-transfer';
 import {
+  BankTransferInstructions,
+  transferBeneficiary,
+} from '@/components/payments/bank-transfer-instructions';
+import {
   ArchType,
   BatchStatus,
   InstallmentStatus,
@@ -2679,7 +2683,34 @@ function PaymentMethodDialog({
                   </div>
                 </div>
               ) : activeMethod === PaymentMethod.BANK_TRANSFER ? (
-                <div ref={bankTransferRef} className="scroll-mt-4">
+                <div ref={bankTransferRef} className="scroll-mt-4 space-y-3">
+                {/* Where to wire first (the same account as the treatment
+                    fee, from the billing settings), then the declaration.
+                    The amount: stamps included, net of the retenue when
+                    applied. */}
+                <BankTransferInstructions
+                  bankDetails={billingDefaults?.bankDetails ?? null}
+                  {...transferBeneficiary(billingDefaults)}
+                  amount={charge.cash}
+                  amountNote={
+                    charge.stamp > 0 && charge.withholding > 0
+                      ? t('quoteUi.payDialog.btAmountStampWithholding', {
+                          stamp: money(charge.stamp, quote.currency),
+                          amount: money(charge.withholding, quote.currency),
+                        })
+                      : charge.stamp > 0
+                        ? t('quoteUi.payDialog.btAmountStamp', {
+                            stamp: money(charge.stamp, quote.currency),
+                          })
+                        : charge.withholding > 0
+                          ? t('quoteUi.payDialog.btAmountWithholding', {
+                              amount: money(charge.withholding, quote.currency),
+                            })
+                          : undefined
+                  }
+                  currency={quote.currency}
+                  paymentReference={orderCode || quote.quotationNumber}
+                />
                 <Card id="installment-bank-transfer">
                   <CardContent className="space-y-4 pt-5">
                     <div className="flex items-start gap-3">
@@ -2694,35 +2725,6 @@ function PaymentMethodDialog({
                           {t('quoteUi.payDialog.btDesc')}
                         </p>
                       </div>
-                    </div>
-
-                    {/* The amount to wire: stamps included, net of the
-                        retenue when applied. */}
-                    <div className="rounded-lg border bg-muted/30 px-3 py-2.5">
-                      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-                        <span className="text-xs font-medium text-muted-foreground">
-                          {t('quoteUi.payDialog.btAmountLabel')}
-                        </span>
-                        <span className="text-base font-semibold tabular-nums">
-                          {money(charge.cash, quote.currency)}
-                        </span>
-                      </div>
-                      {charge.stamp > 0 || charge.withholding > 0 ? (
-                        <p className="mt-0.5 text-[11px] text-muted-foreground">
-                          {charge.stamp > 0 && charge.withholding > 0
-                            ? t('quoteUi.payDialog.btAmountStampWithholding', {
-                                stamp: money(charge.stamp, quote.currency),
-                                amount: money(charge.withholding, quote.currency),
-                              })
-                            : charge.stamp > 0
-                              ? t('quoteUi.payDialog.btAmountStamp', {
-                                  stamp: money(charge.stamp, quote.currency),
-                                })
-                              : t('quoteUi.payDialog.btAmountWithholding', {
-                                  amount: money(charge.withholding, quote.currency),
-                                })}
-                        </p>
-                      ) : null}
                     </div>
 
                     <div className="grid gap-1.5">

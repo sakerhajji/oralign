@@ -1,0 +1,20 @@
+# Secret scan configuration, read by the CI "Security" job (gitleaks).
+# The default rules stay on. Allowed:
+# - unit/e2e test files: their passwords and tokens are fixtures
+#   ('N3wPassword!', 'tok_one_12345678'…), never real secrets;
+# - shell variable references such as PGPASSWORD="${DB_PASSWORD}", which
+#   name a secret without containing it.
+# A real secret must never be committed, test file or not.
+title = "Oralign gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Test fixtures and shell variable references"
+paths = [
+  '''(^|/)[^/]+\.(spec|test|e2e-spec)\.(ts|tsx|js|mjs)$''',
+]
+regexes = [
+  '''^\$\{[A-Z0-9_]+\}$''',
+]

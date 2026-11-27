@@ -34,7 +34,7 @@ jobs:
       url: https://oralign.com.tn
     steps:
       - name: Roll back
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@v1.2.5
         env:
           TARGET_SHA: ${{ inputs.sha }}
         with:
